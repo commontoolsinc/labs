@@ -44,10 +44,16 @@ nothing else.
 | `piece get` | reading a piece | reading a cell at a path |
 | `--input` | a mode you switch on | an address — it follows a link stored in the document to reach the arguments cell |
 | `--schema` | one input format | two — a full schema, and a concise path shorthand that is not a schema |
+| `--url` | a transport address | a target reference — host, space and piece in one token, and the only spelling that takes a space by name |
 
 The `--piece` case is not cosmetic. Believing the target had to be a piece is
 what made a verb's receipt look like it needed purpose-built read machinery,
 when it is an ordinary cell that any read already handles.
+
+**One grammar, two spellings.** `cf exec` writes a callable's arguments
+directly after the mounted file that names it. `cf call` requires `--` before
+the same words in the same position. The two commands invoke a callable the same
+way and disagree about how a caller says so.
 
 **One word, two jobs — twice.** `piece inspect` examines a running piece, while
 `cf inspect` reads the database offline and has its own `piece` subcommand.
@@ -173,6 +179,322 @@ their own is a step-7-class decision this document leaves open.
 
 `--select` and `--schema` everywhere, split per the reasons above.
 
+## Naming the target
+
+Every read and every call names a target, and it takes three words to do it: a
+space, a piece, and — for a call — a verb. How those words are spelled looks
+like decoration on the layout above. It is not: it decides whether that layout
+can be written at all.
+
+### The order is a dependency chain
+
+Each word can only be resolved once the words before it are known. A piece is
+named within a space; a verb is named on a piece; a verb's fields and the shape
+of its result are named by the verb.
+
+```text
+space  ->  piece  ->  verb  ->  verb fields  ->  result shape
+```
+
+Anything that resolves one of those — a caller reaching for the documentation, a
+tool offering candidates, a reader making sense of a line — needs every earlier
+word already in hand. So the chain is not a convention. It is the order the
+words become knowable, and a layout that contradicts it is one where a stage
+cannot be resolved from what precedes it.
+
+Read the target layout against it and every element sits in dependency order,
+`<read opts>` last because the result shape is knowable only once the verb is:
+
+```text
+cf call <addr> <verb> <payload> <read opts>
+```
+
+Two things follow, and they are the reason this section exists.
+
+**The verb cannot lead.** A layout naming the verb before the address puts it
+ahead of the words that say which piece it lives on, so nothing can resolve it —
+including the caller. The verb goes after the address, which is where the layout
+already puts it.
+
+**The read options go after the payload, and nowhere else.** They shape the
+verb's result, so they are knowable only at the end of the chain — a projection
+written before the verb names positions in a result nothing has identified yet,
+which is a shape the caller cannot check and a reader cannot follow. The layout
+above is prescriptive on this point: `<read opts>` is a position, not an
+illustration, and a projection written before the verb is refused rather than
+accepted quietly.
+
+`piece call` places them before the callable name today, because everything
+after that name belongs to the callable's own schema-derived parser. So the one
+position the layout allows is the one position the command rejects, a caller who
+writes them where the layout shows them gets an error about a rule they did not
+break, and the same three flags sit in a different place on `call` than on
+`get`. That is the layout's own constraint going unmet, and closing it is the
+work below rather than a new proposal.
+
+### What names a target today
+
+Four spellings, no two of which carry the same parts:
+
+| Spelling | Carries | Piece written as | Space written as |
+| --- | --- | --- | --- |
+| `--space` plus `--piece` | space, piece | a handle or a slug | a name or a DID |
+| `--url` | host, space, piece | a handle | a name |
+| `/@did:…/of:fid1:…` | space, piece, scope, path | a handle only | a DID only |
+| positional `/of:fid1:…` | piece, scope, path | a handle only | not carried |
+
+Two of those columns are the whole problem, and they run in opposite
+directions. The alias grammar is the one a person can write — it takes a slug,
+and a space by name. The canonical reference is the one that carries the most
+and is meant to lead, and it refuses both: a slug in that position is turned
+away with "piece references must use handles, not human names."
+
+So the form that composes is not the form anyone types, and the form anyone
+types cannot carry a space at all. Neither is a spelling a caller can learn
+once.
+
+**Terseness lives in the identifier, not in the separator.** The same piece,
+three ways:
+
+```text
+  7  tracker
+ 51  of:fid1:pOrTkvYX-…
+110  /@did:key:z6MkiAwQ…/of:fid1:pOrTkvYX-…
+```
+
+Collapsing two flags into one token saves a handful of characters. Naming the
+piece by its slug saves a hundred, and naming the space ambiently saves the
+rest. A combined token is worth having for what it composes — one word to copy,
+one word to pass on — rather than for its length, and the short spelling a
+caller wants is mostly reachable already through parts that exist.
+
+**A separator has to be one the parts cannot contain.** A handle contains a
+colon (`fid1:…`) and so does a DID (`did:key:…`), so a colon-joined
+`host:space:piece` cannot be split from either end without knowing which
+segments are allowed to contain colons — and a host carries a port, which is a
+third. `/` is contained by none of the three, which is why the canonical
+reference already joins its parts with it. Its layout is the right structure
+already: right-anchored, each level to the left a broader scope, omitted levels
+supplied by context, the same shape a container image reference has.
+
+**A host is not part of the referent.** `--url` carries one because it is a
+browser URL, and that conflates a transport with a thing being addressed: the
+same space and piece are the same space and piece whichever host serves them.
+`--api-url` already names the transport. So `--url` does not want a better
+name — it wants to decompose into the two things it is carrying, and survive as
+a documented convenience for pasting a URL out of a browser rather than as the
+only spelling that carries a whole target.
+
+### Three moves, which compose
+
+**Give the space an ambient source.** A parameter that is required everywhere
+and identical across a working session is one a caller should state once. This
+shortens the chain by a stage, so a piece resolves from a bare command, and it
+removes the most-repeated word on the surface. `wish` already reads this way.
+
+`CF_SPACE` is where it lives, beside the `CF_API_URL` and `CF_IDENTITY` the same
+builder already reads, and `--space` overrides it. It serves reads and writes
+alike, which is what every comparable tool does — a namespace, a project and a
+profile are each ambient for deletes as much as for reads.
+
+**A command that writes names the space it wrote to.** A wrong space is not an
+error: it succeeds against data nobody meant to touch, and removing a piece from
+one is indistinguishable at the prompt from removing it from another. Naming the
+space in what the command prints is a receipt rather than a prompt, so it costs
+a non-interactive caller nothing and leaves a wrong space visible the moment it
+happens. Nothing in this CLI asks a caller to confirm anything, and this does
+not introduce the first thing that does.
+
+**Let one spelling carry the whole target, in the form a person writes.** The
+canonical reference has the right structure and the wrong vocabulary; the alias
+has the right vocabulary and carries less. Closing the gap means the reference
+accepts a space by name and a piece by slug — `did:key:…` and `fid1:…` are both
+self-identifying, so neither can be mistaken for a name — and that a reference
+may be written positionally wherever `--piece` is accepted, which a slug cannot
+be today.
+
+The reference carries cells and stops there. A verb is not one, so it stays the
+word after the reference rather than a segment inside it — which is where a
+caller reads it anyway, the reference already in hand by the time they write it.
+
+That is a change to the rule that new capabilities land in the canonical form
+first and an alias never leads. The rule is right about direction and this does
+not overturn it: the canonical form still leads, and what it gains is the
+ability to say the same things the alias already says. What would break the rule
+is leaving the human vocabulary in the alias and letting the alias grow, which
+is the shape the surface has now.
+
+A reference that carries the target also collapses the chain into one word,
+where every part a later segment depends on sits to its left inside the same
+token. Resolving one is then the segment-at-a-time walk a path within a cell
+already needs, rather than a rule about the order of separate words. And it
+gives `--url` somewhere to decompose to.
+
+**Separate the three parties on the line.** A call is read by three: `cf`
+resolves the target, the callable consumes its input, and the read step shapes
+what came back. The chain says they run in that order, and the layout says they
+are written in that order. What is missing is the marker between the second and
+the third.
+
+**The verb opens the callable's section; `--` closes it.** A positional already
+marks where the callable's vocabulary begins, so no marker is written there —
+the same boundary `docker run` draws at an image name and `ssh` at a host. What
+a marker is needed for is the boundary the conventional shape does not have: the
+one where the callable's section ends and the read step's begins.
+
+```text
+cf call <target> <verb> <verb input>
+cf call <target> <verb> <verb input> -- <read opts>
+cf call <target> <verb> -- <read opts>             # a verb that takes none
+cf exec <mountedFile> <verb input> -- <read opts>
+```
+
+One marker at most, and it appears only on a call that asks for a projection.
+
+`cf exec` already reads this way — its arguments are written directly after the
+mounted file, with nothing between. `cf call` requires a marker for the same
+words in the same position, so the two commands spell one grammar two ways. This
+settles that disagreement in the direction the sibling already went, and it is
+the smaller change of the two: what the callable's section needs is not a new
+boundary at its start but a way out at its end.
+
+**This is one rule across every command that reads.** Six carry the read
+options, and they divide by whether a callable's vocabulary stands between the
+command and them. `get` and `wish` have none, so nothing separates their read
+options from the rest of the line. `call` and `exec` have one, so a marker
+closes it:
+
+```text
+cf get  <addr> [path]           --select …
+cf wish <target>                --select …
+cf call <target> <verb> <input> -- --select …
+cf exec <mountedFile> <input>   -- --select …
+```
+
+The read options come after the thing they shape in all four, and the marker
+appears exactly where something else owns flags in between. That is one rule a
+caller derives rather than two they memorize.
+
+The documentation already writes it this way wherever the grammar allows.
+Every `get` and `wish` example puts the read options last; every `call` and
+`exec` example puts them first, which is the only position those two accept.
+Nobody chose the split — the grammar imposed it — and closing it converges the
+surface rather than giving `call` a spelling of its own.
+
+**Parsing what follows the marker needs nothing new.** The tokens past it are
+the read options and only those, so they parse against a command carrying just
+those three. Value typing, the near-miss suggestion for a misspelled flag, and
+the refusal of `--schema` beside `--select` all come from the declaration that
+already exists.
+
+**The payload is verb input, whichever way it is spelled.** Inline JSON is the
+same argument as the schema-derived flags that replace it, so it sits in the
+same section, and no caller has to know which spelling of an argument changes
+where it goes.
+
+**Two reasons the closing marker earns its place**, and the second is the one
+that generalizes. A verb has to be named before a projection is written, both
+because a result cannot be shaped before it is produced and because nothing can
+offer the positions of a result it has not identified. And a projection must not
+be read where a verb's fields are read, because the two vocabularies are
+independent and either may grow a name the other already has.
+
+That second reason is why the boundary is not conditional on a collision
+existing today. A rule that admits a projection into the callable's section
+while no field shares its name is a rule that holds until an author adds one,
+and then a line that worked reaches a different reader with no edit and no
+warning. The boundary is drawn whether or not anything is currently standing on
+it.
+
+**A projection is refused before the verb**, and inside the callable's section,
+and reported rather than absorbed in both places.
+
+**`--help` reaches the callable from both spellings.** Written after the verb
+it falls inside the callable's section and prints that verb's own page, which is
+what it does today. Written as `<verb> -- --help` — the spelling the
+documentation currently teaches — it would otherwise land among the read options
+and print this command's page instead, with nothing to refuse it, since `--help`
+is the one flag that is never an unknown one. That shape has no competing
+reading: a caller wanting this command's help writes it without a verb. So it is
+given the meaning it already has, as a rule about the grammar rather than a
+window that closes.
+
+**Every way to get this wrong is answered with the line that would work.** The
+vocabularies on both sides of the boundary are known — `cf`'s flags are
+declared, and the verb's fields arrive with its input schema — so a name in the
+wrong section is recognizable as belonging to the other one. A refusal names
+which section the flag belongs to **and prints the corrected command**, rather
+than reporting that a name is unknown and leaving the caller to work out where
+it should have gone:
+
+| Written | What it should say |
+| --- | --- |
+| a `cf` flag after the verb | it is a `cf` flag, and that a projection goes past `--` |
+| a verb field before the verb | it is a field of that verb, and that fields follow the verb |
+| a projection before the verb | a result has to be named before it can be shaped |
+| a second `--` | one boundary follows the callable's section, and it is already drawn |
+
+The corrected line is what makes this survivable without a warned window. Every
+one of these is a spelling that worked before, so the caller reading the refusal
+is someone who learned the old one — and a message that says only what is wrong
+asks them to rediscover the grammar, while one that prints the line asks them to
+retype it. It is also what keeps a field named for a read option from being read
+as one, which is the only case here that would otherwise pass quietly.
+The repository already answers this way where it matters: a mounted callable's
+result reports the whole command that reads it
+back rather than the address alone.
+
+`undeclaredFlagError` is where the first of those belongs: it already answers an
+undeclared name with a near miss and the vocabulary the position takes, and
+already carries one special case that searches a different candidate set. A name
+that is a `cf` flag is another.
+
+The rule for `cf` is one sentence: `cf` owns the flags it declares plus the
+payload spellings it already forwards, up to the first marker. A verb declaring
+a field that collides with a `cf` flag reaches it past that marker, which is
+where every schema-derived flag already lives.
+
+The three moves are independent and each stands alone, but they point the same
+way: a caller states the space once, names the rest in one word, and writes what
+follows in the order the words become knowable.
+
+### Precedent worth not re-deriving
+
+Position deciding which entity a flag applies to is well-established.
+`ffmpeg` scopes options by their position relative to `-i` — the same flag
+before and after names an input setting and an output setting. `ld` resolves
+`-l` against the objects to its left. `git` accepts `--no-pager` before a
+subcommand and not after. The pattern is ordinary; what draws complaints in
+those tools is that the rule is invisible where it is broken, which is an
+argument about the error message rather than about the grammar.
+
+Handing everything after a boundary to a wrapped command is the most
+conventional shape on this list, and it divides on how the boundary is drawn.
+Where a positional already marks it, no marker is written: `docker run` ends its
+own options at the image name, as `ssh` does at the host and `env`, `nice`,
+`timeout` and `sudo` do at the command. Where no positional marks it, a marker
+is required and its omission is an error: `kubectl exec … -- <cmd>`,
+`npm run <script> -- <flags>`, `cargo run -- <args>`. Neither family lets a
+caller choose.
+
+A `cf` call has the positional — the verb names it — and takes the first
+family's shape for that reason. What neither family has is a section *after* the
+wrapped command's, which is the one boundary a marker is spent on here. The
+nearest precedent is `curl --next`, which separates one request's flags from the
+next's: evidence for reading a line as a sequence of sections rather than as a
+nesting.
+
+A hierarchy in one token with optional parts is equally well-trodden, and
+right-anchored optionality is its usual form: a container image reference
+(`registry/namespace/image:tag@digest`) defaults the registry and namespace when
+they are omitted, as `scp`'s `[user@]host:path` defaults the user. `kubectl`'s
+`type/name` is the same idea one level shallower.
+
+Ambient scope with a flag override is close to unanimous among tools that
+address more than one tenant: `kubectl` has a current-context namespace beside
+`--namespace`, `gcloud` a configured project beside `--project`, `aws` a profile
+from environment or configuration beside `--profile`.
+
 ## How to get there
 
 Additive, in dependency order. Nothing before 6b removes or renames anything a
@@ -202,6 +524,55 @@ than taking anything away.
 Steps 1–5 are mechanical. Step 7 needs real decisions and belongs last, because
 each pair is two working commands whose merge changes behavior rather than
 spelling.
+
+**Naming the target is a second arc, not a later step.** Steps 1 through 7
+decide what the commands are called; the work below decides how a caller writes
+what a command acts on. The two are independent except at one point — 6b removes
+the spellings 6a warned about, so nothing here starts a second deprecation on
+those same commands until it has landed.
+
+8. **Give the space an ambient source** in `CF_SPACE`, with the flag overriding
+   it, serving reads and writes alike; and every command that writes names the
+   space it wrote to.
+9. **The reference takes a space by name and a piece by slug**, and may be
+   written positionally wherever `--piece` is accepted. A slug is accepted
+   positionally today only through the flag, which is the gap this closes.
+10. **The verb opens the callable's section and `--` closes it**, on `call` and
+    on `exec`. A projection is refused before the verb and inside the callable's
+    section, and each refusal names the section the flag belongs to and prints
+    the corrected line. The change takes effect at once rather than through a
+    warned window.
+
+    Printing the corrected line is what carries that, and it is worth being
+    exact about which case needs it. A stray `cf` flag is refused as an unknown
+    read option and the message adds the spelling that works. A stray *field* is
+    not always refused: nothing reserves a field name, so a verb may declare
+    `select`, `filter` or `schema`, and a line whose only fields are those reads
+    as a projection instead — the handler runs with different input and exits
+    zero. Recognizing words after an empty callable section as fields the verb
+    declares is what turns that into a corrected line rather than a quiet
+    reinterpretation, and it is the same recognition the message needs anyway.
+    A caller writing the new grammar never produces the shape, since fields
+    before the marker leave the section non-empty. It needs the verb's declared
+    fields in hand, so it settles after the schema loads rather than during
+    argument handling.
+11. **`--url` decomposes** into the transport it names and the reference it
+    carries, and survives as a convenience for pasting rather than as the only
+    spelling that carries a whole target.
+
+Steps 8, 9 and 11 add. Step 10 is the one that changes what a written line
+means, and it is the one the rest of the surface reads against — a projection
+cannot be written after the verb until it lands.
+
+The sweep is bounded and known: about thirty places in this repository teach the
+old marker, one of them the verb session walkthrough, whose commands
+`check-verb-session-sync` already holds to what its demo script runs.
+
+**The trailing form is taught throughout**, in the same pass as step 10. The
+read options go after the thing they shape on every command that has them, which
+is what `get` and `wish` already show and what `call` and `exec` gain. Their
+leading position stays legal where nothing is ambiguous; the documentation stops
+using it.
 
 **Each step carries its own documentation.** `--input`, `--piece`, and
 `piece get` appear across the tutorial, `packages/cli/README.md`, and the
@@ -254,3 +625,10 @@ preserve that.
 
 **`piece link` stays.** It writes a link with reactive-wiring meaning that a
 general value write does not express.
+
+**That the position which works everywhere today stops working.** The read
+options may precede the positional on all six commands now. Afterwards a
+projection before the verb is refused, so the one spelling a caller could carry
+between commands is the one being taken away. It is replaced by a spelling that
+works on all six, which is the trade, and it is worth stating rather than
+discovering.
