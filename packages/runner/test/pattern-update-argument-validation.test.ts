@@ -917,11 +917,38 @@ describe("pattern update validates the stored argument", () => {
     // descent terminates instead of recursing forever.
     const absent = rt.getCell<string>(space, "nested-cold-target");
     const mid = rt.getCell<string>(space, "nested-cold-mid");
+    const fine = rt.getCell<string>(space, "nested-cold-fine");
+    const fineHop = rt.getCell<string>(space, "nested-cold-fine-hop");
+    const inner = rt.getCell<Record<string, unknown>>(
+      space,
+      "nested-cold-inner",
+    );
+    const wrap = rt.getCell<Record<string, unknown>>(
+      space,
+      "nested-cold-wrap",
+    );
     const row = rt.getCell<Record<string, unknown>>(space, "nested-cold-row");
     const { error: writeError } = await rt.editWithRetry((tx) => {
       mid.withTx(tx).asSchema(undefined as never).set(absent as never);
+      fine.withTx(tx).asSchema(undefined as never).set("fine" as never);
+      fineHop.withTx(tx).asSchema(undefined as never).set(fine as never);
+      inner.withTx(tx).asSchema(undefined as never).set(
+        { inner: "annotation" } as never,
+      );
+      wrap.withTx(tx).asSchema(undefined as never).set(
+        { wrap: inner } as never,
+      );
       row.withTx(tx).asSchema(undefined as never).set(
-        { name: mid, other: "fine", loop: row } as never,
+        {
+          name: mid,
+          // A chain and a mid-path link that RESOLVE, beside the one that
+          // does not: the walk mirrors these to their values and leaves
+          // them untouched while `name` alone defers.
+          other: fineHop,
+          // The note's path crosses the link stored at `wrap` mid-doc.
+          note: wrap.key("wrap").key("inner"),
+          loop: row,
+        } as never,
       );
     });
     expect(writeError?.message).toBeUndefined();
@@ -1028,13 +1055,14 @@ describe("pattern update validates the stored argument", () => {
     // the walk runs today, but the walk must terminate on its own — it
     // follows raw bytes, and an infinite loop here would hang setup on
     // whatever cyclic shape some other resolution vintage tolerates. A
-    // cycle reads as a judged absence (a dead end the docs genuinely hold),
-    // never as unreadable.
+    // cycle resolves to no readable tree, like every other dead end.
     const cycleA = rt.getCell<unknown>(space, "walk-cycle-a");
     const cycleB = rt.getCell<unknown>(space, "walk-cycle-b");
+    const prim = rt.getCell<Record<string, unknown>>(space, "walk-primitive");
     const { error: writeError } = await rt.editWithRetry((tx) => {
       cycleA.withTx(tx).asSchema(undefined as never).set(cycleB as never);
       cycleB.withTx(tx).asSchema(undefined as never).set(cycleA as never);
+      prim.withTx(tx).asSchema(undefined as never).set({ p: true } as never);
     });
     expect(writeError?.message).toBeUndefined();
     await rt.idle();
@@ -1046,19 +1074,45 @@ describe("pattern update validates the stored argument", () => {
         cycleA.getAsNormalizedFullLink(),
         new Set(),
       );
-      expect(reading.unreadable).toBeUndefined();
-      expect((reading as { value: unknown }).value).toBeUndefined();
+      expect(reading.value).toBeUndefined();
+      // The other no-tree dead ends, exercised at the same seam: a doc the
+      // store has never held, and a path that reads through a primitive.
+      const absent = rt.getCell<unknown>(space, "walk-absent-target");
+      expect(
+        readStoredLinkChainRaw(
+          tx,
+          absent.getAsNormalizedFullLink(),
+          new Set(),
+        ).value,
+      ).toBeUndefined();
+      expect(
+        readStoredLinkChainRaw(
+          tx,
+          absent.key("beyond").getAsNormalizedFullLink(),
+          new Set(),
+        ).value,
+      ).toBeUndefined();
+      expect(
+        readStoredLinkChainRaw(
+          tx,
+          prim.key("p").key("deeper").getAsNormalizedFullLink(),
+          new Set(),
+        ).value,
+      ).toBeUndefined();
     } finally {
       await tx.commit();
     }
   });
 
-  it("still refuses a PRESENT doc's genuinely absent value behind the hop", async () => {
-    // The other side of the unreadable/absent line, pinned so the deep
-    // deferral cannot widen into it: here every doc on the chain is present
-    // and readable — the linked slot just holds nothing. That is a judged
-    // absence, not an unreadable one, and a required field over it must
-    // refuse exactly as a plain missing value would.
+  it("defers a PRESENT doc's absent value behind the hop", async () => {
+    // Behind a link, an absence defers whatever produced it. This exact
+    // shape argues why: the pattern-vintage stores hold pieces whose
+    // `profiles` argument links a path the target doc does not hold YET —
+    // the slot materializes lazily, on the first profile created — and a
+    // validator that judged "present doc, absent path" as invalid refused
+    // every update over them. Absence at rest is indistinguishable from
+    // absence-so-far, so the slot's check belongs to instantiation-time
+    // reads, which see the write when it comes.
     const present = rt.getCell<Record<string, unknown>>(
       space,
       "nested-absent-slot-target",
@@ -1088,16 +1142,16 @@ describe("pattern update validates the stored argument", () => {
       "nested-absent-slot-link",
     );
 
-    const { error, thrown } = await rollForward(cell, typedRow("v2"));
+    const { error } = await rollForward(cell, typedRow("v2"));
 
     expect(
       error,
-      "a required slot whose link lands on a readable doc that genuinely " +
-        "holds nothing slipped past validation — the unreadable-link " +
-        "deferral is leaking onto judged absences",
-    ).toContain("updated arguments do not match the candidate schema");
-    expect(error).toContain("name:");
-    expect(isStoredArgumentSchemaRefusal(thrown)).toBe(true);
+      "a slot whose link lands on a path its target does not hold yet was " +
+        "treated as invalid — the lazily-materialized-slot shape the " +
+        "pattern-vintage stores hold",
+    ).toBeUndefined();
+    await cell.pull();
+    expect((cell.getAsQueryResult() as { marker: string }).marker).toBe("v2");
   });
 
   it("still refuses a READABLE wrong-typed value behind the same hop", async () => {
