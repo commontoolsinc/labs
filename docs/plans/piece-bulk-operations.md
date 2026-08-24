@@ -472,29 +472,29 @@ registered sits outside the holder; the survey-diff, which compares a survey
 against a plan or an earlier survey and is the verification every later
 stage uses; and the drill skeleton.
 
-- [ ] Enumeration comes from the holder's collection, and the registry is
+- [x] Enumeration comes from the holder's collection, and the registry is
       compared against it by containment: a registered in-scope piece the
       collection lacks stops the run and is named. A silent subset is the
       failure this exists to prevent.
-- [ ] Both counts and the containment result are recorded in the plan's
+- [x] Both counts and the containment result are recorded in the plan's
       header.
-- [ ] Each row records whether the source behind its recorded identity is
+- [x] Each row records whether the source behind its recorded identity is
       still retained in the space, so a row with no rollback target is known
       before the run rather than during the incident.
 - [ ] One process handles a board-sized set, start to finish.
-- [ ] The read reports live state on every invocation, and a test proves it:
+- [x] The read reports live state on every invocation, and a test proves it:
       a read taken after a change reflects the change.
-- [ ] The output is a plan — the same artifact the later stages consume —
+- [x] The output is a plan — the same artifact the later stages consume —
       with `expect` filled, and `op` filled when the survey was given an
       operation. Op-less rows are the pre-state record and a valid input to
       planning later.
-- [ ] A tally accompanies it, so "do these pieces all agree?" is answered
+- [x] A tally accompanies it, so "do these pieces all agree?" is answered
       without reading every row.
-- [ ] A supplied validator — a JSON schema the survey reads each piece
+- [x] A supplied validator — a JSON schema the survey reads each piece
       under — selects the pieces that fail it, naming each one. A collection
       whose read fails as a whole is diagnosable by this and by nothing else
       in bulk.
-- [ ] The survey-diff: a survey compared against a plan or an earlier
+- [x] The survey-diff: a survey compared against a plan or an earlier
       survey, reporting per piece moved as planned, still outstanding, or
       moved to something the plan did not ask for.
 
