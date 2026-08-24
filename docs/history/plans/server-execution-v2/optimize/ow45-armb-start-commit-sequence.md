@@ -2,7 +2,7 @@
 status: historical
 created: 2026-08-23
 archived: 2026-08-23
-reason: "Measurement answering the owner's OW45 arm-B question: is the refused 50-op deferred-start commit the piece's initial MATERIALIZATION, or a FOLLOW-UP first wave the client runs after a smaller materialization already landed? VERDICT — MATERIALIZATION, specifically the node-INSTANTIATION half of it, and it is the 5th and last of five client start commits (9, 23, 28, 46, 50 ops) of which the first four land successfully. So the owner is right that a smaller commit already lands first, but wrong that the 50-op commit is a derivation wave: no first-run output is in it (every `computed:` op it writes holds a wiring LINK, not a derived value; the scheduler's first run is a later macrotask in its own transactions). The decisive new fact is redundancy, not ordering: the SERVING side's own derived wave commit writes the identical 50 documents — the same 50 (verb, id) tuples, 16 `computed:` / 15 `of:` / 19 `cid:`, patch=4 + set=46 — and whichever side arrives second is refused as stale. Measured both directions in ONE run: session A's client lost to wave localSeq 7 and was REFUSED; session B's client won and the byte-identical commit was ACCEPTED. The client's whole deferred-start commit is therefore duplicated work under ON, and the only durable content the serving side structurally cannot supply (the setup half — pattern identity, argument, stored-setup marker) is NOT in the refused commit: it landed earlier, in the accepted commits."
+reason: "Measurement answering the owner's OW45 arm-B question: is the refused 50-op deferred-start commit the piece's initial MATERIALIZATION, or a FOLLOW-UP first wave the client runs after a smaller materialization already landed? VERDICT — MATERIALIZATION, specifically the node-INSTANTIATION half of it, and it is the 5th and last of five client start commits (9, 23, 28, 46, 50 ops) of which the first four land successfully. So the owner is right that a smaller commit already lands first, but wrong that the 50-op commit is a derivation wave: no first-run output is in it (every `computed:` op it writes holds a wiring LINK, not a derived value; the scheduler's first run is a later macrotask in its own transactions). The decisive new fact is redundancy, not ordering: the SERVING side's own derived wave commit writes EVERY ONE of the same 50 operations — tuple for tuple in run s01, as a strict superset in run s02 — so client-only operations are 0 of 50 in both measured refusals, and whichever side arrives second is refused as stale. Measured both directions in ONE run: session A's client lost to wave localSeq 7 and was REFUSED; session B's client won and the byte-identical commit was ACCEPTED, after which the server did smaller follow-up waves over the client's writes instead. On the shrink question the answer has a measured size: 4 of the 50 ops are piece ROOTS carrying the full setup state (patternIdentity, patternSetupIdentity, argument, internal, schema) — that is 'the pattern + the result cell'; the other 46 are structure, wiring and content-addressed schema the server writes anyway. Those 4 are in the START commit rather than the originating one because `instantiatePatternNode` runs `setupInternal` for CHILD pattern nodes inside the start tx — which also refines 'the server never writes setup': true of the top-level piece (the loop calls `start()`, never `run()`), false of children, and the wave wrote all four of these roots first."
 ---
 
 # The OW45 arm-B start commit sequence — materialization, or follow-up wave?
@@ -20,10 +20,23 @@ separate transactions.
 
 The fact that actually decides the disposition is neither of the two the
 question offered. It is **redundancy**: the serving side's own derived wave
-commit writes **the identical 50 documents** — the same 50 `(verb, id)` tuples,
-the same 16/15/19 scheme split, the same `patch=4, set=46` verb split — and
-whichever side arrives second is refused as stale. This was measured in both
-directions inside a single run.
+commit writes **every one of the same 50 operations** — exactly, tuple for
+tuple, in run s01; as a strict superset in run s02 — and whichever side arrives
+second is refused as stale. **Client-only operations: 0 of 50, in both measured
+refusals.** That the two sides are doing the same work was measured in both
+directions inside a single run: where the wave got there first the client's copy
+was REFUSED; where the client got there first the byte-identical commit was
+ACCEPTED and the server then did smaller follow-up waves over the client's
+writes instead.
+
+**And the shrink the owner proposes has a measured size: 4 operations out of
+50.** Four of the commit's `of:` documents are piece ROOTS carrying the whole
+setup state — `patternIdentity`, `patternSetupIdentity`, the `argument`
+write-redirect, the `internal` manifest and the result cell's `schema`. That is
+exactly "the pattern + the result cell". The remaining 46 are wiring, structure
+and content-addressed schema. The catch is that on this evidence even those 4
+are not unique to the client: the serving side wrote all four roots first, in
+the same wave.
 
 ## Why this was asked
 
@@ -146,6 +159,27 @@ the client's own earlier commit 4 landed at seq 9. The client built its commit
 from the seq-9 world, the wave moved those documents to seq 11/12 underneath it,
 and the client's identical copy arrived stale.
 
+Run s02 reproduced the same defeat with the wave as a **superset** rather than
+an exact match — the immediately preceding wave (localSeq 30) carried 63
+operations over 61 documents, and **all 50** of the client's `(verb, id)` tuples
+were among them, with **zero** client-only operations:
+
+| # | class | localSeq | ops | shape | verdict |
+|---|---|---|---|---|---|
+| 65–66 | authored | 4 | 46 | 12/15/19, set=46 | ACCEPT |
+| 67 | derived | 29 | 1 | — | — |
+| **68** | **derived** | **30** | **63** | **23/21/19** | **applied** |
+| **69–70** | **authored** | **5** | **50** | **16/15/19, patch=4 set=46** | **REFUSED** |
+
+s02's refusal message reads `stale confirmed read: computed:fid1:2Oq8htwz… at
+seq 0 conflicted with seq 11` — the fork memo's literal signature, which the
+census had already explained as an array-order artifact.
+
+So the invariant is not "the wave writes exactly the same commit" but the
+weaker, sufficient one: **the client's deferred-start operations are a subset of
+what the serving side writes anyway.** Client-only operations: 0 of 50, in both
+measured refusals.
+
 ### The same commit is ACCEPTED when the client wins the race
 
 The reload session in the *same run* ran the identical five-commit sequence:
@@ -170,26 +204,45 @@ same commit; only the race outcome differs.
 ## 3. The 50 operations, classified
 
 Read from the stored document values (the accepted copies of the same
-documents, pulled from the run's sqlite store).
+documents, pulled from the run's sqlite store). Every one of the 50 written
+documents falls into exactly one of four key-shapes:
 
-### (i) Irreducible materialization — **0 of the 50**
+| ops | scheme | top-level keys of the document | class |
+|---|---|---|---|
+| **4** | `of:` | `argument`, `internal`, `patternIdentity`, `patternSetupIdentity`, `schema`, `value` | **(i) irreducible materialization** |
+| 11 | `of:` | `result` (7 of them also `value`) | (ii) authoritative structure |
+| 16 | `computed:` | `result` | (iii) "computed" cells — but see below |
+| 19 | `cid:` | `value` | (iv) content-addressed schema docs |
 
-Nothing in this commit is the piece's identity or entry point. The pattern
-pointer (`patternIdentity`), the argument document, the result cell's `schema`
-meta and the stored-setup marker are all written by `setupInternal` /
-`applySetupState` (`runner.ts:2098`, `1913`) into the **originating**
-transaction — i.e. they are in commits 1–4, which landed. By the time the
-refused commit is issued, the piece's identity is already durable.
+### (i) Irreducible materialization — **4 of the 50**
 
-### (ii) Authoritative structure the server also writes — **15 `of:`**
+**This is the answer to "the pattern + the result cell".** Four of the fifteen
+`of:` documents are piece ROOTS carrying the complete setup state: the pattern
+pointer (`patternIdentity`), the setup-completion marker
+(`patternSetupIdentity`), the argument write-redirect link, the `internal`
+manifest, and the result cell's `schema` meta. If the commit were shrunk to "the
+pattern and the result cell and none of the rest", these four documents are what
+would remain — 4 operations instead of 50.
 
-The piece graph's argument/result wiring. Measured shapes: **4** documents whose
-body is an `argument` write-redirect link, **11** whose body is a `result` link,
-each of the form
-`{"result":{"/quote":{"/":{"link@1":{"id":"of:fid1:…","overwrite":"redirect",…}}}}}`.
-These are node-instantiation products (`instantiateNode` →
-`instantiatePatternNode`'s identity/value binds and `sendValueToBinding`), not
-setup products.
+They are here, rather than in the originating transaction, because of nesting.
+`setupInternal` writes into the *originating* tx for the piece being run, but
+`instantiatePatternNode` (`runner.ts:7300`) calls
+`runWithStartOwnership(tx, patternImpl, inputs, childResultCell, …)`
+(`runner.ts:7483`) with the **start** transaction — so every CHILD pattern node
+a start instantiates has its full setup written into that start's own commit.
+The refused commit materializes four such child pieces.
+
+The same count across the chain, measured: commits 1, 2 and 3 carry **0**
+piece-root documents each (pure structure/wiring), commit 4 carries **1**, and
+commit 5 carries **4**.
+
+### (ii) Authoritative structure the server also writes — **11 `of:`**
+
+The piece graph's result wiring, of the form
+`{"result":{"/quote":{"/":{"link@1":{"id":"of:fid1:…","overwrite":"redirect",…}}}}}`
+— node-instantiation products (`instantiateNode` → `instantiatePatternNode`'s
+identity/value binds and `sendValueToBinding`), derivable from the pattern plus
+the four roots above.
 
 ### (iii) "Computed" output cells — **16 `computed:`**, but they hold wiring, not values
 
@@ -242,10 +295,26 @@ the measured run it wrote all 50 first.**
 
 | class | ops | serving side writes it? | evidence |
 |---|---|---|---|
-| (i) irreducible materialization (setup) | 0 in this commit | **NO** | the loop calls `runtime.start()`, never `run()` |
-| (ii) `of:` structure/wiring | 15 | **YES** | all 15 in wave #19; first revision at the wave's seq |
-| (iii) `computed:` wiring cells | 16 | **YES** | all 16 in wave #19, same verbs |
-| (iv) `cid:` schema docs | 19 | **YES** | all 19 in wave #19, first revision at the wave's seq |
+| (i) child-piece setup (piece roots) | 4 | **YES** | all 4 in the preceding wave; first revision at the wave's seq |
+| (ii) `of:` structure/wiring | 11 | **YES** | all 11 in the preceding wave, both runs |
+| (iii) `computed:` wiring cells | 16 | **YES** | all 16 in the preceding wave, same verbs |
+| (iv) `cid:` schema docs | 19 | **YES** | all 19 in the preceding wave; first revision at the wave's seq |
+
+Stated as one number: **0 of the refused commit's 50 operations are absent from
+the wave the serving side issued immediately before it** — in both measured
+refusals.
+
+Note that class (i) is a genuine refinement of "the server never writes setup".
+That statement is true of the **top-level** piece: the serving loop's only
+piece-start path is `space-server.ts:3279/3291` → `ensurePieceRunningVerdict` →
+`ensure-piece-running.ts:198` `await runtime.start(resultCell)`, and
+`ensure-piece-running.ts:196` says in as many words that it starts the existing
+piece "without re-running setup and potentially allocating different metadata
+cells" (there are no `runner.run` / `runtime.run(` calls anywhere in
+`packages/toolshed/` or `packages/runner/src/executor/`). But `start()` on a
+parent transitively performs `setupInternal` for every child *pattern node* it
+instantiates, so the server does write child-piece setup — and measurably wrote
+all four of these roots first.
 
 The mechanism, traced: the serving loop's only piece-start path is
 `space-server.ts:3279/3291` → `ensurePieceRunningVerdict` →
@@ -256,17 +325,17 @@ branch on any of the three write paths, and the client has no flag-gated skip
 (the only `serverExecution` reference in the client packages is
 `packages/shell/src/lib/env.ts:77`, which just reads the build define).
 
-The one thing the server never does is **setup**. `ensure-piece-running.ts:196`
-says so in as many words — it starts the existing piece "without re-running
-setup and potentially allocating different metadata cells" — and there are no
-`runner.run` / `runtime.run(` calls anywhere in `packages/toolshed/` or
-`packages/runner/src/executor/`.
+The one thing the server never does is **top-level piece creation** — the
+`run()` entry point, which is what mints a piece that did not exist. Everything
+downstream of an existing piece's `start()`, child-piece setup included, is
+shared code that both sides execute.
 
-**So the split the owner is reaching for already exists in the code, one level
-up from where he expected it.** Piece *creation* (setup) is client-only and
-already lands in its own earlier, retrying, accepted commit. Piece
-*instantiation* is shared, and the client's copy of it is fully redundant with a
-wave the server issues anyway.
+**So the shrink the owner is reaching for has a measured size: 4 operations out
+of 50.** The other 46 are structure, wiring and schema that the serving side
+writes anyway, and in both measured refusals had already written. Whether the
+client should issue even those 4 is a different question — the piece they set up
+is a *child* the server also instantiates, so on this evidence the durable
+content unique to the client's deferred start is **zero**.
 
 ## 5. On the §3b read-and-render posture
 
@@ -286,16 +355,22 @@ the same work wins the race.
 Stated as gaps rather than inferred:
 
 - **Which piece each of commits 1–4 belongs to, by name.** Their compositions,
-  their document sets and their disjointness are measured; the mapping from each
-  commit to a named pattern/piece in the default app is not. In particular I did
-  **not** establish that commit 4 is the setup half of the *same* piece commit 5
-  instantiates — their `cid:` sets are disjoint, which suggests different
-  patterns. What is established is that no setup-class write appears in commit 5.
-- **Invariance across runs.** Everything above is from run s01 (one red run,
-  two browser sessions, both showing the same five-commit sequence with
-  compositions 9/23/28/46/50). Confirmation runs were still in flight when this
-  report was written; the report should not be read as claiming an 18/18-style
-  invariance the census earned for its own measurement.
+  their document sets, their disjointness and their piece-root counts are
+  measured; the mapping from each commit to a named pattern/piece in the default
+  app is not. In particular I did **not** establish that commit 4 is the setup
+  half of the *same* piece commit 5 instantiates — their `cid:` sets are
+  disjoint, which points at different patterns. The chain is a descent through a
+  piece graph; its exact parentage was not resolved.
+- **Whether the four piece roots in the refused commit are the piece the user
+  navigated to,** or four of its children. The `patternIdentity` shape is
+  measured; the identity behind it was not decoded.
+- **Invariance across runs.** Two informative runs, s01 and s02 — both RED, both
+  showing the same five-commit sequence with compositions 9/23/28/46/50, the
+  same refusal at commit 5, and the same "all 50 ops present in the preceding
+  wave" result. A first pair of confirmation runs (s03, s04) turned out **not**
+  to be informative: reverting the scratch edit re-enabled the step's ON skip,
+  so the step was `ignored`. This is two observations, not the 18/18 invariance
+  the census earned for its own measurement.
 - **Whether shrinking the commit would fix arm B.** This is a measurement of
   what is in the commit and who else writes it, not a validation of any
   disposition. Note in particular the census's finding that the refused commit
