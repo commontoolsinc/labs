@@ -17,7 +17,6 @@ import {
   type Cell,
   getPatternIdentityRef,
   type JSONSchema,
-  sourceDocKey,
 } from "@commonfabric/runner";
 import { validateSchemaValue } from "@commonfabric/runner/cfc";
 
@@ -27,7 +26,9 @@ import {
   type PieceExpect,
   type PiecePlan,
   type PiecePlanRow,
+  type RegisteredOutside,
   type RetargetOp,
+  type SurveyProblem,
 } from "./bulk-plan.ts";
 import { readPieceSourceMetadata } from "./piece-origin.ts";
 import type { PiecesController } from "./pieces-controller.ts";
@@ -91,19 +92,6 @@ export interface SurveyOptions {
   takenAt?: string;
 }
 
-/** One piece the survey could not read into a plan row. */
-export interface SurveyProblem {
-  piece: string;
-  problem: string;
-}
-
-/** A registered in-scope piece the selection does not cover. */
-export interface RegisteredOutside {
-  piece: string;
-  patternIdentity: string;
-  symbol: string;
-}
-
 /** How many selected pieces run one `{identity, symbol}` within one phase. */
 export interface TallyEntry {
   phase: string;
@@ -159,6 +147,22 @@ export async function selectPieces(
     MEMBER_LIST_SCHEMA,
   ) as Cell<Cell<unknown>[]>;
   const members = await collection.pull() ?? [];
+  // An absent stored value and a misspelled path read the same, and the
+  // silent holder-only plan a default would produce is the exact subset
+  // failure the survey exists to prevent — so absence is a refusal.
+  const stored = collection.getRaw();
+  if (stored === undefined) {
+    throw new Error(
+      `The holder stores no collection at ${selector.path.join("/")} — a ` +
+        `misspelled path and a never-written collection are ` +
+        `indistinguishable, so neither is surveyed silently.`,
+    );
+  }
+  if (!Array.isArray(stored)) {
+    throw new Error(
+      `The value at ${selector.path.join("/")} is not a collection.`,
+    );
+  }
   const phase = String(selector.path.at(-1) ?? "members");
   // A literal in a member slot resolves to a cell inside the holder's own
   // document rather than to another document, which is how one is told apart
@@ -237,13 +241,19 @@ export async function surveyPieces(
         Object.hasOwn(options.operations, phase)
       ? options.operations[phase]
       : undefined;
+    // A piece already on the operation's reference gets no op: the row would
+    // be unverifiable — landed and never-ran read the same — and the apply
+    // has nothing to do for it. The op-less row stays a pre-state record.
+    const op = operation !== undefined &&
+        (operation.patternIdentity !== pin.patternIdentity ||
+          operation.symbol !== pin.symbol)
+      ? { kind: "retarget" as const, ...operation }
+      : undefined;
     rows.push({
       piece: pin.piece,
       phase,
       expect,
-      ...(operation === undefined
-        ? {}
-        : { op: { kind: "retarget", ...operation } }),
+      ...(op === undefined ? {} : { op }),
     });
     if (options.validator !== undefined) {
       const controller = await pieces.get(piece, false);
@@ -274,9 +284,13 @@ export async function surveyPieces(
       takenAt: options.takenAt ?? new Date().toISOString(),
       enumerated: {
         collection: memberCount,
-        registry: (await pieces.getRegisteredPieces()).length,
+        registry: registered.length,
         registeredOutside: outside.length,
       },
+      // Incompleteness rides the artifact: an encoded plan whose survey
+      // could not account for every piece must not read as a complete one.
+      ...(problems.length === 0 ? {} : { problems: [...problems] }),
+      ...(outside.length === 0 ? {} : { outside }),
     },
     rows,
   };
@@ -341,10 +355,11 @@ const MEMBER_LIST_SCHEMA = {
 } as const satisfies JSONSchema;
 
 /**
- * Whether `identity`'s source closure is retained in the space — one
- * existence probe of the `pattern:<identity>` document, cached per identity.
- * Existence is the right granularity: it answers "does a restore target
- * exist?" without verifying or materializing the closure.
+ * Whether `identity`'s source closure is verifiably retained in the space —
+ * the canonical loader can produce it, hashes checked — cached per distinct
+ * identity, so a board pays the load once per generation rather than once
+ * per piece. Bare document existence would be cheaper and would lie: a
+ * malformed entry document exists while nothing can restore from it.
  */
 async function isSourceRetained(
   pieces: PiecesController,
@@ -353,12 +368,9 @@ async function isSourceRetained(
 ): Promise<boolean> {
   const cached = cache.get(identity);
   if (cached !== undefined) return cached;
-  const doc = pieces.runtime.getCell(
-    pieces.getSpace(),
-    sourceDocKey(identity),
-  );
-  await doc.sync();
-  const retained = doc.getRaw() !== undefined;
+  const program = await pieces.runtime.patternManager
+    .getPatternSourceProgramByIdentity(identity, pieces.getSpace());
+  const retained = program !== undefined;
   cache.set(identity, retained);
   return retained;
 }

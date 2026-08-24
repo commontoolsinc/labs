@@ -1,8 +1,8 @@
 # Bulk piece operations
 
-**Status:** proposed; stage 1 — the survey library, its CLI entry points,
-and its CI drill — is built and in review, and every later stage is unbuilt.
-The design and build sequence for changing many pieces in one space as one
+**Status:** proposed; stage 1's survey library is built and in review, its
+CLI entry points and CI drill follow in stacked changes behind it, and every
+later stage is unbuilt. The design and build sequence for changing many pieces in one space as one
 reviewable, resumable operation. Driven by recurring Topics board upgrades.
 
 ## The short version

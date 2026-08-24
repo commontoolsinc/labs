@@ -16,17 +16,39 @@
  * [docs/plans/piece-bulk-operations.md](../../../../docs/plans/piece-bulk-operations.md).
  */
 
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { hashStringForEntityAddress } from "@commonfabric/runner";
 
 /**
  * The canonical spelling of a piece address: the bare tagged-hash form every
  * survey row carries. The `of:` URI alias names the same entity and folds to
  * it here, so two spellings of one piece cannot slip past a uniqueness check
- * or a diff key. A kinded (`computed:`) address is refused by the underlying
- * parser — the `of:` id over the same hash names a different entity.
+ * or a diff key. What remains after the fold must parse as a tagged content
+ * hash — an empty or arbitrary string is refused, not carried. A kinded
+ * (`computed:`) address is refused by the underlying parser — the `of:` id
+ * over the same hash names a different entity.
  */
 export function canonicalPieceAddress(address: string): string {
-  return hashStringForEntityAddress(address);
+  const bare = hashStringForEntityAddress(address);
+  try {
+    FabricHash.fromString(bare);
+  } catch {
+    throw new Error(`Not a piece address: ${JSON.stringify(address)}.`);
+  }
+  return bare;
+}
+
+/** One piece a survey could not read into a plan row. */
+export interface SurveyProblem {
+  piece: string;
+  problem: string;
+}
+
+/** A registered in-scope piece the selection does not cover. */
+export interface RegisteredOutside {
+  piece: string;
+  patternIdentity: string;
+  symbol: string;
 }
 
 /** What a plan row requires of its piece before its operation applies. */
@@ -41,10 +63,11 @@ export interface PieceExpect {
    */
   symbol: string;
   /**
-   * Whether the source behind `patternIdentity` is still retained in the
-   * space, and so is a restore target. A row whose prior source is not
-   * retained has no rollback target, which a run has to know before it starts
-   * rather than during an incident.
+   * Whether the source behind `patternIdentity` is verifiably retained in
+   * the space — the canonical loader can produce its closure — and so is a
+   * usable restore target. A row whose prior source is not has no rollback
+   * target, which a run has to know before it starts rather than during an
+   * incident.
    */
   retained: boolean;
   /**
@@ -118,7 +141,10 @@ export type PieceOp = RetargetOp | RestoreOp;
 
 /** One piece in a plan: the piece, its precondition, and its operation. */
 export interface PiecePlanRow {
-  /** The piece's address, in the `of:fid1:…` form `PiecesController.get` takes. */
+  /**
+   * The piece's canonical bare address (`fid1:…`). The `of:` alias names the
+   * same piece and folds to this form at decode.
+   */
   piece: string;
   /** A grouping label for reports and for stopping between groups; not a sort key. */
   phase?: string;
@@ -149,6 +175,15 @@ export interface PiecePlanHeader {
   /** When the survey behind the plan was taken, as an ISO-8601 string. */
   takenAt: string;
   enumerated: PlanEnumeration;
+  /**
+   * Selected pieces the survey could not read into rows. Their absence from
+   * `rows` would otherwise be invisible in the artifact, so an incomplete
+   * survey stays incomplete across encode and decode; a write stage refuses
+   * a plan carrying any.
+   */
+  problems?: readonly SurveyProblem[];
+  /** Registered in-scope pieces the selection lacks — the same standing. */
+  outside?: readonly RegisteredOutside[];
 }
 
 /** A header and its rows, in execution order. */
@@ -221,6 +256,15 @@ export function deriveRollbackPlan(
   plan: PiecePlan,
   takenAt: string,
 ): PiecePlan {
+  if (
+    (plan.header.problems?.length ?? 0) > 0 ||
+    (plan.header.outside?.length ?? 0) > 0
+  ) {
+    throw new Error(
+      "No rollback can be derived from an incomplete plan: its header " +
+        "names pieces the survey did not account for.",
+    );
+  }
   const unretained = plan.rows.filter((row) =>
     row.op?.kind === "retarget" && !row.expect.retained
   );
@@ -280,7 +324,23 @@ function isPlanHeader(value: unknown): value is PiecePlanHeader {
     isRecord(enumerated) &&
     typeof enumerated.collection === "number" &&
     typeof enumerated.registry === "number" &&
-    typeof enumerated.registeredOutside === "number";
+    typeof enumerated.registeredOutside === "number" &&
+    (value.problems === undefined ||
+      (Array.isArray(value.problems) && value.problems.every(isProblem))) &&
+    (value.outside === undefined ||
+      (Array.isArray(value.outside) && value.outside.every(isOutside)));
+}
+
+function isProblem(value: unknown): value is SurveyProblem {
+  return isRecord(value) && typeof value.piece === "string" &&
+    typeof value.problem === "string";
+}
+
+function isOutside(value: unknown): value is RegisteredOutside {
+  return isRecord(value) && typeof value.piece === "string" &&
+    typeof value.patternIdentity === "string" &&
+    value.patternIdentity !== "" &&
+    typeof value.symbol === "string" && value.symbol !== "";
 }
 
 function isPlanRow(value: unknown): value is PiecePlanRow {
@@ -290,11 +350,18 @@ function isPlanRow(value: unknown): value is PiecePlanRow {
   const expect = value.expect;
   if (
     !isRecord(expect) || typeof expect.patternIdentity !== "string" ||
-    typeof expect.symbol !== "string" ||
+    expect.patternIdentity === "" ||
+    typeof expect.symbol !== "string" || expect.symbol === "" ||
     typeof expect.retained !== "boolean" ||
     !isOptionalString(expect.revisionId)
   ) return false;
-  return value.op === undefined || isPieceOp(value.op);
+  if (value.op === undefined) return true;
+  if (!isPieceOp(value.op)) return false;
+  // A row whose operation produces the reference the row already records is
+  // unverifiable: a diff could not tell "landed" from "never ran". Such a
+  // row is a no-op to drop, not an operation to carry.
+  return value.op.patternIdentity !== expect.patternIdentity ||
+    value.op.symbol !== expect.symbol;
 }
 
 function isPieceOp(value: unknown): value is PieceOp {

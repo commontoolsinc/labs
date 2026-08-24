@@ -91,6 +91,7 @@ export {
   type ConsoleEvent,
   ConsoleMethod,
   Engine,
+  type EntryIdentityOptions,
   resolveEntryIdentity,
   type RuntimeProgram,
   type TypeScriptHarnessProcessOptions,

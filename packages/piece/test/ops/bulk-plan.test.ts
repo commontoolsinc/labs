@@ -74,6 +74,17 @@ describe("bulk-plan", () => {
       expect(decodePlan(encodePlan(plan))).toEqual(plan);
     });
 
+    it("returns an op-less row as the pre-state record it is", () => {
+      const row = {
+        piece: "fid1:aaa",
+        expect: { patternIdentity: "idA", symbol: "default", retained: true },
+      };
+      const decoded = decodePlan(
+        JSON.stringify(header) + "\n" + JSON.stringify(row),
+      );
+      expect(decoded.rows[0]).toEqual(row);
+    });
+
     it("returns the plan when blank lines were inserted by hand", () => {
       const text = encodePlan(retargetPlan()).replace("\n", "\n\n");
       expect(decodePlan(text)).toEqual(retargetPlan());
@@ -185,6 +196,66 @@ describe("bulk-plan", () => {
       expect(() =>
         decodePlan(JSON.stringify(header) + "\n" + JSON.stringify(row))
       ).toThrow("row 1");
+    });
+
+    it("throws for a piece that is not a piece address", () => {
+      const plan = retargetPlan();
+      for (const bad of ["", "garbage", "of:"]) {
+        const row = { ...plan.rows[0], piece: bad };
+        expect(() =>
+          decodePlan(JSON.stringify(header) + "\n" + JSON.stringify(row))
+        ).toThrow("Not a piece address");
+      }
+    });
+
+    it("throws for an empty precondition reference", () => {
+      const plan = retargetPlan();
+      const emptySymbol = {
+        ...plan.rows[0],
+        op: undefined,
+        expect: { ...plan.rows[0].expect, symbol: "" },
+      };
+      expect(() =>
+        decodePlan(JSON.stringify(header) + "\n" + JSON.stringify(emptySymbol))
+      ).toThrow("row 1");
+    });
+
+    it("throws for an op that produces the reference the row records", () => {
+      const plan = retargetPlan();
+      const noop = {
+        ...plan.rows[0],
+        op: {
+          kind: "retarget",
+          source: { main: "topic.tsx" },
+          patternIdentity: plan.rows[0].expect.patternIdentity,
+          symbol: plan.rows[0].expect.symbol,
+        },
+      };
+      expect(() =>
+        decodePlan(JSON.stringify(header) + "\n" + JSON.stringify(noop))
+      ).toThrow("row 1");
+    });
+
+    it("round-trips an incomplete header, and rollback derivation refuses it", () => {
+      const incomplete = {
+        header: {
+          ...header,
+          enumerated: { ...header.enumerated, registeredOutside: 1 },
+          problems: [{ piece: "fid1:ccc", problem: "carries no identity" }],
+          outside: [{
+            piece: "fid1:ddd",
+            patternIdentity: "idA",
+            symbol: "default",
+          }],
+        },
+        rows: retargetPlan().rows,
+      };
+      const decoded = decodePlan(encodePlan(incomplete));
+      expect(decoded.header.problems).toEqual(incomplete.header.problems);
+      expect(decoded.header.outside).toEqual(incomplete.header.outside);
+      expect(() => deriveRollbackPlan(decoded, "later")).toThrow(
+        "incomplete plan",
+      );
     });
 
     it("canonicalizes the of: alias, and refuses an alias-spelled duplicate", () => {

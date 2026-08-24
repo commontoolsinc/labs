@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
-import { Runtime, type RuntimeProgram } from "@commonfabric/runner";
+import {
+  getPatternIdentityRef,
+  Runtime,
+  type RuntimeProgram,
+  sourceDocKey,
+} from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { createBuilder } from "../../../runner/src/builder/factory.ts";
@@ -225,6 +230,66 @@ describe("bulk-survey", () => {
       expect(builderRun.plan.rows[0].expect.retained).toBe(false);
     });
 
+    it("reports retained false when the stored source cannot verify", async () => {
+      const a = await pieces.create(generationProgram("a"), { input: {} });
+      const holder = await seedHolder([a]);
+      const identity = getPatternIdentityRef(a.getCell())!.identity;
+      await pieces.runtime.editWithRetry((tx) => {
+        pieces.runtime.getCell(
+          pieces.getSpace(),
+          sourceDocKey(identity),
+          undefined,
+          tx,
+        ).set({ bogus: true });
+      });
+      await pieces.runtime.idle();
+
+      const survey = await surveyPieces(pieces, {
+        selector: collectionOf(holder),
+      });
+      // Existence is not retention: nothing can restore from this document.
+      expect(survey.plan.rows[0].expect.retained).toBe(false);
+    });
+
+    it("throws for a path whose stored value is not a collection", async () => {
+      const holder = await pieces.create({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            "import { NAME, pattern } from 'commonfabric';",
+            "export default pattern<{ blob?: string }>(() => ({",
+            "  [NAME]: 'Scalar holder',",
+            "  note: 'scalar',",
+            "}));",
+            "",
+          ].join("\n"),
+        }],
+      }, { input: {} });
+      await holder.input.set("not a list", ["blob"]);
+      await pieces.runtime.idle();
+
+      await expect(
+        surveyPieces(pieces, {
+          selector: { kind: "collection", holder: holder.id, path: ["blob"] },
+        }),
+      ).rejects.toThrow("not a collection");
+    });
+
+    it("throws for a path that stores no collection", async () => {
+      const a = await pieces.create(generationProgram("a"), { input: {} });
+      const holder = await seedHolder([a]);
+      await expect(
+        surveyPieces(pieces, {
+          selector: {
+            kind: "collection",
+            holder: holder.id,
+            path: ["membres"],
+          },
+        }),
+      ).rejects.toThrow("stores no collection");
+    });
+
     it("reflects a source change on the next survey", async () => {
       const a = await pieces.create(generationProgram("a"), { input: {} });
       const b = await pieces.create(generationProgram("b"), { input: {} });
@@ -352,6 +417,28 @@ describe("bulk-survey", () => {
       expect(survey.plan.rows[1].op).toBeUndefined();
     });
 
+    it("stamps no op on a member already at the operation's reference", async () => {
+      const a = await pieces.create(generationProgram("a"), { input: {} });
+      const b = await pieces.create(generationProgram("b"), { input: {} });
+      const holder = await seedHolder([a, b]);
+      const bRef = getPatternIdentityRef(b.getCell())!;
+
+      const survey = await surveyPieces(pieces, {
+        selector: collectionOf(holder),
+        operations: {
+          members: {
+            source: { main: "member.tsx" },
+            patternIdentity: bRef.identity,
+            symbol: bRef.symbol,
+          },
+        },
+      });
+
+      expect(survey.plan.rows[0].op?.kind).toBe("retarget");
+      // Already landed: an op here would be unverifiable.
+      expect(survey.plan.rows[1].op).toBeUndefined();
+    });
+
     it("names each piece whose result fails the validator schema", async () => {
       const a = await pieces.create(generationProgram("a"), { input: {} });
       const holder = await seedHolder([a]);
@@ -387,6 +474,22 @@ describe("bulk-survey", () => {
       // The member carries `version`; the holder does not.
       expect(survey.validatorFailures.map((failure) => failure.piece))
         .toEqual([holder.id]);
+    });
+
+    it("passes a piece whose missing field the validator's default rescues", async () => {
+      const a = await pieces.create(generationProgram("a"), { input: {} });
+      const holder = await seedHolder([a]);
+
+      const survey = await surveyPieces(pieces, {
+        selector: collectionOf(holder),
+        validator: {
+          type: "object",
+          properties: { absent: { type: "string", default: "ok" } },
+          required: ["absent"],
+        },
+      });
+
+      expect(survey.validatorFailures).toEqual([]);
     });
 
     it("tells two exports of one module apart across the survey", async () => {
@@ -477,6 +580,10 @@ describe("bulk-survey", () => {
         operations: {},
       });
 
+      expect(survey.plan.rows.map((row) => row.phase)).toEqual([
+        "toString",
+        "holder",
+      ]);
       // `{}` owns no "toString"; the inherited one must not become an op.
       expect(survey.plan.rows.every((row) => row.op === undefined)).toBe(true);
     });
@@ -521,6 +628,13 @@ describe("bulk-survey", () => {
           ].join("\n"),
         }],
       }, { input: {} });
+      // A stored member first, so the refusal under test is the phase
+      // collision rather than the absent-path one.
+      const member = await pieces.create(generationProgram("a"), {
+        input: {},
+      });
+      await holder.input.set([member.getCell()], ["holder"]);
+      await pieces.runtime.idle();
       await expect(
         surveyPieces(pieces, {
           selector: { kind: "collection", holder: holder.id, path: ["holder"] },
