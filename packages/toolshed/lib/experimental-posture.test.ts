@@ -1,8 +1,9 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   experimentalPosture,
   publishExperimentalPosture,
+  publishServingExperimentalOverrides,
 } from "./experimental-posture.ts";
 
 describe("experimental-posture", () => {
@@ -38,5 +39,59 @@ describe("experimental-posture", () => {
     publishExperimentalPosture({ serverExecution: true });
     expect(experimentalPosture()).toEqual({ serverExecution: true });
     publishExperimentalPosture(null);
+  });
+
+  describe("serving overrides", () => {
+    afterEach(() => {
+      publishExperimentalPosture(null);
+      publishServingExperimentalOverrides(null);
+    });
+
+    it("wins over the base for the flags a serving runtime forces", () => {
+      publishExperimentalPosture({
+        modernCellRep: true,
+        serverExecution: false,
+        systemPatternAutoUpdate: false,
+      });
+      publishServingExperimentalOverrides({
+        serverExecution: true,
+        systemPatternAutoUpdate: true,
+      });
+      expect(experimentalPosture()).toEqual({
+        modernCellRep: true,
+        serverExecution: true,
+        systemPatternAutoUpdate: true,
+      });
+    });
+
+    it("keeps the merged document in flag order", () => {
+      // An override for a flag the base left unresolved would otherwise land
+      // at the end, and a diff of the meta document would read as a changed
+      // posture when only the iteration order moved.
+      publishExperimentalPosture({ serverExecution: false });
+      publishServingExperimentalOverrides({
+        modernCellRep: true,
+        systemPatternAutoUpdate: true,
+      });
+      expect(Object.keys(experimentalPosture() ?? {})).toEqual([
+        "modernCellRep",
+        "serverExecution",
+        "systemPatternAutoUpdate",
+      ]);
+    });
+
+    it("reports nothing while no Runtime has published a base", () => {
+      // Overrides alone are not a posture: without the base they would say
+      // `false` about every flag the serving loop does not force.
+      publishServingExperimentalOverrides({ serverExecution: true });
+      expect(experimentalPosture()).toBe(null);
+    });
+
+    it("stops applying once cleared", () => {
+      publishExperimentalPosture({ serverExecution: false });
+      publishServingExperimentalOverrides({ serverExecution: true });
+      publishServingExperimentalOverrides(null);
+      expect(experimentalPosture()).toEqual({ serverExecution: false });
+    });
   });
 });

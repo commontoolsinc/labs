@@ -52,9 +52,9 @@ describe("pieces-controller", () => {
           })).rejects.toThrow();
           // The deployment's experimental posture first, because it decides
           // how the runtime is constructed; then the health probe that
-          // decides whether to go on at all. Neither answers here (the stub
-          // is 503 throughout), and the posture request not answering is why
-          // the controller still reaches the health probe.
+          // decides whether to go on at all. The stub answers 503 to both,
+          // and a non-OK posture response is read as an absent posture,
+          // which is why the controller goes on to the health probe.
           expect(requested).toEqual([
             "http://toolshed.test/api/meta",
             "http://toolshed.test/_health",

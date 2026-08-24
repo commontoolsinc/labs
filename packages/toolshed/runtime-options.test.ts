@@ -1,7 +1,7 @@
 import { assertEquals, assertStrictEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
-import type { RuntimeOptions } from "@commonfabric/runner";
+import type { Runtime, RuntimeOptions } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   experimentalPosture,
@@ -120,18 +120,19 @@ Deno.test("createToolshedRuntime publishes the posture it resolved", async () =>
   const signer = await Identity.fromPassphrase("runtime-options-posture-test");
   const storageManager = StorageManager.emulate({ as: signer });
   publishExperimentalPosture(null);
-  const runtime = createToolshedRuntime(
-    {
-      MEMORY_URL: "http://memory.test:8000/",
-      API_URL: "http://api.test:9000/",
-      OTEL_ENABLED: false,
-      OTEL_SERVICE_NAME: "toolshed-test",
-      ENV: "test",
-    },
-    storageManager,
-    (name) => name === "EXPERIMENTAL_MODERN_CELL_REP" ? "true" : undefined,
-  );
+  let runtime: Runtime | undefined;
   try {
+    runtime = createToolshedRuntime(
+      {
+        MEMORY_URL: "http://memory.test:8000/",
+        API_URL: "http://api.test:9000/",
+        OTEL_ENABLED: false,
+        OTEL_SERVICE_NAME: "toolshed-test",
+        ENV: "test",
+      },
+      storageManager,
+      (name) => name === "EXPERIMENTAL_MODERN_CELL_REP" ? "true" : undefined,
+    );
     const posture = experimentalPosture();
     assertEquals(posture?.modernCellRep, true);
     // Resolved, not passed: the env reader said nothing about these, and a
@@ -143,7 +144,7 @@ Deno.test("createToolshedRuntime publishes the posture it resolved", async () =>
       SERVER_EXECUTION_DEFAULT_ENABLED,
     );
   } finally {
-    await runtime.dispose();
+    await runtime?.dispose();
     await storageManager.close();
     publishExperimentalPosture(null);
   }

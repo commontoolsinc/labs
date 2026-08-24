@@ -32,7 +32,7 @@ was last checked against the code.
 | [`contentAddressedSchemas`](#contentaddressedschemas)                       | `EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS` env / shell build define, or `RuntimeOptions.experimental`                                                                  | on                                                                                   | Robin McCollum (PR #5833)                             | finish the spec's Phase 3 (retire transport schema compression for link positions), then delete flag                                                                                                                              | implemented, on by default                                                      |
 | [`commitPreconditions`](#commitpreconditions)                               | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry)                             | on                                                                                   | Bernhard Seefeld (#4090)                              | fold into base scheduler semantics, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`plainResultReceipts`](#plainresultreceipts)                               | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env, or `RuntimeOptions.experimental`                                                                      | on                                                                                   | Mike Salisbury (verb contract WS-C)                   | fold into receipt semantics and delete flag after a bake period                                                                                                                                                                   | implemented, on by default                                                      |
-| [`systemPatternAutoUpdate`](#systempatternautoupdate)                       | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental`                                             | on in the shell (same-toolshed system sources, including all roots); ALSO on server-side under server-execution (`server-execution.ts:171` defaults it true — serving-loop.md §3e; both runtimes then race the update, OCC-guarded and content-addressed — verification-coverage.md OW56 finding 2) | Bernhard Seefeld (#4611; shell default-on #4619)      | graduate to always-on, then delete flag                                                                                                                                                                                           | implemented, on in the shell                                                    |
+| [`systemPatternAutoUpdate`](#systempatternautoupdate)                       | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental`                                             | on in the shell (same-toolshed system sources, including all roots); ALSO on server-side under server-execution (`SERVING_RUNTIME_EXPERIMENTAL` in `toolshed/lib/server-execution.ts` forces it true for every serving runtime, and `/api/meta` publishes it — serving-loop.md §3e; both runtimes then race the update, OCC-guarded and content-addressed — verification-coverage.md OW56 finding 2) | Bernhard Seefeld (#4611; shell default-on #4619)      | graduate to always-on, then delete flag                                                                                                                                                                                           | implemented, on in the shell                                                    |
 | [`computedCellIds`](#computedcellids)                                       | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental`                                                                          | on                                                                                   | Robin McCollum (#4659)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`lazyMaterialization`](#lazymaterialization)                               | `EXPERIMENTAL_LAZY_MATERIALIZATION` env, or `RuntimeOptions.experimental`                                                                       | on                                                                                   | Bernhard Seefeld                                      | fold into base read semantics, then delete flag                                                             | implemented, on by default                                         |
 | [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | off (`SERVER_EXECUTION_DEFAULT_ENABLED = false` — the ONE first-party default; Phase 7 landed flip-READY, DARK; explicit `true` = the ON arm) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | the flip is its OWN one-line PR after the plan's Phase-7 ordered gates; then soak on main, then delete the flag and the OFF path (the split-out post-soak PR) | Phases 1–6 landed; Phase 7 flip-READY landed dark (owner ruling 2026-08-16): OFF by default everywhere, the ON arm fully selectable and CI-tested on an ON-built binary |
@@ -1229,8 +1229,18 @@ Server Process (Deno)
   +-- toolshed/index.ts           --> new Runtime(toolshedRuntimeOptions(...))
 ```
 
-The background piece service and the CLI use the same mapping and the same
-presets, so the three server-side wirings agree on how a value parses.
+The background piece service's main and worker processes use the same mapping
+and the same presets, so the server-side wirings agree on how a value parses.
+
+The CLI is not one of them. `cf`, the pieces controller behind it, the agents
+host and `cast-admin` are clients of a deployment rather than part of one, and
+they resolve their posture from that deployment first — the environment
+supplies their overrides, not their starting point. Their wiring is
+[Clients that are not built alongside their
+server](#clients-that-are-not-built-alongside-their-server). The CLI's
+LOCAL modes (`cf test`, `cf dev`) run against emulated storage, have no
+deployment to ask, and do read the environment alone, through this same
+mapping.
 
 ### Browser-side (build-time injection)
 
@@ -1279,7 +1289,7 @@ before constructing its `Runtime`:
 cf / pieces controller / agents host / cast-admin
   |
   +-- GET <apiUrl>/api/meta  --> { experimental: { <flag>: <boolean>, ... } }
-  |     the posture the SERVER's own Runtime resolved
+  |     the posture the SERVER runs at
   |
   +-- runner/runtime-presets.ts --> experimentalOptionsForDeployedClient()
   |     explicit EXPERIMENTAL_* > server declaration > built-in default
@@ -1296,11 +1306,22 @@ own default. Absence of a declaration is never a declaration of `false`, which
 is what lets a client of an older server behave exactly as it did before the
 server published anything.
 
+A serving toolshed runs two kinds of runtime, and what it publishes is the
+posture it SERVES at. The generic runtime it constructs for webhook pattern
+execution supplies the base; under server-execution the per-space serving
+runtimes force `serverExecution` and `systemPatternAutoUpdate` on top of it
+(`SERVING_RUNTIME_EXPERIMENTAL` in
+[`packages/toolshed/lib/server-execution.ts`](../../packages/toolshed/lib/server-execution.ts),
+the one place those two are written), and those override the base for as long
+as the serving loop runs. Every other flag reaches both runtimes from the same
+environment, so the base already carries it.
+
 Three rules govern what a client does with a declaration:
 
-- **An explicit `EXPERIMENTAL_*` still wins.** It is the documented rollback
-  lever, and how CI pins a lane; neither survives a server that can overrule
-  it. Setting one is also how you disagree with a deployment on purpose.
+- **An explicit `EXPERIMENTAL_*` still wins.** It outranks the declaration:
+  it is the documented rollback lever and how CI pins a lane, and a server
+  able to overrule it would leave neither mechanism working. Setting one is
+  also how you disagree with a deployment on purpose.
 - **Only a server-authoritative flag is adopted.**
   `EXPERIMENTAL_FLAG_AUTHORITY` in
   [`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts)
@@ -1322,11 +1343,18 @@ for the case where a deployment publishes something a client cannot run and you
 do not yet know which flag it is. Per-flag `EXPERIMENTAL_*` overrides are the
 answer when you do.
 
+A caller whose startup can be cancelled passes its `AbortSignal`, and the
+request carries it. Without one, a deployment that accepts the connection and
+then says nothing holds that startup for as long as it stays silent, with no
+shutdown able to reach it. An aborted signal is the one failure that does not
+resolve to the environment: it throws the abort reason, because the caller has
+stopped wanting a posture at all.
+
 Presets that run against local emulated storage — `cf test`, `cf dev`, the
 pattern harnesses — have no server to ask and keep reading the environment
-alone. Nor do the background piece service's own main and worker processes:
-they are deployed with the same environment as the toolshed they serve
-alongside, so they read it directly through `productionServer`.
+alone. The background piece service's own main and worker processes have one
+but do not ask it: they are deployed with the same environment as the toolshed
+they serve alongside, and read it directly through `productionServer`.
 
 The adoption happens before `new Runtime(...)`, not at the memory handshake,
 even though `hello`/`hello.ok` already carries capability flags in both
@@ -1340,8 +1368,10 @@ that should no longer arise.
 ### Background piece service
 
 The background piece service reads the same environment variables and builds its
-runtimes (the main process and each worker) through the `productionServer`
-preset, so set the same `EXPERIMENTAL_*` variables when starting it.
+main and worker runtimes through the `productionServer` preset, so set the same
+`EXPERIMENTAL_*` variables when starting it. Its `cast-admin` CLI is the
+exception: that one is a client of whatever toolshed it is pointed at, and
+adopts the deployment's posture like the others above.
 
 ## Enabling flags locally
 

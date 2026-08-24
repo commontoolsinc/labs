@@ -27,7 +27,6 @@ export type {
 } from "./runtime.ts";
 export {
   ADOPT_SERVER_FLAGS_ENV,
-  adoptServerExperimentalOptions,
   type BrowserWorkerPresetParams,
   type DeployedClientExperimentalParams,
   type EnvReader,
@@ -36,7 +35,6 @@ export {
   type ExperimentalFlagAuthority,
   experimentalOptionsForDeployedClient,
   experimentalOptionsFromEnv,
-  parseServerExperimentalOptions,
   type PatternTestPresetParams,
   type ProductionServerPresetParams,
   type RemoteClientPresetParams,

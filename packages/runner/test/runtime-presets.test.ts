@@ -443,8 +443,9 @@ describe("runtimePresets conformance (CT-1814)", () => {
       });
 
       it("keeps an explicit environment value over the server's", () => {
-        // The documented rollback lever, and CI's way to pin a lane: neither
-        // survives a server that can overrule it.
+        // An explicit value is the documented rollback lever and CI's way to
+        // pin a lane, so it outranks the declaration: a server able to
+        // overrule it would leave neither mechanism working.
         expect(
           adoptServerExperimentalOptions(
             { modernCellRep: true },
@@ -553,6 +554,41 @@ describe("runtimePresets conformance (CT-1814)", () => {
               Promise.resolve(metaResponse({ did: "did:key:z", gitSha: null })),
           }),
         ).toEqual({});
+      });
+
+      it("hands the request the caller's cancellation signal", async () => {
+        // Without it, a deployment that accepts the connection and then says
+        // nothing holds a cancellable startup here for as long as it stays
+        // silent, and no shutdown can reach it.
+        const controller = new AbortController();
+        let passed: AbortSignal | undefined;
+        await experimentalOptionsForDeployedClient({
+          apiUrl: new URL("https://deployment.example"),
+          env: () => undefined,
+          signal: controller.signal,
+          fetch: (_input, init) => {
+            passed = init?.signal ?? undefined;
+            return Promise.resolve(metaResponse({ experimental: {} }));
+          },
+        });
+        expect(passed).toBe(controller.signal);
+      });
+
+      it("throws the abort reason instead of resolving a cancelled startup", async () => {
+        // The one failure that is NOT read as "the server said nothing": the
+        // caller asked to stop, so handing back a posture would feed a
+        // runtime construction it is abandoning.
+        const controller = new AbortController();
+        controller.abort(new Error("shutting down"));
+        await expect(experimentalOptionsForDeployedClient({
+          apiUrl: new URL("https://deployment.example"),
+          env: () => undefined,
+          signal: controller.signal,
+          fetch: (_input, init) => {
+            init?.signal?.throwIfAborted();
+            return Promise.resolve(metaResponse({ experimental: {} }));
+          },
+        })).rejects.toThrow("shutting down");
       });
 
       it("ignores the server's posture under CF_ADOPT_SERVER_FLAGS=false", async () => {

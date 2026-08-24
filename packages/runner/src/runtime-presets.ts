@@ -386,8 +386,8 @@ export function parseServerExperimentalOptions(
  * own environment says, in that order of increasing authority:
  *
  * 1. an explicit `EXPERIMENTAL_*` wins outright — it is the documented
- *    rollback lever and CI's way to pin a lane, and neither survives a server
- *    that can overrule it;
+ *    rollback lever and CI's way to pin a lane, and a server able to overrule
+ *    it would leave neither mechanism working;
  * 2. otherwise a `"server"` flag takes the published value;
  * 3. otherwise the flag stays unset and the built-in default governs, which
  *    is exactly what an old server, an unreachable one, or a `"client"` flag
@@ -426,6 +426,13 @@ export interface DeployedClientExperimentalParams {
   apiUrl: URL;
   /** Reads this process's environment; pass `Deno.env.get` in Deno contexts. */
   env: EnvReader;
+  /**
+   * Cancels the request. A caller whose startup is cancellable must pass its
+   * signal: without one, a deployment that accepts the connection and then
+   * says nothing holds the caller here for as long as it stays silent, and
+   * no shutdown can reach it.
+   */
+  signal?: AbortSignal;
   /** Injectable for tests; the real `fetch` otherwise. */
   fetch?: typeof globalThis.fetch;
 }
@@ -445,6 +452,10 @@ export interface DeployedClientExperimentalParams {
  * the environment alone. Absence of a declaration is not a declaration, and
  * the caller is about to fail loudly on its real work if the server is
  * genuinely down; failing here first would only obscure that.
+ *
+ * An aborted `signal` is the one case that does NOT resolve: the caller
+ * asked to stop, so this throws the abort reason rather than handing back a
+ * posture nobody is going to use.
  */
 export async function experimentalOptionsForDeployedClient(
   params: DeployedClientExperimentalParams,
@@ -461,6 +472,7 @@ export async function experimentalOptionsForDeployedClient(
   try {
     const response = await fetchImpl(
       new URL(SERVER_EXPERIMENTAL_PATH, params.apiUrl),
+      params.signal !== undefined ? { signal: params.signal } : {},
     );
     if (!response.ok) {
       // Discard the body rather than leaving the connection holding an
@@ -472,6 +484,10 @@ export async function experimentalOptionsForDeployedClient(
     declared = ((await response.json()) as { experimental?: unknown })
       ?.experimental;
   } catch {
+    // A cancelled startup is the caller's decision, not a server that failed
+    // to answer: propagate it instead of resolving a posture into a runtime
+    // construction the caller is abandoning.
+    params.signal?.throwIfAborted();
     return env;
   }
   return adoptServerExperimentalOptions(

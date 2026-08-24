@@ -11,10 +11,41 @@
 // resolved, so what a client reads is the effective posture — built-in
 // defaults and preset resolution included — never a second reading of the
 // environment that could disagree with the first.
+//
+// Two halves, because a serving process runs two kinds of runtime: the
+// generic one this toolshed constructs for webhook pattern execution, whose
+// resolved flags are the base, and the per-space SERVING runtimes the
+// executor host builds under server-execution, which force a posture of
+// their own on top. The base alone would tell a client the deployment runs
+// flags it does not.
 
 import type { ExperimentalOptions } from "@commonfabric/runner";
 
 let posture: Record<string, boolean> | null = null;
+let servingOverrides: Record<string, boolean> | null = null;
+
+/**
+ * By flag name, so the meta document reads the same across restarts and a
+ * diff of it means a changed posture rather than a changed iteration order.
+ */
+function sortedByFlag(
+  entries: [string, boolean][],
+): Record<string, boolean> {
+  return Object.fromEntries(
+    entries.sort(([left], [right]) => left < right ? -1 : 1),
+  );
+}
+
+/** Every boolean entry of a flag set, with unresolved flags dropped. */
+function booleanFlags(
+  experimental: ExperimentalOptions,
+): Record<string, boolean> {
+  return sortedByFlag(
+    Object.entries(experimental).filter((entry): entry is [string, boolean] =>
+      typeof entry[1] === "boolean"
+    ),
+  );
+}
 
 /**
  * Record a constructed Runtime's resolved flags. Flags the runtime left
@@ -27,20 +58,33 @@ let posture: Record<string, boolean> | null = null;
 export function publishExperimentalPosture(
   experimental: ExperimentalOptions | null,
 ): void {
-  if (experimental === null) {
-    posture = null;
-    return;
-  }
-  posture = Object.fromEntries(
-    Object.entries(experimental)
-      .filter((entry): entry is [string, boolean] =>
-        typeof entry[1] === "boolean"
-      )
-      .sort(([left], [right]) => left < right ? -1 : 1),
-  );
+  posture = experimental === null ? null : booleanFlags(experimental);
 }
 
-/** What `/api/meta` reports; `null` until a Runtime has been constructed. */
+/**
+ * Record the flags the SERVING loop forces on top of that base, when this
+ * process serves (`lib/server-execution.ts`). Under the ON arm the per-space
+ * serving runtimes are the ones doing the deployment's work, and they run a
+ * posture the generic webhook runtime does not: a client told only the base
+ * would adopt a value this deployment is not using. Every other flag reaches
+ * both runtimes from the same environment, so the base carries it.
+ *
+ * Pass `null` when the serving loop is not running, which is also the state
+ * before it starts and after it stops.
+ */
+export function publishServingExperimentalOverrides(
+  overrides: ExperimentalOptions | null,
+): void {
+  servingOverrides = overrides === null ? null : booleanFlags(overrides);
+}
+
+/**
+ * What `/api/meta` reports: the deployment's posture, serving overrides
+ * applied. `null` until a Runtime has been constructed — a client reads that
+ * as "this deployment said nothing" and keeps its own defaults.
+ */
 export function experimentalPosture(): Record<string, boolean> | null {
-  return posture;
+  if (posture === null) return null;
+  if (servingOverrides === null) return posture;
+  return sortedByFlag(Object.entries({ ...posture, ...servingOverrides }));
 }
