@@ -5752,6 +5752,62 @@ supply; OW29/OW32/OW34 closed):
     (the recovered piece stays its parent's child); a document
     still in flight at walk time reads PENDING and re-triggers on
     arrival (OW51 semantics).
+    **THE 10/10 GATE AT THE FIX HEAD (2026-08-24): 7/10 — the b04
+    START death is closed live; the residue is TWO READ-SIDE members
+    the deferred-start error arm cannot reach; THE SKIP STAYS,
+    reworded.** Method: ON-built binary (sha256 88631052bc76…),
+    fresh store + posture probe per run
+    (shellServerExecutionDefine "true" + servingLoop present, every
+    run), ensure-off (`SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false` —
+    deliberately the CI ON lanes' posture, i.e. what a lifted step
+    would actually run under, and the harsher client-creates regime),
+    the skip neutralized in the working tree for all ten runs
+    (skip-print verified absent per run), quiet-and-loaded (ambient
+    5-14 on a busy shared box; loaded = +6 pinned CPU spinners,
+    ambient peaked 144 before r09), PID-only kills, ports 9711-9730.
+    Per-run ledger on the PR. What the recovery did, live: catchup
+    activations 1-2 in EVERY run (17 total), terminal deferred-start
+    deaths ZERO, recovery failures ZERO — and in the green runs the
+    SECOND catchup was the NOTEBOOK space's own refused root start
+    (space-DID-matched in r03/r04/r05), i.e. the exact b04 sequence
+    (interactive piece → stale-confirmed-read refusal → teardown)
+    now ends in a running piece and a green step (22-46 s steps,
+    including at loads 23-40). The three reds, classified: (i) r01
+    (quiet) — the h01/h05 READ member, store-verified: all 7
+    /value/notes appends durable (seqs 48-88), serving loop healthy,
+    notebook context fully live (isNotebook true, internal noteCount
+    7, render notesLength 7, chips 6/7), the predicate's readCell of
+    the argument's redirect-linked notes undefined across the full
+    300 s net — SILENT (zero error lines; its one catchup was a
+    DIFFERENT space's, so no recovery was even involved); one
+    recorded thread: a speculation.md §6 speculative-basis refusal
+    (designed, terminal) in-window whose doc then never landed
+    anywhere. (ii) r06+r09 (both loaded) — the STRANDED WHOLE-PIECE
+    member, identical chain twice: the notebook space's root
+    recovery fired and no start died, then ONE watcher
+    `pattern-load-error` for a KEYLESS identity, then every read of
+    the piece (argument, internal, render's own) returning nothing
+    at diagnostics time — the CT-1923 stranded-state shape; the
+    durable store's patternIdentity pointers are all REAL
+    identities, so the keyless ref is session-side (an
+    overlay/session-synthetic pointer reaching the watcher), and the
+    load-error is the discriminating event between recovered-green
+    and stranded-red (greens have the same catchup and no
+    load-error). CONSEQUENCE for the family map: the fork memo's
+    working hypothesis that h01/h05/rf2 were "the same die-off
+    later/earlier in the start walk" is DISPROVED — the walk
+    completes in both red shapes; the residue lives in the
+    read/delivery path (r01) and in the post-start pointer-watcher
+    path (r06/r09). Follow-on aids landed with this build: the
+    recovery logs a LOUD
+    `deferred-start-catchup-failed …resolved without the piece
+    running` when its walk resolves false un-stopped (r06's
+    post-mortem could not distinguish that outcome; the next
+    occurrence is decisive), beside the existing
+    `deferred-start-catchup` scheduling line. The lift bar is
+    UNCHANGED (the residue closes and the fixed step greens ON 10/10
+    quiet-and-loaded); the step entry's reason now names the
+    narrowed charge.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:

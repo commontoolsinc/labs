@@ -3608,6 +3608,19 @@ export class Runner {
               ),
             );
           }
+          if (!started && !recoveryOwnership.isCancelled()) {
+            // A recovery that resolves without leaving the piece running,
+            // with nobody having stopped it, is the silent no-context
+            // state this arm exists to prevent — surface it loudly (the
+            // r06 gate run's post-mortem could not distinguish this
+            // outcome from a read-side stall; this line makes the next
+            // occurrence decisive).
+            logger.error(
+              "deferred-start-catchup-failed",
+              `Deferred ${label} catch-up start resolved without the ` +
+                "piece running (superseded or stopped mid-walk)",
+            );
+          }
         } finally {
           // The token exists to cover the WAIT; the load walk installs
           // (or declines) its own registration. Settling the token here

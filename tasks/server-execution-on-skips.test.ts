@@ -136,7 +136,7 @@ Deno.test("main: empty lists print the report on stderr and nothing on stdout", 
   assertMatch(err[0], /shell: no skips — full suite runs/);
 });
 
-Deno.test("main: the patterns list = ONE step entry (default-app's reload step, under OW45). The step's own interim-race trap CLOSED test-side 2026-08-22 — the assertions bind to the summary the waitForCondition predicate approves and hands back, absorbing the OW51-ruled interim-undefined-then-retrigger disposition the old post-wait single-shot read kept racing (1/10 quiet, 5/10 under load on main, every red undefined-vs-7) — and on the FIXED step the residue proved REAL: at the true ON topology the value-wait itself starves on first-hydration reads of freshly created served state — no reload between the creates and the reads (readCell of the argument's redirect-linked notes sticky-undefined across the full 5-minute net at 500ms cadence, or every client read of the piece returning nothing mid-session) — while the store holds all 7 appends and the reactive render path serves the same notes — zero loss, the OW45 row's arm-B client starvation, so the entry STAYS until that closes. The FIRST ON-LANE CI GATE set (2026-08-21, skip-and-land) is otherwise fully lifted — cellset-lww (OW47), convergence-storm (OW52), default-app's FILE skip (OW51), cfc-group-chat-demo (OW59), home-profile-reload-durability (the explicit warm request), profile-embed (OW47's re-close), the sqlite identity pair (OW53), topics-navigation (OW33 triage; the echo-drop smell is OW60). An EMPTY list is the flip PR's bar; any change here is a deliberate edit that reddens this pin", async () => {
+Deno.test("main: the patterns list = ONE step entry (default-app's reload step, under OW45), its charge NARROWED 2026-08-24. The b04 client-start death — the flag-ON client's navigate-deferred piece start dying terminally on a stale-confirmed-read ConflictError — is CLOSED by the RULED catch-up-and-start recovery (the refusal is 'the server won the race'; the client awaits the conflict's readiness and starts from the served documents through the ordinary load walk, committing nothing; OW45's CATCH-UP-AND-START block, serving-loop.md §3d RULED 2026-08-24), and the fix-head gate watched the recovery resurrect the notebook space's refused root start in the GREEN runs. What keeps the entry is the gate's 7/10: the arm-B residue is READ-SIDE — a silent sticky readCell of the argument's redirect-linked notes with the piece context fully live (r01), and a stranded whole-piece mid-session read death behind a keyless pattern-load-error, with zero start deaths (r06/r09) — both store-verified zero-loss, neither reachable from the deferred-start error arm. An EMPTY list is the flip PR's bar; any change here is a deliberate edit that reddens this pin", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
   // A step entry never drops its file: no --ignore flag on stdout…
@@ -159,7 +159,7 @@ Deno.test("main: the patterns list = ONE step entry (default-app's reload step, 
   );
   // The guard lookup RESOLVES for the guarded step (the in-file
   // onArmStepSkip guard binds it under the ON posture), and the reason
-  // names the isolated defect, not the closed test race.
+  // names the narrowed residue, not the closed start class.
   const entry = serverExecutionOnStepSkip(
     "patterns",
     "integration/default-app.test.ts",
@@ -169,6 +169,7 @@ Deno.test("main: the patterns list = ONE step entry (default-app's reload step, 
   assertEquals(entry.phase, "phase-7");
   assertMatch(entry.reason, /readCell|rehydrat/);
   assertMatch(entry.reason, /no data loss/);
+  assertMatch(entry.reason, /catch-up-and-start/);
   // The shard filter passes every candidate through untouched.
   const { files, skipped } = serverExecutionOnFilterFiles("patterns", [
     "./integration/default-app.test.ts",
