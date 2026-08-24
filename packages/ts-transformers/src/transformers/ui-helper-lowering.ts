@@ -64,9 +64,15 @@ export function rewriteUiHelperElement(
     if (!attr || attr.initializer === undefined) {
       return [];
     }
-    return [context.factory.createJsxAttribute(
-      context.factory.createIdentifier(entry.attr),
-      createJsxAttributeInitializer(attr.initializer, context.factory),
+    // The data attribute stands at the authored helper prop's site, so it
+    // carries that prop's range; the identifier is a new name and stays
+    // synthetic.
+    return [preserveSourceMapRange(
+      context.factory.createJsxAttribute(
+        context.factory.createIdentifier(entry.attr),
+        createJsxAttributeInitializer(attr.initializer, context.factory),
+      ),
+      attr,
     )];
   });
 
@@ -174,17 +180,28 @@ function getStringLiteralAttributeValue(
   return undefined;
 }
 
+/**
+ * Rebuilds a helper prop's value for the data attribute that replaces it. Each
+ * rebuilt node stands at the authored initializer's site, so it carries that
+ * range — source-map range only, never text range or original-node identity.
+ */
 function createJsxAttributeInitializer(
   initializer: ts.JsxAttributeValue,
   factory: ts.NodeFactory,
 ): ts.JsxAttributeValue {
   if (ts.isStringLiteral(initializer)) {
-    return factory.createStringLiteral(initializer.text);
+    return preserveSourceMapRange(
+      factory.createStringLiteral(initializer.text),
+      initializer,
+    );
   }
   if (ts.isJsxExpression(initializer)) {
-    return factory.createJsxExpression(
-      initializer.dotDotDotToken,
-      initializer.expression,
+    return preserveSourceMapRange(
+      factory.createJsxExpression(
+        initializer.dotDotDotToken,
+        initializer.expression,
+      ),
+      initializer,
     );
   }
   return initializer;

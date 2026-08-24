@@ -250,6 +250,64 @@ function hasIdentifier(root: ts.Node, text: string): boolean {
   );
 }
 
+/**
+ * JSX node kinds that always stand for authored syntax. A synthesized one is a
+ * replacement for something the author wrote, so it must be able to name where
+ * that was; a stage that rebuilds one without carrying its range is the whole
+ * bug class this file guards. Expression kinds are deliberately excluded —
+ * injected schemas and hoisting scaffolds synthesize those with no authored
+ * counterpart at all.
+ */
+const AUTHORED_JSX_KINDS: ReadonlySet<ts.SyntaxKind> = new Set([
+  ts.SyntaxKind.JsxAttribute,
+  ts.SyntaxKind.JsxElement,
+  ts.SyntaxKind.JsxExpression,
+  ts.SyntaxKind.JsxSelfClosingElement,
+]);
+
+/** Every `*.input.ts(x)` fixture path, relative to the fixture root. */
+async function collectFixturePaths(): Promise<string[]> {
+  const root = new URL("./fixtures/", import.meta.url);
+  const found: string[] = [];
+  const walk = async (dir: URL, prefix: string): Promise<void> => {
+    for await (const entry of Deno.readDir(dir)) {
+      if (entry.isDirectory) {
+        await walk(new URL(`${entry.name}/`, dir), `${prefix}${entry.name}/`);
+      } else if (
+        entry.name.endsWith(".input.tsx") || entry.name.endsWith(".input.ts")
+      ) {
+        found.push(`${prefix}${entry.name}`);
+      }
+    }
+  };
+  await walk(root, "");
+  return found.sort();
+}
+
+/** Synthesized authored-JSX nodes in `root` that cannot name an authored site. */
+function unanchoredJsxNodes(root: ts.SourceFile): string[] {
+  const printer = ts.createPrinter();
+  const unanchored: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      node.pos < 0 && AUTHORED_JSX_KINDS.has(node.kind) &&
+      !recoverAuthoredPosition(node)
+    ) {
+      let printed: string;
+      try {
+        printed = printer.printNode(ts.EmitHint.Unspecified, node, root)
+          .replace(/\s+/g, " ").slice(0, 80);
+      } catch {
+        printed = "(unprintable)";
+      }
+      unanchored.push(`${ts.SyntaxKind[node.kind]}: ${printed}`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(root);
+  return unanchored;
+}
+
 describe("replacement source-map ranges", () => {
   it("preserves authored positions on JSX-router replacements", async () => {
     const { original, transformed } = await transformThroughStage(
@@ -276,6 +334,17 @@ describe("replacement source-map ranges", () => {
       "rewritten self-closing UiPromptSlot",
     );
     expectAuthoredText(selfClosingUiHelper, original, "<UiPromptSlot");
+
+    // The data attribute replaces the authored helper prop, so it anchors on
+    // that prop rather than on the element that carries it.
+    const dataAttr = findOnly(
+      transformed,
+      (node): node is ts.JsxAttribute =>
+        ts.isJsxAttribute(node) &&
+        ts.isIdentifier(node.name) && node.name.text === "data-ui-action",
+      "rewritten UiAction data attribute",
+    );
+    expectAuthoredText(dataAttr, original, 'action="CT1869_UI"');
 
     const sharedPre = findOnly(
       transformed,
@@ -482,5 +551,65 @@ describe("replacement source-map ranges", () => {
       original,
       '{ marker: "CT1869_DATA" }',
     );
+  });
+
+  // The cases above pin the sites this file knows about by name. This one is
+  // the drift gate: it makes the same guarantee over every fixture, so a NEW
+  // stage that rebuilds a JSX node without carrying its range fails here
+  // instead of waiting for someone to notice a wrong debug position. The
+  // fixtures declared above are included because the corpus reaches no
+  // UI-helper element, which would otherwise leave that family ungated.
+  it("recovers an authored position for every synthesized JSX node in the corpus", async () => {
+    const fixturePaths = await collectFixturePaths();
+    expect(fixturePaths.length, "fixture corpus is non-empty").toBeGreaterThan(
+      100,
+    );
+
+    const sources: Record<string, string> = {
+      "/inline-router.tsx": ROUTER_FIXTURE,
+      "/inline-owned-router.tsx": OWNED_ROUTER_FIXTURE,
+      "/inline-closure.tsx": CLOSURE_FIXTURE,
+      "/inline-post-closure.tsx": POST_CLOSURE_FIXTURE,
+    };
+    for (const path of fixturePaths) {
+      const url = new URL(`./fixtures/${path}`, import.meta.url);
+      sources[`/${path.replaceAll("/", "_")}`] = await Deno.readTextFile(url);
+    }
+
+    // Type-check in batches: one program per fixture would dominate runtime.
+    const names = Object.keys(sources);
+    const BATCH = 25;
+    const failures: string[] = [];
+    let checked = 0;
+    for (let index = 0; index < names.length; index += BATCH) {
+      const batch = names.slice(index, index + BATCH);
+      const files = Object.fromEntries(
+        batch.map((name) => [name, sources[name]!]),
+      );
+      const { program } = await batchTypeCheckFixtures(files, {
+        types: COMMONFABRIC_TYPES,
+      });
+      for (const name of batch) {
+        const sourceFile = program.getSourceFile(name);
+        assert(sourceFile, `fixture source file present: ${name}`);
+        const pipeline = new CommonFabricTransformerPipeline();
+        const result = ts.transform(sourceFile, pipeline.toFactories(program));
+        const transformed = result.transformed[0];
+        assert(transformed, `pipeline returned a source file: ${name}`);
+        checked++;
+        for (const unanchored of unanchoredJsxNodes(transformed)) {
+          failures.push(`${name} -> ${unanchored}`);
+        }
+      }
+    }
+
+    expect(checked, "every fixture ran through the pipeline").toBe(
+      names.length,
+    );
+    expect(
+      failures,
+      "synthesized JSX nodes with no recoverable authored position; carry the " +
+        "authored range with preserveSourceMapRange at the site that builds them",
+    ).toEqual([]);
   });
 });

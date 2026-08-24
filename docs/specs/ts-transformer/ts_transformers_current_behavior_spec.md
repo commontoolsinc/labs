@@ -1717,13 +1717,30 @@ rig: `packages/ts-transformers/APRIME-LINEAGE-HANDOFF.md`.
 
 The same source-map-range-only rule applies to semantic replacement boundaries
 outside the builder-artifact path. Pattern-body reactive-root replacements,
-lowered UI-helper elements, rebuilt JSX expression containers, rewritten
-handler attributes and initializers, nested reactive-array receiver keys, and
+lowered UI-helper elements together with the data attributes they derive from
+authored helper props, rebuilt JSX expression containers, rewritten handler
+attributes and initializers, nested reactive-array receiver keys, and
 module-scope `__cf_data` wrappers all carry the range of the authored node they
-replace or wrap. They deliberately do not acquire that node's text range or
-original-node identity. `test/replacement-source-map-range.test.ts` runs
-fixtures through the owning pipeline stage and content-binds every recovered
-range; it also directly pins the non-input-bound reactive-wrapper helper branch.
+replace or wrap. A derived data attribute anchors on the helper prop it
+replaces, not on the element carrying it. They deliberately do not acquire that
+node's text range or original-node identity.
+`test/replacement-source-map-range.test.ts` runs fixtures through the owning
+pipeline stage and content-binds every recovered range; it also directly pins
+the non-input-bound reactive-wrapper helper branch.
+
+That file closes with a corpus-wide invariant: across every fixture, no
+synthesized `JsxAttribute`, `JsxElement`, `JsxExpression`, or
+`JsxSelfClosingElement` may fail to recover an authored position. Those four
+kinds always stand for authored syntax, so a synthesized one is a replacement
+that owes a range — which makes the invariant the drift gate for stages added
+later. Expression kinds are excluded because injected schemas and hoisting
+scaffolds synthesize them with no authored counterpart.
+
+Carried ranges reach the emitted source map for replacements that survive to
+emit as themselves. The JSX-shaped replacements above are rebuilt again by
+TypeScript's own JSX transform, which runs after this pipeline and does not
+propagate emit-node data, so their ranges serve in-pipeline recovery rather
+than the emitted map.
 
 ### 11.6 Builder source-site sidecar
 
