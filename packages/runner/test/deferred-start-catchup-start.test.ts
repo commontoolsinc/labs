@@ -4,7 +4,10 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { Cell } from "../src/cell.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  createTrustedBuilder,
+  trustExecutable,
+} from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { entityKey } from "../src/scheduler/keys.ts";
 
@@ -571,6 +574,136 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
         installed.restore();
         injector.restore();
       }
+    }
+  });
+
+  it("contains a recovery whose walk throws: loud, settled, no zombie", async () => {
+    // The recovery's failure arm. A load walk can genuinely fail (the r06/r09
+    // gate runs' stranded shape rides a pattern-load failure downstream), and
+    // the arc's rule for a piece with no client context is LOUD, never
+    // silent: the rejection must be contained (an unhandled rejection fails
+    // this test on its own), the catch-up chain must settle (the idle hook
+    // returns), and no registration or pending recovery may linger.
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const tx = gatedTxOn(runtime);
+    const result = runtime.getCell<{ doubled?: number }>(
+      space,
+      "a recovery whose walk throws",
+      undefined,
+      tx,
+    );
+    const injector = refuseDeferredStartCommits(
+      runtime,
+      staleConfirmedReadOf(result),
+    );
+    // Fail the SECOND context assembly (the recovery's) at the same seam the
+    // install observer hooks: the first attempt wires normally and is torn
+    // down by the refusal; the recovery's walk then dies synchronously.
+    const runner = runtime.runner as unknown as {
+      startCore: (...args: unknown[]) => () => void;
+    };
+    const originalStartCore = runner.startCore;
+    let assemblies = 0;
+    runner.startCore = (...args: unknown[]) => {
+      const cell = args[0] as Cell<unknown>;
+      if (key(cell) === key(result)) {
+        assemblies++;
+        if (assemblies >= 2) {
+          throw new Error("injected: the recovery walk's assembly failed");
+        }
+      }
+      return Reflect.apply(originalStartCore, runtime.runner, args) as () =>
+        void;
+    };
+    try {
+      runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
+      expect((await tx.commit()).error).toBeUndefined();
+
+      await waitForSignal(
+        injector.refusalsReach(1),
+        "the start's transaction being refused",
+      );
+      await runtime.runner.idleDeferredStartCatchUps();
+      await runtime.idle();
+
+      // Both assemblies were attempted, the failure was contained, and the
+      // runner holds neither a registration nor a pending recovery.
+      expect(assemblies).toBe(2);
+      expect(injector.refusals()).toBe(1);
+      expect(runtime.runner.cancels.has(key(result))).toBe(false);
+    } finally {
+      runner.startCore = originalStartCore;
+      injector.restore();
+    }
+  });
+
+  it("routes the cross-space arm's refusal to the recovery; without served state it fails loud and contained", async () => {
+    // The SIBLING deferred start (runPatternAfterSuccessfulCommit — the
+    // navigateTo receipt shape) meets the identical first-hydration race and
+    // shares the recovery. Driven directly at the private seam, the idiom
+    // child-run-ownership.test.ts established for exactly this method. One
+    // deliberate difference from the primary arm, pinned here as the
+    // DISCLOSED design-check caveat: this arm's SETUP rides the deferred
+    // transaction itself, so its recovery depends on the server's own
+    // create having landed. In this single-runtime harness nothing served
+    // the result, so the recovery must fail LOUD and contained — the chain
+    // settles, no registration remains, no unhandled rejection escapes
+    // (which would fail this test on its own) — never the silent terminal
+    // death of the old arm.
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const harness = runtime.runner as unknown as {
+      runPatternAfterSuccessfulCommit(
+        tx: unknown,
+        resultCell: unknown,
+        pattern: unknown,
+        inputs: unknown,
+        pullOnceAfterStart?: boolean,
+        markCreateOnlyResult?: boolean,
+      ): () => void;
+    };
+    const tx = runtime.edit();
+    const receipt = runtime.getCell<Record<string, unknown>>(
+      space,
+      "a cross-space deferred start refused for a stale confirmed read",
+      undefined,
+      tx,
+    );
+    const injector = refuseDeferredStartCommits(
+      runtime,
+      staleConfirmedReadOf(receipt),
+      Number.MAX_SAFE_INTEGER,
+    );
+    try {
+      harness.runPatternAfterSuccessfulCommit(
+        tx,
+        receipt,
+        trustExecutable(runtime, Piece),
+        { value: 3 },
+        false,
+        false,
+      );
+      expect((await tx.commit()).error).toBeUndefined();
+
+      await waitForSignal(
+        injector.refusalsReach(1),
+        "the cross-space start's transaction being refused",
+      );
+      await runtime.runner.idleDeferredStartCatchUps();
+      await runtime.idle();
+
+      // Exactly one refusal (the recovery never re-committed a start
+      // transaction — this arm's walk never reaches a second commit), and
+      // the failed recovery left nothing behind.
+      expect(injector.refusals()).toBe(1);
+      expect(runtime.runner.cancels.has(key(receipt))).toBe(false);
+    } finally {
+      injector.restore();
     }
   });
 
