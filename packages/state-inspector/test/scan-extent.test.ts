@@ -793,6 +793,77 @@ describe("scan-extent", () => {
       );
     });
 
+    it("does not count a document whose shape classifies as `unknown`", async () => {
+      await withSeeded(
+        [
+          {
+            id: "of:piece-1",
+            document: {
+              value: { $NAME: "Topic" },
+              patternIdentity: { identity: MODULE_IDENTITY, symbol: "default" },
+            },
+            revisions: 1,
+          },
+          // Decodes fine; its shape is simply not one the model names. Its kind
+          // WAS determined — `unknown` — so dropping it is an answer, not a gap.
+          { id: "of:odd", document: { cfc: {}, slug: "x" }, revisions: 1 },
+        ],
+        [{ name: "" }],
+        (space) => {
+          const listing = listEntityModels(space, { kind: "piece" });
+          expect(listing.entities.map((e) => e.id)).toEqual(["of:piece-1"]);
+          expect(listing.extent.unreadable).toBe(0);
+          expect(isCompleteScan(listing.extent)).toBe(true);
+        },
+      );
+    });
+
+    it("already reports itself truncated whenever the module walk runs past the cap", async () => {
+      const MODULE = {
+        value: {
+          kind: "source",
+          identity: MODULE_IDENTITY,
+          code: "export default () => null;\n",
+          filename: "/api/patterns/notes/notebook.tsx",
+          imports: [],
+        },
+      };
+      await withSeeded(
+        [
+          ...Array.from({ length: 2 }, (_, i) => ({
+            id: `of:piece-${i + 1}`,
+            document: {
+              value: { $NAME: "Topic" },
+              patternIdentity: { identity: MODULE_IDENTITY, symbol: "default" },
+            },
+            revisions: 3,
+          })),
+          // Both sit past a cap of 1, so only the module walk reaches them.
+          { id: "of:bad", document: UNDECODABLE, revisions: 2 },
+          { id: "of:mod", document: MODULE, revisions: 1 },
+        ],
+        [{ name: "" }],
+        (space) => {
+          // The walk resolves the module and passes an undecodable row on the
+          // way, which it does not count. It does not have to: the walk is
+          // reachable ONLY after collection stopped at the cap, so the result
+          // already reports itself incomplete, and raising the limit hands the
+          // same row to the pass that DOES count it. Both halves asserted here,
+          // because the invariant lives in the loop bounds and nothing else
+          // would notice if an edit broke it.
+          const capped = listEntityModels(space, { kind: "piece", limit: 1 });
+          expect(capped.entities[0].lineage.pattern?.moduleId).toBe("of:mod");
+          expect(capped.extent.truncated).toBe(true);
+          expect(isCompleteScan(capped.extent)).toBe(false);
+
+          const whole = listEntityModels(space, { kind: "piece" });
+          expect(whole.extent.truncated).toBe(false);
+          expect(whole.extent.unreadable).toBe(1);
+          expect(isCompleteScan(whole.extent)).toBe(false);
+        },
+      );
+    });
+
     it("does not count a tombstone the filter dropped, which is no error", async () => {
       await withSeeded(
         [

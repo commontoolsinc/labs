@@ -745,6 +745,13 @@ export function listEntityModels(
       }
     }
   }
+  // Reachable only when collection stopped at the cap — the loop above runs to
+  // `rows.length` otherwise — so a failure this walk meets is already covered by
+  // `truncated`, and counting it under `unreadable` would contradict the notice
+  // that goes with it: raising `--limit` DOES bring these rows into the pass
+  // above, which reports them. Pinned by a test, since the invariant lives in
+  // the loop bounds rather than anywhere it can be read off.
+  //
   // The walk ends the moment nothing is still wanted.
   for (; wanted.size > 0 && scanned < rows.length; scanned++) {
     const r = rows[scanned];
