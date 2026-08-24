@@ -537,6 +537,86 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
     }
   });
 
+  it("lets a parent cancel landing MID-WALK stop the recovered run", async () => {
+    // The delta review's D1, watched red at the pre-fix head (the
+    // reviewer's probe: `registered-after-parent-cancel: true`). The
+    // parent's handle fires DURING the recovery's walk — after the
+    // readiness wait resolved, before the walk's install lands. The
+    // token's cancel is a ONE-SHOT `stopped` latch: fired against the
+    // STALE install of the refused attempt it is a registry-guarded
+    // no-op that BURNS the latch, and the hand-off's later
+    // markInstalled(current) then returns at the latch WITHOUT stopping
+    // the freshly recovered run — a leaked live piece with every parent
+    // handle spent, the F1 leak one window later. The recovery must
+    // leave no registration behind this ordering.
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const harness = runtime.runner as unknown as {
+      runWithStartOwnership(
+        tx: unknown,
+        pattern: unknown,
+        argument: unknown,
+        resultCell: unknown,
+        options?: unknown,
+      ): { cancelDeferredStart?: () => void };
+      startCore: (...args: unknown[]) => () => void;
+    };
+    const tx = gatedTxOn(runtime);
+    const result = runtime.getCell<{ doubled?: number }>(
+      space,
+      "parent cancel mid-walk stops the recovery",
+      undefined,
+      tx,
+    );
+    const injector = refuseDeferredStartCommits(
+      runtime,
+      staleConfirmedReadOf(result),
+    );
+    // Fire the parent's handle synchronously INSIDE the recovery's context
+    // assembly — the widest point of the walk window.
+    let parentCancel: (() => void) | undefined;
+    let assemblies = 0;
+    const originalStartCore = harness.startCore;
+    harness.startCore = (...args: unknown[]) => {
+      if (key(args[0] as Cell<unknown>) === key(result)) {
+        assemblies++;
+        if (assemblies === 2) parentCancel?.();
+      }
+      return Reflect.apply(originalStartCore, runtime.runner, args) as () =>
+        void;
+    };
+    try {
+      const { cancelDeferredStart } = harness.runWithStartOwnership(
+        tx,
+        trustExecutable(runtime, Piece),
+        { value: 3 },
+        result.withTx(tx),
+      );
+      expect(cancelDeferredStart).toBeDefined();
+      parentCancel = cancelDeferredStart;
+      runtime.prepareTxForCommit(tx);
+      expect((await tx.commit()).error).toBeUndefined();
+
+      await waitForSignal(
+        injector.refusalsReach(1),
+        "the start's transaction being refused",
+      );
+      await runtime.runner.idleDeferredStartCatchUps();
+      await runtime.idle();
+
+      // Both assemblies ran (the refused attempt's and the recovery's),
+      // the mid-walk cancel landed, and NOTHING stays registered: the
+      // recovered run was stopped, not leaked.
+      expect(assemblies).toBe(2);
+      expect(runtime.runner.cancels.has(key(result))).toBe(false);
+    } finally {
+      harness.startCore = originalStartCore;
+      injector.restore();
+    }
+  });
+
   it("abandons the recovery when the piece is stopped first", async () => {
     // The zombie case: the user navigated away, or the piece was disposed,
     // between the refusal and the recovery. The pending recovery is
