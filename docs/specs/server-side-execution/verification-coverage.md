@@ -5804,10 +5804,11 @@ supply; OW29/OW32/OW34 closed):
     running` when its walk resolves false un-stopped (r06's
     post-mortem could not distinguish that outcome; the next
     occurrence is decisive), beside the existing
-    `deferred-start-catchup` scheduling line. The lift bar is
-    UNCHANGED (the residue closes and the fixed step greens ON 10/10
-    quiet-and-loaded); the step entry's reason now names the
-    narrowed charge.
+    `deferred-start-catchup` scheduling line. The lift bar's STEP
+    half is unchanged — the fixed step greens ON 10/10
+    quiet-and-loaded — and its class half is now the named read-side
+    residue (the START class the bar originally named is closed by
+    this build); the step entry's reason names the narrowed charge.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
