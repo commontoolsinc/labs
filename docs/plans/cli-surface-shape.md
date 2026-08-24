@@ -434,12 +434,15 @@ it should have gone:
 | a projection before the verb | a result has to be named before it can be shaped |
 | a second `--` | one boundary follows the callable's section, and it is already drawn |
 
-The corrected line is what makes this survivable without a warned window.
-Every one of these is a spelling that worked before, so the caller reading the
-refusal is someone who learned the old one — and a message that says only what
-is wrong asks them to rediscover the grammar, while one that prints the line
-asks them to retype it. The repository already answers this way where it
-matters: a mounted callable's result reports the whole command that reads it
+The corrected line is what makes this survivable without a warned window, and
+the refusal has to be reached before a reinterpretation is: a verb may declare a
+field named for a read option, so a line that would otherwise be read as a
+projection has to be recognized as the old spelling first. Every one of these is
+a spelling that worked before, so the caller reading the refusal is someone who
+learned the old one — and a message that says only what is wrong asks them to
+rediscover the grammar, while one that prints the line asks them to retype it.
+The repository already answers this way where it matters: a mounted callable's
+result reports the whole command that reads it
 back rather than the address alone.
 
 `undeclaredFlagError` is where the first of those belongs: it already answers an
@@ -539,12 +542,22 @@ those same commands until it has landed.
     on `exec`. A projection is refused before the verb and inside the callable's
     section, and each refusal names the section the flag belongs to and prints
     the corrected line. The change takes effect at once rather than through a
-    warned window: a line carrying the old marker puts the verb's own fields
-    where the read options are read, and an unknown read option is refused
-    loudly with the spelling that works. The corrected line is what stands in
-    for the window, so it lands with the change rather than after it. `--help`
-    is the exception, and is carried from both spellings for the reason given
-    above.
+    warned window, which rests on a line carrying the old marker being refused
+    rather than reinterpreted — and that has to be built rather than assumed.
+    Nothing reserves a field name, so a verb may declare `select`, `filter` or
+    `schema`, and a line whose only fields are those parses as a projection
+    instead: the handler runs with different input and exits zero. `--help` is
+    the same shape, being the one flag that is never unknown.
+
+    **So the old marker is refused, not reinterpreted.** A `--` that opens an
+    empty callable section, followed by words naming fields the verb declares,
+    is the old spelling and is answered with the corrected line. That is what
+    every old line carrying fields does, so the shape is recognizable wherever
+    it matters, and a caller writing the new grammar never produces it — fields
+    written before the marker leave the section non-empty. `--help` after an
+    empty section keeps reaching the callable, for the reason given above.
+    Both need the verb's declared fields in hand, so the split settles after
+    the schema is loaded rather than during argument handling.
 11. **`--url` decomposes** into the transport it names and the reference it
     carries, and survives as a convenience for pasting rather than as the only
     spelling that carries a whole target.

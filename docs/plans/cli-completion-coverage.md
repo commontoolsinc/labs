@@ -78,7 +78,7 @@ read before picking one up; this table is the roll-up.
 | 1 | Inline `--option=value` drops every live candidate | correctness | not started |
 | 2 | Flags offered past a `stopEarly()` boundary | correctness | not started |
 | 3 | Target resolution lags the reference grammar | correctness | not started |
-| 4 | Verb flags do not complete (with item 2) | pattern vocabulary | not started |
+| 4 | Verb flags do not complete (with item 2) | pattern vocabulary | needs step 10 |
 | 5 | Result field paths for `get` and `wish` | pattern vocabulary | not started |
 | 6 | Result field paths for `call` and `exec` | pattern vocabulary | needs step 10 |
 | 7 | Slugs never complete | pattern vocabulary | not started |
@@ -215,16 +215,30 @@ a call to `cf piece verbs` or `cf get` and a read of what comes back.
 
 ### 4. Verb flags do not complete
 
-`cf call --piece <piece> addItem -- --<TAB>` offers nothing, and neither does
-the equivalent under `cf exec`. This is the position where a caller most needs
-help, because the vocabulary is the pattern author's rather than the CLI's.
+A verb's own fields are the pattern author's vocabulary rather than the CLI's,
+so this is the position where a caller has least to go on and completion has
+most to give. Nothing is offered there.
 
-Two edits stand between the current behavior and candidates:
+Where "there" is depends on step 10. Today the fields are written after `--`;
+afterwards the verb opens the callable's section and they are written directly
+after the verb, with `--` closing that section and opening the read step's:
 
-- `liveCandidates` dispatches on `option-value` and `argument` slots only, so
-  the `passthrough` slot — every word after `--` — reaches no provider at all.
-- `call:tail`, `piece call:tail`, and `exec:tail` have no `ARGUMENT_PROVIDERS`
-  entries, so the words before a `--` reach none either.
+```text
+cf call --piece <piece> addItem --ti<TAB>        # after step 10
+cf call --piece <piece> addItem -- --ti<TAB>     # before it
+```
+
+**Build this against the settled grammar, not the current one.** The two
+positions are different slots, so completing the current one means completing it
+again later, and it would teach the spelling that step 10 retires while the
+retirement is being taught. If it lands first for some other reason, it is
+transitional and says so.
+
+`liveCandidates` dispatches on `option-value` and `argument` slots only, so
+neither position reaches a provider today. After step 10 the slot to route is
+the one following the verb, which is the same boundary item 2 has to recognize —
+the two are one edit, and recognizing the boundary without routing the slot
+leaves the position offering nothing.
 
 The data needs no new request. `listPieceCallables` — the call
 `callableCandidates` already makes — returns each verb's `inputSchema`, and
@@ -232,8 +246,11 @@ The data needs no new request. `listPieceCallables` — the call
 itself applies. A verb declaring `title` accepts `--title`, and both halves of
 that sentence are already in the process.
 
-The same slot should offer `--help`, which the callable's parser accepts and
-which is the documented way to read one verb's interface.
+`--help` belongs in this slot too: it falls inside the callable's section, where
+it reaches the verb and prints that verb's own page.
+
+The slot past the marker is not this one. It belongs to the read options, and
+completing it from the verb's declared result is item 6.
 
 ### 5. Result field paths for `get` and `wish`
 
