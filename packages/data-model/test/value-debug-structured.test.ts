@@ -101,6 +101,24 @@ describe("toStructuredDebugValue()", () => {
       expect(toStructuredDebugValue(class Foo {}))
         .toEqual({ "/function": "Foo(...)" });
     });
+
+    it("returns the failure inside `/function` when `name` cannot be read", () => {
+      // The failure is reported within the wrapper rather than in place of
+      // it, so the result still says a function was here, and the sibling
+      // properties are unaffected.
+      const value = new Proxy(function real() {}, {
+        get(target, key, receiver) {
+          if (key === "name") throw new Error("name trap");
+          return Reflect.get(target, key, receiver);
+        },
+      });
+
+      expect(toStructuredDebugValue({ a: 1, fn: value, z: 2 })).toEqual({
+        a: 1,
+        fn: { "/function": { "/unconvertible": "name trap" } },
+        z: 2,
+      });
+    });
   });
 
   // Every case here holds at least one value that does not survive conversion
@@ -452,6 +470,47 @@ describe("toStructuredDebugValue()", () => {
       expect(Object.keys(result.bad!)).toEqual(["/unconvertible"]);
       expect(result.z).toBe(2);
     });
+
+    // What lands in the `/unconvertible` payload depends on what was thrown,
+    // and anything at all can be thrown.
+    describe("the `/unconvertible` message", () => {
+      /** Converts a value whose sole property throws `thrown` when read. */
+      function messageFor(thrown: unknown): unknown {
+        const value = {
+          get boom(): number {
+            throw thrown;
+          },
+        };
+        return (toStructuredDebugValue(value) as Record<string, unknown>)[
+          "/unconvertible"
+        ];
+      }
+
+      it("returns an `Error`'s message, subclasses included", () => {
+        class MyError extends Error {}
+        expect(messageFor(new Error("plain"))).toBe("plain");
+        expect(messageFor(new MyError("custom"))).toBe("custom");
+      });
+
+      it("returns the stringification of a thrown non-`Error`", () => {
+        expect(messageFor("just a string")).toBe("just a string");
+        expect(messageFor(42)).toBe("42");
+      });
+
+      it("returns the stringification when a message is not a string", () => {
+        // An `Error` may carry a non-string `message`, in which case the
+        // whole value is stringified rather than the message read out.
+        const error = new Error("ignored");
+        (error as unknown as Record<string, unknown>).message = 5;
+        expect(messageFor(error)).toBe("Error: 5");
+      });
+
+      it("returns a fixed token when the thrown value resists stringifying", () => {
+        // A null-prototype object has no `toString` to reach, so `String()`
+        // throws on it; the message derivation must not throw in turn.
+        expect(messageFor(Object.create(null))).toBe("/unconvertibleError");
+      });
+    });
   });
 
   describe("the `FabricValue` result contract", () => {
@@ -487,6 +546,17 @@ describe("toStructuredDebugValue()", () => {
               throw new Error("x");
             },
           }),
+        },
+        new Proxy(function real() {}, {
+          get: (target, key, receiver) => {
+            if (key === "name") throw new Error("x");
+            return Reflect.get(target, key, receiver);
+          },
+        }),
+        {
+          get bad(): number {
+            throw Object.create(null);
+          },
         },
         { deep: { deeper: { deepest: [1, { s: Symbol("x") }] } } },
       ];
