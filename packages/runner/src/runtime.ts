@@ -288,17 +288,19 @@ export interface ExperimentalOptions {
  * `Runtime` resolves an unset flag to, and the baseline
  * {@link nonDefaultExperimentalFlags} reports divergence from.
  *
- * Written here so it is written once. The values were previously spread
- * across the constructor and three ambient modules, and restated in prose in
- * `docs/development/EXPERIMENTAL_OPTIONS.md`; that copy could drift from the
- * code without anything noticing. Typed as a total record over the flags, so
- * a new flag does not compile until it declares what "unset" means for it.
+ * The one place to look a default up. They were previously spread across the
+ * constructor and three ambient modules and restated in prose in
+ * `docs/development/EXPERIMENTAL_OPTIONS.md`, where the copy could drift from
+ * the code without anything noticing. Typed as a total record over the flags,
+ * so a new flag does not compile until it declares what "unset" means for it.
  *
- * The bound on that: this table is what a flag defaults TO, not what any
- * given process is running. The three ambient flags can be moved by a
+ * Two bounds on that. This table is what a flag defaults TO, not what any
+ * given process is running: the three ambient flags can be moved by a
  * co-hosted runtime, and the constructor reads the effective value back
- * rather than assuming this one — which is also why their entries here are
- * imported from the module that owns each default rather than written out.
+ * rather than assuming this one. And it is not the sole DECLARATION site —
+ * those three defaults belong to the module that owns each control point, and
+ * are imported rather than restated, because a copy here could state a
+ * default without being able to move it.
  */
 export const EXPERIMENTAL_DEFAULTS = {
   // Three flags reach the process through an ambient control point in a lower
@@ -331,13 +333,16 @@ export const EXPERIMENTAL_DEFAULTS = {
  * telling an operator what is unusual about this process is the question the
  * banner exists to answer, and a list of everything it resolved buries that.
  *
- * `resolved` is the runtime's effective posture; `selected` is what its
- * caller passed. The two differ only where an ambient control point carries
- * a value nobody here chose, and `serverExecution` is the one flag read from
- * `selected` for exactly that reason: a flag-less runtime in a serving
- * process inherits the process's arm rather than choosing one, so reporting
- * it as this runtime's divergence would be a claim about a decision it did
- * not make.
+ * `resolved` is the runtime's effective posture, every flag present; `selected`
+ * is what its caller passed, which omits whatever it left unset. Reading from
+ * `resolved` is what lets an ambient value a co-hosted runtime established be
+ * reported, and costs nothing for an unset flag, which resolves to its default
+ * and is suppressed either way.
+ *
+ * `serverExecution` is the one flag read from `selected` instead: a flag-less
+ * runtime in a serving process inherits the process's arm rather than choosing
+ * one, so reporting it as this runtime's divergence would be a claim about a
+ * decision it did not make.
  */
 export function nonDefaultExperimentalFlags(
   resolved: ExperimentalOptions,

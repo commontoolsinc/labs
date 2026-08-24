@@ -112,13 +112,6 @@ describe("ExperimentalOptions", () => {
     });
   });
 
-  // What the startup banner reports. It exists so an operator can check that
-  // a flag took effect, and the answer to that is what is UNUSUAL about this
-  // process — a list of everything resolved buries it. Two ways that went
-  // wrong before the defaults table: the deployed presets select the fleet's
-  // own server-execution arm explicitly, and a client that is not built
-  // alongside its server adopts the deployment's whole posture explicitly, so
-  // both printed a banner on every construction while running nothing unusual.
   describe("EXPERIMENTAL_DEFAULTS", () => {
     it("is what a runtime with no flags set actually resolves", async () => {
       // The table is advertised as the place to change a default, so an entry
@@ -152,6 +145,13 @@ describe("ExperimentalOptions", () => {
     });
   });
 
+  // What the startup banner reports. It exists so an operator can check that
+  // a flag took effect, and the answer to that is what is UNUSUAL about this
+  // process — a list of everything resolved buries it. Two ways that went
+  // wrong before the defaults table: the deployed presets select the fleet's
+  // own server-execution arm explicitly, and a client that is not built
+  // alongside its server adopts the deployment's whole posture explicitly, so
+  // both printed a banner on every construction while running nothing unusual.
   describe("nonDefaultExperimentalFlags()", () => {
     const resolved = (over: ExperimentalOptions = {}): ExperimentalOptions => ({
       ...EXPERIMENTAL_DEFAULTS,
