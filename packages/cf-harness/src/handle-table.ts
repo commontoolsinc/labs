@@ -237,6 +237,37 @@ export const resolveHandleToken = (
 ): HarnessHandleEntry | undefined =>
   table.entries.find((entry) => entry.token === token);
 
+/**
+ * The `addressKey` of the address `refText` names, or `undefined` when the
+ * text does not name an entity address at all. Normalization is the one
+ * minting uses, so any spelling of one address — the bare entity URI, the
+ * LLM-friendly link — yields one key.
+ */
+export const handleRefAddressKey = (refText: string): string | undefined => {
+  try {
+    return addressKey(normalizeHandleRef(refText));
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Returns the entry whose address `refText` names, or `undefined` when the
+ * table holds no entry for that address. Entry identity is `addressKey`, the
+ * same identity minting is idempotent over, so this is the inverse of
+ * {@link resolveHandleToken}: it answers whether the run holds a handle to
+ * the address a caller wrote out in full.
+ */
+export const resolveHandleRef = (
+  table: HarnessHandleTable,
+  refText: string,
+): HarnessHandleEntry | undefined => {
+  const key = handleRefAddressKey(refText);
+  return key === undefined
+    ? undefined
+    : table.entries.find((entry) => entry.addressKey === key);
+};
+
 // The free-text address grammar, assembled from the entity URI schemes so a
 // new scheme cannot leave a stale alternation here. The scheme prefix is the
 // sole positive marker; after it, any `<tag>:<base64url-ish>` tagged hash is

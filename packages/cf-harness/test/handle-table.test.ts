@@ -13,6 +13,7 @@ import {
   createHarnessHandleTable,
   type HandleTokenHasher,
   mintAddressHandle,
+  resolveHandleRef,
   resolveHandleToken,
   swapLinksForTokens,
   swapTokensForRefs,
@@ -231,6 +232,31 @@ describe("handle-table", () => {
     it("returns `undefined` for a token the table does not hold", () => {
       const table = createHarnessHandleTable("run-1");
       expect(resolveHandleToken(table, "cfh:a:22222")).toBe(undefined);
+    });
+  });
+
+  describe("resolveHandleRef()", () => {
+    it("returns the entry for any spelling of an address the table holds", async () => {
+      const { table, token } = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+      );
+      // The LLM-friendly link and the bare entity URI are one address.
+      expect(resolveHandleRef(table, LINK_A)?.token).toBe(token);
+      expect(resolveHandleRef(table, `of:fid1:${HASH_A}`)?.token).toBe(token);
+    });
+
+    it("returns `undefined` for an address the table does not hold", async () => {
+      const { table } = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+      );
+      expect(resolveHandleRef(table, LINK_B)).toBe(undefined);
+    });
+
+    it("returns `undefined` for text that names no address at all", () => {
+      const table = createHarnessHandleTable("run-1");
+      expect(resolveHandleRef(table, "the traveller's name")).toBe(undefined);
     });
   });
 
