@@ -6726,14 +6726,27 @@ supply; OW29/OW32/OW34 closed):
     one local run at the same head did not). With the test lanes'
     ensure opt-out (the RULED switch) the defect is LATENT again, not
     fixed. SURFACED TO THE OWNER 2026-08-24 (the coordinator is
-    carrying it). Owed: a ruling on the delivery side — deliver the
-    schema closure with the computed doc, or make the arrival
-    validator's failure a deferred re-fetch instead of an uncaught
-    throw — and a pin reproducing the delivery race directly (the
-    ensure gives it a deterministic producer). Trigger: before any
-    production deployment that runs the ensure ON beside space-cell-
-    only subscribers, and before the flip PR's list-EMPTY bar
-    (an ON fleet re-reaches it by construction).
+    carrying it). RULED 2026-08-24 (owner, verbatim — the shipping
+    side is the fix):
+
+    > "seam 3: that's a bug then, and the most straightforward fix is
+    > to make sure the subscription query results include cids when
+    > they are mentioned, just like they follow the `source` metadata."
+
+    > "ack on all recommendaions, except 2/OW61 (ii): instead of
+    > holding computed: docs, let's fix the shipping side and make
+    > sure `cid` s arrive with the `computed` that require them, i.e.
+    > the seam 3 fix i propose (and i'm surprised isn't in already,
+    > tbh)."
+
+    The coordinator's recommendation (i) — the arrival validator's
+    uncaught throw becomes a CONTAINED per-doc failure (fail-closed
+    for the doc, contained for the process) — was ACKed and stands
+    beside the shipping fix. The owed pin reproduces the delivery
+    race directly (the ensure is its deterministic producer). Trigger:
+    before any production deployment that runs the ensure ON beside
+    space-cell-only subscribers, and before the flip PR's list-EMPTY
+    bar (an ON fleet re-reaches it by construction).
 
   - **OW62 — adopt-not-start: the piece-open seam is where the ON
     execution model's "one starter per piece" has to land. POST-FLIP
