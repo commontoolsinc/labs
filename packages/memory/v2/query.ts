@@ -738,10 +738,11 @@ export const closeFrameOverSchemaRefs = (
   if (byBranch === undefined) return [];
   const appended: FrameUpsertEntry[] = [];
   for (const [branch, hashes] of byBranch) {
-    const seeds = [...hashes].filter((hash) =>
-      !inFrame.has(`${branch}\0cid:${hash}`)
-    );
-    if (seeds.length === 0) continue;
+    // Seed UNFILTERED — an in-frame cid doc's own hash must still enter
+    // the walk so its registered form's DEPS are followed (a schema doc
+    // arriving in a frame whose deps rode an earlier frame would
+    // otherwise ship without them); only the APPEND below skips what
+    // the frame already holds.
     const manager = new EngineObjectManager(
       engine,
       branch,
@@ -753,7 +754,7 @@ export const closeFrameOverSchemaRefs = (
       engine,
       manager,
       branch,
-      seeds,
+      hashes,
     );
     for (const [hash, { snapshot }] of closure) {
       const frameKey = `${branch}\0cid:${hash}`;

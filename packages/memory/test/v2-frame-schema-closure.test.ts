@@ -144,6 +144,166 @@ const mentioningDoc = (marker: string) => ({
   },
 });
 
+Deno.test("memory v2 frame closure follows an in-frame schema doc's OWN refs (the dep rode an earlier frame)", async () => {
+  // The edge the seed-filter would miss: a schema document arrives in a
+  // frame (a watched-absent cid root born after its watch) while its
+  // registered form's dependency was delivered in an EARLIER frame (a
+  // carrier mentioned it, so the tracked graph holds it). The arriving
+  // schema doc's frame must still carry the dependency — an in-frame cid
+  // doc's own hash seeds the closure walk; only the append skips what
+  // the frame already holds.
+  const depSchema = { type: "string", title: "ow61-dep-leaf" } as const;
+  const depHash = internSchemaAsTaggedHashString(depSchema);
+  const depId = `cid:${depHash}`;
+  const refingSchema = {
+    type: "object",
+    properties: { x: { $ref: depId } },
+  } as const;
+  const refingHash = internSchemaAsTaggedHashString(refingSchema);
+  const refingId = `cid:${refingHash}`;
+
+  const server = new Server({
+    ...testSessionOpenServerOptions,
+    store: new URL("memory://memory-v2-frame-schema-dep-closure"),
+    subscriptionRefreshDelayMs: 0,
+  });
+  const writerMessages: ServerMessage[] = [];
+  const watcherMessages: ServerMessage[] = [];
+  const writer = server.connect((message) => writerMessages.push(message));
+  const watcher = server.connect((message) => watcherMessages.push(message));
+  const space = "did:key:z6Mk-frame-schema-dep-closure";
+
+  try {
+    for (const connection of [writer, watcher]) {
+      await connection.receive(encodeMemoryBoundary(HELLO));
+    }
+    const writerSessionOpen = expectHelloOk(writerMessages);
+    const watcherSessionOpen = expectHelloOk(watcherMessages);
+    await writer.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "writer-open",
+      space,
+      session: {},
+      invocation: authInvocation(writerSessionOpen),
+    }));
+    const writerSessionId = nextResponse<{ sessionId: string }>(
+      writerMessages,
+    ).ok!.sessionId;
+    await watcher.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "watcher-open",
+      space,
+      session: {},
+      invocation: authInvocation(watcherSessionOpen),
+    }));
+    const watcherSessionId = nextResponse<{ sessionId: string }>(
+      watcherMessages,
+    ).ok!.sessionId;
+
+    // Frame 1's producer: the dep schema doc plus a carrier mentioning
+    // it in a link position.
+    await writer.receive(encodeMemoryBoundary({
+      type: "transact",
+      requestId: "tx-1",
+      space,
+      sessionId: writerSessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          { op: "set", id: depId, value: { value: depSchema } },
+          {
+            op: "set",
+            id: "of:dep-carrier",
+            value: {
+              value: {
+                linked: {
+                  "/": {
+                    "link@1": {
+                      id: "of:dep-target",
+                      path: [],
+                      schema: { $ref: depId },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+    }));
+    assertExists(nextResponse(writerMessages).ok);
+
+    // Two watches: the carrier (delivers the dep via assembly) and the
+    // NOT-YET-EXISTING refing schema doc (a marker until it is born).
+    await watcher.receive(encodeMemoryBoundary({
+      type: "session.watch.set",
+      requestId: "watch-1",
+      space,
+      sessionId: watcherSessionId,
+      watches: [{
+        id: "dep-carrier",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:dep-carrier",
+            selector: { path: [], schema: false },
+          }],
+        },
+      }, {
+        id: "refing-schema-doc",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: refingId,
+            selector: { path: [], schema: false },
+          }],
+        },
+      }],
+    }));
+    const frame1 = assertResponse<WatchSyncResult>(
+      shiftMessage(watcherMessages),
+    ).ok!.sync;
+    assert(
+      upsertIds(frame1.upserts).includes(depId),
+      "the initial delivery carries the mentioned dep schema doc",
+    );
+
+    // The refing schema doc is born (its dep is stored — the write-side
+    // closure boundary is satisfied). Its arrival frame must carry the
+    // dep AGAIN: the arrival validator resolves a registered schema
+    // doc's own refs against the frame and the replica, and the frame
+    // must not assume the earlier frame's fate.
+    await writer.receive(encodeMemoryBoundary({
+      type: "transact",
+      requestId: "tx-2",
+      space,
+      sessionId: writerSessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          { op: "set", id: refingId, value: { value: refingSchema } },
+        ],
+      },
+    }));
+    assertExists(nextResponse(writerMessages).ok);
+
+    const frame2 = await nextContentEffect(watcherMessages);
+    assert(
+      upsertIds(frame2.upserts).includes(refingId),
+      "the born schema doc's frame delivers it",
+    );
+    assert(
+      upsertIds(frame2.upserts).includes(depId),
+      `the born schema doc's frame must carry its OWN ref's target in ` +
+        `the SAME frame (got: ${JSON.stringify(upsertIds(frame2.upserts))})`,
+    );
+  } finally {
+    await server.close();
+  }
+});
+
 Deno.test("memory v2 sync frames re-carry the cid schema docs their documents mention (per-frame closure, OW61)", async () => {
   const server = new Server({
     ...testSessionOpenServerOptions,
