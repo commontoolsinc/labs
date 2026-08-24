@@ -365,10 +365,11 @@ class DebugConverter {
 
     try {
       if (value instanceof FabricPrimitive) {
-        // These can in effect require an additional layer of nesting to convert,
-        // by the time they actually hit _some_ real transports. We hereby accept
-        // the fact that there can be an arguable inconsistency between intended
-        // and actual maximum nesting when these are converted "at the edge."
+        // These can in effect require an additional layer of nesting to
+        // convert, by the time they actually hit _some_ real transports. We
+        // hereby accept the fact that there can be an arguable inconsistency
+        // between intended and actual maximum nesting when these are converted
+        // "at the edge."
         return value;
       }
 
