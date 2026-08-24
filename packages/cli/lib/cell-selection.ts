@@ -23,11 +23,19 @@ import {
   cfcSchemaChildRoot,
   isEmbeddedCfcSchemaRef,
   resolveCfcSchemaRef,
+  resolveCfcSchemaRefs,
 } from "@commonfabric/runner/cfc/schema-refs";
 import { ANNOTATION_KEYS } from "@commonfabric/piece/schema-compatibility";
 import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { runtimeErrorLog } from "./callable.ts";
+import {
+  declaredFieldNames,
+  declaredFieldsAt,
+  isSchemaObject,
+  schemaIsArrayShaped,
+  schemaIsObjectShaped,
+} from "./declared-fields.ts";
 import { nearestName } from "./refusal.ts";
 
 type PredicateComparisonOperator = "==" | "!=" | "<" | "<=" | ">" | ">=";
@@ -1191,6 +1199,14 @@ export async function parseCellSelectionOptions(options: {
 }
 
 /**
+ * Whether a schema position is marked a stream, which is a dispatch surface
+ * rather than a value: nothing is stored at it to read or to address.
+ */
+function carriesStreamMarker(schema: { readonly asCell?: unknown }): boolean {
+  return Array.isArray(schema.asCell) && schema.asCell.includes("stream");
+}
+
+/**
  * The `source` a derived projection records, in place of the text a caller
  * would have typed. It reaches the derived read's cause, so it is a fixed
  * string rather than a rendering of the schema: two calls that derive the same
@@ -1254,9 +1270,7 @@ function derivePosition(
   // A stream carries no value: it renders as the empty object and reading it
   // says nothing. `asCell` otherwise says how a position is held rather than
   // what shape it has, and the shape beside it is what decides the cut.
-  if (Array.isArray(schema.asCell) && schema.asCell.includes("stream")) {
-    return DERIVED_DROPPED;
-  }
+  if (carriesStreamMarker(schema)) return DERIVED_DROPPED;
 
   if (typeof schema.$ref === "string") {
     const ref = schema.$ref;
@@ -1752,6 +1766,197 @@ function alignConciseMarkers(
       }),
     ),
   };
+}
+
+/**
+ * A field a concise list names at a position the source cannot hold it at,
+ * with what that position holds instead.
+ */
+interface UnheldSelectionField {
+  key: string;
+  /**
+   * The position the field was named at, spelled the way this boundary spells
+   * a projection position everywhere else: `<root>` for the read's own source,
+   * `.name` for a property, `[]` for the elements of an array a field list
+   * crosses.
+   */
+  position: string;
+  /**
+   * What the position does hold: the field names it declares, the types it
+   * states where it declares no fields, or the stream it is.
+   */
+  holds:
+    | { fields: string[] }
+    | { types: string[] }
+    | { stream: true };
+}
+
+/**
+ * The first field a concise list names that the source schema proves cannot be
+ * there — a typo, or a name the source has since stopped declaring.
+ *
+ * A projection that matches nothing legitimately answers nothing: an optional
+ * field is absent, a link that has not synced is unresolvable, and both are
+ * real answers a read must be able to give. What this separates out is the
+ * case where no value could ever appear at the path, which the schema settles
+ * before the read runs and which is never anything but a mistake.
+ *
+ * The walk is the caller's field list, which is finite, consulting the source
+ * schema beside it — so a source that names itself terminates on the list
+ * rather than on a cycle guard. Every position where the schema stops proving
+ * what sits under it fails open, each one marked below: a refusal costs a
+ * retype, while a read wrongly refused cannot be taken at all. That is the
+ * direction the call door's gate over a payload's fields fails in too
+ * (`firstUndeclaredEventField`, callable.ts).
+ */
+function firstUnheldSelectionField(
+  source: JSONSchema | undefined,
+  root: JSONSchema,
+  projection: JSONSchema,
+  position: string,
+): UnheldSelectionField | undefined {
+  if (typeof projection === "boolean") return undefined;
+  const named = projection.properties;
+  if (!isObjectNotArray(named)) return undefined;
+  if (!isSchemaObject(source)) return undefined;
+  // A stream is a dispatch surface rather than a value, so nothing is stored
+  // at it for a field path to reach. The marker is read before the reference
+  // beside it is followed, because that is where a verb carries it:
+  // `{asCell: ["stream"], $ref: "#/$defs/AddEvent"}` puts the event's fields
+  // in the definition and the marker at the site naming it.
+  if (carriesStreamMarker(source)) {
+    return { key: Object.keys(named)[0], position, holds: { stream: true } };
+  }
+  // A reference site that declares fields of its own is passed over. The
+  // site's keywords and the definition's are two accounts of one position, and
+  // a read answers from both — it reads whatever is stored at a name neither
+  // account declares — so which of them governs a name is not a question this
+  // gate settles.
+  if (
+    typeof source.$ref === "string" &&
+    (isObjectNotArray(source.properties) || source.allOf !== undefined)
+  ) {
+    return undefined;
+  }
+  const scopeRoot = cfcSchemaChildRoot(source, root);
+  // A reference is followed the way the validator follows it, so a named
+  // interface declares what it names.
+  const target = resolveCfcSchemaRefs(source, scopeRoot);
+  if (!isSchemaObject(target)) return undefined;
+  if (target.anyOf !== undefined || target.oneOf !== undefined) {
+    return undefined;
+  }
+  const targetRoot = cfcSchemaChildRoot(target, scopeRoot);
+
+  // A field list names a field wherever the value holds one rather than at a
+  // fixed depth, so an array position is crossed and the same names are asked
+  // of its elements — the traversal `alignConciseProjectionMask` applies to
+  // the mask beside this.
+  if (schemaIsArrayShaped(target)) {
+    if (schemaIsObjectShaped(target, targetRoot)) return undefined;
+    return firstUnheldSelectionField(
+      sourceItemSchema(target),
+      targetRoot,
+      projection,
+      `${position}[]`,
+    );
+  }
+
+  if (!schemaIsObjectShaped(target, targetRoot)) {
+    const types = schemaTypes(target);
+    // A stated scalar type is the position saying what it holds, and a string
+    // has no fields to name. Every other reading of the position — no type at
+    // all, a union admitting a container, a conjunction whose members state
+    // the type between them — leaves the shape open, and an open position
+    // holds whatever was stored there.
+    if (
+      types.length === 0 || types.includes("object") || types.includes("array")
+    ) {
+      return undefined;
+    }
+    return { key: Object.keys(named)[0], position, holds: { types } };
+  }
+
+  // A pattern-matched name is declared without being named, so a position
+  // carrying one has a vocabulary no list of keys states.
+  if (target.patternProperties !== undefined) return undefined;
+  const declared = declaredFieldsAt(target, targetRoot);
+  // A position with no property map states no vocabulary, and answers with
+  // whatever the value holds there.
+  if (declared.sources.length === 0) return undefined;
+  const declaringSources = (key: string) =>
+    declared.sources.filter((source) => Object.hasOwn(source.properties, key));
+  if (!declared.honorsUndeclared) {
+    for (const key of Object.keys(named)) {
+      if (declaringSources(key).length === 0) {
+        return {
+          key,
+          position,
+          holds: { fields: declaredFieldNames(declared.sources) },
+        };
+      }
+    }
+  }
+  for (const [key, child] of Object.entries(named)) {
+    const matches = declaringSources(key);
+    // A name several conjunction members declare is passed over one level
+    // down: the walk cannot say which member's schema governs beneath it.
+    if (matches.length > 1) continue;
+    const found = firstUnheldSelectionField(
+      matches.length === 1
+        ? matches[0].properties[key]
+        : target.additionalProperties as JSONSchema | undefined,
+      matches.length === 1 ? matches[0].root : targetRoot,
+      child as JSONSchema,
+      `${position}.${key}`,
+    );
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/** The names a refusal lists, quoted, in the order the source declares them. */
+function quotedNames(names: readonly string[]): string {
+  return names.map((name) => `"${name}"`).join(", ");
+}
+
+/**
+ * The refusal a field the source cannot hold earns.
+ *
+ * The caller is handed what the reader knew before it read anything: the name
+ * they wrote, the position it was named at, what that position holds instead,
+ * and the declared name they are one edit from. No read-side surface prints
+ * the schema a read runs against, so the vocabulary is the whole remediation.
+ */
+function unheldSelectionFieldError(
+  flag: ProjectionFlag,
+  found: UnheldSelectionField,
+): CellSelectionError {
+  const opening = `Invalid ${flag} at ${found.position}: "${found.key}" is ` +
+    "not a field the source holds. ";
+  if ("stream" in found.holds) {
+    return new CellSelectionError(
+      opening +
+        `${found.position} is a verb, which dispatches rather than holding ` +
+        "a value to select from",
+    );
+  }
+  if ("types" in found.holds) {
+    return new CellSelectionError(
+      opening +
+        `${found.position} holds ${
+          quotedNames(found.holds.types)
+        }, which has no fields`,
+    );
+  }
+  const nearest = nearestName(found.key, found.holds.fields);
+  return new CellSelectionError(
+    opening +
+      (nearest === undefined ? "" : `Did you mean "${nearest}"? `) +
+      (found.holds.fields.length === 0
+        ? `${found.position} declares no fields at all`
+        : `${found.position} declares ${quotedNames(found.holds.fields)}`),
+  );
 }
 
 function projectValue(
@@ -2283,6 +2488,21 @@ function resolveProjection(
 ): ResolvedProjection | undefined {
   if (projection === undefined) return undefined;
   if (projection.kind === "concise") {
+    // A field list names positions of the source, so the source is what says
+    // whether a name can be there at all. A path it cannot hold answers
+    // nothing however the read is run, and answering nothing is what a read
+    // legitimately does for a field that is merely absent — so the two are
+    // separated here, before the read, where the schema still distinguishes
+    // them.
+    const unheld = firstUnheldSelectionField(
+      sourceSchema,
+      sourceSchema ?? true,
+      projection.schema,
+      "<root>",
+    );
+    if (unheld !== undefined) {
+      throw unheldSelectionFieldError(projection.flag, unheld);
+    }
     const projectsArrayItems = sourceIsArray;
     const source = projectsArrayItems
       ? schemaAtArrayItem(sourceSchema)

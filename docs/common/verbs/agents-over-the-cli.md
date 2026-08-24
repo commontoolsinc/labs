@@ -196,6 +196,18 @@ absent optional source, or a wish run under `--allow-empty`, which prints `null`
 and exits 0 where it would otherwise error — and no caller can tell them apart
 from the output. Read it as "no value here", never as proof of no matches.
 
+**An empty projection is a field holding nothing, not a field that is not
+there.** A `--select`/`--schema` field list is held to the source's own
+vocabulary, so a name the schema proves cannot be there — one the position
+neither declares nor admits, one below a scalar, one below a verb — is refused
+before the read, naming the position and what it declares. What comes back as
+`{}` is therefore a position that could have held a value and does not: an
+optional field nobody has written, an interface an item does not implement, a
+link that has not synced. Where the source schema settles nothing — a position
+carrying `additionalProperties`, a disjunction, an untyped source — no refusal
+is available and `{}` still covers a typo as well, so read one there against
+`cf piece describe` rather than as an answer about the data.
+
 **An unregistered piece is not a missing piece.** Covered above, and repeated
 here because it is the failure that reads most like a definitive answer: `ls`
 and `search` returning nothing is consistent with a space full of pieces whose

@@ -46,10 +46,10 @@ import {
   executeResolvedCallable,
   normalizeAbsentVerbPayload,
   runtimeErrorLog,
-  schemaIsObjectShaped,
   verbInputSchemaError,
   VerbInputValidationError,
 } from "../lib/callable.ts";
+import { schemaIsObjectShaped } from "../lib/declared-fields.ts";
 import {
   type CellSelection,
   CellSelectionError,

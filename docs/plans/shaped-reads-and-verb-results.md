@@ -131,6 +131,23 @@ caller cannot do is introduce its own. A disjunction has no single answer to
 "return this subtree," so honoring one would mean picking a branch on the
 caller's behalf.
 
+**A field list names positions of the source, so the source's schema decides
+whether a name can be there at all.** A projection that matches nothing is a
+real answer — an optional field is absent, a link has not synced — so a read
+cannot refuse on absence. What it can refuse on is a path no value could ever
+appear at, which the schema settles before the read runs: a field a position
+neither declares nor admits, a field named below a scalar, a field named below
+a verb, which dispatches rather than holding a value. The refusal names the
+position, the vocabulary that position declares, and the declared name the path
+is one edit from — the wording every other misspelled name gets
+(`packages/cli/lib/refusal.ts`). Everything the schema leaves open passes:
+`additionalProperties`, a disjunction, an untyped position, a reference that
+does not resolve. Refusing there would take away a read that works, and the
+direction to be wrong in is the permissive one. The full form is held to none
+of it, since a JSON Schema states a shape of its own rather than naming the
+source's fields — which leaves it the spelling for reading a position the
+source does not declare.
+
 ### Saying which positions are addresses
 
 Everything above selects *values*. A shape also needs to say "at this position,

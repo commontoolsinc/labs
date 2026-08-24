@@ -227,6 +227,14 @@ refuses all three flags. `--show-links` composes with a projection, because a
 projection leaves every surviving path where it was; it does not compose with
 `--filter`, which moves the positions a link names.
 
+**A field list is held to what the verb's result declares.** A name the
+declared result proves cannot be there — one the position neither declares nor
+admits, one below a scalar, one below a verb — is refused before the read and
+names the vocabulary that position takes. A name it declares that simply holds
+nothing answers with nothing, which is the answer an optional field is entitled
+to. Where a verb declares no result there is nothing to hold the list to, and
+every name is read as written.
+
 **A verb reached through a filesystem mount is the same call.** `cf exec` takes
 the three flags too, written before the mounted file, since everything after it
 belongs to the callable's own schema-derived interface. It settles the handling
