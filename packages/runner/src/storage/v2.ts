@@ -5335,11 +5335,18 @@ class SpaceReplica implements ISpaceReplica {
    * (`consumeUpdates`), where the previous frame-wide throw was an
    * unhandled rejection that killed the consuming worker wholesale on
    * one bad document — a robustness hole against any producer bug (the
-   * OW61 board: 13 file-level failures from one delivery race). A
-   * compliant server never produces such a frame (per-frame closure is
-   * enforced at emission — `closeFrameOverSchemaRefs`); quarantine is
-   * the net under everything else, and a quarantined doc heals on any
-   * later closed re-delivery.
+   * OW61 board: 13 file-level failures from one delivery race). The
+   * server deliberately ELIDES cid docs this session already received
+   * (not retransmitting schemas is why content addressing exists —
+   * OW61's reversal ruling), so a compliant server legitimately emits
+   * frames whose refs resolve only against this replica's stored docs;
+   * a ref that fails to resolve here therefore indicates a CLIENT-side
+   * absorb/ordering defect (a dropped, reordered, or un-retained
+   * earlier delivery — the defect class OW61's investigation owns).
+   * Quarantine contains that defect loudly; the heal arrives with the
+   * next FULL evaluation (a watch.set, a reconnect — those frames carry
+   * the whole assembled closure), since under elision an unchanged
+   * quarantined doc is rightly never re-delivered mid-session.
    *
    * Direct refs suffice: a stored verified dependency was itself validated
    * when it arrived, and a locally written one carried its closure in its
@@ -5472,7 +5479,10 @@ class SpaceReplica implements ISpaceReplica {
               `within the delivered set ` +
               `(docs/specs/content-addressed-schemas.md). The document ` +
               `is quarantined — this replica keeps its previous state ` +
-              `for it until a closed re-delivery arrives.`,
+              `for it until the next full evaluation (a watch.set or ` +
+              `reconnect) re-delivers it with its closure. This ` +
+              `indicates a client-side absorb/ordering defect ` +
+              `(verification-coverage.md OW61).`,
             ]);
           }
         }

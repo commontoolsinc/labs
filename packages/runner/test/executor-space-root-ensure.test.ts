@@ -393,15 +393,20 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     // every frame. The defect class under investigation is a CLIENT
     // that fails that obligation (a dropped/reordered/un-retained cid
     // delivery); this step simulates exactly that at the register's
-    // named deterministic producer (the ensure materializing
-    // content-addressed computed cells beside a PLAIN space-cell
-    // subscription) and pins the ACKed containment: the consumer
-    // SURVIVES — the mention-carrying doc quarantines loudly instead
-    // of killing the worker (the board's kill mode), sibling traffic
-    // keeps applying, and the replica keeps serving.
+    // named deterministic producer and pins the ACKed containment ON
+    // THE CRASH CLASS'S ACTUAL SEAM: the subscription is registered
+    // BEFORE the ensure activates, so the mention-carrying frames
+    // arrive as server pushes through the BACKGROUND consume path
+    // (`consumeUpdates` → `applySessionSync`) — where the
+    // pre-containment validator throw was an unhandled rejection that
+    // killed the consuming worker (the OW61 board's kill mode; the
+    // round-3 review's R2: routed through the request-shaped pull
+    // path instead, the base throw surfaced as an ignored error
+    // result and the step discriminated nothing). Red-first: this
+    // step's head construction was run against the no-containment
+    // base validator and died on exactly that unhandled rejection.
     await seedAcl({ [space]: "OWNER" });
     const created = newSpaceServer();
-    expect(await created.activate()).toBe(true);
 
     const reader = clientRuntime(readerSigner);
     // The simulated absorb defect: DROP every cid: upsert before the
@@ -437,11 +442,24 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
       );
     };
 
+    // Subscribe FIRST (this starts the background consumer), activate
+    // SECOND: everything the ensure materializes reaches this replica
+    // as push frames on the consume path. The liveness cell is synced
+    // up front too — it rides the SAME session's consume loop, and its
+    // later update is the discriminator a dead loop can never deliver.
     const probe = reader.getSpaceCell(space).key("defaultPattern");
     await probe.sync();
+    const liveness = reader.getCell<{ n?: number }>(
+      space,
+      "ow61-containment-liveness",
+      undefined,
+    );
+    await liveness.sync();
+    expect(await created.activate()).toBe(true);
+
     // Producer sanity: the ensure's computed cells DID ride the plain
-    // subscription, and the simulated defect DID drop cid deliveries —
-    // without both, this pin is vacuously green.
+    // subscription as pushes, and the simulated defect DID drop cid
+    // deliveries — without both, this pin is vacuously green.
     await waitUntil(
       () => computedSeen.size > 0,
       "the ensured root's computed cell riding the plain subscription",
@@ -450,21 +468,57 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
       () => droppedCids > 0,
       "the simulated absorb defect dropping a cid delivery",
     );
+    await waitUntil(
+      () => stats.rootEnsure.created === 1,
+      "the ensure's creation to complete beside the defective reader",
+    );
 
-    // THE PIN, half one — containment: the run reaching this line at
-    // all is the process-survival claim (pre-containment, the arrival
-    // validator's throw was an unhandled rejection in consumeUpdates —
-    // the OW61 board's kill mode). The mention-carrying computed doc
-    // must be QUARANTINED, not applied: fail-closed for the doc.
+    // THE PIN, half one — the consumer SURVIVED the violating push
+    // frames (pre-containment: unhandled rejection in consumeUpdates,
+    // nothing after this point runs) and the mention-carrying computed
+    // doc is QUARANTINED, not applied: fail-closed for the doc.
     await waitUntil(
       () =>
         [...computedSeen].some((id) => replica.getDocument(id) === undefined),
       "a cid-mentioning computed doc held in quarantine (not applied)",
     );
 
-    // Half two — the replica keeps serving: an ordinary write/read
-    // round trip through the same reader runtime still works after the
-    // quarantine (the consumer loop is alive and applying frames).
+    // Half two — the CONSUMER LOOP IS ALIVE, proven by delivery: a
+    // writer pushes an update to the pre-synced liveness cell, and the
+    // reader must SEE it arrive through the same background session.
+    // Pre-containment the violating push frame's throw ended the
+    // consume loop (the unhandled rejection is retained by the test
+    // harness, so death is otherwise silent here — the round-3
+    // review's R2), and this wait times out: the discriminator.
+    {
+      const writer = clientRuntime(spaceSigner);
+      const writerLiveness = writer.getCell<{ n?: number }>(
+        space,
+        "ow61-containment-liveness",
+        undefined,
+      );
+      await writerLiveness.sync();
+      const tx = writer.edit();
+      writerLiveness.withTx(tx).set({ n: 2 });
+      expect((await tx.commit()).error).toBeUndefined();
+      await writer.storageManager.synced();
+    }
+    await waitUntil(
+      () => (liveness.get() as { n?: number } | undefined)?.n === 2,
+      "a post-quarantine push to be DELIVERED through the same consumer",
+    );
+
+    // And the request-shaped path still answers ok (pre-containment
+    // the pull-path validator throw surfaced here as an error
+    // result — the round-3 review's named discriminator), plus an
+    // ordinary write/read round trip through the reader itself.
+    const lateSync = await (reader.storageManager.open(space) as unknown as {
+      sync(
+        id: string,
+        selector: { path: string[]; schema: boolean },
+      ): Promise<{ error?: unknown }>;
+    }).sync([...computedSeen][0], { path: [], schema: false });
+    expect(lateSync.error).toBeUndefined();
     const witness = reader.getCell<{ n?: number }>(
       space,
       "ow61-containment-witness",
@@ -478,8 +532,6 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
       await reader.storageManager.synced();
     }
     expect((witness.get() as { n?: number } | undefined)?.n).toBe(1);
-    // The ensure itself ran to completion beside the defective reader.
-    expect(stats.rootEnsure.created).toBe(1);
     expect(stats.rootEnsure.failures).toBe(0);
   });
 

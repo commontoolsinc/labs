@@ -3966,10 +3966,10 @@ supply; OW29/OW32/OW34 closed):
     217–253 OFF; the several-second sends gone) and the new
     sender-echo series (the one bar that FAILS as worded: not ms-class
     in either arm, ON 1.5–2.4× OFF on chat, attributed to the client
-    (e) term). **(ii) stays OWED to the owner**: the flip's numeric
-    BAR is the owner's ruling — W4 reports the numbers and does not
-    rule; the flip gate (plan Phase 7 task 1 item 4) still reads
-    against the RULED bar once the owner sets it.
+    (e) term). **(ii) RULED 2026-08-24 (owner, verbatim): "topics
+    numbers are fine." — the flip performance bar is MET on the
+    measured numbers**; the flip gate (plan Phase 7 task 1 item 4)
+    reads satisfied on this ruling.
   - OW31 (row above, RULED 2026-08-18; BUILT 2026-08-21): the
     write-authority posture is
     ruled — the serving identity never writes users' home spaces, the
@@ -6837,9 +6837,17 @@ supply; OW29/OW32/OW34 closed):
     space-cell subscriber SURVIVES a replica that fails to absorb
     the cid schema docs") — the register's named deterministic
     producer with a simulated absorb defect (cid upserts dropped at
-    the reader replica): the consumer survives, the
-    mention-carrying computed doc quarantines, sibling traffic and a
-    witness round-trip keep working, the ensure completes.
+    the reader replica), routed through the BACKGROUND consume path
+    (the subscription registers before the ensure activates, so the
+    violating frames arrive as pushes — the crash class's actual
+    seam; the round-3 review's R2 caught the earlier pull-path
+    construction passing at base). The discriminator is DELIVERY
+    LIVENESS: after the quarantine, a writer's push to a pre-synced
+    cell must arrive through the same consumer — watched red against
+    the no-containment base validator (the board's exact doc pair as
+    an unhandled rejection, then the liveness timeout), green at
+    head with the computed doc quarantined, the request path
+    answering ok, and the ensure completing.
     Subscriber-shape finding (the owner's cf-harness question,
     verified): ALL THREE named production space-cell-only
     subscribers are ONE shape — `PiecesController`'s constructor
