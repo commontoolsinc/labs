@@ -2400,8 +2400,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         const detail = reasons.length > 0 ? `: ${reasons[0]}` : "";
         const message =
           `CFC enforcement rejected commit: relevant transaction was not prepared${detail}`;
-        // A refusal is terminal only when it is a VERDICT on this
-        // transaction's data. When any reason says prepare could not evaluate
+        // WATCH(cfc-unevaluable): a refusal is terminal only when it is a
+        // VERDICT on this transaction's data. When any reason says prepare could not evaluate
         // — an input it needed was not available here — a fresh attempt can
         // decide differently once that input loads, so the rejection keeps
         // the retryable discarded-attempt name. Marking that at the reason's

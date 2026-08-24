@@ -5185,6 +5185,14 @@ export const prepareBoundaryCommit = (
   tx: IExtendedStorageTransaction,
   instrumentation?: CfcPrepareInstrumentation,
 ): string[] => {
+  // WATCH(cfc-unevaluable): every reason recorded here decides whether the
+  // commit is retried. A reason that says policy REFUSED the data is a
+  // verdict and makes the rejection terminal; a reason that says prepare
+  // could not EVALUATE — an input it needed was unavailable in this
+  // transaction — must be wrapped in `unevaluableReason(...)` so the
+  // rejection stays retryable and lands once that input arrives. Untagged is
+  // treated as a verdict; see cfc/unevaluable-reason.ts for why, and for what
+  // getting it wrong looks like from the outside.
   const reasons: string[] = [];
   const state = tx.getCfcState();
   // D4: per-target last-overlapping-write bounds over the ordered write-

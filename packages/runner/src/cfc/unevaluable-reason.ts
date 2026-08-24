@@ -19,12 +19,36 @@
 // (`runner.ts`), and matching a token rather than prose keeps producer and
 // consumer in lockstep.
 //
-// NOTE the default, which is deliberate but arguable: an UNMARKED reason is
-// treated as a verdict, so a new reason is terminal until someone marks it.
-// That is the right default only if every future "could not evaluate" reason
-// gets marked at its source. The opposite default — retryable until proven a
-// verdict — would fail toward today's bounded-retry behaviour instead. See the
-// pull request discussion; this is a model question for the framework owner.
+// WATCH(cfc-unevaluable): THE DEFAULT IS "VERDICT", AND IT IS THE THING TO
+// SUSPECT FIRST.
+//
+// An UNMARKED reason counts as a verdict, so a reason added tomorrow is
+// TERMINAL — never retried — until someone tags it here. That is safe only
+// while every "could not evaluate" reason is tagged at its source. Get it
+// wrong and the symptom is a write that never lands and never retries: a
+// pattern result that stays absent, a served-wish state that never
+// materializes and whose UI silently never mounts, a refusal logged once and
+// then nothing. It will NOT look like a labelling bug; it looks like the
+// computation simply stopped.
+//
+// If you are debugging that, the question is: did prepare refuse this data,
+// or could it not evaluate yet? If the latter, the fix is one line — wrap the
+// reason at its producer in `unevaluableReason(...)`, next to the other
+// tagged sites in `prepare.ts` — plus a test that the write lands once the
+// input arrives.
+//
+// This default was chosen deliberately and reviewed (PR #6114, ask A1): it is
+// the smaller change, and it matches how `isRetryableCommitRejection` treats
+// its allow-list. The alternative — retryable until proven a verdict, which
+// fails toward today's bounded-retry behaviour and costs ~13 tagged sites
+// instead of 3 — was the argued-for opposite. Inverting it is mechanical:
+// tag the verdicts instead, and flip the predicate below.
+//
+// One revision of #6114 shipped WITHOUT this split, treating every reason as
+// a verdict, and it stranded the served-wish state exactly as described
+// above. The OW49/OW50 suites caught it
+// (`cfc-prepare-crash-surfacing.test.ts`, `executor-events-down.test.ts`,
+// `executor-trust-attribution.test.ts`) — if you are changing this, run those.
 
 /**
  * Stable machine token marking a CFC prepare reason as an EVALUATION FAILURE
