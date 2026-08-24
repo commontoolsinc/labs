@@ -621,7 +621,13 @@ describe("schema-doc-sync", () => {
       fromSeq: 700_000,
       toSeq: 700_001,
       upserts: [
-        { branch: "", id: "of:heal-carrier", scope: "space", seq: 1, doc: carrierDoc },
+        {
+          branch: "",
+          id: "of:heal-carrier",
+          scope: "space",
+          seq: 1,
+          doc: carrierDoc,
+        },
       ],
       removes: [],
     }, "integrate");
@@ -633,7 +639,13 @@ describe("schema-doc-sync", () => {
       fromSeq: 700_001,
       toSeq: 700_002,
       upserts: [
-        { branch: "", id: "of:heal-carrier", scope: "space", seq: 2, doc: carrierDoc },
+        {
+          branch: "",
+          id: "of:heal-carrier",
+          scope: "space",
+          seq: 2,
+          doc: carrierDoc,
+        },
         {
           branch: "",
           id: `cid:${depHash}`,

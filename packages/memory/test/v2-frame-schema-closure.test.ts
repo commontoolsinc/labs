@@ -296,8 +296,8 @@ Deno.test("memory v2 sync frames re-carry the cid schema docs their documents me
       upsertIds(frame3.upserts).includes(cidId),
       `the watch.add response must carry the mentioned cid schema doc in ` +
         `the SAME frame (got: ${
-        JSON.stringify(upsertIds(frame3.upserts))
-      }) — its earlier delivery rode a different frame whose application ` +
+          JSON.stringify(upsertIds(frame3.upserts))
+        }) — its earlier delivery rode a different frame whose application ` +
         `the server cannot assume`,
     );
   } finally {

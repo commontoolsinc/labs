@@ -6742,11 +6742,61 @@ supply; OW29/OW32/OW34 closed):
     The coordinator's recommendation (i) — the arrival validator's
     uncaught throw becomes a CONTAINED per-doc failure (fail-closed
     for the doc, contained for the process) — was ACKed and stands
-    beside the shipping fix. The owed pin reproduces the delivery
-    race directly (the ensure is its deterministic producer). Trigger:
-    before any production deployment that runs the ensure ON beside
-    space-cell-only subscribers, and before the flip PR's list-EMPTY
-    bar (an ON fleet re-reaches it by construction).
+    beside the shipping fix. BUILT (this row's closing PR), three
+    parts, each red-first. **The mechanism, located:** the cid
+    following the ruling asks for EXISTED at the graph layer —
+    `assembleSchemaDocClosures` (memory/v2/query.ts, since #5833)
+    scans every delivered snapshot for embedded cid refs and stages
+    the verified closure, beside the meta-link following
+    (`loadMetaLinkedDocs`, runner traverse.ts) that ships computed
+    results at all — but it stages a closure doc only while the
+    tracked graph has never delivered it, and the frame builders
+    additionally elide entries the session cache says were delivered
+    before. So a RE-delivered cid-mentioning doc shipped in a frame
+    WITHOUT its cid: sibling, and that frame's validity hung on the
+    client having durably applied every earlier frame in order —
+    the ordering delivery-window timing broke. (1) Shipping (the
+    ruled fix): `closeFrameOverSchemaRefs` (memory/v2/query.ts)
+    closes every sync frame at build time — the diffed upserts'
+    mentioned cid docs are verified through the shared closure
+    walker and appended to the SAME frame unless already in it;
+    wired at the three diffed builders (watch.add, incremental push
+    refresh, full-evaluation diff via buildDiffSync's injected
+    closeOver); watch.set and graph.query ship the whole assembled
+    set and were already closed; appended entries are frame-local
+    freight (not session-cached), so rollback stays exact and
+    re-mention re-appends idempotent bytes. (2) Containment:
+    `#validateArrivedSchemaDocuments` returns a quarantine set
+    instead of throwing — the offending doc drops from the frame
+    with a loud per-doc diagnostic (fixpoint over in-frame schema
+    docs so dependents fail closed together), the replica keeps its
+    prior state for it, and a later closed re-delivery heals it;
+    `consumeUpdates` additionally catches any residual per-frame
+    apply failure. (3) Pins, each watched red at base `2ea87cea9`:
+    `memory/test/v2-frame-schema-closure.test.ts` (the push frame
+    after re-touching the mentioning doc carried it ALONE, and the
+    watch.add response likewise); four steps in
+    `runner/test/schema-doc-sync.test.ts` (the exact uncaught
+    validator throws from the board, now quarantine + survive +
+    heal, plus the consumeUpdates belt); and the ensure-driven pin
+    in `runner/test/executor-space-root-ensure.test.ts` ("a plain
+    space-cell subscriber's frames stay closed over cid mentions
+    through materialization AND re-delivery") — the live ensure as
+    the register's named deterministic producer, red at base with
+    `computed:fid1:49QA… mentions cid:fid1:CzEh…, absent from its
+    frame` on the aged-reconcile re-delivery, no timing dependence.
+    Subscriber-shape finding (the owner's cf-harness question,
+    verified): ALL THREE named production space-cell-only
+    subscribers are ONE shape — `PiecesController`'s constructor
+    subscription (`piece/src/ops/pieces-controller.ts` —
+    `runtime.getSpaceCell(space).sync()`, no root-aware demand) —
+    constructed by the CLI (`cli/lib/piece.ts`), agents-host
+    (`agents-host/src/fabric-runtime.ts`), AND cf-harness's
+    run_pattern session (`cf-harness/src/fabric-session.ts`), so
+    yes: cf-harness is also that shape, and one fix covers all
+    three. Residual trigger: before the flip PR's list-EMPTY bar,
+    re-read this row only if a NEW frame producer is added outside
+    the closed builders (the pins guard the existing three).
 
   - **OW62 — adopt-not-start: the piece-open seam is where the ON
     execution model's "one starter per piece" has to land. POST-FLIP

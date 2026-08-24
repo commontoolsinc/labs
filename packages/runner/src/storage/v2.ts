@@ -5417,9 +5417,9 @@ class SpaceReplica implements ISpaceReplica {
           overlay.delete(id);
           logger.error("schema-doc-quarantine", () => [
             `Schema document ${id} was replaced with content that does ` +
-              `not hash to its id — content under a content-addressed id ` +
-              `must never change. The arriving copy is quarantined; this ` +
-              `replica keeps its stored, verified document.`,
+            `not hash to its id — content under a content-addressed id ` +
+            `must never change. The arriving copy is quarantined; this ` +
+            `replica keeps its stored, verified document.`,
           ]);
           continue;
         }
@@ -5462,12 +5462,12 @@ class SpaceReplica implements ISpaceReplica {
             changed = true;
             logger.error("schema-doc-quarantine", () => [
               `Document ${referrer} was delivered with a broken schema ` +
-                `ref: cid:${dep} is not delivered and verified in this ` +
-                `replica. Every delivered document's refs must resolve ` +
-                `within the delivered set ` +
-                `(docs/specs/content-addressed-schemas.md). The document ` +
-                `is quarantined — this replica keeps its previous state ` +
-                `for it until a closed re-delivery arrives.`,
+              `ref: cid:${dep} is not delivered and verified in this ` +
+              `replica. Every delivered document's refs must resolve ` +
+              `within the delivered set ` +
+              `(docs/specs/content-addressed-schemas.md). The document ` +
+              `is quarantined — this replica keeps its previous state ` +
+              `for it until a closed re-delivery arrives.`,
             ]);
           }
         }

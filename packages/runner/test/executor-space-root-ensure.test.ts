@@ -425,11 +425,13 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     const originalApply = replica.applySessionSync.bind(replica);
     replica.applySessionSync = (sync: unknown, type: string) => {
       const upserts = (sync as { upserts?: unknown[] })?.upserts;
-      const frame = Array.isArray(upserts) ? upserts as Array<{
-        id?: unknown;
-        deleted?: unknown;
-        doc?: unknown;
-      }> : [];
+      const frame = Array.isArray(upserts)
+        ? upserts as Array<{
+          id?: unknown;
+          deleted?: unknown;
+          doc?: unknown;
+        }>
+        : [];
       const inFrame = new Set<string>();
       for (const upsert of frame) {
         if (
