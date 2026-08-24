@@ -46,7 +46,6 @@ Deno.test("transformInjectHelperModule injects the helper import into every file
   assertNotMatch(main.contents, /cts-enable/);
 });
 
-
 Deno.test("transformInjectHelperModule passes .d.ts files through untouched", () => {
   const declarations = "export declare const value: number;\n";
   const transformed = transformInjectHelperModule({

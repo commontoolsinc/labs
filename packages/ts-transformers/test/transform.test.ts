@@ -807,7 +807,6 @@ export default function next(value: number) {
       ),
     );
   });
-
 });
 
 describe("CFHelpers handling", () => {

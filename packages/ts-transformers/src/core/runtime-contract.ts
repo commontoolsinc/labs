@@ -82,7 +82,6 @@ function isIntegerAtLeast(value: unknown, minimum: number): value is number {
     value >= minimum;
 }
 
-
 /** Index of the first non-blank line, or null for an all-blank source. */
 export function findFirstContentLineIndex(
   lines: readonly string[],

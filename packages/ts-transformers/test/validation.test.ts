@@ -50,7 +50,6 @@ function assertHasErrorType(
   );
 }
 
-
 Deno.test("Cast Validation", async (t) => {
   await t.step("errors on double cast 'as unknown as'", async () => {
     const source = `

@@ -1,7 +1,5 @@
-import { assertEquals, assertMatch, assertNotMatch } from "@std/assert";
-import {
-  transformCfDirective,
-} from "../../src/mod.ts";
+import { assertMatch } from "@std/assert";
+import { transformCfDirective } from "../../src/mod.ts";
 
 Deno.test("transformCfDirective injects helpers by default", () => {
   const source = [
@@ -17,6 +15,3 @@ Deno.test("transformCfDirective injects helpers by default", () => {
   );
   assertMatch(transformed, /function h\(\.\.\.args: any\[\]\)/);
 });
-
-
-

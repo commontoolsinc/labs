@@ -323,7 +323,8 @@ describe("content-addressed action identity", () => {
       main: "/main.tsx",
       files: [{
         name: "/main.tsx",
-        contents: `import { type Cell, handler, lift, pattern } from "commonfabric";
+        contents:
+          `import { type Cell, handler, lift, pattern } from "commonfabric";
 
 export const dump = handler<Record<string, never>, { out: Cell<string> }>(
   { type: "object", properties: {} },

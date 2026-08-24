@@ -207,7 +207,6 @@ Deno.test("transformCfDirective injects the helpers import for an ordinary sourc
   assert(out.includes(`${CF_HELPERS_IDENTIFIER}.h.apply`));
 });
 
-
 Deno.test("injectCfHelpers uses TypeScript helper-shim syntax by default", () => {
   const out = injectCfHelpers(`const x = 1;`);
   // The TS variant carries the `: any[]` rest annotation.
