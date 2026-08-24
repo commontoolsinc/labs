@@ -40,8 +40,8 @@ import {
 } from "./pattern-source-scheme.ts";
 import type { PatternUpdateOutcome } from "./pattern-updater.ts";
 import { getPatternIdentityRef, setPatternSource } from "./runner.ts";
-import type { Runtime, RuntimeFetch } from "./runtime.ts";
-import { nameSchema, type NameSchema } from "./schemas.ts";
+import type { Runtime, RuntimeFetch, SpaceCellContents } from "./runtime.ts";
+import { type NameSchema, nameSchema } from "./schemas.ts";
 import type {
   CommitError,
   IExtendedStorageTransaction,
@@ -126,6 +126,13 @@ export type SpaceRootCreationHooks = {
    * platform fetch, its historical behavior); the serving seat passes
    * `runtime.fetch` so tests can serve pattern sources in-process. */
   fetch?: RuntimeFetch;
+  /** The space-cell handle the creation transaction's re-check reads
+   * through. The controller passes its OWN synced instance (its
+   * historical read source — and the piece suite's creation-race test
+   * stubs exactly that seam); absent, a fresh handle over the same
+   * address (`runtime.getSpaceCell(space)`), which is what the serving
+   * seat uses. */
+  spaceCell?: Cell<SpaceCellContents>;
 };
 
 /**
@@ -188,7 +195,8 @@ export async function createSpaceRootIfAbsent(
         hooks.stampCreationTx?.(tx);
         // Double-check the pattern doesn't exist (the read establishes
         // the OCC invariant).
-        const spaceCellWithTx = runtime.getSpaceCell(space).withTx(tx);
+        const spaceCellWithTx = (hooks.spaceCell ?? runtime.getSpaceCell(space))
+          .withTx(tx);
         const defaultPatternCell = spaceCellWithTx.key("defaultPattern");
         const existingDefault = defaultPatternCell.get();
         if (existingDefault?.get()) {
