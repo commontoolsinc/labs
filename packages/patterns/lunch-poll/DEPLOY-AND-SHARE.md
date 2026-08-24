@@ -1,18 +1,17 @@
 # Deploying, updating & sharing lunch-poll state
 
-How to deploy the lunch poll, update it in place without losing data, share it,
-verify it actually worked, and recover it when it breaks. Written for someone
-(human or agent) operating the poll for the first time — read top to bottom
-once.
+How to deploy the lunch poll, apply ordinary compatible updates, migrate the
+name-keyed poll to profile-cell identity, share it, verify it actually worked,
+and recover it when it breaks. Written for someone (human or agent) operating
+the poll for the first time — read top to bottom once.
 
-> **Status (2026-08-20): live-deployable.** The CLI paths below were exercised
-> against `rapids`: a fresh `cf piece new`, a `setsrc` over a populated piece,
-> the smoke test, the state copy, and the reset handlers. The visit history and
-> its per-visit vote snapshots live in a plain **`PerSpace<HistoryEntry[]>`
-> array** (`visits`), each entry embedding its own vote snapshot. Joins are
-> profile-gated: an identity with no resolvable `#profile` CANNOT join, and the
-> gate answers loudly (`joinMessage`) rather than silently no-opping — the smoke
-> test below reads that verdict.
+> **Status (2026-08-24): fresh-piece migration required for profile identity.**
+> Ordinary compatible source updates still use `setsrc`, but this identity
+> change does not: `argument.visits[]` is an accepted contract break and the
+> compatibility gate refuses an in-place swap on the populated name-keyed piece.
+> Use Option B for this rollout. Joins are profile-gated: an identity with no
+> resolvable `#profile` CANNOT join, and the gate answers loudly (`joinMessage`)
+> rather than silently no-opping — the smoke test below reads that verdict.
 
 ## Where the data lives (mental model)
 
@@ -25,14 +24,15 @@ cells**, shared by everyone in the space: `question`, `options`, `votes`,
 `host`, and **`visits`** (the "Recently eaten" log + embedded vote snapshots
 that feed "Lunch stats").
 
-There is no per-user state: whether you have joined is derived by comparing your
-`#profile` against the roster, so the same identity is recognised on any device
-and nothing can go stale.
+There is no stored per-user joined flag: whether you have joined is derived by
+comparing your `#profile` against the roster, so the same identity is recognised
+on any device and nothing can go stale.
 
-All of these survive an in-place `setsrc` (Option A). All but `visits` copy to
-another piece with a plain read-and-write; `visits` needs one edit on the way
-across, because each entry holds a live link into the source piece's roster
-(Option B).
+All of these survive an in-place `setsrc` only when the old and new schemas are
+compatible (Option A). The profile-identity rollout is not compatible, so it
+moves the values into a fresh piece (Option B). When migrating the name-keyed
+piece, strip the visit log's legacy links into that source piece's roster; the
+display snapshots and tallies remain intact.
 
 ## The live pieces
 
@@ -173,11 +173,16 @@ day is set, and the notice quotes it. The piece-lifecycle commands keep the
 `cf piece` prefix: `new`, `setsrc`, `getsrc`, `step`, `inspect`, `render`, `ls`,
 `rm`, `verbs`, `recreate-root`.
 
-## Option A — update the existing piece in place (recommended)
+## Option A — ordinary compatible source updates
 
-To push code changes **and keep all accumulated state**, update the source of
-the existing piece. Do **not** run `cf piece new` — that mints a fresh, empty
-instance.
+**Do not use this option for the profile-cell identity rollout.** Its accepted
+`argument.visits[]` break is in the root argument contract, so `setsrc` refuses
+the populated predecessor. Use Option B even though the vintage replay proves
+that its stored rows remain readable.
+
+For an ordinary compatible change, update the source of the existing piece to
+**keep all accumulated state**. Do **not** run `cf piece new` for that case — it
+mints a fresh, empty instance.
 
 ```bash
 deno task cf piece setsrc --piece "$PIECE" -s "$SPACE" \
@@ -187,7 +192,7 @@ deno task cf piece setsrc --piece "$PIECE" -s "$SPACE" \
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
 ```
 
-**What survives (verified):** all the `PerSpace` cells
+**For a compatible update, what survives (verified):** all the `PerSpace` cells
 (`users`/`votes`/`options`/`visits`/…). Cell ids derive from the causal
 generation chain (not contents, scope excluded), so `setsrc` keeps the same
 result cell and its populated inputs. **Adding a new `PerSpace` field is safe**
@@ -208,10 +213,11 @@ which is the default: giving up an input leaves whatever the piece stored unread
 rather than breaking a reader. A closed argument object refuses it, since it
 could no longer hold the value the piece is carrying.
 
-`--dangerously-allow-incompatible-schema` replaces the source anyway. Adding
-fields is safe, but heavily **reordering or renaming** pattern inputs can shift
-the causal chain and orphan old data. Don't refactor the input interface
-casually against a piece you care about.
+`--dangerously-allow-incompatible-schema` replaces the source anyway. Do not use
+it to force this identity migration: the supported disposition is a fresh piece
+plus the explicit copy below. More generally, heavily **reordering or renaming**
+pattern inputs can shift the causal chain and orphan old data. Don't refactor
+the input interface casually against a piece you care about.
 
 > **Precondition:** `setsrc` loads the piece's _currently deployed_ source
 > before it compares schemas, so a piece whose deployed generation no longer
@@ -234,10 +240,10 @@ casually against a piece you care about.
 > so a caller reading only the tail of the output takes it for a clean deploy.
 > See "A piece that saved its source and will not start".
 
-## Option B — copy the state into your own piece
+## Option B — migrate the populated name-keyed poll to a fresh piece
 
-To get your **own** instance seeded with the current data (e.g. to experiment
-without touching the shared poll):
+Use this for the profile-cell identity rollout, or to get your **own** instance
+seeded with the current data without touching the shared poll:
 
 ```bash
 # 1. Create your own empty piece (note the new ID it prints).
@@ -257,13 +263,13 @@ for field in question users options votes; do
     | deno task cf set -s "$SPACE" "$ARG/$field" -q
 done
 
-# 4. Copy the visit log, dropping its roster links (see below).
+# 4. Copy the visit log, deleting the predecessor's roster links (see below).
 deno task cf get --piece "$PIECE" -s "$SPACE" visits --input -q \
   | deno eval '
       const v = JSON.parse(await new Response(Deno.stdin.readable).text());
       for (const e of v) {
-        e.loggedBy = null;
-        for (const s of e.votes ?? []) s.voterLink = null;
+        delete e.loggedBy;
+        for (const s of e.votes ?? []) delete s.voterLink;
       }
       console.log(JSON.stringify(v));
     ' \
@@ -283,24 +289,26 @@ deno task cf piece inspect --piece "$MINE" -s "$SPACE" --summary
 > argument document itself is not validated that way, which is what step 2
 > resolves and what the loop above uses.
 
-> **Why the host seat is left behind.** `host` points at a participant's profile
-> cell, so copying it carries a link into the SOURCE piece exactly as `visits`
-> does. Leave it empty and the first person to join the copy becomes host, or
-> copy the roster and use **Become host**.
+> **Why the host seat is left behind.** The name-keyed predecessor has no
+> profile-cell host identity worth carrying. Leave the new seat empty: the first
+> person to re-join with a profile becomes host. A later joined participant can
+> use **Become host**.
 
-> **Why `visits` needs the edit.** Each entry's `loggedBy`, and each embedded
-> vote's `voterLink`, is a live `Cell<User>` link into the **source** piece's
-> roster, and the destination cannot prove a contract for a link it did not
-> mint:
+> **Why the predecessor's `visits` needs the edit.** Each legacy entry's
+> `loggedBy`, and each embedded vote's `voterLink`, is a live `Cell<User>` link
+> into the **source** piece's roster. The destination cannot prove a contract
+> for a link it did not mint:
 >
 > ```
 > input link at visits.0.loggedBy schema is not compatible: source has no durable schema contract
 > ```
 >
-> Both fields are nullable and the names travel separately, in `loggedByName`
-> and `voter`, so nulling the links costs the "who logged this" navigation and
-> nothing else — the "Recently eaten" log and the "Lunch stats" tallies come
-> across intact.
+> The profile-first schema makes those identity fields optional, and the names
+> travel separately in `loggedByName` and `voter`, so deleting the legacy links
+> costs the "who logged this" navigation and nothing else — the "Recently eaten"
+> log and the "Lunch stats" tallies come across intact. For a later
+> profile-first-to-profile-first copy in the same space, the new links point at
+> shared profile cells rather than roster slots and can be copied as-is.
 
 This is a **one-time snapshot copy**, not a live link — the pieces diverge
 after.
@@ -447,16 +455,17 @@ for what it says when that fails.
 
 The piece answers `cf get`, but anything that starts it — `cf piece render`,
 `cf piece step`, `cf get --step` — refuses with a stored-argument complaint
-naming a field of a nested pattern:
+naming a field of a nested pattern. For example, a piece saved from the
+name-keyed predecessor can report:
 
 ```
 updated arguments do not match the candidate schema: myName: value does not match type string
 ```
 
-The named field belongs to a sub-pattern instance (`participant-identity-card`
-supplies both `myName` and the profile fields), whose stored argument document
-is missing that required key. There is no in-place repair: another `setsrc`
-saves the source and fails the refresh the same way, and a direct write to the
+That field belongs to the predecessor's stored `participant-identity-card`
+argument, not the current card contract. Its argument document no longer
+satisfies the saved source. There is no in-place repair: another `setsrc` saves
+the source and fails the refresh the same way, and a direct write to the
 sub-pattern's argument document is refused with
 `updated result write destination has no durable schema contract`. Move to a
 fresh piece, as below.
@@ -492,9 +501,9 @@ home space fails to load with
 **stored** root pattern is a stale compiled artifact. Fix: open the header menu
 → **Toggle debug mode** (🐛) → click the red **Recreate Root Pattern** button in
 the debugger drawer, then reload. (Console fallback:
-`localStorage.setItem("showDebuggerView","true")` then reload.) The poll's
-free-text join fallback lets you in even when your profile / home space won't
-load — you just don't get your profile name and avatar pre-filled.
+`localStorage.setItem("showDebuggerView","true")` then reload.) The poll's join
+card has no free-text bypass. Repair and reload the home space, then create or
+pick a shared profile before joining the poll.
 
 ## Performance notes
 
