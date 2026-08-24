@@ -2896,17 +2896,33 @@ describe("Phase 3 events-down (serving side)", () => {
         // below absorbs once; anything else fails loud, first time.
         {
           const durableAtProbe = w.entriesOf(w.sidecarOf(w.s2));
+          // The tag requires the window's WHOLE fingerprint, not the
+          // symptom alone (Cubic P1 on the retry PR): (a) the durable
+          // content is exactly the emitter's ping — nothing else ever
+          // qualifies; (b) the queue-seam arming provably ENGAGED
+          // (`holdArmed` — set synchronously with the sealed append,
+          // so a durable ping with holdArmed still false means the
+          // arming machinery itself broke: NOT the window, fails
+          // loud, first attempt). The residual — an intermittent
+          // gate-machinery regression producing exactly an
+          // armed-flush — is indistinguishable from the window at
+          // this seam BY THE AUDIT'S CONCLUSION (no admitting-path
+          // seam exists test-side), which is what the owner ruled
+          // on: it is absorbed AT MOST ONCE, logged and countable,
+          // and a deterministic regression with this signature still
+          // reds the step on the second attempt.
           if (
             durableAtProbe.length > 0 &&
+            holdArmed &&
             durableAtProbe.every((entry) =>
               (entry.payload as { tag?: string } | undefined)?.tag === "ping"
             )
           ) {
             throw new A3StructuralWindow(
               `the held-wave probe found the emitter's ping durable ` +
-                `(${durableAtProbe.length} entry/entries) — the ` +
-                `committing-tail window admitted the wave past the ` +
-                `armed settle gate`,
+                `(${durableAtProbe.length} entry/entries) with the hold ` +
+                `armed — the committing-tail window admitted the wave ` +
+                `past the armed settle gate`,
             );
           }
           expect(durableAtProbe).toEqual([]);
@@ -2960,16 +2976,20 @@ describe("Phase 3 events-down (serving side)", () => {
       expect(seen).toEqual(["rival"]);
       expect(w.engineN(sideServing)).toBe(0);
       expect(stats.events.orphanDeliveriesRefused).toBe(1);
+      // Scoped to THIS attempt's stream (Cubic P3 on the retry PR): the
+      // retry reuses the per-step server/space, so a global scan would
+      // read an absorbed attempt-1 tenure's leftovers beside this
+      // construction's — an eventId embeds its stream doc id, and each
+      // attempt's stream is prefix-fresh, so the filter is exact.
+      const s2Id = w.s2.getAsNormalizedFullLink().id;
       const consequenced = (w.engine.database.prepare(
         `SELECT consequence_of FROM "commit"
          WHERE class = 'derived' AND consequence_of IS NOT NULL`,
       ).all() as Array<{ consequence_of: string }>).flatMap((row) =>
         decodeMemoryBoundary(row.consequence_of) as unknown as string[]
-      );
+      ).filter((id) => id.includes(s2Id));
       const durableIds = new Set(
-        sidecarIdsIn(w.engine).flatMap((id) =>
-          w.entriesOf(id).map((entry) => entry.eventId)
-        ),
+        w.entriesOf(w.sidecarOf(w.s2)).map((entry) => entry.eventId),
       );
       expect(consequenced.length).toBeGreaterThanOrEqual(1);
       for (const id of consequenced) expect(durableIds.has(id)).toBe(true);
