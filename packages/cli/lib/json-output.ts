@@ -83,7 +83,8 @@ export function reservesStdoutForCommandOutput(
   if (args[0] === "get" || args[0] === "call") return true;
   const subcommand = pieceSubcommand(args);
   return subcommand === "get" || subcommand === "get-label" ||
-    subcommand === "set-label" || subcommand === "call";
+    subcommand === "set-label" || subcommand === "call" ||
+    subcommand === "survey";
 }
 
 export const stderrConsoleHandler: ConsoleHandler = ({ method, args }) => ({
