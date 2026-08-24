@@ -367,6 +367,46 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     }
   });
 
+  it("activation before the genesis ACL: the fail-closed skip RE-ARMS on the ACL commit and the ensure runs in the SAME tenure", async () => {
+    // The measured live boot order (stage-1 measurement r01): the host
+    // activates on SESSION-OPEN, before the client's genesis ACL commit
+    // (which is the space's commit #1 — INV-13) has landed, so the
+    // tenure's first ensure finds no owner and skips fail-closed. The
+    // owner then RESOLVES seconds later; waiting for the next tenure
+    // would leave every fresh space's stage-1 ensure inert. The seat
+    // re-arms the owed step when an admitted commit touches the ACL
+    // doc (`of:<space>`) — same tenure, same fail-closed posture, still
+    // never the service DID.
+    const created = newSpaceServer();
+    expect(await created.activate()).toBe(true);
+    await waitUntil(
+      () => stats.rootEnsure.skippedNoOwner === 1,
+      "fail-closed skip before the genesis",
+    );
+    expect(stats.rootEnsure.runs).toBe(0);
+
+    // The genesis lands (the client's bootstrap), and the host's feed
+    // delivers its admission notice — modelled directly here (the
+    // host→feed plumbing is pre-existing and pinned elsewhere).
+    await seedAcl({ [space]: "OWNER" });
+    created.enqueueCommit({
+      space,
+      seq: Engine.serverSeq(engine),
+      class: "authored",
+      sessionId: "test-genesis",
+      writes: [{ id: `of:${space}`, scopeKey: "space" as never }],
+    });
+
+    await waitUntil(
+      () => stats.rootEnsure.runs === 1,
+      "the re-armed ensure ran",
+    );
+    expect(stats.rootEnsure.created).toBe(1);
+    const reader = clientRuntime(readerSigner);
+    const root = await resolveRootEventually(reader);
+    expect(getPatternSource(root)).toBe(HOME_PATTERN_SOURCE);
+  });
+
   it("a space with no resolvable ACL owner SKIPS fail-closed: counted, no root, tenure alive", async () => {
     // No ACL seeded at all — resolveSpaceOwner yields undefined.
     const created = newSpaceServer();

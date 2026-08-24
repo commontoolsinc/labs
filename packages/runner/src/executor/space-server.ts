@@ -611,6 +611,20 @@ export class SpaceServer implements TransactionSealDestination {
    * creation transaction's OCC re-read plus the cause-derived root
    * address converge every race on one root. */
   #rootEnsureOwed = false;
+  /** The fail-closed skip's SAME-TENURE retry arm (stage-1 measurement
+   * r01's boot-order finding): the host activates on SESSION-OPEN,
+   * which precedes the client bootstrap's genesis ACL commit (the
+   * space's commit #1 — INV-13), so a fresh space's first ensure finds
+   * no owner and skips. Waiting for the next tenure would leave every
+   * fresh space's ensure inert at the live topology. Set by the
+   * no-owner skip; an admitted commit touching the ACL doc
+   * (`of:<space>`) consumes it and re-arms the owed ensure — the
+   * identity posture is unchanged (owner-resolved, fail-closed, never
+   * the service DID), only the retry cadence moves from next-tenure to
+   * owner-became-resolvable. Bounded: one re-arm per ACL-doc-touching
+   * admission, and the ensure re-sets it only from another no-owner
+   * skip. */
+  #rootEnsureAwaitingOwner = false;
   /** Phase 4 (protocol.md §5): an effects-doc-touching authored commit
    * (an ack) — or activation (a crash between ack and retirement must
    * still retire) — owes the next wave the acked-entry retirement scan.
@@ -1071,6 +1085,17 @@ export class SpaceServer implements TransactionSealDestination {
    * this space, own derived commits included (skipped by class + holder
    * below — serving-loop.md §3's self-echo rule). */
   enqueueCommit(record: AdmittedCommitNotice): void {
+    // The no-owner skip's re-arm (see #rootEnsureAwaitingOwner): the
+    // genesis ACL just landed — the owner is now resolvable, so the
+    // tenure re-owes its ensure. Checked on the raw doc id: the ACL
+    // document IS `of:<space>` (the memory server's aclDocId).
+    if (
+      this.#rootEnsureAwaitingOwner &&
+      record.writes.some((write) => write.id === `of:${this.#options.space}`)
+    ) {
+      this.#rootEnsureAwaitingOwner = false;
+      this.#rootEnsureOwed = true;
+    }
     if (record.warm === true) {
       // The warm request's demand half (see #warmDemandKeys): captured
       // for every warm notice — pre-activation pendings, the
@@ -3428,19 +3453,23 @@ export class SpaceServer implements TransactionSealDestination {
   async #ensureSpaceRoot(runtime: Runtime): Promise<void> {
     const { engine, space, server } = this.#options;
     const stats = this.#options.stats.rootEnsure;
-    const owner = server.resolveSpaceOwner(engine, space);
-    if (owner === undefined) {
-      stats.skippedNoOwner += 1;
-      logger.warn("space-root-ensure-no-owner", () => [
-        `space ${space}: no concrete ACL owner resolves; the root ` +
-        "ensure is SKIPPED fail-closed for this tenure (never the " +
-        "service DID — OW53's shape). Under OW31(b) genesis precedes " +
-        "data for every served space, so an ACTIVE space landing here " +
-        "is an anomaly worth this warning.",
-      ]);
-      return;
-    }
     try {
+      // Inside the try like everything else the ensure does: the loop
+      // must never park over the ensure — a thrown ACL read is a
+      // counted failure, not a tenure-ending one.
+      const owner = server.resolveSpaceOwner(engine, space);
+      if (owner === undefined) {
+        stats.skippedNoOwner += 1;
+        this.#rootEnsureAwaitingOwner = true;
+        logger.warn("space-root-ensure-no-owner", () => [
+          `space ${space}: no concrete ACL owner resolves; the root ` +
+          "ensure is SKIPPED fail-closed for this tenure (never the " +
+          "service DID — OW53's shape). Under OW31(b) genesis precedes " +
+          "data for every served space, so an ACTIVE space landing " +
+          "here is an anomaly worth this warning.",
+        ]);
+        return;
+      }
       const result = await ensureSpaceRootPattern(runtime, space, {
         // The ACL-derived home predicate (self-owned = home): the
         // client's `space === runtime.userIdentityDID` is WRONG here —
