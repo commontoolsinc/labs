@@ -115,3 +115,408 @@ port_free=yes
 orphan_headless=none
 store_commits: total=61 authored=11 derived=50 system=0 per-space: did:key:z6MkhXVojALkxoReYwWTVxpT9RqA3xMteQd1Uj8KpmdGtfNd.sqlite:1/3/0 did:key:z6MkuQHQWTfUVTSsJ6rEAcaRSP8R8NoWyixGF7ud8YGr8ZFF.sqlite:10/47/0
 
+== t1-off
+start_utc=2026-08-24T18:46:39Z workload=test arm=off port=9871 series_n=20
+load_before={ 4.66 6.50 7.03 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-off sha256=849204a9f6e1f5ef repo=/Users/berni/labs-worktrees/topics-benchmark head=324c01fe7298
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=17161
+  posture: gitSha=97f0745e5979 define=None servingLoop_pre=False
+test_rc=0 test_wall_s=32 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 6.33 6.67 7.07 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=79 authored=79 derived=0 system=0 per-space: did:key:z6MkhhNgSc99nFvqxjELcURkwNLurtP1MLgQoayCr7w4VZKK.sqlite:2/0/0 did:key:z6MkvwbQPqwZt8ocUapndvDGtzCw6eUMph5u5HGDYgeYjYci.sqlite:77/0/0
+
+== t1-on
+start_utc=2026-08-24T18:47:19Z workload=test arm=on port=9872 series_n=20
+load_before={ 6.33 6.67 7.07 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-on sha256=3da66132e4cc6173 repo=/Users/berni/labs-worktrees/topics-benchmark head=324c01fe7298
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=18113
+  posture: gitSha=97f0745e5979 define=true servingLoop_pre=True
+test_rc=0 test_wall_s=24 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 7.54 6.93 7.15 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=40 authored=7 derived=33 system=0 per-space: did:key:z6MkjbyNdjMFDprYhfXunYSwrJeS4x56Znav4QPksrs3MjcK.sqlite:6/30/0 did:key:z6Mkm7vhS8WEnYuFyvDwrCfHGcYXGHKyw6YLCsyskbXYQ6tR.sqlite:1/3/0
+
+== t2-on
+start_utc=2026-08-24T18:49:52Z workload=test arm=on port=9872 series_n=20
+load_before={ 4.11 5.94 6.73 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-on sha256=3da66132e4cc6173 repo=/Users/berni/labs-worktrees/topics-benchmark head=324c01fe7298
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=26149
+  posture: gitSha=97f0745e5979 define=true servingLoop_pre=True
+test_rc=0 test_wall_s=12 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 4.20 5.85 6.68 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=39 authored=8 derived=31 system=0 per-space: did:key:z6MkuCus15g9kWLzQMjjQZebHkRZqWHNsGRn3GesZEkXLx3x.sqlite:7/28/0 did:key:z6MkvJ81ANhAkGb1VJYbyhWnLawNTs9rVc5i25yKf8f9PWdb.sqlite:1/3/0
+
+== t2-off
+start_utc=2026-08-24T18:50:08Z workload=test arm=off port=9871 series_n=20
+load_before={ 4.20 5.85 6.68 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-off sha256=849204a9f6e1f5ef repo=/Users/berni/labs-worktrees/topics-benchmark head=324c01fe7298
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=26568
+  posture: gitSha=97f0745e5979 define=None servingLoop_pre=False
+test_rc=0 test_wall_s=8 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 4.19 5.79 6.65 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=77 authored=77 derived=0 system=0 per-space: did:key:z6MkhxXWbAayDpMSX5NdCkaqCr2xrSrFX2egyXTZgHDm6ZNy.sqlite:2/0/0 did:key:z6MkuCJsP8yL8AEFD3JS9rn8tsjLqM4wx3HTSr8A5jRGMtXg.sqlite:75/0/0
+
+== t3-off
+start_utc=2026-08-24T18:50:19Z workload=test arm=off port=9871 series_n=20
+load_before={ 4.19 5.79 6.65 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-off sha256=849204a9f6e1f5ef repo=/Users/berni/labs-worktrees/topics-benchmark head=324c01fe7298
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=26929
+  posture: gitSha=97f0745e5979 define=None servingLoop_pre=False
+test_rc=0 test_wall_s=8 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 4.46 5.79 6.64 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=79 authored=79 derived=0 system=0 per-space: did:key:z6Mkh5rsDWFP8t4C3qb9uE4Deijkz6cu3vF8fkDpwiUidLiV.sqlite:2/0/0 did:key:z6MkjL1VKYMyJbV2aBkUMLwsjjiwekAsXG7YRfWYGxnJ5jLY.sqlite:77/0/0
+
+== t3-on
+start_utc=2026-08-24T18:50:29Z workload=test arm=on port=9872 series_n=20
+load_before={ 4.46 5.79 6.64 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-on sha256=3da66132e4cc6173 repo=/Users/berni/labs-worktrees/topics-benchmark head=324c01fe7298
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=27261
+  posture: gitSha=97f0745e5979 define=true servingLoop_pre=True
+test_rc=0 test_wall_s=12 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 4.67 5.77 6.62 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=37 authored=7 derived=30 system=0 per-space: did:key:z6MkkPrM92Am1rHGrJmtwMtoeQNjWgCmwbKW3ARkMu7qnbdb.sqlite:1/3/0 did:key:z6MkuzAgV1ycCwTEwAGHX5vD7Uq6hzMPVQbHarJuvMTomQvC.sqlite:6/27/0
+
+== t4-on
+start_utc=2026-08-24T18:50:44Z workload=test arm=on port=9872 series_n=20
+load_before={ 4.67 5.77 6.62 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-on sha256=3da66132e4cc6173 repo=/Users/berni/labs-worktrees/topics-benchmark head=324c01fe7298
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=27719
+  posture: gitSha=97f0745e5979 define=true servingLoop_pre=True
+test_rc=0 test_wall_s=11 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 4.91 5.77 6.60 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=36 authored=7 derived=29 system=0 per-space: did:key:z6MkgYPn2qR4Fg4HyjUsVG3pQgWqXF5gecAKWq2T11W9PL9k.sqlite:6/26/0 did:key:z6MkosVpZwiRKXjtXPt2pEEaQYTCoWt9eFiGDwdx5K9CvXnG.sqlite:1/3/0
+
+== t4-off
+start_utc=2026-08-24T18:51:00Z workload=test arm=off port=9871 series_n=20
+load_before={ 4.91 5.77 6.60 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-off sha256=849204a9f6e1f5ef repo=/Users/berni/labs-worktrees/topics-benchmark head=324c01fe7298
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=28124
+  posture: gitSha=97f0745e5979 define=None servingLoop_pre=False
+test_rc=0 test_wall_s=11 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 5.31 5.81 6.60 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=79 authored=79 derived=0 system=0 per-space: did:key:z6Mkf7XueiXGJMTmVvmpN5ftW7KCaUvb7WCE8XJB5H493iYR.sqlite:77/0/0 did:key:z6MkgigaY92qMLkPVm7PXgo2VYzp34JdcGpCRgrvko7JEeUo.sqlite:2/0/0
+
+== t5-off
+start_utc=2026-08-24T18:55:15Z workload=test arm=off port=9871 series_n=20
+load_before={ 4.98 5.65 6.35 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-off sha256=849204a9f6e1f5ef repo=/Users/berni/labs-worktrees/topics-benchmark head=38afecde2a78
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=38660
+  posture: gitSha=97f0745e5979 define=None servingLoop_pre=False
+NOTE 2026-08-24 ~19:20Z: gate threshold raised 5 -> 6 via gate-threshold file
+(ambient 1-min load today 5.5-6 = the resident daemon pair; the dossier-era
+gate of 5 only burns its 20-min timeout then proceeds at the same load).
+CORRECTION: the t5 gate cleared NATURALLY at 4.98 before any short-circuit
+landed (no process was killed); the override therefore applies from the t6
+gate onward. Loads per run remain in this ledger + per-run load-samples.txt.
+test_rc=0 test_wall_s=11 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 5.50 5.73 6.36 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=79 authored=79 derived=0 system=0 per-space: did:key:z6MkkG4Z3LVXD4F5MQuJTFihzYxJdUpEbpisLUmLcqh1haEa.sqlite:2/0/0 did:key:z6Mktu69LyhHMaTXrXwExGPnye6aE7SxRjFjwgbMqaLiY1ge.sqlite:77/0/0
+
+== t5-on
+start_utc=2026-08-24T18:55:32Z workload=test arm=on port=9872 series_n=20
+load_before={ 5.50 5.73 6.36 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-on sha256=3da66132e4cc6173 repo=/Users/berni/labs-worktrees/topics-benchmark head=38afecde2a78
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=39127
+  posture: gitSha=97f0745e5979 define=true servingLoop_pre=True
+test_rc=0 test_wall_s=21 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 6.46 5.92 6.41 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=38 authored=8 derived=30 system=0 per-space: did:key:z6MkfrnWLNKBbenZFEfMx6G5Evs8CMRcK4eSJXt181bBww9Q.sqlite:7/27/0 did:key:z6MkkkcKwAhJdrqSyb1vPDvMnP3b1TLhZQsiiHdN2nMN32Xd.sqlite:1/3/0
+
+== t6-on
+start_utc=2026-08-24T18:56:58Z workload=test arm=on port=9872 series_n=20
+load_before={ 3.85 5.27 6.13 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-on sha256=3da66132e4cc6173 repo=/Users/berni/labs-worktrees/topics-benchmark head=38afecde2a78
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=41218
+  posture: gitSha=97f0745e5979 define=true servingLoop_pre=True
+test_rc=0 test_wall_s=12 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 4.18 5.29 6.13 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=36 authored=7 derived=29 system=0 per-space: did:key:z6MkgmzdKRUbkszTsQYTSRGZJyeLjuq5voYAAdWk7ab892Qo.sqlite:1/3/0 did:key:z6Mkt2JKtvFBXkqvDAv5C6JEtEbe4ipP9iZSNCqAZkWDLPMY.sqlite:6/26/0
+
+== t6-off
+start_utc=2026-08-24T18:57:13Z workload=test arm=off port=9871 series_n=20
+load_before={ 4.24 5.28 6.12 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-off sha256=849204a9f6e1f5ef repo=/Users/berni/labs-worktrees/topics-benchmark head=38afecde2a78
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=41855
+  posture: gitSha=97f0745e5979 define=None servingLoop_pre=False
+test_rc=0 test_wall_s=8 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 4.05 5.21 6.08 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=77 authored=77 derived=0 system=0 per-space: did:key:z6MkoshuQDQPtJXs1pKvPb19Ni5iwS1nhMQrdFA3fWgVGXj5.sqlite:2/0/0 did:key:z6Mkpoq4ubK3gfnueaiuqxRf6qLPUR8fgbEjBimcjLxNjPZC.sqlite:75/0/0
+
+== j1-off
+start_utc=2026-08-24T18:57:25Z workload=journey arm=off port=9871 series_n=20
+load_before={ 4.05 5.21 6.08 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-off sha256=849204a9f6e1f5ef repo=/Users/berni/labs-worktrees/topics-benchmark head=38afecde2a78
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=42258
+  posture: gitSha=97f0745e5979 define=None servingLoop_pre=False
+test_rc=0 test_wall_s=65 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 4.20 5.06 5.96 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=557 authored=557 derived=0 system=0 per-space: did:key:z6MkjRvxjPHZAJiDedukNQGfaZzTAJ61Rt49uRGFiErzamZt.sqlite:555/0/0 did:key:z6MktdRL2vpuuBjvAdjBnRHuFWtApghAqnJQGLXP1pWjW9KU.sqlite:2/0/0
+
+== j1-on
+start_utc=2026-08-24T18:58:32Z workload=journey arm=on port=9872 series_n=20
+load_before={ 4.20 5.06 5.96 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-on sha256=3da66132e4cc6173 repo=/Users/berni/labs-worktrees/topics-benchmark head=38afecde2a78
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=48738
+  posture: gitSha=97f0745e5979 define=true servingLoop_pre=True
+test_rc=0 test_wall_s=82 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 12.39 6.66 6.44 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=208 authored=27 derived=181 system=0 per-space: did:key:z6Mkm7NrYtjeKej8fScxkDEkFi1m5K1JuSfbiq8a8AkMrJJZ.sqlite:26/178/0 did:key:z6MksFyZrLXCohaammDX6JsJaYnQbFQgq9HfXi5deETCk8Vs.sqlite:1/3/0
+
+== j2-on
+start_utc=2026-08-24T19:04:58Z workload=journey arm=on port=9872 series_n=20
+load_before={ 5.43 7.62 7.07 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-on sha256=3da66132e4cc6173 repo=/Users/berni/labs-worktrees/topics-benchmark head=38afecde2a78
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=62182
+  posture: gitSha=97f0745e5979 define=true servingLoop_pre=True
+test_rc=0 test_wall_s=99 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 6.84 7.43 7.05 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=239 authored=28 derived=211 system=0 per-space: did:key:z6MkgKzpiEKpMxDyZm9chRKuMusYmey3Tsi6ohrBSrDN7d6Y.sqlite:1/3/0 did:key:z6MkkRFKV82ZXr63bFK3KxMfiH4QnuT4EaSiJejbxFQrhNtg.sqlite:27/208/0
+
+== j2-off
+start_utc=2026-08-24T19:06:41Z workload=journey arm=off port=9871 series_n=20
+load_before={ 6.84 7.43 7.05 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-off sha256=849204a9f6e1f5ef repo=/Users/berni/labs-worktrees/topics-benchmark head=38afecde2a78
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=64532
+  posture: gitSha=97f0745e5979 define=None servingLoop_pre=False
+test_rc=0 test_wall_s=79 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 7.02 7.36 7.06 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=559 authored=559 derived=0 system=0 per-space: did:key:z6MkfYFskezY19XAAvVC5vfHgSSZi8psVNeuse4k4rX1JuV6.sqlite:557/0/0 did:key:z6MkkAUuLJtxjm26jskCL2Gr4zN7Fh5mDBMvkCu9wKdd3puu.sqlite:2/0/0
+
+== j3-off
+start_utc=2026-08-24T19:09:08Z workload=journey arm=off port=9871 series_n=20
+load_before={ 5.69 6.94 6.92 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-off sha256=849204a9f6e1f5ef repo=/Users/berni/labs-worktrees/topics-benchmark head=38afecde2a78
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=72579
+  posture: gitSha=97f0745e5979 define=None servingLoop_pre=False
+test_rc=0 test_wall_s=67 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 4.99 6.49 6.75 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=558 authored=558 derived=0 system=0 per-space: did:key:z6MkuDQ29S72zEmrkSi2ns6fix7vRrqDzYg94RKSuguxtKEW.sqlite:556/0/0 did:key:z6MkuGBBjDdB6JtbW7GvXqF7C3HL3sik1tEtv8CbFwzG9Nsx.sqlite:2/0/0
+
+== j3-on
+start_utc=2026-08-24T19:10:18Z workload=journey arm=on port=9872 series_n=20
+load_before={ 4.99 6.49 6.75 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-on sha256=3da66132e4cc6173 repo=/Users/berni/labs-worktrees/topics-benchmark head=38afecde2a78
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=74371
+  posture: gitSha=97f0745e5979 define=true servingLoop_pre=True
+test_rc=0 test_wall_s=83 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 4.44 5.93 6.51 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=212 authored=28 derived=184 system=0 per-space: did:key:z6Mkj567N6yeZfdEuH5yeahZfPLeL5FF7h1pnbyZYAt5meKf.sqlite:27/181/0 did:key:z6Mkoy7M7jzFrxWrWdserP9JQdd8LuTWKCEGz4ENLtwDHJdw.sqlite:1/3/0
+
+== j4-on
+start_utc=2026-08-24T19:11:44Z workload=journey arm=on port=9872 series_n=20
+load_before={ 4.44 5.93 6.51 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-on sha256=3da66132e4cc6173 repo=/Users/berni/labs-worktrees/topics-benchmark head=38afecde2a78
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=76372
+  posture: gitSha=97f0745e5979 define=true servingLoop_pre=True
+test_rc=0 test_wall_s=86 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 6.43 6.16 6.53 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=213 authored=28 derived=185 system=0 per-space: did:key:z6Mki4kyALiV5jwW9oJqNodxiTXqAgdEtUomvWoLB3h527Hm.sqlite:27/182/0 did:key:z6MkqfbAbzJF3w54qfFxS4rgXgV861FSWsZsrhkxaRS2Aj7c.sqlite:1/3/0
+
+== j4-off
+start_utc=2026-08-24T19:13:13Z workload=journey arm=off port=9871 series_n=20
+load_before={ 6.43 6.16 6.53 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-off sha256=849204a9f6e1f5ef repo=/Users/berni/labs-worktrees/topics-benchmark head=38afecde2a78
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=78343
+  posture: gitSha=97f0745e5979 define=None servingLoop_pre=False
+test_rc=0 test_wall_s=71 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 5.83 6.22 6.54 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=559 authored=559 derived=0 system=0 per-space: did:key:z6MkeW5k8JzAfzNmq9sLiFJr2Uv82zdVvSEjPdw9n21ndg59.sqlite:2/0/0 did:key:z6MkrP2HaTBtxvFUtncEmppjHZCCCqf7EmLeS4NNM5PaGNfW.sqlite:557/0/0
+
+== j5-off
+start_utc=2026-08-24T19:14:27Z workload=journey arm=off port=9871 series_n=20
+load_before={ 5.83 6.22 6.54 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-off sha256=849204a9f6e1f5ef repo=/Users/berni/labs-worktrees/topics-benchmark head=38afecde2a78
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=85150
+  posture: gitSha=97f0745e5979 define=None servingLoop_pre=False
+test_rc=0 test_wall_s=72 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 6.50 6.35 6.56 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=557 authored=557 derived=0 system=0 per-space: did:key:z6MkgwGECmYxso6p8DwvHDEXEiwij35MgDHqab4qAh9zaCCF.sqlite:555/0/0 did:key:z6MkoNuyM2U7peFuRuE4gMAR8tLjEbxTW47K2ruTkTvyFG5D.sqlite:2/0/0
+
+== j5-on
+start_utc=2026-08-24T19:15:43Z workload=journey arm=on port=9872 series_n=20
+load_before={ 6.78 6.41 6.58 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-on sha256=3da66132e4cc6173 repo=/Users/berni/labs-worktrees/topics-benchmark head=38afecde2a78
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=87054
+  posture: gitSha=97f0745e5979 define=true servingLoop_pre=True
+test_rc=0 test_wall_s=106 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 11.01 8.77 7.53 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=240 authored=27 derived=213 system=0 per-space: did:key:z6MknasLWK27E4zkkRTd4kgfVUJBaovj3cbPpBg5X6fE2xCi.sqlite:1/3/0 did:key:z6MkqovK8D7fDWwX5yn4GkbpoTaQhMpFQJ2HtT5wxo6AcVbm.sqlite:26/210/0
+
+== j6-on
+start_utc=2026-08-24T19:24:37Z workload=journey arm=on port=9872 series_n=20
+load_before={ 4.71 8.89 8.49 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-on sha256=3da66132e4cc6173 repo=/Users/berni/labs-worktrees/topics-benchmark head=38afecde2a78
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=9618
+  posture: gitSha=97f0745e5979 define=true servingLoop_pre=True
+test_rc=0 test_wall_s=103 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 9.24 8.96 8.54 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=241 authored=28 derived=213 system=0 per-space: did:key:z6MkfK6h476GxkoomVH7zpMGgMQncnHqu17PTipD6ZQmdLqQ.sqlite:1/3/0 did:key:z6MkgGj7wNU1JAfRbmPAUw7rxEajaLufYNgtRkxGQTP77Efm.sqlite:27/210/0
+
+== j6-off
+start_utc=2026-08-24T19:26:24Z workload=journey arm=off port=9871 series_n=20
+load_before={ 9.24 8.96 8.54 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-off sha256=849204a9f6e1f5ef repo=/Users/berni/labs-worktrees/topics-benchmark head=38afecde2a78
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=12171
+  posture: gitSha=97f0745e5979 define=None servingLoop_pre=False
+test_rc=0 test_wall_s=89 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 8.91 9.02 8.61 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=559 authored=559 derived=0 system=0 per-space: did:key:z6MkvpoykfDGcR2RmdkPryMtRAVtHHdGhi7Zkb1822dUHNfn.sqlite:2/0/0 did:key:z6Mkw96QUMNmx1aooFrA6uJbXdfE12bqgymaNan5i5JZESTX.sqlite:557/0/0
+
+== j7-off
+start_utc=2026-08-24T20:31:06Z workload=journey arm=off port=9871 series_n=20
+load_before={ 4.26 3.95 5.46 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-off sha256=849204a9f6e1f5ef repo=/Users/berni/labs-worktrees/topics-benchmark head=38afecde2a78
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=66592
+  posture: gitSha=97f0745e5979 define=None servingLoop_pre=False
+NOTE 2026-08-24 ~20:20Z: between j6 and j7 a sibling seat's loaded-mode gate
+campaign (six deliberate CPU spinners + deno test, its own scratchpad) drove
+1-min load 10->161; my j7 gate held correctly through it (never admitted j7);
+the harness then stopped the background task carrying the sequence at poll
+18/20. State at death verified clean: no toolshed on 9871/9872, no j7 run dir,
+j1-j6 + t1-t6 complete. Sequence RESUMED as resume-j7-j10.sh at ambient load
+~3.6 after the sibling finished. No sibling process was touched (PID-only
+discipline; nothing of theirs was killed).

@@ -1,0 +1,35 @@
+[0m[38;5;245mrunning 1 test from ./integration/topics-journey-bench.scratch.test.ts[0m
+Topics journey benchmark (scratch instrument) ...
+[0m[38;5;245m------- output -------[0m
+Experimental flag overrides: serverExecution=false
+[0m[38;5;245m----- output end -----[0m
+  measures the topics journey ON-vs-OFF stimuli ...
+[0m[38;5;245m------- output -------[0m
+[WARN][traverse::19:15:13.942] slow-traverse 165ms doc=of:fid1:HajF32jglqGgPuGMrbRxEfqkI84u6iB_vjy7COExgQc/undefined trackerKeys=433 trackerVals=1227 traverseSchema=3453 traversePtr=773 traverseArr=201 traverseObj=442 traverseDAG=0 anyOfBranches=4850 anyOfFastRejects=3466 anyOfPropertyMerges=0 getDocAtPath=1504 dagMemo=0 uniqueDocs=0 uniquePaths=0 maxDepth=33 schemaMemo=3273 schemaMemoHits=180 topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)
+[0m[1m[33m'Topics journey benchmark (scratch instrument)' has been running for over [0m[38;5;245m(1m0s)[0m[0m
+
+[topics-journey] arm=OFF seed echo ms: 410 343
+[topics-series] arm=OFF n=20 delay=2000ms load1/5/15=6.50/6.35/6.56
+[topics-series] echo    median=739ms q1=616ms q3=908ms p95=2147ms min=386ms max=2147ms
+[topics-series] arrival median=1051ms q1=764ms q3=1312ms p95=3010ms min=424ms max=3010ms
+[topics-series] gap     median=276ms q1=103ms q3=450ms p95=862ms min=37ms max=862ms
+[topics-series] per-event echo ms: 573 433 734 563 616 634 689 815 781 386 528 862 908 739 810 718 1140 969 1252 2147
+[topics-series] per-event arrival ms: 676 577 779 600 655 909 954 1167 1051 424 764 1312 1292 1099 887 1116 1755 1540 2034 3010
+[topics-series] per-event gap ms: 103 144 44 37 40 276 265 352 270 38 236 450 383 361 77 398 616 571 782 862
+
+[topics-journey OFF] step timings (total 4905ms):
+      2406ms  board create + start (controller)
+       410ms  addTopic seed 1 echo (controller)
+       343ms  addTopic seed 2 echo (controller)
+        37ms  fid capture (result.pull + resolveAsCell x2)
+       856ms  browser cold load: goto + login
+        14ms  browser runtime idle
+       786ms  browser renders both seed titles
+        50ms  navigate-to-topic: click Open -> piece view
+         3ms  post-navigation runtime idle
+[0m[38;5;245m----- output end -----[0m
+  measures the topics journey ON-vs-OFF stimuli ... [0m[32mok[0m [0m[38;5;245m(1m7s)[0m
+Topics journey benchmark (scratch instrument) ... [0m[32mok[0m [0m[38;5;245m(1m11s)[0m
+
+[0m[32mok[0m | 1 passed (1 step) | 0 failed [0m[38;5;245m(1m11s)[0m
+

@@ -1,0 +1,37 @@
+[0m[38;5;245mrunning 1 test from ./integration/topics-journey-bench.scratch.test.ts[0m
+Topics journey benchmark (scratch instrument) ...
+[0m[38;5;245m------- output -------[0m
+Experimental flag overrides: serverExecution=true
+[0m[38;5;245m----- output end -----[0m
+  measures the topics journey ON-vs-OFF stimuli ...
+[0m[38;5;245m------- output -------[0m
+[ERROR][runner::18:58:46.173] pattern-load-error Failed to load pattern keyless:fid1:2t2Xa3L_XM592WOBOrFYXNojhDv4G9ZUij9DJzMZ7rk#default
+[WARN][traverse::18:59:26.186] slow-traverse 219ms doc=of:fid1:uZt5khol09reHr5KY9ayab0WfOP9luo2Cpi1PpCjVSI/undefined trackerKeys=440 trackerVals=1243 traverseSchema=3590 traversePtr=791 traverseArr=207 traverseObj=461 traverseDAG=0 anyOfBranches=5115 anyOfFastRejects=3657 anyOfPropertyMerges=0 getDocAtPath=1542 dagMemo=0 uniqueDocs=0 uniquePaths=0 maxDepth=33 schemaMemo=3402 schemaMemoHits=188 topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)
+[0m[1m[33m'Topics journey benchmark (scratch instrument)' has been running for over [0m[38;5;245m(1m0s)[0m[0m
+[WARN][traverse::18:59:36.315] slow-traverse 160ms doc=of:fid1:uZt5khol09reHr5KY9ayab0WfOP9luo2Cpi1PpCjVSI/undefined trackerKeys=507 trackerVals=1450 traverseSchema=4069 traversePtr=920 traverseArr=237 traverseObj=518 traverseDAG=0 anyOfBranches=5693 anyOfFastRejects=4066 anyOfPropertyMerges=0 getDocAtPath=1785 dagMemo=0 uniqueDocs=0 uniquePaths=0 maxDepth=33 schemaMemo=3858 schemaMemoHits=211 topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)
+
+[topics-journey] arm=ON seed echo ms: 1680 362
+[topics-series] arm=ON n=20 delay=2000ms load1/5/15=12.39/6.66/6.44
+[topics-series] echo    median=1253ms q1=814ms q3=1957ms p95=2448ms min=703ms max=2448ms
+[topics-series] arrival median=1302ms q1=850ms q3=2046ms p95=2529ms min=741ms max=2529ms
+[topics-series] gap     median=50ms q1=39ms q3=81ms p95=95ms min=19ms max=95ms
+[topics-series] per-event echo ms: 740 783 755 862 703 707 814 926 1142 2448 1404 1191 1631 1253 1404 1957 1894 2134 2052 2334
+[topics-series] per-event arrival ms: 759 813 796 901 741 743 850 976 1191 2529 1464 1236 1698 1302 1464 2046 1974 2221 2139 2429
+[topics-series] per-event gap ms: 19 30 41 39 38 36 36 50 49 81 60 45 68 49 60 89 80 87 87 95
+
+[topics-journey ON] step timings (total 5988ms):
+      2028ms  board create + start (controller)
+      1680ms  addTopic seed 1 echo (controller)
+       362ms  addTopic seed 2 echo (controller)
+        40ms  fid capture (result.pull + resolveAsCell x2)
+       763ms  browser cold load: goto + login
+         4ms  browser runtime idle
+      1016ms  browser renders both seed titles
+        51ms  navigate-to-topic: click Open -> piece view
+        44ms  post-navigation runtime idle
+[0m[38;5;245m----- output end -----[0m
+  measures the topics journey ON-vs-OFF stimuli ... [0m[32mok[0m [0m[38;5;245m(1m14s)[0m
+Topics journey benchmark (scratch instrument) ... [0m[32mok[0m [0m[38;5;245m(1m21s)[0m
+
+[0m[32mok[0m | 1 passed (1 step) | 0 failed [0m[38;5;245m(1m21s)[0m
+

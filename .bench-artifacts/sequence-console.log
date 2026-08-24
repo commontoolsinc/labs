@@ -1,0 +1,76 @@
+load-ok 4.66
+RUN_DONE t1-off rc=0 wall=32s drops=0
+RUN_DONE t1-on rc=0 wall=24s drops=0
+load-high 7.54 (poll 0/20)
+load-high 5.72 (poll 1/20)
+load-ok 4.11
+RUN_DONE t2-on rc=0 wall=12s drops=0
+RUN_DONE t2-off rc=0 wall=8s drops=0
+load-ok 4.19
+RUN_DONE t3-off rc=0 wall=8s drops=0
+RUN_DONE t3-on rc=0 wall=12s drops=0
+load-ok 4.67
+RUN_DONE t4-on rc=0 wall=11s drops=0
+RUN_DONE t4-off rc=0 wall=11s drops=0
+load-high 5.31 (poll 0/20)
+load-high 5.73 (poll 1/20)
+load-high 6.04 (poll 2/20)
+load-high 6.04 (poll 3/20)
+load-ok 4.98
+RUN_DONE t5-off rc=0 wall=11s drops=0
+RUN_DONE t5-on rc=0 wall=21s drops=0
+load-high 6.18 (poll 0/20, threshold 6)
+load-ok 3.85 (threshold 6)
+RUN_DONE t6-on rc=0 wall=12s drops=0
+RUN_DONE t6-off rc=0 wall=8s drops=0
+load-ok 4.05 (threshold 6)
+RUN_DONE j1-off rc=0 wall=65s drops=0
+RUN_DONE j1-on rc=0 wall=82s drops=0
+load-high 12.39 (poll 0/20, threshold 6)
+load-high 11.63 (poll 1/20, threshold 6)
+load-high 13.58 (poll 2/20, threshold 6)
+load-high 15.18 (poll 3/20, threshold 6)
+load-high 9.06 (poll 4/20, threshold 6)
+load-ok 5.43 (threshold 6)
+RUN_DONE j2-on rc=0 wall=99s drops=0
+RUN_DONE j2-off rc=0 wall=79s drops=0
+load-high 7.09 (poll 0/20, threshold 6)
+load-ok 5.69 (threshold 6)
+RUN_DONE j3-off rc=0 wall=67s drops=0
+RUN_DONE j3-on rc=0 wall=83s drops=0
+load-ok 4.44 (threshold 6)
+RUN_DONE j4-on rc=0 wall=86s drops=0
+RUN_DONE j4-off rc=0 wall=71s drops=0
+load-ok 5.83 (threshold 6)
+RUN_DONE j5-off rc=0 wall=72s drops=0
+RUN_DONE j5-on rc=0 wall=106s drops=0
+load-high 11.01 (poll 0/20, threshold 6)
+load-high 14.54 (poll 1/20, threshold 6)
+load-high 9.79 (poll 2/20, threshold 6)
+load-high 13.87 (poll 3/20, threshold 6)
+load-high 13.67 (poll 4/20, threshold 6)
+load-high 10.14 (poll 5/20, threshold 6)
+load-high 7.65 (poll 6/20, threshold 6)
+load-ok 4.71 (threshold 6)
+RUN_DONE j6-on rc=0 wall=103s drops=0
+RUN_DONE j6-off rc=0 wall=89s drops=0
+load-high 8.91 (poll 0/20, threshold 6)
+load-high 11.97 (poll 1/20, threshold 6)
+load-high 11.86 (poll 2/20, threshold 6)
+load-high 12.27 (poll 3/20, threshold 6)
+load-high 11.70 (poll 4/20, threshold 6)
+load-high 12.13 (poll 5/20, threshold 6)
+load-high 23.68 (poll 6/20, threshold 6)
+load-high 40.12 (poll 7/20, threshold 6)
+load-high 125.43 (poll 8/20, threshold 6)
+load-high 127.96 (poll 9/20, threshold 6)
+load-high 58.68 (poll 10/20, threshold 6)
+load-high 31.00 (poll 11/20, threshold 6)
+load-high 19.47 (poll 12/20, threshold 6)
+load-high 15.03 (poll 13/20, threshold 6)
+load-high 13.49 (poll 14/20, threshold 6)
+load-high 14.75 (poll 15/20, threshold 6)
+load-high 19.15 (poll 16/20, threshold 6)
+load-high 161.61 (poll 17/20, threshold 6)
+load-high 78.77 (poll 18/20, threshold 6)
+load-ok 4.26 (threshold 6)

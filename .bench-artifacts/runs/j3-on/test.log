@@ -1,0 +1,36 @@
+[0m[38;5;245mrunning 1 test from ./integration/topics-journey-bench.scratch.test.ts[0m
+Topics journey benchmark (scratch instrument) ...
+[0m[38;5;245m------- output -------[0m
+Experimental flag overrides: serverExecution=true
+[0m[38;5;245m----- output end -----[0m
+  measures the topics journey ON-vs-OFF stimuli ...
+[0m[38;5;245m------- output -------[0m
+[ERROR][runner::19:10:33.363] pattern-load-error Failed to load pattern keyless:fid1:wc2AbL_zg53gN9yBddGkTxg7cEFCmJs9_SoCRHGg77A#default
+[WARN][traverse::19:11:13.226] slow-traverse 269ms doc=of:fid1:7Sj1PxHspc1PZiPp8jmZMlgNQ15VVBkKDcDa5kIFi90/undefined trackerKeys=432 trackerVals=1226 traverseSchema=3451 traversePtr=773 traverseArr=201 traverseObj=442 traverseDAG=0 anyOfBranches=4850 anyOfFastRejects=3466 anyOfPropertyMerges=0 getDocAtPath=1502 dagMemo=0 uniqueDocs=0 uniquePaths=0 maxDepth=33 schemaMemo=3271 schemaMemoHits=180 topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)
+[0m[1m[33m'Topics journey benchmark (scratch instrument)' has been running for over [0m[38;5;245m(1m0s)[0m[0m
+
+[topics-journey] arm=ON seed echo ms: 1505 280
+[topics-series] arm=ON n=20 delay=2000ms load1/5/15=4.44/5.93/6.51
+[topics-series] echo    median=1320ms q1=1043ms q3=1615ms p95=2598ms min=743ms max=2598ms
+[topics-series] arrival median=1381ms q1=1076ms q3=1693ms p95=2706ms min=760ms max=2706ms
+[topics-series] gap     median=58ms q1=36ms q3=79ms p95=178ms min=17ms max=178ms
+[topics-series] per-event echo ms: 743 782 921 927 1043 977 1268 1240 1084 1172 1419 1320 1606 1389 1615 1507 1739 1815 1942 2598
+[topics-series] per-event arrival ms: 760 811 957 961 1076 1012 1310 1294 1136 1222 1477 1381 1675 1462 1693 1586 1821 1898 2120 2706
+[topics-series] per-event gap ms: 17 28 36 33 33 35 43 53 52 50 58 61 69 73 78 79 82 83 178 109
+
+[topics-journey ON] step timings (total 5108ms):
+      1886ms  board create + start (controller)
+      1505ms  addTopic seed 1 echo (controller)
+       280ms  addTopic seed 2 echo (controller)
+        33ms  fid capture (result.pull + resolveAsCell x2)
+       644ms  browser cold load: goto + login
+         8ms  browser runtime idle
+       711ms  browser renders both seed titles
+        39ms  navigate-to-topic: click Open -> piece view
+         2ms  post-navigation runtime idle
+[0m[38;5;245m----- output end -----[0m
+  measures the topics journey ON-vs-OFF stimuli ... [0m[32mok[0m [0m[38;5;245m(1m13s)[0m
+Topics journey benchmark (scratch instrument) ... [0m[32mok[0m [0m[38;5;245m(1m22s)[0m
+
+[0m[32mok[0m | 1 passed (1 step) | 0 failed [0m[38;5;245m(1m22s)[0m
+

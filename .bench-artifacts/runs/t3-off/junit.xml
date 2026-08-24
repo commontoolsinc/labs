@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="deno test" tests="2" failures="0" errors="0" time="7.216">
+    <testsuite name="./integration/topics-navigation.test.ts" tests="1" disabled="0" errors="0" failures="0">
+        <testcase name="Topics durable navigation" classname="./integration/topics-navigation.test.ts" time="7.203" line="24" col="1">
+        </testcase>
+    </testsuite>
+    <testsuite name="https://jsr.io/@std/testing/1.0.19/_test_suite.ts" tests="1" disabled="0" errors="0" failures="0">
+        <testcase name="Topics durable navigation &gt; opens a topic after a cold browser load without scheduler handlers" classname="https://jsr.io/@std/testing/1.0.19/_test_suite.ts" time="1.577" line="172" col="39">
+        </testcase>
+    </testsuite>
+</testsuites>

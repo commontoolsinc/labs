@@ -1,0 +1,35 @@
+[0m[38;5;245mrunning 1 test from ./integration/topics-journey-bench.scratch.test.ts[0m
+Topics journey benchmark (scratch instrument) ...
+[0m[38;5;245m------- output -------[0m
+Experimental flag overrides: serverExecution=true
+[0m[38;5;245m----- output end -----[0m
+  measures the topics journey ON-vs-OFF stimuli ...
+[0m[38;5;245m------- output -------[0m
+[ERROR][runner::19:12:02.202] pattern-load-error Failed to load pattern keyless:fid1:zpvBYCHHQXHar3I5Iy-nRZEqNxYIGY1UnNmmvVi_SBg#default
+[0m[1m[33m'Topics journey benchmark (scratch instrument)' has been running for over [0m[38;5;245m(1m0s)[0m[0m
+
+[topics-journey] arm=ON seed echo ms: 2284 572
+[topics-series] arm=ON n=20 delay=2000ms load1/5/15=6.47/6.16/6.54
+[topics-series] echo    median=1502ms q1=1018ms q3=1662ms p95=2149ms min=648ms max=2149ms
+[topics-series] arrival median=1562ms q1=1064ms q3=1726ms p95=2245ms min=675ms max=2245ms
+[topics-series] gap     median=62ms q1=50ms q3=79ms p95=96ms min=26ms max=96ms
+[topics-series] per-event echo ms: 876 752 700 648 1522 1434 1018 990 1153 1222 1585 1477 1840 1502 1931 1725 1662 1549 1573 2149
+[topics-series] per-event arrival ms: 902 780 730 675 1578 1488 1064 1042 1203 1284 1661 1560 1920 1562 2013 1803 1726 1613 1660 2245
+[topics-series] per-event gap ms: 26 28 30 27 56 54 46 52 50 62 76 83 79 60 82 78 64 64 86 96
+
+[topics-journey ON] step timings (total 7094ms):
+      2527ms  board create + start (controller)
+      2284ms  addTopic seed 1 echo (controller)
+       572ms  addTopic seed 2 echo (controller)
+        41ms  fid capture (result.pull + resolveAsCell x2)
+       607ms  browser cold load: goto + login
+         2ms  browser runtime idle
+      1027ms  browser renders both seed titles
+        32ms  navigate-to-topic: click Open -> piece view
+         2ms  post-navigation runtime idle
+[0m[38;5;245m----- output end -----[0m
+  measures the topics journey ON-vs-OFF stimuli ... [0m[32mok[0m [0m[38;5;245m(1m15s)[0m
+Topics journey benchmark (scratch instrument) ... [0m[32mok[0m [0m[38;5;245m(1m24s)[0m
+
+[0m[32mok[0m | 1 passed (1 step) | 0 failed [0m[38;5;245m(1m24s)[0m
+

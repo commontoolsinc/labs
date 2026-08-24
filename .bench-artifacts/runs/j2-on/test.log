@@ -1,0 +1,1320 @@
+[0m[38;5;245mrunning 1 test from ./integration/topics-journey-bench.scratch.test.ts[0m
+Topics journey benchmark (scratch instrument) ...
+[0m[38;5;245m------- output -------[0m
+Experimental flag overrides: serverExecution=true
+[ERROR][runner::19:05:07.112] piece-start-commit-failed piece-start commit piece-instantiate/of:fid1:rszomt4Ti8MwDNpMJLZCjcENRtAH6MFBxgf0wYVNCs8 failed; the started graph's setup writes did not land (stage P2-F, F1) {
+  name: "ConflictError",
+  message: "stale confirmed read: computed:fid1:Dz_6hb8ua7E4hMb8U8pzaJ8qWQUZktkp8EyWo1H1Njs at seq 2 conflicted with seq 6",
+  transaction: {
+    localSeq: 1,
+    reads: {
+      confirmed: [
+        {
+          id: "computed:fid1:7BycCyHc2yDDzr17jnXayWZMxpweSGk2JcGKILKguvo",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "computed:fid1:84YHWJkYlPXiQFXSvsnG8Ne6ijVYaMReVSb9qxHm9oM",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:BwUlxKKCzU2_GMzHjgyN5nDi72JSr-aJLSBOFyMVIws",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:Djt2mteUsPM7xYqzyAbcQZEwUhUFRtNcUu_dL2GyxUs",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "computed:fid1:Dz_6hb8ua7E4hMb8U8pzaJ8qWQUZktkp8EyWo1H1Njs",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:G8X9gfQd1ZfX2vaMDqWVDhFrarUPAkIcp69xODNvx3c",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "computed:fid1:GGng7yFyEwfHiE0Bo1yAmcbu9pj_8qy_iSpXAlwxDmQ",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:GhOS_Qzg4aQsPWtNg0frwVKm7k2DdisaI7fkd1QogUE",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:NDH7kD9zYTjqZ4NQ9WsAsW0k29WorrVsNAFE59K6asE",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:NRJzxEBWOzxtjA9xrzNhE53XDdX9QWKvY5rIn_ztKW4",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:Q9c1xCLYxqKafO1CK84VQetjU3dEKeeuU96zs79aP7g",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "computed:fid1:WcTPCJymkaqb_c_x0XTKDWnAr9wxkfsKDWDJn8ph5JE",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:YVjYrLbQAQKcj1RBiaWtPRwFiTO2o5lMfYyLo5CY2cw",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "computed:fid1:_RHS0e-1sLoHtqOHyp5J-RACfTxJiuia7ZWJnfDNasA",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:gF9QKMz-FcmL49UwJm52qLlXGBa6ZP89tGZM9jnqNkU",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:gaCaVS-c7UAgxJhY1DBuQ-5NGojPTXnxuioJherRl0A",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:mT-mBD6j0jX2jkEihNONf6AFvff2nmjpHTEIgHwz6Bo",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:nkDLkSDqFVnlrb6b8Q2s496fMu2emja2q8uZVBE9zaw",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:qAoKs40nJ1IrrfxAYJYAKI3lBKjwJKtLlvZXtqYxgtU",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:qaSUNVSVtppTG0pY2eS7l0tT65rkimOuRFEQucsrUfQ",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "computed:fid1:siFcUi2tTiTtn7CtJbtMGKvgs2CxKeQFWe4eg1JZyaE",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:vQ6XyU4eZNV4VwD9ypPNS1VPqduQx0-EApTeewjGGdM",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:vbprVvgtMXvl5HyEhaXwfZm0RN39553TamrUg20U4cg",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:ya0xn1GFQU4eU-XpQKIMCYMtZLHlUCBVIjp3Eb3bUwY",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:-Cl3XnGLsdTrHsdAQ-9R6m4foFt431o10d9fhW_y084",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:1d0m8Mja8fdOCNFcP32pFh61c5VjIcZtkPiUJJMAFLA",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:1d0m8Mja8fdOCNFcP32pFh61c5VjIcZtkPiUJJMAFLA",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:1d0m8Mja8fdOCNFcP32pFh61c5VjIcZtkPiUJJMAFLA",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:1d0m8Mja8fdOCNFcP32pFh61c5VjIcZtkPiUJJMAFLA",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:1d0m8Mja8fdOCNFcP32pFh61c5VjIcZtkPiUJJMAFLA",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:1d0m8Mja8fdOCNFcP32pFh61c5VjIcZtkPiUJJMAFLA",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:1d0m8Mja8fdOCNFcP32pFh61c5VjIcZtkPiUJJMAFLA",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:1d0m8Mja8fdOCNFcP32pFh61c5VjIcZtkPiUJJMAFLA",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:4YMUjmJuPdhpOSZEWNVkkXjVnGLHsl0rrLbicbuaGyo",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:4dTOlPwiX5YpWg4pyTxo8G9W9nOY3G1OlYJYKDXfIeI",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:4dTOlPwiX5YpWg4pyTxo8G9W9nOY3G1OlYJYKDXfIeI",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:6k8TEe2tEQ3azu3bTjph6u67BXPZ0YEPlQG39YGrTvg",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:7ONX40pIVh_zAGw3zZKiDFflrbXI03pKIA4sf_tOkHE",
+          scope: "space",
+          path: [Array],
+          seq: 3
+        },
+        {
+          id: "of:fid1:7ONX40pIVh_zAGw3zZKiDFflrbXI03pKIA4sf_tOkHE",
+          scope: "space",
+          path: [Array],
+          seq: 3
+        },
+        {
+          id: "of:fid1:7ONX40pIVh_zAGw3zZKiDFflrbXI03pKIA4sf_tOkHE",
+          scope: "space",
+          path: [Array],
+          seq: 3
+        },
+        {
+          id: "of:fid1:7ONX40pIVh_zAGw3zZKiDFflrbXI03pKIA4sf_tOkHE",
+          scope: "space",
+          path: [Array],
+          seq: 3
+        },
+        {
+          id: "of:fid1:7ONX40pIVh_zAGw3zZKiDFflrbXI03pKIA4sf_tOkHE",
+          scope: "space",
+          path: [Array],
+          seq: 3
+        },
+        {
+          id: "of:fid1:7ONX40pIVh_zAGw3zZKiDFflrbXI03pKIA4sf_tOkHE",
+          scope: "space",
+          path: [Array],
+          seq: 3
+        },
+        {
+          id: "of:fid1:7ONX40pIVh_zAGw3zZKiDFflrbXI03pKIA4sf_tOkHE",
+          scope: "space",
+          path: [Array],
+          seq: 3
+        },
+        {
+          id: "of:fid1:7ONX40pIVh_zAGw3zZKiDFflrbXI03pKIA4sf_tOkHE",
+          scope: "space",
+          path: [Array],
+          seq: 3
+        },
+        {
+          id: "of:fid1:84YHWJkYlPXiQFXSvsnG8Ne6ijVYaMReVSb9qxHm9oM",
+          scope: "space",
+          path: [Array],
+          seq: 0
+        },
+        {
+          id: "of:fid1:AUrx2JXW32qcXHdvDLCaLkXmOJJqVsZAygfyhhBsYd0",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:BwUlxKKCzU2_GMzHjgyN5nDi72JSr-aJLSBOFyMVIws",
+          scope: "space",
+          path: [Array],
+          seq: 0
+        },
+        {
+          id: "of:fid1:DBhO7rDzmPN2XXq8qvgeUAw3sqwIhkChQrO2yqwX5C0",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:DpWVHNzNWh9anMz8COHgy_ZKCqx_93iVzRNmi1M0Nps",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:GGng7yFyEwfHiE0Bo1yAmcbu9pj_8qy_iSpXAlwxDmQ",
+          scope: "space",
+          path: [Array],
+          seq: 0
+        },
+        {
+          id: "of:fid1:JXzk982jhc-pXGXrVT2bUt9NgD3Ncnks3egsZNKZLG0",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:JXzk982jhc-pXGXrVT2bUt9NgD3Ncnks3egsZNKZLG0",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:JXzk982jhc-pXGXrVT2bUt9NgD3Ncnks3egsZNKZLG0",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:JXzk982jhc-pXGXrVT2bUt9NgD3Ncnks3egsZNKZLG0",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:JXzk982jhc-pXGXrVT2bUt9NgD3Ncnks3egsZNKZLG0",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:JXzk982jhc-pXGXrVT2bUt9NgD3Ncnks3egsZNKZLG0",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:JXzk982jhc-pXGXrVT2bUt9NgD3Ncnks3egsZNKZLG0",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:JXzk982jhc-pXGXrVT2bUt9NgD3Ncnks3egsZNKZLG0",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:JXzk982jhc-pXGXrVT2bUt9NgD3Ncnks3egsZNKZLG0",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:LaFtomRzChrcyFJg156LkWLHrOAFm7cADdbMT1Uj-O8",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:M6P3pCj4YDJEzRy0DRvKXprrgDJK8t33KSf0yt5nfic",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:M6P3pCj4YDJEzRy0DRvKXprrgDJK8t33KSf0yt5nfic",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:M6P3pCj4YDJEzRy0DRvKXprrgDJK8t33KSf0yt5nfic",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:M6P3pCj4YDJEzRy0DRvKXprrgDJK8t33KSf0yt5nfic",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:M6P3pCj4YDJEzRy0DRvKXprrgDJK8t33KSf0yt5nfic",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:M6P3pCj4YDJEzRy0DRvKXprrgDJK8t33KSf0yt5nfic",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:M6P3pCj4YDJEzRy0DRvKXprrgDJK8t33KSf0yt5nfic",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:M6P3pCj4YDJEzRy0DRvKXprrgDJK8t33KSf0yt5nfic",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:Mtb2G_Dy6PK-NJx6dxrCoBxOoCEeFX8Z1HOUx5_e5sQ",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:OPzwBCSdVikdS60gtui3hVEgUocODqOUx469ZRXrjdc",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:Xg_L4qpXUQisS_-Xj1B8ZtavpmvPo2O7I-sn__oe3gs",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:ZH8Pj0gPXWyJPSCt1m0y_I0ncuryqtfZZZ9mIZbban0",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:ZH8Pj0gPXWyJPSCt1m0y_I0ncuryqtfZZZ9mIZbban0",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:ZhetCAxfdR51JonfYZff2jAK86ARDwgTb-Ra47HS1hg",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:_QxpLsnHYEuEpicsiGujFzAXDExvGJyQDJCFLgBZkME",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:_RHS0e-1sLoHtqOHyp5J-RACfTxJiuia7ZWJnfDNasA",
+          scope: "space",
+          path: [Array],
+          seq: 0
+        },
+        {
+          id: "of:fid1:a1-GAV5BlFfgE8fT-1fZLIj_2LcC__nd427UaRX-r4E",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:aovgZwMnyr20MaQpoL4xPH4vVPeVjhxvr7PZ9EyCh7w",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:aovgZwMnyr20MaQpoL4xPH4vVPeVjhxvr7PZ9EyCh7w",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:dgaN8WoZSBcpE-MWgOR5R6ivE8Yg1iT7EoQ8NudU4Zk",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:dgaN8WoZSBcpE-MWgOR5R6ivE8Yg1iT7EoQ8NudU4Zk",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:gdlUyLJ5u1M3GQZ4K4V0zYBsEH0teACQ-TsEU1u4hR8",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:nCG97mOZjJ51VxHb-wKIVTWcjQxspOsZ8Q8ZhHb2Jhc",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:rszomt4Ti8MwDNpMJLZCjcENRtAH6MFBxgf0wYVNCs8",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:rszomt4Ti8MwDNpMJLZCjcENRtAH6MFBxgf0wYVNCs8",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:rszomt4Ti8MwDNpMJLZCjcENRtAH6MFBxgf0wYVNCs8",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:s9w_jRT7u8ckDdwVXpzMrfgrXghXdUuu2ttkWp67R5o",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:tyChdgfVIHDHPe_fuy8AHtA2Z6ELXJM3kNnVIF2hM5Y",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:vudiMmdFMORO8JhNfvC-70MYP3fYjqRiojn4nznrh70",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:wy5KuCpJUV8ntdGSZgRlGkFv-4rEfA-AFaKUkY-wnuw",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        }
+      ],
+      pending: []
+    },
+    operations: [
+      {
+        op: "patch",
+        id: "of:fid1:JXzk982jhc-pXGXrVT2bUt9NgD3Ncnks3egsZNKZLG0",
+        scope: "space",
+        patches: [ [Object] ]
+      }
+    ]
+  },
+  conflict: {
+    space: "did:key:z6MkkRFKV82ZXr63bFK3KxMfiH4QnuT4EaSiJejbxFQrhNtg",
+    the: "application/json",
+    of: "computed:fid1:Dz_6hb8ua7E4hMb8U8pzaJ8qWQUZktkp8EyWo1H1Njs"
+  },
+  retryAfterSeq: 7,
+  readyToRetry: [AsyncFunction (anonymous)]
+}
+[0m[38;5;245m----- output end -----[0m
+  measures the topics journey ON-vs-OFF stimuli ...
+[0m[38;5;245m------- output -------[0m
+[ERROR][runner::19:05:10.931] pattern-load-error Failed to load pattern keyless:fid1:-_3_rBWmJmZKlaTTiqaiCUrpzQk7aPcjiq3FMCry_rM#default
+[WARN][traverse::19:05:53.137] slow-traverse 243ms doc=of:fid1:N5JT3q0XfWxbvZ5Dxo99XOMhwWGpT97CncQZvnyd_oU/undefined trackerKeys=408 trackerVals=1151 traverseSchema=3244 traversePtr=724 traverseArr=189 traverseObj=416 traverseDAG=0 anyOfBranches=4569 anyOfFastRejects=3266 anyOfPropertyMerges=0 getDocAtPath=1408 dagMemo=0 uniqueDocs=0 uniquePaths=0 maxDepth=33 schemaMemo=3075 schemaMemoHits=169 topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)
+[0m[1m[33m'Topics journey benchmark (scratch instrument)' has been running for over [0m[38;5;245m(1m0s)[0m[0m
+[WARN][cell::19:06:12.021] get >80ms get() took 89ms {
+  id: "of:fid1:N5JT3q0XfWxbvZ5Dxo99XOMhwWGpT97CncQZvnyd_oU",
+  path: [],
+  space: "did:key:z6MkkRFKV82ZXr63bFK3KxMfiH4QnuT4EaSiJejbxFQrhNtg",
+  scope: "space",
+  schema: {
+    "$defs": {
+      AddCommentEvent: {
+        properties: { agentName: [Object], body: [Object] },
+        required: [ "body" ],
+        type: "object"
+      },
+      AddLinkEvent: {
+        properties: {
+          agentName: [Object],
+          kind: [Object],
+          label: [Object],
+          url: [Object]
+        },
+        required: [ "kind", "url", "label" ],
+        type: "object"
+      },
+      AddTopicEvent: {
+        properties: { agentName: [Object], body: [Object], title: [Object] },
+        required: [ "title" ],
+        type: "object"
+      },
+      MentionEvent: {
+        properties: { topic: [Object] },
+        required: [ "topic" ],
+        type: "object"
+      },
+      SetBodyEvent: {
+        properties: { agentName: [Object], body: [Object] },
+        required: [ "body" ],
+        type: "object"
+      },
+      TopicAuthor: {
+        properties: { avatar: [Object], kind: [Object], name: [Object] },
+        required: [ "kind", "name" ],
+        type: "object"
+      },
+      TopicComment: {
+        properties: {
+          author: [Object],
+          authorName: [Object],
+          body: [Object],
+          sentAt: [Object]
+        },
+        required: [ "authorName", "body", "sentAt" ],
+        type: "object"
+      },
+      TopicCrossrefRow: {
+        properties: { mentionedBy: [Object], topic: [Object] },
+        required: [ "topic", "mentionedBy" ],
+        type: "object"
+      },
+      TopicIndexRow: {
+        properties: {
+          commentCount: [Object],
+          createdAt: [Object],
+          createdBy: [Object],
+          lastActivityAt: [Object],
+          title: [Object]
+        },
+        required: [ "title", "createdAt", "commentCount", "lastActivityAt" ],
+        type: "object"
+      },
+      TopicLink: {
+        properties: {
+          addedAt: [Object],
+          addedBy: [Object],
+          kind: [Object],
+          label: [Object],
+          url: [Object]
+        },
+        required: [ "kind", "url", "label" ],
+        type: "object"
+      },
+      TopicLinkKind: { enum: [ "session", "topic", "pr", "web" ] },
+      TopicMentionRef: {
+        properties: { destination: [Object], modifiedTitle: [Object] },
+        required: [ "destination", "modifiedTitle" ],
+        type: "object"
+      },
+      TopicMentionRefMap: {
+        additionalProperties: { "$ref": "#/$defs/TopicMentionRef" },
+        properties: {},
+        type: "object"
+      },
+      TopicPiece: {
+        properties: {
+          "$NAME": [Object],
+          addComment: [Object],
+          addLink: [Object],
+          body: [Object],
+          bodyUpdatedAt: [Object],
+          bodyUpdatedBy: [Object],
+          commentCount: [Object],
+          comments: [Object],
+          createdAt: [Object],
+          createdBy: [Object],
+          createdByName: [Object],
+          lastActivityAt: [Object],
+          links: [Object],
+          mention: [Object],
+          mentioned: [Object],
+          mentions: [Object],
+          referencedBy: [Object],
+          references: [Object],
+          setBody: [Object],
+          title: [Object],
+          unmention: [Object]
+        },
+        required: [
+          "createdByName", "body",
+          "comments",      "links",
+          "mentions",      "references",
+          "mentioned",     "referencedBy",
+          "addComment",    "addLink",
+          "setBody",       "$NAME",
+          "title",         "createdAt",
+          "commentCount",  "lastActivityAt"
+        ],
+        type: "object"
+      },
+      TopicSummary: {
+        properties: {
+          commentCount: [Object],
+          createdAt: [Object],
+          createdBy: [Object],
+          lastActivityAt: [Object],
+          title: [Object]
+        },
+        required: [ "title", "createdAt", "commentCount", "lastActivityAt" ],
+        type: "object"
+      },
+      UnmentionEvent: {
+        properties: { topic: [Object] },
+        required: [ "topic" ],
+        type: "object"
+      }
+    },
+    description: "Topics — a tracker over #topic pieces: durable units of shared attention\n" +
+      "(CT-1878). Deliberately minimal: no statuses, labels, or assignees; topics\n" +
+      "sort by last activity. Replaces Linear / GitHub issues / loose process docs\n" +
+      "for the team; PR workflows stay in GitHub and arrive here as links.\n" +
+      "\n" +
+      "Headless use: survey the whole board with one bounded read of `index` — a\n" +
+      "row IS its topic, so a row's own address (`--select index[].@`) is what\n" +
+      "that topic's reads and verbs take as the piece. File with `addTopic`,\n" +
+      "title and optional initial body in one call, then work on the topic\n" +
+      "directly: the body is its living document, the thread its append-only\n" +
+      "deliberation. Sign every mutation with `agentName` — Fabric records the\n" +
+      "human principal behind the key; the name says which agent acted under it.",
+    properties: {
+      "$NAME": { type: "string" },
+      "$UI": { "$ref": "https://commonfabric.org/schemas/vnode.json" },
+      addTopic: {
+        "$ref": "#/$defs/AddTopicEvent",
+        asCell: [ "stream" ],
+        description: "File a topic. The atomic unit takes the initial body with the title, so\n" +
+          "no reader observes a title-only halfway state and no follow-up `setBody`\n" +
+          "finishes a create. Returns the created topic as its survey row — the\n" +
+          "reference plus the write-time facts the pattern resolved."
+      },
+      crossrefs: {
+        default: [],
+        description: "The board's mention pivot, one row per topic: the topic, and the topics\n" +
+          "that mention it. Published so a topic composed outside `addTopic` can be\n" +
+          "wired to the same table the board's own children read — the graph is\n" +
+          "derived once, here, and never per topic.",
+        items: { "$ref": "#/$defs/TopicCrossrefRow" },
+        type: "array"
+      },
+      index: {
+        default: [],
+        description: "The full-board survey surface: one bounded row per topic, carrying the\n" +
+          "scalars a survey reads. A row IS its topic, so a row's own address is the\n" +
+          "topic's — `--select index[].@` reads it, and an index into this array is\n" +
+          "not a stable address.",
+        items: { "$ref": "#/$defs/TopicIndexRow" },
+        type: "array"
+      },
+      mentionable: {
+        default: [],
+        description: "The same list, under the name the topic pattern's editor autocompletes\n" +
+          "over — what `addTopic` wires into each child as its mention universe.",
+        items: { "$ref": "#/$defs/TopicPiece" },
+        type: "array"
+      },
+      myName: { type: "string" },
+      newTitle: {
+        description: "Session-local draft for the footer composer (exposed for embedding and\n" +
+          "headless driving, like the chat exemplar's drafts).",
+        type: "string"
+      },
+      setMyName: {
+        asCell: [ "stream" ],
+        deprecated: true,
+        properties: { name: [Object] },
+        required: [ "name" ],
+        type: "object"
+      },
+      submitTopic: {
+        asCell: [ "stream", "opaque" ],
+        description: "Submit the footer composer as the current viewer's canonical Profile.",
+        tier: "wrapper"
+      },
+      topicCount: {
+        description: "How many topics the board holds, nulls included.",
+        type: "number"
+      },
+      topics: {
+        description: "The board's topics, in filing order, as complete pieces — bodies,\n" +
+          "threads, and verbs included. Survey through `index` instead; read this\n" +
+          "when you already know which topic you are expanding.",
+        items: { "$ref": "#/$defs/TopicPiece" },
+        type: "array"
+      }
+    },
+    required: [
+      "topics",      "mentionable",
+      "topicCount",  "crossrefs",
+      "index",       "addTopic",
+      "myName",      "setMyName",
+      "submitTopic", "$NAME",
+      "$UI"
+    ],
+    tags: [ "topic" ],
+    type: "object"
+  },
+  overwrite: "redirect",
+  viaLinkHop: true
+}
+[WARN][traverse::19:06:13.014] slow-traverse 103ms doc=of:fid1:N5JT3q0XfWxbvZ5Dxo99XOMhwWGpT97CncQZvnyd_oU/undefined trackerKeys=508 trackerVals=1455 traverseSchema=4080 traversePtr=920 traverseArr=237 traverseObj=520 traverseDAG=0 anyOfBranches=5693 anyOfFastRejects=4066 anyOfPropertyMerges=0 getDocAtPath=1792 dagMemo=0 uniqueDocs=0 uniquePaths=0 maxDepth=33 schemaMemo=3867 schemaMemoHits=213 topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)
+[WARN][traverse::19:06:13.163] slow-traverse 133ms doc=of:fid1:N5JT3q0XfWxbvZ5Dxo99XOMhwWGpT97CncQZvnyd_oU/undefined trackerKeys=508 trackerVals=1455 traverseSchema=4080 traversePtr=920 traverseArr=237 traverseObj=520 traverseDAG=0 anyOfBranches=5693 anyOfFastRejects=4066 anyOfPropertyMerges=0 getDocAtPath=1792 dagMemo=0 uniqueDocs=0 uniquePaths=0 maxDepth=33 schemaMemo=3867 schemaMemoHits=213 topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)
+[WARN][cell::19:06:18.046] get >80ms get() took 89ms {
+  id: "of:fid1:N5JT3q0XfWxbvZ5Dxo99XOMhwWGpT97CncQZvnyd_oU",
+  path: [],
+  space: "did:key:z6MkkRFKV82ZXr63bFK3KxMfiH4QnuT4EaSiJejbxFQrhNtg",
+  scope: "space",
+  schema: {
+    "$defs": {
+      AddCommentEvent: {
+        properties: { agentName: [Object], body: [Object] },
+        required: [ "body" ],
+        type: "object"
+      },
+      AddLinkEvent: {
+        properties: {
+          agentName: [Object],
+          kind: [Object],
+          label: [Object],
+          url: [Object]
+        },
+        required: [ "kind", "url", "label" ],
+        type: "object"
+      },
+      AddTopicEvent: {
+        properties: { agentName: [Object], body: [Object], title: [Object] },
+        required: [ "title" ],
+        type: "object"
+      },
+      MentionEvent: {
+        properties: { topic: [Object] },
+        required: [ "topic" ],
+        type: "object"
+      },
+      SetBodyEvent: {
+        properties: { agentName: [Object], body: [Object] },
+        required: [ "body" ],
+        type: "object"
+      },
+      TopicAuthor: {
+        properties: { avatar: [Object], kind: [Object], name: [Object] },
+        required: [ "kind", "name" ],
+        type: "object"
+      },
+      TopicComment: {
+        properties: {
+          author: [Object],
+          authorName: [Object],
+          body: [Object],
+          sentAt: [Object]
+        },
+        required: [ "authorName", "body", "sentAt" ],
+        type: "object"
+      },
+      TopicCrossrefRow: {
+        properties: { mentionedBy: [Object], topic: [Object] },
+        required: [ "topic", "mentionedBy" ],
+        type: "object"
+      },
+      TopicIndexRow: {
+        properties: {
+          commentCount: [Object],
+          createdAt: [Object],
+          createdBy: [Object],
+          lastActivityAt: [Object],
+          title: [Object]
+        },
+        required: [ "title", "createdAt", "commentCount", "lastActivityAt" ],
+        type: "object"
+      },
+      TopicLink: {
+        properties: {
+          addedAt: [Object],
+          addedBy: [Object],
+          kind: [Object],
+          label: [Object],
+          url: [Object]
+        },
+        required: [ "kind", "url", "label" ],
+        type: "object"
+      },
+      TopicLinkKind: { enum: [ "session", "topic", "pr", "web" ] },
+      TopicMentionRef: {
+        properties: { destination: [Object], modifiedTitle: [Object] },
+        required: [ "destination", "modifiedTitle" ],
+        type: "object"
+      },
+      TopicMentionRefMap: {
+        additionalProperties: { "$ref": "#/$defs/TopicMentionRef" },
+        properties: {},
+        type: "object"
+      },
+      TopicPiece: {
+        properties: {
+          "$NAME": [Object],
+          addComment: [Object],
+          addLink: [Object],
+          body: [Object],
+          bodyUpdatedAt: [Object],
+          bodyUpdatedBy: [Object],
+          commentCount: [Object],
+          comments: [Object],
+          createdAt: [Object],
+          createdBy: [Object],
+          createdByName: [Object],
+          lastActivityAt: [Object],
+          links: [Object],
+          mention: [Object],
+          mentioned: [Object],
+          mentions: [Object],
+          referencedBy: [Object],
+          references: [Object],
+          setBody: [Object],
+          title: [Object],
+          unmention: [Object]
+        },
+        required: [
+          "createdByName", "body",
+          "comments",      "links",
+          "mentions",      "references",
+          "mentioned",     "referencedBy",
+          "addComment",    "addLink",
+          "setBody",       "$NAME",
+          "title",         "createdAt",
+          "commentCount",  "lastActivityAt"
+        ],
+        type: "object"
+      },
+      TopicSummary: {
+        properties: {
+          commentCount: [Object],
+          createdAt: [Object],
+          createdBy: [Object],
+          lastActivityAt: [Object],
+          title: [Object]
+        },
+        required: [ "title", "createdAt", "commentCount", "lastActivityAt" ],
+        type: "object"
+      },
+      UnmentionEvent: {
+        properties: { topic: [Object] },
+        required: [ "topic" ],
+        type: "object"
+      }
+    },
+    description: "Topics — a tracker over #topic pieces: durable units of shared attention\n" +
+      "(CT-1878). Deliberately minimal: no statuses, labels, or assignees; topics\n" +
+      "sort by last activity. Replaces Linear / GitHub issues / loose process docs\n" +
+      "for the team; PR workflows stay in GitHub and arrive here as links.\n" +
+      "\n" +
+      "Headless use: survey the whole board with one bounded read of `index` — a\n" +
+      "row IS its topic, so a row's own address (`--select index[].@`) is what\n" +
+      "that topic's reads and verbs take as the piece. File with `addTopic`,\n" +
+      "title and optional initial body in one call, then work on the topic\n" +
+      "directly: the body is its living document, the thread its append-only\n" +
+      "deliberation. Sign every mutation with `agentName` — Fabric records the\n" +
+      "human principal behind the key; the name says which agent acted under it.",
+    properties: {
+      "$NAME": { type: "string" },
+      "$UI": { "$ref": "https://commonfabric.org/schemas/vnode.json" },
+      addTopic: {
+        "$ref": "#/$defs/AddTopicEvent",
+        asCell: [ "stream" ],
+        description: "File a topic. The atomic unit takes the initial body with the title, so\n" +
+          "no reader observes a title-only halfway state and no follow-up `setBody`\n" +
+          "finishes a create. Returns the created topic as its survey row — the\n" +
+          "reference plus the write-time facts the pattern resolved."
+      },
+      crossrefs: {
+        default: [],
+        description: "The board's mention pivot, one row per topic: the topic, and the topics\n" +
+          "that mention it. Published so a topic composed outside `addTopic` can be\n" +
+          "wired to the same table the board's own children read — the graph is\n" +
+          "derived once, here, and never per topic.",
+        items: { "$ref": "#/$defs/TopicCrossrefRow" },
+        type: "array"
+      },
+      index: {
+        default: [],
+        description: "The full-board survey surface: one bounded row per topic, carrying the\n" +
+          "scalars a survey reads. A row IS its topic, so a row's own address is the\n" +
+          "topic's — `--select index[].@` reads it, and an index into this array is\n" +
+          "not a stable address.",
+        items: { "$ref": "#/$defs/TopicIndexRow" },
+        type: "array"
+      },
+      mentionable: {
+        default: [],
+        description: "The same list, under the name the topic pattern's editor autocompletes\n" +
+          "over — what `addTopic` wires into each child as its mention universe.",
+        items: { "$ref": "#/$defs/TopicPiece" },
+        type: "array"
+      },
+      myName: { type: "string" },
+      newTitle: {
+        description: "Session-local draft for the footer composer (exposed for embedding and\n" +
+          "headless driving, like the chat exemplar's drafts).",
+        type: "string"
+      },
+      setMyName: {
+        asCell: [ "stream" ],
+        deprecated: true,
+        properties: { name: [Object] },
+        required: [ "name" ],
+        type: "object"
+      },
+      submitTopic: {
+        asCell: [ "stream", "opaque" ],
+        description: "Submit the footer composer as the current viewer's canonical Profile.",
+        tier: "wrapper"
+      },
+      topicCount: {
+        description: "How many topics the board holds, nulls included.",
+        type: "number"
+      },
+      topics: {
+        description: "The board's topics, in filing order, as complete pieces — bodies,\n" +
+          "threads, and verbs included. Survey through `index` instead; read this\n" +
+          "when you already know which topic you are expanding.",
+        items: { "$ref": "#/$defs/TopicPiece" },
+        type: "array"
+      }
+    },
+    required: [
+      "topics",      "mentionable",
+      "topicCount",  "crossrefs",
+      "index",       "addTopic",
+      "myName",      "setMyName",
+      "submitTopic", "$NAME",
+      "$UI"
+    ],
+    tags: [ "topic" ],
+    type: "object"
+  },
+  overwrite: "redirect",
+  viaLinkHop: true
+}
+[WARN][traverse::19:06:18.200] slow-traverse 108ms doc=of:fid1:N5JT3q0XfWxbvZ5Dxo99XOMhwWGpT97CncQZvnyd_oU/undefined trackerKeys=508 trackerVals=1455 traverseSchema=4080 traversePtr=920 traverseArr=237 traverseObj=520 traverseDAG=0 anyOfBranches=5693 anyOfFastRejects=4066 anyOfPropertyMerges=0 getDocAtPath=1792 dagMemo=0 uniqueDocs=0 uniquePaths=0 maxDepth=33 schemaMemo=3867 schemaMemoHits=213 topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)
+[WARN][traverse::19:06:19.823] slow-traverse 111ms doc=of:fid1:N5JT3q0XfWxbvZ5Dxo99XOMhwWGpT97CncQZvnyd_oU/undefined trackerKeys=532 trackerVals=1530 traverseSchema=4288 traversePtr=969 traverseArr=249 traverseObj=546 traverseDAG=0 anyOfBranches=5974 anyOfFastRejects=4266 anyOfPropertyMerges=0 getDocAtPath=1887 dagMemo=0 uniqueDocs=0 uniquePaths=0 maxDepth=33 schemaMemo=4064 schemaMemoHits=224 topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)
+[WARN][traverse::19:06:19.948] slow-traverse 110ms doc=of:fid1:N5JT3q0XfWxbvZ5Dxo99XOMhwWGpT97CncQZvnyd_oU/undefined trackerKeys=532 trackerVals=1530 traverseSchema=4288 traversePtr=969 traverseArr=249 traverseObj=546 traverseDAG=0 anyOfBranches=5974 anyOfFastRejects=4266 anyOfPropertyMerges=0 getDocAtPath=1887 dagMemo=0 uniqueDocs=0 uniquePaths=0 maxDepth=33 schemaMemo=4064 schemaMemoHits=224 topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)
+[WARN][traverse::19:06:24.484] slow-traverse 102ms doc=of:fid1:N5JT3q0XfWxbvZ5Dxo99XOMhwWGpT97CncQZvnyd_oU/undefined trackerKeys=533 trackerVals=1531 traverseSchema=4289 traversePtr=969 traverseArr=249 traverseObj=546 traverseDAG=0 anyOfBranches=5974 anyOfFastRejects=4266 anyOfPropertyMerges=0 getDocAtPath=1888 dagMemo=0 uniqueDocs=0 uniquePaths=0 maxDepth=33 schemaMemo=4065 schemaMemoHits=224 topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)
+[WARN][cell::19:06:24.485] get >100ms get() took 102ms {
+  id: "of:fid1:N5JT3q0XfWxbvZ5Dxo99XOMhwWGpT97CncQZvnyd_oU",
+  path: [],
+  space: "did:key:z6MkkRFKV82ZXr63bFK3KxMfiH4QnuT4EaSiJejbxFQrhNtg",
+  scope: "space",
+  schema: {
+    "$defs": {
+      AddCommentEvent: {
+        properties: { agentName: [Object], body: [Object] },
+        required: [ "body" ],
+        type: "object"
+      },
+      AddLinkEvent: {
+        properties: {
+          agentName: [Object],
+          kind: [Object],
+          label: [Object],
+          url: [Object]
+        },
+        required: [ "kind", "url", "label" ],
+        type: "object"
+      },
+      AddTopicEvent: {
+        properties: { agentName: [Object], body: [Object], title: [Object] },
+        required: [ "title" ],
+        type: "object"
+      },
+      MentionEvent: {
+        properties: { topic: [Object] },
+        required: [ "topic" ],
+        type: "object"
+      },
+      SetBodyEvent: {
+        properties: { agentName: [Object], body: [Object] },
+        required: [ "body" ],
+        type: "object"
+      },
+      TopicAuthor: {
+        properties: { avatar: [Object], kind: [Object], name: [Object] },
+        required: [ "kind", "name" ],
+        type: "object"
+      },
+      TopicComment: {
+        properties: {
+          author: [Object],
+          authorName: [Object],
+          body: [Object],
+          sentAt: [Object]
+        },
+        required: [ "authorName", "body", "sentAt" ],
+        type: "object"
+      },
+      TopicCrossrefRow: {
+        properties: { mentionedBy: [Object], topic: [Object] },
+        required: [ "topic", "mentionedBy" ],
+        type: "object"
+      },
+      TopicIndexRow: {
+        properties: {
+          commentCount: [Object],
+          createdAt: [Object],
+          createdBy: [Object],
+          lastActivityAt: [Object],
+          title: [Object]
+        },
+        required: [ "title", "createdAt", "commentCount", "lastActivityAt" ],
+        type: "object"
+      },
+      TopicLink: {
+        properties: {
+          addedAt: [Object],
+          addedBy: [Object],
+          kind: [Object],
+          label: [Object],
+          url: [Object]
+        },
+        required: [ "kind", "url", "label" ],
+        type: "object"
+      },
+      TopicLinkKind: { enum: [ "session", "topic", "pr", "web" ] },
+      TopicMentionRef: {
+        properties: { destination: [Object], modifiedTitle: [Object] },
+        required: [ "destination", "modifiedTitle" ],
+        type: "object"
+      },
+      TopicMentionRefMap: {
+        additionalProperties: { "$ref": "#/$defs/TopicMentionRef" },
+        properties: {},
+        type: "object"
+      },
+      TopicPiece: {
+        properties: {
+          "$NAME": [Object],
+          addComment: [Object],
+          addLink: [Object],
+          body: [Object],
+          bodyUpdatedAt: [Object],
+          bodyUpdatedBy: [Object],
+          commentCount: [Object],
+          comments: [Object],
+          createdAt: [Object],
+          createdBy: [Object],
+          createdByName: [Object],
+          lastActivityAt: [Object],
+          links: [Object],
+          mention: [Object],
+          mentioned: [Object],
+          mentions: [Object],
+          referencedBy: [Object],
+          references: [Object],
+          setBody: [Object],
+          title: [Object],
+          unmention: [Object]
+        },
+        required: [
+          "createdByName", "body",
+          "comments",      "links",
+          "mentions",      "references",
+          "mentioned",     "referencedBy",
+          "addComment",    "addLink",
+          "setBody",       "$NAME",
+          "title",         "createdAt",
+          "commentCount",  "lastActivityAt"
+        ],
+        type: "object"
+      },
+      TopicSummary: {
+        properties: {
+          commentCount: [Object],
+          createdAt: [Object],
+          createdBy: [Object],
+          lastActivityAt: [Object],
+          title: [Object]
+        },
+        required: [ "title", "createdAt", "commentCount", "lastActivityAt" ],
+        type: "object"
+      },
+      UnmentionEvent: {
+        properties: { topic: [Object] },
+        required: [ "topic" ],
+        type: "object"
+      }
+    },
+    description: "Topics — a tracker over #topic pieces: durable units of shared attention\n" +
+      "(CT-1878). Deliberately minimal: no statuses, labels, or assignees; topics\n" +
+      "sort by last activity. Replaces Linear / GitHub issues / loose process docs\n" +
+      "for the team; PR workflows stay in GitHub and arrive here as links.\n" +
+      "\n" +
+      "Headless use: survey the whole board with one bounded read of `index` — a\n" +
+      "row IS its topic, so a row's own address (`--select index[].@`) is what\n" +
+      "that topic's reads and verbs take as the piece. File with `addTopic`,\n" +
+      "title and optional initial body in one call, then work on the topic\n" +
+      "directly: the body is its living document, the thread its append-only\n" +
+      "deliberation. Sign every mutation with `agentName` — Fabric records the\n" +
+      "human principal behind the key; the name says which agent acted under it.",
+    properties: {
+      "$NAME": { type: "string" },
+      "$UI": { "$ref": "https://commonfabric.org/schemas/vnode.json" },
+      addTopic: {
+        "$ref": "#/$defs/AddTopicEvent",
+        asCell: [ "stream" ],
+        description: "File a topic. The atomic unit takes the initial body with the title, so\n" +
+          "no reader observes a title-only halfway state and no follow-up `setBody`\n" +
+          "finishes a create. Returns the created topic as its survey row — the\n" +
+          "reference plus the write-time facts the pattern resolved."
+      },
+      crossrefs: {
+        default: [],
+        description: "The board's mention pivot, one row per topic: the topic, and the topics\n" +
+          "that mention it. Published so a topic composed outside `addTopic` can be\n" +
+          "wired to the same table the board's own children read — the graph is\n" +
+          "derived once, here, and never per topic.",
+        items: { "$ref": "#/$defs/TopicCrossrefRow" },
+        type: "array"
+      },
+      index: {
+        default: [],
+        description: "The full-board survey surface: one bounded row per topic, carrying the\n" +
+          "scalars a survey reads. A row IS its topic, so a row's own address is the\n" +
+          "topic's — `--select index[].@` reads it, and an index into this array is\n" +
+          "not a stable address.",
+        items: { "$ref": "#/$defs/TopicIndexRow" },
+        type: "array"
+      },
+      mentionable: {
+        default: [],
+        description: "The same list, under the name the topic pattern's editor autocompletes\n" +
+          "over — what `addTopic` wires into each child as its mention universe.",
+        items: { "$ref": "#/$defs/TopicPiece" },
+        type: "array"
+      },
+      myName: { type: "string" },
+      newTitle: {
+        description: "Session-local draft for the footer composer (exposed for embedding and\n" +
+          "headless driving, like the chat exemplar's drafts).",
+        type: "string"
+      },
+      setMyName: {
+        asCell: [ "stream" ],
+        deprecated: true,
+        properties: { name: [Object] },
+        required: [ "name" ],
+        type: "object"
+      },
+      submitTopic: {
+        asCell: [ "stream", "opaque" ],
+        description: "Submit the footer composer as the current viewer's canonical Profile.",
+        tier: "wrapper"
+      },
+      topicCount: {
+        description: "How many topics the board holds, nulls included.",
+        type: "number"
+      },
+      topics: {
+        description: "The board's topics, in filing order, as complete pieces — bodies,\n" +
+          "threads, and verbs included. Survey through `index` instead; read this\n" +
+          "when you already know which topic you are expanding.",
+        items: { "$ref": "#/$defs/TopicPiece" },
+        type: "array"
+      }
+    },
+    required: [
+      "topics",      "mentionable",
+      "topicCount",  "crossrefs",
+      "index",       "addTopic",
+      "myName",      "setMyName",
+      "submitTopic", "$NAME",
+      "$UI"
+    ],
+    tags: [ "topic" ],
+    type: "object"
+  },
+  overwrite: "redirect",
+  viaLinkHop: true
+}
+
+[topics-journey] arm=ON seed echo ms: 1751 945
+[topics-series] arm=ON n=20 delay=2000ms load1/5/15=6.84/7.43/7.05
+[topics-series] echo    median=2453ms q1=1131ms q3=2950ms p95=4267ms min=651ms max=4267ms
+[topics-series] arrival median=2592ms q1=1178ms q3=3103ms p95=4423ms min=680ms max=4423ms
+[topics-series] gap     median=118ms q1=47ms q3=153ms p95=188ms min=19ms max=188ms
+[topics-series] per-event echo ms: 972 651 713 704 933 1131 1447 1742 1790 2954 2475 2426 2605 2578 3609 3869 4267 2950 2453 2930
+[topics-series] per-event arrival ms: 1000 680 731 733 971 1178 1500 1838 1870 3046 2592 2545 2727 2709 3759 4024 4423 3103 2622 3118
+[topics-series] per-event gap ms: 27 29 19 29 38 47 52 96 80 92 118 119 122 131 150 155 157 153 169 188
+
+[topics-journey ON] step timings (total 7024ms):
+      1703ms  board create + start (controller)
+      1751ms  addTopic seed 1 echo (controller)
+       945ms  addTopic seed 2 echo (controller)
+        52ms  fid capture (result.pull + resolveAsCell x2)
+       862ms  browser cold load: goto + login
+         4ms  browser runtime idle
+      1585ms  browser renders both seed titles
+        65ms  navigate-to-topic: click Open -> piece view
+        57ms  post-navigation runtime idle
+[0m[38;5;245m----- output end -----[0m
+  measures the topics journey ON-vs-OFF stimuli ... [0m[32mok[0m [0m[38;5;245m(1m32s)[0m
+Topics journey benchmark (scratch instrument) ... [0m[32mok[0m [0m[38;5;245m(1m38s)[0m
+
+[0m[32mok[0m | 1 passed (1 step) | 0 failed [0m[38;5;245m(1m38s)[0m
+

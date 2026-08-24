@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="deno test" tests="2" failures="0" errors="0" time="63.849">
+    <testsuite name="./integration/topics-journey-bench.scratch.test.ts" tests="1" disabled="0" errors="0" failures="0">
+        <testcase name="Topics journey benchmark (scratch instrument)" classname="./integration/topics-journey-bench.scratch.test.ts" time="63.829" line="97" col="1">
+        </testcase>
+    </testsuite>
+    <testsuite name="https://jsr.io/@std/testing/1.0.19/_test_suite.ts" tests="1" disabled="0" errors="0" failures="0">
+        <testcase name="Topics journey benchmark (scratch instrument) &gt; measures the topics journey ON-vs-OFF stimuli" classname="https://jsr.io/@std/testing/1.0.19/_test_suite.ts" time="60.653" line="172" col="39">
+        </testcase>
+    </testsuite>
+</testsuites>

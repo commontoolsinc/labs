@@ -1,0 +1,10 @@
+[0m[38;5;245mrunning 1 test from ./integration/topics-navigation.test.ts[0m
+Topics durable navigation ...
+[0m[38;5;245m------- output -------[0m
+Experimental flag overrides: serverExecution=true
+[0m[38;5;245m----- output end -----[0m
+  opens a topic after a cold browser load without scheduler handlers ... [0m[32mok[0m [0m[38;5;245m(1s)[0m
+Topics durable navigation ... [0m[32mok[0m [0m[38;5;245m(11s)[0m
+
+[0m[32mok[0m | 1 passed (1 step) | 0 failed [0m[38;5;245m(11s)[0m
+
