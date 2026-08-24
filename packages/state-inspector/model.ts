@@ -52,10 +52,16 @@
 // └────────────────────────────────────────────────────────────────────────────┘
 
 import { isObjectNotArray } from "@commonfabric/utils/types";
+import { utf8Compare } from "@commonfabric/utils/utf8";
 
 import type { SpaceDb } from "./db.ts";
 import { countLinks, parseSigilLink, summarize } from "./decode.ts";
-import { reconstructDocument } from "./reconstruct.ts";
+import {
+  branchReadChain,
+  type BranchReadLink,
+  reconstructDocument,
+  visibleRevisionRows,
+} from "./reconstruct.ts";
 import type { EntityDocument, ReconstructOptions } from "./reconstruct.ts";
 
 export type EntityKind =
@@ -371,12 +377,9 @@ export function buildModuleIndex(
 ): Map<string, ModuleEntry> {
   const branch = opts.branch ?? "";
   const scope = opts.scope ?? "space";
-  const ids = space.db
-    .prepare(
-      `SELECT DISTINCT id FROM revision WHERE branch = ? AND scope_key = ?`,
-    )
-    .all<{ id: string }>(branch, scope)
-    .map((r) => r.id);
+  // Same enumeration every space-wide scan walks: branch-visible, and without
+  // the tombstones that could never reconstruct into a module anyway.
+  const ids = visibleEntityRows(space, { branch, scope }).map((r) => r.id);
 
   const index = new Map<string, ModuleEntry>();
   for (const id of ids) {
@@ -445,52 +448,325 @@ const KIND_ORDER: Record<EntityKind, number> = {
   unknown: 6,
 };
 
-/**
- * Model every entity in a space — the fluent "what is in here?" view. One
- * reconstruction pass: collect documents, build the module index from them,
- * then classify each. Sorted pieces → modules → streams → schemas → cells.
- * Replaces the old value-shape-only `listEntities` (which undercounted pieces).
- */
-export function listEntityModels(
-  space: SpaceDb,
-  opts: { branch?: string; scope?: string; limit?: number } = {},
-): EntityModel[] {
-  const branch = opts.branch ?? "";
-  const scope = opts.scope ?? "space";
-  const limit = opts.limit ?? 5000;
-  const rows = space.db
-    .prepare(
-      `SELECT id, count(*) revisions FROM revision
-       WHERE branch = ? AND scope_key = ?
-       GROUP BY id ORDER BY revisions DESC LIMIT ?`,
-    )
-    .all<{ id: string; revisions: number }>(branch, scope, limit);
+/** Every kind an entity classifies as, in the order a listing presents them. */
+export const entityKinds: readonly EntityKind[] = Object.keys(
+  KIND_ORDER,
+) as EntityKind[];
 
-  // Single reconstruction pass: cache docs + build the module index inline.
-  const docs = new Map<string, EntityDocument | undefined>();
-  const moduleIndex = new Map<string, ModuleEntry>();
-  for (const r of rows) {
-    let doc: EntityDocument | undefined;
-    try {
-      doc = reconstructDocument(space, { id: r.id, branch, scope });
-    } catch {
-      doc = undefined;
-    }
-    docs.set(r.id, doc);
-    const v = doc?.value;
-    if (isModuleValue(v)) {
-      const existing = moduleIndex.get(v.identity);
-      if (!existing || v.kind === "source") {
-        moduleIndex.set(v.identity, {
-          id: r.id,
-          filename: v.filename,
-          kind: v.kind,
-        });
+/** Whether a string names one of the kinds an entity classifies as. */
+export function isEntityKind(value: string): value is EntityKind {
+  return (entityKinds as readonly string[]).includes(value);
+}
+
+/**
+ * How many entities a space-wide scan reconstructs before it stops. Every scan
+ * is capped, because reconstruction is per-entity work and a space can hold
+ * more entities than anyone wants to wait for.
+ */
+export const DEFAULT_SCAN_LIMIT = 5000;
+
+/**
+ * The cap a scan will actually apply, for a limit that may be anything a caller
+ * passed. Entities are counted one at a time, so a cap has to be a whole
+ * number: a fractional one no integer count can ever equal is a cap that never
+ * takes effect, and the three scans disagreed about which way to round it.
+ */
+export function scanLimit(limit: number | undefined): number {
+  if (limit === undefined || Number.isNaN(limit)) return DEFAULT_SCAN_LIMIT;
+  return Math.max(0, Math.floor(limit));
+}
+
+/**
+ * How far a capped space-wide scan reached. A scan that stops at its cap
+ * returns a SUBSET, and a caller that cannot tell a capped result from a
+ * complete one will read the subset as the whole space — so every capped scan
+ * reports this alongside its result.
+ */
+export interface ScanExtent {
+  /** The cap the scan applied. */
+  limit: number;
+  /**
+   * Entities this branch and scope can see, before any `kind` filter — the
+   * size of the set the scan walked (`visibleEntityRows`), so a complete pass
+   * describes exactly this many.
+   */
+  total: number;
+  /** True when the scan reached more of what was asked for than `limit`. */
+  truncated: boolean;
+  /**
+   * Entities the scan enumerated and could NOT describe — a payload that would
+   * not decode, or a reconstruction that threw. A separate count from
+   * `truncated` because it is a separate kind of incompleteness: raising
+   * `limit` does not recover one. Zero where a pass returns a row for every
+   * entity it reached, as `listEntityModels` does by modeling an unreadable
+   * entity `unknown`.
+   */
+  unreadable: number;
+}
+
+/** Whether a scan returned less than the whole set, for any reason. */
+export function isCompleteScan(extent: ScanExtent): boolean {
+  return !extent.truncated && extent.unreadable === 0;
+}
+
+/** One entity a scan can reach, and how many of its revisions it can see. */
+export interface EntityScanRow {
+  id: string;
+  revisions: number;
+  /**
+   * The chain link that owns the visible row. A pass describing an entity's
+   * history has to read THIS branch and no other: nearest-branch ownership
+   * hides a parent's log exactly as it hides the parent's value.
+   */
+  link: BranchReadLink;
+}
+
+/**
+ * Every entity a read on this branch and scope can see, busiest-first.
+ *
+ * This is the DOMAIN of every space-wide scan, and the set `ScanExtent.total`
+ * counts — one enumeration so that a scan's rows and its own report of how far
+ * it reached can never describe different sets. Two properties earn it:
+ *
+ *  - It reads through branch ancestry, not just the rows written ON `branch`.
+ *    A child branch inherits every entity its parent held at the fork
+ *    (`branchReadChain`), and a scan that enumerated only local rows would
+ *    report a listing complete while omitting entities the same branch reads
+ *    fine. `revisions` counts the history on the branch that OWNS the visible
+ *    row, which is the history a read from here can reach.
+ *  - It drops entities whose visible head is a `delete`, unless
+ *    `includeDeleted`. A tombstone reconstructs to nothing, so a pass that
+ *    describes reconstructed entities would otherwise count rows it never
+ *    describes — inflating the total and raising a truncation notice for a
+ *    result that was never truncated.
+ *
+ * Ties on `revisions` break by id through `utf8Compare`, so which entities a
+ * cap admits is a property of the space rather than of the day's query plan.
+ */
+export function visibleEntityRows(
+  space: SpaceDb,
+  opts: {
+    branch?: string;
+    scope?: string;
+    /** Include entities whose visible head is a `delete`. Default false. */
+    includeDeleted?: boolean;
+  } = {},
+): EntityScanRow[] {
+  const scope = opts.scope ?? "space";
+  const branch = opts.branch ?? "";
+  const rows = visibleRevisionRows(space, { branch, scope });
+
+  // Entities on ONE branch whose LAST row up to the cut is a delete. Asked for
+  // the other way round — find the deletes, then ask which are final — because
+  // deletes are a sliver of a space's rows, where deriving every entity's head
+  // op reads all of them. Keyed by the branch that OWNS the entity: a delete on
+  // a farther link is hidden by the nearer branch that claimed it.
+  const gone = new Set<string>();
+  if (!opts.includeDeleted) {
+    const tombstoned = space.db.prepare(
+      `SELECT r.id FROM revision r
+       WHERE r.branch = ? AND r.scope_key = ? AND r.op = 'delete' AND r.seq <= ?
+         AND NOT EXISTS (
+           SELECT 1 FROM revision h
+           WHERE h.branch = r.branch AND h.id = r.id
+             AND h.scope_key = r.scope_key AND h.seq <= ?
+             AND (h.seq > r.seq OR (h.seq = r.seq AND h.op_index > r.op_index))
+         )`,
+    );
+    for (const link of branchReadChain(space, branch)) {
+      for (
+        const r of tombstoned.all<{ id: string }>(
+          link.branch,
+          scope,
+          link.atSeq,
+          link.atSeq,
+        )
+      ) {
+        gone.add(`${link.branch}\u0000${r.id}`);
       }
     }
   }
 
-  const out: EntityModel[] = rows.map((r): EntityModel => {
+  return rows
+    .filter((r) => !gone.has(`${r.link.branch}\u0000${r.id}`))
+    .map((r) => ({ id: r.id, revisions: r.revisions, link: r.link }))
+    // `utf8Compare` rather than `<`, matching `fingerprint.ts` and every other
+    // id ordering in the tree. The tie-break exists to make the order a
+    // property of the space; a hand-rolled comparison is a second definition of
+    // string order in the one domain that already has a shared one.
+    .sort((a, b) => b.revisions - a.revisions || utf8Compare(a.id, b.id));
+}
+
+/**
+ * How many entities a read on this branch and scope can see — the size of
+ * `visibleEntityRows`, and by construction the same set a scan walks.
+ */
+export function countEntities(
+  space: SpaceDb,
+  opts: { branch?: string; scope?: string; includeDeleted?: boolean } = {},
+): number {
+  return visibleEntityRows(space, opts).length;
+}
+
+/** An entity's kind without modeling it; `unknown` when it cannot be read. */
+function kindOf(doc: EntityDocument | undefined): EntityKind {
+  return doc === undefined ? "unknown" : classifyDocument(doc).kind;
+}
+
+/**
+ * The pattern identity a document's `moduleId` would resolve through — the
+ * same `patternIdentity.identity` `classifyDocument` reads into
+ * `lineage.pattern`, without paying for a full classification.
+ */
+function patternIdentityOf(
+  doc: EntityDocument | undefined,
+): string | undefined {
+  if (doc === undefined || !isObjectNotArray(doc.patternIdentity)) return;
+  const identity = (doc.patternIdentity as { identity?: unknown }).identity;
+  return typeof identity === "string" ? identity : undefined;
+}
+
+/** A capped listing of a space's entities, with how far its scan reached. */
+export interface EntityListing {
+  /** The entities modeled, at most `extent.limit` of them. */
+  entities: EntityModel[];
+  extent: ScanExtent;
+}
+
+/**
+ * Model the entities in a space — the fluent "what is in here?" view. One
+ * reconstruction pass: collect documents, build the module index from them,
+ * then classify each. Sorted pieces → modules → streams → schemas → cells.
+ *
+ * `limit` bounds what the caller asked for, so `kind` selects DURING the scan
+ * rather than over its result: filtering afterwards would yield "the pieces
+ * among the first `limit` entities" rather than "up to `limit` pieces", which
+ * reads the same and is a different set. A `kind` scan therefore walks the
+ * space until it has enough matches, and costs more than an unfiltered one.
+ */
+export function listEntityModels(
+  space: SpaceDb,
+  opts: {
+    branch?: string;
+    scope?: string;
+    limit?: number;
+    kind?: EntityKind;
+  } = {},
+): EntityListing {
+  const branch = opts.branch ?? "";
+  const scope = opts.scope ?? "space";
+  const limit = scanLimit(opts.limit);
+  const kind = opts.kind;
+
+  // A listing describes the space's RECORDS, so it keeps tombstones (they model
+  // as `unknown`) — which also keeps `extent.total` counting exactly the set
+  // this pass returns.
+  const rows = visibleEntityRows(space, {
+    branch,
+    scope,
+    includeDeleted: true,
+  });
+
+  // Single reconstruction pass: cache docs + build the module index inline.
+  // Only matching documents are cached; a `kind` scan may pass over far more
+  // entities than it keeps, and holding every value would cost the space.
+  const docs = new Map<string, EntityDocument | undefined>();
+  const moduleIndex = new Map<string, ModuleEntry>();
+  const indexModule = (id: string, doc: EntityDocument | undefined): void => {
+    const v = doc?.value;
+    if (!isModuleValue(v)) return;
+    const existing = moduleIndex.get(v.identity);
+    // First wins, but a `source` entity always supersedes a `compiled` one.
+    if (!existing || v.kind === "source") {
+      moduleIndex.set(v.identity, { id, filename: v.filename, kind: v.kind });
+    }
+  };
+  // A throw and a tombstone both yield no document, and only one of them is an
+  // error: a deleted entity is definitively not a `piece`, while an entity that
+  // would not decode might have been one. A `kind` filter drops both, so the
+  // two have to stay distinguishable or the dropped error goes unreported.
+  const read = (
+    id: string,
+  ): { doc: EntityDocument | undefined; failed: boolean } => {
+    try {
+      return {
+        doc: reconstructDocument(space, { id, branch, scope }),
+        failed: false,
+      };
+    } catch {
+      return { doc: undefined, failed: true };
+    }
+  };
+
+  const kept: EntityScanRow[] = [];
+  let truncated = false;
+  let scanned = 0;
+  // Rows a `kind` filter dropped BECAUSE they would not reconstruct. An
+  // unfiltered listing keeps every row it reaches — an unreadable one included,
+  // modeled `unknown` — so it never has any; a filtered one silently omits what
+  // it cannot classify, and `--require-complete` has to hear about it.
+  let unreadable = 0;
+  // Collect: one entity past the limit is kept and dropped, because HOLDING it
+  // is what proves more remain — truncation is never inferred from a count that
+  // happened to land on the cap.
+  for (; scanned < rows.length; scanned++) {
+    const r = rows[scanned];
+    const { doc, failed } = read(r.id);
+    indexModule(r.id, doc);
+    if (kind !== undefined && kindOf(doc) !== kind) {
+      if (failed) unreadable++;
+      continue;
+    }
+    if (kept.length === limit) {
+      truncated = true;
+      scanned++;
+      break;
+    }
+    docs.set(r.id, doc);
+    kept.push(r);
+  }
+
+  // Resolve: a piece's `moduleId` comes from a module that can sit ANYWHERE in
+  // the order — modules are written once, so they rank last among busiest-first
+  // rows, and a `kind` scan that stopped at the cap can hold pieces whose module
+  // it never reached. Their `moduleId` would come back `undefined`, which reads
+  // as "this piece has no pattern" rather than "the scan stopped early".
+  //
+  // A `kind` scan is where that matters: the module is a DIFFERENT kind, so it
+  // could never be in the result and the caller has no way to resolve the
+  // identity themselves. An unfiltered capped listing is a prefix that says so,
+  // and its unresolved ids point outside the prefix the same way `lineage.owner`
+  // and `lineage.argument` already do — so it keeps its cheap scan.
+  const wanted = new Set<string>();
+  if (kind !== undefined) {
+    for (const doc of docs.values()) {
+      const identity = patternIdentityOf(doc);
+      if (
+        identity !== undefined && moduleIndex.get(identity)?.kind !== "source"
+      ) {
+        wanted.add(identity);
+      }
+    }
+  }
+  // Reachable only when collection stopped at the cap — the loop above runs to
+  // `rows.length` otherwise — so a failure this walk meets is already covered by
+  // `truncated`, and counting it under `unreadable` would contradict the notice
+  // that goes with it: raising `--limit` DOES bring these rows into the pass
+  // above, which reports them. Pinned by a test, since the invariant lives in
+  // the loop bounds rather than anywhere it can be read off.
+  //
+  // The walk ends the moment nothing is still wanted.
+  for (; wanted.size > 0 && scanned < rows.length; scanned++) {
+    const r = rows[scanned];
+    const { doc } = read(r.id);
+    indexModule(r.id, doc);
+    const v = doc?.value;
+    // A `source` entity supersedes a `compiled` one, so a want is only settled
+    // once source is seen — or the rows run out.
+    if (isModuleValue(v) && v.kind === "source") wanted.delete(v.identity);
+  }
+
+  const out: EntityModel[] = kept.map((r): EntityModel => {
     const doc = docs.get(r.id);
     if (doc === undefined) {
       return {
@@ -513,11 +789,24 @@ export function listEntityModels(
     return m;
   });
 
-  return out.sort(
-    (a, b) =>
-      KIND_ORDER[a.kind] - KIND_ORDER[b.kind] ||
-      (b.revisions ?? 0) - (a.revisions ?? 0),
-  );
+  return {
+    entities: out.sort(
+      (a, b) =>
+        KIND_ORDER[a.kind] - KIND_ORDER[b.kind] ||
+        (b.revisions ?? 0) - (a.revisions ?? 0),
+    ),
+    extent: {
+      // `rows`, not a second count: the listing and its own report of how far
+      // it reached are the same enumeration, so they cannot drift. It counts
+      // tombstones because this listing returns them, which is also why a
+      // `graph` or `html` total over the same space is smaller — those describe
+      // reconstructed entities, and a tombstone reconstructs to nothing.
+      limit,
+      total: rows.length,
+      truncated,
+      unreadable,
+    },
+  };
 }
 
 export interface PieceCellRef {

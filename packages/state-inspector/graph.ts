@@ -24,6 +24,9 @@ import {
   isModuleValue,
   modelFromDocument,
   type ModuleEntry,
+  type ScanExtent,
+  scanLimit,
+  visibleEntityRows,
 } from "./model.ts";
 
 export type EdgeKind = "pattern" | "argument" | "owns" | "link";
@@ -61,6 +64,8 @@ export interface SpaceGraph {
     edgesByKind: Record<EdgeKind, number>;
     externalEdges: number;
   };
+  /** How far the entity scan this graph was built from reached. */
+  extent: ScanExtent;
 }
 
 function shortPath(p?: readonly string[]): string | undefined {
@@ -83,29 +88,35 @@ export function buildSpaceGraph(
 ): SpaceGraph {
   const branch = opts.branch ?? "";
   const scope = opts.scope ?? "space";
-  const limit = opts.limit ?? 5000;
+  const limit = scanLimit(opts.limit);
   const includeLinks = opts.includeLinks ?? true;
   const own = (space.path.split("/").pop() ?? "").replace(/\.sqlite$/, "");
 
-  const rows = space.db
-    .prepare(
-      `SELECT id, count(*) revisions FROM revision
-       WHERE branch = ? AND scope_key = ?
-       GROUP BY id ORDER BY revisions DESC LIMIT ?`,
-    )
-    .all<{ id: string; revisions: number }>(branch, scope, limit);
+  // The entities a read on this branch can see, tombstones already dropped —
+  // the same set this graph is built from, so `extent.total` counts what a
+  // complete graph would hold and truncation is a fact rather than an inference
+  // from a count landing on the cap.
+  const rows = visibleEntityRows(space, { branch, scope });
+  const truncated = rows.length > limit;
+  const scanned = truncated ? rows.slice(0, limit) : rows;
+  let unreadable = 0;
 
   // Pass 1: reconstruct + build the module index (identity → module entity).
   const docs = new Map<string, EntityDocument>();
   const moduleIndex = new Map<string, ModuleEntry>();
-  for (const r of rows) {
+  for (const r of scanned) {
     let doc: EntityDocument | undefined;
     try {
       doc = reconstructDocument(space, { id: r.id, branch, scope });
     } catch {
       doc = undefined;
     }
-    if (!doc) continue;
+    if (!doc) {
+      // Enumerated but not placed in the graph: counted, never silently dropped, or a pass
+      // that skipped it would report itself complete over a smaller set.
+      unreadable++;
+      continue;
+    }
     docs.set(r.id, doc);
     const v = doc.value;
     if (isModuleValue(v)) {
@@ -226,6 +237,12 @@ export function buildSpaceGraph(
     nodes: [...nodes.values()],
     edges: deduped,
     stats: { nodesByKind, edgesByKind, externalEdges },
+    extent: {
+      limit,
+      total: rows.length,
+      truncated,
+      unreadable,
+    },
   };
 }
 
@@ -280,6 +297,9 @@ export function subgraphAround(
     nodes,
     edges,
     stats: { nodesByKind, edgesByKind, externalEdges },
+    // A neighborhood inherits the cap of the scan it was cut from: narrowing
+    // to one root does not restore the entities the scan never reached.
+    extent: graph.extent,
   };
 }
 
