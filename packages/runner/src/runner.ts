@@ -114,6 +114,7 @@ import {
 } from "./storage/reactivity-log.ts";
 import {
   isConflictRejection,
+  isStaleConfirmedReadConflict,
   isStorageTransactionInconsistent,
 } from "./storage/rejection.ts";
 
@@ -3392,6 +3393,7 @@ export class Runner {
     speculativeConsequence?: { eventId: string },
   ): Cancel {
     const resultLink = resultCell.getAsNormalizedFullLink();
+    const startLifecycleEpoch = this.lifecycleEpoch;
     const ownership = this.createDeferredStartOwnership(resultCell);
     tx.addCommitCallback((_committedTx, result) => {
       if (result.error) {
@@ -3461,6 +3463,17 @@ export class Runner {
         startTx.commit().then(({ error }) => {
           if (error) {
             ownership.cancel();
+            if (
+              this.catchUpAndStartOnStaleRead(
+                error,
+                resultCell,
+                "start",
+                startLifecycleEpoch,
+                pullOnceAfterStart,
+              )
+            ) {
+              return;
+            }
             logger.error(
               "tx-commit-error",
               "Error committing deferred start transaction",
@@ -3489,6 +3502,172 @@ export class Runner {
     return ownership.cancel;
   }
 
+  /**
+   * The catch-up recovery a commit-gated start earns when its transaction
+   * is refused for a STALE CONFIRMED READ under server execution — the
+   * seat of the OW45 arm-B client-start fix (verification-coverage.md;
+   * RULED 2026-08-24). Returns whether a recovery was scheduled — `false`
+   * leaves the caller's terminal arm to run exactly as it does for every
+   * other refusal.
+   *
+   * WHY a start earns one at all. Under the flag a piece is materialized
+   * SERVER-side, and the client's navigate-deferred start reads that
+   * piece's computed documents to base its own transaction on. At first
+   * hydration those two acts race by construction: the serving loop's
+   * derived commits for the just-born piece are in flight exactly while
+   * the client reads their targets as absent, so the client's basis is
+   * stale whenever the interleaving is tight — the EXPECTED outcome of
+   * losing the race, not an exceptional one. Terminating there is what
+   * made the race fatal: `startWithTx` has already installed the
+   * client-side piece inside the transaction when the refusal lands, the
+   * error arm's cancel tears that install down, and nothing re-runs it —
+   * the piece has no client context for the rest of the session and every
+   * read that depends on it resolves to nothing, while the store holds
+   * every append (verification-coverage.md OW45 arm B, the run b04 catch).
+   *
+   * WHAT the recovery does — and deliberately does not. The refusal is
+   * treated as "the server won the race": await the conflict's readiness
+   * (the session catch-up the wire attaches as `readyToRetry`, plus the
+   * named document's pull — `Runtime.awaitCommitRetryReadiness`), then
+   * START the piece from the served documents through the ordinary load
+   * walk (`doStart`), the same walk a reload runs. The recovery arm
+   * COMMITS NOTHING: it does not re-mint and re-commit the refused
+   * materialization (#6208's retry — census-proved non-convergent,
+   * closed), and it mints no transaction of its own. The load walk's own
+   * instantiation transaction keeps its sanctioned `bookkeeping` stamp
+   * exactly as a reload's does (serving-loop.md §3d's piece-start site),
+   * and for a piece the server materialized it has nothing left to write.
+   * A document still in flight reads as PENDING and re-triggers on
+   * arrival (speculation.md §2's unresolved-input semantics) — the
+   * entirely reactive flow that catches up with the server.
+   *
+   * ON-ONLY, by the coordinator's conservative default: under OFF a stale
+   * confirmed read on a deferred start means another CLIENT raced, and
+   * the cross-tab mutex semantics own that story — the OFF arm keeps
+   * today's terminal behavior byte-for-byte.
+   *
+   * WHAT stays terminal. Only a stale confirmed read recovers
+   * ({@link isStaleConfirmedReadConflict}). Every other refusal keeps
+   * today's behavior exactly: a CFC or speculative-basis refusal, an
+   * authorization denial, a precondition failure, a row-label violation —
+   * none of them describe a basis the served documents repair.
+   *
+   * RE-ENTRANCY. The recovery registers a FRESH ownership token under the
+   * result's key BEFORE the readiness gate is awaited, so a stop, a
+   * release, or a navigation away during that window tombstones it
+   * through the same path that already tombstones a pending first attempt
+   * (`cancelPendingDeferredStarts`); the load walk that follows runs
+   * under the runner's ordinary start-attempt tracking, which a stop
+   * invalidates like any other start. The lifecycle epoch covers the
+   * teardown window a token cannot: `stopAll()` cancels the tokens it can
+   * SEE and clears the index, so a teardown landing before this
+   * continuation runs leaves nothing to cancel a token minted afterwards.
+   */
+  private catchUpAndStartOnStaleRead<T>(
+    error: { name?: string; message?: string },
+    resultCell: Cell<T>,
+    label: string,
+    scheduledLifecycleEpoch: number,
+    pullOnceAfterStart: boolean,
+  ): boolean {
+    if (this.runtime.experimental.serverExecution !== true) return false;
+    if (!isStaleConfirmedReadConflict(error)) return false;
+    if (scheduledLifecycleEpoch !== this.lifecycleEpoch) return false;
+    logger.warn(
+      "deferred-start-catchup",
+      `Deferred ${label} transaction lost its first-hydration basis to ` +
+        "the serving side; starting from the served documents instead",
+      error,
+    );
+    // Registered BEFORE the readiness gate is awaited: this token is what
+    // a concurrent stop or teardown cancels to keep the recovery from
+    // firing into a piece that is no longer wanted.
+    const recoveryOwnership = this.createDeferredStartOwnership(resultCell);
+    const recovery = this.runtime.awaitCommitRetryReadiness(error)
+      .then(async () => {
+        // Paired guards, each the other's backstop (the mutation pins kill
+        // them jointly): the token covers a stop or a stopAll that ran
+        // while the readiness gate was awaited (the token was registered
+        // before the await, so the sweep sees it), and the epoch covers a
+        // teardown that ran before this recovery was even scheduled, when
+        // the sweep could not have seen a token that did not exist yet.
+        if (
+          recoveryOwnership.isCancelled() ||
+          scheduledLifecycleEpoch !== this.lifecycleEpoch
+        ) {
+          return;
+        }
+        try {
+          const started = await this.startFromServedState(resultCell);
+          if (
+            started && pullOnceAfterStart && !recoveryOwnership.isCancelled()
+          ) {
+            this.pullCellOnceInPullMode(
+              this.runtime.getCellFromLink<T>(
+                resultCell.getAsNormalizedFullLink(),
+              ),
+            );
+          }
+        } finally {
+          // The token exists to cover the WAIT; the load walk installs
+          // (or declines) its own registration. Settling the token here
+          // only drops the pending-index entry — it was never
+          // markInstalled, so this cancel touches no live registration.
+          recoveryOwnership.cancel();
+        }
+      })
+      .catch((cause) => {
+        // Loud in every arm, per serving-loop.md §3d's piece-start
+        // surfacing rule: a failed recovery is a piece with no client
+        // context, never a silent state.
+        logger.error(
+          "deferred-start-catchup-failed",
+          `Deferred ${label} catch-up start failed; the piece has no ` +
+            "client-side context",
+          cause,
+        );
+      });
+    this.pendingDeferredStartCatchUps.add(recovery);
+    recovery.finally(() => this.pendingDeferredStartCatchUps.delete(recovery));
+    return true;
+  }
+
+  /**
+   * The ordinary load walk (`doStart`), invoked for a catch-up recovery:
+   * the piece starts from what the store serves, exactly as a reload
+   * would start it. Identical to {@link start} except that the result is
+   * NOT marked independently started — a recovered deferred start remains
+   * its parent's child, releasable exactly like the install the refused
+   * attempt would have registered.
+   */
+  private startFromServedState<T>(resultCell: Cell<T>): Promise<boolean> {
+    const attempt: StartAttempt = {
+      lifecycleEpoch: this.lifecycleEpoch,
+      schedulePatternUpdate: true,
+      generationsByDoc: new Map(),
+      preResolutionStopKeys: new Set(),
+    };
+    this.activeStartAttempts.add(attempt);
+    this.trackStartAttempt(attempt, this.getDocKey(resultCell));
+    try {
+      return this.doStart(resultCell, new Set(), attempt)
+        .then((started) => {
+          // Same target-scoped claim as start(): a stop that superseded
+          // this walk, or a start that resolved elsewhere, reports false.
+          const target = attempt.targetKey;
+          return started && target !== undefined &&
+            this.isStartAttemptCurrentFor(attempt, target) &&
+            this.cancels.has(target);
+        })
+        .finally(() => {
+          this.finishStartAttempt(attempt);
+        });
+    } catch (error) {
+      this.finishStartAttempt(attempt);
+      return Promise.reject(error);
+    }
+  }
+
   private runPatternAfterSuccessfulCommit<T = any>(
     tx: IExtendedStorageTransaction,
     resultCell: Cell<T>,
@@ -3499,6 +3678,7 @@ export class Runner {
     speculativeConsequence?: { eventId: string },
   ): Cancel {
     const resultLink = resultCell.getAsNormalizedFullLink();
+    const startLifecycleEpoch = this.lifecycleEpoch;
     const ownership = this.createDeferredStartOwnership(resultCell);
     tx.addCommitCallback((_committedTx, result) => {
       if (result.error) {
@@ -3563,6 +3743,17 @@ export class Runner {
         startTx.commit().then(({ error }) => {
           if (error) {
             ownership.cancel();
+            if (
+              this.catchUpAndStartOnStaleRead(
+                error,
+                resultCell,
+                "cross-space pattern",
+                startLifecycleEpoch,
+                pullOnceAfterStart,
+              )
+            ) {
+              return;
+            }
             logger.error(
               "tx-commit-error",
               "Error committing deferred cross-space pattern transaction",

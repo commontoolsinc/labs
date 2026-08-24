@@ -344,11 +344,15 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       expect(injector.refusals()).toBe(1);
       // …the piece is RUNNING (the b04 death left no registration here)…
       expect(runtime.runner.cancels.has(key(result))).toBe(true);
-      // …its dependent reads resolve (the client context serves them)…
-      expect(result.get()?.doubled).toBe(6);
       // …and the recovery arm committed NOTHING: not one commit reached
       // the store's door after the refusal.
       expect(storeCommits.count()).toBe(0);
+      // Its dependent reads resolve (the client context serves them). The
+      // pull-then-read is this harness's readable path for a derived value
+      // — the CLEAN gated ON run reads the same way — and a pull is a
+      // read, so the zero-commit count above already stands.
+      await result.pull();
+      expect(result.get()?.doubled).toBe(6);
     } finally {
       installed.restore();
       storeCommits.restore();
