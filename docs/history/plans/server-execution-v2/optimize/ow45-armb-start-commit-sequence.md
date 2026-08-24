@@ -364,7 +364,7 @@ client should issue even those 4 is a different question — the piece they set 
 is a *child* the server also instantiates, so on this evidence the durable
 content unique to the client's deferred start is **zero**.
 
-## 5. On the §3b read-and-render posture
+## 5. On the §3b read-and-render posture — and what N62 was deleted on
 
 Worth recording against the owner's framing, since it bears on whether the
 client should be issuing this commit at all: **"read-and-render" exists only as
@@ -373,7 +373,27 @@ is read-and-render") and `runtime-mapping.md:523` ("clients no longer run
 committed derivations at all") describe a posture nothing implements; the fork
 memo's option (b), "adopt-not-start under ON", is explicitly future work, and it
 calls the current client-side deferred start "a remnant still running against
-it". The measurement here is what that remnant costs: one duplicated 50-op
+it".
+
+**The sharp form of this is N62.** Observation adoption was DELETED in Phase 1
+stage C.2, and `runtime-mapping.md:520-524` states the premise plainly:
+
+> "Adoption existed so N client runtimes didn't all re-run what one already ran
+> — the multi-client symptom v2 removes at the root. Under the flag clients no
+> longer run committed derivations at all (reload is read-and-render, §3b), so
+> adoption has nothing to adopt."
+
+The measurement here says that premise is **not yet true in code**. The client
+and the serving loop each independently produced the same 50 operations for the
+same four child pieces, in the same run — precisely "two runtimes re-running
+what one already ran," the symptom adoption existed to prevent. N62's deletion
+was justified by a posture (§3b read-and-render) that the client does not yet
+adopt, so the deletion is currently running ahead of the code rather than behind
+it. That is a spec-vs-implementation gap for the owner to weigh, not a defect in
+the deletion decision: nothing here says adoption should come back, only that
+the condition cited for removing it has not landed.
+
+The measurement is what that remnant costs: one duplicated 50-op
 materialization per piece start, which is refused whenever the server's copy of
 the same work wins the race.
 
