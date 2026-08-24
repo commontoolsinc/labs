@@ -237,7 +237,21 @@ They are here, rather than in the originating transaction, because of nesting.
 `runWithStartOwnership(tx, patternImpl, inputs, childResultCell, …)`
 (`runner.ts:7483`) with the **start** transaction — so every CHILD pattern node
 a start instantiates has its full setup written into that start's own commit.
-The refused commit materializes four such child pieces.
+
+The refused commit materializes four such child pieces, and they decode as
+sub-pieces rather than the navigated target — read from their `$NAME` and
+`patternIdentity`:
+
+| `$NAME` | `patternIdentity.identity` |
+|---|---|
+| `BacklinksIndex` | `WnirWvtk7wCsoPNsu4IIKpp09TQeS7Ge…` |
+| `SummaryIndex` | `Kn-c_cnguU8O9EnpN43JHx-9ieIv9u3E…` |
+| `Grid View` | `eP2OivSIIN-HxgIDk_lS6XFoGREr7ZRZ…` |
+| `Grid View` | `eP2OivSIIN-HxgIDk_lS6XFoGREr7ZRZ…` (same pattern, second instance) |
+
+So even the irreducible 4 are children of the piece being started — which is
+why the serving side, whose `start()` instantiates the same children, wrote all
+four of them first.
 
 The same count across the chain, measured: commits 1, 2 and 3 carry **0**
 piece-root documents each (pure structure/wiring), commit 4 carries **1**, and
@@ -374,9 +388,11 @@ Stated as gaps rather than inferred:
   half of the *same* piece commit 5 instantiates — their `cid:` sets are
   disjoint, which points at different patterns. The chain is a descent through a
   piece graph; its exact parentage was not resolved.
-- **Whether the four piece roots in the refused commit are the piece the user
-  navigated to,** or four of its children. The `patternIdentity` shape is
-  measured; the identity behind it was not decoded.
+- ~~Whether the four piece roots are the navigated piece or its children.~~
+  **Resolved** — they are children (`BacklinksIndex`, `SummaryIndex`, and two
+  `Grid View` instances of one pattern). What is still *not* established is
+  which piece the navigate itself targeted, and therefore where in the chain of
+  five commits that piece's own root was written.
 - **Invariance across runs.** Two informative runs, s01 and s02 — both RED, both
   showing the same five-commit sequence with compositions 9/23/28/46/50, the
   same refusal at commit 5, and the same "all 50 ops present in the preceding
