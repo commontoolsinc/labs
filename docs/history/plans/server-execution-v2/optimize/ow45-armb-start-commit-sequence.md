@@ -2,7 +2,7 @@
 status: historical
 created: 2026-08-23
 archived: 2026-08-23
-reason: "Measurement answering the owner's OW45 arm-B question: is the refused 50-op deferred-start commit the piece's initial MATERIALIZATION, or a FOLLOW-UP first wave the client runs after a smaller materialization already landed? VERDICT — MATERIALIZATION, specifically the node-INSTANTIATION half of it, and it is the 5th and last of five client start commits (9, 23, 28, 46, 50 ops) of which the first four land successfully. So the owner is right that a smaller commit already lands first, but wrong that the 50-op commit is a derivation wave: no first-run output is in it (every `computed:` op it writes holds a wiring LINK, not a derived value; the scheduler's first run is a later macrotask in its own transactions). The decisive new fact is redundancy, not ordering: the SERVING side's own derived wave commit writes EVERY ONE of the same 50 operations — tuple for tuple in run s01, as a strict superset in run s02 — so client-only operations are 0 of 50 in all five measured refusals, and whichever side arrives second is refused as stale. CRUCIAL QUALIFIER: run s07 is GREEN — the step ran and PASSED — and its commit 5 was refused all the same by a wave covering 50/50. Across 5 informative runs the refusal is 5/5 while the verdict is 4 red / 1 green, so this duplicated materialization is the NORMAL steady state of a flag-ON client start, not the arm-B defect; removing it would remove the refusal but does NOT follow to arm B going green. Measured both directions in ONE run: session A's client lost to wave localSeq 7 and was REFUSED; session B's client won and a commit of the same shape was ACCEPTED, after which the server did smaller follow-up waves over the client's writes instead. On the shrink question the answer has a measured size: 4 of the 50 ops are piece ROOTS carrying the full setup state (patternIdentity, patternSetupIdentity, argument, internal, schema) — that is 'the pattern + the result cell'; the other 46 are structure, wiring and content-addressed schema the server writes anyway. Those 4 are in the START commit rather than the originating one because `instantiatePatternNode` runs `setupInternal` for CHILD pattern nodes inside the start tx — which also refines 'the server never writes setup': true of the top-level piece (the loop calls `start()`, never `run()`), false of children, and the wave wrote all four of these roots first."
+reason: "Measurement answering the owner's OW45 arm-B question: is the refused 50-op deferred-start commit the piece's initial MATERIALIZATION, or a FOLLOW-UP first wave the client runs after a smaller materialization already landed? VERDICT — MATERIALIZATION, specifically the node-INSTANTIATION half of it, and it is the 5th and last of five client start commits (9, 23, 28, 46, 50 ops) of which the first four land successfully. So the owner is right that a smaller commit already lands first, but wrong that the 50-op commit is a derivation wave: no first-run output is in it (every `computed:` op it writes holds a wiring LINK, not a derived value; the scheduler's first run is a later macrotask in its own transactions). The decisive new fact is redundancy, not ordering: the SERVING side's own derived wave commit writes EVERY ONE of the same 50 operations — tuple for tuple in run s01, as a strict superset in run s02 — so client-only operations are 0 of 50 in all seven measured refusals of a commit 5, and whichever side arrives second is refused as stale. CRUCIAL QUALIFIER: run s07 is GREEN — the step ran and PASSED — and its commit 5 was refused all the same by a wave covering 50/50. Across 6 informative runs the refusal is 6/6 while the verdict is 5 red / 1 green, so this duplicated materialization is the NORMAL steady state of a flag-ON client start, not the arm-B defect; removing it would remove the refusal but does NOT follow to arm B going green. Measured both directions in ONE run: session A's client lost to wave localSeq 7 and was REFUSED; session B's client won and a commit of the same shape was ACCEPTED, after which the server did smaller follow-up waves over the client's writes instead. On the shrink question the answer has a measured size: 4 of the 50 ops are piece ROOTS carrying the full setup state (patternIdentity, patternSetupIdentity, argument, internal, schema) — that is 'the pattern + the result cell'; the other 46 are structure, wiring and content-addressed schema the server writes anyway. Those 4 are in the START commit rather than the originating one because `instantiatePatternNode` runs `setupInternal` for CHILD pattern nodes inside the start tx — which also refines 'the server never writes setup': true of the top-level piece (the loop calls `start()`, never `run()`), false of children, and the wave wrote all four of these roots first."
 ---
 
 # The OW45 arm-B start commit sequence — materialization, or follow-up wave?
@@ -22,8 +22,8 @@ The fact that actually decides the disposition is neither of the two the
 question offered. It is **redundancy**: the serving side's own derived wave
 commit writes **every one of the same 50 operations** — exactly, tuple for
 tuple, in run s01; as a strict superset in run s02 — and whichever side arrives
-second is refused as stale. **Client-only operations: 0 of 50, in all five measured
-refusals — four reds and one green.** That the two sides are doing the same work was measured in both
+second is refused as stale. **Client-only operations: 0 of 50, in all seven measured
+refusals of a commit 5, across six informative runs — five red, one green.** That the two sides are doing the same work was measured in both
 directions inside a single run: where the wave got there first the client's copy
 was REFUSED; where the client got there first a commit of the same shape was
 ACCEPTED and the server then did smaller follow-up waves over the client's
@@ -83,16 +83,17 @@ each contributes two captures of the start sequence.
 | s05 | ran | 1 (RED) | 327 s | 3.48 | REFUSED | ACCEPTED | 50/50 |
 | s06 | ran | 1 (RED) | 324 s | 4.26 | REFUSED | ACCEPTED | 50/50 |
 | **s07** | **ran** | **0 (GREEN)** | **28 s** | **4.79** | **REFUSED** | **ACCEPTED** | **50/50** |
+| s08 | ran | 1 (RED) | 331 s | 11.55 | REFUSED | ACCEPTED | 50/50 (cumulative) |
 
 s03 and s04 are not informative — reverting the scratch edit between run batches
 re-enabled the step's ON skip.
 
 Three things this table says, and one it does not:
 
-- **The first session's commit 5 is refused 5/5**, in every informative run.
-- **Its 50 operations are covered 50/50 by waves that preceded it, 5/5.**
-  Usually by the single immediately-preceding wave; in s02's first session the
-  immediately-preceding wave carried only 12 operations and the coverage is
+- **The first session's commit 5 is refused 6/6**, in every informative run.
+- **Its 50 operations are covered 50/50 by waves that preceded it, 6/6.**
+  Usually by the single immediately-preceding wave; in the first sessions of
+  s02 and s08 that wave carried only 12 operations and the coverage is
   cumulative across earlier waves. The invariant is coverage, not adjacency.
 - **s07 is the load-bearing row.** It is GREEN — the step ran and PASSED in
   17 s — and its first session's commit 5 was refused all the same. So the
@@ -102,9 +103,13 @@ Three things this table says, and one it does not:
   of its 18 captured refusals came from runs that passed), and it bounds every
   inference below: see §6.
 - What it does **not** say is that the reload session always wins. It usually
-  does (4 of 5), but s02 lost both — and s02 is a red while s01, s05 and s06
-  are reds whose reload session won. So neither the refusal nor its repetition
-  tracks the verdict.
+  does (5 of 6), but s02 lost both — and s02 is a red while s01, s05, s06 and
+  s08 are reds whose reload session won. So neither the refusal nor its
+  repetition tracks the verdict.
+- s08 ran at ambient load **11.55**, well above the 2.3–5.3 band of the others
+  and near the region the arm-B brief flags as having induced a *different*
+  defect. It behaved identically to the low-load reds, so nothing here is
+  load-specific — but it is the one row whose load sits outside the band.
 
 ### The instrument
 
@@ -218,7 +223,7 @@ census had already explained as an array-order artifact.
 So the invariant is not "the wave writes exactly the same commit" but the
 weaker, sufficient one: **the client's deferred-start operations are a subset of
 what the serving side writes anyway.** Client-only operations: 0 of 50, in all
-six measured refusals of a commit 5 (five first sessions plus s02's second).
+seven measured refusals of a commit 5 (six first sessions plus s02's second).
 
 ### The same commit is ACCEPTED when the client wins the race
 
@@ -377,7 +382,7 @@ the measured run it wrote all 50 first.**
 
 Stated as one number: **0 of the refused commit's 50 operations are absent from
 the wave the serving side issued immediately before it** — in every informative
-run measured (5/5; see the run ledger) — including the GREEN run s07.
+run measured (6/6; see the run ledger) — including the GREEN run s07.
 
 Note that class (i) is a genuine refinement of "the server never writes setup".
 That statement is true of the **top-level** piece: the serving loop's only
@@ -407,7 +412,7 @@ shared code that both sides execute.
 
 **So the shrink the owner is reaching for has a measured size: 4 operations out
 of 50.** The other 46 are structure, wiring and schema that the serving side
-writes anyway, and in all five measured refusals had already written. Whether the
+writes anyway, and in every measured refusal had already written. Whether the
 client should issue even those 4 is a different question — the piece they set up
 is a *child* the server also instantiates, so on this evidence the durable
 content unique to the client's deferred start is **zero**.
@@ -470,11 +475,11 @@ Stated as gaps rather than inferred:
   `Grid View` instances of one pattern). What is still *not* established is
   which piece the navigate itself targeted, and therefore where in the chain of
   five commits that piece's own root was written.
-- **Invariance across runs — measured 5/5, which is fewer than the census's
-  18/18.** See the run ledger in the Bench section. Five informative runs
-  (s01, s02, s05, s06 RED; s07 GREEN), all showing the same five-commit
-  sequence, the same refusal at commit 5, and 50/50 client operations covered
-  by a preceding wave. A first pair of confirmation runs (s03, s04) turned out **not** to be
+- **Invariance across runs — measured 6/6, approaching but not matching the
+  census's 18/18.** See the run ledger in the Bench section. Six informative
+  runs (s01, s02, s05, s06, s08 RED; s07 GREEN), all showing the same
+  five-commit sequence, the same refusal at commit 5, and 50/50 client
+  operations covered by preceding waves. A first pair of confirmation runs (s03, s04) turned out **not** to be
   informative: reverting the scratch edit re-enabled the step's ON skip, so the
   step was `ignored` — a reminder that the skip file is read by the test
   process from source, not baked into the binary. No GREEN run was sampled
@@ -484,8 +489,9 @@ Stated as gaps rather than inferred:
   evidence AGAINST assuming it would.** This is a measurement of what is in the
   commit and who else writes it, not a validation of any disposition. Run s07
   passed *with the same refusal*, by the same 50/50 wave, in its first session.
-  Across 5 informative runs the refusal is 5/5 and the verdict is 4 red / 1
-  green, so the refusal does not discriminate. Removing the client's redundant
+  Across 6 informative runs the refusal is 6/6 and the verdict is 5 red / 1
+  green, so the refusal does not discriminate (6 runs, refusal 6/6, verdict 5
+  red / 1 green). Removing the client's redundant
   materialization would remove this refusal; on this evidence it would **not**
   follow that arm B goes green, because the refusal is present on a green too.
   Whatever separates red from green lives downstream of it — which is exactly
