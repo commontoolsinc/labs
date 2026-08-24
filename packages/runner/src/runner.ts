@@ -169,6 +169,7 @@ export {
 export { validateAndCheckReactives } from "./sandbox/result-normalization.ts";
 
 const MAX_PIECE_INSTANTIATION_CONFLICT_RETRIES = 5;
+const PIECE_INSTANTIATION_CONFLICT_RETRY_WAIT_MS = 5_000;
 
 const logger = getLogger("runner", { enabled: true, level: "warn" });
 const triggerFlowLogger = getLogger("runner.trigger-flow", {
@@ -3983,36 +3984,40 @@ export class Runner {
   private async preparePieceStartConflictRetry(error: unknown): Promise<void> {
     const readyToRetry = (error as { readyToRetry?: () => unknown })
       ?.readyToRetry;
-    if (typeof readyToRetry === "function") {
-      try {
-        await readyToRetry();
-      } catch {
-        // A replaced session aborts the readiness gate. The replay's commit
-        // produces the definitive outcome against whichever session is live.
-      }
-    }
-
-    // Catch-up advances the replica through the conflicting commit, but a
-    // document this runtime only wrote may still be absent locally. Pull the
-    // named document so the replay does not assert the same stale version.
     const conflict = (error as {
       conflict?: { space?: MemorySpace; of?: string };
     })?.conflict;
     if (
-      conflict?.space === undefined ||
-      typeof conflict.of !== "string" ||
-      conflict.of === "of:unknown"
+      conflict?.space !== undefined &&
+      typeof conflict.of === "string" &&
+      conflict.of !== "of:unknown"
     ) {
+      // Storage finalizes a real conflict only after its read-repair gate has
+      // settled, so the row is already ready for replay when commit() returns.
+      // Re-arming that gate or issuing another sync here can leave a redundant
+      // watch refresh outstanding after the replay has succeeded.
       return;
     }
+    if (typeof readyToRetry !== "function") return;
+
+    // Synthetic/local conflicts may have no named row and can bypass the
+    // storage finalizer. Their catch-up gate is the only available
+    // forward-progress signal.
+    const forwardProgress = Promise.resolve().then(readyToRetry).catch(() => {
+      // A replaced session aborts the readiness gate. The replay's commit
+      // produces the definitive outcome against whichever session is live.
+    });
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const backstop = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, PIECE_INSTANTIATION_CONFLICT_RETRY_WAIT_MS);
+    });
     try {
-      await this.runtime.storageManager.open(conflict.space).sync(
-        conflict.of as URI,
-        { path: [], schema: false },
-      );
-    } catch {
-      // A failed pull does not establish a terminal outcome. The replay's
-      // commit retains the authoritative rejection and reporting path.
+      // A bounded replay budget handles another stale row if only part of the
+      // setup transaction has caught up.
+      await Promise.race([forwardProgress, backstop]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
     }
   }
 

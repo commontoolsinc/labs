@@ -942,7 +942,9 @@ describe("stage P2-F piece-start commit failure handling (F1)", () => {
 
     let attempts = 0;
     let readinessGates = 0;
+    const readiness = Promise.withResolvers<void>();
     const replayed = Promise.withResolvers<void>();
+    const conflictingId = cell.getAsNormalizedFullLink().id;
     runtime.installSealDestination({
       seal: (sealTx: IExtendedStorageTransaction) => {
         const context = waveRunContextOf(sealTx);
@@ -959,12 +961,12 @@ describe("stage P2-F piece-start commit failure handling (F1)", () => {
               conflict: {
                 space,
                 the: "application/json" as never,
-                of: "of:unknown" as never,
+                of: conflictingId as never,
               },
               retryAfterSeq: 1,
               readyToRetry: () => {
                 readinessGates++;
-                return Promise.resolve();
+                return readiness.promise;
               },
             },
           });
@@ -991,7 +993,9 @@ describe("stage P2-F piece-start commit failure handling (F1)", () => {
     await runtime.settled();
 
     expect(attempts).toBe(2);
-    expect(readinessGates).toBe(1);
+    // A named conflict relies on the storage finalizer's completed read repair
+    // and does not re-arm the general catch-up gate it already waited on.
+    expect(readinessGates).toBe(0);
     expect(runtime.runner.cancels.size).toBe(1);
     expect([...runtime.runner.cancels.values()][0]).toBe(registration);
     runtime.clearSealDestination();
