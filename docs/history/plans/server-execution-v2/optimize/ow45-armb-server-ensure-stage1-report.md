@@ -100,6 +100,84 @@ any of them reverting is a bounded diff, not a redesign.
    mechanism, accepted 12/12 in every measured run, composing with the
    deferred-start retry work (#6208) rather than with this seat.
 
+## RULED 2026-08-24 — every space gets a root in production; tests get an off switch
+
+The stage-1 CI board (run 32742547103) went red across the ON lanes and
+surfaced the scope question the seat reviews could not see: should the
+server ensure a default root for EVERY space it activates? The owner
+ruled (Berni, 2026-08-24, verbatim):
+
+> "in production there is no reason for a space to not have a default
+> pattern, but i can see that for tests this is annoying overhead. so
+> let's maybe add a way for tests to disable this. in the simplest form
+> that is just a setting in the in-memory version. in the most complex
+> form -- real toolshed instance + some spaces actually do need
+> defaults and others -- we'll need more design work. `cf test ...`
+> almost certainly wants default patterns opt-in, since those tests get
+> a bit slower with them and they really aren't needed."
+
+What that settles: (1) NO per-space narrowing — production ensures a
+root for every activated space, as built; the mixed case (one toolshed,
+some spaces with defaults and some without) is DEFERRED to its own
+design work; (2) tests get an off switch, simplest form first;
+(3) `cf test` wants default patterns opt-in.
+
+**The diagnosis that placed the switch.** The red lanes' one uniform
+failure class: the ensured root's computed cells are CONTENT-ADDRESSED
+(space-independent ids — the runtime-client lane's broken doc
+`computed:fid1:7BycCyHc…` is byte-for-byte the census's default-app
+root cell), so every fixture client holding a plain space-cell
+subscription received them, and the delivery reached the replica with
+the root's `cid:` schema doc "not delivered and verified" —
+`SpaceReplica.#validateArrivedSchemaDocuments` throws UNCAUGHT on the
+background consume path and the FILE fails regardless of its own
+assertions (13 distinct file-level failures across runner,
+runtime-client, shell, and 9/10 pattern shards; environment-sensitive —
+one local full-suite run at the same head was green while CI hit it
+consistently). Attribution: main is green at the identical base
+(`e55785eff`); the breaking docs exist only because the ensure created
+them; the OFF lanes stayed green. EVERY failing lane runs a REAL
+toolshed binary (the same lanes' in-process-server tests passed), so
+the switch needed a toolshed-level home beside the in-memory setting —
+still the ruled simple form (a whole-instance flag), NOT the deferred
+per-space design.
+
+**As built:** `SpaceServerOptions.ensureSpaceRoots` /
+`ExecutorHostOptions.ensureSpaceRoots` (the in-memory setting the
+ruling named; default ON) → the toolshed env knob
+`SERVER_EXECUTION_ENSURE_SPACE_ROOTS` (only the literal `"false"`
+disables; garbage FAILS TO PRODUCTION with a warning). Off is fully
+inert: nothing arms, no skip, no ACL re-arm, no counter movement
+(pinned both ways; gate-ignored mutation kills the off pin). The CI ON
+lanes set it `false` on both the served binary and the test-process env
+(the in-process servers some tests boot inherit it).
+
+**`cf test` (ruled opt-in): already the status quo, recorded rather
+than built.** Single-user `cf test` runs on `StorageManager.emulate`
+with NO ExecutorHost anywhere in `packages/cli` — the ensure is
+structurally absent, so "default patterns opt-in" is the factual
+present; the in-memory setting for any future cf-test serving host is
+exactly `ExecutorHostOptions.ensureSpaceRoots`. The multi-user variant
+connects to a LIVE toolshed (`memoryHost`), where the server's own env
+knob governs — a cf-test-side flag cannot reach a server it does not
+start. Both recorded as the ruling's coverage, not extended.
+
+**Flagged for the owner (not filled):**
+
+- The diagnosis exposed a PRE-EXISTING delivery gap the ensure made
+  reachable at scale: a computed doc can be delivered to a replica
+  whose `cid:` schema ref is not delivered-and-verified in that
+  replica (the client throws fail-closed, uncaught, on the consume
+  path). With the lanes switched off it returns to latent. Production
+  exposure differs (shell clients demand the root explicitly and
+  subscribe root-aware), but space-cell-only subscribers (CLI,
+  agents-host) exist; the gap belongs to the delivery/validation
+  machinery, not to this seat.
+- With the ON lanes running ensure-off, no CI lane exercises the
+  production ensure at the true topology; coverage rides the unit pins
+  and the measurement harness until a lane (or a dedicated gate) opts
+  in.
+
 ## Flagged, not filled
 
 - **OW55's self-pin (design open question 9).** The ensure's fetch

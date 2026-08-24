@@ -901,9 +901,15 @@ jobs:
           # then returns, so the test steps never race a not-yet-listening
           # server. The server logs to --log-file, which the launcher prints on
           # success and dumps if the server exits before binding.
+          # Space-root ensure OFF for test lanes (OW45 arm-B stage 1,
+          # RULED 2026-08-24: production spaces always get a default
+          # pattern; tests may switch it off — the ensured root's
+          # content-addressed computed cells otherwise land in every
+          # fixture space's subscriptions).
           CFTS_AI_GATEWAY_URL="" \
           CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
           EXPERIMENTAL_SERVER_EXECUTION=true \
+          SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false \
           ./common-binaries/toolshed --port="$TOOLSHED_PORT" \
             --background --log-file="$RUNNER_TEMP/toolshed.log"
 
@@ -960,6 +966,7 @@ jobs:
           SX_ON_IGNORE=$(deno run --allow-read ../../tasks/server-execution-on-skips.ts ${{ matrix.suite_name }})
           API_URL="http://localhost:${TOOLSHED_PORT}/" \
           EXPERIMENTAL_SERVER_EXECUTION=true \
+          SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false \
           INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/${JUNIT_NAME}.xml ${SX_ON_IGNORE}" \
           deno task integration
 
@@ -1395,9 +1402,12 @@ jobs:
           chmod +x ./common-binaries/toolshed
           # --background waits until the server has bound its port before it
           # returns, so the test steps never race a not-yet-listening server.
+          # Space-root ensure OFF for test lanes (see the package ON
+          # lane's note; RULED 2026-08-24).
           CFTS_AI_GATEWAY_URL="" \
           CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
           EXPERIMENTAL_SERVER_EXECUTION=true \
+          SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false \
           ./common-binaries/toolshed \
             --background --log-file="$RUNNER_TEMP/toolshed.log"
 
@@ -1456,6 +1466,7 @@ jobs:
           HEADLESS=1 \
           API_URL=http://localhost:8000/ \
           EXPERIMENTAL_SERVER_EXECUTION=true \
+          SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false \
           PATTERN_INTEGRATION_SHARD="${{ matrix.shard }}/${{ matrix.total }}" \
           CF_COMPILE_CACHE_FILE="${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json" \
           deno test --no-check --v8-flags=--max-old-space-size=4096 --trace-leaks -A \
