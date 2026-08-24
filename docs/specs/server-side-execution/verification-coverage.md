@@ -5603,7 +5603,16 @@ supply; OW29/OW32/OW34 closed):
     server's new `resolveSpaceOwner` (the OW31-ruled service-identity
     ACL read; the OW59 Q3 caveat's named follow-up — the creation tx
     carries `trustSnapshotForPrincipal(owner)`, pinned live), with
-    no-owner spaces SKIPPED counted-and-warned (OW53's shape). The
+    no-owner spaces SKIPPED counted-and-warned (OW53's shape) — plus
+    the measurement-driven SAME-TENURE retry: the live boot order has
+    activation (session-open-triggered) PRECEDE the client bootstrap's
+    genesis ACL commit, so a fresh space's first ensure always finds no
+    owner; the skip therefore latches awaiting-owner and an admitted
+    commit touching the ACL doc re-arms the owed ensure — identity
+    posture unchanged, only the retry cadence moved from next-tenure to
+    owner-became-resolvable (without it, r01 measured the ensure INERT
+    on 4/4 gate spaces; with it, r02 measured the server creating 4/4).
+    The
     custom-`defaultAppUrl` fork stays UNRULED: stage 1
     logs-and-uses-the-system-default on fresh non-home creations.
     Recorded STAGE-2 GATE: the runnability-repair pair (cold-start
