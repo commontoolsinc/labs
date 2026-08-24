@@ -128,7 +128,17 @@ export function consoleMessageFrom(
     try {
       return fabricFromRealmValue(arg);
     } catch (e) {
-      return { "/undecodable": `${e}` };
+      // A thrown value can refuse even to be stringified, and the derivation
+      // of a failure's message must not fail in turn. `/undecodableError` is
+      // the fixed token for that, as `/unconvertibleError` is for the
+      // conversion at the other end.
+      let message: string;
+      try {
+        message = String(e);
+      } catch {
+        message = "/undecodableError";
+      }
+      return { "/undecodable": message };
     }
   });
 

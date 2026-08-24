@@ -545,6 +545,29 @@ describe("consoleMessageFrom", () => {
     expect(message.args[1]).toBe("plain");
   });
 
+  it("returns a fixed token when the decoder's own failure resists stringifying", () => {
+    // A null-prototype object has no `toString` to reach, so `String()`
+    // throws on it; deriving the failure's message must not fail in turn.
+    const hostile = new Proxy({}, {
+      get() {
+        throw Object.create(null);
+      },
+      ownKeys() {
+        return ["x"];
+      },
+      getOwnPropertyDescriptor() {
+        return { enumerable: true, configurable: true };
+      },
+    });
+    const message = consoleMessageFrom(notification([
+      [["fvr1"], hostile] as unknown as ConsoleNotification["args"][0],
+      realmFromFabricValue("after"),
+    ]));
+
+    expect(message.args[0]).toEqual({ "/undecodable": "/undecodableError" });
+    expect(message.args[1]).toBe("after");
+  });
+
   it("returns `/undecodable` in place of an argument that does not decode", () => {
     // These are a pattern's `console.*` arguments: a log line that arrives
     // damaged beats one that takes the message dispatch down with it.
