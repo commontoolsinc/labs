@@ -434,13 +434,12 @@ it should have gone:
 | a projection before the verb | a result has to be named before it can be shaped |
 | a second `--` | one boundary follows the callable's section, and it is already drawn |
 
-The corrected line is what makes this survivable without a warned window, and
-the refusal has to be reached before a reinterpretation is: a verb may declare a
-field named for a read option, so a line that would otherwise be read as a
-projection has to be recognized as the old spelling first. Every one of these is
-a spelling that worked before, so the caller reading the refusal is someone who
-learned the old one — and a message that says only what is wrong asks them to
-rediscover the grammar, while one that prints the line asks them to retype it.
+The corrected line is what makes this survivable without a warned window. Every
+one of these is a spelling that worked before, so the caller reading the refusal
+is someone who learned the old one — and a message that says only what is wrong
+asks them to rediscover the grammar, while one that prints the line asks them to
+retype it. It is also what keeps a field named for a read option from being read
+as one, which is the only case here that would otherwise pass quietly.
 The repository already answers this way where it matters: a mounted callable's
 result reports the whole command that reads it
 back rather than the address alone.
@@ -542,22 +541,21 @@ those same commands until it has landed.
     on `exec`. A projection is refused before the verb and inside the callable's
     section, and each refusal names the section the flag belongs to and prints
     the corrected line. The change takes effect at once rather than through a
-    warned window, which rests on a line carrying the old marker being refused
-    rather than reinterpreted — and that has to be built rather than assumed.
-    Nothing reserves a field name, so a verb may declare `select`, `filter` or
-    `schema`, and a line whose only fields are those parses as a projection
-    instead: the handler runs with different input and exits zero. `--help` is
-    the same shape, being the one flag that is never unknown.
+    warned window.
 
-    **So the old marker is refused, not reinterpreted.** A `--` that opens an
-    empty callable section, followed by words naming fields the verb declares,
-    is the old spelling and is answered with the corrected line. That is what
-    every old line carrying fields does, so the shape is recognizable wherever
-    it matters, and a caller writing the new grammar never produces it — fields
-    written before the marker leave the section non-empty. `--help` after an
-    empty section keeps reaching the callable, for the reason given above.
-    Both need the verb's declared fields in hand, so the split settles after
-    the schema is loaded rather than during argument handling.
+    Printing the corrected line is what carries that, and it is worth being
+    exact about which case needs it. A stray `cf` flag is refused as an unknown
+    read option and the message adds the spelling that works. A stray *field* is
+    not always refused: nothing reserves a field name, so a verb may declare
+    `select`, `filter` or `schema`, and a line whose only fields are those reads
+    as a projection instead — the handler runs with different input and exits
+    zero. Recognizing words after an empty callable section as fields the verb
+    declares is what turns that into a corrected line rather than a quiet
+    reinterpretation, and it is the same recognition the message needs anyway.
+    A caller writing the new grammar never produces the shape, since fields
+    before the marker leave the section non-empty. It needs the verb's declared
+    fields in hand, so it settles after the schema loads rather than during
+    argument handling.
 11. **`--url` decomposes** into the transport it names and the reference it
     carries, and survives as a convenience for pasting rather than as the only
     spelling that carries a whole target.
