@@ -92,6 +92,18 @@ describe("bulk-plan", () => {
         JSON.stringify({ piece: "of:fid1:aaa" }) + "\n";
       expect(() => decodePlan(text)).toThrow("row 1");
     });
+
+    it("throws when the first line is not an object at all", () => {
+      expect(() => decodePlan('"hello"\n')).toThrow("header");
+    });
+
+    it("throws for a row that is not an object, and for a numeric piece", () => {
+      const withNumber = JSON.stringify(header) + "\n5\n";
+      expect(() => decodePlan(withNumber)).toThrow("row 1");
+      const numericPiece = JSON.stringify(header) + "\n" +
+        JSON.stringify({ piece: 7, expect: {} }) + "\n";
+      expect(() => decodePlan(numericPiece)).toThrow("row 1");
+    });
   });
 
   describe("deriveRollbackPlan()", () => {

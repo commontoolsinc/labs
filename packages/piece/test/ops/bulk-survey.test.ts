@@ -260,7 +260,9 @@ describe("bulk-survey", () => {
       const unrelated = await pieces.create(generationProgram("z"), {
         input: {},
       });
-      await pieces.add([unrelated.getCell()]);
+      // The member itself being registered is not a disagreement: containment
+      // asks only for registered in-scope pieces the selection lacks.
+      await pieces.add([member.getCell(), unrelated.getCell()]);
       const holder = await seedHolder([member]);
 
       const survey = await surveyPieces(pieces, {
@@ -269,6 +271,33 @@ describe("bulk-survey", () => {
 
       expect(survey.outside).toEqual([]);
       expect(survey.complete).toBe(true);
+    });
+
+    it("throws for a collection member that is not a piece link", async () => {
+      const holder = await pieces.create(holderProgram(), { input: {} });
+      await holder.input.set(["not a link"], ["members"]);
+      await pieces.runtime.idle();
+
+      await expect(
+        surveyPieces(pieces, { selector: collectionOf(holder) }),
+      ).rejects.toThrow("does not hold a piece link");
+    });
+
+    it("names a selected piece that carries no pattern identity, and incomplete", async () => {
+      const a = await pieces.create(generationProgram("a"), { input: {} });
+      // The holder's own argument document is a stored document with no
+      // pattern identity — a selected id that is not a piece.
+      const holder = await seedHolder([a]);
+      const argumentDoc = pieceId(await holder.input.getCell())!;
+
+      const survey = await surveyPieces(pieces, {
+        selector: { kind: "list", pieces: [argumentDoc] },
+      });
+
+      expect(survey.plan.rows).toEqual([]);
+      expect(survey.problems).toHaveLength(1);
+      expect(survey.problems[0].problem).toBe("carries no pattern identity");
+      expect(survey.complete).toBe(false);
     });
 
     it("stamps the phase's retarget onto its rows and leaves other phases bare", async () => {
@@ -312,6 +341,24 @@ describe("bulk-survey", () => {
         .toEqual([a.id, holder.id]);
       // A validator finding is a finding, not an incomplete selection.
       expect(survey.complete).toBe(true);
+    });
+
+    it("passes pieces whose result materializes under the validator", async () => {
+      const a = await pieces.create(generationProgram("a"), { input: {} });
+      const holder = await seedHolder([a]);
+
+      const survey = await surveyPieces(pieces, {
+        selector: collectionOf(holder),
+        validator: {
+          type: "object",
+          properties: { version: { type: "string" } },
+          required: ["version"],
+        },
+      });
+
+      // The member carries `version`; the holder does not.
+      expect(survey.validatorFailures.map((failure) => failure.piece))
+        .toEqual([holder.id]);
     });
   });
 });

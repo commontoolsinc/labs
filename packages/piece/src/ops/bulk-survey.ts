@@ -150,9 +150,13 @@ export async function selectPieces(
   ) as Cell<Cell<unknown>[]>;
   const members = await collection.pull() ?? [];
   const phase = String(selector.path.at(-1) ?? "members");
+  // A literal in a member slot resolves to a cell inside the holder's own
+  // document rather than to another document, which is how one is told apart
+  // from a link.
+  const holderDoc = collection.getAsNormalizedFullLink().id;
   const selected = members.map((member, index) => {
     const id = pieceId(member);
-    if (id === undefined) {
+    if (id === undefined || member.getAsNormalizedFullLink().id === holderDoc) {
       throw new Error(
         `Collection member ${index} at ${
           selector.path.join("/")
@@ -183,12 +187,9 @@ export async function surveyPieces(
   const validatorFailures: SurveyProblem[] = [];
 
   for (const { piece, phase } of selected) {
-    const controller = await pieces.get(piece, false);
-    const state = readPieceSourceMetadata(
-      pieces.runtime,
-      controller.getCell(),
-    );
-    if (state.pattern === undefined) {
+    const pin = await readPiecePin(pieces, piece, retainedByIdentity);
+    if (pin === undefined) {
+      const controller = await pieces.get(piece, false);
       problems.push({
         piece: controller.id,
         problem: "carries no pattern identity",
@@ -196,19 +197,13 @@ export async function surveyPieces(
       continue;
     }
     const expect: PieceExpect = {
-      patternIdentity: state.pattern.identity,
-      retained: await isSourceRetained(
-        pieces,
-        state.pattern.identity,
-        retainedByIdentity,
-      ),
-      ...(state.currentRevisionId === undefined
-        ? {}
-        : { revisionId: state.currentRevisionId }),
+      patternIdentity: pin.patternIdentity,
+      retained: pin.retained,
+      ...(pin.revisionId === undefined ? {} : { revisionId: pin.revisionId }),
     };
     const operation = options.operations?.[phase];
     rows.push({
-      piece: controller.id,
+      piece: pin.piece,
       phase,
       expect,
       ...(operation === undefined
@@ -216,9 +211,10 @@ export async function surveyPieces(
         : { op: { kind: "retarget", ...operation } }),
     });
     if (options.validator !== undefined) {
+      const controller = await pieces.get(piece, false);
       const failure = await validateResult(controller, options.validator);
       if (failure !== undefined) {
-        validatorFailures.push({ piece: controller.id, problem: failure });
+        validatorFailures.push({ piece: pin.piece, problem: failure });
       }
     }
   }
@@ -248,6 +244,49 @@ export async function surveyPieces(
     problems,
     validatorFailures,
     complete: problems.length === 0 && outside.length === 0,
+  };
+}
+
+/** The source pin one cheap read yields for one piece. */
+export interface PiecePin {
+  /** The piece's canonical address. */
+  piece: string;
+  patternIdentity: string;
+  /** The entry export the identity runs. */
+  symbol: string;
+  /** The current source revision, when the piece keeps a log. */
+  revisionId?: string;
+  /** Whether the identity's source is retained in the space. */
+  retained: boolean;
+}
+
+/**
+ * Read one piece's source pin: identity, symbol, current revision when a log
+ * exists, and whether the identity's source is retained. One synced read of
+ * the piece plus one cached existence probe — the piece is never run, and
+ * nothing else is pulled. Returns `undefined` for a piece carrying no
+ * pattern identity.
+ */
+export async function readPiecePin(
+  pieces: PiecesController,
+  piece: string,
+  retainedByIdentity: Map<string, boolean> = new Map(),
+): Promise<PiecePin | undefined> {
+  const controller = await pieces.get(piece, false);
+  const state = readPieceSourceMetadata(pieces.runtime, controller.getCell());
+  if (state.pattern === undefined) return undefined;
+  return {
+    piece: controller.id,
+    patternIdentity: state.pattern.identity,
+    symbol: state.pattern.symbol,
+    ...(state.currentRevisionId === undefined
+      ? {}
+      : { revisionId: state.currentRevisionId }),
+    retained: await isSourceRetained(
+      pieces,
+      state.pattern.identity,
+      retainedByIdentity,
+    ),
   };
 }
 
@@ -322,12 +361,12 @@ async function validateResult(
   const shaped = result.asSchema(validator);
   await shaped.pull();
   if (shaped.get() !== undefined) return undefined;
-  if (result.getRaw() === undefined) return "has no stored result";
-  if (validateSchemaValue(validator, undefined) === undefined) {
-    return undefined;
-  }
-  return "stored result is present, but the schema could not resolve all " +
-    "required values";
+  return validateSchemaValue(validator, undefined) === undefined
+    ? undefined
+    : result.getRaw() === undefined
+    ? "has no stored result"
+    : "stored result is present, but the schema could not resolve all " +
+      "required values";
 }
 
 function tallyRows(rows: readonly PiecePlanRow[]): TallyEntry[] {
