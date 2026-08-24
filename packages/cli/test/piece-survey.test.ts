@@ -8,7 +8,11 @@ import { Runtime, type RuntimeProgram } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { PiecesController } from "@commonfabric/piece/ops";
 
-import { runSurvey, type SurveyRunRequest } from "../lib/bulk.ts";
+import {
+  readSourcePin,
+  runSurvey,
+  type SurveyRunRequest,
+} from "../lib/bulk.ts";
 import {
   inspectPieceFromCommand,
   parseRetargetFlag,
@@ -124,6 +128,33 @@ describe("piece-survey", () => {
         path: ["topics"],
       });
       expect(hints).toEqual(["members: 1 on idA#default"]);
+    });
+
+    it("refuses a --side that is neither input nor result", async () => {
+      await expect(
+        surveyFromCommand({ ...OPTIONS, path: "topics", side: "bogus" }, {
+          runSurvey: () => Promise.resolve(COMPLETE),
+        }),
+      ).rejects.toThrow('--side takes input or result, got "bogus"');
+    });
+
+    it("names each validator failure as a hint", async () => {
+      const hints: string[] = [];
+      await captureStdout(() =>
+        surveyFromCommand({ ...OPTIONS, path: "topics" }, {
+          runSurvey: () =>
+            Promise.resolve({
+              ...COMPLETE,
+              validatorFailures: [
+                { piece: "of:fid1:aaa", problem: "missing version" },
+              ],
+            }),
+          printHint: (message) => {
+            hints.push(message);
+          },
+        })
+      );
+      expect(hints).toContain("validator: of:fid1:aaa missing version");
     });
 
     it("honors the inherited --quiet by silencing hints that otherwise print", async () => {
@@ -403,6 +434,47 @@ describe("piece-survey", () => {
       ).rejects.toThrow("stores no collection at members");
     });
 
+    it("reads a created piece's source pin over the controller", async () => {
+      const member = await pieces.create(memberProgram("one"), { input: {} });
+      const pin = await readSourcePin({ piece: member.id } as never, {
+        loadPieces: () => Promise.resolve(pieces),
+        resolvePieceAddress: (_pieces, token) => Promise.resolve(token),
+      });
+      expect(pin?.symbol).toBe("default");
+      expect(pin?.retained).toBe(true);
+      expect(pin?.patternIdentity).toBeDefined();
+    });
+
+    it("stamps a resolved retarget onto the rows carrying its phase", async () => {
+      const member = await pieces.create(memberProgram("one"), { input: {} });
+      const dir = await Deno.makeTempDir({ prefix: "cli-bulk-retarget" });
+      try {
+        await Deno.writeTextFile(
+          `${dir}/main.tsx`,
+          memberProgram("two").files[0].contents,
+        );
+        const survey = await runSurvey({} as never, {
+          selector: { kind: "list", pieces: [member.id] },
+          retargets: [
+            { phase: "list", source: { main: `${dir}/main.tsx` }, rev: "r1" },
+          ],
+          allowIncompatible: true,
+        }, {
+          loadPieces: () => Promise.resolve(pieces),
+          resolvePieceAddress: (_pieces, token) => Promise.resolve(token),
+        });
+        const op = survey.plan.rows[0].op;
+        if (op?.kind !== "retarget") {
+          throw new Error("expected a retarget op on the list row");
+        }
+        expect(op.rev).toBe("r1");
+        expect(op.allowIncompatible).toBe(true);
+        expect(op.patternIdentity).toBeDefined();
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
     it("refuses two retargets naming one phase before loading anything", async () => {
       await expect(
         runSurvey({} as never, {
@@ -428,6 +500,35 @@ describe("piece-survey", () => {
       revisionId: "rev-1",
       retained: true,
     };
+
+    it("summarizes and prints the general inspection in both output modes", async () => {
+      const pieceData = {
+        id: "p1",
+        name: "Board",
+        patternRef: undefined,
+        source: { a: 1 },
+        result: { b: 2 },
+        cachedResultFields: [],
+        readingFrom: [],
+        readBy: [],
+      } as never;
+      const rendered: Array<{ value: unknown; json: boolean | undefined }> = [];
+      const render = (value: unknown, config?: { json?: boolean }) => {
+        rendered.push({ value, json: config?.json });
+      };
+      const deps = {
+        inspectPiece: () => Promise.resolve(pieceData),
+        render,
+      };
+      await inspectPieceFromCommand(
+        { ...OPTIONS, summary: true, json: true },
+        deps,
+      );
+      expect(rendered[0].json).toBe(true);
+      expect(rendered[0].value).toMatchObject({ id: "p1" });
+      await inspectPieceFromCommand({ ...OPTIONS }, deps);
+      expect(String(rendered[1].value)).toContain("=== Piece: p1 ===");
+    });
 
     it("prints the source pin as JSON under --pattern-identity --json", async () => {
       const out = await captureStdout(() =>
