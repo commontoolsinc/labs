@@ -99,7 +99,6 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
   let engine: Engine.Engine;
   let files: Map<string, string>;
   let spaceServer: SpaceServer | undefined;
-  let servingRuntime: Runtime | undefined;
   let mintedTxs: IExtendedStorageTransaction[];
   let stats: ServingLoopStats;
   let cleanups: Array<() => Promise<void>>;
@@ -159,7 +158,6 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     sinkLocalSeq = { value: 0 };
     hangPatternFetches = false;
     spaceServer = undefined;
-    servingRuntime = undefined;
     cleanups = [];
   });
 
@@ -233,7 +231,6 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
           mintedTxs.push(tx);
           return tx;
         }) as typeof runtime.edit;
-        servingRuntime = runtime;
         return {
           runtime,
           dispose: async () => {
