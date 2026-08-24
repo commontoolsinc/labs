@@ -80,7 +80,7 @@ than silently kept or moved. The rest move:
 
 ## Stage 1 — addresses become positional
 
-**P1. A positional address beside `--piece`.** *(M)* `cf piece get <addr> [path]`
+**P1. A positional address beside `--piece`.** *(M)* `cf get <addr> [path]`
 accepts what `--piece <addr>` accepts, and both spellings work. An entity id, a
 slug, or a URL.
 

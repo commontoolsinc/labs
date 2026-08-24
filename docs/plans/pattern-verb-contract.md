@@ -37,7 +37,7 @@ symbols rather than line numbers. Verifying each one against the tree showed
 that WS-D has landed whole, and the claims below are corrected in place:
 `Cell.send` accepts a caller-supplied event id and scopes it by the session
 that chose it and the stream it was sent to; `resolveInvocationIdentity` mints
-the id–session pair for every `cf piece call`, so the pair is always supplied
+the id–session pair for every `cf call`, so the pair is always supplied
 rather than only when a caller passes `--invocation`;
 `executeResolvedCallable` forwards it, then reads the handling's outcome back
 off `tx.handlingReceiptLink` and returns it as `invocation.result` — including
@@ -375,7 +375,7 @@ board topic). Until that lands, board-level routing
 (`addComment {topicFid, body}`) is the documented workaround — pragmatic, not
 the target shape.
 
-`cf piece get` lets an agent control how much data an exploratory read returns:
+`cf get` lets an agent control how much data an exploratory read returns:
 `--filter` narrows array membership and `--schema` constructs a projected value
 from source-schema-selected reads. Both execute through computed pattern nodes
 so their CFC behavior matches pattern expressions, without returning an
@@ -735,14 +735,14 @@ and the message is the whole signal.
 An agent holding a piece URL must be able to ask "what can I call here?"
 without reading pattern source. The pieces exist:
 
-- **Per verb**, `cf piece call <piece> <verb> --help --json` already emits the
+- **Per verb**, `cf call <piece> <verb> --help --json` already emits the
   machine-readable command spec — kind, default verb, input schema — derived
   from the pattern's own types (`callableCommandSpec`,
   `packages/cli/lib/callable.ts`).
 - **Enumeration**: `cf piece verbs --json` lists every callable — name, kind
   (handler/tool), which cell it lives on, and its input schema (tools also
   carry their output schema) — walking result-then-input with the same
-  classification `cf piece call` resolves through, so the listing and the
+  classification `cf call` resolves through, so the listing and the
   dispatcher cannot disagree. FUSE independently classifies the same entries
   (`classifyCallableEntry`, `packages/fuse/callables.ts`) into `.handler` /
   `.tool` files plus a
@@ -1015,7 +1015,7 @@ design-level order.
 3. Replace the tool-result poll with sink-based settlement and return the
    result cell's address to the caller. Standing fix, useful regardless.
 4. Plumb the id and the readback: pass a caller-supplied `eventId` from
-   `cf piece call` through `cell.send()` to `queueEvent`; have `topics` verbs
+   `cf call` through `cell.send()` to `queueEvent`; have `topics` verbs
    return values; have the CLI reconstruct the cause and read the
    `{ resultFor }` cell after commit (explicit sync — a cold plain read
    returns `undefined`), and reclassify `precondition: "receipt-exists"` as
