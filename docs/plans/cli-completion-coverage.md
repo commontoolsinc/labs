@@ -88,18 +88,17 @@ read before picking one up; this table is the roll-up.
 | 9 | A verb's annotation is its kind, not its prose | comprehension | done |
 | 10 | Wrapper and deprecated verbs are offered unmarked | comprehension | done |
 | 11 | Every Tab costs two process starts | felt cost | needs a decision |
-| 12 | `nospace` is inert on the stock macOS bash | felt cost | not started |
-| 13 | Space and entity positionals across `inspect` | operator surface | not started |
-| 14 | `wish` targets and scopes | CLI vocabulary | not started |
-| 15 | Remaining path-shaped and enumerable values | CLI vocabulary | not started |
-| 16 | Two provider entries that can never fire | hygiene | not started |
+| 12 | `nospace` is inert on the stock macOS bash | felt cost | remedy disproven |
+| 13 | Space and entity positionals across `inspect` | operator surface | done |
+| 14 | `wish` targets and scopes | CLI vocabulary | done |
+| 15 | Remaining path-shaped and enumerable values | CLI vocabulary | done |
+| 16 | Two provider entries that can never fire | hygiene | done |
 | 17 | The README table omits the top-level spellings | hygiene | done |
 | 18 | A live-provider test seam | mechanism | done |
 | 19 | A gate that fails when a new slot has no decision | mechanism | not started |
 
-**What can be picked up today.** Items 12, 13, 14, 15 and 16 are mechanical and
-can be taken at any time. Item 19 is the other half of the mechanism item 18
-landed.
+**What can be picked up today.** Item 19 is what remains: the other half of the
+mechanism item 18 landed.
 
 Item 4's candidates are built and its wiring waits: step 10 decides whether a
 verb's fields are written before the `--` marker or after it, and the position
@@ -469,61 +468,96 @@ where state lives rather than about how fast a process starts.
 Worth sizing before it is scheduled: it may be that the correctness and
 vocabulary items above change the experience more than a faster Tab would.
 
-### 12. `nospace` is inert on the stock macOS bash
+### 12. `nospace` is inert on the stock macOS bash, and the remedy does not work
 
-Cell paths and link endpoints complete one segment at a time and emit a
-`nospace` directive so the cursor stays attached for the next `/`. The bash
-function applies it through `compopt`, which is bash 4 and later; macOS ships
-bash 3.2. The script comments note the cost as a keystroke. It is a keystroke
-*per segment*, on the default shell of the platform most of this repository is
-developed on, and it lands on the deepest and most useful completion there is.
+Cell paths, link endpoints and projection paths complete one segment at a time
+and emit a `nospace` directive so the cursor stays attached for the next
+separator. The bash function applies it through `compopt`, which is bash 4 and
+later; macOS ships bash 3.2. It is a keystroke *per segment*, on the default
+shell of the platform most of this repository is developed on, and it lands on
+the deepest and most useful completion there is.
 
-A candidate that carries its own trailing separator is one way around it, since
-the shell's added space then falls after a `/` rather than inside a path.
+The remedy this item proposed — a candidate carrying its own trailing separator
+— was measured against bash 3.2 through a pty and does not work. Three
+behaviours, all of them of one unique match:
+
+- A reply of `items` inserts `items ` — the space this item is about.
+- A reply of `items/` inserts `items/ `. The space falls after the separator
+  rather than inside the path, and the caller still has to delete it before
+  typing the next segment.
+- `complete -o filenames` does not change that. It suppresses a trailing space
+  only where the candidate names a directory that exists on disk, which a cell
+  path does not, and it adds filename escaping to every candidate: `#profile`
+  reaches the line as `\#profile`.
+
+What does suppress the space is the match not being unique: two candidates
+sharing the prefix `items/` insert that prefix and stop. So the lever is a
+phantom candidate in the menu, which costs a caller more than the keystroke it
+saves. `complete -o nospace` at registration is the other lever, and it takes
+the space away from every slot rather than the path-shaped ones.
+
+The item stays open with its remedy closed. What would settle it is a bash the
+directive works on, which is what `compopt` already reaches.
 
 ## Operator surface and CLI vocabulary
 
 ### 13. Space and entity positionals across `inspect`
 
-Every `cf inspect` subcommand that reads a space takes it positionally, and none
-of the eighteen have a provider — while `space clone` and `space fingerprint`,
-which take the same thing the same way, do. `inspect` reads local stores
-directly, so the provider it wants is the one `space clone` already uses, and
-item 8's disposition applies unchanged.
+Every `cf inspect` subcommand that reads a space completes it from the same
+local stores `space clone` and `space fingerprint` read, and item 8's
+disposition applies unchanged. The `<entity>` positional beside them completes
+from `listEntityModels` — the listing `inspect entities` prints — annotated
+with the label it reconstructs, so an opaque id reads.
 
-The `<entity>` positional beside them is a piece id within the named space, and
-`inspect entities` is what enumerates them.
+The two sets are generated from a list of subcommand names rather than written
+out as thirty-odd table entries, because which subcommands open a space is one
+fact and repeating it is somewhere for the next one to be forgotten. Item 19's
+gate is what names a subcommand the list has missed.
+
+The entity provider reads local stores only. `--remote` fetches a snapshot over
+the network before it can list anything, which is a round trip a keystroke
+should not start.
 
 ### 14. `wish` targets and scopes
 
-`cf wish <target>` takes a documented vocabulary — the profile targets and the
-space-relative ones its help enumerates — and completes nothing. `--scope`
-accepts exactly `~`, `.`, `profile`, or a space DID, which is an enumerated set
-plus the space provider.
+`cf wish <target>` completes the vocabulary its help enumerates — the profile
+targets and the space-relative ones — and `--scope` completes `~`, `.`,
+`profile` and the space provider's DIDs.
 
-Both sets are in the command's own help, which is what puts this below the
-pattern-owned slots rather than beside them.
+The target list is hand-maintained, because the vocabulary is the wish
+builtin's rather than the command tree's and nothing on the tree carries it.
+The command's help text is where it is documented and where it is kept in step.
+
+`--scope` means something else on `cf inspect`, where it is a scope key. An
+option provider is keyed by long name alone, so this one says which commands it
+applies to — the same scoping `--from` needs, being a file on `space clone` and
+a sequence number on `inspect diff`.
 
 ### 15. Remaining path-shaped and enumerable values
 
-The mechanical remainder, each one an entry in an existing table:
+The mechanical remainder, each one an entry in an existing table: pattern files
+for `piece set-home <main>`; files and directories for `piece getsrc <outpath>`,
+`deps update <file>`, `fuse mount|unmount <mountpoint>`, `--dir`, `--out`,
+`--output` and `space clone --from`; `--api-url`'s candidates for `--remote`;
+and `piece map --format` and `inspect entities --kind` beside the four already
+in `ENUMERATED_OPTION_VALUES`.
 
-- Pattern files: `piece set-home <main>`.
-- Files and directories: `piece getsrc <outpath>`, `deps update <file>`,
-  `fuse mount|unmount <mountpoint>`, `--dir`, `--out`, `--output`, `--from`.
-- API URLs: `--remote`, which takes what `--api-url` takes.
-- Enumerated values, which belong beside the four already in
-  `ENUMERATED_OPTION_VALUES`: `piece map --format` (`ascii`, `dot`),
-  `inspect entities --kind` (seven values its help lists).
+`--remote` is reachable only as `--remote=<value>`. Its value is optional
+(`[url:string]`), so a bare `--remote` is legal and the word after it is a
+positional rather than the flag's value — which is what the resolver reads it
+as, and what the command reads it as too.
+
+`piece set-slug <source>` is not in that enumeration and is completed with it:
+it takes what `--piece` takes, which is the same table entry.
 
 ## Hygiene
 
 ### 16. Two provider entries that can never fire
 
-`OPTION_VALUE_PROVIDERS` carries `log-file` and `state-path`. Both belong to
-`fuse-supervisor` and `fuse-daemon`, which take raw arguments and declare no
-Cliffy options, and which completion drops from its subcommand candidates as
-internal. Neither entry is reachable.
+`log-file` and `state-path` are gone from `OPTION_VALUE_PROVIDERS`. Both
+belonged to `fuse-supervisor` and `fuse-daemon`, which take raw arguments and
+declare no Cliffy options, and which completion drops from its subcommand
+candidates as internal. Item 19's gate is the same subtraction made permanent.
 
 ### 17. The README table omits the top-level spellings
 

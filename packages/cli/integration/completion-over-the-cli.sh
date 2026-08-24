@@ -511,6 +511,46 @@ check "1" "$(complete_at "cf piece link $LINE_ARGS $BOARD/revision $ITEM_ID/rec"
 check "1" "$(succeeds $CF piece link --quiet $LINE_ARGS \
   "$BOARD/revision" "$ITEM_ID/recorded")" \
   "a pair of completed endpoints is a link the command writes"
+step "15. The operator surface completes from the same store"
+# `cf inspect` reads space DBs directly, so it wants the store step 13 looked
+# for. Where none is discoverable there is nothing here to exercise, which is
+# item 8's positional discovery rather than a defect — so the step says which
+# case it saw rather than passing either way.
+if [ -n "$DISCOVERED" ]; then
+  LOCAL_DID="$DISCOVERED"
+  check "1" "$(complete_at "cf inspect entities ${LOCAL_DID:0:20}" |
+    grep -c "^$LOCAL_DID\$")" "the space positional completes from it"
+  ENTITY=$($CF inspect entities "$LOCAL_DID" --json 2>/dev/null |
+    jq -r '.[0].id // empty')
+  if [ -n "$ENTITY" ]; then
+    check "1" "$(complete_at "cf inspect piece $LOCAL_DID ${ENTITY:0:12}" |
+      grep -c "^$ENTITY\$")" \
+      "and the entity positional completes what inspect entities lists"
+  else
+    ok "the discovered space holds no entities to complete"
+  fi
+else
+  ok "no local space db here, so the operator surface has nothing to offer"
+fi
+
+step "16. wish and the enumerated remainder"
+# These are the CLI's own vocabulary rather than a pattern's, which is what
+# puts them below the slots above. Each set is in the command's own help.
+check "1" "$(complete_at "cf wish #profileN" | grep -cx '#profileName')" \
+  "a wish target completes"
+check "profile" "$(complete_at "cf wish '#profile' --scope p" | paste -sd, -)" \
+  "and a wish scope completes its named values"
+check "ascii,dot" "$(candidates_at "cf piece map --format ")" \
+  "an enumerated option completes exactly what its help lists"
+check "1" "$(complete_at "cf inspect entities x --kind ow" |
+  grep -cx 'owned-cell')" "and so does the other one"
+# An option name means one thing per command, and the provider says where it
+# applies: a file on one, a sequence number on the other.
+check ":cf:files" "$(directives_at "cf space clone x --from ")" \
+  "--from offers a snapshot file where it names one"
+check "" "$(directives_at "cf inspect diff x y --from ")$(complete_at \
+  "cf inspect diff x y --from ")" \
+  "and nothing where it names a sequence number"
 
 ELAPSED=$(($(date +%s) - START))
 printf '\n== %d passed, %d failed, %d gaps open — %ds wall clock\n' \

@@ -8,12 +8,14 @@ import {
   liveCandidates,
   projectionKeys,
   resolveSpaceContext,
+  shapeEntityCandidates,
   shapePieceCandidates,
   shapeProjectionCandidates,
   shapeSlugCandidates,
   shapeVerbCandidates,
   splitPathPrefix,
   splitSelectPrefix,
+  wishTargetCandidates,
 } from "../lib/completion/providers.ts";
 import {
   parseSelectionProjection,
@@ -21,6 +23,7 @@ import {
 } from "../lib/cell-selection.ts";
 import { tokenizeLine } from "../lib/completion/mod.ts";
 import { main } from "../commands/main.ts";
+import { wish } from "../commands/wish.ts";
 
 function lineFor(text: string) {
   const { words, cword } = tokenizeLine(text, text.length);
@@ -634,6 +637,38 @@ Deno.test("shaping: a key the concise grammar cannot carry is not offered", () =
       .map((candidate) => candidate.value),
     ["ok", "ok@"],
   );
+});
+
+Deno.test("shaping: an entity is labeled by what was reconstructed for it", () => {
+  // The id is what the next positional takes; the label is what makes it
+  // readable. `(piece)` is what the reconstruction says when it found no name,
+  // which is the kind's job rather than the label's.
+  assertEquals(
+    shapeEntityCandidates([
+      { id: "of:fid1:a", label: "Completion fixture", kind: "piece" },
+      { id: "of:fid1:b", label: "(piece)", kind: "piece" },
+      { id: "of:fid1:c", kind: "free-cell" },
+    ]),
+    [
+      { value: "of:fid1:a", description: "Completion fixture" },
+      { value: "of:fid1:b", description: "piece" },
+      { value: "of:fid1:c", description: "free-cell" },
+    ],
+  );
+});
+
+Deno.test("every wish target offered is one the command's help enumerates", () => {
+  // The vocabulary is the wish builtin's rather than the command tree's, so it
+  // is carried here by hand. The help text is where it is documented, and a
+  // target in one and not the other is the drift this catches.
+  const help = wish.getDescription();
+  for (const candidate of wishTargetCandidates().candidates) {
+    if (candidate.value === "/") continue; // The root, named in prose.
+    assert(
+      help.includes(candidate.value),
+      `${candidate.value} is offered but not documented in cf wish --help`,
+    );
+  }
 });
 
 Deno.test("shaping: containers yield keys, leaves yield nothing", () => {

@@ -983,17 +983,21 @@ source <(cf completion bash)
 Completion covers the command tree — subcommands, flags, and enumerated values
 such as `--log-level` — plus live values read from the fabric:
 
-| Slot                            | Completes to                                                  |
-| ------------------------------- | ------------------------------------------------------------- |
-| `--piece`                       | the space's slugs, then its piece ids                         |
-| `cf call <callable>`            | the piece's callables, annotated with the doc comment on each |
-| `cf get`/`cf set <path>`        | cell keys, one path segment at a time                         |
-| `cf get --select`/`--schema`    | field paths into the value, and their `@` form                |
-| `piece set-slug <slug>`         | the space's slugs                                             |
-| `piece link <source>/<target>`  | `pieceId/path/to/field` endpoints                             |
-| `--space`                       | space DIDs of local memory-v2 stores                          |
-| `--identity`, pattern arguments | `*.key` / `*.tsx` files, via the shell                        |
-| `--datafile`                    | any file, via the shell                                       |
+| Slot                                    | Completes to                                                  |
+| --------------------------------------- | ------------------------------------------------------------- |
+| `--piece`                               | the space's slugs, then its piece ids                         |
+| `call <callable>`                       | the piece's callables, annotated with the doc comment on each |
+| `get`/`set <path>`                      | cell keys, one path segment at a time                         |
+| `get --select`/`--schema`               | field paths into the value, and their `@` form                |
+| `piece set-slug <slug>`                 | the space's slugs                                             |
+| `piece link <source>/<target>`          | `pieceId/path/to/field` endpoints                             |
+| `--space`, a positional space           | space DIDs of local memory-v2 stores                          |
+| `inspect <entity>`                      | that space's entities, as `cf inspect entities` lists them    |
+| `wish <target>`, `wish --scope`         | the vocabulary `cf wish --help` enumerates                    |
+| `--identity`, pattern arguments         | `*.key` / `*.tsx` files, via the shell                        |
+| `--datafile`, `--out`, `--output`       | any file, via the shell                                       |
+| `--dir`, `--to`, `--root`, a mountpoint | a directory, via the shell                                    |
+| `--remote`                              | what `--api-url` takes, in the `--remote=<url>` spelling      |
 
 A callable is annotated with what its author said it is for, falling back to its
 kind where they wrote nothing. A wrapper or deprecated verb — the two
