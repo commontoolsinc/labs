@@ -59,6 +59,8 @@ import {
   resolveEntryIdentity,
 } from "../src/index.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
+import { collectExternalSchemaRefHashes } from "../src/schema-decompose.ts";
 
 const spaceSigner = await Identity.fromPassphrase("space root ensure space");
 const space = spaceSigner.did() as MemorySpace;
@@ -383,6 +385,117 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
       expect(snapshot?.actingPrincipal).toBe(space);
       expect(snapshot?.actingPrincipal).not.toBe(serviceSigner.did());
     }
+  });
+
+  it("a plain space-cell subscriber's frames stay closed over cid mentions through materialization AND re-delivery (OW61)", async () => {
+    // The OW61 delivery race, reproduced with its own producer: the
+    // ensure materializes content-addressed computed cells into a space
+    // whose subscriber holds a PLAIN space-cell subscription (the
+    // production shape — CLI, agents-host: no root-aware demand). The
+    // board's kill needed two ingredients: (1) the server re-delivering
+    // a cid-mentioning doc in a frame WITHOUT its cid: sibling (elided
+    // because an EARLIER frame carried it), and (2) any ordering that
+    // voids the client having durably applied that earlier frame. (2)
+    // is delivery-window timing CI hit and a fast local box does not;
+    // (1) is deterministic — the aged-space reconcile below re-delivers
+    // the root's computed cells after their cid docs rode the first
+    // tenure's frames. So this pin asserts the emission-side guarantee
+    // the fix establishes, per-frame SELF-closure: every cid ref a
+    // frame's documents mention resolves WITHIN that frame. Watched RED
+    // at base (the reconcile's push frame carried the computed doc
+    // alone); the per-frame closure pass makes it green. With frames
+    // self-closed, ingredient (2) has nothing to break.
+    await seedAcl({ [space]: "OWNER" });
+    const created = newSpaceServer();
+    expect(await created.activate()).toBe(true);
+
+    const reader = clientRuntime(readerSigner);
+    // Record every frame the reader's replica consumes, BEFORE it
+    // applies (the suite's established instance-patch seam): collect
+    // per-frame self-closure violations and count computed-cell
+    // deliveries (the producer sanity — without them this pin is
+    // vacuously green).
+    const replica = (reader.storageManager.open(space) as unknown as {
+      replica: {
+        applySessionSync(sync: unknown, type: string): void;
+      };
+    }).replica;
+    const violations: string[] = [];
+    let computedDeliveries = 0;
+    const originalApply = replica.applySessionSync.bind(replica);
+    replica.applySessionSync = (sync: unknown, type: string) => {
+      const upserts = (sync as { upserts?: unknown[] })?.upserts;
+      const frame = Array.isArray(upserts) ? upserts as Array<{
+        id?: unknown;
+        deleted?: unknown;
+        doc?: unknown;
+      }> : [];
+      const inFrame = new Set<string>();
+      for (const upsert of frame) {
+        if (
+          typeof upsert?.id === "string" && upsert.deleted !== true &&
+          upsert.doc !== undefined
+        ) {
+          inFrame.add(upsert.id);
+        }
+      }
+      for (const upsert of frame) {
+        if (typeof upsert?.id !== "string" || upsert.deleted === true) {
+          continue;
+        }
+        const doc = upsert.doc;
+        if (doc === null || typeof doc !== "object") continue;
+        if (upsert.id.startsWith("computed:")) computedDeliveries++;
+        // A schema doc's own refs ride the registration path; the
+        // mention scan is for ordinary documents' link schemas — the
+        // same positions the arrival validator interprets.
+        if (upsert.id.startsWith("cid:")) continue;
+        mapLinkSchemas(doc as never, (schema) => {
+          for (
+            const hash of collectExternalSchemaRefHashes(schema as never)
+          ) {
+            const cid = `cid:${hash}`;
+            if (!inFrame.has(cid)) {
+              violations.push(
+                `${upsert.id} mentions ${cid}, absent from its frame`,
+              );
+            }
+          }
+          return schema;
+        });
+      }
+      return originalApply(sync, type);
+    };
+
+    const probe = reader.getSpaceCell(space).key("defaultPattern");
+    await probe.sync();
+    await waitUntil(() => probe.get() !== undefined, "root linked");
+    await resolveRootEventually(reader);
+    await waitUntil(
+      () => computedDeliveries > 0,
+      "the ensured root's computed cell riding the plain subscription",
+    );
+
+    // The RE-delivery: age the source while parked; the second tenure's
+    // reconcile rewrites the root's computed cells and the push frame
+    // re-delivers them — after their cid docs already rode tenure 1's
+    // frames, which is exactly the elision the race rode.
+    await created.park("test-age");
+    await created.whenParked;
+    files.set(HOME_PATH, rootSource("home-v2"));
+    const second = newSpaceServer();
+    expect(await second.activate()).toBe(true);
+    await waitUntil(
+      () => stats.rootEnsure.reconciled === 1,
+      "second tenure's reconcile counted",
+    );
+    const deliveriesBeforeRedelivery = computedDeliveries;
+    await waitUntil(
+      () => computedDeliveries > deliveriesBeforeRedelivery,
+      "the reconciled computed cell re-delivered",
+    );
+
+    expect(violations).toEqual([]);
   });
 
   it("the ensure's creation tx carries the resolved OWNER's trust snapshot, never the service's (granted-owner space, default-app source)", async () => {
