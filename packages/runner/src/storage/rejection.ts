@@ -95,6 +95,36 @@ export function isConflictRejection(
 }
 
 /**
+ * The STALE-CONFIRMED-READ sub-shape of {@link isConflictRejection}: the
+ * server refused the commit because a document the transaction read at a
+ * given seq had already advanced past it, so a re-read is what converges.
+ * The other shape normalized to `ConflictError` — `pending dependency not
+ * resolved` (memory/v2/engine.ts: a commit whose basis names a local seq the
+ * server has not accepted yet) — is deliberately NOT included. It says this
+ * session's own earlier commit is unresolved rather than that this read is
+ * behind, so it is that commit's fate, not a fresh read, that decides it.
+ *
+ * Discriminated by MESSAGE, the way `toRejectedError` (storage/v2.ts) already
+ * recovers the conflicted entity from one: `Error` fields do not survive the
+ * wire, the message does, and its format is owned by the `ConflictError`
+ * construction in memory/v2/engine.ts.
+ *
+ * A caller that only needs "can re-running converge at all" wants
+ * {@link isRetryableCommitRejection}. This predicate is for a caller that
+ * must separate a basis a fresh read fixes from every other refusal — the
+ * commit-gated piece start, whose first-hydration commit races the serving
+ * side materializing the very documents its basis read as absent
+ * (server-execution v2; verification-coverage.md OW45 arm B).
+ */
+export function isStaleConfirmedReadConflict(
+  error: { name?: string; message?: string } | undefined | null,
+): boolean {
+  return isConflictRejection(error) &&
+    typeof error?.message === "string" &&
+    error.message.includes("stale confirmed read");
+}
+
+/**
  * A stale-basis inconsistency: a value the transaction read changed on this
  * replica between the read and the commit (see storage/v2-transaction.ts
  * `validate()`). Like a conflict it is resolved by re-running the transaction
