@@ -275,13 +275,45 @@ async function callableCandidates(
 export interface VerbListingLike {
   readonly name: string;
   readonly kind: string;
+  /** The author's doc comment on the verb, where the listing carries one. */
+  readonly description?: string;
+  /** A UI affordance rather than a headless verb. Hidden by `cf piece verbs`. */
+  readonly tier?: string;
+  /** `@deprecated` on the verb. Hidden by `cf piece verbs`. */
+  readonly deprecated?: boolean;
 }
 
-/** Callables annotated by kind, matching what `cf piece verbs` reports. */
+/**
+ * Callables, annotated with what the author said the verb is FOR.
+ *
+ * `cf piece verbs` prints that sentence under each row and it is the one a
+ * verb's help page opens with, so it is what the annotation column is for. The
+ * kind is a two-value fact that rarely decides anything at the prompt, and it
+ * is the fallback where the author documented nothing — never derived from the
+ * name, which would report a caller's own word back as documentation.
+ *
+ * A wrapper or deprecated verb is marked. `cf piece verbs` holds both back
+ * unless `--all` and says how many it held; completion offers them, because
+ * both are callable and a name that works should be reachable. What is not
+ * defensible is the two surfaces disagreeing silently, and the mark is the
+ * cheapest way to agree: it keeps the name reachable while saying what it is.
+ */
 export function shapeVerbCandidates(
   verbs: readonly VerbListingLike[],
 ): Candidate[] {
-  return verbs.map((verb) => ({ value: verb.name, description: verb.kind }));
+  return verbs.map((verb) => {
+    const mark = verb.tier === "wrapper"
+      ? "wrapper"
+      : verb.deprecated === true
+      ? "deprecated"
+      : undefined;
+    const said = verb.description?.split("\n")[0].trim();
+    const body = said && said.length > 0 ? said : verb.kind;
+    return {
+      value: verb.name,
+      description: mark ? `[${mark}] ${body}` : body,
+    };
+  });
 }
 
 /**

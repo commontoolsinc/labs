@@ -368,15 +368,59 @@ Deno.test("shaping: a piece is labeled by name, falling back to its pattern", ()
   );
 });
 
-Deno.test("shaping: callables are annotated by kind", () => {
+Deno.test("shaping: a callable is annotated with what the author said it is for", () => {
+  // The doc comment is the sentence the verb's help page opens with, and the
+  // kind is a two-value fact that rarely decides anything at the prompt. The
+  // kind is the fallback where the author documented nothing, so a candidate
+  // is never unannotated.
   assertEquals(
     shapeVerbCandidates([
-      { name: "addItem", kind: "handler" },
+      { name: "addItem", kind: "handler", description: "Add one item." },
       { name: "search", kind: "tool" },
+      { name: "wrapped", kind: "handler", description: "  " },
     ]),
     [
-      { value: "addItem", description: "handler" },
+      { value: "addItem", description: "Add one item." },
       { value: "search", description: "tool" },
+      { value: "wrapped", description: "handler" },
+    ],
+  );
+});
+
+Deno.test("shaping: a callable takes the first line of a multi-line comment", () => {
+  // The annotation is one column of one row; the rest of the comment is what
+  // the verb's own help page is for.
+  assertEquals(
+    shapeVerbCandidates([
+      {
+        name: "noteAll",
+        kind: "handler",
+        description: "Record it.\nThen some.",
+      },
+    ])[0].description,
+    "Record it.",
+  );
+});
+
+Deno.test("shaping: a verb the listing holds back is offered marked", () => {
+  // `cf piece verbs` hides both unless --all. Both are callable, so hiding
+  // them here would put a working name out of reach; the mark is what keeps
+  // the two surfaces from disagreeing silently.
+  assertEquals(
+    shapeVerbCandidates([
+      { name: "legacyAdd", kind: "handler", deprecated: true },
+      {
+        name: "openPicker",
+        kind: "handler",
+        tier: "wrapper",
+        description: "Pick.",
+      },
+      { name: "addItem", kind: "handler", deprecated: false },
+    ]),
+    [
+      { value: "legacyAdd", description: "[deprecated] handler" },
+      { value: "openPicker", description: "[wrapper] Pick." },
+      { value: "addItem", description: "handler" },
     ],
   );
 });

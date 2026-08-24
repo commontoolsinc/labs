@@ -312,16 +312,24 @@ check "addItem,noteAll,renameItem,sweep" \
     jq -r '[.verbs[] | select(.deprecated != true and .tier != "wrapper") |
       .name] | sort | join(",")')" \
   "the verbs listing shows four of them"
-check "handler" "$(annotation_at "cf call $LINE_ARGS --piece board " legacyAdd)" \
-  "the deprecated verb is offered annotated like every other"
-# The annotation column carries the kind, while the listing row carries the
-# prose the author wrote — the sentence the verb's help page opens with.
-check "Add one item to the board, and report the new total." \
-  "$($CF piece verbs --piece board $ARGS --json 2>/dev/null |
-    jq -r '.verbs[] | select(.name == "addItem") | .description')" \
+# Both surfaces are offered the deprecated verb, and completion says so: it is
+# callable, so hiding it would put a working name out of reach, and offering it
+# unmarked is the two surfaces disagreeing silently.
+check "[deprecated] handler" \
+  "$(annotation_at "cf call $LINE_ARGS --piece board " legacyAdd)" \
+  "the verb the listing held back is offered marked"
+check "1" "$(succeeds $CF call --quiet --piece board $ARGS \
+  --invocation legacy-1 legacyAdd '{"title":"Legacy item"}')" \
+  "and it is callable, which is why it is offered at all"
+# The annotation column carries what the author said the verb is FOR, which is
+# the sentence its help page opens with.
+ADD_PROSE=$($CF piece verbs --piece board $ARGS --json 2>/dev/null |
+  jq -r '.verbs[] | select(.name == "addItem") | .description')
+check "Add one item to the board, and report the new total." "$ADD_PROSE" \
   "the listing carries addItem's prose"
-check "handler" "$(annotation_at "cf call $LINE_ARGS --piece board " addItem)" \
-  "and the candidate is annotated with its kind instead"
+check "$ADD_PROSE" \
+  "$(annotation_at "cf call $LINE_ARGS --piece board " addItem)" \
+  "and the candidate is annotated with the same sentence"
 
 step "7. Past the callable name, cf's own flags are not offered"
 # `piece call` is stopEarly(), so the first positional ends option parsing and
