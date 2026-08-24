@@ -60,16 +60,21 @@ if [ -n "$BOARD" ]; then ok "deployed $BOARD"; else
   bad "deploy failed"
   exit 1
 fi
+FILED=0
 for title in alpha beta gamma; do
-  $CF call -q --piece "$BOARD" $ARGS addMember "{\"title\":\"$title\"}" \
-    >/dev/null 2>&1 || bad "addMember $title failed"
+  if $CF call -q --piece "$BOARD" $ARGS addMember "{\"title\":\"$title\"}" \
+    >/dev/null 2>&1; then
+    FILED=$((FILED + 1))
+  else
+    bad "addMember $title failed"
+  fi
 done
-ok "filed alpha, beta, gamma"
+check "3" "$FILED" "filed alpha, beta, gamma"
 
 step "2. Survey the collection, stamping a retarget"
 PLAN="$WORK/plan.jsonl"
 if $CF piece survey -q --piece "$BOARD" --path items $ARGS \
-  --retarget "items=$RETARGET_FIXTURE@drill" \
+  --retarget "items=$RETARGET_FIXTURE@drill" --main-export Member \
   --out "$PLAN" 2>"$WORK/survey.err"; then
   ok "survey exited 0 (complete)"
 else
@@ -80,10 +85,11 @@ fi
 
 step "3. The header accounts for the selection"
 HEADER_FACTS=$(head -1 "$PLAN" | jq -r \
-  '[.kind, (.v|tostring), (.enumerated.collection|tostring),
-    (.enumerated.registeredOutside|tostring)] | @tsv')
-check "$(printf 'piece-plan\t1\t3\t0')" "$HEADER_FACTS" \
-  "header: piece-plan v1, collection 3, nothing registered outside"
+  '[.kind, (.v|tostring), .selector, (.enumerated.collection|tostring),
+    (.enumerated.registeredOutside|tostring),
+    ((has("problems") or has("outside"))|tostring)] | @tsv')
+check "$(printf 'piece-plan\t1\tcollection\t3\t0\tfalse')" "$HEADER_FACTS" \
+  "header: collection of 3, nothing outside, nothing unaccounted for"
 
 step "4. Rows are members in order, then the holder"
 PHASES=$(tail -n +2 "$PLAN" | jq -rs 'map(.phase) | join(",")')
@@ -106,25 +112,33 @@ step "6. The retarget stamp pins the target identity, on member rows only"
 STAMPS=$(tail -n +2 "$PLAN" | jq -rs \
   'map(select(.phase == "items") | .op)
    | [(map(.kind) | unique | join(",")), (map(.rev) | unique | join(",")),
+      (map(.symbol) | unique | join(",")),
       (map(.patternIdentity) | unique | length | tostring)] | @tsv')
-check "$(printf 'retarget\tdrill\t1')" "$STAMPS" \
-  "member rows carry one retarget target, rev label 'drill'"
-TARGET_IS_CURRENT=$(tail -n +2 "$PLAN" | jq -rs \
+check "$(printf 'retarget\tdrill\tMember\t1')" "$STAMPS" \
+  "member rows carry one retarget target, rev 'drill', export Member"
+TARGET_DIFFERS=$(tail -n +2 "$PLAN" | jq -rs \
   'map(select(.phase == "items"))
-   | map(.op.patternIdentity == .expect.patternIdentity) | unique | join(",")')
-check "false" "$TARGET_IS_CURRENT" \
-  "the stamped identity differs from the one the members run"
+   | map((.op.patternIdentity != null) and
+       (.op.patternIdentity != .expect.patternIdentity))
+   | unique | join(",")')
+check "true" "$TARGET_DIFFERS" \
+  "every member row is stamped, and with a different reference"
 HOLDER_OP=$(tail -n +2 "$PLAN" | jq -rs \
   'map(select(.phase == "holder") | has("op")) | join(",")')
 check "false" "$HOLDER_OP" "the holder row carries no op"
 
 step "7. The single-piece pin agrees with the holder row"
-PIN_IDENTITY=$($CF piece inspect --pattern-identity --json \
-  --piece "$BOARD" $ARGS 2>/dev/null | jq -r '.patternIdentity')
-HOLDER_IDENTITY=$(tail -n +2 "$PLAN" | jq -rs \
-  'map(select(.phase == "holder") | .expect.patternIdentity) | first')
-check "$HOLDER_IDENTITY" "$PIN_IDENTITY" \
-  "inspect --pattern-identity matches the survey's holder row"
+PIN_FACTS=$($CF piece inspect --pattern-identity --json \
+  --piece "$BOARD" $ARGS 2>/dev/null |
+  jq -r '[.patternIdentity, .symbol, (.retained|tostring)] | @tsv')
+HOLDER_FACTS=$(tail -n +2 "$PLAN" | jq -rs \
+  'map(select(.phase == "holder") | .expect)
+   | first | [.patternIdentity, .symbol, (.retained|tostring)] | @tsv')
+if [ -z "$PIN_FACTS" ] || [ -z "$HOLDER_FACTS" ]; then
+  bad "pin extraction came back empty"
+fi
+check "$HOLDER_FACTS" "$PIN_FACTS" \
+  "inspect's source pin matches the survey's holder row, symbol included"
 
 step "8. A change shows on the next survey (live read)"
 $CF call -q --piece "$BOARD" $ARGS addMember '{"title":"delta"}' \
@@ -132,6 +146,32 @@ $CF call -q --piece "$BOARD" $ARGS addMember '{"title":"delta"}' \
 AFTER=$($CF piece survey -q --piece "$BOARD" --path items $ARGS \
   2>/dev/null | head -1 | jq -r '.enumerated.collection')
 check "4" "$AFTER" "the after-survey counts the member added since"
+
+step "9. A registered in-scope orphan makes the survey refuse"
+ORPHAN=$($CF piece new --quiet --main-export Member \
+  "$SCRIPT_DIR/pattern/bulk-member.tsx" $ARGS 2>/dev/null |
+  grep -oE '^fid1:[A-Za-z0-9_-]+' | head -1)
+if [ -n "$ORPHAN" ]; then ok "registered orphan $ORPHAN"; else
+  bad "orphan deploy failed"
+fi
+if $CF piece survey -q --piece "$BOARD" --path items $ARGS \
+  >/dev/null 2>"$WORK/incomplete.err"; then
+  bad "survey exited 0 despite a registered in-scope orphan"
+else
+  ok "survey exited nonzero with an orphan registered"
+fi
+if grep -q "registered outside the selection" "$WORK/incomplete.err"; then
+  ok "the refusal names the orphan's standing"
+else
+  bad "the refusal does not name the orphan"
+fi
+
+step "10. A list survey claims no containment"
+LIST_FACTS=$($CF piece survey -q --list "$BOARD" $ARGS 2>/dev/null |
+  head -1 | jq -r '[.selector, (.enumerated.collection|tostring),
+    (.enumerated.registeredOutside|tostring)] | @tsv')
+check "$(printf 'list\t1\t0')" "$LIST_FACTS" \
+  "list of one row, complete despite the orphan"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
