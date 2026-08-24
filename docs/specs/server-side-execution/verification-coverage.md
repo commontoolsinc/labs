@@ -5673,6 +5673,85 @@ supply; OW29/OW32/OW34 closed):
     the lanes off; and no CI lane now exercises the production ensure
     at the true topology — unit pins and the measurement harness carry
     it until a lane opts in.
+    **CATCH-UP-AND-START BUILT 2026-08-24 — the ruled close of the
+    client-start class. RULED 2026-08-24: the coordinator's
+    recommendation, ACKED verbatim by the owner ("so ack on all
+    recommendaions"):**
+
+    > In the stale-confirmed-read error arm of the deferred start,
+    > treat the refusal as "the server won the race": wait for the
+    > conflicting docs to arrive (the wire path already attaches
+    > `readyToRetry` = `waitForCaughtUpLocalSeq`,
+    > packages/memory/v2/client.ts ~:1403), then START the runner
+    > against the served docs, COMMITTING NOTHING. Not re-commit
+    > (#6208's retry — census-proved non-convergent, closed), not
+    > refuse-to-start (today's terminal arm).
+
+    The owner's model statements grounding it (same date, verbatim):
+
+    > "clients should actually start patterns when they load, but
+    > it's an entirely reactive flow that catches up with the
+    > server."
+
+    > "a client can still speculatively run it locally, just that
+    > the server-state will eventually win"
+
+    > "ah, one thing i forgot, and we can change: clients do create
+    > patterns, but only in tests. for production client we
+    > currently don't have a way to instantiate a new pattern with
+    > new code from \"the outside\" (as opposed to patterns doing
+    > it). (and just to be clear, a .map creates and starts a lot of
+    > sub patterns, but it does so deterministacally and reactively
+    > and with existing code, so the client just speculates, the
+    > servers fills in, it converges, done)."
+
+    — owner (Berni), 2026-08-24. As built (`runner.ts`
+    `catchUpAndStartOnStaleRead` + `startFromServedState`; the
+    discriminator `isStaleConfirmedReadConflict` and the readiness
+    `awaitCommitRetryReadiness` cherry-picked from closed #6208 —
+    the retry itself deliberately NOT brought): both deferred-start
+    arms' stale-confirmed-read refusals, ON-ONLY
+    (`experimental.serverExecution === true`, the coordinator's
+    conservative default — under OFF the refusal means another
+    CLIENT raced and cross-tab mutex semantics own that story; OFF
+    byte-identical, pinned), cancel the failed install as today,
+    then await the conflict's readiness and run the ORDINARY LOAD
+    WALK (`doStart`, the reload walk) with no independent-start
+    marking; the recovery arm commits nothing (store-door pin: zero
+    `commitNative` calls post-refusal), mints no transaction, and
+    re-issues the one-shot pull the refused commit's success arm
+    would have issued. Log keys: `deferred-start-catchup` (recovery
+    scheduled), `deferred-start-catchup-failed` (walk failed —
+    loud, the piece has no client context). The two design checks
+    flagged to the owner, resolved with evidence before code:
+    (1) nothing downstream in the start walk requires the CLIENT's
+    startTx commit to have succeeded — the walk consumes the
+    ORIGINATING committed tx's products (root doc, patternIdentity
+    meta, argument link, setup state; the deferred callback only
+    arms on that commit's success) plus in-memory context the
+    recovery re-creates; the two startTx-success-gated products are
+    the one-shot pull (the recovery re-issues it) and the
+    pattern-updater schedule (the walk's own instantiation tx
+    re-arms it); the startTx's staged materialization writes are
+    exactly what the SERVER already materialized (deterministic,
+    cause-derived ids). (2) §3d restated in serving-loop.md §3d's
+    RULED 2026-08-24 paragraph (the sanction names the
+    deferred-start transaction; the recovery mints none) — no
+    semantic beyond the ruling. Red-first:
+    `deferred-start-catchup-start.test.ts`, watched red at the
+    exact b04 shape (terminal tx-commit-error, one install, the
+    awaited second install failed by quiescence); mutation kills:
+    the ON gate (OFF pin), the discriminator
+    (other-refusals-terminal pin), the token registration point
+    (stop pin), and the epoch pair JOINTLY (teardown pin — the two
+    checks are each other's backstop, individually shadowed;
+    recorded as one joint kill, not two). Disclosed deltas, each
+    derived from "the context is the normal start walk's": the
+    recovery carries no navigate event context (the server owns the
+    intent — §3d's own rationale) and no independent-start marking
+    (the recovered piece stays its parent's child); a document
+    still in flight at walk time reads PENDING and re-triggers on
+    arrival (OW51 semantics).
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
@@ -6798,7 +6877,37 @@ supply; OW29/OW32/OW34 closed):
     fix is deliberately not flag-gated). Trigger: the post-flip soak,
     or any ON surface where a re-attempted start is observed
     exhausting its budget in real usage
-    (`deferred-start-conflict-exhausted`), whichever comes first.**
+    (`deferred-start-conflict-exhausted`), whichever comes first.
+    **RE-FRAMED (RULED 2026-08-24, owner ack "so ack on all
+    recommendaions"): the destination is START-WITHOUT-COMMIT, not
+    adopt-not-start.** Clients DO start pieces — speculatively, with
+    the normal start walk's context — and the server-state wins:
+
+    > "a client can still speculatively run it locally, just that
+    > the server-state will eventually win"
+
+    > "clients should actually start patterns when they load, but
+    > it's an entirely reactive flow that catches up with the
+    > server."
+
+    — owner (Berni), 2026-08-24. The five pieces, re-dispositioned
+    (the history above kept as written): (i) adopted-context,
+    (ii) the birth-adoption wait, and (v) the hydration UX all
+    DISSOLVE — the context is the normal start walk's; whoever wins
+    the race materializes and the loser catches up; the UX is
+    today's. (iii) the §3d restatement arrived EARLY via the OW45
+    catch-up-and-start build (serving-loop.md §3d's RULED 2026-08-24
+    paragraph). (iv) — whether the OFF-arm start path is retained as
+    a fallback under ON, and under exactly which predicate — is the
+    STAGE-2 question, unchanged, and is what remains of this row.
+    The landing DUTY above is discharged by history: #6208 closed
+    unmerged, so no retry ever landed to retire; its
+    `isStaleConfirmedReadConflict` predicate lands via the OW45
+    build as the LIVE discriminator of the catch-up recovery — not
+    dead code — and `reattemptDeferredStartOnStaleRead` never
+    landed at all (`deferred-start-conflict-exhausted` never became
+    a live log key; the recovery's keys are
+    `deferred-start-catchup` / `deferred-start-catchup-failed`).**
 
 ## 4. Standing rule
 
