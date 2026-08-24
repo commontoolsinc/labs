@@ -225,10 +225,120 @@ Every behavior pin was watched failing before its seat/fix existed:
 
 ## Measurement — before/after at the true ON topology, ambient load only
 
-_TO BE FILLED: whether the server's ensure precedes the client's, the
-ARM-A refusal rate, and the client's five-commit sequence
-(count/composition), before vs after, with run ledgers._
+Bench: the OW45 gate-harness shape — fresh store per run, posture probe
+per run (`shellServerExecutionDefine=true servingLoop=present` on every
+run), ports 9691–9696 (never 8000), PID-only kills, ambient load only
+(load-before 2.9–5.8 across the ledger). Gate:
+`packages/patterns/integration/default-app.test.ts` with the step's ON
+skip entry neutralized in the working tree so the step actually runs
+(restored after; the committed entry is untouched). Client worker
+console forwarded (`FORWARD_WORKER_CONSOLE=1 PIPE_CONSOLE=1`).
+
+Instruments — two SCRATCH taps, in the tree for the measurement builds
+only and reverted before this report's final push (the census's
+discipline; the committed diff carries neither):
+
+1. `[ENSURETAP]` at the shared creation core's exit
+   (`createSpaceRootIfAbsent`): space, cause, `createdByThisCall`,
+   commit-error name. Prints server-side into the toolshed log and
+   client-side through the forwarded worker console — the
+   who-created-and-who-won instrument.
+2. `[SEQTAP]` per client commit at `sealOperations` (localSeq + scheme
+   split) — the census's instrument-3 shape. Supplementary only: the
+   worker console forward attaches after the earliest boot commits, so
+   compositions are read from the refusal payloads (the product's own
+   `tx-commit-error` line embeds the whole transaction) and ENSURETAP.
+
+The server's `rootEnsure` counters (`/api/health/stats`) are product
+surface, not a tap.
+
+**Before** is the arming-entry report's ledger
+(`ow45-armb-arming-entry.md`), measured at `e55785eff` — THIS branch's
+base — same gate, same fresh-store/posture/ambient discipline, same
+box: 6 informative runs (5 green, 1 red at 325 s), 12/12 ARM-A arms
+from `ensureDefaultPattern`, **9 refusals, all ARM-A**, every refused
+commit `(50, 16, 15, 19)`, client boot sequence five commits
+`(9, 23, 28, 46, 50)` ops. Run r01 below — stage-1 code with the
+fail-closed skip still next-tenure-only, i.e. the server INERT — is the
+in-branch control that reproduces exactly that before-signature.
+
+### Run ledger
+
+| run | build | exit | wall | load b/a | rootEnsure runs/created/skipNoOwner | server creates | client creation attempts (won) | ARM-A refusals | step |
+|---|---|---|---|---|---|---|---|---|---|
+| r01 | stage 1, pre-re-arm | 1 | 341 s | 2.9/4.4 | 0/0/4 | 0 | 2 (2) | **2** — both `(50,16,15,19)` at localSeq 5 | **RED** (5 m 26 s) |
+| r02 | + same-tenure re-arm | 0 | 25 s | 4.3/5.8 | 4/4/4 | 4 (2 home + 2 default-app) | 1 (0) | 0 | ok 17 s |
+| r03 | + same-tenure re-arm | 0 | 25 s | 5.8/4.8 | 4/4/4 | 4 | 2 (0) | 0 | ok 14 s |
+| r04 | + same-tenure re-arm | 0 | 30 s | 4.8/4.0 | 4/4/4 | 4 | 1 (0) | 0 | ok 19 s |
+| r05 | + same-tenure re-arm | 0 | 29 s | 4.0/4.8 | 4/4/4 | 4 | 1 (0) | 0 | ok 17 s |
+| r06 | + same-tenure re-arm | 0 | 25 s | 4.8/4.2 | 4/4/4 | 4 | 1 (0) | 0 | ok 14 s |
+
+### What the numbers say
+
+1. **Does the server's ensure precede the client's?** YES, structurally
+   and measured. The activation-time ensure runs ~5–6 s before the
+   client's creation would commit (r01's timestamps: the server's
+   attempt at :14.5, the client's creation at :20.2). With the
+   same-tenure re-arm the server CREATED the root on 20/20
+   space-openings across r02–r06 (both arms live: `home-pattern` on
+   self-owned spaces, `space-root`/default-app on user-owned spaces).
+   The one boot-order fact the design's assumption missed — activation
+   precedes the genesis ACL, so the ruled fail-closed skip fires first
+   on EVERY fresh space — is what r01 measured (ensure inert, 4/4
+   skipped) and what the re-arm closes without touching the identity
+   posture.
+2. **ARM-A refusal rate:** before, 9 refusals across 6 runs (all
+   ARM-A, invariant `(50,16,15,19)`); r01 (server inert) reproduces it
+   (2 refusals, same composition). After: **0 refusals in 5/5 runs**.
+   The client's remaining creation attempts (6 across r02–r06, all on
+   the default-app spaces whose root it demanded mid-boot) all
+   resolved the served root inside the transaction
+   (`createdByThisCall=false`, no error) — the OCC fast arm engaging
+   live, because the serving loop had already started the served root
+   and its value was present at the re-check.
+3. **The client's five-commit sequence:** the creation pair — the
+   46-op originating tx and the 50-op deferred start (commits 4+5,
+   the pair the arming report attributed to `ensureDefaultPattern`) —
+   is GONE from the client's boot in every after-run: no client
+   creation commit, no deferred-start arming from the root's creation,
+   zero refusal lines to embed one. On home spaces the client's fast
+   path resolves the served root without entering the creation arm at
+   all; on default-app spaces it enters and exits on the in-tx re-check
+   (a read-only attempt). The three compile-cache write-back commits
+   are not individually tabled (SEQTAP attaches too late for the boot
+   commits), but the composition change the design predicted — the
+   materialization pair moving server-side — is directly witnessed.
+4. **Step verdict (not a promised metric, reported because it is the
+   skip's subject):** r01, with the server inert, is the known arm-B
+   RED (341 s, the b04/h04 family). r02–r06, with the server creating
+   every root, are **5/5 GREEN at 14–19 s step walls**. This is
+   consistent with the design's does-fix claim (the refusal class and
+   the duplicated materialization disappear when the server creates
+   first) and it does NOT meet the skip's lift bar (10/10
+   quiet-and-loaded, the client-start class explained) — **no skip
+   lift is taken or planned here**; the b04 ConflictError class (the
+   deferred start of a CLIENT-created piece racing the serving wave's
+   materialization of the same piece) is unreachable for the SPACE
+   ROOT when the server creates it, but the gate's mid-test piece
+   creations still exercise the general class, and 5 runs is 5 runs.
 
 ## Suites run
 
-_TO BE FILLED with counts._
+Counts at the final tree (one file per invocation):
+
+- `packages/memory` `v2-server-space-owner.test.ts` — 4/4.
+- `packages/runner` `ensure-space-root.test.ts` — 6/6 steps;
+  `executor-space-root-ensure.test.ts` — 5/5 steps (real-clock list).
+- `packages/piece` `pattern-source-provenance.test.ts` 3/3 steps (the
+  OFF-arm witness included), `ensure-default-pattern.test.ts` 16/16
+  steps, `check-update-default-pattern.test.ts` 69/69 steps,
+  `piece-origin.test.ts` 64/64 steps, `home-golden-replay.test.ts` and
+  `default-app-golden-replay.test.ts` green.
+- `packages/toolshed` `lib/server-execution.test.ts` — 6/6 steps (the
+  OFF witness pins included).
+- Neighboring executor suites at the final tree:
+  `executor-space-server.test.ts`, `executor-warm-request.test.ts`,
+  `executor-trust-attribution.test.ts` — see the PR's test plan for
+  the counts of the final run.
+- The live gate: the measurement ledger above (r02–r06 5/5 green with
+  the step running; r01 the served-inert control).
