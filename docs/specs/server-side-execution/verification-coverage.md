@@ -5731,21 +5731,34 @@ supply; OW29/OW32/OW34 closed):
     recorded, not silently extended; a b04-shaped death under THAT
     message is that mode's own open item. THE RECOVERY, as
     restructured by the review's F1 (+ Cubic P1 — the
-    cancellation-authority root, both faces): it recovers only an
-    attempt whose install is STILL THE CURRENT REGISTRATION when the
-    refusal lands (a stop or release during the commit round trip
-    now WINS, exactly as on the terminal path), tears the refused
-    install down with the token's own registry-guarded stop WITHOUT
-    spending the token, re-enters the pending index under the SAME
-    token the parent holds (stops tombstone the readiness wait
+    cancellation-authority root, both faces) and CORRECTED by the
+    delta review's D1: it recovers only an attempt whose install is
+    STILL THE CURRENT REGISTRATION when the refusal lands (a stop or
+    release during the commit round trip now WINS, exactly as on the
+    terminal path), tears the refused install down with the token's
+    own registry-guarded stop WITHOUT spending the token, CLEARS the
+    token's now-stale install reference (D1's root: the token's
+    cancel is a one-shot `stopped` latch — fired against a stale
+    install it no-ops AND burns the latch, and the first cut's later
+    hand-off then returned at the latch without stopping the
+    recovered run: the F1 leak one window later, the reviewer's
+    `registered-after-parent-cancel` probe; with the install
+    cleared, a cancel landing anywhere in the wait or walk window
+    stays pending-shaped), re-enters the pending index under the
+    SAME token the parent holds (stops tombstone the readiness wait
     there), then awaits the conflict's readiness and runs the
     ORDINARY LOAD WALK (`doStart`, the reload walk) with no
-    independent-start marking; when the walk leaves the piece
-    running the token is markInstalled with the current
-    registration, so the parent's one Cancel handle stops the
-    recovered run — and a cancel that landed mid-walk stops it in
-    the same breath; if another start took the key during the wait,
-    the recovery yields exactly as `startWithTx` yields on an owned
+    independent-start marking. The walk hands the claimed
+    registration to the token INSIDE its claim mapping — the same
+    synchronous block as the claim checks, so no promise hop
+    separates claim from hand-off for a stop+restart to slip a
+    foreign registration into (the delta review's D2, closed by
+    construction) — after which the parent's one Cancel handle stops
+    the recovered run, and a cancel that landed during the wait or
+    the walk is finished by that markInstalled against the real
+    registration: stopped in the same breath, the walk reporting
+    not-running. If another start took the key during the wait, the
+    recovery yields exactly as `startWithTx` yields on an owned
     key. The recovery arm commits nothing (store-door pin: zero
     `commitNative` calls post-refusal), mints no transaction, and
     re-issues the one-shot pull the refused commit's success arm
@@ -5773,16 +5786,21 @@ supply; OW29/OW32/OW34 closed):
     review round — the stop-during-round-trip revival and the spent
     parent handle both watched red before the F1 restructure, the
     stale-pending-read recovery and the embedded-phrase terminality
-    both watched red before the predicate change. Mutation kills:
-    the ON gate (OFF pin), the discriminator
+    both watched red before the predicate change, and the delta
+    round's mid-walk parent cancel watched red at the D1 leak
+    (`cancels.has` true after the handle fired inside the recovery's
+    assembly) before the latch-clear + in-claim hand-off landed.
+    Mutation kills: the ON gate (OFF pin), the discriminator
     (other-refusals-terminal pin), the token registration point
     (stop pin), the epoch pair JOINTLY (teardown pin — the two
     checks are each other's backstop, individually shadowed;
     recorded as one joint kill, not two), the entry authority gate
-    (stop-wins pin), the markInstalled hand-off (parent-handle
-    pin), and the cross-space CALL SITE (the routing pin's
-    entry-point instrumentation — the review's F13 found the prior
-    pin vacuous to exactly this mutation; it now reds). The
+    (stop-wins pin), the stale-install CLEAR (mid-walk pin), the
+    in-claim markInstalled hand-off (parent-handle AND mid-walk
+    pins — doubly load-bearing), and the cross-space CALL SITE (the
+    routing pin's entry-point instrumentation — the review's F13
+    found the prior pin vacuous to exactly this mutation; it now
+    reds). The
     readiness gate itself is pinned (Cubic P2/F12): a test-held
     `readyToRetry` shows no re-assembly while held and recovery
     exactly after release; the other unit refusals are
@@ -5860,7 +5878,13 @@ supply; OW29/OW32/OW34 closed):
     owned-key check and a stop cancels the token, so review note
     F11's benign-supersede false fire is structurally squeezed to
     the mid-walk window), beside the existing
-    `deferred-start-catchup` scheduling line. The lift bar's STEP
+    `deferred-start-catchup` scheduling line. Recorded follow-on
+    (review F9, veto not exercised — a recommendation, not owed
+    here): §3d makes failure-arm loudness a CONTRACT, and the
+    client half of it is unpinned because this package has no
+    logger-capture idiom; the serving half's model is an assertable
+    counter (`structureLoadFailures`) — a client-side counter or a
+    capture idiom would make the client half assertable too. The lift bar's STEP
     half is unchanged — the fixed step greens ON 10/10
     quiet-and-loaded — and its class half is now the named read-side
     residue (the START class the bar originally named is closed by

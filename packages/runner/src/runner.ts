@@ -3564,20 +3564,28 @@ export class Runner {
    * the recovery DECLINE, so the stop wins exactly as it does on the
    * terminal path; (2) the refused install is torn down with the same
    * registry-guarded stop the token's own cancel performs, WITHOUT
-   * spending the token; (3) the token re-enters the pending index for
-   * the readiness wait, so a stop, a release, or `stopAll()` during that
-   * window tombstones the recovery through the same path that tombstones
-   * a pending first attempt; (4) when the walk leaves the piece running,
-   * the token is markInstalled with the CURRENT registration, so a
-   * parent cancel from then on stops the recovered run — and one that
-   * landed mid-walk stops it in the same breath (markInstalled finishes
-   * a pending cancellation synchronously). If another start took the key
-   * while the recovery waited, the recovery yields exactly as
-   * `startWithTx` yields on an owned key: the piece has a context under
-   * someone else's authority, and the token settles without touching it.
-   * The lifecycle epoch still covers the one window no token can: a
-   * teardown that ran before the refusal's continuation, whose sweep
-   * could not see this scheduling.
+   * spending the token, and the token's now-stale install reference is
+   * CLEARED (delta review D1: the token's cancel is a one-shot `stopped`
+   * latch — fired against a stale install it would no-op AND burn the
+   * latch, leaving a later hand-off unable to stop the recovered run;
+   * with the install cleared, a cancel landing anywhere in the wait or
+   * walk window stays pending-shaped); (3) the token re-enters the
+   * pending index for the readiness wait, so a stop, a release, or
+   * `stopAll()` during that window tombstones the recovery through the
+   * same path that tombstones a pending first attempt; (4) the walk
+   * hands the claimed registration to the token INSIDE its claim
+   * mapping — the same synchronous block as the claim checks, no
+   * promise hop for a stop+restart to slip a foreign registration into
+   * (delta review D2) — so a parent cancel from then on stops the
+   * recovered run, and one that landed during the wait or the walk is
+   * finished by that markInstalled against the real registration: the
+   * run is stopped in the same breath and the walk reports not-running.
+   * If another start took the key while the recovery waited, the
+   * recovery yields exactly as `startWithTx` yields on an owned key:
+   * the piece has a context under someone else's authority, and the
+   * token settles without touching it. The lifecycle epoch still covers
+   * the one window no token can: a teardown that ran before the
+   * refusal's continuation, whose sweep could not see this scheduling.
    */
   private catchUpAndStartOnStaleRead<T>(
     error: { name?: string; message?: string },
@@ -3617,9 +3625,21 @@ export class Runner {
     // token is the parent's one handle to this start, and it now carries
     // the recovery.
     this.stop(resultCell);
+    // Clear the token's now-STALE install (delta review D1). The token's
+    // cancel is a ONE-SHOT `stopped` latch: fired against the stale
+    // install it would be a registry-guarded no-op that BURNS the latch,
+    // and the hand-off's later markInstalled would return at the latch
+    // WITHOUT stopping the freshly recovered run — the F1 leak one
+    // window later. With the install cleared, a cancel landing anywhere
+    // in the wait or walk window stays pending-shaped (no latch burn),
+    // and the hand-off's markInstalled finishes it against the real
+    // registration.
+    ownership.markInstalled(undefined);
     // Back into the pending index under the SAME token, so a stop or a
     // release during the readiness wait tombstones the recovery through
-    // the same path that tombstones a pending first attempt.
+    // the same path that tombstones a pending first attempt. (The
+    // markInstalled above also unregistered the token — a no-op, it was
+    // not registered — so this add is the token's one live entry.)
     let pending = this.pendingDeferredStarts.get(key);
     if (pending === undefined) {
       pending = new Set();
@@ -3650,20 +3670,21 @@ export class Runner {
           return;
         }
         try {
-          const started = await this.startFromServedState(resultCell);
+          // The hand-off to the parent's token happens INSIDE the walk's
+          // claim mapping — the same synchronous block as the claim
+          // checks — so there is no promise-hop window between "the walk
+          // left the piece running" and "the token owns that
+          // registration" for a stop+restart to slip a foreign
+          // registration into (delta review D2, closed by construction).
+          // `started` is therefore already the hand-off's verdict: true
+          // means the token owns the recovered run un-cancelled; false
+          // with a cancelled token means a cancel landed in the wait or
+          // walk window and the run was stopped in the same breath.
+          const started = await this.startFromServedState(
+            resultCell,
+            ownership,
+          );
           if (started) {
-            const current = this.cancels.get(key);
-            if (current !== undefined) {
-              // Hand the recovered registration to the SAME token the
-              // parent holds: a parent cancel from here on stops the
-              // recovered run, and one that landed mid-walk stops it now.
-              if (ownership.markInstalled(current)) return;
-            } else {
-              // Claimed running, no registration: a stop landed between
-              // the walk's claim and here — nothing to own.
-              ownership.cancel();
-              return;
-            }
             if (pullOnceAfterStart && !ownership.isCancelled()) {
               this.pullCellOnceInPullMode(
                 this.runtime.getCellFromLink<T>(
@@ -3717,8 +3738,20 @@ export class Runner {
    * NOT marked independently started — a recovered deferred start remains
    * its parent's child, releasable exactly like the install the refused
    * attempt would have registered.
+   *
+   * When an `ownership` token is supplied, the walk hands the claimed
+   * registration to it IN THE CLAIM MAPPING — the same synchronous block
+   * as the claim checks — so a cancel that landed during the walk stops
+   * the just-claimed run in the same breath (markInstalled finishes a
+   * pending cancellation), and no promise hop separates the claim from
+   * the hand-off (delta review D1/D2). The mapping then reports whether
+   * the token owns a RUNNING piece: a hand-off that resolved a pending
+   * cancellation reports false.
    */
-  private startFromServedState<T>(resultCell: Cell<T>): Promise<boolean> {
+  private startFromServedState<T>(
+    resultCell: Cell<T>,
+    ownership?: DeferredCancelOwnership,
+  ): Promise<boolean> {
     const attempt: StartAttempt = {
       lifecycleEpoch: this.lifecycleEpoch,
       schedulePatternUpdate: true,
@@ -3733,9 +3766,19 @@ export class Runner {
           // Same target-scoped claim as start(): a stop that superseded
           // this walk, or a start that resolved elsewhere, reports false.
           const target = attempt.targetKey;
-          return started && target !== undefined &&
+          const stillRunning = started && target !== undefined &&
             this.isStartAttemptCurrentFor(attempt, target) &&
             this.cancels.has(target);
+          if (stillRunning && ownership !== undefined) {
+            const current = this.cancels.get(target!)!;
+            if (ownership.markInstalled(current)) {
+              // A cancel was pending (it landed during the wait or the
+              // walk): markInstalled just finished it against the real
+              // registration — the run is stopped, not owned.
+              return false;
+            }
+          }
+          return stillRunning;
         })
         .finally(() => {
           this.finishStartAttempt(attempt);
