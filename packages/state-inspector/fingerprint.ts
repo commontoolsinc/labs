@@ -119,9 +119,10 @@ export interface FingerprintReport {
 export interface FingerprintOptions {
   branch?: string;
   /**
-   * Refuse rather than fingerprint a space whose scope enumerates at or above
-   * this many entities, since the enumeration may have been truncated. Defaults
-   * to 1,000,000 — far above any real space; raise it only knowingly.
+   * Refuse rather than fingerprint a space whose scope enumerates more than
+   * this many entities, since the enumeration was truncated. A scope holding
+   * exactly the cap is complete and accepted. Defaults to 1,000,000 — far above
+   * any real space; raise it only knowingly.
    */
   enumerationCap?: number;
   /**
