@@ -21,7 +21,6 @@ export interface AppState {
 export interface AppStateConfig {
   showShellPieceListView?: boolean;
   showDebuggerView?: boolean;
-  showQuickJumpView?: boolean;
   showSidebar?: boolean;
 }
 
@@ -37,7 +36,6 @@ export function isAppStateConfigKey(
   switch (value) {
     case "showShellPieceListView":
     case "showDebuggerView":
-    case "showQuickJumpView":
     case "showSidebar":
       return true;
   }

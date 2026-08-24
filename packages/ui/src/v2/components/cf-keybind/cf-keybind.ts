@@ -25,7 +25,7 @@ import type { KeyboardRouter, ShortcutSpec } from "../keyboard-router.ts";
  *   { name?, event, code, key, alt, ctrl, meta, shift }
  *
  * @example
- * <cf-keybind name="quick-jump" meta key="o"></cf-keybind>
+ * <cf-keybind name="open" meta key="o"></cf-keybind>
  * <cf-keybind name="close" alt key="w"></cf-keybind>
  */
 export class CFKeybind extends BaseElement {
