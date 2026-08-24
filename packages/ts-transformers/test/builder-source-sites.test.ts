@@ -88,6 +88,15 @@ describe("builder-source-sites", () => {
         ),
         bindingName: "onDeclared",
       });
+      // Reaching a callback through a property access is a compile error —
+      // the module verifier cannot follow it, so the module is refused at
+      // load, and stage 7 says so
+      // (`transformers/indirect-builder-callback-validation.test.ts` pins that
+      // diagnostic). Recording is independent of that rejection and is pinned
+      // here anyway: this is the only coverage of the anchor-less fallback,
+      // where no callback anchor is recoverable and the site comes from the
+      // builder call itself. Read it as coverage of that fallback, never as a
+      // spelling a pattern may use.
       expect(sidecar?.sites.propertyHandler).toEqual({
         ...locationOf("handler(callbacks.onProperty)"),
         bindingName: "propertyHandler",
