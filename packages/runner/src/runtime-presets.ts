@@ -309,9 +309,10 @@ export const EXPERIMENTAL_FLAG_AUTHORITY = {
   // Link serialization: the two encodings are a hard mismatch, which the
   // memory handshake already refuses to connect across.
   modernCellRep: "server",
-  // Emission gate. A client that stamps schema references at a server whose
-  // space does not hold the closure provokes a QueryError; a rolled-back
-  // server needs its clients rolled back with it.
+  // An emission gate whose rollout is fleet-wide and one-way: a deployment
+  // turns it on only once every client of it reads references, and an
+  // explicit `false` is how it rolls back. A client still emitting after that
+  // writes the form the deployment decided to stop producing.
   contentAddressedSchemas: "server",
   // The server enforces the preconditions this flag makes a commit carry.
   commitPreconditions: "server",

@@ -1,5 +1,8 @@
 import { assertEquals } from "@std/assert";
-import { SERVER_EXPERIMENTAL_PATH } from "@commonfabric/runner";
+import {
+  experimentalOptionsForDeployedClient,
+  SERVER_EXPERIMENTAL_PATH,
+} from "@commonfabric/runner";
 import env from "@/env.ts";
 import createApp from "@/lib/create-app.ts";
 import { publishExperimentalPosture } from "@/lib/experimental-posture.ts";
@@ -65,5 +68,32 @@ Deno.test("meta routes", async (t) => {
     // from; moving the route without moving the constant would leave every
     // deployed client silently back on its own environment.
     assertEquals(SERVER_EXPERIMENTAL_PATH, routes.index.path);
+  });
+
+  await t.step("a client resolves its posture from this response", async () => {
+    // The two halves meet only in the shape of this document: the route
+    // decides the field, `experimentalOptionsForDeployedClient` reads it, and
+    // nothing else would notice one of them renaming it. Driven through the
+    // real handler rather than a fixture, for exactly that reason.
+    publishExperimentalPosture({
+      modernCellRep: true,
+      lazyMaterialization: false,
+    });
+    try {
+      const adopted = await experimentalOptionsForDeployedClient({
+        apiUrl: new URL("http://toolshed.test"),
+        // An explicit override still outranks what the server publishes.
+        env: (name) =>
+          name === "EXPERIMENTAL_MODERN_CELL_REP" ? "false" : undefined,
+        fetch: async (input) =>
+          await app.request(new URL(String(input)).pathname),
+      });
+      assertEquals(adopted, {
+        modernCellRep: false,
+        lazyMaterialization: false,
+      });
+    } finally {
+      publishExperimentalPosture(null);
+    }
   });
 });
