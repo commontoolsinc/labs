@@ -200,8 +200,12 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     policyOverride?: Partial<
       NonNullable<ConstructorParameters<typeof SpaceServer>[0]["policy"]>
     >,
+    options?: { ensureSpaceRoots?: boolean },
   ): SpaceServer => {
     const created = new SpaceServer({
+      ...(options?.ensureSpaceRoots !== undefined
+        ? { ensureSpaceRoots: options.ensureSpaceRoots }
+        : {}),
       space,
       server,
       engine,
@@ -464,6 +468,44 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     expect(stats.rootEnsure.created).toBe(0);
     // The tenure is alive and serving — the wedge parked nothing.
     expect(created.active).toBe(true);
+  });
+
+  it("ensureSpaceRoots:false (the RULED test switch) arms NOTHING: no root, no counter movement, tenure serving", async () => {
+    // RULED 2026-08-24 (the owner; recorded verbatim in the stage-1
+    // report): production spaces always get a default pattern, but
+    // tests may switch the tenure's ensure OFF — the CI ON lanes'
+    // fixture clients hold space-cell subscriptions that receive the
+    // ensured root's computed cells with unverified cid: schema refs
+    // (the broken-schema-ref uncaught class that redded the board).
+    // OFF must mean fully inert: nothing armed, nothing skipped,
+    // nothing counted — and the ACL-arrival re-arm must not resurrect
+    // it.
+    await seedAcl({ [space]: "OWNER" });
+    const created = newSpaceServer(undefined, { ensureSpaceRoots: false });
+    expect(await created.activate()).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    // The re-arm path cannot resurrect a disabled ensure either.
+    created.enqueueCommit({
+      space,
+      seq: Engine.serverSeq(engine),
+      class: "authored",
+      sessionId: "test-acl-touch",
+      writes: [{ id: `of:${space}`, scopeKey: "space" as never }],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    expect(stats.rootEnsure).toEqual({
+      runs: 0,
+      created: 0,
+      reconciled: 0,
+      skippedNoOwner: 0,
+      failures: 0,
+    });
+    expect(created.active).toBe(true);
+    const reader = clientRuntime(readerSigner);
+    expect(await resolveSpaceRootPattern(reader, space)).toBeUndefined();
+    expect(ensureTxs().length).toBe(0);
   });
 
   it("a space with no resolvable ACL owner SKIPS fail-closed: counted, no root, tenure alive", async () => {

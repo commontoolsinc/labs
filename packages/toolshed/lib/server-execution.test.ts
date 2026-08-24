@@ -4,6 +4,7 @@ import type { Server as MemoryServer } from "@commonfabric/memory/v2/server";
 import type { Identity } from "@commonfabric/identity";
 import {
   DEFAULT_MAX_OUTSTANDING_EFFECTS,
+  ensureSpaceRootsFromEnv,
   serverExecutionPolicyFromEnv,
   startServerExecutionHost,
 } from "@/lib/server-execution.ts";
@@ -140,5 +141,48 @@ describe("startServerExecutionHost OFF witness", () => {
         name === "EXPERIMENTAL_SERVER_EXECUTION" ? "false" : undefined,
     });
     expect(host).toBeUndefined();
+  });
+});
+
+// The RULED test switch's env parsing (OW45 arm-B stage 1, RULED
+// 2026-08-24): unset and "true" are the production posture (ensure ON);
+// only the literal "false" switches the space-root ensure off; garbage
+// FAILS TO PRODUCTION (ON, with a warning) — a typo must never silently
+// strip production spaces of their roots.
+describe("ensureSpaceRootsFromEnv", () => {
+  const envOf2 = (values: Record<string, string | undefined>) =>
+  (name: string) => values[name];
+
+  it("defaults ON, honors true, and only the literal false disables", () => {
+    const warnings: string[] = [];
+    const warn = (m: string) => warnings.push(m);
+    expect(ensureSpaceRootsFromEnv(envOf2({}), warn)).toBe(true);
+    expect(
+      ensureSpaceRootsFromEnv(
+        envOf2({ SERVER_EXECUTION_ENSURE_SPACE_ROOTS: "true" }),
+        warn,
+      ),
+    ).toBe(true);
+    expect(
+      ensureSpaceRootsFromEnv(
+        envOf2({ SERVER_EXECUTION_ENSURE_SPACE_ROOTS: "false" }),
+        warn,
+      ),
+    ).toBe(false);
+    expect(warnings).toEqual([]);
+  });
+
+  it("FAILS TO PRODUCTION on garbage: ensure stays ON, loudly", () => {
+    for (const raw of ["off", "0", "FALSE", " false", "no"]) {
+      const warnings: string[] = [];
+      expect(
+        ensureSpaceRootsFromEnv(
+          envOf2({ SERVER_EXECUTION_ENSURE_SPACE_ROOTS: raw }),
+          (m) => warnings.push(m),
+        ),
+      ).toBe(true);
+      expect(warnings.length).toBe(1);
+      expect(warnings[0]).toContain("SERVER_EXECUTION_ENSURE_SPACE_ROOTS");
+    }
   });
 });

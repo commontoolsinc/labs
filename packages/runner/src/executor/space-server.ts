@@ -247,6 +247,17 @@ export type SpaceServerOptions = {
   localSeqRef: { value: number };
   /** The host's shared counters (serving-loop.md §7). */
   stats: ServingLoopStats;
+  /** OW45 arm-B stage 1, RULED 2026-08-24 (the owner, verbatim in the
+   * stage-1 report): production spaces always get a default pattern —
+   * "in production there is no reason for a space to not have a
+   * default pattern" — but tests may switch the tenure's space-root
+   * ensure OFF ("for tests this is annoying overhead … a setting in
+   * the in-memory version"). Default ON; `false` disables the
+   * activation arming entirely (no ensure, no skip, no re-arm, no
+   * counter movement). Per-space discrimination is explicitly
+   * DEFERRED by the same ruling — this is a whole-instance switch,
+   * never a policy about which spaces deserve roots. */
+  ensureSpaceRoots?: boolean;
   policy?: SpaceServerPolicy;
   onParked?: (reason: string) => void;
   /** Fired on each successfully committed wave — the host's
@@ -914,8 +925,11 @@ export class SpaceServer implements TransactionSealDestination {
     // (design #6209 §1 — "space open", server-side, IS activation; all
     // three triggers ensure, sessionless ones included: idempotence
     // makes the repeat cost one fast-path read, and a warm-provisioned
-    // space gets its root before its first human open).
-    this.#rootEnsureOwed = true;
+    // space gets its root before its first human open). Gated on the
+    // RULED test switch (options.ensureSpaceRoots, default ON): with
+    // it off nothing arms, so the skip/re-arm machinery and every
+    // rootEnsure counter stay untouched for the tenure.
+    this.#rootEnsureOwed = this.#options.ensureSpaceRoots !== false;
 
     // W = read watermark doc (0 if absent).
     this.#watermark = readWatermarkSeq(engine);
