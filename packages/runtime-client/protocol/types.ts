@@ -1140,13 +1140,14 @@ export type ConsoleNotification = {
   type: NotificationType.ConsoleMessage;
   metadata?: { pieceId?: string; patternId?: string; space?: string };
   method: string;
-  // TODO(danfuzz): these arrive pre-flattened to text by
-  // `sanitizeForPostMessage()` (`backends/runtime-processor.ts`), and the
-  // receiver hands them to `console.log()` -- a devtools inspector, which can
-  // show more of a value than a string of it can. A `codec-realm` arm here is
-  // what lets the fabric among them cross whole; see the marker at the producer
-  // for what else has to move first.
-  args: JSONValue[];
+  // TODO(danfuzz): the producer (`toConsoleDebugValue()`,
+  // `backends/runtime-processor.ts`) yields a `FabricValue`, and the raw
+  // structured clone this rides on carries only part of one: it refuses a
+  // symbol outright and strips a `FabricPrimitive` to `{}`. A
+  // `codec-realm`-encoded envelope carries the whole of it to the
+  // `console.log()` on the far side, whose devtools inspector shows more of a
+  // live value than of a rendering of one.
+  args: FabricValue[];
 };
 
 export type NavigateRequestNotification = {
