@@ -444,7 +444,6 @@ function newConsoleDebugReplacer(): (value: any) => any {
     const result: Record<string, unknown> = {
       __ref: formatCellLink(getCellOrThrow(value)),
     };
-    proxyValues.set(value, result);
 
     // The properties are exposed rather than copied, so that the conversion
     // reads each one under its own guard: a proxy that throws on one key
@@ -455,6 +454,12 @@ function newConsoleDebugReplacer(): (value: any) => any {
         get: () => value[key],
       });
     }
+
+    // Held only once complete, so that a proxy which throws before its keys
+    // can be listed is rendered the same way everywhere it appears rather
+    // than leaving a half-built object behind for its later positions. The
+    // conversion descends after this returns, so a cycle still finds it.
+    proxyValues.set(value, result);
 
     return result;
   };

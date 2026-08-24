@@ -1230,7 +1230,7 @@ describe("toConsoleDebugValue", () => {
       for (const value of values) {
         const converted = toConsoleDebugValue(value);
         expect(isValidFabricValue(converted)).toBe(true);
-        expect(() => acrossTheWire(value)).not.toThrow();
+        expect(acrossTheWire(value)).toEqual(converted);
       }
     });
 
@@ -1251,8 +1251,9 @@ describe("toConsoleDebugValue", () => {
       const { cell, done } = await withCell();
       try {
         for (const value of [cell, cell.get(), { held: cell }]) {
-          expect(isValidFabricValue(toConsoleDebugValue(value))).toBe(true);
-          expect(() => acrossTheWire(value)).not.toThrow();
+          const converted = toConsoleDebugValue(value);
+          expect(isValidFabricValue(converted)).toBe(true);
+          expect(acrossTheWire(value)).toEqual(converted);
         }
       } finally {
         await done();
@@ -1332,6 +1333,28 @@ describe("toConsoleDebugValue", () => {
         expect(result.__ref).toMatch(CELL_LINK);
         expect(result.name).toBe("test");
         expect(result.count).toEqual({ "/unconvertible": "read failed" });
+      } finally {
+        await done();
+      }
+    });
+
+    it("returns a query result whose keys cannot be listed the same way at each position", async () => {
+      // The rendering a proxy is held under is the finished one, so a proxy
+      // that fails before its keys can be read reports that failure wherever
+      // it appears rather than a half-built record at its later positions.
+      const { cell, done } = await withCell();
+      try {
+        const keysThrow = new Proxy(cell.get() as Record<string, unknown>, {
+          ownKeys() {
+            throw new Error("cannot list keys");
+          },
+          get(target, key) {
+            return Reflect.get(target, key);
+          },
+        });
+        const failure = { "/unconvertible": "cannot list keys" };
+        expect(toConsoleDebugValue({ a: keysThrow, b: keysThrow }))
+          .toEqual({ a: failure, b: failure });
       } finally {
         await done();
       }

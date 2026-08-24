@@ -6,9 +6,10 @@ import {
 } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { getLogger } from "@commonfabric/utils/logger";
-import { RuntimeConnection } from "./connection.ts";
+import { consoleMessageFrom, RuntimeConnection } from "./connection.ts";
 import { EventEmitter } from "./emitter.ts";
 import {
+  type ConsoleNotification,
   type InitializationData,
   type IPCClientMessage,
   type IPCClientNotification,
@@ -519,5 +520,42 @@ describe("FakeTransport", () => {
       .toEqual(new Uint8Array([1, 2, 3]));
     expect((fabricFromRealmValue(body) as FabricBytes).slice())
       .toEqual(new Uint8Array([1, 2, 3]));
+  });
+});
+
+describe("consoleMessageFrom", () => {
+  /** A console notification carrying the given already-encoded arguments. */
+  function notification(
+    args: ConsoleNotification["args"],
+  ): ConsoleNotification {
+    return { type: NotificationType.ConsoleMessage, method: "log", args };
+  }
+
+  it("returns the arguments decoded, and the rest of the notification intact", () => {
+    const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+    const message = consoleMessageFrom({
+      ...notification([bytes, "plain"].map((a) => realmFromFabricValue(a))),
+      metadata: { pieceId: "a-piece" },
+    });
+
+    expect(message.method).toBe("log");
+    expect(message.metadata).toEqual({ pieceId: "a-piece" });
+    expect(message.args[0]).toBeInstanceOf(FabricBytes);
+    expect(message.args[0]).toEqual(bytes);
+    expect(message.args[1]).toBe("plain");
+  });
+
+  it("returns `/undecodable` in place of an argument that does not decode", () => {
+    // These are a pattern's `console.*` arguments: a log line that arrives
+    // damaged beats one that takes the message dispatch down with it.
+    const message = consoleMessageFrom(notification([
+      realmFromFabricValue("before"),
+      ["not-a-marker", 1] as unknown as ConsoleNotification["args"][0],
+      realmFromFabricValue("after"),
+    ]));
+
+    expect(message.args[0]).toBe("before");
+    expect(Object.keys(message.args[1] as object)).toEqual(["/undecodable"]);
+    expect(message.args[2]).toBe("after");
   });
 });
