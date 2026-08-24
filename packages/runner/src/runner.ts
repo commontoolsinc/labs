@@ -1245,6 +1245,14 @@ export class Runner {
   // so tests can synchronize deterministically under the frozen-clock
   // preload, where wall-clock polling cannot observe this work.
   private pendingWatcherPatternLoads = new Set<Promise<unknown>>();
+  // In-flight catch-up recoveries of commit-gated starts whose transaction
+  // lost its basis to the serving side's own first-hydration materialization
+  // (see `catchUpAndStartOnStaleRead`). NEVER awaited by dispose(), for the
+  // same reason as the watcher loads above: the readiness gate they await is
+  // a session catch-up, which a closing runtime may never reach, and a
+  // cancelled ownership already tombstones the work. Tracked solely so tests
+  // can synchronize deterministically.
+  private pendingDeferredStartCatchUps = new Set<Promise<unknown>>();
   // Both maps record that this runner prepared or stopped a result, so a later
   // start of the same result can reuse the cells it already assembled instead
   // of re-syncing dependencies and rehydrating a snapshot. They are shortcuts:
@@ -4610,6 +4618,20 @@ export class Runner {
         ...this.pendingWatcherPatternLoads,
         ...this.pendingPointerCommits,
       ]);
+    }
+  }
+
+  /**
+   * TESTS ONLY: settle in-flight catch-up recoveries of commit-gated starts
+   * (see `catchUpAndStartOnStaleRead`). Loops in case a settled recovery's
+   * continuation schedules another. Never called from dispose(): the
+   * readiness gate a recovery awaits is a session catch-up, which a closing
+   * runtime need never reach — a cancelled ownership is what stops the work
+   * there.
+   */
+  async idleDeferredStartCatchUps(): Promise<void> {
+    while (this.pendingDeferredStartCatchUps.size > 0) {
+      await Promise.allSettled([...this.pendingDeferredStartCatchUps]);
     }
   }
 
