@@ -129,8 +129,10 @@ a plan for the bulk operations in `docs/plans/piece-bulk-operations.md`. On a
 collection survey the registry is its cross-check: a registered piece on an
 in-scope identity that the collection lacks makes the survey exit nonzero,
 naming the piece. A `--list` survey reads exactly the pieces named and makes no
-containment claim. Read-only; the spelling is provisional until the bulk write
-operations get a home.
+containment claim; each entry takes either reference form, and a canonical
+entry's embedded space composes the way it does on `--piece` — supplying the
+space when `--space` is absent, agreeing with it otherwise. Read-only; the
+spelling is provisional until the bulk write operations get a home.
 
 `cf piece slugs` lists the space's slug index: every name assigned through
 `--slug` or `set-slug`, each resolved to the piece it names. The index records

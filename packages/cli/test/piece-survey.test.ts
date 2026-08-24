@@ -37,6 +37,13 @@ class ExitSentinel extends Error {}
 
 const signer = await Identity.fromPassphrase("cli bulk survey");
 
+// The 43-character handle length clears the canonical parser's threshold
+// below which an id reads as a human name and is refused.
+const HANDLE = "baedreiabcdefghijklmnopqrstuvwxyz0123456789";
+const SPACE_DID = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+const OTHER_SPACE_DID =
+  "did:key:z6MkrZ1r5XBFZjBU34qyD8fueMbMRkKw17BZaq2ivKFjnz2z";
+
 const OPTIONS = {
   apiUrl: "http://localhost:8000",
   identity: "/tmp/test-identity.pem",
@@ -282,7 +289,7 @@ describe("piece-survey", () => {
       let request: SurveyRunRequest | undefined;
       await captureStdout(() =>
         surveyFromCommand(
-          { ...OPTIONS, piece: undefined, list: ["/of:fid1:x"] },
+          { ...OPTIONS, piece: undefined, list: [`/of:fid1:${HANDLE}`] },
           {
             runSurvey: (_config, req) => {
               request = req;
@@ -294,8 +301,117 @@ describe("piece-survey", () => {
       );
       expect(request?.selector).toEqual({
         kind: "list",
-        pieces: ["of:fid1:x"],
+        pieces: [`of:fid1:${HANDLE}`],
       });
+    });
+
+    it("folds a list entry's embedded space into the command's target", async () => {
+      const withEmbedded = `/@${SPACE_DID}/of:fid1:${HANDLE}`;
+      let config: { space?: string; embeddedSpaces?: string[] } | undefined;
+      let request: SurveyRunRequest | undefined;
+      const deps = {
+        runSurvey: (
+          cfg: { space?: string; embeddedSpaces?: string[] },
+          req: SurveyRunRequest,
+        ) => {
+          config = cfg;
+          request = req;
+          return Promise.resolve(COMPLETE);
+        },
+        printHint: () => {},
+      };
+      // No --space: the embedded DID supplies it.
+      await captureStdout(() =>
+        surveyFromCommand(
+          {
+            ...OPTIONS,
+            space: undefined,
+            piece: undefined,
+            list: [
+              withEmbedded,
+            ],
+          },
+          deps as never,
+        )
+      );
+      expect(config?.space).toBe(SPACE_DID);
+      expect(config?.embeddedSpaces).toEqual([SPACE_DID]);
+      expect(request?.selector).toEqual({
+        kind: "list",
+        pieces: [`of:fid1:${HANDLE}`],
+      });
+      // A matching --space DID: agreed at parse time, nothing deferred.
+      await captureStdout(() =>
+        surveyFromCommand(
+          {
+            ...OPTIONS,
+            space: SPACE_DID,
+            piece: undefined,
+            list: [
+              withEmbedded,
+            ],
+          },
+          deps as never,
+        )
+      );
+      expect(config?.space).toBe(SPACE_DID);
+      expect(config?.embeddedSpaces).toBeUndefined();
+      // A --space name: the comparison defers to the session open.
+      await captureStdout(() =>
+        surveyFromCommand(
+          { ...OPTIONS, piece: undefined, list: [withEmbedded] },
+          deps as never,
+        )
+      );
+      expect(config?.space).toBe("home");
+      expect(config?.embeddedSpaces).toEqual([SPACE_DID]);
+    });
+
+    it("refuses a list entry whose embedded space contradicts the target", async () => {
+      await expect(
+        surveyFromCommand(
+          {
+            ...OPTIONS,
+            space: OTHER_SPACE_DID,
+            piece: undefined,
+            list: [`/@${SPACE_DID}/of:fid1:${HANDLE}`],
+          },
+          { runSurvey: () => Promise.resolve(COMPLETE) },
+        ),
+      ).rejects.toThrow("names space");
+      // Two entries embedding different spaces cannot be one survey: the
+      // first entry's space becomes the target the second is parsed against.
+      await expect(
+        surveyFromCommand(
+          {
+            ...OPTIONS,
+            space: undefined,
+            piece: undefined,
+            list: [
+              `/@${SPACE_DID}/of:fid1:${HANDLE}`,
+              `/@${OTHER_SPACE_DID}/of:fid1:${HANDLE}`,
+            ],
+          },
+          { runSurvey: () => Promise.resolve(COMPLETE) },
+        ),
+      ).rejects.toThrow("names space");
+    });
+
+    it("refuses a list entry carrying a path, a scope, or #argument", async () => {
+      for (
+        const [entry, message] of [
+          [`/of:fid1:${HANDLE}/topics/0`, "drop the path"],
+          [`/of:fid1:${HANDLE}@user`, "@scope suffix"],
+          [`/of:fid1:${HANDLE}#argument`, "#argument suffix"],
+        ]
+      ) {
+        await expect(
+          surveyFromCommand(
+            { ...OPTIONS, piece: undefined, list: [entry] },
+            { runSurvey: () => Promise.resolve(COMPLETE) },
+          ),
+        ).rejects.toThrow(message);
+      }
     });
 
     it("throws for a collection survey without --path", async () => {

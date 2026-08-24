@@ -3177,19 +3177,68 @@ export async function surveyFromCommand(
   let selector: PieceSelector;
   let spaceConfig;
   if (options.list !== undefined && options.list.length > 0) {
-    spaceConfig = parseSpaceOptions(options);
+    // An entry is either the canonical reference form or the bare id. A
+    // canonical entry may embed the target space: it supplies the space when
+    // --space is absent, and otherwise the two must agree — at parse time
+    // against a DID, through validateEmbeddedSpaces against a name still to
+    // be resolved. The survey reads whole pieces, so a scope, a path, or the
+    // #argument suffix on an entry is refused rather than dropped.
+    let listSpace = options.space;
+    const embedded: string[] = [];
     const entries = options.list.map((entry) => {
-      if (entry.includes("@")) {
+      const ref = normalizeLLMFriendlyRef(entry, { space: listSpace });
+      if (ref === undefined) {
+        // The bare alias grammar reads @ as its scope marker.
+        if (entry.includes("@")) {
+          throw new ValidationError(
+            `A scoped piece cannot be surveyed; drop the @scope suffix on ` +
+              `${JSON.stringify(entry)}.`,
+            { exitCode: 1 },
+          );
+        }
+        return entry;
+      }
+      if (ref.scope !== undefined) {
         throw new ValidationError(
           `A scoped piece cannot be surveyed; drop the @scope suffix on ` +
             `${JSON.stringify(entry)}.`,
           { exitCode: 1 },
         );
       }
-      // The canonical reference form leads with a slash; the selector takes
-      // the address itself.
-      return entry.startsWith("/") ? entry.slice(1) : entry;
+      if (ref.path.length > 0) {
+        throw new ValidationError(
+          `A survey reads whole pieces; drop the path on ` +
+            `${JSON.stringify(entry)}.`,
+          { exitCode: 1 },
+        );
+      }
+      if (ref.input) {
+        throw new ValidationError(
+          `A survey reads whole pieces; drop the #argument suffix on ` +
+            `${JSON.stringify(entry)}.`,
+          { exitCode: 1 },
+        );
+      }
+      if (ref.embeddedSpace !== undefined) {
+        embedded.push(ref.embeddedSpace);
+        // A --url names the space itself; leave the deferred check to
+        // settle an entry against it rather than manufacturing a --space
+        // beside it.
+        if (listSpace === undefined && options.url === undefined) {
+          listSpace = ref.embeddedSpace;
+        }
+      }
+      return ref.pieceId;
     });
+    spaceConfig = parseSpaceOptions(
+      listSpace === options.space ? options : { ...options, space: listSpace },
+    );
+    if (embedded.length > 0) {
+      spaceConfig.embeddedSpaces = [
+        ...(spaceConfig.embeddedSpaces ?? []),
+        ...embedded,
+      ];
+    }
     selector = { kind: "list", pieces: entries };
   } else {
     const pieceConfig = parsePieceOptions(options);
