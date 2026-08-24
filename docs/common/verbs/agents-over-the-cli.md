@@ -209,9 +209,16 @@ Two cases keep the older reading, and `{}` covers a typo in both. A JSON
 `--schema` names a shape of its own rather than the source's fields and is held
 to no vocabulary at all. And a field list meets positions the source schema
 settles nothing about — an open `additionalProperties`, a `patternProperties`
-map, a disjunction, an untyped source — where no refusal is available. Read a
-`{}` from either against `cf piece describe` rather than as an answer about the
-data.
+map that names a pattern, a disjunction, an untyped source, a reference site
+declaring fields of its own, a name several `allOf` members declare — where no
+refusal is available. Read a `{}` from either against `cf piece describe`
+rather than as an answer about the data.
+
+One of those positions goes further: a field declared ONLY through `allOf`
+members is named by the schema and still comes back `{}`, because the read does
+not reach a conjunction member's properties. There, `{}` is neither absence nor
+a typo — it is a field the read cannot deliver, and `cf piece describe` is what
+tells the three apart.
 
 **An unregistered piece is not a missing piece.** Covered above, and repeated
 here because it is the failure that reads most like a definitive answer: `ls`

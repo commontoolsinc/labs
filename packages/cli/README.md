@@ -397,10 +397,12 @@ verb, which dispatches rather than holding a value. A field that is merely
 ABSENT is a different fact and still answers with nothing at exit 0 — an
 optional field nobody has written, an interface an item does not implement, a
 link that has not synced. The refusal therefore fires only where the schema
-settles the question. These all read as they always did: an open
-`additionalProperties`, a `patternProperties` map, a disjunction, an untyped
-position, a reference that does not resolve, a reference site that declares
-fields of its own, and a name several `allOf` members declare. A JSON `--schema`
+settles the question, and a position it does not settle reads as it always did:
+an open `additionalProperties`, a `patternProperties` map that names a pattern,
+a disjunction, an untyped position, a reference site that declares fields of its
+own, and a name several `allOf` members declare. A reference that does not
+resolve is passed over as well, and what the caller then reads is the read's own
+report of the reference rather than anything about the field. A JSON `--schema`
 states a shape of its own rather than naming the source's fields and is not held
 to the source's vocabulary, which is the spelling for reading a position the
 source does not declare.

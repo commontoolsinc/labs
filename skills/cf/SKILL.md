@@ -334,10 +334,12 @@ read, naming the position, what it declares, and, where one is close enough, the
 declared name the path is a typo of. A field that is merely absent still answers
 with nothing at exit 0, so a `{}` from a field list reads as "nothing here"
 rather than "you may have mistyped". Where the source schema settles nothing —
-an open `additionalProperties`, a `patternProperties` map, a disjunction, an
-untyped position, an unresolvable reference — no refusal is available. A JSON
-`--schema` states a shape of its own rather than naming the source's fields, and
-is not held to that vocabulary.
+an open `additionalProperties`, a `patternProperties` map that names a pattern,
+a disjunction, an untyped position, a reference site declaring fields of its
+own, a name several `allOf` members declare — no refusal is available. An
+unresolvable reference is passed over too, and the read reports the reference
+itself. A JSON `--schema` states a shape of its own rather than naming the
+source's fields, and is not held to that vocabulary.
 
 `piece call` takes the same three flags, before the callable name, with the same
 grammar, the same `--select`/`--schema` conflict, and the same error messages.
