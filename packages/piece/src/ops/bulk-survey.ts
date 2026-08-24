@@ -18,6 +18,7 @@ import {
   type Cell,
   getPatternIdentityRef,
   type JSONSchema,
+  schemaAcceptsOpaqueCellValue,
 } from "@commonfabric/runner";
 import { validateSchemaValue } from "@commonfabric/runner/cfc";
 
@@ -140,6 +141,16 @@ export async function selectPieces(
         piece: canonicalPieceAddress(piece),
         phase: LIST_PHASE,
       })),
+    );
+  }
+  if (
+    selector.path.length === 0 ||
+    selector.path.some((segment) => segment === "")
+  ) {
+    // The last segment becomes the rows' phase label, and the codec refuses
+    // an empty one — a survey must not emit a plan its own codec rejects.
+    throw new Error(
+      "A collection path needs at least one segment, and none may be empty.",
     );
   }
   const holder = await pieces.get(selector.holder, false);
@@ -452,8 +463,12 @@ async function validateResult(
   const materialized = shaped.get();
   if (materialized !== undefined) {
     // Materializing is necessary, not sufficient: a value can come back and
-    // still violate the schema — a string where a number is demanded.
-    return validateSchemaValue(validator, materialized);
+    // still violate the schema — a string where a number is demanded. A
+    // position the schema declares `asCell` materializes as a cell handle by
+    // design, so the handle is accepted exactly there and nowhere else.
+    return validateSchemaValue(validator, materialized, validator, {
+      acceptOpaqueValue: schemaAcceptsOpaqueCellValue,
+    });
   }
   return validateSchemaValue(validator, undefined) === undefined
     ? undefined

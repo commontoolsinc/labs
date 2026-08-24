@@ -545,6 +545,43 @@ describe("bulk-survey", () => {
         .toEqual([holder.id]);
     });
 
+    it("accepts a cell handle exactly where the validator declares asCell", async () => {
+      const a = await pieces.create(generationProgram("a"), { input: {} });
+
+      const survey = await surveyPieces(pieces, {
+        selector: { kind: "list", pieces: [a.id] },
+        validator: {
+          type: "object",
+          properties: { version: { type: "string", asCell: ["cell"] } },
+          required: ["version"],
+        },
+      });
+
+      // The declared position materializes as a handle by design; validating
+      // the handle against the string schema would report a false failure.
+      expect(survey.validatorFailures).toEqual([]);
+    });
+
+    it("throws for an empty collection path or an empty segment", async () => {
+      const a = await pieces.create(generationProgram("a"), { input: {} });
+      const holder = await seedHolder([a]);
+
+      await expect(
+        surveyPieces(pieces, {
+          selector: { kind: "collection", holder: holder.id, path: [] },
+        }),
+      ).rejects.toThrow("at least one segment");
+      await expect(
+        surveyPieces(pieces, {
+          selector: {
+            kind: "collection",
+            holder: holder.id,
+            path: ["members", ""],
+          },
+        }),
+      ).rejects.toThrow("none may be empty");
+    });
+
     it("passes a piece whose missing field the validator's default rescues", async () => {
       const a = await pieces.create(generationProgram("a"), { input: {} });
       const holder = await seedHolder([a]);

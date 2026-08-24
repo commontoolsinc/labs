@@ -31,11 +31,12 @@ import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
 export function canonicalPieceAddress(address: string): string {
   const bare = hashStringForEntityAddress(address);
   try {
-    FabricHash.fromString(bare);
+    // The parsed hash's own spelling, not the input's: padded and other
+    // non-canonical base64 spellings of one hash must land on one key.
+    return FabricHash.fromString(bare).taggedHashString;
   } catch {
     throw new Error(`Not a piece address: ${JSON.stringify(address)}.`);
   }
-  return bare;
 }
 
 /** One piece and what went wrong with it — unreadable, or failing a validator. */

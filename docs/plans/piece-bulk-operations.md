@@ -1,8 +1,8 @@
 # Bulk piece operations
 
-**Status:** proposed; stage 1 — the survey library, its `cf` entry points,
-and its CI drill — is built and in review as a short stack, and every
-later stage is unbuilt. This is the design and build sequence for changing
+**Status:** proposed; stage 1's survey library is built and in review, its
+`cf` entry points and CI drill follow in stacked changes immediately behind
+it, and every later stage is unbuilt. This is the design and build sequence for changing
 many pieces in one space as one reviewable, resumable operation. Driven by
 recurring Topics board upgrades.
 
@@ -518,11 +518,13 @@ compiling; and the drill.
 - [x] The survey-diff: a survey compared against a plan or an earlier
       survey, reporting per piece moved as planned, still outstanding, or
       moved to something the plan did not ask for.
-- [x] The survey and the pin read are invocable from `cf`
+- [ ] The survey and the pin read are invocable from `cf`
       (`cf piece survey`, `cf piece inspect --pattern-identity`),
-      provisionally spelled per decision 1.
-- [x] The stage-1 drill runs in continuous integration, under the CLI
-      integration suite's `piece-call` section.
+      provisionally spelled per decision 1. Ticked by the stacked change
+      that lands them.
+- [ ] The stage-1 drill runs in continuous integration, under the CLI
+      integration suite's `piece-call` section. Ticked by the stacked
+      change that lands it.
 
 ### 2. Repair, by a supplied fixer
 

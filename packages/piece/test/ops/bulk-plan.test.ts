@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
+  canonicalPieceAddress,
   decodePlan,
   deriveRollbackPlan,
   encodePlan,
@@ -22,7 +23,7 @@ function retargetPlan(): PiecePlan {
     header,
     rows: [
       {
-        piece: "fid1:aaa",
+        piece: "fid1:aaY",
         phase: "topics",
         expect: { patternIdentity: "old-a", symbol: "default", retained: true },
         op: {
@@ -35,7 +36,7 @@ function retargetPlan(): PiecePlan {
         },
       },
       {
-        piece: "fid1:bbb",
+        piece: "fid1:bbY",
         phase: "holder",
         expect: {
           patternIdentity: "old-b",
@@ -60,8 +61,8 @@ describe("bulk-plan", () => {
       const lines = encodePlan(retargetPlan()).trimEnd().split("\n");
       expect(lines.length).toBe(3);
       expect(JSON.parse(lines[0]).kind).toBe("piece-plan");
-      expect(JSON.parse(lines[1]).piece).toBe("fid1:aaa");
-      expect(JSON.parse(lines[2]).piece).toBe("fid1:bbb");
+      expect(JSON.parse(lines[1]).piece).toBe("fid1:aaY");
+      expect(JSON.parse(lines[2]).piece).toBe("fid1:bbY");
     });
 
     it("returns text ending in a newline", () => {
@@ -77,7 +78,7 @@ describe("bulk-plan", () => {
 
     it("returns an op-less row as the pre-state record it is", () => {
       const row = {
-        piece: "fid1:aaa",
+        piece: "fid1:aaY",
         expect: { patternIdentity: "idA", symbol: "default", retained: true },
       };
       const decoded = decodePlan(
@@ -116,14 +117,14 @@ describe("bulk-plan", () => {
 
     it("throws for a row missing its precondition, naming the row", () => {
       const text = JSON.stringify(header) + "\n" +
-        JSON.stringify({ piece: "fid1:aaa" }) + "\n";
+        JSON.stringify({ piece: "fid1:aaY" }) + "\n";
       expect(() => decodePlan(text)).toThrow("row 1");
     });
 
     it("throws for a precondition without its export symbol", () => {
       const text = JSON.stringify(header) + "\n" +
         JSON.stringify({
-          piece: "fid1:aaa",
+          piece: "fid1:aaY",
           expect: { patternIdentity: "x", retained: true },
         }) + "\n";
       expect(() => decodePlan(text)).toThrow("row 1");
@@ -262,7 +263,7 @@ describe("bulk-plan", () => {
           enumerated: { ...header.enumerated, registeredOutside: 1 },
           problems: [{ piece: "fid1:ccc", problem: "carries no identity" }],
           outside: [{
-            piece: "fid1:ddd",
+            piece: "fid1:ddc",
             patternIdentity: "idA",
             symbol: "default",
           }],
@@ -277,11 +278,29 @@ describe("bulk-plan", () => {
       );
     });
 
+    it("normalizes non-canonical hash spellings onto one key", () => {
+      const canonical = "fid1:" + "A".repeat(43);
+      expect(canonicalPieceAddress(canonical + "=")).toBe(canonical);
+      expect(canonicalPieceAddress("fid1:" + "A".repeat(42) + "B")).toBe(
+        canonical,
+      );
+      const plan = retargetPlan();
+      const dup = JSON.stringify(header) + "\n" +
+        JSON.stringify({ ...plan.rows[0], op: undefined, piece: canonical }) +
+        "\n" +
+        JSON.stringify({
+          ...plan.rows[1],
+          op: undefined,
+          piece: canonical + "=",
+        });
+      expect(() => decodePlan(dup)).toThrow("more than once");
+    });
+
     it("canonicalizes the of: alias, and refuses an alias-spelled duplicate", () => {
       const plan = retargetPlan();
-      const aliased = { ...plan.rows[0], piece: "of:fid1:aaa" };
+      const aliased = { ...plan.rows[0], piece: "of:fid1:aaY" };
       const text = JSON.stringify(header) + "\n" + JSON.stringify(aliased);
-      expect(decodePlan(text).rows[0].piece).toBe("fid1:aaa");
+      expect(decodePlan(text).rows[0].piece).toBe("fid1:aaY");
       const dup = JSON.stringify(header) + "\n" +
         JSON.stringify(plan.rows[0]) + "\n" + JSON.stringify(aliased);
       expect(() => decodePlan(dup)).toThrow("more than once");
@@ -401,7 +420,7 @@ describe("bulk-plan", () => {
         }],
       };
       const rollback = deriveRollbackPlan(mixed, "later");
-      expect(rollback.rows.map((row) => row.piece)).toEqual(["fid1:aaa"]);
+      expect(rollback.rows.map((row) => row.piece)).toEqual(["fid1:aaY"]);
     });
 
     it("throws for a retarget row whose prior source is not retained, naming it", () => {
@@ -414,7 +433,7 @@ describe("bulk-plan", () => {
         }],
       };
       expect(() => deriveRollbackPlan(unretained, "later")).toThrow(
-        "fid1:bbb",
+        "fid1:bbY",
       );
     });
 
@@ -422,7 +441,7 @@ describe("bulk-plan", () => {
       const surveyOnly: PiecePlan = {
         header,
         rows: [{
-          piece: "fid1:aaa",
+          piece: "fid1:aaY",
           expect: {
             patternIdentity: "old-a",
             symbol: "default",
