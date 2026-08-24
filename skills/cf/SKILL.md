@@ -66,7 +66,7 @@ what this looks like when it bites.
   stderr, exit 1 (no usage screen). A `piece link` that fails validation
   (missing source/target piece or path) reports the same way. So does a
   `piece get` path that lands on a handler verb: reading a stream refuses — read
-  data, call verbs. A root verb's refusal points at `cf piece call` (its literal
+  data, call verbs. A root verb's refusal points at `cf call` (its literal
   spelling); a nested verb is not directly callable, so it points at reading the
   parent object or `cf piece verbs`. The verb's parent object still reads, and
   tool bindings read as data.

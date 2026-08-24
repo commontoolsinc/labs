@@ -282,7 +282,7 @@ function cfcLabelViewForCommand(
     : redactCaveatSourcesForDisplay(effectiveView);
 }
 
-/** A `cf piece get` path that lands ON a verb. Reading a verb returns the
+/** A read path that lands ON a verb, under either spelling. Reading a verb returns the
  * stream's serialization — never what the caller wanted — so the read refuses
  * and redirects instead, mirroring the llm-dialog read tool's "Path resolves
  * to a handler; use invoke() instead." (verb contract WS-F, read-path guard).
@@ -4072,7 +4072,7 @@ async function classifyReadPathVerb(
  * projection check as a matter of course — and that error tells the caller to
  * retry with `--step`, which sends them to re-run a read that cannot succeed
  * at any number of steps. Classify before surrendering to the projection
- * error so the refusal naming `cf piece call` wins. Returns null when the path
+ * error so the refusal naming `cf call` wins. Returns null when the path
  * is not certainly a verb, leaving the projection error exactly as it was.
  */
 async function verbReadRefusalOrNull(
