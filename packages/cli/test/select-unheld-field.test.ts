@@ -268,6 +268,39 @@ describe("select-unheld-field", () => {
     });
   });
 
+  it("reads a field named at an untyped position beside an `items` schema", async () => {
+    const source = await sourceCell(
+      "unheld-untyped-items",
+      { items: { type: "object", properties: { title: { type: "string" } } } },
+      { extra: "kept" },
+    );
+    // The position may hold an array and holds an object, so the name belongs
+    // to the position itself rather than to an element, and the element
+    // schema's vocabulary says nothing about it. The empty answer is the
+    // concise read applying its field mask, not a refusal — the JSON spelling
+    // of the same request reaches the value.
+    expect(await selected(source, "extra")).toEqual({});
+    expect(
+      await deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection(
+          '{"type":"object","properties":{"extra":true}}',
+        ),
+      }),
+    ).toEqual({ extra: "kept" });
+  });
+
+  it("reads a field named at a position typed as both an array and an object", async () => {
+    const source = await sourceCell(
+      "unheld-array-or-object",
+      {
+        type: ["array", "object"],
+        items: { type: "object", properties: { title: { type: "string" } } },
+      },
+      { extra: "kept" },
+    );
+    expect(await selected(source, "extra")).toEqual({ extra: "kept" });
+  });
+
   it("reads a field named at a position that matches names by pattern", async () => {
     const source = await sourceCell(
       "unheld-pattern-properties",

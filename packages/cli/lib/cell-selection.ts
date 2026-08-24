@@ -1857,8 +1857,14 @@ function firstUnheldSelectionField(
   // fixed depth, so an array position is crossed and the same names are asked
   // of its elements — the traversal `alignConciseProjectionMask` applies to
   // the mask beside this.
-  if (schemaIsArrayShaped(target)) {
-    if (schemaIsObjectShaped(target, targetRoot)) return undefined;
+  //
+  // Crossed only where the position MUST hold an array, which is the question
+  // {@link sourceProvesContainer} exists to answer. A position that merely may
+  // hold one — untyped beside an `items`, or a union naming both containers —
+  // settles neither depth: the name belongs to an element where the value is
+  // an array and to the position itself where it is not, and judging it at one
+  // of them refuses a read that works at the other.
+  if (sourceProvesContainer("array", target, targetRoot)) {
     return firstUnheldSelectionField(
       sourceItemSchema(target),
       targetRoot,
@@ -1866,19 +1872,16 @@ function firstUnheldSelectionField(
       `${position}[]`,
     );
   }
+  if (schemaIsArrayShaped(target)) return undefined;
 
   if (!schemaIsObjectShaped(target, targetRoot)) {
     const types = schemaTypes(target);
     // A stated scalar type is the position saying what it holds, and a string
     // has no fields to name. Every other reading of the position — no type at
-    // all, a union admitting a container, a conjunction whose members state
-    // the type between them — leaves the shape open, and an open position
-    // holds whatever was stored there.
-    if (
-      types.length === 0 || types.includes("object") || types.includes("array")
-    ) {
-      return undefined;
-    }
+    // all, a union admitting an object, a conjunction whose members state the
+    // type between them — leaves the shape open, and an open position holds
+    // whatever was stored there.
+    if (types.length === 0 || types.includes("object")) return undefined;
     return { key: Object.keys(named)[0], position, holds: { types } };
   }
 

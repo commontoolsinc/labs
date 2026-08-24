@@ -142,8 +142,9 @@ position, the vocabulary that position declares, and — where the vocabulary ha
 a name close enough — the one the path is a typo of, the wording every other
 misspelled name gets (`packages/cli/lib/refusal.ts`). Everything the
 schema leaves open passes: an open `additionalProperties`, a `patternProperties`
-map that names a pattern, a disjunction, an untyped position, a reference site
-declaring fields of its own, and a name several `allOf` members declare. A
+map that names a pattern, a disjunction, an untyped position, a position that
+only MAY hold an array rather than proving it, a reference site declaring
+fields of its own, and a name several `allOf` members declare. A
 reference that does not resolve passes the gate as well, though the read behind
 it then reports the reference rather than answering. Refusing at any of them
 would take away a read that works, and the direction to be wrong in is the
