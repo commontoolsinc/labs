@@ -3665,31 +3665,33 @@ const applyCommitTransaction = (
         if ("add" in patch) collectLinkSchemaRefs(patch.add);
         if ("values" in patch) collectLinkSchemaRefs(patch.values);
       }
-      const docKey = opDocKey(opIndex, operation);
-      if (cfcPatchDocKeys.has(docKey)) {
-        const base = stagedCfcDocs.has(docKey)
-          ? stagedCfcDocs.get(docKey)
-          : readState(engine, {
-            id: operation.id,
-            branch,
-            scope: operation.scope as Parameters<
-              typeof readState
-            >[1]["scope"],
-            principal: scanPrincipal,
-            sessionId: scanSession,
-            scopeKey: scopeKeyByOpIndex.get(opIndex),
-          })?.document ?? undefined;
-        try {
-          const patched = applyPatchToDocument(
-            base as Parameters<typeof applyPatchToDocument>[0] | undefined,
-            operation.patches ?? [],
-          );
-          stagedCfcDocs.set(docKey, patched);
-          if (patchTouchesCfc(operation.patches)) {
-            collectCfcEnvelopeRef((patched as { cfc?: unknown }).cfc);
+      if (cfcPatchDocKeys.size > 0) {
+        const docKey = opDocKey(opIndex, operation);
+        if (cfcPatchDocKeys.has(docKey)) {
+          const base = stagedCfcDocs.has(docKey)
+            ? stagedCfcDocs.get(docKey)
+            : readState(engine, {
+              id: operation.id,
+              branch,
+              scope: operation.scope as Parameters<
+                typeof readState
+              >[1]["scope"],
+              principal: scanPrincipal,
+              sessionId: scanSession,
+              scopeKey: scopeKeyByOpIndex.get(opIndex),
+            })?.document ?? undefined;
+          try {
+            const patched = applyPatchToDocument(
+              base as Parameters<typeof applyPatchToDocument>[0] | undefined,
+              operation.patches ?? [],
+            );
+            stagedCfcDocs.set(docKey, patched);
+            if (patchTouchesCfc(operation.patches)) {
+              collectCfcEnvelopeRef((patched as { cfc?: unknown }).cfc);
+            }
+          } catch (error) {
+            if (!(error instanceof PatchApplyError)) throw error;
           }
-        } catch (error) {
-          if (!(error instanceof PatchApplyError)) throw error;
         }
       }
     }
@@ -3699,12 +3701,14 @@ const applyCommitTransaction = (
         collectCfcEnvelopeRef(
           (operation.value as { cfc?: unknown } | null)?.cfc,
         );
-        const docKey = opDocKey(opIndex, operation);
-        if (cfcPatchDocKeys.has(docKey)) {
-          stagedCfcDocs.set(docKey, operation.value);
+        if (cfcPatchDocKeys.size > 0) {
+          const docKey = opDocKey(opIndex, operation);
+          if (cfcPatchDocKeys.has(docKey)) {
+            stagedCfcDocs.set(docKey, operation.value);
+          }
         }
       }
-      if (operation.op === "delete") {
+      if (operation.op === "delete" && cfcPatchDocKeys.size > 0) {
         const docKey = opDocKey(opIndex, operation);
         if (cfcPatchDocKeys.has(docKey)) {
           stagedCfcDocs.set(docKey, undefined);
