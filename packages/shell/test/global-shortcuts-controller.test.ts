@@ -6,9 +6,9 @@ import { GlobalShortcutsController } from "../src/lib/global-shortcuts-controlle
 // the current view addresses. It goes through a single document keydown
 // listener, so the tests drive that listener directly with synthetic events.
 
-// The controller attaches to `document`, and `navigate` dispatches on
-// `globalThis`. Deno has neither shaped the way a browser does, so stand in
-// for them around each test and restore after.
+// The controller reads `navigator.platform` and attaches to `document`, and
+// `navigate` dispatches on `globalThis`. Deno has none of those shaped the way
+// a browser does, so stand in for them around each test and restore after.
 function withStubbedEnv<T>(
   run: (env: {
     dispatch: (
@@ -30,6 +30,7 @@ function withStubbedEnv<T>(
   }
 
   let listener: ((e: KeyboardEventLike) => void) | undefined;
+  setGlobal("navigator", { platform: "MacIntel" });
   setGlobal("document", {
     addEventListener(type: string, fn: (e: KeyboardEventLike) => void) {
       if (type === "keydown") listener = fn;
