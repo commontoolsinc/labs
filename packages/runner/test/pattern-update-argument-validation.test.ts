@@ -83,6 +83,23 @@ const typedCount = (marker: string): RuntimeProgram =>
     "",
   ].join("\n"));
 
+/**
+ * A candidate that types a NESTED object: `row.name` is required, so a `row`
+ * that materializes without it refuses. The nested-cold cases stand on this —
+ * the argument doc's own slot (`row`) resolves fine, and only a hop past it
+ * dead-ends.
+ */
+const typedRow = (marker: string): RuntimeProgram =>
+  programOf([
+    "import { pattern } from 'commonfabric';",
+    "interface Row { name: string; other?: string }",
+    "interface Args { row?: Row; [key: string]: any }",
+    "export default pattern<Args, { marker: string }>(() => {",
+    `  return { marker: ${JSON.stringify(marker)} };`,
+    "});",
+    "",
+  ].join("\n"));
+
 describe("pattern update validates the stored argument", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let rt: Runtime;
@@ -879,6 +896,80 @@ describe("pattern update validates the stored argument", () => {
     ).toBeUndefined();
     await cell.pull();
     expect((cell.getAsQueryResult() as { marker: string }).marker).toBe("v2");
+  });
+
+  it("rolls forward when the unreadable link sits BEHIND a readable hop", async () => {
+    // The 2026-08-21 fleet incident, in miniature. A profile's `name` cell
+    // stores a LINK to the doc holding its seed value, cold-start sync
+    // delivers the cell doc but not the seed doc, and the home pattern's
+    // first identity move in months re-validated every home's `profiles`
+    // argument over that half-replicated graph: `profiles: 0: name: value
+    // does not match type string`, permanently, fleet-wide. The one-hop case
+    // above never covers this: the argument doc's OWN slot resolves fine
+    // (`row` materializes as an object), and the dead end is a hop further
+    // down, where an overlay that only reads the argument doc's raw cannot
+    // see it. The deferral has to follow the stored link graph as deep as the
+    // materialization it repairs.
+    const absent = rt.getCell<string>(space, "nested-cold-target");
+    const row = rt.getCell<Record<string, unknown>>(space, "nested-cold-row");
+    const { error: writeError } = await rt.editWithRetry((tx) => {
+      row.withTx(tx).asSchema(undefined as never).set(
+        { name: absent, other: "fine" } as never,
+      );
+    });
+    expect(writeError?.message).toBeUndefined();
+    await rt.idle();
+    const { cell } = await setupVintage(
+      openArgument("v1"),
+      { row },
+      "nested-cold-link",
+    );
+
+    const { error } = await rollForward(cell, typedRow("v2"));
+
+    expect(
+      error,
+      "a slot whose stored value routes through an unreadable link one hop " +
+        "past the argument doc was treated as invalid — the shape that " +
+        "bricked every home space on 2026-08-21",
+    ).toBeUndefined();
+    await cell.pull();
+    expect((cell.getAsQueryResult() as { marker: string }).marker).toBe("v2");
+  });
+
+  it("still refuses a READABLE wrong-typed value behind the same hop", async () => {
+    // The differential that pins where the deferral ends: identical nesting,
+    // identical candidate, but the value behind the hop is present and simply
+    // wrong. Deferral is for what this context cannot read, never for what it
+    // read and found invalid — widen it to any nested `undefined`-adjacent
+    // shape and the gate stops gating.
+    const row = rt.getCell<Record<string, unknown>>(
+      space,
+      "nested-wrong-type-row",
+    );
+    const { error: writeError } = await rt.editWithRetry((tx) => {
+      row.withTx(tx).asSchema(undefined as never).set(
+        { name: 7, other: "fine" } as never,
+      );
+    });
+    expect(writeError?.message).toBeUndefined();
+    await rt.idle();
+    const { cell } = await setupVintage(
+      openArgument("v1"),
+      { row },
+      "nested-wrong-type-link",
+    );
+
+    const { error, thrown } = await rollForward(cell, typedRow("v2"));
+
+    expect(
+      error,
+      "a readable nested value of the wrong type slipped past validation — " +
+        "the unreadable-link deferral is leaking onto values that were read " +
+        "and judged",
+    ).toContain("updated arguments do not match the candidate schema");
+    expect(error).toContain("name: value does not match type string");
+    expect(isStoredArgumentSchemaRefusal(thrown)).toBe(true);
   });
 
   it("leaves a same-version setup alone over an argument its OWN schema rejects", async () => {
