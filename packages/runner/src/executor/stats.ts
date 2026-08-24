@@ -384,6 +384,28 @@ export type ServingLoopStats = {
     budgetDeferrals: number;
   };
   lease: { held: number; lost: number };
+  /** OW45 arm-B server-ensure stage 1 (design PR #6209 §10): the
+   * SpaceServer's space-root ensure — one lease-guarded owed step per
+   * tenure (existence + freshness, no start). */
+  rootEnsure: {
+    /** Completed ensure runs, any outcome. */
+    runs: number;
+    /** Runs whose creation transaction materialized the root. */
+    created: number;
+    /** Runs whose freshness reconcile moved the root ("updated" or
+     * "repaired-provenance" from the awaited default-root check). */
+    reconciled: number;
+    /** Fail-closed skips: the space's ACL resolved no concrete owner
+     * (missing, invalid, retracted, ANYONE-only). The tenure serves
+     * without a root ensure and NEVER substitutes the service DID
+     * (OW53's ruled shape); the next tenure retries. */
+    skippedNoOwner: number;
+    /** Ensure attempts that threw (source resolve, compile, creation,
+     * or resolution failure). Counted AND warned; cleared for the
+     * tenure — the next tenure retries — so a deterministic failure
+     * cannot spin the wave loop. */
+    failures: number;
+  };
 };
 
 export const emptyServingLoopStats = (): ServingLoopStats => ({
@@ -445,6 +467,13 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
   memo: { hits: 0, misses: 0, inflight: 0 },
   outbox: { queued: 0, completed: 0, failed: 0, budgetDeferrals: 0 },
   lease: { held: 0, lost: 0 },
+  rootEnsure: {
+    runs: 0,
+    created: 0,
+    reconciled: 0,
+    skippedNoOwner: 0,
+    failures: 0,
+  },
 });
 
 /** The `derivedCommitsBySpace` cap (the settle.series bounding

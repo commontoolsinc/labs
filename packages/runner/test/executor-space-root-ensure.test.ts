@@ -1,0 +1,371 @@
+// The SpaceServer's space-root ensure seat (OW45 arm-B server-ensure
+// STAGE 1; design PR #6209 §1/§9): at activation the tenure owes the
+// space one lease-guarded, single-flight root ensure — existence +
+// freshness, no start — run as the first serialized step of the wave
+// loop's first cycle. The pins are the design's §9 stage-1 subset:
+//
+// - a fresh OWNED space's activation materializes `defaultPattern` and
+//   the root, provenance-stamped from the space-type source (watched
+//   RED before the seat existed: the root never appeared);
+// - park/re-activate converges on ONE root (the OCC/address invariant)
+//   and an aged root's re-activation reconciles the obsolete
+//   patternIdentity before anything loads it (the updater-ordering
+//   half, at the seat);
+// - the ensure's creation transaction carries the resolved OWNER's CFC
+//   trust snapshot — never the ambient service snapshot (the OW59 Q3
+//   caveat's named follow-up, design §4(b)); asserted on the LIVE
+//   transaction the ensure minted, since the fixture patterns declare
+//   no ifc labels for a store-side label audit to read;
+// - a space with NO resolvable ACL owner SKIPS fail-closed: counted,
+//   root left absent, tenure serving — never the service DID as
+//   fallback (OW53's shape).
+//
+// The OFF witness for this seat is structural — the ensure's only
+// caller is SpaceServer.activate, the SpaceServer's only builder is the
+// ExecutorHost, and the host exists only under
+// EXPERIMENTAL_SERVER_EXECUTION (packages/toolshed/lib/
+// server-execution.test.ts pins the flag-off bootstrap returning
+// undefined) — plus activate() itself refuses a runtime without the
+// flag (pinned by the stage-G suite).
+
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import * as Engine from "@commonfabric/memory/v2/engine";
+import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import { Runtime, type RuntimeFetch } from "../src/runtime.ts";
+import type {
+  IExtendedStorageTransaction,
+  MemorySpace,
+} from "../src/storage/interface.ts";
+import { SpaceServer } from "../src/executor/space-server.ts";
+import { waveRunContextOf } from "../src/executor/wave.ts";
+import {
+  emptyServingLoopStats,
+  type ServingLoopStats,
+} from "../src/executor/stats.ts";
+import {
+  DEFAULT_APP_PATTERN_SOURCE,
+  HOME_PATTERN_SOURCE,
+  resolveSpaceRootPattern,
+} from "../src/ensure-space-root.ts";
+import {
+  ACLManager,
+  getEntityId,
+  getPatternIdentityRef,
+  getPatternSource,
+  resolveEntryIdentity,
+} from "../src/index.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
+
+const spaceSigner = await Identity.fromPassphrase("space root ensure space");
+const space = spaceSigner.did() as MemorySpace;
+const serviceSigner = await Identity.fromPassphrase(
+  "space root ensure service",
+);
+const aliceSigner = await Identity.fromPassphrase("space root ensure alice");
+const readerSigner = await Identity.fromPassphrase("space root ensure reader");
+
+const HOME_PATH = "/api/patterns/system/home.tsx";
+const APP_PATH = "/api/patterns/system/default-app.tsx";
+
+function rootSource(marker: string): string {
+  return [
+    "import { computed, pattern } from 'commonfabric';",
+    "const Root = pattern<Record<string, never>, { marker: string }>(" +
+    `() => ({ marker: computed(() => "${marker}") }));`,
+    "export default Root;",
+    "",
+  ].join("\n");
+}
+
+const waitUntil = async (
+  predicate: () => boolean,
+  label: string,
+  timeoutMs = 20_000,
+): Promise<void> => {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) {
+      throw new Error(`timed out waiting for ${label}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+};
+
+describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
+  let server: MemoryV2Server.Server;
+  let engine: Engine.Engine;
+  let files: Map<string, string>;
+  let spaceServer: SpaceServer | undefined;
+  let servingRuntime: Runtime | undefined;
+  let mintedTxs: IExtendedStorageTransaction[];
+  let stats: ServingLoopStats;
+  let cleanups: Array<() => Promise<void>>;
+
+  const identityFor = (entry: string): Promise<string> =>
+    resolveEntryIdentity(entry, (name) => {
+      const contents = files.get(name);
+      return contents !== undefined
+        ? Promise.resolve(contents)
+        : Promise.reject(new Error(`not found: ${name}`));
+    });
+
+  const fetchStub: RuntimeFetch = (input, _init) => {
+    const url = new URL(
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+        ? input.href
+        : input.url,
+    );
+    const body = files.get(url.pathname);
+    if (body === undefined) {
+      return Promise.resolve(new Response("not found", { status: 404 }));
+    }
+    if (url.searchParams.has("identity")) {
+      return identityFor(url.pathname).then((id) => new Response(id));
+    }
+    return Promise.resolve(new Response(body));
+  };
+
+  beforeEach(async () => {
+    server = newSharedServer({ subscriptionRefreshDelayMs: 0 });
+    engine = await server.engineForSpace(space);
+    files = new Map([
+      [HOME_PATH, rootSource("home-v1")],
+      [APP_PATH, rootSource("app-v1")],
+    ]);
+    mintedTxs = [];
+    stats = emptyServingLoopStats();
+    spaceServer = undefined;
+    servingRuntime = undefined;
+    cleanups = [];
+  });
+
+  afterEach(async () => {
+    await spaceServer?.park("test-teardown");
+    for (const cleanup of cleanups.reverse()) await cleanup();
+    await server.close();
+  });
+
+  const clientRuntime = (as: Identity): Runtime => {
+    const manager = EmulatedStorageManager.connectTo(server, { as });
+    const runtime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager: manager,
+      fetch: fetchStub,
+    });
+    cleanups.push(async () => {
+      await runtime.dispose();
+      await manager.close();
+    });
+    return runtime;
+  };
+
+  /** Seed the space's ACL (`of:<space>`) through the SPACE IDENTITY via
+   * ACLManager — the sanctioned whole-document mutation path (a
+   * value-path write is refused: "mutate it through ACLManager"). */
+  const seedAcl = async (
+    acl: Record<string, "READ" | "WRITE" | "OWNER">,
+  ): Promise<void> => {
+    const runtime = clientRuntime(spaceSigner);
+    const manager = new ACLManager(runtime, space as never);
+    for (const [user, capability] of Object.entries(acl)) {
+      await manager.set(user as never, capability);
+    }
+    await runtime.idle();
+    await runtime.storageManager.synced();
+  };
+
+  const newSpaceServer = (): SpaceServer => {
+    const created = new SpaceServer({
+      space,
+      server,
+      engine,
+      serviceIdentity: serviceSigner.did(),
+      // deno-lint-ignore require-await
+      createRuntime: async () => {
+        const manager = EmulatedStorageManager.connectTo(server, {
+          as: serviceSigner,
+        });
+        const runtime = new Runtime({
+          apiUrl: new URL("http://toolshed.test"),
+          storageManager: manager,
+          fetch: fetchStub,
+          servingPosture: true,
+          experimental: {
+            serverExecution: true,
+            systemPatternAutoUpdate: true,
+          },
+        });
+        // Record every transaction the serving runtime mints, so the
+        // pins can find the ensure's creation tx and read the LIVE
+        // trust snapshot it carried (the rejectFirstFabricCommit
+        // precedent: instance-level patching is the established seam).
+        const originalEdit = runtime.edit.bind(runtime);
+        runtime.edit = (() => {
+          const tx = originalEdit();
+          mintedTxs.push(tx);
+          return tx;
+        }) as typeof runtime.edit;
+        servingRuntime = runtime;
+        return {
+          runtime,
+          dispose: async () => {
+            await runtime.dispose();
+            await manager.close();
+          },
+        };
+      },
+      localSeqRef: { value: 0 },
+      stats,
+      policy: { flushDeadlineMs: 2_000, idleParkMs: 600_000 },
+    });
+    spaceServer = created;
+    return created;
+  };
+
+  /** Resolve the space root through a client replica, poll-bounded:
+   * the wave batch lands link + docs together, but a reader's replica
+   * receives them on subscription frames, so the first resolve after
+   * the link's arrival can still miss the target's meta. */
+  const resolveRootEventually = async (reader: Runtime) => {
+    const deadline = Date.now() + 20_000;
+    while (true) {
+      const root = await resolveSpaceRootPattern(reader, space);
+      if (root !== undefined) return root;
+      if (Date.now() > deadline) {
+        throw new Error("timed out resolving the space root");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  };
+
+  const ensureTxs = (): IExtendedStorageTransaction[] =>
+    mintedTxs.filter((tx) =>
+      waveRunContextOf(tx)?.actionId?.startsWith("space-root-ensure/") === true
+    );
+
+  it("activation of a fresh self-owned space materializes the root from the home source", async () => {
+    await seedAcl({ [space]: "OWNER" });
+    const created = newSpaceServer();
+    expect(await created.activate()).toBe(true);
+
+    // The ensure's writes ride the first wave; poll the DURABLE store
+    // through an independent client replica.
+    const reader = clientRuntime(readerSigner);
+    const probe = reader.getSpaceCell(space).key("defaultPattern");
+    await probe.sync();
+    await waitUntil(() => probe.get() !== undefined, "root linked");
+
+    const root = await resolveRootEventually(reader);
+    expect(getPatternSource(root)).toBe(HOME_PATTERN_SOURCE);
+    expect(getPatternIdentityRef(root)?.identity).toBe(
+      await identityFor(HOME_PATH),
+    );
+    expect(stats.rootEnsure.runs).toBe(1);
+    expect(stats.rootEnsure.created).toBe(1);
+    expect(stats.rootEnsure.skippedNoOwner).toBe(0);
+    expect(stats.rootEnsure.failures).toBe(0);
+  });
+
+  it("park/re-activate converges on ONE root and reconciles an aged identity before anything loads it", async () => {
+    await seedAcl({ [space]: "OWNER" });
+    const created = newSpaceServer();
+    expect(await created.activate()).toBe(true);
+
+    const reader = clientRuntime(readerSigner);
+    const probe = reader.getSpaceCell(space).key("defaultPattern");
+    await probe.sync();
+    await waitUntil(() => probe.get() !== undefined, "root linked");
+    const firstRoot = await resolveRootEventually(reader);
+    const agedIdentity = await identityFor(HOME_PATH);
+    expect(getPatternIdentityRef(firstRoot)?.identity).toBe(agedIdentity);
+
+    // The served source moves while the space is parked — the aged
+    // space. Re-activation's ensure must swap the stored identity
+    // forward as its freshness half, before any load of the obsolete
+    // identity. A SpaceServer is single-tenure (park() is terminal on
+    // the instance; the HOST builds a fresh one per re-activation), so
+    // the second tenure is a second SpaceServer over the same engine
+    // and the SAME stats object — the counters span tenures like the
+    // host's do.
+    await created.park("test-age");
+    await created.whenParked;
+    files.set(HOME_PATH, rootSource("home-v2"));
+    const freshIdentity = await identityFor(HOME_PATH);
+    expect(freshIdentity).not.toBe(agedIdentity);
+
+    const second = newSpaceServer();
+    expect(await second.activate()).toBe(true);
+    await waitUntil(
+      () => stats.rootEnsure.runs === 2,
+      "second tenure's ensure",
+    );
+    {
+      const deadline = Date.now() + 20_000;
+      while (getPatternIdentityRef(firstRoot)?.identity !== freshIdentity) {
+        if (Date.now() > deadline) {
+          throw new Error("timed out waiting for aged identity reconcile");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        await firstRoot.sync();
+      }
+    }
+
+    const secondRoot = await resolveRootEventually(reader);
+    expect(getEntityId(secondRoot)).toEqual(getEntityId(firstRoot));
+    expect(stats.rootEnsure.created).toBe(1);
+    expect(stats.rootEnsure.reconciled).toBe(1);
+  });
+
+  it("the ensure's creation tx carries the resolved OWNER's trust snapshot, never the service's (granted-owner space, default-app source)", async () => {
+    await seedAcl({ [aliceSigner.did()]: "OWNER" });
+    const created = newSpaceServer();
+    expect(await created.activate()).toBe(true);
+
+    const reader = clientRuntime(readerSigner);
+    const probe = reader.getSpaceCell(space).key("defaultPattern");
+    await probe.sync();
+    await waitUntil(() => probe.get() !== undefined, "root linked");
+
+    // A non-self-owned space is NOT the owner's home: the system
+    // default-app source, with the custom-URL fork's interim (system
+    // default only) — never the home source.
+    const root = await resolveRootEventually(reader);
+    expect(getPatternSource(root)).toBe(DEFAULT_APP_PATTERN_SOURCE);
+
+    const creations = ensureTxs();
+    expect(creations.length).toBeGreaterThan(0);
+    for (const tx of creations) {
+      const snapshot = tx.getCfcState().trustSnapshot;
+      expect(snapshot?.actingPrincipal).toBe(aliceSigner.did());
+      expect(snapshot?.actingPrincipal).not.toBe(serviceSigner.did());
+    }
+  });
+
+  it("a space with no resolvable ACL owner SKIPS fail-closed: counted, no root, tenure alive", async () => {
+    // No ACL seeded at all — resolveSpaceOwner yields undefined.
+    const created = newSpaceServer();
+    expect(await created.activate()).toBe(true);
+
+    await waitUntil(
+      () => stats.rootEnsure.skippedNoOwner === 1,
+      "fail-closed skip counted",
+    );
+    expect(stats.rootEnsure.runs).toBe(0);
+    expect(stats.rootEnsure.created).toBe(0);
+    // The tenure keeps serving (the skip parks nothing).
+    expect(created.active).toBe(true);
+
+    // And the root was NOT created under the service identity (the
+    // fallback the fail-closed arm exists to prevent): semantic
+    // absence through the same resolution the ensure itself uses.
+    const reader = clientRuntime(readerSigner);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(await resolveSpaceRootPattern(reader, space)).toBeUndefined();
+    expect(ensureTxs().length).toBe(0);
+  });
+});

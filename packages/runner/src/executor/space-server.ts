@@ -96,6 +96,7 @@ import {
   ensurePieceRunningVerdict,
   type EnsurePieceVerdict,
 } from "../ensure-piece-running.ts";
+import { ensureSpaceRootPattern } from "../ensure-space-root.ts";
 import {
   stampWaveRunContext,
   WaveAccumulator,
@@ -594,6 +595,18 @@ export class SpaceServer implements TransactionSealDestination {
    * input (serving-loop.md §3's event-append classification; §6
    * step 4's reprocess scan is the same move at activation). */
   #eventScanOwed = false;
+  /** OW45 arm-B server-ensure stage 1 (design PR #6209 §1, seat A2):
+   * activation owes the tenure ONE space-root ensure — existence +
+   * freshness, no start — run as the first serialized step of the wave
+   * loop's first cycle (the #eventScanOwed / #outboxDrainOwed shape).
+   * Single-flight per tenure: consumed before the ensure runs and
+   * never re-armed mid-tenure — a failure or a fail-closed no-owner
+   * skip is counted and retried by the NEXT tenure's activation, so a
+   * deterministic failure cannot spin the loop. Idempotent across
+   * tenures and against clients: the creation transaction's OCC
+   * re-read plus the cause-derived root address converge every race
+   * on one root. */
+  #rootEnsureOwed = false;
   /** Phase 4 (protocol.md §5): an effects-doc-touching authored commit
    * (an ack) — or activation (a crash between ack and retirement must
    * still retire) — owes the next wave the acked-entry retirement scan.
@@ -853,6 +866,12 @@ export class SpaceServer implements TransactionSealDestination {
     // Phase 4 (protocol.md §5): arm the acked-effect retirement scan —
     // a crash between an ack and its retirement re-owes the scan here.
     this.#effectsRetirementOwed = true;
+    // OW45 arm-B stage 1: the tenure owes the space one root ensure
+    // (design #6209 §1 — "space open", server-side, IS activation; all
+    // three triggers ensure, sessionless ones included: idempotence
+    // makes the repeat cost one fast-path read, and a warm-provisioned
+    // space gets its root before its first human open).
+    this.#rootEnsureOwed = true;
 
     // W = read watermark doc (0 if absent).
     this.#watermark = readWatermarkSeq(engine);
@@ -2088,6 +2107,10 @@ export class SpaceServer implements TransactionSealDestination {
       this.#pendingWaveSeals > 0 ||
       this.#eventScanOwed ||
       this.#effectsRetirementOwed ||
+      // The owed root ensure is work (consumed by the next cycle; set
+      // only at activation today, where cycle 1 always runs first —
+      // kept here so a future re-arm cannot idle-park past it).
+      this.#rootEnsureOwed ||
       // Deferred effect batches of the OPEN wave are work (round-2
       // thread 1): an effect-only tx (an all-no-op claim re-issue —
       // the §6 step 3 recovery shape) seals no contribution, so
@@ -3373,10 +3396,108 @@ export class SpaceServer implements TransactionSealDestination {
     }
   }
 
+  /**
+   * The tenure's space-root ensure (OW45 arm-B server-ensure stage 1;
+   * design PR #6209 §1/§4): make sure the space's default pattern
+   * EXISTS and is FRESH — the client-era duties 1 and 2, no start (the
+   * serving loop starts pieces on demand; the runnability-repair pair
+   * stays client-side until stage 2 moves it — the recorded stage-2
+   * gate).
+   *
+   * Identity, per the design's §4(b): the space's ACL OWNER, resolved
+   * through the memory server's ruled service-identity ACL read
+   * (`resolveSpaceOwner`) — self-owned = the space's own home. The
+   * creation transaction stamps `bookkeeping` (the §3d sanctioned
+   * internal kind) AND attaches the owner-resolved trust snapshot, so
+   * durable labels a schema mints resolve against the OWNER — never
+   * the ambient service snapshot (the OW59 Q3 caveat's named
+   * follow-up). A space with NO resolvable owner is SKIPPED
+   * fail-closed: counted, warned, retried next tenure — never the
+   * service DID as fallback (OW53's shape;
+   * `homeSpacePrincipalFor`'s posture).
+   *
+   * Failures are counted and cleared for the tenure (the next
+   * activation retries): the ensure must never park or spin the loop —
+   * a space whose root cannot materialize still serves what it has,
+   * and the OFF-era client path still covers creation in stage 1.
+   */
+  async #ensureSpaceRoot(runtime: Runtime): Promise<void> {
+    const { engine, space, server } = this.#options;
+    const stats = this.#options.stats.rootEnsure;
+    const owner = server.resolveSpaceOwner(engine, space);
+    if (owner === undefined) {
+      stats.skippedNoOwner += 1;
+      logger.warn("space-root-ensure-no-owner", () => [
+        `space ${space}: no concrete ACL owner resolves; the root ` +
+        "ensure is SKIPPED fail-closed for this tenure (never the " +
+        "service DID — OW53's shape). Under OW31(b) genesis precedes " +
+        "data for every served space, so an ACTIVE space landing here " +
+        "is an anomaly worth this warning.",
+      ]);
+      return;
+    }
+    try {
+      const result = await ensureSpaceRootPattern(runtime, space, {
+        // The ACL-derived home predicate (self-owned = home): the
+        // client's `space === runtime.userIdentityDID` is WRONG here —
+        // a serving runtime's userIdentityDID is the SERVICE DID.
+        isHomeSpace: owner === space,
+        stampCreationTx: (tx) => {
+          runtime.stampServerRun(tx, {
+            actionId: `space-root-ensure/${space}`,
+            kind: "bookkeeping",
+          });
+          // AFTER the stamp (which leaves an actor-less bookkeeping
+          // run's snapshot alone), the owner-resolved per-run snapshot
+          // — before the transaction's first read.
+          tx.setCfcTrustSnapshot(
+            runtime.trustSnapshotForPrincipal(owner),
+          );
+        },
+      });
+      stats.runs += 1;
+      if (result.outcome === "created") stats.created += 1;
+      if (
+        result.reconcile === "updated" ||
+        result.reconcile === "repaired-provenance"
+      ) {
+        stats.reconciled += 1;
+      }
+      logger.info?.("space-root-ensure", () => [
+        `space ${space}: root ensure ${result.outcome} ` +
+        `(reconcile ${result.reconcile}; owner ${owner}` +
+        `${owner === space ? ", self-owned home" : ""})`,
+      ]);
+    } catch (error) {
+      stats.failures += 1;
+      logger.warn("space-root-ensure-failed", () => [
+        `space ${space}: root ensure failed; the tenure serves without ` +
+        "it and the next activation retries (the client-era creation " +
+        "path still covers stage 1)",
+        error,
+      ]);
+    }
+  }
+
   async #waveCycle(): Promise<void> {
     const runtime = this.#runtime;
     if (runtime === undefined || !this.#active) return;
     this.#cycleCounter += 1;
+    // The tenure's owed space-root ensure (OW45 arm-B stage 1) runs
+    // single-flight BEFORE the tenure's ordinary steps: the event drain
+    // may dispatch into the root's addPiece stream, and the demand
+    // passes below load what the ensure materializes. Fully awaited
+    // like the drain — once per tenure, so a slow first compile costs
+    // the first wave only; its seal joins THIS cycle's wave and commits
+    // with it. (Its commit resolves at seal-accept — the wave commit
+    // happens at this cycle's end — so awaiting it here cannot
+    // deadlock against the wave.)
+    if (this.#rootEnsureOwed) {
+      this.#rootEnsureOwed = false;
+      const ensureStart = performance.now();
+      await this.#ensureSpaceRoot(runtime);
+      timing.time(ensureStart, "executor", "wave", "root-ensure");
+    }
     const { batchHead } = this.#drainFeed();
     // The event drain stays a fully-awaited, single-flight step AHEAD
     // of the deadline race (Phase 3's shape): at most one drain runs
