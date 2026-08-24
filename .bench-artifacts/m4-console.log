@@ -1,1 +1,12 @@
 load-high 6.05 (poll 0/20, threshold 6)
+load-ok 4.31 (threshold 6)
+RUN_DONE bnav1-off rc=0 wall=141s drops=0
+RUN_DONE bnav1-on rc=0 wall=183s drops=0
+load-ok 4.83 (threshold 6)
+RUN_DONE bnav2-on rc=0 wall=265s drops=0
+RUN_DONE bnav2-off rc=0 wall=173s drops=0
+load-high 11.81 (poll 0/20, threshold 6)
+load-ok 5.87 (threshold 6)
+RUN_DONE bnav3-off rc=0 wall=136s drops=0
+RUN_DONE bnav3-on rc=0 wall=201s drops=0
+ALL_DONE_M4

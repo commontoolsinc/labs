@@ -1123,3 +1123,99 @@ expected errors) are GREEN under ON. Flip relevance: if the default flips,
 the no-server pattern-tests lane runs this file ON and goes red unless the
 lane pins OFF or the in-process surface grows a server role. Evidence:
 .bench-artifacts/runs/pt*-on/test.log + pattern-unit-tests.xml.
+== bnav1-off
+start_utc=2026-08-24T21:08:58Z workload=bench:integration/topic-board-navigation.bench.ts arm=off port=9871 cap_s=900
+load_before={ 4.31 6.46 7.15 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-off sha256=849204a9f6e1f5ef repo=/Users/berni/labs-worktrees/topics-benchmark head=93d59469f786
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=57688
+  posture: gitSha=97f0745e5979 define=None servingLoop_pre=False
+test_rc=0 test_wall_s=141 (rc 124 = hard cap 900s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 5.05 6.02 6.86 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=1024 authored=1024 derived=0 system=0 per-space: did:key:z6Mkr3bMYNNToF8UP5KDpfCSumXQ7BeTTZvPetU3WxmHCTdX.sqlite:1022/0/0 did:key:z6MktwisPW3yyQ3wS7Zwkqau3qq3nM5jG3xUMUf1gTKPawUT.sqlite:2/0/0
+
+== bnav1-on
+start_utc=2026-08-24T21:11:22Z workload=bench:integration/topic-board-navigation.bench.ts arm=on port=9872 cap_s=900
+load_before={ 5.05 6.02 6.86 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-on sha256=3da66132e4cc6173 repo=/Users/berni/labs-worktrees/topics-benchmark head=93d59469f786
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=66427
+  posture: gitSha=97f0745e5979 define=true servingLoop_pre=True
+test_rc=0 test_wall_s=183 (rc 124 = hard cap 900s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 4.83 5.69 6.58 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=659 authored=104 derived=555 system=0 per-space: did:key:z6Mkidvax6yrrJtMtGLeAegroLaGApauMaaetTYyMRqJ2zbd.sqlite:103/552/0 did:key:z6MktwisPW3yyQ3wS7Zwkqau3qq3nM5jG3xUMUf1gTKPawUT.sqlite:1/3/0
+
+== bnav2-on
+start_utc=2026-08-24T21:14:28Z workload=bench:integration/topic-board-navigation.bench.ts arm=on port=9872 cap_s=900
+load_before={ 4.83 5.69 6.58 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-on sha256=3da66132e4cc6173 repo=/Users/berni/labs-worktrees/topics-benchmark head=93d59469f786
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=71378
+  posture: gitSha=97f0745e5979 define=true servingLoop_pre=True
+test_rc=0 test_wall_s=265 (rc 124 = hard cap 900s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 7.45 7.56 7.28 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=751 authored=104 derived=647 system=0 per-space: did:key:z6MksDPdkRXQpkuioPMa38pkgLTp9szU4L6ZBeFLgiTRzigB.sqlite:103/644/0 did:key:z6MktwisPW3yyQ3wS7Zwkqau3qq3nM5jG3xUMUf1gTKPawUT.sqlite:1/3/0
+
+== bnav2-off
+start_utc=2026-08-24T21:18:55Z workload=bench:integration/topic-board-navigation.bench.ts arm=off port=9871 cap_s=900
+load_before={ 7.45 7.56 7.28 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-off sha256=849204a9f6e1f5ef repo=/Users/berni/labs-worktrees/topics-benchmark head=93d59469f786
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=82716
+  posture: gitSha=97f0745e5979 define=None servingLoop_pre=False
+test_rc=0 test_wall_s=173 (rc 124 = hard cap 900s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 11.81 9.42 8.07 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=1026 authored=1026 derived=0 system=0 per-space: did:key:z6Mkk7z4TmoDNLeFkc4SC2mZq5T7nRdjLsgEWx23ewuF1oQB.sqlite:1024/0/0 did:key:z6MktwisPW3yyQ3wS7Zwkqau3qq3nM5jG3xUMUf1gTKPawUT.sqlite:2/0/0
+
+== bnav3-off
+start_utc=2026-08-24T21:22:52Z workload=bench:integration/topic-board-navigation.bench.ts arm=off port=9871 cap_s=900
+load_before={ 5.87 8.14 7.68 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-off sha256=849204a9f6e1f5ef repo=/Users/berni/labs-worktrees/topics-benchmark head=93d59469f786
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=93349
+  posture: gitSha=97f0745e5979 define=None servingLoop_pre=False
+test_rc=0 test_wall_s=136 (rc 124 = hard cap 900s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 5.48 7.09 7.32 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=1030 authored=1030 derived=0 system=0 per-space: did:key:z6Mked3dHC4S38BNChPgZqNEJa7znwuBqXjmxtGAcZD7NAL9.sqlite:1028/0/0 did:key:z6MktwisPW3yyQ3wS7Zwkqau3qq3nM5jG3xUMUf1gTKPawUT.sqlite:2/0/0
+
+== bnav3-on
+start_utc=2026-08-24T21:25:13Z workload=bench:integration/topic-board-navigation.bench.ts arm=on port=9872 cap_s=900
+load_before={ 5.48 7.09 7.32 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-on sha256=3da66132e4cc6173 repo=/Users/berni/labs-worktrees/topics-benchmark head=93d59469f786
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=97261
+  posture: gitSha=97f0745e5979 define=true servingLoop_pre=True
+test_rc=0 test_wall_s=201 (rc 124 = hard cap 900s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 7.13 8.15 7.82 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=690 authored=104 derived=586 system=0 per-space: did:key:z6Mkf7Qsajg4t3rEiHcKc6Z6H6mU3GHUAKxBW3T2Wtui7Rbq.sqlite:103/583/0 did:key:z6MktwisPW3yyQ3wS7Zwkqau3qq3nM5jG3xUMUf1gTKPawUT.sqlite:1/3/0
+

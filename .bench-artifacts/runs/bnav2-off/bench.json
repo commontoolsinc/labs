@@ -1,0 +1,139 @@
+{
+  "version": 1,
+  "runtime": "Deno/2.9.4 aarch64-apple-darwin",
+  "cpu": "Apple M3 Max",
+  "benches": [
+    {
+      "origin": "file:///Users/berni/labs-worktrees/topics-benchmark/packages/patterns/integration/topic-board-navigation.bench.ts",
+      "group": "topic board",
+      "name": "load",
+      "baseline": false,
+      "results": [
+        {
+          "ok": {
+            "n": 6,
+            "min": 446566000.0,
+            "max": 575439375.0,
+            "avg": 513972209.0,
+            "p75": 560506000.0,
+            "p99": 575439375.0,
+            "p995": 575439375.0,
+            "p999": 575439375.0,
+            "highPrecision": true,
+            "usedExplicitTimers": true
+          }
+        }
+      ]
+    },
+    {
+      "origin": "file:///Users/berni/labs-worktrees/topics-benchmark/packages/patterns/integration/topic-board-navigation.bench.ts",
+      "group": "topic board",
+      "name": "sign in",
+      "baseline": false,
+      "results": [
+        {
+          "ok": {
+            "n": 6,
+            "min": 254679083.0,
+            "max": 336649542.0,
+            "avg": 303416702.0,
+            "p75": 334341000.0,
+            "p99": 336649542.0,
+            "p995": 336649542.0,
+            "p999": 336649542.0,
+            "highPrecision": true,
+            "usedExplicitTimers": true
+          }
+        }
+      ]
+    },
+    {
+      "origin": "file:///Users/berni/labs-worktrees/topics-benchmark/packages/patterns/integration/topic-board-navigation.bench.ts",
+      "group": "topic board",
+      "name": "board",
+      "baseline": false,
+      "results": [
+        {
+          "ok": {
+            "n": 6,
+            "min": 2358062792.0,
+            "max": 3302409625.0,
+            "avg": 2638847848.0,
+            "p75": 2708785708.0,
+            "p99": 3302409625.0,
+            "p995": 3302409625.0,
+            "p999": 3302409625.0,
+            "highPrecision": true,
+            "usedExplicitTimers": true
+          }
+        }
+      ]
+    },
+    {
+      "origin": "file:///Users/berni/labs-worktrees/topics-benchmark/packages/patterns/integration/topic-board-navigation.bench.ts",
+      "group": "topic board",
+      "name": "open topic",
+      "baseline": false,
+      "results": [
+        {
+          "ok": {
+            "n": 6,
+            "min": 448183084.0,
+            "max": 1018762792.0,
+            "avg": 613465278.0,
+            "p75": 628562583.0,
+            "p99": 1018762792.0,
+            "p995": 1018762792.0,
+            "p999": 1018762792.0,
+            "highPrecision": true,
+            "usedExplicitTimers": true
+          }
+        }
+      ]
+    },
+    {
+      "origin": "file:///Users/berni/labs-worktrees/topics-benchmark/packages/patterns/integration/topic-board-navigation.bench.ts",
+      "group": "topic board",
+      "name": "crossref",
+      "baseline": false,
+      "results": [
+        {
+          "ok": {
+            "n": 6,
+            "min": 305879125.0,
+            "max": 379121292.0,
+            "avg": 341182618.0,
+            "p75": 365924958.0,
+            "p99": 379121292.0,
+            "p995": 379121292.0,
+            "p999": 379121292.0,
+            "highPrecision": true,
+            "usedExplicitTimers": true
+          }
+        }
+      ]
+    },
+    {
+      "origin": "file:///Users/berni/labs-worktrees/topics-benchmark/packages/patterns/integration/topic-board-navigation.bench.ts",
+      "group": "topic board",
+      "name": "journey",
+      "baseline": false,
+      "results": [
+        {
+          "ok": {
+            "n": 6,
+            "min": 3261694292.0,
+            "max": 3966815583.0,
+            "avg": 3706318653.0,
+            "p75": 3923768667.0,
+            "p99": 3966815583.0,
+            "p995": 3966815583.0,
+            "p999": 3966815583.0,
+            "highPrecision": true,
+            "usedExplicitTimers": true
+          }
+        }
+      ]
+    }
+  ]
+}

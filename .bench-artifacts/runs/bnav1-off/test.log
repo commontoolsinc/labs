@@ -1,0 +1,3 @@
+[0m[32mCheck[0m integration/topic-board-navigation.bench.ts
+[topic-board-navigation] seeding 30 topics into space topicsbench-bnav1-off at http://localhost:9871/
+[topic-board-navigation] seeded board fid1:NMftpaYPA-gWTHJhPw1RscA-2Zjd-U29nf4BKobTfjg in 21391ms; 5 iterations per segment after 1 warm-up
