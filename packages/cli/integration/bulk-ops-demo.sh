@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# The bulk survey as something to watch: a board of 113 members surveyed in
+# Bulk piece operations as something to watch. What runs today is stage 1 of
+# docs/plans/piece-bulk-operations.md — a board of 113 members surveyed in
 # one process, the plan it emits, the retarget stamp, and the containment
-# refusal — the stage-1 surface of docs/plans/piece-bulk-operations.md, run
-# live rather than asserted.
+# refusal — live rather than asserted. What the later stages add appears as
+# PENDING acts at the end: the eventual shape of the mechanism stays visible
+# in the transcript, and each stage's checklist in the plan carries the item
+# that converts its act from pending to run, so a landed stage cannot leave
+# this demo describing a smaller tool than the one that exists.
 #
 # This is a demo, not a test. It narrates each command before running it, so
 # the transcript is the artifact. Its companion `bulk-survey-drill.sh` asserts
@@ -13,11 +17,10 @@
 # displays `"$@"` and executes `"$@"`, so a line that reads well and a line
 # that ran cannot drift apart. What a reader sees is what they can retype,
 # given the environment variables the header names. Unlike the verb-session
-# demo this one carries no `broken` or `pending` helper: nothing in the
-# surveyed surface is defective or unbuilt, and the helpers arrive when an
-# act needs their claim.
+# demo this one carries no `broken` helper: nothing in the running surface
+# is defective, and that helper arrives when an act needs its claim.
 #
-#   API_URL=http://localhost:8000 packages/cli/integration/bulk-survey-demo.sh
+#   API_URL=http://localhost:8000 packages/cli/integration/bulk-ops-demo.sh
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -49,7 +52,8 @@ export CF_IDENTITY
 SPACE="${SPACE:-$(mktemp -u surveyXXXXXXXX)}"
 WORK="$(mktemp -d)"
 
-B=$'\033[1m'; D=$'\033[2m'; C=$'\033[36m'; N=$'\033[0m'; R=$'\033[31m'
+B=$'\033[1m'; D=$'\033[2m'; C=$'\033[36m'; Y=$'\033[33m'; N=$'\033[0m'
+R=$'\033[31m'
 # Every act makes a claim: an unmarked one says the command works, a REFUSED
 # one says the surface turns this down. Both are counted, so a transcript that
 # got either wrong cannot exit 0 and read as a clean session.
@@ -136,6 +140,19 @@ refused() {
   fi
 }
 
+# Show what a command will do once the capability it needs is built. Display
+# only, and deliberately unchecked: there is nothing to run a signature
+# against until the stage lands. What keeps a pending act from going stale is
+# the plan document instead — each later stage's checklist carries the item
+# that converts its act here from pending to run, the same per-change tick
+# discipline stage 1 used.
+pending() {
+  printf '\n%s   $ %s%s\n' "$Y" "$1" "$N"
+  printf '%s     PENDING — %s%s\n' "$Y" "$2" "$N"
+  printf '%s     will print:%s\n' "$D" "$N"
+  printf '%s\n' "$3" | sed 's/^/       /'
+}
+
 printf '%s\n' "${B}A board-sized survey, watched end to end${N}"
 say "A board holds a collection of member pieces it created through its own"
 say "verb — which is exactly why the piece registry does not know them. The"
@@ -217,6 +234,32 @@ say "containment claim was made. The orphan is still out there; this survey"
 say "just never claimed otherwise."
 run_loud cf piece survey -s "$SPACE" --list board --out "$WORK/list.jsonl"
 run sh -c "head -1 '$WORK/list.jsonl' | jq -c '{selector, enumerated}'"
+
+act "9 · The rest of the mechanism, by what it waits on"
+say "The plan files this transcript produced are the input to every later"
+say "stage; nothing below needs a different artifact. Each act shows the"
+say "command a stage adds and what it will print — spelled provisionally,"
+say "since decision 1 of the plan owns where bulk writes live. A stage that"
+say "lands converts its act from PENDING to run; the plan's checklist for"
+say "that stage says so, the way stage 1's did."
+
+pending "cf piece repair -s $SPACE --plan plan.jsonl --fixer fix-titles.ts" \
+  "stage 2: a caller-supplied fixer, iterated by the spine, dry by default" \
+"fid1:cey7Ro... title: 'seed-0' -> 'Seed 0'
+112 more would change, 2 already conform; --apply writes them in plan order"
+
+pending "cf piece apply -s $SPACE retarget.jsonl" \
+  "stage 3: the retarget apply — serial, precondition-checked, resumable" \
+"row 1/114 fid1:cey7Ro... I9aHKe...#Member -> WPK2FB...#Member landed
+stopped at row 57: the piece moved since the survey; 57 unattempted, named"
+
+pending "cf piece survey -s $SPACE --piece board --path items --diff retarget.jsonl" \
+  "stage 3: verification is a second survey against the plan, never the apply's exit code — the diff itself is stage-1 library code waiting on a spelling" \
+"moved as planned: 56 . still outstanding: 57 . moved off-plan: 1, named"
+
+pending "cf piece rollback -s $SPACE retarget.jsonl" \
+  "stage 4: the plan derived in the other direction, restoring each row's recorded revision" \
+"114 rollback rows derived; every prior source retained; restores in plan order"
 
 printf '\n%s━━ The shape of it %s\n' "$B" "$N"
 say "One process surveyed a board-sized collection and emitted the plan the"

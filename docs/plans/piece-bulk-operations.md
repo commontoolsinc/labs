@@ -585,6 +585,9 @@ Topics restore script hand-rolls today and should import instead.
 - [ ] References survive a repair that does not mention them, and a fixer
       that would rewrite one as a value is refused.
 - [ ] Re-running a completed repair writes nothing.
+- [ ] The repair act in `packages/cli/integration/bulk-ops-demo.sh` stops
+      being pending: the transcript runs a fixer live where it now shows
+      the provisional spelling.
 
 ### 3. Retarget
 
@@ -635,6 +638,10 @@ spelling (decision 1).
 - [ ] Per-piece timing is reported as the run proceeds. A run whose cost per
       piece is unknown cannot be improved, and the number is the input to
       every decision below about whether to go faster.
+- [ ] The apply and survey-diff acts in
+      `packages/cli/integration/bulk-ops-demo.sh` stop being pending: the
+      transcript applies a stamped plan and diffs the after-survey against
+      it where it now shows the provisional spellings.
 
 ### 4. Rollback
 
@@ -665,6 +672,9 @@ rollback-plan derivation; and the rollback drill.
 - [ ] The reversal is exercised against a copy, in the drill, before any live
       run is allowed to depend on it. A rollback path first attempted during
       the incident it exists for is not a rollback path.
+- [ ] The rollback act in `packages/cli/integration/bulk-ops-demo.sh` stops
+      being pending: the transcript derives and restores live where it now
+      shows the provisional spelling.
 
 ### 5. A session across the whole run
 
