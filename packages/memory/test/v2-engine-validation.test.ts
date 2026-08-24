@@ -903,6 +903,40 @@ Deno.test("validates the schema document a CFC envelope's schemaHash references"
       "neither included in the commit nor stored in the space",
     );
 
+    // A delete between them clears the staged base: the patch that
+    // follows replays over an absent document, and the envelope it adds
+    // there is validated like any other landing.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(14, {
+            operations: [{
+              op: "set",
+              id: "of:delete-then-patch-carrier",
+              value: { value: { field: "v" } },
+            } as never, {
+              op: "delete",
+              id: "of:delete-then-patch-carrier",
+            } as never, {
+              op: "patch",
+              id: "of:delete-then-patch-carrier",
+              patches: [{
+                op: "add",
+                path: "/cfc",
+                value: {
+                  version: 1,
+                  schemaHash: "fid1:post-delete-unbacked",
+                  labelMap: { version: 1, entries: [] },
+                },
+              }],
+            } as never],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+
     // Operations in ONE commit compose: a set stages the base a later
     // patch rewrites, so the patch validates against what THIS commit
     // leaves, never against durable pre-commit state alone.
