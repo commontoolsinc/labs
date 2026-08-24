@@ -1,0 +1,704 @@
+[0m[38;5;245mrunning 1 test from ./integration/topic-create-onscreen.test.ts[0m
+Topics create, on screen against off screen ...
+[0m[38;5;245m------- output -------[0m
+Experimental flag overrides: serverExecution=true
+[ERROR][runner::20:44:31.748] piece-start-commit-failed piece-start commit piece-instantiate/of:fid1:rszomt4Ti8MwDNpMJLZCjcENRtAH6MFBxgf0wYVNCs8 failed; the started graph's setup writes did not land (stage P2-F, F1) {
+  name: "ConflictError",
+  message: "stale confirmed read: computed:fid1:2aoy7mNjTxufpVKhz3AijEq52XoRsC05NKUu4TQaJq0 at seq 2 conflicted with seq 6",
+  transaction: {
+    localSeq: 1,
+    reads: {
+      confirmed: [
+        {
+          id: "computed:fid1:2aoy7mNjTxufpVKhz3AijEq52XoRsC05NKUu4TQaJq0",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:5xUguvCzmn9KBwQbv68Ugcwn4cEFDsEd9gaHn2iUdUc",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:6Ph_ikj4kTrL1PwLr2yfRdO0_tP-310y5zoe0wfCv7I",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:73QMjLJVqw0sjBRXd4e7hYO72hmx1cVnJ31ErbmAyu8",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:7BycCyHc2yDDzr17jnXayWZMxpweSGk2JcGKILKguvo",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "computed:fid1:84YHWJkYlPXiQFXSvsnG8Ne6ijVYaMReVSb9qxHm9oM",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:BwUlxKKCzU2_GMzHjgyN5nDi72JSr-aJLSBOFyMVIws",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:Djt2mteUsPM7xYqzyAbcQZEwUhUFRtNcUu_dL2GyxUs",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "computed:fid1:G8X9gfQd1ZfX2vaMDqWVDhFrarUPAkIcp69xODNvx3c",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "computed:fid1:GGng7yFyEwfHiE0Bo1yAmcbu9pj_8qy_iSpXAlwxDmQ",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:Ox3JnDMEaSTP8A4usoxuOW9RoofYxbwO2rDOyBZaMJA",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:Q9c1xCLYxqKafO1CK84VQetjU3dEKeeuU96zs79aP7g",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "computed:fid1:XlqJZGJaQ3Hl-YfmshsVvLf6gguyAwm2gLgQCbXA0lc",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:YVjYrLbQAQKcj1RBiaWtPRwFiTO2o5lMfYyLo5CY2cw",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "computed:fid1:_RHS0e-1sLoHtqOHyp5J-RACfTxJiuia7ZWJnfDNasA",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:dvOqMe-w7YZzzNhfBfJUy66Tr8cfXYzRrZ7twsxGdmQ",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:dxGwGnvZnisjUKx3Xjh7QLGck8F8U7Oqn3hHfJy3myw",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:gaCaVS-c7UAgxJhY1DBuQ-5NGojPTXnxuioJherRl0A",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:j8JEEGr5CZBLRcIM6Yj1rySKTmb3JnXM87gVRUFncgQ",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:mkwfI4e3ozYa9X1gfV6B-ANaysPNcAyMffP2uqBpHqw",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:pGMyUSDWMuZJwvMdW4IZhkC7o7BNvJMZDIMd8KwfE0g",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:qaSUNVSVtppTG0pY2eS7l0tT65rkimOuRFEQucsrUfQ",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "computed:fid1:x2qAXqZGGvAgSQWpv4rs4bdrJPZ4gevaCq0nSv_2hn0",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:ya0xn1GFQU4eU-XpQKIMCYMtZLHlUCBVIjp3Eb3bUwY",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:-Cl3XnGLsdTrHsdAQ-9R6m4foFt431o10d9fhW_y084",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:0shaBUcKGB_EcZLCoz-AzaRKs9oquW-YiUOjLAJ6qKs",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:0shaBUcKGB_EcZLCoz-AzaRKs9oquW-YiUOjLAJ6qKs",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:4GF8egaRCCKqwxQQnq0jofuyq7cR8ftQqxf202v3XQ0",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:6k8TEe2tEQ3azu3bTjph6u67BXPZ0YEPlQG39YGrTvg",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:84RjYD1xrzMre1dA2C3Etn-apREbhwsRlLOuOz8WvRk",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:84RjYD1xrzMre1dA2C3Etn-apREbhwsRlLOuOz8WvRk",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:84YHWJkYlPXiQFXSvsnG8Ne6ijVYaMReVSb9qxHm9oM",
+          scope: "space",
+          path: [Array],
+          seq: 0
+        },
+        {
+          id: "of:fid1:AUrx2JXW32qcXHdvDLCaLkXmOJJqVsZAygfyhhBsYd0",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:BwUlxKKCzU2_GMzHjgyN5nDi72JSr-aJLSBOFyMVIws",
+          scope: "space",
+          path: [Array],
+          seq: 0
+        },
+        {
+          id: "of:fid1:GGng7yFyEwfHiE0Bo1yAmcbu9pj_8qy_iSpXAlwxDmQ",
+          scope: "space",
+          path: [Array],
+          seq: 0
+        },
+        {
+          id: "of:fid1:LaFtomRzChrcyFJg156LkWLHrOAFm7cADdbMT1Uj-O8",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:OPzwBCSdVikdS60gtui3hVEgUocODqOUx469ZRXrjdc",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:OZ_NafAuMQDT606BAefZNhVUOu2h3PkJpIf1maLPCTY",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:Td692kxuTafG1M21BLV0fkMcwcjRbYMKZ1-PdVwv8Oo",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:UzqtS8lT3ARSuod57TgxdxEX6EHiEpNHs6xl4UsGJbs",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:UzqtS8lT3ARSuod57TgxdxEX6EHiEpNHs6xl4UsGJbs",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:UzqtS8lT3ARSuod57TgxdxEX6EHiEpNHs6xl4UsGJbs",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:UzqtS8lT3ARSuod57TgxdxEX6EHiEpNHs6xl4UsGJbs",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:UzqtS8lT3ARSuod57TgxdxEX6EHiEpNHs6xl4UsGJbs",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:UzqtS8lT3ARSuod57TgxdxEX6EHiEpNHs6xl4UsGJbs",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:UzqtS8lT3ARSuod57TgxdxEX6EHiEpNHs6xl4UsGJbs",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:UzqtS8lT3ARSuod57TgxdxEX6EHiEpNHs6xl4UsGJbs",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:Xg_L4qpXUQisS_-Xj1B8ZtavpmvPo2O7I-sn__oe3gs",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:ZbQq68XLyXOAR2ohWjGCS4rS4gA7J_G84xeKPUjrVew",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:ZbQq68XLyXOAR2ohWjGCS4rS4gA7J_G84xeKPUjrVew",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:ZhetCAxfdR51JonfYZff2jAK86ARDwgTb-Ra47HS1hg",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:_RHS0e-1sLoHtqOHyp5J-RACfTxJiuia7ZWJnfDNasA",
+          scope: "space",
+          path: [Array],
+          seq: 0
+        },
+        {
+          id: "of:fid1:bs2yTJST-FZUr-tgQk44eHRa6vl_ez95wahl3LJ3RyE",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:gdlUyLJ5u1M3GQZ4K4V0zYBsEH0teACQ-TsEU1u4hR8",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:mgdIL7toB-5w2pRRw5MHSp-tFcMifISLIVOBUNZsZpw",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:mgdIL7toB-5w2pRRw5MHSp-tFcMifISLIVOBUNZsZpw",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:mgdIL7toB-5w2pRRw5MHSp-tFcMifISLIVOBUNZsZpw",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:mgdIL7toB-5w2pRRw5MHSp-tFcMifISLIVOBUNZsZpw",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:mgdIL7toB-5w2pRRw5MHSp-tFcMifISLIVOBUNZsZpw",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:mgdIL7toB-5w2pRRw5MHSp-tFcMifISLIVOBUNZsZpw",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:mgdIL7toB-5w2pRRw5MHSp-tFcMifISLIVOBUNZsZpw",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:mgdIL7toB-5w2pRRw5MHSp-tFcMifISLIVOBUNZsZpw",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:mpJ_BGnhfKkVw3lxB7orIOvdTbn7FADoo9qrpmf-IaA",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:mpJ_BGnhfKkVw3lxB7orIOvdTbn7FADoo9qrpmf-IaA",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:mpJ_BGnhfKkVw3lxB7orIOvdTbn7FADoo9qrpmf-IaA",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:mpJ_BGnhfKkVw3lxB7orIOvdTbn7FADoo9qrpmf-IaA",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:mpJ_BGnhfKkVw3lxB7orIOvdTbn7FADoo9qrpmf-IaA",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:mpJ_BGnhfKkVw3lxB7orIOvdTbn7FADoo9qrpmf-IaA",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:mpJ_BGnhfKkVw3lxB7orIOvdTbn7FADoo9qrpmf-IaA",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:mpJ_BGnhfKkVw3lxB7orIOvdTbn7FADoo9qrpmf-IaA",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:mpJ_BGnhfKkVw3lxB7orIOvdTbn7FADoo9qrpmf-IaA",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:nCG97mOZjJ51VxHb-wKIVTWcjQxspOsZ8Q8ZhHb2Jhc",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:nt1uDEEajxOe4W7fWJPn9t3FPrpY3iQUaRA8XMNspj8",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:prMItiY-IT9tNdIf-WVw7r4rhI2Y7Hf95Nz2ZL2atd4",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:rszomt4Ti8MwDNpMJLZCjcENRtAH6MFBxgf0wYVNCs8",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:rszomt4Ti8MwDNpMJLZCjcENRtAH6MFBxgf0wYVNCs8",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:rszomt4Ti8MwDNpMJLZCjcENRtAH6MFBxgf0wYVNCs8",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:s84JRUJQuQZ8xB69NtA8HePPwa5Qd2iAeRIlsny-mhE",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:s84JRUJQuQZ8xB69NtA8HePPwa5Qd2iAeRIlsny-mhE",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:s84JRUJQuQZ8xB69NtA8HePPwa5Qd2iAeRIlsny-mhE",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:s84JRUJQuQZ8xB69NtA8HePPwa5Qd2iAeRIlsny-mhE",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:s84JRUJQuQZ8xB69NtA8HePPwa5Qd2iAeRIlsny-mhE",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:s84JRUJQuQZ8xB69NtA8HePPwa5Qd2iAeRIlsny-mhE",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:s84JRUJQuQZ8xB69NtA8HePPwa5Qd2iAeRIlsny-mhE",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:s84JRUJQuQZ8xB69NtA8HePPwa5Qd2iAeRIlsny-mhE",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:s9w_jRT7u8ckDdwVXpzMrfgrXghXdUuu2ttkWp67R5o",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:tczc6iU8UxIUE0F-BRrkjf633NBDOJO92g1d8_CSE-s",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:tczc6iU8UxIUE0F-BRrkjf633NBDOJO92g1d8_CSE-s",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:tyChdgfVIHDHPe_fuy8AHtA2Z6ELXJM3kNnVIF2hM5Y",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:vudiMmdFMORO8JhNfvC-70MYP3fYjqRiojn4nznrh70",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:wFY1JGJLbwaqSKXiRo6eu7NyQfmIiLlfaN1b3pAsX28",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        }
+      ],
+      pending: []
+    },
+    operations: [
+      {
+        op: "patch",
+        id: "of:fid1:mpJ_BGnhfKkVw3lxB7orIOvdTbn7FADoo9qrpmf-IaA",
+        scope: "space",
+        patches: [ [Object] ]
+      }
+    ]
+  },
+  conflict: {
+    space: "did:key:z6Mkqd1Z2N57cBXJ1mWPkmebANHnv7TQ16EjbiA7M1e4W7uh",
+    the: "application/json",
+    of: "computed:fid1:2aoy7mNjTxufpVKhz3AijEq52XoRsC05NKUu4TQaJq0"
+  },
+  retryAfterSeq: 7,
+  readyToRetry: [AsyncFunction (anonymous)]
+}
+[0m[38;5;245m----- output end -----[0m
+  times one more topic on a rendered board against an unrendered one ...
+[0m[38;5;245m------- output -------[0m
+TOPIC_CREATE render=1 size=5 i=0 off=855 onWrite=1077 onTotal=1312 render=235
+TOPIC_CREATE render=1 size=5 i=1 off=776 onWrite=1296 onTotal=1325 render=29
+TOPIC_CREATE render=1 size=5 i=2 off=886 onWrite=841 onTotal=864 render=23
+TOPIC_CREATE render=1 size=5 i=3 off=730 onWrite=914 onTotal=940 render=26
+TOPIC_CREATE render=1 size=5 i=4 off=715 onWrite=891 onTotal=927 render=36
+
+[topic-create size=5 render=1] main-thread runtime-client IPC round-trips (ms):
+    ipc/page:getAll                n=    3 p50=  2097.7 p95=  2097.8 max=   2097.8 total=      6293
+    ipc/pattern:getSpaceRoot       n=    1 p50=  2241.4 p95=  2241.4 max=   2241.4 total=    2241.4
+    ipc/page:get                   n=    3 p50=    44.8 p95=  2065.2 max=   2065.2 total=    2111.3
+    ipc/page:synced                n=    3 p50=    62.4 p95=    62.4 max=     62.4 total=     187.1
+    loop/mainLag                   n=   47 p50=     4.1 p95=     4.7 max=      5.1 total=     183.6
+    ipc/cell:subscribe             n=   11 p50=     2.6 p95=    30.3 max=     30.3 total=      70.3
+    ipc/vdom:mount                 n=    1 p50=    67.4 p95=    67.4 max=     67.4 total=      67.4
+    ipc/cell:resolveAsCell         n=    6 p50=     7.7 p95=    30.7 max=     30.7 total=      57.2
+    ipc/runtime:resolveSpaceName   n=    2 p50=    20.5 p95=    20.5 max=     20.5 total=      40.7
+    ipc/cell:get                   n=    6 p50=     5.9 p95=    18.6 max=     18.6 total=      39.6
+    ipc/page:getSlug               n=    1 p50=      14 p95=      14 max=       14 total=        14
+    ipc/cell:unsubscribe           n=    4 p50=     3.5 p95=     5.3 max=      5.3 total=        14
+    ipc/runtime:idle               n=    2 p50=     6.3 p95=     6.3 max=      6.3 total=      11.8
+    ipc/initialize                 n=    1 p50=     8.7 p95=     8.7 max=      8.7 total=       8.7
+[topic-create size=5 render=1] main-thread IPC still pending:
+    (none)
+[topic-create size=5 render=1] request timeline (sentAt..doneAt ms):
+          0..      9 initialize
+         10..     30 runtime:resolveSpaceName
+         10..     30 runtime:resolveSpaceName
+         10..     11 runtime:setTelemetryEnabled
+         10..     11 runtime:setBreakpoints
+         10..     72 page:synced
+         10..     72 page:synced
+         10..     72 page:synced
+         30..   2271 pattern:getSpaceRoot
+         30..     75 page:get
+         58..     59 runtime:getHomeSpaceCell
+         59..     66 runtime:idle
+         70..     75 runtime:idle
+         72..   2170 page:getAll
+         72..   2170 page:getAll
+         72..   2170 page:getAll
+         75..   2140 page:get
+       2141..   2155 page:getSlug
+       2155..   2174 cell:subscribe
+       2156..   2174 cell:get
+       2159..   2174 cell:resolveAsCell
+       2170..   2176 cell:get
+       2170..   2176 cell:get
+       2170..   2176 cell:get
+       2175..   2242 vdom:mount
+       2239..   2270 cell:resolveAsCell
+       2240..   2270 cell:subscribe
+       2270..   2272 cell:subscribe
+       2271..   2273 page:get
+       2272..   2273 cell:get
+       2272..   2273 cell:get
+       2273..   2275 cell:send
+       3779..   3781 cell:resolveAsCell
+       3781..   3782 cell:subscribe
+       3961..   3967 cell:unsubscribe
+       3961..   3967 cell:subscribe
+       5638..   5638 cell:resolveAsCell
+       5639..   5639 cell:subscribe
+       5821..   5824 cell:unsubscribe
+       5821..   5824 cell:subscribe
+       7174..   7182 cell:resolveAsCell
+       7182..   7183 cell:subscribe
+       7482..   7485 cell:unsubscribe
+       7482..   7486 cell:subscribe
+       8826..   8826 cell:resolveAsCell
+       8827..   8827 cell:subscribe
+       8940..   8942 cell:unsubscribe
+       8940..   8943 cell:subscribe
+[topic-create size=5 render=1] worker request ledger (received/responded):
+    received/cell:get=6 received/cell:resolveAsCell=6 received/cell:send=1
+    received/cell:subscribe=11 received/cell:unsubscribe=4 received/initialize=1
+    received/page:get=3 received/page:getAll=3 received/page:getSlug=1 received/page:synced=3
+    received/pattern:getSpaceRoot=1 received/runtime:getHomeSpaceCell=1
+    received/runtime:getLoggerCounts=1 received/runtime:idle=2
+    received/runtime:resolveSpaceName=2 received/runtime:setBreakpoints=1
+    received/runtime:setTelemetryEnabled=1 received/vdom:mount=1 responded/cell:get=6
+    responded/cell:resolveAsCell=6 responded/cell:send=1 responded/cell:subscribe=11
+    responded/cell:unsubscribe=4 responded/initialize=1 responded/page:get=3
+    responded/page:getAll=3 responded/page:getSlug=1 responded/page:synced=3
+    responded/pattern:getSpaceRoot=1 responded/runtime:getHomeSpaceCell=1
+    responded/runtime:idle=2 responded/runtime:resolveSpaceName=2
+    responded/runtime:setBreakpoints=1 responded/runtime:setTelemetryEnabled=1
+    responded/vdom:mount=1 total=97
+[topic-create size=5 render=1] worker scheduler/runner/storage (ms):
+    runner/start/resumeCellSync    n=  414 p50=   662.9 p95=   694.5 max=    695.5 total=  196636.7
+    runner/start/resumeArgumentLinkTargetSync n=   64 p50=   187.1 p95=   188.5 max=    188.6 total=    8758.9
+    piece/phase/get.runtime.start  n=    4 p50=  1945.6 p95=  2060.8 max=   2060.8 total=    7896.8
+    runner.ipc/handle/page:getAll  n=    3 p50=  2080.8 p95=  2081.2 max=   2081.2 total=    6242.6
+    piece/phase/getDefaultPattern.get(runIt=true) n=    3 p50=  1945.6 p95=  1945.7 max=   1945.7 total=    5836.9
+    runner/start/loadPatternByIdentity n=    4 p50=  1001.5 p95=    1391 max=     1391 total=    4394.9
+    runner/start/syncCellsForRunningPattern n=    5 p50=   856.8 p95=   857.3 max=    857.3 total=      3337
+    runner.ipc/handle/pattern:getSpaceRoot n=    1 p50=  2240.8 p95=  2240.8 max=   2240.8 total=    2240.8
+    runner.ipc/handle/page:get     n=    3 p50=    43.1 p95=  2061.4 max=   2061.4 total=    2104.9
+    piece/phase/ensureDefaultPattern.checkAndUpdateDefaultPattern n=    1 p50=    1843 p95=    1843 max=     1843 total=      1843
+    pattern-manager/compile-cache/load-pattern-by-identity n=    2 p50=   733.3 p95=   733.3 max=    733.3 total=    1454.6
+    scheduler/scheduler/execute    n=   47 p50=     1.3 p95=    39.9 max=    714.6 total=    1037.7
+    runner.loop/workerLag          n=   49 p50=     4.1 p95=    62.9 max=    575.1 total=    1025.4
+    scheduler/scheduler/execute/event n=   47 p50=       0 p95=     0.2 max=    702.1 total=       715
+    scheduler/scheduler/execute/settle n=   47 p50=     1.1 p95=    33.9 max=     54.6 total=       313
+    scheduler/scheduler/run        n=  147 p50=     0.9 p95=     8.3 max=     16.7 total=     295.7
+    piece/phase/ensureDefaultPattern.startPiece n=    1 p50=   236.4 p95=   236.4 max=    236.4 total=     236.4
+    scheduler/scheduler/run/action n=  147 p50=     0.6 p95=     7.2 max=     12.7 total=       212
+    runner.ipc/handle/page:synced  n=    3 p50=    61.1 p95=      62 max=       62 total=     184.1
+    piece/phase/startPiece.result.pull n=    1 p50=   119.5 p95=   119.5 max=    119.5 total=     119.5
+    piece/phase/startPiece.runtime.start n=    1 p50=   114.7 p95=   114.7 max=    114.7 total=     114.7
+    runner/start/startCoreResume   n=    2 p50=    84.8 p95=    84.8 max=     84.8 total=     102.3
+    piece/phase/ensureDefaultPattern.synced n=    1 p50=    99.1 p95=    99.1 max=     99.1 total=      99.1
+    runner/raw/run/map             n=   13 p50=     3.3 p95=    12.6 max=     12.6 total=      61.5
+    scheduler/scheduler/run/commit n=  147 p50=     0.1 p95=     1.5 max=      3.4 total=      54.2
+    runner.ipc/handle/vdom:mount   n=    1 p50=    53.8 p95=    53.8 max=     53.8 total=      53.8
+    runner.ipc/delivery/cell:resolveAsCell n=    6 p50=     7.1 p95=    30.5 max=     30.5 total=        49
+    runner.ipc/delivery/cell:subscribe n=   10 p50=     2.2 p95=    29.7 max=     29.7 total=      46.3
+[topic-create size=5 render=1] churn / conflict counters:
+    actionRuns=147 commitConflicts=0 commitReverts=0 commitRejected=0 scheduleRunErrors=0 eventLostRaces=0 overlayLateEchoDrops=0 overlayArrivalSweeps=8 overlayIntentChecks=3 overlayIntentsByConsequenceOf=1 overlayIntentEchoBackstops=1 overlayCascadeEchoRetired=0 overlayCascadeEchoFlickers=0
+[0m[38;5;245m----- output end -----[0m
+  times one more topic on a rendered board against an unrendered one ... [0m[32mok[0m [0m[38;5;245m(9s)[0m
+Topics create, on screen against off screen ... [0m[32mok[0m [0m[38;5;245m(19s)[0m
+
+[0m[32mok[0m | 1 passed (1 step) | 0 failed [0m[38;5;245m(19s)[0m
+

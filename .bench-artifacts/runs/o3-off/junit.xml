@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="deno test" tests="2" failures="0" errors="0" time="19.398">
+    <testsuite name="./integration/topic-create-onscreen.test.ts" tests="1" disabled="0" errors="0" failures="0">
+        <testcase name="Topics create, on screen against off screen" classname="./integration/topic-create-onscreen.test.ts" time="19.366" line="103" col="1">
+        </testcase>
+    </testsuite>
+    <testsuite name="https://jsr.io/@std/testing/1.0.19/_test_suite.ts" tests="1" disabled="0" errors="0" failures="0">
+        <testcase name="Topics create, on screen against off screen &gt; times one more topic on a rendered board against an unrendered one" classname="https://jsr.io/@std/testing/1.0.19/_test_suite.ts" time="8.413" line="172" col="39">
+        </testcase>
+    </testsuite>
+</testsuites>

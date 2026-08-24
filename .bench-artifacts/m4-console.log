@@ -1,0 +1,1 @@
+load-high 6.05 (poll 0/20, threshold 6)

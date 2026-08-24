@@ -1,0 +1,415 @@
+[0m[32mTask[0m [0m[36mintegration[0m ./tasks/integration.ts '--junit-dir=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/runs/pt1-off' 'pattern-tests' 'patterns/topics/'
+Integration Test Runner
+=======================
+Package filter: pattern-tests
+Name filter: patterns/topics/
+
+
+============================================================
+Running integration tests for: pattern-tests
+============================================================
+Found 3 pattern test(s), running 5 at a time
+✅ packages/patterns/topics/topics-rejections.test.tsx (4.6s)
+   Found 1 test file(s)
+   
+   topics-rejections.test.tsx
+     ✓ assertion_1 (after action_1)
+     ✓ assertion_2 (after action_2)
+     ✓ assertion_3 (after action_3)
+     ✓ assertion_4 (after action_4)
+     ✓ assertion_5 (after action_5)
+     ✓ assertion_6 (after action_6)
+     ✓ assertion_7 (after action_7)
+     ✓ assertion_8 (after action_8)
+     ✓ assertion_9 (after action_9)
+     ✓ assertion_10 (after action_10)
+     ✓ assertion_11 (after action_11)
+     ✓ assertion_12 (after action_12)
+     ✓ assertion_13 (after action_13)
+     ✓ assertion_14 (after action_14)
+     ⊘ 13 runtime error(s) (expected)
+   
+   14 passed, 0 failed (3927ms)
+   Error in action: Error: addTopic rejected: title must be non-empty 
+     pieceId: of:fid1:3cg8d499s_ayNkHHoikVfTZCg4_YPDKAg0odhOeujv4 
+     space: did:key:z6MkpXpeKbhbddoVvxQndKtnNZmGfpSbXXmVw88bswFy2hHh 
+     patternId: f1rDrfYrcuyiqP66kUgGlFnWYr8mHIHpYMkK-MGVHYc 
+   Error: addTopic rejected: title must be non-empty
+       at eval (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/topic.tsx:593:8)
+       at commonfabric_1.__cfHelpers.handler.resultSchema.type (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/main.tsx:364:33)
+     at invoke (packages/runner/src/runner.ts:6854:16)
+     at AsyncLocalStorage.run (ext:deno_node/async_hooks.ts:1:1762)
+     at runInActionExecution (packages/runner/src/builder/action-context.ts:47:23)
+     at Runner.invokeJavaScriptImplementation (packages/runner/src/runner.ts:6868:12)
+     at handler:cf:module/f1rDrfYrcuyiqP66kUgGlFnWYr8mHIHpYMkK-MGVHYc/topics/main.tsx:355:57 [as handler] (packages/runner/src/runner.ts:6151:27)
+     at action (packages/runner/src/scheduler/events.ts:301:26)
+     at packages/runner/src/scheduler/events.ts:1727:44
+     at SESInternals.exec (packages/runner/src/sandbox/ses-runtime.ts:30:22)
+     at SESRuntime.exec (packages/runner/src/sandbox/ses-runtime.ts:106:27)
+     at Engine.invoke (packages/runner/src/harness/engine.ts:1751:33)
+     at dispatchQueuedEvent (packages/runner/src/scheduler/events.ts:1727:31)
+     at drainTicks (ext:core/01_core.js:426:7)
+     at listOnTimeout (ext:core/02_timers.js:286:9)
+     at Object.processTimers (ext:core/02_timers.js:250:7)
+     at __processTimers (ext:core/01_core.js:447:21)
+     at async processPullQueuedEventDuringExecute (packages/runner/src/scheduler/events.ts:1103:3)
+     at async Scheduler.processExecuteEventPhase (packages/runner/src/scheduler/facade.ts:1912:7)
+     at async Scheduler.execute (packages/runner/src/scheduler/facade.ts:1884:31)
+   Error in action: Error: addTopic rejected: agentName must be non-blank when given 
+     pieceId: of:fid1:3cg8d499s_ayNkHHoikVfTZCg4_YPDKAg0odhOeujv4 
+     space: did:key:z6MkpXpeKbhbddoVvxQndKtnNZmGfpSbXXmVw88bswFy2hHh 
+     patternId: f1rDrfYrcuyiqP66kUgGlFnWYr8mHIHpYMkK-MGVHYc 
+   Error: addTopic rejected: agentName must be non-blank when given
+       at eval (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/topic.tsx:593:8)
+       at commonfabric_1.__cfHelpers.handler.resultSchema.type (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/main.tsx:362:21)
+     at invoke (packages/runner/src/runner.ts:6854:16)
+     at AsyncLocalStorage.run (ext:deno_node/async_hooks.ts:1:1762)
+     at runInActionExecution (packages/runner/src/builder/action-context.ts:47:23)
+     at Runner.invokeJavaScriptImplementation (packages/runner/src/runner.ts:6868:12)
+     at handler:cf:module/f1rDrfYrcuyiqP66kUgGlFnWYr8mHIHpYMkK-MGVHYc/topics/main.tsx:355:57 [as handler] (packages/runner/src/runner.ts:6151:27)
+     at action (packages/runner/src/scheduler/events.ts:301:26)
+     at packages/runner/src/scheduler/events.ts:1727:44
+     at SESInternals.exec (packages/runner/src/sandbox/ses-runtime.ts:30:22)
+     at SESRuntime.exec (packages/runner/src/sandbox/ses-runtime.ts:106:27)
+     at Engine.invoke (packages/runner/src/harness/engine.ts:1751:33)
+     at dispatchQueuedEvent (packages/runner/src/scheduler/events.ts:1727:31)
+     at drainTicks (ext:core/01_core.js:426:7)
+     at listOnTimeout (ext:core/02_timers.js:286:9)
+     at Object.processTimers (ext:core/02_timers.js:250:7)
+     at __processTimers (ext:core/01_core.js:447:21)
+     at async processPullQueuedEventDuringExecute (packages/runner/src/scheduler/events.ts:1103:3)
+     at async Scheduler.processExecuteEventPhase (packages/runner/src/scheduler/facade.ts:1912:7)
+     at async Scheduler.execute (packages/runner/src/scheduler/facade.ts:1884:31)
+   Error in action: Error: addTopic rejected: agentName must be non-blank when given 
+     pieceId: of:fid1:CJ0HQH5MZVASRZmqojOdzNuOV7P4MpD_fur2l_fKwUw 
+     space: did:key:z6MkpXpeKbhbddoVvxQndKtnNZmGfpSbXXmVw88bswFy2hHh 
+     patternId: f1rDrfYrcuyiqP66kUgGlFnWYr8mHIHpYMkK-MGVHYc 
+   Error: addTopic rejected: agentName must be non-blank when given
+       at eval (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/topic.tsx:593:8)
+       at commonfabric_1.__cfHelpers.handler.resultSchema.type (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/main.tsx:362:21)
+     at invoke (packages/runner/src/runner.ts:6854:16)
+     at AsyncLocalStorage.run (ext:deno_node/async_hooks.ts:1:1762)
+     at runInActionExecution (packages/runner/src/builder/action-context.ts:47:23)
+     at Runner.invokeJavaScriptImplementation (packages/runner/src/runner.ts:6868:12)
+     at handler:cf:module/f1rDrfYrcuyiqP66kUgGlFnWYr8mHIHpYMkK-MGVHYc/topics/main.tsx:355:57 [as handler] (packages/runner/src/runner.ts:6151:27)
+     at action (packages/runner/src/scheduler/events.ts:301:26)
+     at packages/runner/src/scheduler/events.ts:1727:44
+     at SESInternals.exec (packages/runner/src/sandbox/ses-runtime.ts:30:22)
+     at SESRuntime.exec (packages/runner/src/sandbox/ses-runtime.ts:106:27)
+     at Engine.invoke (packages/runner/src/harness/engine.ts:1751:33)
+     at dispatchQueuedEvent (packages/runner/src/scheduler/events.ts:1727:31)
+     at async processPullQueuedEventDuringExecute (packages/runner/src/scheduler/events.ts:1103:3)
+     at async Scheduler.processExecuteEventPhase (packages/runner/src/scheduler/facade.ts:1912:7)
+     at async Scheduler.execute (packages/runner/src/scheduler/facade.ts:1884:31)
+   Error in action: Error: addComment rejected: body must be non-empty 
+     pieceId: of:fid1:22rBENMpWOupVeen3PSeIUnc10CbDYZoymPVfB2XzRo 
+     space: did:key:z6MkpXpeKbhbddoVvxQndKtnNZmGfpSbXXmVw88bswFy2hHh 
+     patternId: XxDJ51eETJkKpVYYZLFIIYpW9vt5hHuZZYtA1Hk15VQ 
+   Error: addComment rejected: body must be non-empty
+       at eval (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/topic.tsx:593:8)
+       at commonfabric_1.__cfHelpers.handler.resultSchema.type (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/topic.tsx:1001:37)
+     at invoke (packages/runner/src/runner.ts:6854:16)
+     at AsyncLocalStorage.run (ext:deno_node/async_hooks.ts:1:1762)
+     at runInActionExecution (packages/runner/src/builder/action-context.ts:47:23)
+     at Runner.invokeJavaScriptImplementation (packages/runner/src/runner.ts:6868:12)
+     at handler:cf:module/XxDJ51eETJkKpVYYZLFIIYpW9vt5hHuZZYtA1Hk15VQ/topics/topic.tsx:991:6 [as handler] (packages/runner/src/runner.ts:6151:27)
+     at action (packages/runner/src/scheduler/events.ts:301:26)
+     at packages/runner/src/scheduler/events.ts:1727:44
+     at SESInternals.exec (packages/runner/src/sandbox/ses-runtime.ts:30:22)
+     at SESRuntime.exec (packages/runner/src/sandbox/ses-runtime.ts:106:27)
+     at Engine.invoke (packages/runner/src/harness/engine.ts:1751:33)
+     at dispatchQueuedEvent (packages/runner/src/scheduler/events.ts:1727:31)
+     at async processPullQueuedEventDuringExecute (packages/runner/src/scheduler/events.ts:1103:3)
+     at async Scheduler.processExecuteEventPhase (packages/runner/src/scheduler/facade.ts:1912:7)
+     at async Scheduler.execute (packages/runner/src/scheduler/facade.ts:1884:31)
+   Error in action: Error: addComment rejected: agentName must be non-blank when given 
+     pieceId: of:fid1:22rBENMpWOupVeen3PSeIUnc10CbDYZoymPVfB2XzRo 
+     space: did:key:z6MkpXpeKbhbddoVvxQndKtnNZmGfpSbXXmVw88bswFy2hHh 
+     patternId: XxDJ51eETJkKpVYYZLFIIYpW9vt5hHuZZYtA1Hk15VQ 
+   Error: addComment rejected: agentName must be non-blank when given
+       at eval (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/topic.tsx:593:8)
+       at commonfabric_1.__cfHelpers.handler.resultSchema.type (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/topic.tsx:997:12)
+     at invoke (packages/runner/src/runner.ts:6854:16)
+     at AsyncLocalStorage.run (ext:deno_node/async_hooks.ts:1:1762)
+     at runInActionExecution (packages/runner/src/builder/action-context.ts:47:23)
+     at Runner.invokeJavaScriptImplementation (packages/runner/src/runner.ts:6868:12)
+     at handler:cf:module/XxDJ51eETJkKpVYYZLFIIYpW9vt5hHuZZYtA1Hk15VQ/topics/topic.tsx:991:6 [as handler] (packages/runner/src/runner.ts:6151:27)
+     at action (packages/runner/src/scheduler/events.ts:301:26)
+     at packages/runner/src/scheduler/events.ts:1727:44
+     at SESInternals.exec (packages/runner/src/sandbox/ses-runtime.ts:30:22)
+     at SESRuntime.exec (packages/runner/src/sandbox/ses-runtime.ts:106:27)
+     at Engine.invoke (packages/runner/src/harness/engine.ts:1751:33)
+     at dispatchQueuedEvent (packages/runner/src/scheduler/events.ts:1727:31)
+     at drainTicks (ext:core/01_core.js:426:7)
+     at listOnTimeout (ext:core/02_timers.js:286:9)
+     at Object.processTimers (ext:core/02_timers.js:250:7)
+     at __processTimers (ext:core/01_core.js:447:21)
+     at async processPullQueuedEventDuringExecute (packages/runner/src/scheduler/events.ts:1103:3)
+     at async Scheduler.processExecuteEventPhase (packages/runner/src/scheduler/facade.ts:1912:7)
+     at async Scheduler.execute (packages/runner/src/scheduler/facade.ts:1884:31)
+   Error in action: Error: addLink rejected: url must be http(s) 
+     pieceId: of:fid1:22rBENMpWOupVeen3PSeIUnc10CbDYZoymPVfB2XzRo 
+     space: did:key:z6MkpXpeKbhbddoVvxQndKtnNZmGfpSbXXmVw88bswFy2hHh 
+     patternId: XxDJ51eETJkKpVYYZLFIIYpW9vt5hHuZZYtA1Hk15VQ 
+   Error: addLink rejected: url must be http(s)
+       at eval (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/topic.tsx:593:8)
+       at commonfabric_1.__cfHelpers.handler.resultSchema.type (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/topic.tsx:1020:25)
+     at invoke (packages/runner/src/runner.ts:6854:16)
+     at AsyncLocalStorage.run (ext:deno_node/async_hooks.ts:1:1762)
+     at runInActionExecution (packages/runner/src/builder/action-context.ts:47:23)
+     at Runner.invokeJavaScriptImplementation (packages/runner/src/runner.ts:6868:12)
+     at handler:cf:module/XxDJ51eETJkKpVYYZLFIIYpW9vt5hHuZZYtA1Hk15VQ/topics/topic.tsx:1011:6 [as handler] (packages/runner/src/runner.ts:6151:27)
+     at action (packages/runner/src/scheduler/events.ts:301:26)
+     at packages/runner/src/scheduler/events.ts:1727:44
+     at SESInternals.exec (packages/runner/src/sandbox/ses-runtime.ts:30:22)
+     at SESRuntime.exec (packages/runner/src/sandbox/ses-runtime.ts:106:27)
+     at Engine.invoke (packages/runner/src/harness/engine.ts:1751:33)
+     at dispatchQueuedEvent (packages/runner/src/scheduler/events.ts:1727:31)
+     at drainTicks (ext:core/01_core.js:426:7)
+     at listOnTimeout (ext:core/02_timers.js:286:9)
+     at Object.processTimers (ext:core/02_timers.js:250:7)
+     at __processTimers (ext:core/01_core.js:447:21)
+     at async processPullQueuedEventDuringExecute (packages/runner/src/scheduler/events.ts:1103:3)
+     at async Scheduler.processExecuteEventPhase (packages/runner/src/scheduler/facade.ts:1912:7)
+     at async Scheduler.execute (packages/runner/src/scheduler/facade.ts:1884:31)
+   Error in action: Error: addLink rejected: url must be non-empty 
+     pieceId: of:fid1:22rBENMpWOupVeen3PSeIUnc10CbDYZoymPVfB2XzRo 
+     space: did:key:z6MkpXpeKbhbddoVvxQndKtnNZmGfpSbXXmVw88bswFy2hHh 
+     patternId: XxDJ51eETJkKpVYYZLFIIYpW9vt5hHuZZYtA1Hk15VQ 
+   Error: addLink rejected: url must be non-empty
+       at eval (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/topic.tsx:593:8)
+       at commonfabric_1.__cfHelpers.handler.resultSchema.type (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/topic.tsx:1018:40)
+     at invoke (packages/runner/src/runner.ts:6854:16)
+     at AsyncLocalStorage.run (ext:deno_node/async_hooks.ts:1:1762)
+     at runInActionExecution (packages/runner/src/builder/action-context.ts:47:23)
+     at Runner.invokeJavaScriptImplementation (packages/runner/src/runner.ts:6868:12)
+     at handler:cf:module/XxDJ51eETJkKpVYYZLFIIYpW9vt5hHuZZYtA1Hk15VQ/topics/topic.tsx:1011:6 [as handler] (packages/runner/src/runner.ts:6151:27)
+     at action (packages/runner/src/scheduler/events.ts:301:26)
+     at packages/runner/src/scheduler/events.ts:1727:44
+     at SESInternals.exec (packages/runner/src/sandbox/ses-runtime.ts:30:22)
+     at SESRuntime.exec (packages/runner/src/sandbox/ses-runtime.ts:106:27)
+     at Engine.invoke (packages/runner/src/harness/engine.ts:1751:33)
+     at dispatchQueuedEvent (packages/runner/src/scheduler/events.ts:1727:31)
+     at drainTicks (ext:core/01_core.js:426:7)
+     at listOnTimeout (ext:core/02_timers.js:286:9)
+     at Object.processTimers (ext:core/02_timers.js:250:7)
+     at __processTimers (ext:core/01_core.js:447:21)
+     at async processPullQueuedEventDuringExecute (packages/runner/src/scheduler/events.ts:1103:3)
+     at async Scheduler.processExecuteEventPhase (packages/runner/src/scheduler/facade.ts:1912:7)
+     at async Scheduler.execute (packages/runner/src/scheduler/facade.ts:1884:31)
+   Error in action: Error: addLink rejected: agentName must be non-blank when given 
+     pieceId: of:fid1:22rBENMpWOupVeen3PSeIUnc10CbDYZoymPVfB2XzRo 
+     space: did:key:z6MkpXpeKbhbddoVvxQndKtnNZmGfpSbXXmVw88bswFy2hHh 
+     patternId: XxDJ51eETJkKpVYYZLFIIYpW9vt5hHuZZYtA1Hk15VQ 
+   Error: addLink rejected: agentName must be non-blank when given
+       at eval (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/topic.tsx:593:8)
+       at commonfabric_1.__cfHelpers.handler.resultSchema.type (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/topic.tsx:1016:25)
+     at invoke (packages/runner/src/runner.ts:6854:16)
+     at AsyncLocalStorage.run (ext:deno_node/async_hooks.ts:1:1762)
+     at runInActionExecution (packages/runner/src/builder/action-context.ts:47:23)
+     at Runner.invokeJavaScriptImplementation (packages/runner/src/runner.ts:6868:12)
+     at handler:cf:module/XxDJ51eETJkKpVYYZLFIIYpW9vt5hHuZZYtA1Hk15VQ/topics/topic.tsx:1011:6 [as handler] (packages/runner/src/runner.ts:6151:27)
+     at action (packages/runner/src/scheduler/events.ts:301:26)
+     at packages/runner/src/scheduler/events.ts:1727:44
+     at SESInternals.exec (packages/runner/src/sandbox/ses-runtime.ts:30:22)
+     at SESRuntime.exec (packages/runner/src/sandbox/ses-runtime.ts:106:27)
+     at Engine.invoke (packages/runner/src/harness/engine.ts:1751:33)
+     at dispatchQueuedEvent (packages/runner/src/scheduler/events.ts:1727:31)
+     at drainTicks (ext:core/01_core.js:426:7)
+     at listOnTimeout (ext:core/02_timers.js:286:9)
+     at Object.processTimers (ext:core/02_timers.js:250:7)
+     at __processTimers (ext:core/01_core.js:447:21)
+     at async processPullQueuedEventDuringExecute (packages/runner/src/scheduler/events.ts:1103:3)
+     at async Scheduler.processExecuteEventPhase (packages/runner/src/scheduler/facade.ts:1912:7)
+     at async Scheduler.execute (packages/runner/src/scheduler/facade.ts:1884:31)
+   Error in action: Error: setBody rejected: agentName must be non-blank when given 
+     pieceId: of:fid1:22rBENMpWOupVeen3PSeIUnc10CbDYZoymPVfB2XzRo 
+     space: did:key:z6MkpXpeKbhbddoVvxQndKtnNZmGfpSbXXmVw88bswFy2hHh 
+     patternId: XxDJ51eETJkKpVYYZLFIIYpW9vt5hHuZZYtA1Hk15VQ 
+   Error: setBody rejected: agentName must be non-blank when given
+       at eval (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/topic.tsx:593:8)
+       at commonfabric_1.__cfHelpers.handler.resultSchema.type (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/topic.tsx:1030:25)
+     at invoke (packages/runner/src/runner.ts:6854:16)
+     at AsyncLocalStorage.run (ext:deno_node/async_hooks.ts:1:1762)
+     at runInActionExecution (packages/runner/src/builder/action-context.ts:47:23)
+     at Runner.invokeJavaScriptImplementation (packages/runner/src/runner.ts:6868:12)
+     at handler:cf:module/XxDJ51eETJkKpVYYZLFIIYpW9vt5hHuZZYtA1Hk15VQ/topics/topic.tsx:1026:6 [as handler] (packages/runner/src/runner.ts:6151:27)
+     at action (packages/runner/src/scheduler/events.ts:301:26)
+     at packages/runner/src/scheduler/events.ts:1727:44
+     at SESInternals.exec (packages/runner/src/sandbox/ses-runtime.ts:30:22)
+     at SESRuntime.exec (packages/runner/src/sandbox/ses-runtime.ts:106:27)
+     at Engine.invoke (packages/runner/src/harness/engine.ts:1751:33)
+     at dispatchQueuedEvent (packages/runner/src/scheduler/events.ts:1727:31)
+     at async processPullQueuedEventDuringExecute (packages/runner/src/scheduler/events.ts:1103:3)
+     at async Scheduler.processExecuteEventPhase (packages/runner/src/scheduler/facade.ts:1912:7)
+     at async Scheduler.execute (packages/runner/src/scheduler/facade.ts:1884:31)
+   Error in action: Error: mention rejected: topic must be a reference 
+     pieceId: of:fid1:22rBENMpWOupVeen3PSeIUnc10CbDYZoymPVfB2XzRo 
+     space: did:key:z6MkpXpeKbhbddoVvxQndKtnNZmGfpSbXXmVw88bswFy2hHh 
+     patternId: XxDJ51eETJkKpVYYZLFIIYpW9vt5hHuZZYtA1Hk15VQ 
+   Error: mention rejected: topic must be a reference
+       at eval (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/topic.tsx:593:8)
+       at eval (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/topic.tsx:1084:23)
+     at invoke (packages/runner/src/runner.ts:6854:16)
+     at AsyncLocalStorage.run (ext:deno_node/async_hooks.ts:1:1762)
+     at runInActionExecution (packages/runner/src/builder/action-context.ts:47:23)
+     at Runner.invokeJavaScriptImplementation (packages/runner/src/runner.ts:6868:12)
+     at handler:cf:module/XxDJ51eETJkKpVYYZLFIIYpW9vt5hHuZZYtA1Hk15VQ/topics/topic.tsx:1076:41 [as handler] (packages/runner/src/runner.ts:6151:27)
+     at action (packages/runner/src/scheduler/events.ts:301:26)
+     at packages/runner/src/scheduler/events.ts:1727:44
+     at SESInternals.exec (packages/runner/src/sandbox/ses-runtime.ts:30:22)
+     at SESRuntime.exec (packages/runner/src/sandbox/ses-runtime.ts:106:27)
+     at Engine.invoke (packages/runner/src/harness/engine.ts:1751:33)
+     at dispatchQueuedEvent (packages/runner/src/scheduler/events.ts:1727:31)
+     at drainTicks (ext:core/01_core.js:426:7)
+     at listOnTimeout (ext:core/02_timers.js:286:9)
+     at Object.processTimers (ext:core/02_timers.js:250:7)
+     at __processTimers (ext:core/01_core.js:447:21)
+     at async processPullQueuedEventDuringExecute (packages/runner/src/scheduler/events.ts:1103:3)
+     at async Scheduler.processExecuteEventPhase (packages/runner/src/scheduler/facade.ts:1912:7)
+     at async Scheduler.execute (packages/runner/src/scheduler/facade.ts:1884:31)
+   Error in action: Error: unmention rejected: topic must be a reference 
+     pieceId: of:fid1:22rBENMpWOupVeen3PSeIUnc10CbDYZoymPVfB2XzRo 
+     space: did:key:z6MkpXpeKbhbddoVvxQndKtnNZmGfpSbXXmVw88bswFy2hHh 
+     patternId: XxDJ51eETJkKpVYYZLFIIYpW9vt5hHuZZYtA1Hk15VQ 
+   Error: unmention rejected: topic must be a reference
+       at eval (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/topic.tsx:593:8)
+       at eval (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/topic.tsx:1098:23)
+     at invoke (packages/runner/src/runner.ts:6854:16)
+     at AsyncLocalStorage.run (ext:deno_node/async_hooks.ts:1:1762)
+     at runInActionExecution (packages/runner/src/builder/action-context.ts:47:23)
+     at Runner.invokeJavaScriptImplementation (packages/runner/src/runner.ts:6868:12)
+     at handler:cf:module/XxDJ51eETJkKpVYYZLFIIYpW9vt5hHuZZYtA1Hk15VQ/topics/topic.tsx:1092:45 [as handler] (packages/runner/src/runner.ts:6151:27)
+     at action (packages/runner/src/scheduler/events.ts:301:26)
+     at packages/runner/src/scheduler/events.ts:1727:44
+     at SESInternals.exec (packages/runner/src/sandbox/ses-runtime.ts:30:22)
+     at SESRuntime.exec (packages/runner/src/sandbox/ses-runtime.ts:106:27)
+     at Engine.invoke (packages/runner/src/harness/engine.ts:1751:33)
+     at dispatchQueuedEvent (packages/runner/src/scheduler/events.ts:1727:31)
+     at drainTicks (ext:core/01_core.js:426:7)
+     at listOnTimeout (ext:core/02_timers.js:286:9)
+     at Object.processTimers (ext:core/02_timers.js:250:7)
+     at __processTimers (ext:core/01_core.js:447:21)
+     at async processPullQueuedEventDuringExecute (packages/runner/src/scheduler/events.ts:1103:3)
+     at async Scheduler.processExecuteEventPhase (packages/runner/src/scheduler/facade.ts:1912:7)
+     at async Scheduler.execute (packages/runner/src/scheduler/facade.ts:1884:31)
+   Error in action: Error: setTitle rejected: title must be non-empty 
+     pieceId: of:fid1:nlT5gHgwV38gcfDg8O9xpA-IIzjl82HRCmxZfpu-krY 
+     space: did:key:z6MkpXpeKbhbddoVvxQndKtnNZmGfpSbXXmVw88bswFy2hHh 
+     patternId: XxDJ51eETJkKpVYYZLFIIYpW9vt5hHuZZYtA1Hk15VQ 
+   Error: setTitle rejected: title must be non-empty
+       at eval (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/topic.tsx:593:8)
+       at commonfabric_1.__cfHelpers.handler.resultSchema.type (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/topic.tsx:1053:37)
+     at invoke (packages/runner/src/runner.ts:6854:16)
+     at AsyncLocalStorage.run (ext:deno_node/async_hooks.ts:1:1762)
+     at runInActionExecution (packages/runner/src/builder/action-context.ts:47:23)
+     at Runner.invokeJavaScriptImplementation (packages/runner/src/runner.ts:6868:12)
+     at handler:cf:module/XxDJ51eETJkKpVYYZLFIIYpW9vt5hHuZZYtA1Hk15VQ/topics/topic.tsx:1046:6 [as handler] (packages/runner/src/runner.ts:6151:27)
+     at action (packages/runner/src/scheduler/events.ts:301:26)
+     at packages/runner/src/scheduler/events.ts:1727:44
+     at SESInternals.exec (packages/runner/src/sandbox/ses-runtime.ts:30:22)
+     at SESRuntime.exec (packages/runner/src/sandbox/ses-runtime.ts:106:27)
+     at Engine.invoke (packages/runner/src/harness/engine.ts:1751:33)
+     at dispatchQueuedEvent (packages/runner/src/scheduler/events.ts:1727:31)
+     at async processPullQueuedEventDuringExecute (packages/runner/src/scheduler/events.ts:1103:3)
+     at async Scheduler.processExecuteEventPhase (packages/runner/src/scheduler/facade.ts:1912:7)
+     at async Scheduler.execute (packages/runner/src/scheduler/facade.ts:1884:31)
+   Error in action: Error: setTitle rejected: agentName must be non-blank 
+     pieceId: of:fid1:nlT5gHgwV38gcfDg8O9xpA-IIzjl82HRCmxZfpu-krY 
+     space: did:key:z6MkpXpeKbhbddoVvxQndKtnNZmGfpSbXXmVw88bswFy2hHh 
+     patternId: XxDJ51eETJkKpVYYZLFIIYpW9vt5hHuZZYtA1Hk15VQ 
+   Error: setTitle rejected: agentName must be non-blank
+       at eval (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/topic.tsx:593:8)
+       at commonfabric_1.__cfHelpers.handler.resultSchema.type (/fid1:la4XEgLOnONI5STPP8mJBBco_ualQYAhm06ZCo_eFv8/topics/topic.tsx:1052:25)
+     at invoke (packages/runner/src/runner.ts:6854:16)
+     at AsyncLocalStorage.run (ext:deno_node/async_hooks.ts:1:1762)
+     at runInActionExecution (packages/runner/src/builder/action-context.ts:47:23)
+     at Runner.invokeJavaScriptImplementation (packages/runner/src/runner.ts:6868:12)
+     at handler:cf:module/XxDJ51eETJkKpVYYZLFIIYpW9vt5hHuZZYtA1Hk15VQ/topics/topic.tsx:1046:6 [as handler] (packages/runner/src/runner.ts:6151:27)
+     at action (packages/runner/src/scheduler/events.ts:301:26)
+     at packages/runner/src/scheduler/events.ts:1727:44
+     at SESInternals.exec (packages/runner/src/sandbox/ses-runtime.ts:30:22)
+     at SESRuntime.exec (packages/runner/src/sandbox/ses-runtime.ts:106:27)
+     at Engine.invoke (packages/runner/src/harness/engine.ts:1751:33)
+     at dispatchQueuedEvent (packages/runner/src/scheduler/events.ts:1727:31)
+     at drainTicks (ext:core/01_core.js:426:7)
+     at listOnTimeout (ext:core/02_timers.js:286:9)
+     at Object.processTimers (ext:core/02_timers.js:250:7)
+     at __processTimers (ext:core/01_core.js:447:21)
+     at async processPullQueuedEventDuringExecute (packages/runner/src/scheduler/events.ts:1103:3)
+     at async Scheduler.processExecuteEventPhase (packages/runner/src/scheduler/facade.ts:1912:7)
+     at async Scheduler.execute (packages/runner/src/scheduler/facade.ts:1884:31)
+✅ packages/patterns/topics/multi-user.test.tsx (10.1s)
+   Found 1 test file(s)
+   
+   multi-user.test.tsx
+     ✓ gideon/assertion_1 (after gideon/action_1)
+     ✓ gideon/assertion_2 (after gideon/action_2)
+     ✓ fable/assertion_1
+     ✓ fable/assertion_2 (after fable/action_1)
+     ✓ fable/assertion_3 (after fable/action_2)
+     ✓ gideon/assertion_3 (after gideon/action_2)
+     ✓ gideon/assertion_4 (after gideon/action_2)
+   
+   7 passed, 0 failed (6922ms)
+✅ packages/patterns/topics/topics.test.tsx (15.1s)
+   Found 1 test file(s)
+   
+   topics.test.tsx
+     ✓ assertion_1
+     ✓ assertion_2 (after action_1)
+     ✓ assertion_3 (after action_2)
+     ✓ assertion_4 (after action_3)
+     ✓ assertion_5 (after action_4)
+     ✓ assertion_6 (after action_4)
+     ✓ assertion_7 (after action_5)
+     ✓ assertion_8 (after action_6)
+     ✓ assertion_9 (after action_7)
+     ✓ assertion_10 (after action_8)
+     ✓ assertion_11 (after action_9)
+     ✓ assertion_12 (after action_10)
+     ✓ assertion_13 (after action_12)
+     ✓ assertion_14 (after action_13)
+     ✓ assertion_15 (after action_14)
+     ✓ assertion_16 (after action_15)
+     ✓ assertion_17 (after action_16)
+     ✓ assertion_18 (after action_16)
+     ✓ assertion_19 (after action_16)
+     ✓ assertion_20 (after action_16)
+     ✓ assertion_21 (after action_18)
+     ✓ assertion_22 (after action_18)
+     ✓ assertion_23 (after action_19)
+     ✓ assertion_24 (after action_20)
+     ✓ assertion_25 (after action_21)
+     ✓ assertion_26 (after action_22)
+     ✓ assertion_27 (after action_22)
+     ✓ assertion_28 (after action_23)
+     ✓ assertion_29 (after action_24)
+     ✓ assertion_30 (after action_25)
+     ✓ assertion_31 (after action_28)
+     ✓ assertion_32 (after action_30)
+     ✓ assertion_33 (after action_31)
+     ✓ assertion_34 (after action_33)
+     ✓ assertion_35 (after action_33)
+     ✓ assertion_36 (after action_34)
+     ✓ assertion_37 (after action_35)
+     ✓ assertion_38 (after action_36)
+     ✓ assertion_39 (after action_36)
+     ✓ assertion_40 (after action_37)
+     ✓ assertion_41 (after action_37)
+     ✓ assertion_42 (after action_38)
+     ✓ assertion_43 (after action_38)
+     ✓ assertion_44 (after action_39)
+     ✓ assertion_45 (after action_40)
+   
+   45 passed, 0 failed (14419ms)
+
+✅ All 3 pattern tests passed
+Wrote JUnit timing to /Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/runs/pt1-off/pattern-unit-tests.xml
+
+============================================================
+Summary
+============================================================
+  ✅ pattern-tests
+
+Passed: 1/1

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+<testsuite name="pattern-unit-tests" tests="3" failures="0" time="32.109">
+  <testcase name="packages/patterns/topics/topics-rejections.test.tsx" time="5.022" />
+  <testcase name="packages/patterns/topics/multi-user.test.tsx" time="10.774" />
+  <testcase name="packages/patterns/topics/topics.test.tsx" time="16.313" />
+</testsuite>
+</testsuites>

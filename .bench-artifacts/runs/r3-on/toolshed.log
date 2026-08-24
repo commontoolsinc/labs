@@ -1,0 +1,15 @@
+Server is starting on port http://0.0.0.0:9872
+Initializing runtime with signer did:key:z6MksHnZGdHxNoCqcC3kPvBSo2goCzLSWheQ8LrVpAtQwgwW...
+Runtime initialized successfully
+Configured to remote storage: http://localhost:9872
+Server-execution v2: serving loop ON (service did:key:z6MksHnZGdHxNoCqcC3kPvBSo2goCzLSWheQ8LrVpAtQwgwW)
+Server running on http://0.0.0.0:9872
+{"level":30,"time":1787605452572,"pid":46082,"hostname":"Bernis-MacBook-Pro.local","req":{"method":"GET","url":"/api/meta","headers":"{\"accept\":\"*/*\",\"host\":\"localhost:9872\",\"user-agent\":\"curl/8.7.1\"}"},"res":{"headers":"{\"content-type\":\"application/json\"}"},"reqId":"166988f7-b2ce-4065-9806-bc2dedbb8412","responseTime":0,"msg":"Request completed"}
+{"level":30,"time":1787605452582,"pid":46082,"hostname":"Bernis-MacBook-Pro.local","req":{"method":"GET","url":"/api/health/stats","headers":"{\"accept\":\"*/*\",\"host\":\"localhost:9872\",\"user-agent\":\"curl/8.7.1\"}"},"res":{"headers":"{\"content-type\":\"application/json\"}"},"reqId":"60f8e412-cbfb-4a5f-be7c-b4978a035ca5","responseTime":0,"msg":"Request completed"}
+ Adding 🤖 gateway (30 models from https://llm.stage.commontools.dev)
+[models] No default model available (tried gateway:claude-sonnet-4-6, anthropic:claude-sonnet-4-6, anthropic:claude-sonnet-4-5).
+{"level":30,"time":1787605452914,"pid":46082,"hostname":"Bernis-MacBook-Pro.local","req":{"method":"GET","url":"/api/health/stats","headers":"{\"accept\":\"*/*\",\"host\":\"localhost:9872\",\"user-agent\":\"curl/8.7.1\"}"},"res":{"headers":"{\"content-type\":\"application/json\"}"},"reqId":"51193c04-c3f4-49b1-999c-87a773d587fa","responseTime":0,"msg":"Request completed"}
+Shutdown signal received, closing server...
+Closing memory system...
+Memory system closed successfully
+Shutdown complete

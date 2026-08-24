@@ -1,0 +1,14 @@
+Server is starting on port http://0.0.0.0:9871
+Initializing runtime with signer did:key:z6MksHnZGdHxNoCqcC3kPvBSo2goCzLSWheQ8LrVpAtQwgwW...
+Runtime initialized successfully
+Configured to remote storage: http://localhost:9871
+Server running on http://0.0.0.0:9871
+{"level":30,"time":1787605301368,"pid":42285,"hostname":"Bernis-MacBook-Pro.local","req":{"method":"GET","url":"/api/meta","headers":"{\"accept\":\"*/*\",\"host\":\"localhost:9871\",\"user-agent\":\"curl/8.7.1\"}"},"res":{"headers":"{\"content-type\":\"application/json\"}"},"reqId":"018f01bf-2c9d-4282-8efc-5492cccf3f6e","responseTime":0,"msg":"Request completed"}
+{"level":30,"time":1787605301380,"pid":42285,"hostname":"Bernis-MacBook-Pro.local","req":{"method":"GET","url":"/api/health/stats","headers":"{\"accept\":\"*/*\",\"host\":\"localhost:9871\",\"user-agent\":\"curl/8.7.1\"}"},"res":{"headers":"{\"content-type\":\"application/json\"}"},"reqId":"cb200950-f63b-4250-9a64-2b2ac1202dbb","responseTime":0,"msg":"Request completed"}
+ Adding 🤖 gateway (30 models from https://llm.stage.commontools.dev)
+[models] No default model available (tried gateway:claude-sonnet-4-6, anthropic:claude-sonnet-4-6, anthropic:claude-sonnet-4-5).
+{"level":30,"time":1787605308119,"pid":42285,"hostname":"Bernis-MacBook-Pro.local","req":{"method":"GET","url":"/api/health/stats","headers":"{\"accept\":\"*/*\",\"host\":\"localhost:9871\",\"user-agent\":\"curl/8.7.1\"}"},"res":{"headers":"{\"content-type\":\"application/json\"}"},"reqId":"c01f8ac1-cbb7-4b12-9c9f-271c5030fd88","responseTime":0,"msg":"Request completed"}
+Shutdown signal received, closing server...
+Closing memory system...
+Memory system closed successfully
+Shutdown complete

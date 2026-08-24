@@ -1,0 +1,130 @@
+[0m[32mCheck[0m integration/topic-create-onscreen.test.ts
+[0m[38;5;245mrunning 1 test from ./integration/topic-create-onscreen.test.ts[0m
+Topics create, on screen against off screen ...
+[0m[38;5;245m------- output -------[0m
+Experimental flag overrides: serverExecution=false
+[0m[38;5;245m----- output end -----[0m
+  times one more topic on a rendered board against an unrendered one ...
+[0m[38;5;245m------- output -------[0m
+TOPIC_CREATE render=1 size=5 i=0 off=725 onWrite=548 onTotal=818 render=270
+TOPIC_CREATE render=1 size=5 i=1 off=787 onWrite=531 onTotal=673 render=142
+TOPIC_CREATE render=1 size=5 i=2 off=463 onWrite=471 onTotal=570 render=99
+TOPIC_CREATE render=1 size=5 i=3 off=563 onWrite=417 onTotal=494 render=76
+TOPIC_CREATE render=1 size=5 i=4 off=534 onWrite=568 onTotal=608 render=40
+
+[topic-create size=5 render=1] main-thread runtime-client IPC round-trips (ms):
+    ipc/page:getAll                n=    3 p50=  1250.8 p95=  1250.8 max=   1250.8 total=    3752.3
+    ipc/pattern:getSpaceRoot       n=    1 p50=  2615.3 p95=  2615.3 max=   2615.3 total=    2615.3
+    ipc/page:get                   n=    3 p50=      35 p95=  1370.9 max=   1370.9 total=    1406.8
+    ipc/cell:get                   n=    6 p50=   126.9 p95=     128 max=      128 total=     408.9
+    loop/mainLag                   n=   32 p50=       4 p95=    39.7 max=       70 total=     248.7
+    ipc/cell:resolveAsCell         n=    6 p50=    37.2 p95=    74.5 max=     74.5 total=     217.1
+    ipc/page:synced                n=    3 p50=    57.7 p95=    57.7 max=     57.7 total=       173
+    ipc/vdom:mount                 n=    1 p50=   109.1 p95=   109.1 max=    109.1 total=     109.1
+    ipc/cell:subscribe             n=   10 p50=     4.7 p95=    23.9 max=     23.9 total=      60.4
+    ipc/runtime:resolveSpaceName   n=    2 p50=    26.4 p95=    26.4 max=     26.4 total=      52.3
+    ipc/cell:unsubscribe           n=    3 p50=     5.2 p95=     6.5 max=      6.5 total=      13.6
+    ipc/initialize                 n=    1 p50=     9.9 p95=     9.9 max=      9.9 total=       9.9
+    ipc/page:getSlug               n=    1 p50=     4.3 p95=     4.3 max=      4.3 total=       4.3
+    ipc/runtime:getHomeSpaceCell   n=    1 p50=       3 p95=       3 max=        3 total=         3
+[topic-create size=5 render=1] main-thread IPC still pending:
+    (none)
+[topic-create size=5 render=1] request timeline (sentAt..doneAt ms):
+          0..     10 initialize
+         11..     37 runtime:resolveSpaceName
+         11..     38 runtime:resolveSpaceName
+         11..     12 runtime:setTelemetryEnabled
+         11..     12 runtime:setBreakpoints
+         11..     69 page:synced
+         12..     69 page:synced
+         12..     69 page:synced
+         32..     35 runtime:getHomeSpaceCell
+         35..     36 runtime:idle
+         37..   2653 pattern:getSpaceRoot
+         38..     73 page:get
+         41..     41 runtime:idle
+         69..   1320 page:getAll
+         69..   1320 page:getAll
+         69..   1320 page:getAll
+         73..   1444 page:get
+       1320..   1447 cell:get
+       1320..   1447 cell:get
+       1320..   1448 cell:get
+       1444..   1448 page:getSlug
+       1449..   1473 cell:subscribe
+       1450..   1473 cell:get
+       1454..   1473 cell:resolveAsCell
+       1474..   1583 vdom:mount
+       1570..   1583 cell:resolveAsCell
+       1571..   1584 cell:subscribe
+       1583..   1585 cell:subscribe
+       2653..   2654 page:get
+       2653..   2654 cell:get
+       2653..   2655 cell:get
+       2654..   2656 cell:send
+       2971..   3043 cell:resolveAsCell
+       3043..   3045 cell:subscribe
+       4036..   4074 cell:resolveAsCell
+       4074..   4078 cell:subscribe
+       4129..   4136 cell:unsubscribe
+       4129..   4136 cell:subscribe
+       5060..   5134 cell:resolveAsCell
+       5134..   5136 cell:subscribe
+       5224..   5229 cell:unsubscribe
+       5224..   5230 cell:subscribe
+       6102..   6102 cell:resolveAsCell
+       6102..   6103 cell:subscribe
+       6275..   6277 cell:unsubscribe
+       6275..   6277 cell:subscribe
+[topic-create size=5 render=1] worker request ledger (received/responded):
+    received/cell:get=6 received/cell:resolveAsCell=6 received/cell:send=1
+    received/cell:subscribe=10 received/cell:unsubscribe=3 received/initialize=1
+    received/page:get=3 received/page:getAll=3 received/page:getSlug=1 received/page:synced=3
+    received/pattern:getSpaceRoot=1 received/runtime:getHomeSpaceCell=1
+    received/runtime:getLoggerCounts=1 received/runtime:idle=2
+    received/runtime:resolveSpaceName=2 received/runtime:setBreakpoints=1
+    received/runtime:setTelemetryEnabled=1 received/vdom:mount=1 responded/cell:get=6
+    responded/cell:resolveAsCell=6 responded/cell:send=1 responded/cell:subscribe=10
+    responded/cell:unsubscribe=3 responded/initialize=1 responded/page:get=3
+    responded/page:getAll=3 responded/page:getSlug=1 responded/page:synced=3
+    responded/pattern:getSpaceRoot=1 responded/runtime:getHomeSpaceCell=1
+    responded/runtime:idle=2 responded/runtime:resolveSpaceName=2
+    responded/runtime:setBreakpoints=1 responded/runtime:setTelemetryEnabled=1
+    responded/vdom:mount=1 total=93
+[topic-create size=5 render=1] worker scheduler/runner/storage (ms):
+    runner/start/resumeCellSync    n=  326 p50=   500.2 p95=   519.4 max=    520.3 total=  154049.5
+    piece/phase/get.runtime.start  n=    4 p50=   932.2 p95=  1365.1 max=   1365.1 total=    4160.5
+    runner.ipc/handle/page:getAll  n=    3 p50=  1243.8 p95=  1244.5 max=   1244.5 total=    3731.6
+    piece/phase/getDefaultPattern.get(runIt=true) n=    3 p50=   932.3 p95=   932.4 max=    932.4 total=      2797
+    runner.ipc/handle/pattern:getSpaceRoot n=    1 p50=  2614.5 p95=  2614.5 max=   2614.5 total=    2614.5
+    runner/start/syncCellsForRunningPattern n=    4 p50=     554 p95=   865.5 max=    865.5 total=    2526.5
+    piece/phase/ensureDefaultPattern.checkAndUpdateDefaultPattern n=    1 p50=  1975.3 p95=  1975.3 max=   1975.3 total=    1975.3
+    runner/start/loadPatternByIdentity n=    4 p50=     312 p95=   478.2 max=    478.2 total=    1413.7
+    runner.ipc/handle/page:get     n=    3 p50=    33.4 p95=  1365.7 max=   1365.7 total=    1399.8
+    runner.loop/workerLag          n=   29 p50=     4.6 p95=   205.1 max=    378.5 total=     913.3
+    piece/phase/ensureDefaultPattern.startPiece n=    1 p50=   596.5 p95=   596.5 max=    596.5 total=     596.5
+    piece/phase/startPiece.result.pull n=    1 p50=   584.7 p95=   584.7 max=    584.7 total=     584.7
+    scheduler/scheduler/execute    n=   31 p50=    10.7 p95=    82.8 max=    128.2 total=     569.5
+    runner/start/resumeArgumentLinkTargetSync n=   11 p50=     1.7 p95=   323.7 max=    323.7 total=       427
+    scheduler/scheduler/execute/settle n=   31 p50=     3.7 p95=    52.2 max=     82.4 total=     419.9
+    scheduler/scheduler/run        n=  155 p50=     1.1 p95=     9.8 max=     33.1 total=       404
+    runner.ipc/delivery/cell:get   n=    6 p50=     125 p95=   127.5 max=    127.5 total=       386
+    scheduler/scheduler/run/action n=  155 p50=     0.8 p95=       9 max=     26.9 total=     301.5
+    runner.ipc/handle/page:synced  n=    3 p50=    56.1 p95=    57.4 max=     57.4 total=     169.4
+    scheduler/scheduler/execute/event n=   31 p50=       0 p95=      13 max=    127.9 total=     141.3
+    pattern-manager/compile-cache/load-pattern-by-identity n=    2 p50=    60.5 p95=    60.5 max=     60.5 total=     105.2
+    runner/raw/run/map             n=   15 p50=     4.3 p95=    26.9 max=     26.9 total=      91.8
+    runner/start/startCoreResume   n=    2 p50=    64.1 p95=    64.1 max=     64.1 total=      84.6
+    runner.ipc/handle/vdom:mount   n=    1 p50=    82.2 p95=    82.2 max=     82.2 total=      82.2
+    scheduler/scheduler/run/commit n=  155 p50=     0.1 p95=     2.4 max=      5.3 total=      65.5
+    pattern-manager/compile-cache/evaluate n=    1 p50=    56.7 p95=    56.7 max=     56.7 total=      56.7
+    runner/action/readInputs       n=   65 p50=     0.3 p95=     2.2 max=     18.5 total=      52.7
+    runner.ipc/handle/runtime:resolveSpaceName n=    2 p50=    26.1 p95=    26.1 max=     26.1 total=        52
+[topic-create size=5 render=1] churn / conflict counters:
+    actionRuns=155 commitConflicts=31 commitReverts=27 commitRejected=0 scheduleRunErrors=27 eventLostRaces=0 overlayLateEchoDrops=0 overlayArrivalSweeps=0 overlayIntentChecks=0 overlayIntentsByConsequenceOf=0 overlayIntentEchoBackstops=0 overlayCascadeEchoRetired=0 overlayCascadeEchoFlickers=0
+[0m[38;5;245m----- output end -----[0m
+  times one more topic on a rendered board against an unrendered one ... [0m[32mok[0m [0m[38;5;245m(6s)[0m
+Topics create, on screen against off screen ... [0m[32mok[0m [0m[38;5;245m(15s)[0m
+
+[0m[32mok[0m | 1 passed (1 step) | 0 failed [0m[38;5;245m(16s)[0m
+

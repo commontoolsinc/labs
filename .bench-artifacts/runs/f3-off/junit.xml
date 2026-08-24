@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="deno test" tests="16" failures="0" errors="0" time="0.011">
+    <testsuite name="./integration/topic-board-fixture.test.ts" tests="1" disabled="0" errors="0" failures="0">
+        <testcase name="topic-board-fixture" classname="./integration/topic-board-fixture.test.ts" time="0.008" line="12" col="1">
+        </testcase>
+    </testsuite>
+    <testsuite name="ext:cli/40_test.js" tests="1" disabled="0" errors="0" failures="0">
+        <testcase name="topic-board-fixture &gt; topicTitle" classname="ext:cli/40_test.js" time="0.002" line="239" col="28">
+        </testcase>
+    </testsuite>
+    <testsuite name="https://jsr.io/@std/testing/1.0.19/_test_suite.ts" tests="14" disabled="0" errors="0" failures="0">
+        <testcase name="topic-board-fixture &gt; topicTitle &gt; returns a title carrying the index, zero-padded to four digits" classname="https://jsr.io/@std/testing/1.0.19/_test_suite.ts" time="0.000" line="172" col="39">
+        </testcase>
+        <testcase name="topic-board-fixture &gt; topicTitle &gt; returns a distinct title for each of the first thousand indices" classname="https://jsr.io/@std/testing/1.0.19/_test_suite.ts" time="0.001" line="402" col="15">
+        </testcase>
+        <testcase name="topic-board-fixture &gt; topicTitle &gt; orders titles by index under a plain string sort" classname="https://jsr.io/@std/testing/1.0.19/_test_suite.ts" time="0.000" line="402" col="15">
+        </testcase>
+        <testcase name="topic-board-fixture &gt; crossrefTargets" classname="https://jsr.io/@std/testing/1.0.19/_test_suite.ts" time="0.002" line="402" col="15">
+        </testcase>
+        <testcase name="topic-board-fixture &gt; crossrefTargets &gt; returns nothing for a topic older than the citing window" classname="https://jsr.io/@std/testing/1.0.19/_test_suite.ts" time="0.000" line="402" col="15">
+        </testcase>
+        <testcase name="topic-board-fixture &gt; crossrefTargets &gt; returns citations for every topic inside the citing window" classname="https://jsr.io/@std/testing/1.0.19/_test_suite.ts" time="0.000" line="402" col="15">
+        </testcase>
+        <testcase name="topic-board-fixture &gt; crossrefTargets &gt; returns citations for the newest topic, which the board lists first" classname="https://jsr.io/@std/testing/1.0.19/_test_suite.ts" time="0.000" line="402" col="15">
+        </testcase>
+        <testcase name="topic-board-fixture &gt; crossrefTargets &gt; returns only earlier topics" classname="https://jsr.io/@std/testing/1.0.19/_test_suite.ts" time="0.000" line="402" col="15">
+        </testcase>
+        <testcase name="topic-board-fixture &gt; crossrefTargets &gt; returns distinct targets" classname="https://jsr.io/@std/testing/1.0.19/_test_suite.ts" time="0.000" line="402" col="15">
+        </testcase>
+        <testcase name="topic-board-fixture &gt; crossrefTargets &gt; returns as many citations as were asked for" classname="https://jsr.io/@std/testing/1.0.19/_test_suite.ts" time="0.000" line="402" col="15">
+        </testcase>
+        <testcase name="topic-board-fixture &gt; crossrefTargets &gt; returns every earlier topic when asked for more than exist" classname="https://jsr.io/@std/testing/1.0.19/_test_suite.ts" time="0.000" line="402" col="15">
+        </testcase>
+        <testcase name="topic-board-fixture &gt; crossrefTargets &gt; spreads citations across everything earlier" classname="https://jsr.io/@std/testing/1.0.19/_test_suite.ts" time="0.000" line="402" col="15">
+        </testcase>
+        <testcase name="topic-board-fixture &gt; crossrefTargets &gt; returns nothing when no topic is asked to cite" classname="https://jsr.io/@std/testing/1.0.19/_test_suite.ts" time="0.000" line="402" col="15">
+        </testcase>
+        <testcase name="topic-board-fixture &gt; crossrefTargets &gt; returns nothing for the first topic, which has nothing to cite" classname="https://jsr.io/@std/testing/1.0.19/_test_suite.ts" time="0.000" line="402" col="15">
+        </testcase>
+    </testsuite>
+</testsuites>

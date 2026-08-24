@@ -1,0 +1,53 @@
+load-high 6.13 (poll 0/20, threshold 6)
+load-ok 4.80 (threshold 6)
+RUN_DONE o1-off rc=0 wall=25s drops=0
+RUN_DONE o1-on rc=0 wall=20s drops=0
+load-ok 5.17 (threshold 6)
+RUN_DONE o2-on rc=0 wall=27s drops=0
+RUN_DONE o2-off rc=0 wall=14s drops=0
+load-ok 5.10 (threshold 6)
+RUN_DONE o3-off rc=0 wall=20s drops=0
+RUN_DONE o3-on rc=0 wall=22s drops=0
+load-high 7.20 (poll 0/20, threshold 6)
+load-high 6.76 (poll 1/20, threshold 6)
+load-high 10.24 (poll 2/20, threshold 6)
+load-high 9.01 (poll 3/20, threshold 6)
+load-high 6.98 (poll 4/20, threshold 6)
+load-high 10.46 (poll 5/20, threshold 6)
+load-high 7.61 (poll 6/20, threshold 6)
+load-high 9.77 (poll 7/20, threshold 6)
+load-high 22.38 (poll 8/20, threshold 6)
+load-high 11.31 (poll 9/20, threshold 6)
+load-high 8.33 (poll 10/20, threshold 6)
+load-high 6.91 (poll 11/20, threshold 6)
+load-high 6.40 (poll 12/20, threshold 6)
+load-high 6.90 (poll 13/20, threshold 6)
+load-ok 5.50 (threshold 6)
+RUN_DONE f1-off rc=0 wall=7s drops=0
+RUN_DONE f1-on rc=0 wall=1s drops=0
+load-ok 5.63 (threshold 6)
+RUN_DONE f2-on rc=0 wall=0s drops=0
+RUN_DONE f2-off rc=0 wall=0s drops=0
+load-ok 5.68 (threshold 6)
+RUN_DONE f3-off rc=0 wall=1s drops=0
+RUN_DONE f3-on rc=0 wall=0s drops=0
+load-ok 5.41 (threshold 6)
+RUN_DONE p1-off rc=1 wall=5s drops=0
+RUN_DONE p1-on rc=1 wall=0s drops=0
+load-ok 5.18 (threshold 6)
+RUN_DONE p2-on rc=1 wall=0s drops=0
+RUN_DONE p2-off rc=1 wall=1s drops=0
+load-ok 5.33 (threshold 6)
+RUN_DONE p3-off rc=1 wall=0s drops=0
+RUN_DONE p3-on rc=1 wall=1s drops=0
+load-ok 5.19 (threshold 6)
+RUN_DONE r1-off rc=1 wall=7s drops=0
+RUN_DONE r1-on rc=1 wall=0s drops=0
+load-high 8.02 (poll 0/20, threshold 6)
+load-high 7.92 (poll 1/20, threshold 6)
+load-ok 5.83 (threshold 6)
+RUN_DONE r2-on rc=1 wall=0s drops=0
+RUN_DONE r2-off rc=1 wall=0s drops=0
+load-ok 5.71 (threshold 6)
+RUN_DONE r3-off rc=1 wall=0s drops=0
+RUN_DONE r3-on rc=1 wall=0s drops=0
