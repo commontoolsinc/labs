@@ -458,6 +458,38 @@ The three moves are independent and each stands alone, but they point the same
 way: a caller states the space once, names the rest in one word, and writes what
 follows in the order the words become knowable.
 
+### Alternatives, and why they are not the design
+
+Recorded so they are not proposed again by someone reading only the outcome.
+
+**The verb leading the line.** Naming the verb first would give every later word
+a verb to resolve against, which reads like the obvious fix for a projection
+that cannot find one. It puts the verb ahead of the words that say which piece
+it lives on, so nothing can resolve the *verb* — and that is the completion that
+works today and the one worth most.
+
+**A distinct marker for the second boundary.** A marker unlike `--` names its
+own place, where a repeat of `--` is positional. It also cannot be written where
+the argument parser is still parsing: a word shaped like a flag is refused
+there, including one the command has declared. So the spelling that would make
+it convenient — reaching the read step with no callable section before it —
+costs a split of the arguments ahead of parsing, which the repeated marker never
+needs because a second `--` only ever follows a first.
+
+**Two markers, with the verb opening nothing.** Fencing the callable's section
+on both sides is symmetric and puts every vocabulary behind an explicit
+boundary. It also spends a marker on a boundary a positional already draws,
+which is the boundary `docker run`, `ssh` and `cf exec` all leave unmarked, and
+it forces an empty section on any verb that declares no input.
+
+**Admitting a projection into the callable's section when no field collides.**
+This costs a caller nothing today and holds only until an author declares a
+field of that name, at which point a line that worked reaches a different
+reader with no edit and no warning.
+
+**A colon-joined `host:space:piece`.** A handle contains a colon, a DID contains
+two, and a host carries a port, so the token cannot be split from either end.
+
 ### Precedent worth not re-deriving
 
 Position deciding which entity a flag applies to is well-established.
@@ -528,8 +560,11 @@ spelling.
 **Naming the target is a second arc, not a later step.** Steps 1 through 7
 decide what the commands are called; the work below decides how a caller writes
 what a command acts on. The two are independent except at one point — 6b removes
-the spellings 6a warned about, so nothing here starts a second deprecation on
-those same commands until it has landed.
+the spellings 6a warned about, so nothing here changes those same commands until
+it has landed. `PIECE_DATA_SPELLING_END_DATE` in
+`packages/cli/commands/piece.ts` is the date those warnings name and the one
+thing to check before starting step
+10.
 
 8. **Give the space an ambient source** in `CF_SPACE`, with the flag overriding
    it, serving reads and writes alike; and every command that writes names the
@@ -564,9 +599,11 @@ Steps 8, 9 and 11 add. Step 10 is the one that changes what a written line
 means, and it is the one the rest of the surface reads against — a projection
 cannot be written after the verb until it lands.
 
-The sweep is bounded and known: about thirty places in this repository teach the
-old marker, one of them the verb session walkthrough, whose commands
-`check-verb-session-sync` already holds to what its demo script runs.
+The sweep is bounded and enumerable: twelve files across `docs/`, `skills/`,
+`packages/cli/README.md`, and the CLI's own tests and integration scripts teach
+the old marker. Two of them are the verb session documents, whose commands
+`check-verb-session-sync` holds to what the demo script runs — so those change
+in the same commit as the script, or the gate fails.
 
 **The trailing form is taught throughout**, in the same pass as step 10. The
 read options go after the thing they shape on every command that has them, which
