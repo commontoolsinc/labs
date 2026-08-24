@@ -1,13 +1,19 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { PiecePlan, SurveyResult } from "@commonfabric/piece/ops";
 import { decode } from "@commonfabric/utils/encoding";
+
+import { createSession, Identity } from "@commonfabric/identity";
+import { Runtime, type RuntimeProgram } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { PiecesController } from "@commonfabric/piece/ops";
 
 import { runSurvey, type SurveyRunRequest } from "../lib/bulk.ts";
 import {
   inspectPieceFromCommand,
   parseRetargetFlag,
   piece,
+  setQuietMode,
   surveyFromCommand,
 } from "../commands/piece.ts";
 
@@ -24,6 +30,8 @@ function captureStdout(fn: () => Promise<void>): Promise<string> {
 }
 
 class ExitSentinel extends Error {}
+
+const signer = await Identity.fromPassphrase("cli bulk survey");
 
 const OPTIONS = {
   apiUrl: "http://localhost:8000",
@@ -61,6 +69,9 @@ const COMPLETE: SurveyResult = {
 };
 
 describe("piece-survey", () => {
+  // The fixtures pass `quiet`, and the action applies it globally.
+  afterEach(() => setQuietMode(false));
+
   describe("parseRetargetFlag()", () => {
     it("returns the phase, an absolute main path, and the rev label", () => {
       const parsed = parseRetargetFlag("topics=patterns/topic.tsx@abc123");
@@ -113,6 +124,31 @@ describe("piece-survey", () => {
         path: ["topics"],
       });
       expect(hints).toEqual(["members: 1 on idA#default"]);
+    });
+
+    it("honors the inherited --quiet by silencing hints that otherwise print", async () => {
+      const seen: string[] = [];
+      const originalError = console.error;
+      console.error = (...parts: unknown[]) => {
+        seen.push(parts.join(" "));
+      };
+      try {
+        const run = (quiet: boolean) =>
+          surveyFromCommand(
+            { ...OPTIONS, path: "topics", out: "plan.jsonl", quiet },
+            {
+              runSurvey: () => Promise.resolve(COMPLETE),
+              writeTextFile: () => Promise.resolve(),
+            },
+          );
+        await run(false);
+        expect(seen.join("\n")).toContain("members: 1 on idA#default");
+        seen.length = 0;
+        await run(true);
+        expect(seen).toEqual([]);
+      } finally {
+        console.error = originalError;
+      }
     });
 
     it("writes the plan to --out instead of stdout", async () => {
@@ -279,6 +315,94 @@ describe("piece-survey", () => {
   });
 
   describe("runSurvey()", () => {
+    let storageManager: ReturnType<typeof StorageManager.emulate>;
+    let runtime: Runtime;
+    let pieces: PiecesController;
+
+    beforeEach(async () => {
+      storageManager = StorageManager.emulate({ as: signer });
+      runtime = new Runtime({
+        apiUrl: new URL("http://toolshed.test"),
+        storageManager,
+      });
+      pieces = new PiecesController(
+        await createSession({
+          identity: signer,
+          spaceName: `cli-bulk-survey-${crypto.randomUUID()}`,
+        }),
+        runtime,
+      );
+      await pieces.synced();
+    });
+
+    afterEach(async () => {
+      await runtime?.dispose();
+      await storageManager?.close();
+    });
+
+    /** The smallest surveyable member; `version` names the generation. */
+    function memberProgram(version: string): RuntimeProgram {
+      return {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            "import { NAME, pattern } from 'commonfabric';",
+            "export default pattern<{ seed?: string }>(() => ({",
+            "  [NAME]: 'Member',",
+            `  version: ${JSON.stringify(version)},`,
+            "}));",
+            "",
+          ].join("\n"),
+        }],
+      };
+    }
+
+    it("resolves a list selector and surveys it end to end", async () => {
+      const member = await pieces.create(memberProgram("one"), { input: {} });
+      const resolved: string[] = [];
+      const survey = await runSurvey({} as never, {
+        selector: { kind: "list", pieces: [member.id] },
+        validatorPath: "/demand.json",
+      }, {
+        loadPieces: () => Promise.resolve(pieces),
+        resolvePieceAddress: (_pieces, token) => {
+          resolved.push(token);
+          return Promise.resolve(token);
+        },
+        readTextFile: () =>
+          Promise.resolve(JSON.stringify({
+            type: "object",
+            properties: { version: { type: "string" } },
+            required: ["version"],
+          })),
+      });
+      expect(resolved).toEqual([member.id]);
+      expect(survey.complete).toBe(true);
+      expect(survey.plan.rows.length).toBe(1);
+      expect(survey.plan.rows[0].expect.retained).toBe(true);
+      expect(survey.validatorFailures).toEqual([]);
+    });
+
+    it("resolves the collection holder the way the other piece verbs do", async () => {
+      const member = await pieces.create(memberProgram("one"), { input: {} });
+      await expect(
+        runSurvey({} as never, {
+          selector: {
+            kind: "collection",
+            holder: "board-slug",
+            path: ["members"],
+          },
+        }, {
+          loadPieces: () => Promise.resolve(pieces),
+          // The slug resolves to a real piece whose input holds no
+          // collection at the path, so the refusal names the absence —
+          // proof the resolved holder, not the slug text, was read.
+          resolvePieceAddress: () => Promise.resolve(member.id),
+        }),
+      ).rejects.toThrow("stores no collection at members");
+    });
+
     it("refuses two retargets naming one phase before loading anything", async () => {
       await expect(
         runSurvey({} as never, {

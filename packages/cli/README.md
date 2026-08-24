@@ -125,11 +125,12 @@ piece and without pulling its input, result, or link graph.
 
 `cf piece survey` reads a holder's own collection — the enumeration `piece ls`
 cannot provide — one cheap identity read per member, the holder last, and emits
-a plan for the bulk operations in `docs/plans/piece-bulk-operations.md`. The
-registry is only its cross-check: a registered piece on an in-scope identity
-that the collection lacks makes the survey exit nonzero, naming the piece.
-Read-only; the spelling is provisional until the bulk write operations get a
-home.
+a plan for the bulk operations in `docs/plans/piece-bulk-operations.md`. On a
+collection survey the registry is its cross-check: a registered piece on an
+in-scope identity that the collection lacks makes the survey exit nonzero,
+naming the piece. A `--list` survey reads exactly the pieces named and makes no
+containment claim. Read-only; the spelling is provisional until the bulk write
+operations get a home.
 
 `cf piece slugs` lists the space's slug index: every name assigned through
 `--slug` or `set-slug`, each resolved to the piece it names. The index records

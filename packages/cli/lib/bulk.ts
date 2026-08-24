@@ -128,17 +128,6 @@ export async function runSurvey(
     : JSON.parse(
       await (deps.readTextFile ?? Deno.readTextFile)(request.validatorPath),
     ) as JSONSchema;
-  if (
-    validator !== undefined && typeof validator !== "boolean" &&
-    (typeof validator !== "object" || validator === null ||
-      Array.isArray(validator))
-  ) {
-    // `null` is not `undefined`, and shaping by it validates nothing — a
-    // validator that cannot fail would report a clean board it never read.
-    throw new Error(
-      "The validator file must hold a JSON schema: an object or a boolean.",
-    );
-  }
   return await surveyPieces(pieces, {
     selector,
     ...(Object.keys(operations).length === 0 ? {} : { operations }),

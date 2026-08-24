@@ -545,6 +545,18 @@ describe("bulk-survey", () => {
         .toEqual([holder.id]);
     });
 
+    it("throws for a validator that is not a schema", async () => {
+      const a = await pieces.create(generationProgram("a"), { input: {} });
+      for (const validator of [null, [], "x", 7]) {
+        await expect(
+          surveyPieces(pieces, {
+            selector: { kind: "list", pieces: [a.id] },
+            validator: validator as never,
+          }),
+        ).rejects.toThrow("an object or a boolean");
+      }
+    });
+
     it("accepts a cell handle exactly where the validator declares asCell", async () => {
       const a = await pieces.create(generationProgram("a"), { input: {} });
 

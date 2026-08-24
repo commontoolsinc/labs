@@ -3150,6 +3150,8 @@ export function parseRetargetFlag(spec: string): PhaseRetarget {
 }
 
 export interface SurveyCLIOptions extends PieceCLIOptions {
+  /** Inherited from the `piece` mount's global target options. */
+  quiet?: boolean;
   path?: string;
   side?: string;
   list?: string[];
@@ -3171,6 +3173,7 @@ export async function surveyFromCommand(
   options: SurveyCLIOptions,
   deps: SurveyCommandDependencies = {},
 ): Promise<void> {
+  setQuietMode(!!options.quiet);
   let selector: PieceSelector;
   let spaceConfig;
   if (options.list !== undefined && options.list.length > 0) {

@@ -237,6 +237,20 @@ export async function surveyPieces(
   const retainedByIdentity = new Map<string, boolean>();
   const rows: PiecePlanRow[] = [];
   const problems: SurveyProblem[] = [];
+  const validator = options.validator as unknown;
+  if (
+    validator !== undefined && typeof validator !== "boolean" &&
+    (typeof validator !== "object" || validator === null ||
+      Array.isArray(validator))
+  ) {
+    // The type admits only a schema, but the value usually arrives from a
+    // caller-parsed file. `null` is not `undefined`, and shaping by it
+    // validates nothing — a validator that cannot fail would report a clean
+    // board it never read.
+    throw new Error(
+      "A validator must be a JSON schema: an object or a boolean.",
+    );
+  }
   const validatorFailures: SurveyProblem[] = [];
 
   for (const { piece, phase } of selected) {
