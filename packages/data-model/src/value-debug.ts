@@ -516,10 +516,12 @@ export function toStructuredDebugValue(
   /** Value to convert. */
   value: any,
   /**
-   * Maximum depth of result nesting. Must be a positive integer if
-   * specified.
+   * Maximum depth of result nesting. Must be a positive integer or `undefined`
+   * if specified. `undefined` and large integers are taken to mean "as high as
+   * reasonably possible." There is no guarantee about the _actual_ possible
+   * maximum depth.
    */
-  maxDepth?: number,
+  maxDepth?: number | undefined,
 ): FabricValue {
   const ACTUAL_MAX = 100; // To prevent blowing out the stack when converting.
 
