@@ -481,7 +481,7 @@ describe("schema-doc-sync", () => {
     expect((resolved as JSONSchemaObj).type).toBe("object");
   });
 
-  it("rejects a frame that replaces a stored schema document's content", async () => {
+  it("quarantines a frame entry that replaces a stored schema document's content", async () => {
     const schema: JSONSchemaObj = {
       type: "object",
       properties: { replacedTarget: { type: "string" } },
@@ -498,8 +498,10 @@ describe("schema-doc-sync", () => {
     await readerStorage.synced();
 
     // A frame no compliant server sends: the stored, verified document's id
-    // re-delivered with different content. Arrival validation rejects the
-    // frame whole before anything applies.
+    // re-delivered with different content. Arrival validation quarantines
+    // the ARRIVING copy — no throw (a throw here killed the background
+    // consumer wholesale, verification-coverage.md OW61) — and the stored,
+    // verified document stays.
     const forged = {
       type: "sync",
       fromSeq: 900_000,
@@ -513,22 +515,28 @@ describe("schema-doc-sync", () => {
       }],
       removes: [],
     };
-    expect(() =>
-      (provider.replica as unknown as {
-        applySessionSync(sync: unknown, type: string): void;
-      }).applySessionSync(forged, "integrate")
-    ).toThrow("was replaced with content that does not hash to its id");
+    const replica = provider.replica as unknown as {
+      applySessionSync(sync: unknown, type: string): void;
+      getDocument(uri: string): unknown;
+    };
+    replica.applySessionSync(forged, "integrate");
+    expect(
+      (replica.getDocument(`cid:${hash}`) as { value?: unknown })?.value,
+    ).toEqual(schema);
   });
 
-  it("rejects a frame carrying a broken schema ref, skipping malformed entries", () => {
+  it("quarantines a doc delivered with a broken schema ref, applying the rest of the frame", () => {
     const absent = internSchemaAsTaggedHashString({
       type: "string",
       title: "never-delivered-dep",
     });
     const provider = readerStorage.open(space);
     // Malformed entries (a non-string id, a non-object doc) are skipped by
-    // the validation scan; the broken embedded ref in the well-formed
-    // carrier still rejects the frame.
+    // the validation scan. The well-formed carrier embedding a broken ref
+    // is quarantined — fail-closed for THAT doc — while its innocent
+    // sibling in the same frame applies: the frame-wide rejection (and on
+    // the background consume path, the process kill it turned into) is
+    // exactly the OW61 robustness hole.
     const frame = {
       type: "sync",
       fromSeq: 800_000,
@@ -541,6 +549,13 @@ describe("schema-doc-sync", () => {
           scope: "space",
           seq: 1,
           doc: "junk",
+        },
+        {
+          branch: "",
+          id: "of:frame-innocent-sibling",
+          scope: "space",
+          seq: 1,
+          doc: { value: { fine: true } },
         },
         {
           branch: "",
@@ -564,11 +579,131 @@ describe("schema-doc-sync", () => {
       ],
       removes: [],
     };
-    expect(() =>
-      (provider.replica as unknown as {
-        applySessionSync(sync: unknown, type: string): void;
-      }).applySessionSync(frame, "integrate")
-    ).toThrow("was delivered with a broken schema ref");
+    const replica = provider.replica as unknown as {
+      applySessionSync(sync: unknown, type: string): void;
+      getDocument(uri: string): unknown;
+    };
+    replica.applySessionSync(frame, "integrate");
+    expect(replica.getDocument("of:frame-innocent-sibling")).toEqual({
+      value: { fine: true },
+    });
+    expect(replica.getDocument("of:frame-carrier")).toBeUndefined();
+  });
+
+  it("heals a quarantined doc on a closed re-delivery (the cid sibling in the same frame)", () => {
+    const depSchema = {
+      type: "string",
+      title: "heals-on-redelivery",
+    } as const;
+    const depHash = internSchemaAsTaggedHashString(depSchema);
+    const provider = readerStorage.open(space);
+    const replica = provider.replica as unknown as {
+      applySessionSync(sync: unknown, type: string): void;
+      getDocument(uri: string): unknown;
+    };
+    const carrierDoc = {
+      value: {
+        linked: {
+          "/": {
+            [LINK_V1_TAG]: {
+              id: "of:heal-target",
+              path: [],
+              schema: { $ref: `cid:${depHash}` },
+            },
+          },
+        },
+      },
+    };
+    // Frame 1: the mentioning doc WITHOUT its cid sibling — the delivery
+    // race's shape. Quarantined, replica untouched for it.
+    replica.applySessionSync({
+      type: "sync",
+      fromSeq: 700_000,
+      toSeq: 700_001,
+      upserts: [
+        { branch: "", id: "of:heal-carrier", scope: "space", seq: 1, doc: carrierDoc },
+      ],
+      removes: [],
+    }, "integrate");
+    expect(replica.getDocument("of:heal-carrier")).toBeUndefined();
+    // Frame 2: the CLOSED re-delivery (what the fixed server emits —
+    // per-frame closure): mention and sibling together. The doc applies.
+    replica.applySessionSync({
+      type: "sync",
+      fromSeq: 700_001,
+      toSeq: 700_002,
+      upserts: [
+        { branch: "", id: "of:heal-carrier", scope: "space", seq: 2, doc: carrierDoc },
+        {
+          branch: "",
+          id: `cid:${depHash}`,
+          scope: "space",
+          seq: 2,
+          doc: { value: depSchema },
+        },
+      ],
+      removes: [],
+    }, "integrate");
+    expect(replica.getDocument("of:heal-carrier")).toEqual(carrierDoc);
+  });
+
+  it("the background consumer survives a frame that fails to apply and keeps consuming", async () => {
+    const provider = readerStorage.open(space);
+    const replica = provider.replica as unknown as {
+      applySessionSync(sync: unknown, type: string): void;
+      consumeUpdates(iterator: AsyncIterator<unknown>): Promise<void>;
+      getDocument(uri: string): unknown;
+    };
+    // Throw once from applySessionSync itself (any non-validation apply
+    // bug), self-restoring: the belt in consumeUpdates must swallow it,
+    // keep the loop alive, and apply the NEXT frame.
+    const original = replica.applySessionSync.bind(replica);
+    replica.applySessionSync = (sync: unknown, type: string) => {
+      replica.applySessionSync = original;
+      throw new Error("synthetic apply failure");
+    };
+    const frames = [
+      {
+        type: "sync",
+        fromSeq: 600_000,
+        toSeq: 600_001,
+        upserts: [{
+          branch: "",
+          id: "of:survivor-1",
+          scope: "space",
+          seq: 1,
+          doc: { value: { n: 1 } },
+        }],
+        removes: [],
+      },
+      {
+        type: "sync",
+        fromSeq: 600_001,
+        toSeq: 600_002,
+        upserts: [{
+          branch: "",
+          id: "of:survivor-2",
+          scope: "space",
+          seq: 1,
+          doc: { value: { n: 2 } },
+        }],
+        removes: [],
+      },
+    ];
+    let index = 0;
+    const iterator: AsyncIterator<unknown> = {
+      next: () =>
+        Promise.resolve(
+          index < frames.length
+            ? { done: false, value: frames[index++] }
+            : { done: true, value: undefined },
+        ),
+    };
+    // Must resolve (not reject): a rejection here was the unhandled
+    // rejection that killed consuming workers wholesale (OW61).
+    await replica.consumeUpdates(iterator);
+    expect(replica.getDocument("of:survivor-1")).toBeUndefined();
+    expect(replica.getDocument("of:survivor-2")).toEqual({ value: { n: 2 } });
   });
 
   it("closes the staged watch view when a frame fails validation", async () => {

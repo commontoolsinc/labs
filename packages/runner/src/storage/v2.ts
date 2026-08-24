@@ -4255,7 +4255,23 @@ class SpaceReplica implements ISpaceReplica {
       if (next.done || this.#closed) {
         return;
       }
-      this.applySessionSync(next.value, "integrate");
+      try {
+        this.applySessionSync(next.value, "integrate");
+      } catch (error) {
+        // The background consumer must never die wholesale on one bad
+        // frame (OW61: a validation throw here was an unhandled rejection
+        // that killed the consuming worker — nothing upstream awaits this
+        // loop per-frame). Delivery-guarantee violations are contained
+        // per-doc inside applySessionSync already; this catch is the net
+        // under every OTHER producer or apply bug: log loudly, skip the
+        // frame, keep consuming. The replica stays behind for the
+        // frame's docs until a later delivery covers them.
+        logger.error("consume-updates-frame-failed", () => [
+          "dropping a subscription frame that failed to apply; the",
+          "consumer continues:",
+          error,
+        ]);
+      }
     }
   }
 
@@ -5306,13 +5322,30 @@ class SpaceReplica implements ISpaceReplica {
    * document embeds — a registered schema document's own refs, or a link
    * schema anywhere in an ordinary document's value — must reach a
    * VERIFIED schema document delivered by this frame (the prospective
-   * overlay) or already stored. A broken ref throws with the replica
-   * untouched, because it is a delivery consistency bug to surface, never
-   * a hole to quietly repair.
+   * overlay) or already stored.
+   *
+   * A violated guarantee QUARANTINES the offending document — the caller
+   * applies the frame without it, and this replica keeps whatever it
+   * already held under that id — with a loud diagnostic per document
+   * (verification-coverage.md OW61, coordinator recommendation (i),
+   * ACKed 2026-08-24). Fail-closed for the DOC: a document whose refs
+   * cannot verify never applies, and an unverifiable schema document
+   * never registers, so no unverified schema is ever used. Contained for
+   * the PROCESS: this ran on the background consume path
+   * (`consumeUpdates`), where the previous frame-wide throw was an
+   * unhandled rejection that killed the consuming worker wholesale on
+   * one bad document — a robustness hole against any producer bug (the
+   * OW61 board: 13 file-level failures from one delivery race). A
+   * compliant server never produces such a frame (per-frame closure is
+   * enforced at emission — `closeFrameOverSchemaRefs`); quarantine is
+   * the net under everything else, and a quarantined doc heals on any
+   * later closed re-delivery.
+   *
    * Direct refs suffice: a stored verified dependency was itself validated
    * when it arrived, and a locally written one carried its closure in its
    * own transaction. Registration is safe pre-apply — it is hash-verified
-   * and realm-global, so a rejected frame leaves only true content behind.
+   * and realm-global, so a quarantined frame entry leaves only true
+   * content behind.
    *
    * Which `cid:` documents are schema documents is decided by
    * content-addressed identity, the classifier the server's assembly pass
@@ -5321,16 +5354,27 @@ class SpaceReplica implements ISpaceReplica {
    * check to each dependency — mere presence under the id is not delivery,
    * and a forged local copy fails even when the realm registry holds a
    * valid twin from another space.
+   *
+   * @returns the ids of the frame's upserts that must NOT apply.
    */
-  #validateArrivedSchemaDocuments(sync: SessionSync): void {
+  #validateArrivedSchemaDocuments(sync: SessionSync): Set<string> {
     const registered: [string, JSONSchema][] = [];
-    // Dependency hash → the id of the first delivered document that
-    // embeds it, for the violation report.
-    const embedded = new Map<string, string>();
+    // Dependency hash → every delivered document id that embeds it: the
+    // quarantine set on a violation, and the violation report.
+    const embedded = new Map<string, Set<string>>();
+    const embed = (hash: string, id: string) => {
+      let referrers = embedded.get(hash);
+      if (referrers === undefined) {
+        referrers = new Set();
+        embedded.set(hash, referrers);
+      }
+      referrers.add(id);
+    };
     // The prospective frame: what the replica will hold once this frame
     // applies. Dependencies resolve against it first.
     const overlay = new Map<string, unknown>();
     const deletedInFrame = new Set<string>();
+    const quarantined = new Set<string>();
     for (const remove of sync.removes) {
       if (typeof remove.id === "string") deletedInFrame.add(remove.id);
     }
@@ -5366,12 +5410,18 @@ class SpaceReplica implements ISpaceReplica {
         // document this id names — however it got here, an earlier frame
         // or a local write — an arriving copy that fails the identity
         // check is a forged replacement, not another document class.
+        // Quarantine the ARRIVING copy; the stored verified one stays,
+        // so refs to this hash keep resolving.
         if (this.#isVerifiedSchemaDocDelivered(hash, EMPTY_OVERLAY)) {
-          throw new Error(
+          quarantined.add(id);
+          overlay.delete(id);
+          logger.error("schema-doc-quarantine", () => [
             `Schema document ${id} was replaced with content that does ` +
               `not hash to its id — content under a content-addressed id ` +
-              `must never change.`,
-          );
+              `must never change. The arriving copy is quarantined; this ` +
+              `replica keeps its stored, verified document.`,
+          ]);
+          continue;
         }
       }
       // Link positions only — an `$alias`-shaped record in an arriving
@@ -5380,32 +5430,50 @@ class SpaceReplica implements ISpaceReplica {
         for (
           const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
         ) {
-          if (!embedded.has(hash)) embedded.set(hash, id);
+          embed(hash, id);
         }
         return schema;
       });
     }
     for (const [id, document] of registered) {
       for (const dep of collectExternalSchemaRefHashes(document)) {
-        if (!embedded.has(dep)) embedded.set(dep, id);
+        embed(dep, id);
       }
     }
     // Validation runs after the whole frame is collected: a dependency may
     // follow its dependent within the frame, and intra-frame order must
-    // not matter.
-    for (const [dep, referrer] of embedded) {
-      if (
-        deletedInFrame.has(`cid:${dep}`) ||
-        !this.#isVerifiedSchemaDocDelivered(dep, overlay)
-      ) {
-        throw new Error(
-          `Document ${referrer} was delivered with a broken schema ref: ` +
-            `cid:${dep} is not delivered and verified in this replica. ` +
-            `Every delivered document's refs must resolve within the ` +
-            `delivered set (docs/specs/content-addressed-schemas.md).`,
-        );
+    // not matter. Iterated to a fixpoint because quarantining an in-frame
+    // schema document removes it from the prospective overlay, which can
+    // break refs that resolved through it — the dependents fail closed
+    // with it rather than applying against a document that will not be
+    // there.
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const [dep, referrers] of embedded) {
+        if (
+          deletedInFrame.has(`cid:${dep}`) ||
+          !this.#isVerifiedSchemaDocDelivered(dep, overlay)
+        ) {
+          for (const referrer of referrers) {
+            if (quarantined.has(referrer)) continue;
+            quarantined.add(referrer);
+            overlay.delete(referrer);
+            changed = true;
+            logger.error("schema-doc-quarantine", () => [
+              `Document ${referrer} was delivered with a broken schema ` +
+                `ref: cid:${dep} is not delivered and verified in this ` +
+                `replica. Every delivered document's refs must resolve ` +
+                `within the delivered set ` +
+                `(docs/specs/content-addressed-schemas.md). The document ` +
+                `is quarantined — this replica keeps its previous state ` +
+                `for it until a closed re-delivery arrives.`,
+            ]);
+          }
+        }
       }
     }
+    return quarantined;
   }
 
   /**
@@ -5458,9 +5526,20 @@ class SpaceReplica implements ISpaceReplica {
       return;
     }
 
-    // Validation precedes every record mutation: a frame that fails the
-    // delivery guarantee is rejected whole, never half-installed.
-    this.#validateArrivedSchemaDocuments(sync);
+    // Validation precedes every record mutation: an entry that fails the
+    // delivery guarantee is QUARANTINED (dropped from this frame with a
+    // loud diagnostic — never half-installed, never a process kill; see
+    // #validateArrivedSchemaDocuments), and the rest of the frame
+    // applies.
+    const quarantined = this.#validateArrivedSchemaDocuments(sync);
+    if (quarantined.size > 0) {
+      sync = {
+        ...sync,
+        upserts: sync.upserts.filter((upsert) =>
+          typeof upsert.id !== "string" || !quarantined.has(upsert.id)
+        ),
+      };
+    }
 
     // A keyed frame (a lease-holder session's — server-execution v2 stage
     // A, OW17's wire leg) names each entry's instance; the replica keys
