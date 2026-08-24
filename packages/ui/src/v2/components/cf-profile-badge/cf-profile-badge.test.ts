@@ -234,12 +234,13 @@ describe("CFProfileBadge", () => {
       for (const variant of ["full", "chip", "circle", "hero"] as const) {
         const el = new CFProfileBadge() as any;
         el.variant = variant;
-        el._name = "Ada";
+        el._applyValue({ name: "Ada" });
         expect(el.render()).toBeTruthy(); // presented
 
         el._state = "verified";
         el._seal = identitySeal(OWNER_DID);
-        expect(el.render()).toBeTruthy(); // verified
+        expect(el._verified).toBe(true);
+        expect(JSON.stringify(el.render())).toContain('"verified"');
       }
     });
   });

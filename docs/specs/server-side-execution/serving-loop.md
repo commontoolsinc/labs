@@ -860,8 +860,15 @@ fire-and-forget by design) must SURFACE — loudly logged in every
 arm and counted into §7's `structureLoadFailures` on a serving
 runtime via the installed observer — never be swallowed: a
 swallowed refusal leaves the piece silently running against setup
-writes that never landed. Its conflict class: bookkeeping writes
-are advances that commute, so they REBASE like other
+writes that never landed. A self-minted `startCore` instantiation
+transaction that returns `ConflictError` is replayed locally: the runner
+waits for the rejection's catch-up gate, pulls the named conflicting
+document when available, cancels only the failed attempt's nodes, and
+instantiates again while preserving the start owner's cancel registration. The
+retry budget is bounded; exhaustion releases the failed registration. A newer
+start, stop, or runtime teardown cancels the replay. This local start recovery
+does not change the wave conflict class: bookkeeping writes
+are advances that commute, so wave contributions REBASE like other
 non-re-derivable writes; a rebase that conflicts semantically DROPS
 the contribution whole — there is no event to requeue, and the loop
 re-derives its bookkeeping next wave (a raced watermark advance is

@@ -24,7 +24,9 @@
 //   commit that fails on the serving runtime surfaces loudly through
 //   `Runtime.pieceStartCommitFailureObserver` instead of being
 //   swallowed by the fire-and-forget start path (the piece silently
-//   running against stale setup was the filed hazard).
+//   running against stale setup was the filed hazard); an instantiation
+//   conflict replays against caught-up state without replacing its owner's
+//   cancel registration, and persistent conflicts exhaust a bounded budget.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -731,7 +733,7 @@ const programOf = (contents: string): RuntimeProgram => ({
   files: [{ name: "/main.tsx", contents }],
 });
 
-describe("stage P2-F piece-start commit failure surfacing (F1)", () => {
+describe("stage P2-F piece-start commit failure handling (F1)", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
@@ -918,6 +920,146 @@ describe("stage P2-F piece-start commit failure surfacing (F1)", () => {
     }
     expect(surfaced.length).toBeGreaterThanOrEqual(1);
     expect(surfaced[0].actionId.startsWith("piece-instantiate/")).toBe(true);
+    runtime.clearSealDestination();
+  });
+
+  it("replays a conflicted piece instantiation without replacing its owner registration", async () => {
+    const tx = runtime.edit();
+    const v1 = await runtime.patternManager.compilePattern(
+      programOf(V1_NO_HANDLER),
+      { space, tx },
+    );
+    const cell = runtime.getCell<Record<string, unknown>>(
+      space,
+      "p2f-conflicted-restart",
+      undefined,
+      tx,
+    );
+    const running = runtime.runner.run(tx, v1, { limit: 3 }, cell);
+    await tx.commit();
+    await running.pull();
+    runtime.runner.stop(cell);
+
+    let attempts = 0;
+    let readinessGates = 0;
+    const replayed = Promise.withResolvers<void>();
+    runtime.installSealDestination({
+      seal: (sealTx: IExtendedStorageTransaction) => {
+        const context = waveRunContextOf(sealTx);
+        if (!context?.actionId.startsWith("piece-instantiate/")) {
+          return sealTx.tx.commit();
+        }
+        attempts++;
+        if (attempts === 1) {
+          return Promise.resolve({
+            error: {
+              name: "ConflictError" as const,
+              message: "test conflict during piece instantiation",
+              transaction: {} as never,
+              conflict: {
+                space,
+                the: "application/json" as never,
+                of: "of:unknown" as never,
+              },
+              retryAfterSeq: 1,
+              readyToRetry: () => {
+                readinessGates++;
+                return Promise.resolve();
+              },
+            },
+          });
+        }
+        return sealTx.tx.commit().then((result) => {
+          replayed.resolve();
+          return result;
+        });
+      },
+    }, {
+      runStamper: (stampTx, info) => {
+        stampWaveRunContext(stampTx, {
+          actionId: info.actionId,
+          kind: info.kind,
+        });
+      },
+    });
+
+    expect(await runtime.start(cell)).toBe(true);
+    expect(runtime.runner.cancels.size).toBe(1);
+    const registration = [...runtime.runner.cancels.values()][0];
+
+    await replayed.promise;
+    await runtime.settled();
+
+    expect(attempts).toBe(2);
+    expect(readinessGates).toBe(1);
+    expect(runtime.runner.cancels.size).toBe(1);
+    expect([...runtime.runner.cancels.values()][0]).toBe(registration);
+    runtime.clearSealDestination();
+  });
+
+  it("bounds persistent piece-instantiation conflicts and releases the failed registration", async () => {
+    const tx = runtime.edit();
+    const v1 = await runtime.patternManager.compilePattern(
+      programOf(V1_NO_HANDLER),
+      { space, tx },
+    );
+    const cell = runtime.getCell<Record<string, unknown>>(
+      space,
+      "p2f-conflict-budget-restart",
+      undefined,
+      tx,
+    );
+    const running = runtime.runner.run(tx, v1, { limit: 3 }, cell);
+    await tx.commit();
+    await running.pull();
+    runtime.runner.stop(cell);
+
+    let attempts = 0;
+    let readinessGates = 0;
+    const exhausted = Promise.withResolvers<void>();
+    runtime.installSealDestination({
+      seal: (sealTx: IExtendedStorageTransaction) => {
+        const context = waveRunContextOf(sealTx);
+        if (!context?.actionId.startsWith("piece-instantiate/")) {
+          return sealTx.tx.commit();
+        }
+        attempts++;
+        return Promise.resolve({
+          error: {
+            name: "ConflictError" as const,
+            message: "persistent test conflict during piece instantiation",
+            transaction: {} as never,
+            conflict: {
+              space,
+              the: "application/json" as never,
+              of: "of:unknown" as never,
+            },
+            retryAfterSeq: attempts,
+            readyToRetry: () => {
+              readinessGates++;
+              return Promise.resolve();
+            },
+          },
+        });
+      },
+    }, {
+      runStamper: (stampTx, info) => {
+        stampWaveRunContext(stampTx, {
+          actionId: info.actionId,
+          kind: info.kind,
+        });
+      },
+    });
+    runtime.pieceStartCommitFailureObserver = () => {
+      if (attempts === 6) exhausted.resolve();
+    };
+
+    expect(await runtime.start(cell)).toBe(true);
+    await exhausted.promise;
+
+    expect(attempts).toBe(6);
+    expect(readinessGates).toBe(5);
+    expect(runtime.runner.cancels.size).toBe(0);
     runtime.clearSealDestination();
   });
 
