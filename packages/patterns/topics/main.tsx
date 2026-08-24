@@ -25,7 +25,6 @@ import Topic, {
   topicAuthorLabel,
   type TopicCrossrefRow,
   type TopicMentionSource,
-  type TopicPiece,
   TOPICS_THEME,
   type TopicSummary,
   whenLabel,
@@ -348,10 +347,11 @@ const cardsByActivity = lift(
 export interface TopicsOutput {
   [NAME]: string;
   [UI]: VNode;
-
-  /** The board's topics, in filing order, as complete pieces — bodies,
-   * threads, and verbs included. Survey through `index` instead; read this
-   * when you already know which topic you are expanding. */
+  /** The board's topics, in filing order, through the shape the board demands
+   * of them: the display scalars and the mention universe, and no verbs. A
+   * caller that means to mutate a topic addresses the topic itself, where its
+   * own schema governs. Survey through `index` instead; read this when you
+   * already know which topic you are expanding. */
   topics: TopicDemand[];
   /** The same list, under the name the topic pattern's editor autocompletes
    * over — what `addTopic` wires into each child as its mention universe. */
