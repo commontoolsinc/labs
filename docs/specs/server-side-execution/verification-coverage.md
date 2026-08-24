@@ -5707,17 +5707,46 @@ supply; OW29/OW32/OW34 closed):
 
     — owner (Berni), 2026-08-24. As built (`runner.ts`
     `catchUpAndStartOnStaleRead` + `startFromServedState`; the
-    discriminator `isStaleConfirmedReadConflict` and the readiness
-    `awaitCommitRetryReadiness` cherry-picked from closed #6208 —
-    the retry itself deliberately NOT brought): both deferred-start
-    arms' stale-confirmed-read refusals, ON-ONLY
-    (`experimental.serverExecution === true`, the coordinator's
-    conservative default — under OFF the refusal means another
-    CLIENT raced and cross-tab mutex semantics own that story; OFF
-    byte-identical, pinned), cancel the failed install as today,
-    then await the conflict's readiness and run the ORDINARY LOAD
-    WALK (`doStart`, the reload walk) with no independent-start
-    marking; the recovery arm commits nothing (store-door pin: zero
+    readiness `awaitCommitRetryReadiness` cherry-picked from closed
+    #6208 along with its discriminator — the retry itself
+    deliberately NOT brought): both deferred-start arms' stale-read
+    refusals, ON-ONLY (`experimental.serverExecution === true`, the
+    coordinator's conservative default — under OFF the refusal means
+    another CLIENT raced and cross-tab mutex semantics own that
+    story; OFF byte-identical, pinned). COVERED SHAPES, exactly (the
+    adversarial review's F4 — the class language is scoped to these,
+    never "all conflicts"): the engine's stale-read family —
+    `stale confirmed read` (validateConfirmedReads) and its sibling
+    `stale pending read` (resolvePendingReads) — matched HEAD-
+    ANCHORED by `isStaleReadConflict` (né #6208's
+    `isStaleConfirmedReadConflict`; renamed when the pending sibling
+    joined, both directions red-first), so a client-fabricated
+    withdrawal that merely EMBEDS a staleness phrase never
+    classifies (review note F5). Deliberately NOT matched, each with
+    its reason in the predicate's docstring: `pending dependency not
+    resolved` (own-commit fate), `entity-value-hash precondition
+    target changed` (create-only double-handling), and the
+    same-family preempt-mode client shape (`commit preempted: …`,
+    experimental `CF_CONFLICT_ADMISSION=preempt`, default off) —
+    recorded, not silently extended; a b04-shaped death under THAT
+    message is that mode's own open item. THE RECOVERY, as
+    restructured by the review's F1 (+ Cubic P1 — the
+    cancellation-authority root, both faces): it recovers only an
+    attempt whose install is STILL THE CURRENT REGISTRATION when the
+    refusal lands (a stop or release during the commit round trip
+    now WINS, exactly as on the terminal path), tears the refused
+    install down with the token's own registry-guarded stop WITHOUT
+    spending the token, re-enters the pending index under the SAME
+    token the parent holds (stops tombstone the readiness wait
+    there), then awaits the conflict's readiness and runs the
+    ORDINARY LOAD WALK (`doStart`, the reload walk) with no
+    independent-start marking; when the walk leaves the piece
+    running the token is markInstalled with the current
+    registration, so the parent's one Cancel handle stops the
+    recovered run — and a cancel that landed mid-walk stops it in
+    the same breath; if another start took the key during the wait,
+    the recovery yields exactly as `startWithTx` yields on an owned
+    key. The recovery arm commits nothing (store-door pin: zero
     `commitNative` calls post-refusal), mints no transaction, and
     re-issues the one-shot pull the refused commit's success arm
     would have issued. Log keys: `deferred-start-catchup` (recovery
@@ -5740,18 +5769,39 @@ supply; OW29/OW32/OW34 closed):
     semantic beyond the ruling. Red-first:
     `deferred-start-catchup-start.test.ts`, watched red at the
     exact b04 shape (terminal tx-commit-error, one install, the
-    awaited second install failed by quiescence); mutation kills:
+    awaited second install failed by quiescence), and again for the
+    review round — the stop-during-round-trip revival and the spent
+    parent handle both watched red before the F1 restructure, the
+    stale-pending-read recovery and the embedded-phrase terminality
+    both watched red before the predicate change. Mutation kills:
     the ON gate (OFF pin), the discriminator
     (other-refusals-terminal pin), the token registration point
-    (stop pin), and the epoch pair JOINTLY (teardown pin — the two
+    (stop pin), the epoch pair JOINTLY (teardown pin — the two
     checks are each other's backstop, individually shadowed;
-    recorded as one joint kill, not two). Disclosed deltas, each
-    derived from "the context is the normal start walk's": the
-    recovery carries no navigate event context (the server owns the
-    intent — §3d's own rationale) and no independent-start marking
-    (the recovered piece stays its parent's child); a document
-    still in flight at walk time reads PENDING and re-triggers on
-    arrival (OW51 semantics).
+    recorded as one joint kill, not two), the entry authority gate
+    (stop-wins pin), the markInstalled hand-off (parent-handle
+    pin), and the cross-space CALL SITE (the routing pin's
+    entry-point instrumentation — the review's F13 found the prior
+    pin vacuous to exactly this mutation; it now reds). The
+    readiness gate itself is pinned (Cubic P2/F12): a test-held
+    `readyToRetry` shows no re-assembly while held and recovery
+    exactly after release; the other unit refusals are
+    injected-shape pins whose readiness resolves immediately (the
+    named-doc pull only), the live campaign being the wire-gate's
+    true-topology witness. Disclosed deltas, the FULL enumeration
+    (review F10), each derived from "the context is the normal
+    start walk's": the recovery re-derives the pattern from the
+    durable patternIdentity meta (a KEYLESS piece — no stored
+    pointer — therefore fails LOUD, "Cannot start: no pattern
+    identity", rather than starting) and drops the refused
+    attempt's RunnerRunOptions — no navigate event context (the
+    server owns the intent — §3d's own rationale), no
+    independent-start marking (the recovered piece stays its
+    parent's child), no caller `doNotUpdateOnPatternChange` /
+    `awaitSyncBeforeInitialRun` / `parentPieceRootId`, and
+    `schedulePatternUpdate` at the walk's default (true); a
+    document still in flight at walk time reads PENDING and
+    re-triggers on arrival (OW51 semantics).
     **THE 10/10 GATE AT THE FIX HEAD (2026-08-24): 7/10 — the b04
     START death is closed live; the residue is TWO READ-SIDE members
     the deferred-start error arm cannot reach; THE SKIP STAYS,
@@ -5766,7 +5816,9 @@ supply; OW29/OW32/OW34 closed):
     5-14 on a busy shared box; loaded = +6 pinned CPU spinners,
     ambient peaked 144 before r09), PID-only kills, ports 9711-9730.
     Per-run ledger on the PR. What the recovery did, live: catchup
-    activations 1-2 in EVERY run (17 total), terminal deferred-start
+    activations 1-2 in EVERY run (18 across the ten counted runs; 19
+    with smoke r00 — the first write-up said 17, corrected by the
+    adversarial review's reconciliation), terminal deferred-start
     deaths ZERO, recovery failures ZERO — and in the green runs the
     SECOND catchup was the NOTEBOOK space's own refused root start
     (space-DID-matched in r03/r04/r05), i.e. the exact b04 sequence
@@ -5803,7 +5855,11 @@ supply; OW29/OW32/OW34 closed):
     `deferred-start-catchup-failed …resolved without the piece
     running` when its walk resolves false un-stopped (r06's
     post-mortem could not distinguish that outcome; the next
-    occurrence is decisive), beside the existing
+    occurrence is decisive — and the F1 restructure narrowed the
+    line's confound: a supersede now yields BEFORE the walk at the
+    owned-key check and a stop cancels the token, so review note
+    F11's benign-supersede false fire is structurally squeezed to
+    the mid-walk window), beside the existing
     `deferred-start-catchup` scheduling line. The lift bar's STEP
     half is unchanged — the fixed step greens ON 10/10
     quiet-and-loaded — and its class half is now the named read-side
@@ -6961,9 +7017,11 @@ supply; OW29/OW32/OW34 closed):
     unmerged, so no retry ever landed to retire; its
     `isStaleConfirmedReadConflict` predicate lands via the OW45
     build as the LIVE discriminator of the catch-up recovery — not
-    dead code — and `reattemptDeferredStartOnStaleRead` never
-    landed at all (`deferred-start-conflict-exhausted` never became
-    a live log key; the recovery's keys are
+    dead code, and renamed `isStaleReadConflict` when the engine's
+    pending-read staleness sibling joined it (the OW45 block's
+    covered-shapes sentence) — and `reattemptDeferredStartOnStaleRead`
+    never landed at all (`deferred-start-conflict-exhausted` never
+    became a live log key; the recovery's keys are
     `deferred-start-catchup` / `deferred-start-catchup-failed`).**
 
 ## 4. Standing rule

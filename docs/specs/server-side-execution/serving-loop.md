@@ -910,7 +910,9 @@ above — written for the deferred-start transaction — has nothing
 to govern there; the load walk's own setup/instantiation writes
 keep the sanctioned `bookkeeping` stamp of the piece-start site,
 exactly as a reload's do. The OFF arm keeps the refusal terminal
-(a cross-tab race is the cross-tab mutex's story).
+(a cross-tab race is the cross-tab mutex's story — this OFF
+sentence is the COORDINATOR's conservative default, not part of
+the 2026-08-24 ruling; the owner may re-rule it).
 
 - The accumulator is a layered view: store snapshot at the wave's input
   seq + previously sealed writes. Actions run serially per space, so a
