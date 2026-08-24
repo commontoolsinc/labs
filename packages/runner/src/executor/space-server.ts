@@ -62,6 +62,14 @@ const EVENT_DEFERRAL_DROP_THRESHOLD = 8;
  * after the full budget — bounded unrunnable-event cleanup (the park
  * criterion needs the drop) without racing the creation window. */
 const EVENT_DEFERRAL_REARM_MS = 250;
+
+/** The default bound on the tenure's awaited space-root ensure
+ * (SpaceServerPolicy.rootEnsureDeadlineMs): generous — a cold compile
+ * of the system root is seconds, not tens of seconds — because the
+ * cost of firing early is only deferring the root to the client-era
+ * creation path, while the cost of NO bound is a wedged tenure that
+ * keeps its lease. */
+const DEFAULT_ROOT_ENSURE_DEADLINE_MS = 30_000;
 import {
   markRuntimeInjectedEventKeys,
   sanitizeRuntimeInjectedEventKeys,
@@ -179,6 +187,17 @@ export type SpaceServerPolicy = {
   /** Phase 6: per-space network-effect egress pacing (dispatches per
    * second, token bucket). Undefined = unpaced. */
   egressRatePerSecond?: number;
+  /** OW45 arm-B stage 1 (review F2): the bound on the tenure's
+   * awaited space-root ensure. The ensure's resolve path fetches with
+   * no timeout of its own and can point at a remote host, and the
+   * renew timer is independent of the wave loop — so an UNBOUNDED
+   * await here would let one wedged fetch hold the first cycle open
+   * forever while the tenure keeps the lease (no failover, events
+   * queueing, no loop-failed park). On the deadline the ensure lands
+   * in its counted-failure arm and the tenure proceeds serving; the
+   * detached work's eventual writes are idempotent and converge by
+   * address. */
+  rootEnsureDeadlineMs?: number;
   /** serving-loop.md §1's IDLE_PARK_MS. */
   idleParkMs?: number;
   renewIntervalMs?: number;
@@ -625,6 +644,11 @@ export class SpaceServer implements TransactionSealDestination {
    * admission, and the ensure re-sets it only from another no-owner
    * skip. */
   #rootEnsureAwaitingOwner = false;
+  /** F6 (log hygiene): the no-owner WARN fires once per tenure — a
+   * permanently-ownerless space whose ACL doc keeps getting written
+   * would otherwise warn 1:1 with the re-arm; the counter carries the
+   * per-event record either way. */
+  #rootEnsureNoOwnerWarned = false;
   /** Phase 4 (protocol.md §5): an effects-doc-touching authored commit
    * (an ack) — or activation (a crash between ack and retirement must
    * still retire) — owes the next wave the acked-entry retirement scan.
@@ -2136,9 +2160,10 @@ export class SpaceServer implements TransactionSealDestination {
       this.#pendingWaveSeals > 0 ||
       this.#eventScanOwed ||
       this.#effectsRetirementOwed ||
-      // The owed root ensure is work (consumed by the next cycle; set
-      // only at activation today, where cycle 1 always runs first —
-      // kept here so a future re-arm cannot idle-park past it).
+      // The owed root ensure is work: set at activation (where cycle 1
+      // always runs first) AND by the no-owner skip's ACL-arrival
+      // re-arm mid-tenure — this line is what keeps an idle wait from
+      // parking past the re-armed ensure.
       this.#rootEnsureOwed ||
       // Deferred effect batches of the OPEN wave are work (round-2
       // thread 1): an effect-only tx (an all-no-op claim re-issue —
@@ -3461,16 +3486,27 @@ export class SpaceServer implements TransactionSealDestination {
       if (owner === undefined) {
         stats.skippedNoOwner += 1;
         this.#rootEnsureAwaitingOwner = true;
-        logger.warn("space-root-ensure-no-owner", () => [
-          `space ${space}: no concrete ACL owner resolves; the root ` +
-          "ensure is SKIPPED fail-closed for this tenure (never the " +
-          "service DID — OW53's shape). Under OW31(b) genesis precedes " +
-          "data for every served space, so an ACTIVE space landing " +
-          "here is an anomaly worth this warning.",
-        ]);
+        // Once per tenure (F6): the first skip is the expected
+        // fresh-space boot order (activation precedes the genesis ACL;
+        // the ACL's admission re-arms this ensure) — informative once,
+        // spam at 1:1 with re-arms on a permanently-ownerless space.
+        if (!this.#rootEnsureNoOwnerWarned) {
+          this.#rootEnsureNoOwnerWarned = true;
+          logger.warn("space-root-ensure-no-owner", () => [
+            `space ${space}: no concrete ACL owner resolves; the root ` +
+            "ensure is SKIPPED fail-closed (never the service DID — " +
+            "OW53's shape) and re-arms when a commit touches the ACL " +
+            "doc. Expected once on a fresh space's first activation " +
+            "(the genesis ACL lands moments later); repeated re-skips " +
+            "are counted in rootEnsure.skippedNoOwner without further " +
+            "warns.",
+          ]);
+        }
         return;
       }
-      const result = await ensureSpaceRootPattern(runtime, space, {
+      const deadlineMs = this.#options.policy?.rootEnsureDeadlineMs ??
+        DEFAULT_ROOT_ENSURE_DEADLINE_MS;
+      const work = ensureSpaceRootPattern(runtime, space, {
         // The ACL-derived home predicate (self-owned = home): the
         // client's `space === runtime.userIdentityDID` is WRONG here —
         // a serving runtime's userIdentityDID is the SERVICE DID.
@@ -3498,6 +3534,37 @@ export class SpaceServer implements TransactionSealDestination {
           );
         },
       });
+      // The F2 bound: race the ensure against its deadline. On the
+      // deadline the throw lands in the counted-failure arm below and
+      // the tenure proceeds serving; the DETACHED work keeps running —
+      // its eventual writes are idempotent and converge by address
+      // (the same OCC/cause-derived invariants every rival creator
+      // rides) — and its eventual rejection is swallowed here so it
+      // can never surface as an unhandled rejection.
+      work.catch(() => {});
+      let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+      let result: Awaited<typeof work>;
+      try {
+        result = await Promise.race([
+          work,
+          new Promise<never>((_, reject) => {
+            deadlineTimer = setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    `space-root ensure exceeded its ${deadlineMs}ms ` +
+                      "deadline (SpaceServerPolicy.rootEnsureDeadlineMs); " +
+                      "the tenure proceeds serving and the detached " +
+                      "ensure's eventual writes converge by address",
+                  ),
+                ),
+              deadlineMs,
+            );
+          }),
+        ]);
+      } finally {
+        if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
+      }
       stats.runs += 1;
       if (result.outcome === "created") stats.created += 1;
       if (

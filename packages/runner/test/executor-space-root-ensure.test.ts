@@ -121,6 +121,11 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
         : Promise.reject(new Error(`not found: ${name}`));
     });
 
+  /** F2's wedge switch: when set, pattern SOURCE fetches hang forever
+   * (a never-settling promise — the unbounded-remote-fetch shape the
+   * ensure's deadline exists to bound). */
+  let hangPatternFetches = false;
+
   const fetchStub: RuntimeFetch = (input, _init) => {
     const url = new URL(
       typeof input === "string"
@@ -132,6 +137,9 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     const body = files.get(url.pathname);
     if (body === undefined) {
       return Promise.resolve(new Response("not found", { status: 404 }));
+    }
+    if (hangPatternFetches && !url.searchParams.has("identity")) {
+      return new Promise<Response>(() => {});
     }
     if (url.searchParams.has("identity")) {
       return identityFor(url.pathname).then((id) => new Response(id));
@@ -149,6 +157,7 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     mintedTxs = [];
     stats = emptyServingLoopStats();
     sinkLocalSeq = { value: 0 };
+    hangPatternFetches = false;
     spaceServer = undefined;
     servingRuntime = undefined;
     cleanups = [];
@@ -189,7 +198,11 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     await runtime.storageManager.synced();
   };
 
-  const newSpaceServer = (): SpaceServer => {
+  const newSpaceServer = (
+    policyOverride?: Partial<
+      NonNullable<ConstructorParameters<typeof SpaceServer>[0]["policy"]>
+    >,
+  ): SpaceServer => {
     const created = new SpaceServer({
       space,
       server,
@@ -231,7 +244,11 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
       },
       localSeqRef: sinkLocalSeq,
       stats,
-      policy: { flushDeadlineMs: 2_000, idleParkMs: 600_000 },
+      policy: {
+        flushDeadlineMs: 2_000,
+        idleParkMs: 600_000,
+        ...policyOverride,
+      },
     });
     spaceServer = created;
     return created;
@@ -426,6 +443,30 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     const reader = clientRuntime(readerSigner);
     const root = await resolveRootEventually(reader);
     expect(getPatternSource(root)).toBe(HOME_PATTERN_SOURCE);
+  });
+
+  it("a WEDGED ensure hits its deadline: counted failure, lease kept serving, no park (F2)", async () => {
+    // The ensure is fully awaited at the top of the first cycle, and
+    // its resolve path fetches with no timeout of its own — a wedged
+    // fetch (remote mappedHost, dead route) would otherwise hold the
+    // tenure's first cycle open forever WHILE the renew timer keeps
+    // the lease: no failover, events queueing, no loop-failed park.
+    // The deadline lands the wedge in the counted-failure arm and the
+    // tenure proceeds serving. Watched RED before the deadline
+    // existed: the failure never counted and this pin timed out.
+    await seedAcl({ [space]: "OWNER" });
+    hangPatternFetches = true;
+    const created = newSpaceServer({ rootEnsureDeadlineMs: 300 });
+    expect(await created.activate()).toBe(true);
+
+    await waitUntil(
+      () => stats.rootEnsure.failures === 1,
+      "the wedged ensure's deadline failure counted",
+    );
+    expect(stats.rootEnsure.runs).toBe(0);
+    expect(stats.rootEnsure.created).toBe(0);
+    // The tenure is alive and serving — the wedge parked nothing.
+    expect(created.active).toBe(true);
   });
 
   it("a space with no resolvable ACL owner SKIPS fail-closed: counted, no root, tenure alive", async () => {

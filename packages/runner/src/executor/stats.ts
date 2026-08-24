@@ -386,7 +386,14 @@ export type ServingLoopStats = {
   lease: { held: number; lost: number };
   /** OW45 arm-B server-ensure stage 1 (design PR #6209 §10): the
    * SpaceServer's space-root ensure — one lease-guarded owed step per
-   * tenure (existence + freshness, no start). */
+   * tenure (existence + freshness, no start). Counting caveat (review
+   * F4, recorded): `created`/`reconciled` count at SEAL-ACCEPT — the
+   * ensure's transactions resolve when the wave admits them, and the
+   * engine write rides the wave commit — so a wave later dropped
+   * whole (lease-lost abort, replay refusal) leaves a count with no
+   * durable write behind it. Stats-only: the next tenure's ensure
+   * re-resolves and heals the store; triangulate against
+   * `waves`/`lease.lost` when a count looks off. */
   rootEnsure: {
     /** Completed ensure runs, any outcome. */
     runs: number;
