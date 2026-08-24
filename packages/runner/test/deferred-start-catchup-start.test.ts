@@ -638,9 +638,129 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
     }
   });
 
+  it("awaits the wire's readyToRetry gate before walking", async () => {
+    // The readiness fidelity pin (Cubic P2 / review F12): the wire attaches
+    // `readyToRetry` = the session catch-up to a real refusal, and the
+    // recovery must actually AWAIT it — walking before the conflicting
+    // documents arrived would re-read the same pre-birth absence. The
+    // injected refusal carries a gate the test holds: the walk must not
+    // assemble while it is held, and must assemble once released.
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const tx = gatedTxOn(runtime);
+    const result = runtime.getCell<{ doubled?: number }>(
+      space,
+      "recovery held on the readiness gate",
+      undefined,
+      tx,
+    );
+    const gate = Promise.withResolvers<void>();
+    let gateAwaited = 0;
+    const refusal = {
+      ...staleConfirmedReadOf(result),
+      readyToRetry: () => {
+        gateAwaited++;
+        return gate.promise;
+      },
+    };
+    const injector = refuseDeferredStartCommits(runtime, refusal);
+    const installed = observeContextInstalls(
+      runtime,
+      (cell) => key(cell) === key(result),
+      () => runtime.runner.cancels.has(key(result)),
+    );
+    try {
+      runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
+      expect((await tx.commit()).error).toBeUndefined();
+
+      await waitForSignal(
+        injector.refusalsReach(1),
+        "the start's transaction being refused",
+      );
+      await runtime.idle();
+
+      // The gate is held: the refused install was torn down and NOTHING
+      // has re-assembled — the recovery is waiting on the wire.
+      expect(gateAwaited).toBe(1);
+      expect(installed.installs()).toBe(1);
+      expect(runtime.runner.cancels.has(key(result))).toBe(false);
+
+      gate.resolve();
+      await waitForSignal(
+        installed.nth(2),
+        "the catch-up recovery assembling after the gate released",
+      );
+      await runtime.runner.idleDeferredStartCatchUps();
+      await runtime.idle();
+
+      expect(installed.installs()).toBe(2);
+      expect(runtime.runner.cancels.has(key(result))).toBe(true);
+    } finally {
+      installed.restore();
+      injector.restore();
+    }
+  });
+
+  it("recovers the engine's sibling staleness shape: stale pending read", async () => {
+    // The engine emits TWO staleness messages, both meaning "a document this
+    // basis read has advanced; a catch-up and fresh read is what converges":
+    // `stale confirmed read` (validateConfirmedReads, engine.ts) and
+    // `stale pending read` (resolvePendingReads — a read through the
+    // session's own accepted layers whose underlying doc advanced; reachable
+    // in the same first-hydration race whenever the serving side's commit
+    // advances a pending-read target while the confirmed reads pass). Both
+    // recover; leaving the pending sibling terminal would keep the b04 death
+    // alive under that message (review F4).
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const tx = gatedTxOn(runtime);
+    const result = runtime.getCell<{ doubled?: number }>(
+      space,
+      "recovered from a stale pending read",
+      undefined,
+      tx,
+    );
+    const id = result.getAsNormalizedFullLink().id;
+    const injector = refuseDeferredStartCommits(
+      runtime,
+      {
+        name: "ConflictError",
+        message: `stale pending read: ${id} via localSeq 5 conflicted ` +
+          "with seq 10",
+      },
+      Number.MAX_SAFE_INTEGER,
+    );
+    const installed = observeContextInstalls(
+      runtime,
+      (cell) => key(cell) === key(result),
+      () => runtime.runner.cancels.has(key(result)),
+    );
+    try {
+      runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
+      expect((await tx.commit()).error).toBeUndefined();
+
+      await waitForSignal(
+        installed.nth(2),
+        "the catch-up recovery assembling the piece context",
+      );
+      await runtime.runner.idleDeferredStartCatchUps();
+      await runtime.idle();
+
+      expect(injector.refusals()).toBe(1);
+      expect(runtime.runner.cancels.has(key(result))).toBe(true);
+    } finally {
+      installed.restore();
+      injector.restore();
+    }
+  });
+
   it("keeps every other refusal terminal, on the first attempt", async () => {
-    // The discriminator. A refusal that does not name a stale confirmed read
-    // describes no basis served documents repair, so the recovery must not
+    // The discriminator. A refusal that does not name a stale read basis
+    // describes nothing served documents repair, so the recovery must not
     // fire: one attempt, terminal, exactly as before this arm existed.
     const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
     const Piece = pattern<{ value: number }>(({ value }) => ({
@@ -663,6 +783,23 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
         {
           name: "ConflictError",
           message: "pending dependency not resolved: 7",
+        },
+        // The commit-precondition shape: the committed data's own
+        // precondition (create-only / value-hash) failed on its merits —
+        // re-running double-handles, never converges.
+        {
+          name: "ConflictError",
+          message: "entity-value-hash precondition target changed: of:x",
+        },
+        // A client-fabricated withdrawal that EMBEDS the staleness phrase
+        // (makeLocalRejection mints ConflictError from verbatim messages;
+        // wave withdrawals wrap inner errors). Classification is anchored
+        // to the message HEAD, so an embedded phrase must not trigger the
+        // recovery — a withdrawal is not a stale basis (review note F5).
+        {
+          name: "ConflictError",
+          message: "seal failed: inner refusal was: stale confirmed read: " +
+            "of:x at seq 0 conflicted with seq 9",
         },
       ]
     ) {

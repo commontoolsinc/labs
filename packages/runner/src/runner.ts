@@ -114,7 +114,7 @@ import {
 } from "./storage/reactivity-log.ts";
 import {
   isConflictRejection,
-  isStaleConfirmedReadConflict,
+  isStaleReadConflict,
   isStorageTransactionInconsistent,
 } from "./storage/rejection.ts";
 
@@ -3545,11 +3545,13 @@ export class Runner {
    * the cross-tab mutex semantics own that story — the OFF arm keeps
    * today's terminal behavior byte-for-byte.
    *
-   * WHAT stays terminal. Only a stale confirmed read recovers
-   * ({@link isStaleConfirmedReadConflict}). Every other refusal keeps
-   * today's behavior exactly: a CFC or speculative-basis refusal, an
-   * authorization denial, a precondition failure, a row-label violation —
-   * none of them describe a basis the served documents repair.
+   * WHAT stays terminal. Only the engine's stale-read family recovers —
+   * `stale confirmed read` and its `stale pending read` sibling
+   * ({@link isStaleReadConflict}, head-anchored). Every other refusal
+   * keeps today's behavior exactly: a CFC or speculative-basis refusal,
+   * an authorization denial, a precondition failure, a row-label
+   * violation, a withdrawal that merely embeds a staleness phrase — none
+   * of them describe a basis the served documents repair.
    *
    * CANCELLATION AUTHORITY (review F1 + Cubic P1 — both faces of one
    * root). The recovery RIDES THE ORIGINAL ATTEMPT'S OWNERSHIP TOKEN —
@@ -3587,7 +3589,7 @@ export class Runner {
     installedRegistration: Cancel | undefined,
   ): boolean {
     if (this.runtime.experimental.serverExecution !== true) return false;
-    if (!isStaleConfirmedReadConflict(error)) return false;
+    if (!isStaleReadConflict(error)) return false;
     if (scheduledLifecycleEpoch !== this.lifecycleEpoch) return false;
     if (ownership.isCancelled()) return false;
     const key = this.getDocKey(resultCell);
