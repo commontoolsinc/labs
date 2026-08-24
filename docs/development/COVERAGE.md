@@ -389,10 +389,13 @@ transaction that carries the response into the builtin's result document, which
 follows it only clears a result that is already absent, which records no write
 of that document at all. Asking for the one commit that writes it therefore
 lands the refusal on the completion write and on nothing else, however the run
-is scheduled. A case that
-wants both refused asks for every commit from the response onward, and pins the
-count it refused so that a stray transaction shows up as a wrong count rather
-than as a silent miss.
+is scheduled. A case that wants both refused names a document both of them do
+write — the claim they each release — rather than refusing every commit from
+the response onward, which would count whatever else the scheduler opened in
+the same window. Count the transactions the name matched, past the number
+refused rather than capped at it, and state that count: a run that produced
+another matching transaction then fails on the count instead of quietly leaving
+it to commit.
 [The investigation record](../history/development/coverage-flake-fetch-writeback-refusal-2026-08-24.md)
 follows those five lines from the group-level `+5` down to the single artifact
 that covered them, and to the sibling rethrow that no artifact in either run

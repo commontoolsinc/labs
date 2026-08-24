@@ -53,23 +53,34 @@ rather than that commit. Both files are byte-identical between `b75acec4` and
 so whichever `main` the merge was rebuilt against contributed the same two
 files. Their line numbers and counts compare directly.
 
-The baseline run uploads 28 coverage artifacts, of which 26 measure both files.
-Exactly one of them records a hit on any of the five lines:
-`coverage-profile-pattern-integration-5`, which counts one on each. The pull
-request's run uploads 26, of which 25 measure both files, and all 25 report
-zero.
+Each run uploads 36 coverage artifacts, under identical names, of which 31
+measure both files. In the baseline run, exactly one of the 31 records a hit on
+any of the five lines: `coverage-profile-pattern-integration-5`, which counts
+one on each. In the pull request's run all 31 report zero.
 
-That artifact belongs to the `Pattern Integration Tests (5/10)` job. Its file
-set is not what changed. The selector assigns pattern integration files to
-shards by measured weight, and between the two commits the only change under
-`packages/patterns` is to the contents of one test file, not to the list, so
-shard 5 ran the same files in both runs. What those files do is run whole
-patterns in real runtimes — `integration/all.test.ts`, which divides its own
-cases across the ten shards, plus two multi-runtime cases that stand runtimes up
-and tear them down. That is the kind of place a completion writeback is refused:
-the response arrives, `tryWriteResult()` opens its transaction, and the commit
-meets a session that has already closed. Nothing in them asserts that this
-happens, and nothing arranges for it to.
+That artifact belongs to the `Pattern Integration Tests (5/10)` job. The
+selector assigns pattern integration files to shards by measured weight, and
+the file list is unchanged between the two commits, so shard 5 ran the same
+nine files in both runs: `integration/all.test.ts`, `time-capability.test.ts`
+and `time-capability-full.test.ts`, which run in every shard and divide their
+own cases across the ten, plus `default-app`, `cfc-group-chat-demo`,
+`sqlite-read-clearance-multi-runtime`,
+`cfc-group-chat-chained-event-gate-multi-runtime`, `sx2-effect-channel` and
+`sx2-speculation`. They run whole patterns in real runtimes, and two of them
+stand several runtimes up and tear them down. That is the kind of place a
+completion writeback is refused: the response arrives, `tryWriteResult()` opens
+its transaction, and the commit meets a session that has already closed.
+Nothing in them asserts that this happens, and nothing arranges for it to.
+
+One caveat belongs on that comparison. The pull request edits
+`sqlite-read-clearance-multi-runtime.test.ts`, which is one of shard 5's nine
+and one of the two that tear runtimes down, adding a third harness session to
+its cases. So the two runs ran the same files but not the same code in all of
+them, and the difference sits in exactly the kind of case a refused writeback
+comes out of. That weakens this pair as evidence of pure environment
+dependence; it does not weaken the conclusion, because a line whose coverage
+turns on when some unrelated suite tears a runtime down is environment-
+dependent whether or not this particular pair of runs isolates it.
 
 ## The branch behind it, never reached at all
 
@@ -98,8 +109,16 @@ write and on nothing else. That case asserts the error-shaped result the
 conversion produces, by message, and that the claim was released; a second case
 refuses every commit from the response onward and asserts that the tracked work
 rejects, that the report names the completion failure as its cause, and that the
-claim is left pending. A version that swallowed either failure, or that named a
-different one, fails rather than staying green on the line count.
+claim is left pending. A version that swallowed either failure fails rather than
+staying green on the line count.
+
+What no case pins is the guard's choice of predicate. Within one replica every
+route to a superseded writeback also aborts the request's signal, and
+`startFetch()` returns on an aborted signal before the throw it would then have
+raised becomes observable, so a version testing `written` where it now tests
+`commitError` cannot be told apart from this side. The distinction between the
+two answers is stated where it is decidable, on `tryWriteResult()`'s own
+return.
 
 That takes all five lines to a nonzero count from the new test file alone, and
 takes the never-covered rethrow with them.

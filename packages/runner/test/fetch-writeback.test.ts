@@ -14,13 +14,13 @@
  * converts that refusal into an error-shaped result instead, and propagates
  * when even that cannot commit.
  *
- * Those failure reports run nowhere except where a writeback's commit actually
- * fails, which nothing in the suites asks for and only a runtime torn down
- * around one produces, so left to the suites they flip between covered and
- * uncovered across identical CI runs. Each case here constructs the refusal it
- * wants, which is what makes the reports run on every suite run and under
- * every shard layout. `docs/development/COVERAGE.md` ("Failure reports reached
- * only when the operation fails") carries the reasoning.
+ * Those failure reports run nowhere except where a writeback's commit is
+ * refused, which a suite reaches only by tearing a runtime down around one, so
+ * a suite that does not construct the refusal covers them or not according to
+ * how the run was scheduled. Each case here constructs the refusal it wants,
+ * which is what makes the reports run on every suite run and under every shard
+ * layout. `docs/development/COVERAGE.md` ("Failure reports reached only when
+ * the operation fails") carries the reasoning.
  */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
@@ -32,7 +32,7 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { getTransactionWriteAttempts } from "../src/storage/transaction-inspection.ts";
-import { setPatternEnvironment } from "../src/env.ts";
+import { getPatternEnvironment, setPatternEnvironment } from "../src/env.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 import {
   computeInputHashFromValue,
@@ -81,6 +81,7 @@ describe("fetch builtins: a completion writeback the storage layer refuses", () 
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let byRef: ReturnType<typeof createBuilder>["commonfabric"]["byRef"];
   let originalFetch: typeof globalThis.fetch;
+  let originalPatternEnvironment: ReturnType<typeof getPatternEnvironment>;
   let pristineEdit: Runtime["edit"];
 
   beforeEach(() => {
@@ -95,6 +96,7 @@ describe("fetch builtins: a completion writeback the storage layer refuses", () 
     pattern = commonfabric.pattern;
     byRef = commonfabric.byRef;
 
+    originalPatternEnvironment = getPatternEnvironment();
     setPatternEnvironment({
       apiUrl: new URL("http://mock-test-server.local"),
     });
@@ -108,6 +110,7 @@ describe("fetch builtins: a completion writeback the storage layer refuses", () 
     // own writes are refused reports failures that belong to no case.
     (runtime as any).edit = pristineEdit;
     globalThis.fetch = originalFetch;
+    setPatternEnvironment(originalPatternEnvironment);
     tx.abort("case over");
     // `closeStorage: false` drains the runtime's outstanding work first,
     // including the background loads a cell read starts; closing under them
@@ -120,33 +123,36 @@ describe("fetch builtins: a completion writeback the storage layer refuses", () 
    * Refuse the commit of every transaction this runtime opens from now on
    * whose write set `wanted` accepts, up to `limit` of them, leaving the
    * transaction's reads and writes real and only its outcome injected.
-   * Reports how many commits were refused, so a case can state which
-   * transaction it meant rather than trusting that only one matched.
+   *
+   * Reports how many transactions `wanted` accepted, counted past `limit`
+   * rather than capped at it: a case states the number it meant, so a run that
+   * opened a further matching transaction fails on the count instead of
+   * quietly leaving that one to commit.
    */
   function refuseCommits(
     wanted: (writtenDocuments: readonly string[]) => boolean,
     limit: number,
   ): () => number {
-    let refused = 0;
-    (runtime as any).edit = () => {
-      const opened: IExtendedStorageTransaction = pristineEdit();
+    let matched = 0;
+    (runtime as any).edit = (...args: Parameters<Runtime["edit"]>) => {
+      const opened: IExtendedStorageTransaction = pristineEdit(...args);
       const commit = opened.commit.bind(opened);
-      (opened as any).commit = (...args: unknown[]) => {
-        if (refused < limit) {
-          const written = (getTransactionWriteAttempts(opened) ?? []).map(
-            (attempt) => attempt.id as string,
-          );
-          if (wanted(written)) {
-            refused++;
+      (opened as any).commit = (...commitArgs: unknown[]) => {
+        const written = (getTransactionWriteAttempts(opened) ?? []).map(
+          (attempt) => attempt.id as string,
+        );
+        if (wanted(written)) {
+          matched++;
+          if (matched <= limit) {
             opened.abort(REFUSAL);
             return Promise.resolve({ error: REFUSAL });
           }
         }
-        return (commit as (...args: unknown[]) => unknown)(...args);
+        return (commit as (...args: unknown[]) => unknown)(...commitArgs);
       };
       return opened;
     };
-    return () => refused;
+    return () => matched;
   }
 
   describe("tryWriteResult()", () => {
@@ -230,13 +236,17 @@ describe("fetch builtins: a completion writeback the storage layer refuses", () 
     it("carries a refused commit back as a commit error, and writes nothing", async () => {
       const { inputsCell, internal, result } = await newCells("refused");
       const refused = refuseCommits(() => true, 1);
+      let actionRan = false;
 
       const written = await tryWriteResult(
         runtime,
         internal,
         inputsCell,
         INPUT_HASH,
-        (writeTx) => result.withTx(writeTx).set({ from: "the response" }),
+        (writeTx) => {
+          actionRan = true;
+          result.withTx(writeTx).set({ from: "the response" });
+        },
       );
 
       // The other "did not write" shape. Here the hash matched and the action
@@ -244,6 +254,7 @@ describe("fetch builtins: a completion writeback the storage layer refuses", () 
       // superseded case above — and retiring the effect on it would leave the
       // claim pending with nothing left to complete it.
       expect(refused()).toBe(1);
+      expect(actionRan).toBe(true);
       expect(written.written).toBe(false);
       expect(written.commitError).toBe(REFUSAL);
       expect(result.get()).toBeUndefined();
@@ -286,21 +297,22 @@ describe("fetch builtins: a completion writeback the storage layer refuses", () 
       await issued.promise;
       await clock.settle();
 
-      // The pattern's result cell holds a link to the builtin's own result
-      // cell; a plain link is not followed on write, so resolve it to name the
-      // document the writeback writes.
-      const builtinResult = runtime.getCellFromLink(
-        resolveLink(
-          runtime,
-          runtime.readTx(),
-          result.key("result").getAsNormalizedFullLink(),
-        ),
-      );
-      const resultDocument = builtinResult.getAsNormalizedFullLink().id;
+      // The pattern's result cell holds links to the builtin's own cells, and
+      // a plain link is not followed on write, so resolve them to name the
+      // documents a writeback writes.
+      const documentOf = (key: string) =>
+        runtime.getCellFromLink(
+          resolveLink(
+            runtime,
+            runtime.readTx(),
+            result.key(key).getAsNormalizedFullLink(),
+          ),
+        ).getAsNormalizedFullLink().id;
 
       return {
         result,
-        resultDocument,
+        resultDocument: documentOf("result"),
+        pendingDocument: documentOf("pending"),
         work,
         respond: () =>
           release.resolve(
@@ -319,7 +331,8 @@ describe("fetch builtins: a completion writeback the storage layer refuses", () 
       // The writeback is the transaction that carries the response into the
       // builtin's result document. The error writeback that follows does not
       // write it — it clears a result that is already absent — so naming the
-      // document refuses the completion write and nothing else.
+      // document refuses the completion write and nothing else. One
+      // transaction matches, which the count states rather than assumes.
       const refused = refuseCommits(
         (written) => written.includes(resultDocument),
         1,
@@ -337,19 +350,26 @@ describe("fetch builtins: a completion writeback the storage layer refuses", () 
       expect(result.key("result").get()).toBeUndefined();
       // The claim is released, so the node is not left showing a spinner.
       expect(result.key("pending").get()).toBe(false);
-      // Nothing rejected: an error-shaped result IS a completion.
+      // Nothing rejected: an error-shaped result is a completion. The count
+      // is stated too, so an empty `work` cannot pass this vacuously.
+      expect(work.length).toBeGreaterThan(0);
       const outcomes = await Promise.allSettled(work);
       expect(outcomes.filter((o) => o.status === "rejected")).toEqual([]);
     });
 
     it("rejects the tracked work when even the error-shaped result cannot commit", async () => {
-      const { result, work, respond } = await fetchJsonAwaitingItsResponse(
-        "fetch-writeback-refused-twice",
-      );
+      const { result, pendingDocument, work, respond } =
+        await fetchJsonAwaitingItsResponse("fetch-writeback-refused-twice");
 
       // Both writebacks refused: the completion first, then the error-shaped
-      // result that stands in for it.
-      const refused = refuseCommits(() => true, Infinity);
+      // result that stands in for it. Both release the claim, so the pending
+      // document names the two of them and nothing else — refusing every
+      // commit instead would make the count depend on whatever the scheduler
+      // happened to open in the same window.
+      const refused = refuseCommits(
+        (written) => written.includes(pendingDocument),
+        Infinity,
+      );
       respond();
       await runtime.settled();
 
