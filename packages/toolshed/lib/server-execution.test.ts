@@ -150,8 +150,9 @@ describe("startServerExecutionHost OFF witness", () => {
 // FAILS TO PRODUCTION (ON, with a warning) — a typo must never silently
 // strip production spaces of their roots.
 describe("ensureSpaceRootsFromEnv", () => {
-  const envOf2 = (values: Record<string, string | undefined>) =>
-  (name: string) => values[name];
+  const envOf2 =
+    (values: Record<string, string | undefined>) => (name: string) =>
+      values[name];
 
   it("defaults ON, honors true, and only the literal false disables", () => {
     const warnings: string[] = [];
