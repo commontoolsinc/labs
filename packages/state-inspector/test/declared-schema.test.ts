@@ -155,7 +155,7 @@ async function details(): Promise<Map<string, EntityDetail>> {
   seed(dbPath);
   const space = openSpace(dbPath);
   try {
-    return new Map(buildAllDetails(space).map((d) => [d.id, d]));
+    return new Map(buildAllDetails(space).details.map((d) => [d.id, d]));
   } finally {
     space.close();
     await Deno.remove(dir, { recursive: true });

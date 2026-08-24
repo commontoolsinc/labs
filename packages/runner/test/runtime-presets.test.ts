@@ -1,8 +1,13 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  ADOPT_SERVER_FLAGS_ENV,
+  adoptServerExperimentalOptions,
   EXPERIMENTAL_ENV_VARS,
+  EXPERIMENTAL_FLAG_AUTHORITY,
+  experimentalOptionsForDeployedClient,
   experimentalOptionsFromEnv,
+  parseServerExperimentalOptions,
   RUNTIME_OPTION_KEYS,
   type RuntimeOptionKey,
   runtimePresets,
@@ -30,6 +35,26 @@ import { Runtime, signer, StorageManager } from "./engine-test-support.ts";
  */
 
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
+
+/**
+ * Runs `body` with `console.warn` captured, returning what it warned and what
+ * it returned. Restored synchronously, so a `body` that returns a promise has
+ * to be awaited by the caller AFTER this returns.
+ */
+function captureWarnings<T>(
+  body: () => T,
+): { warnings: unknown[][]; result: T } {
+  const warnings: unknown[][] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args);
+  };
+  try {
+    return { warnings, result: body() };
+  } finally {
+    console.warn = originalWarn;
+  }
+}
 
 type PresetName = keyof typeof runtimePresets;
 const PRESET_NAMES = Object.keys(runtimePresets) as PresetName[];
@@ -353,22 +378,288 @@ describe("runtimePresets conformance (CT-1814)", () => {
       // (toolshed's flagValue(): anything but "false" ⇒ true; the CLI reader:
       // anything but "true" ⇒ false). Ignoring keeps the flag on its default
       // and surfaces the typo.
-      const warnings: unknown[][] = [];
-      const originalWarn = console.warn;
-      console.warn = (...args: unknown[]) => {
-        warnings.push(args);
-      };
-      try {
-        expect(
-          experimentalOptionsFromEnv((name) =>
-            name === "EXPERIMENTAL_MODERN_CELL_REP" ? "1" : undefined
-          ),
-        ).toEqual({});
-      } finally {
-        console.warn = originalWarn;
-      }
+      const { warnings, result } = captureWarnings(() =>
+        experimentalOptionsFromEnv((name) =>
+          name === "EXPERIMENTAL_MODERN_CELL_REP" ? "1" : undefined
+        )
+      );
+      expect(result).toEqual({});
       expect(warnings.length).toBe(1);
       expect(String(warnings[0][0])).toContain("EXPERIMENTAL_MODERN_CELL_REP");
+    });
+  });
+
+  describe("experimental flag authority", () => {
+    describe("parseServerExperimentalOptions", () => {
+      it("reads the boolean flags it recognizes", () => {
+        expect(parseServerExperimentalOptions({
+          modernCellRep: true,
+          serverExecution: false,
+        })).toEqual({ modernCellRep: true, serverExecution: false });
+      });
+
+      it("returns nothing for a declaration that is not an object", () => {
+        expect(parseServerExperimentalOptions(null)).toEqual({});
+        expect(parseServerExperimentalOptions(undefined)).toEqual({});
+        expect(parseServerExperimentalOptions("modernCellRep")).toEqual({});
+      });
+
+      it("ignores a key this build has no flag for", () => {
+        // A newer server publishing a flag this client predates. Normal, and
+        // not something to warn about.
+        const { warnings, result } = captureWarnings(() =>
+          parseServerExperimentalOptions({
+            modernCellRep: true,
+            flagFromTheFuture: true,
+          })
+        );
+        expect(result).toEqual({ modernCellRep: true });
+        expect(warnings.length).toBe(0);
+      });
+
+      it("drops a non-boolean value with a warning", () => {
+        const { warnings, result } = captureWarnings(() =>
+          parseServerExperimentalOptions({ modernCellRep: "true" })
+        );
+        expect(result).toEqual({});
+        expect(warnings.length).toBe(1);
+        expect(String(warnings[0][0])).toContain("modernCellRep");
+      });
+    });
+
+    describe("adoptServerExperimentalOptions", () => {
+      it("takes a server-authoritative flag from the server", () => {
+        expect(adoptServerExperimentalOptions({ modernCellRep: true }, {}))
+          .toEqual({ modernCellRep: true });
+      });
+
+      it("keeps an explicit environment value over the server's", () => {
+        // An explicit value is the documented rollback lever and CI's way to
+        // pin a lane, so it outranks the declaration: a server able to
+        // overrule it would leave neither mechanism working.
+        expect(
+          adoptServerExperimentalOptions(
+            { modernCellRep: true },
+            { modernCellRep: false },
+          ),
+        ).toEqual({ modernCellRep: false });
+      });
+
+      it("leaves a client-authoritative flag on the environment alone", () => {
+        expect(
+          adoptServerExperimentalOptions(
+            { modernCellRep: true, serverExecution: true },
+            {},
+            { ...EXPERIMENTAL_FLAG_AUTHORITY, modernCellRep: "client" },
+          ),
+        ).toEqual({ serverExecution: true });
+      });
+
+      it("leaves a flag the server did not publish unset", () => {
+        // Absence of a declaration is not a declaration of `false`: the
+        // built-in default has to govern, or an older server would silently
+        // turn every default-on flag off.
+        expect(adoptServerExperimentalOptions({}, {})).toEqual({});
+      });
+    });
+
+    describe("experimentalOptionsForDeployedClient", () => {
+      const metaResponse = (body: unknown, status = 200) =>
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { "content-type": "application/json" },
+        });
+
+      it("adopts the posture the server publishes on its meta document", async () => {
+        const requested: string[] = [];
+        const adopted = await experimentalOptionsForDeployedClient({
+          apiUrl: new URL("https://deployment.example/api/"),
+          env: (name) =>
+            name === "EXPERIMENTAL_MODERN_CELL_REP" ? "false" : undefined,
+          fetch: (input) => {
+            requested.push(String(input));
+            return Promise.resolve(metaResponse({
+              did: "did:key:z",
+              experimental: { modernCellRep: true, serverExecution: true },
+            }));
+          },
+        });
+        // Spelled out rather than composed from the constant: the point is
+        // WHICH document the client reads, and a test that reuses the
+        // constant cannot tell a changed path from an unchanged one. The
+        // toolshed side pins the constant against the route that serves it.
+        expect(requested).toEqual(["https://deployment.example/api/meta"]);
+        // The env's explicit `false` outranks the server; the flag it says
+        // nothing about is adopted.
+        expect(adopted).toEqual({
+          modernCellRep: false,
+          serverExecution: true,
+        });
+      });
+
+      it("falls back to the environment when the server answers an error", async () => {
+        // The body of an error response is not a posture even when it parses
+        // as one — an error page, or a proxy standing in for the deployment.
+        expect(
+          await experimentalOptionsForDeployedClient({
+            apiUrl: new URL("https://deployment.example"),
+            env: (name) =>
+              name === "EXPERIMENTAL_MODERN_CELL_REP" ? "true" : undefined,
+            fetch: () =>
+              Promise.resolve(metaResponse({
+                experimental: { serverExecution: true },
+              }, 404)),
+          }),
+        ).toEqual({ modernCellRep: true });
+      });
+
+      it("falls back to the environment when the request fails", async () => {
+        // A deployment that is simply down. The caller is about to fail
+        // loudly on its real work; failing here first would only obscure it.
+        expect(
+          await experimentalOptionsForDeployedClient({
+            apiUrl: new URL("https://deployment.example"),
+            env: () => undefined,
+            fetch: () => Promise.reject(new TypeError("connection refused")),
+          }),
+        ).toEqual({});
+      });
+
+      it("falls back to the environment when the body is not JSON", async () => {
+        expect(
+          await experimentalOptionsForDeployedClient({
+            apiUrl: new URL("https://deployment.example"),
+            env: () => undefined,
+            fetch: () => Promise.resolve(new Response("<html>nope</html>")),
+          }),
+        ).toEqual({});
+      });
+
+      it("falls back to the environment for a server that publishes no posture", async () => {
+        // An older server, whose meta document predates the field.
+        expect(
+          await experimentalOptionsForDeployedClient({
+            apiUrl: new URL("https://deployment.example"),
+            env: () => undefined,
+            fetch: () =>
+              Promise.resolve(metaResponse({ did: "did:key:z", gitSha: null })),
+          }),
+        ).toEqual({});
+      });
+
+      it("hands the request the caller's cancellation signal", async () => {
+        // Without it, a deployment that accepts the connection and then says
+        // nothing holds a cancellable startup here for as long as it stays
+        // silent, and no shutdown can reach it.
+        const controller = new AbortController();
+        let passed: AbortSignal | undefined;
+        await experimentalOptionsForDeployedClient({
+          apiUrl: new URL("https://deployment.example"),
+          env: () => undefined,
+          signal: controller.signal,
+          fetch: (_input, init) => {
+            passed = init?.signal ?? undefined;
+            return Promise.resolve(metaResponse({ experimental: {} }));
+          },
+        });
+        expect(passed).toBe(controller.signal);
+      });
+
+      it("throws the abort reason even under CF_ADOPT_SERVER_FLAGS=false", async () => {
+        // The opt-out is over adopting a posture, not over the caller's
+        // cancellation: a startup that has already stopped gets the abort
+        // whichever way it was going to resolve its flags.
+        const controller = new AbortController();
+        controller.abort(new Error("shutting down"));
+        await expect(experimentalOptionsForDeployedClient({
+          apiUrl: new URL("https://deployment.example"),
+          env: (name) => name === ADOPT_SERVER_FLAGS_ENV ? "false" : undefined,
+          signal: controller.signal,
+          fetch: () => Promise.reject(new Error("must not be reached")),
+        })).rejects.toThrow("shutting down");
+      });
+
+      it("throws the abort reason when the body read is cancelled", async () => {
+        // The signal rides the request, so aborting it errors the response
+        // stream: a deployment that sends headers and then stalls its body
+        // cannot hold a cancellable startup open.
+        const controller = new AbortController();
+        await expect(experimentalOptionsForDeployedClient({
+          apiUrl: new URL("https://deployment.example"),
+          env: () => undefined,
+          signal: controller.signal,
+          fetch: (_input, init) =>
+            Promise.resolve(
+              new Response(
+                new ReadableStream({
+                  start(chunk) {
+                    chunk.enqueue(new TextEncoder().encode('{"experimental":'));
+                    init?.signal?.addEventListener(
+                      "abort",
+                      () => chunk.error(init.signal!.reason),
+                    );
+                    controller.abort(new Error("shutting down"));
+                  },
+                }),
+                { headers: { "content-type": "application/json" } },
+              ),
+            ),
+        })).rejects.toThrow("shutting down");
+      });
+
+      it("throws the abort reason instead of resolving a cancelled startup", async () => {
+        // The one failure that is NOT read as "the server said nothing": the
+        // caller asked to stop, so handing back a posture would feed a
+        // runtime construction it is abandoning.
+        const controller = new AbortController();
+        controller.abort(new Error("shutting down"));
+        await expect(experimentalOptionsForDeployedClient({
+          apiUrl: new URL("https://deployment.example"),
+          env: () => undefined,
+          signal: controller.signal,
+          fetch: (_input, init) => {
+            init?.signal?.throwIfAborted();
+            return Promise.resolve(metaResponse({ experimental: {} }));
+          },
+        })).rejects.toThrow("shutting down");
+      });
+
+      it("ignores the server's posture under CF_ADOPT_SERVER_FLAGS=false", async () => {
+        let fetched = false;
+        expect(
+          await experimentalOptionsForDeployedClient({
+            apiUrl: new URL("https://deployment.example"),
+            env: (name) =>
+              name === ADOPT_SERVER_FLAGS_ENV ? "false" : undefined,
+            fetch: () => {
+              fetched = true;
+              return Promise.resolve(metaResponse({
+                experimental: { serverExecution: true },
+              }));
+            },
+          }),
+        ).toEqual({});
+        expect(fetched).toBe(false);
+      });
+
+      it("adopts under a non-canonical CF_ADOPT_SERVER_FLAGS, with a warning", async () => {
+        // Same discipline as the EXPERIMENTAL_* mapping: a value that is
+        // neither "true" nor "false" leaves the default (adopting) in place
+        // rather than being read as an opt-out.
+        const { warnings, result } = captureWarnings(() =>
+          experimentalOptionsForDeployedClient({
+            apiUrl: new URL("https://deployment.example"),
+            env: (name) => name === ADOPT_SERVER_FLAGS_ENV ? "0" : undefined,
+            fetch: () =>
+              Promise.resolve(metaResponse({
+                experimental: { serverExecution: true },
+              })),
+          })
+        );
+        expect(await result).toEqual({ serverExecution: true });
+        expect(warnings.length).toBe(1);
+        expect(String(warnings[0][0])).toContain(ADOPT_SERVER_FLAGS_ENV);
+      });
     });
   });
 

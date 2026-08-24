@@ -385,6 +385,190 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     }
   });
 
+  it("a plain space-cell subscriber SURVIVES a replica that fails to absorb the cid schema docs (OW61 containment at the live producer)", async () => {
+    // OW61, reshaped after the owner's reversal ruling (2026-08-24):
+    // the server deliberately ELIDES cid docs a session already
+    // received — not retransmitting schemas is why content addressing
+    // exists — and the client's obligation is to absorb and retain
+    // every frame. The defect class under investigation is a CLIENT
+    // that fails that obligation (a dropped/reordered/un-retained cid
+    // delivery); this step simulates exactly that at the register's
+    // named deterministic producer and pins the ACKed containment ON
+    // THE CRASH CLASS'S ACTUAL SEAM: the subscription is registered
+    // BEFORE the ensure activates, so the mention-carrying frames
+    // arrive as server pushes through the BACKGROUND consume path
+    // (`consumeUpdates` → `applySessionSync`) — where the
+    // pre-containment validator throw was an unhandled rejection that
+    // killed the consuming worker (the OW61 board's kill mode; the
+    // round-3 review's R2: routed through the request-shaped pull
+    // path instead, the base throw surfaced as an ignored error
+    // result and the step discriminated nothing). Red-first: this
+    // step's head construction was run against the no-containment
+    // base validator and died on exactly that unhandled rejection.
+    await seedAcl({ [space]: "OWNER" });
+    const created = newSpaceServer();
+
+    const reader = clientRuntime(readerSigner);
+    // The simulated absorb defect: DROP every cid: upsert before the
+    // frame applies. Installed on the reader's replica before its
+    // space-cell subscription (the suite's established instance-patch
+    // seam).
+    const replica = (reader.storageManager.open(space) as unknown as {
+      replica: {
+        applySessionSync(sync: unknown, type: string): void;
+        getDocument(uri: string): unknown;
+      };
+    }).replica;
+    let droppedCids = 0;
+    const computedSeen = new Set<string>();
+    const originalApply = replica.applySessionSync.bind(replica);
+    replica.applySessionSync = (sync: unknown, type: string) => {
+      const frame = sync as { upserts?: Array<{ id?: unknown }> };
+      const upserts = Array.isArray(frame?.upserts) ? frame.upserts : [];
+      const kept = upserts.filter((upsert) => {
+        if (typeof upsert?.id !== "string") return true;
+        if (upsert.id.startsWith("computed:")) computedSeen.add(upsert.id);
+        if (upsert.id.startsWith("cid:")) {
+          droppedCids += 1;
+          return false;
+        }
+        return true;
+      });
+      return originalApply(
+        kept.length === upserts.length
+          ? sync
+          : { ...(sync as object), upserts: kept },
+        type,
+      );
+    };
+
+    // Subscribe FIRST (this starts the background consumer), activate
+    // SECOND: everything the ensure materializes reaches this replica
+    // as push frames on the consume path. The liveness cell is synced
+    // up front too — it rides the SAME session's consume loop, and its
+    // later update is the discriminator a dead loop can never deliver.
+    const probe = reader.getSpaceCell(space).key("defaultPattern");
+    await probe.sync();
+    const liveness = reader.getCell<{ n?: number }>(
+      space,
+      "ow61-containment-liveness",
+      undefined,
+    );
+    await liveness.sync();
+    expect(await created.activate()).toBe(true);
+
+    // Producer sanity: the ensure's computed cells DID ride the plain
+    // subscription as pushes, and the simulated defect DID drop cid
+    // deliveries — without both, this pin is vacuously green.
+    await waitUntil(
+      () => computedSeen.size > 0,
+      "the ensured root's computed cell riding the plain subscription",
+    );
+    await waitUntil(
+      () => droppedCids > 0,
+      "the simulated absorb defect dropping a cid delivery",
+    );
+    await waitUntil(
+      () => stats.rootEnsure.created === 1,
+      "the ensure's creation to complete beside the defective reader",
+    );
+
+    // THE PIN, half one — the consumer SURVIVED the violating push
+    // frames (pre-containment: unhandled rejection in consumeUpdates,
+    // nothing after this point runs) and the mention-carrying computed
+    // doc is QUARANTINED, not applied: fail-closed for the doc.
+    let quarantinedId: string | undefined;
+    await waitUntil(
+      () => {
+        quarantinedId = [...computedSeen].find((id) =>
+          replica.getDocument(id) === undefined
+        );
+        return quarantinedId !== undefined;
+      },
+      "a cid-mentioning computed doc held in quarantine (not applied)",
+    );
+
+    // Half two — the CONSUMER LOOP IS ALIVE, proven by delivery: a
+    // writer pushes an update to the pre-synced liveness cell, and the
+    // reader must SEE it arrive through the same background session.
+    // Pre-containment the violating push frame's throw ended the
+    // consume loop (the unhandled rejection is retained by the test
+    // harness, so death is otherwise silent here — the round-3
+    // review's R2), and this wait times out: the discriminator.
+    // A stall anywhere in the writer path must FAIL with its name, not
+    // hang the suite ahead of the named liveness wait below (Cubic P2 on
+    // this PR). These are event-completions, not polls — the deadline
+    // only converts a hang into a named failure, matching the suite's
+    // waitUntil discipline.
+    const named = async <T>(promise: Promise<T>, label: string): Promise<T> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          promise,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () => reject(new Error(`timed out waiting for ${label}`)),
+              20_000,
+            );
+          }),
+        ]);
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    };
+    {
+      const writer = clientRuntime(spaceSigner);
+      const writerLiveness = writer.getCell<{ n?: number }>(
+        space,
+        "ow61-containment-liveness",
+        undefined,
+      );
+      await named(writerLiveness.sync(), "the writer's liveness-cell sync");
+      const tx = writer.edit();
+      writerLiveness.withTx(tx).set({ n: 2 });
+      expect((await named(tx.commit(), "the writer's liveness commit")).error)
+        .toBeUndefined();
+      await named(
+        writer.storageManager.synced(),
+        "the writer's post-commit sync barrier",
+      );
+    }
+    await waitUntil(
+      () => (liveness.get() as { n?: number } | undefined)?.n === 2,
+      "a post-quarantine push to be DELIVERED through the same consumer",
+    );
+
+    // And the request-shaped path still answers ok (pre-containment
+    // the pull-path validator throw surfaced here as an error
+    // result — the round-3 review's named discriminator), plus an
+    // ordinary write/read round trip through the reader itself.
+    const lateSync = await (reader.storageManager.open(space) as unknown as {
+      sync(
+        id: string,
+        selector: { path: string[]; schema: boolean },
+      ): Promise<{ error?: unknown }>;
+    }).sync(quarantinedId!, { path: [], schema: false });
+    expect(lateSync.error).toBeUndefined();
+    // The request path exercised the exact quarantined doc, and the
+    // quarantine held through it (its cid rode the response and was
+    // dropped by the simulated defect again).
+    expect(replica.getDocument(quarantinedId!)).toBeUndefined();
+    const witness = reader.getCell<{ n?: number }>(
+      space,
+      "ow61-containment-witness",
+      undefined,
+    );
+    await witness.sync();
+    {
+      const tx = reader.edit();
+      witness.withTx(tx).set({ n: 1 });
+      expect((await tx.commit()).error).toBeUndefined();
+      await reader.storageManager.synced();
+    }
+    expect((witness.get() as { n?: number } | undefined)?.n).toBe(1);
+    expect(stats.rootEnsure.failures).toBe(0);
+  });
+
   it("the ensure's creation tx carries the resolved OWNER's trust snapshot, never the service's (granted-owner space, default-app source)", async () => {
     await seedAcl({ [aliceSigner.did()]: "OWNER" });
     const created = newSpaceServer();

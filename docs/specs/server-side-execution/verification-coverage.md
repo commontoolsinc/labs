@@ -3966,10 +3966,10 @@ supply; OW29/OW32/OW34 closed):
     217–253 OFF; the several-second sends gone) and the new
     sender-echo series (the one bar that FAILS as worded: not ms-class
     in either arm, ON 1.5–2.4× OFF on chat, attributed to the client
-    (e) term). **(ii) stays OWED to the owner**: the flip's numeric
-    BAR is the owner's ruling — W4 reports the numbers and does not
-    rule; the flip gate (plan Phase 7 task 1 item 4) still reads
-    against the RULED bar once the owner sets it.
+    (e) term). **(ii) RULED 2026-08-24 (owner, verbatim): "topics
+    numbers are fine." — the flip performance bar is MET on the
+    measured numbers**; the flip gate (plan Phase 7 task 1 item 4)
+    reads satisfied on this ruling.
   - OW31 (row above, RULED 2026-08-18; BUILT 2026-08-21): the
     write-authority posture is
     ruled — the serving identity never writes users' home spaces, the
@@ -6790,12 +6790,45 @@ supply; OW29/OW32/OW34 closed):
     identical signature — the ping durable AND consequenced at the
     probe (`expect(...).toEqual([])` received the consequenced ping
     entry) — on a loaded machine at `b775787b6`; five runs of plain
-    main's version at the same head were green. Owed, still: a
-    construction that holds under insertion-shifted timing (or an
-    owner call to accept-and-retry the step); until then a red of
-    THIS step with the ping already durable at the probe is this
-    race, not a product regression, and not the inserting PR's
-    defect. No lift trigger (test-harness item).
+    main's version at the same head were green. The owed
+    "construction that holds" was then DISPROVED as reachable
+    test-side: after two further arming constructions failed on the
+    identical signature (a drain-sync seam, then the queue seam
+    #6233 merged — the arming provably synchronous with the sealed
+    append), 5 identical CI observations on #6223's boards forced
+    the seam audit (PR #6223, comment 5401826757): the serving
+    cycle's ONLY `inputSynced` consultation is inside the settle
+    race (`space-server.ts` `#waveCycle` :3727), and the committing
+    tail after the settle break (watermark `tx.commit()` :3979 →
+    notice settle :3998 → wave capture :4002 → `await #sealChain`
+    :4005 → `commitWave` :4046) admits late seals with NO further
+    gate sample — an emitter interleaving into those awaits flushes
+    past an ARMED gate. The settle is a WATERMARK barrier, not an
+    admission barrier (no product defect asserted; W never claims
+    tail seqs), so no test-side held-wave construction can be sound
+    for tail-arriving work, and even a held gate only DELAYS (the
+    deadline arm commits what is sealed so far). RULED 2026-08-24
+    (owner, verbatim): "agreed with your recommendation: bounded
+    accept-and-retry for now". BUILT (the retry PR): the M1 SIBLING
+    step re-runs its FULL construction (fresh prefix, host tenure,
+    client) at most TWICE; ONLY the tagged structural signature
+    retries — the held-wave probe finding the flushed ping durable
+    (`A3StructuralWindow`) — and every other failure propagates on
+    the first attempt (verified: the title's sibling-fold mutation
+    reds attempt 1 with zero retries; the forced window retries
+    once, logs once, and propagates after attempt 2). Absorbed hits
+    log the greppable marker `a3-structural-window-retry (OW57)` —
+    the CI count is the evidence base for this row's DESTINATION: a
+    product-side seam on the committing tail (its own considered
+    change), which is what would let a held-wave construction bind
+    again. The plain (α3) ORPHAN step shares the construction class
+    and INHERITS this disposition if it ever fires the same
+    signature (durable flushed ping at its held-wave probe) — not
+    pre-wrapped: the ruling's scope is "for now", the observed
+    step. Until then a red of an (α3) step with the ping already
+    durable at the probe is this window, not a product regression,
+    and not the inserting PR's defect. No lift trigger
+    (test-harness item).
   - **OW58 — the consequence-notice resolved-error guard wedge
     (adversarial review of PR #6186, MAJOR-1 — probe-confirmed;
     minted 2026-08-21; PRE-EXISTING since Phase 3, NOT introduced by
@@ -6962,14 +6995,109 @@ supply; OW29/OW32/OW34 closed):
     one local run at the same head did not). With the test lanes'
     ensure opt-out (the RULED switch) the defect is LATENT again, not
     fixed. SURFACED TO THE OWNER 2026-08-24 (the coordinator is
-    carrying it). Owed: a ruling on the delivery side — deliver the
-    schema closure with the computed doc, or make the arrival
-    validator's failure a deferred re-fetch instead of an uncaught
-    throw — and a pin reproducing the delivery race directly (the
-    ensure gives it a deterministic producer). Trigger: before any
-    production deployment that runs the ensure ON beside space-cell-
-    only subscribers, and before the flip PR's list-EMPTY bar
-    (an ON fleet re-reaches it by construction).
+    carrying it). RULED 2026-08-24 (owner, verbatim — the shipping
+    side is the fix):
+
+    > "seam 3: that's a bug then, and the most straightforward fix is
+    > to make sure the subscription query results include cids when
+    > they are mentioned, just like they follow the `source` metadata."
+
+    > "ack on all recommendaions, except 2/OW61 (ii): instead of
+    > holding computed: docs, let's fix the shipping side and make
+    > sure `cid` s arrive with the `computed` that require them, i.e.
+    > the seam 3 fix i propose (and i'm surprised isn't in already,
+    > tbh)."
+
+    The coordinator's recommendation (i) — the arrival validator's
+    uncaught throw becomes a CONTAINED per-doc failure (fail-closed
+    for the doc, contained for the process) — was ACKed and stands
+    beside the shipping fix. BUILT (this row's closing PR), three
+    parts, each red-first. **The mechanism, located:** the cid
+    following the ruling asks for EXISTED at the graph layer —
+    `assembleSchemaDocClosures` (memory/v2/query.ts, since #5833)
+    scans every delivered snapshot for embedded cid refs and stages
+    the verified closure, beside the meta-link following
+    (`loadMetaLinkedDocs`, runner traverse.ts) that ships computed
+    results at all — but it stages a closure doc only while the
+    tracked graph has never delivered it, and the frame builders
+    additionally elide entries the session cache says were delivered
+    before. So a RE-delivered cid-mentioning doc shipped in a frame
+    WITHOUT its cid: sibling, and that frame's validity hung on the
+    client having durably applied every earlier frame in order —
+    the ordering delivery-window timing broke. (1) Shipping — BUILT
+    as a per-frame resend (`closeFrameOverSchemaRefs` at the three
+    diffed builders), then **REVERSED by the owner 2026-08-24
+    (verbatim)**:
+
+    > "this change undermines why we added cids in the first place,
+    > to not retransmit the schemas all the time"
+
+    > "the client should absorb all information sent from the server,
+    > it shouldn't ever dismiss a frame. i don't think it even does
+    > so."
+
+    > "So if we saw this in CI - earlier frame delivered cid doc,
+    > later frame didn't see it - then that's the actual bug."
+
+    The resend and its pins and spec text are REMOVED; the server's
+    cross-frame elision of already-delivered cid docs is
+    correct-by-design, and the ACTUAL bug is CLIENT-side — a replica
+    that failed to absorb/retain (or apply in order) an earlier cid
+    delivery. That investigation and fix run as a SEPARATE
+    owner-spawned session (its deliverable includes the
+    absorb-contract pin); its design is deliberately not scoped in
+    this row. (2) Containment — ACKed, KEPT, and what closes OW61's
+    crash class on its own: `#validateArrivedSchemaDocuments`
+    returns a quarantine set instead of throwing — the offending doc
+    drops from the frame with a loud per-doc diagnostic (fixpoint
+    over in-frame schema docs so dependents fail closed together),
+    the replica keeps its prior state for it, and the heal arrives
+    with the next FULL evaluation (watch.set/reconnect ship the
+    whole assembled closure — under the elision design an unchanged
+    quarantined doc is rightly never re-delivered mid-session);
+    `consumeUpdates` additionally catches any residual per-frame
+    apply failure. In the race window the computed doc now
+    quarantines-with-loud-log instead of killing the worker; the
+    correctness fix lands from the investigation session. Also kept:
+    the watch.add session-cache staging reorder (the delta review's
+    S4 — diff, build the frame, only then commit the cache; its
+    red-first pin died with the resend, whose closure pass was the
+    only reachable throw in that window, so the ordering is kept as
+    commented hygiene). (3) Pins standing: four steps in
+    `runner/test/schema-doc-sync.test.ts`, each watched red at base
+    `2ea87cea9` with the exact uncaught validator throws from the
+    board (quarantine + innocent-sibling survival + the
+    full-evaluation heal + the consumeUpdates belt); and the
+    ensure-driven containment pin in
+    `runner/test/executor-space-root-ensure.test.ts` ("a plain
+    space-cell subscriber SURVIVES a replica that fails to absorb
+    the cid schema docs") — the register's named deterministic
+    producer with a simulated absorb defect (cid upserts dropped at
+    the reader replica), routed through the BACKGROUND consume path
+    (the subscription registers before the ensure activates, so the
+    violating frames arrive as pushes — the crash class's actual
+    seam; the round-3 review's R2 caught the earlier pull-path
+    construction passing at base). The discriminator is DELIVERY
+    LIVENESS: after the quarantine, a writer's push to a pre-synced
+    cell must arrive through the same consumer — watched red against
+    the no-containment base validator (the board's exact doc pair as
+    an unhandled rejection, then the liveness timeout), green at
+    head with the computed doc quarantined, the request path
+    answering ok, and the ensure completing.
+    Subscriber-shape finding (the owner's cf-harness question,
+    verified): ALL THREE named production space-cell-only
+    subscribers are ONE shape — `PiecesController`'s constructor
+    subscription (`piece/src/ops/pieces-controller.ts` —
+    `runtime.getSpaceCell(space).sync()`, no root-aware demand) —
+    constructed by the CLI (`cli/lib/piece.ts`), agents-host
+    (`agents-host/src/fabric-runtime.ts`), AND cf-harness's
+    run_pattern session (`cf-harness/src/fabric-session.ts`), so
+    yes: cf-harness is also that shape, and the containment covers
+    all three. Residual trigger: the investigation session's
+    absorb-contract fix landing (which retires the quarantine to a
+    true never-fires net), and any live `schema-doc-quarantine` log
+    — each occurrence is evidence for that investigation, not a
+    server-side hole.
 
   - **OW62 — adopt-not-start: the piece-open seam is where the ON
     execution model's "one starter per piece" has to land. POST-FLIP

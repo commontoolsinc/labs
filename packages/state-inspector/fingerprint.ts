@@ -30,8 +30,8 @@ import { listScopes } from "./scopes.ts";
  * `listEntityModels` caps at 5,000 by default — a real Estuary space already
  * exceeds that. A fingerprint computed over a truncated enumeration would still
  * return a confident-looking hash, which is the exact failure this whole module
- * exists to prevent, so we raise the cap and REFUSE when even that is reached
- * rather than hash a partial space.
+ * exists to prevent, so we raise the cap and REFUSE the listing that reports
+ * itself truncated rather than hash a partial space.
  */
 const ENUMERATION_CAP = 1_000_000;
 
@@ -70,19 +70,18 @@ function allEntities(
 ): EntityModel[] {
   const out: EntityModel[] = [];
   for (const scope of listScopes(space, { branch })) {
-    const models = listEntityModels(space, {
+    const listing = listEntityModels(space, {
       branch,
       scope: scope.raw,
       limit: cap,
     });
-    if (models.length >= cap) {
+    if (listing.extent.truncated) {
       throw new Error(
-        `scope ${scope.raw} enumerates ${models.length}+ entities, at or above ` +
-          `the ${cap} cap; refusing to fingerprint a possibly truncated ` +
-          `enumeration.`,
+        `scope ${scope.raw} holds ${listing.extent.total} entities, past the ` +
+          `${cap} cap; refusing to fingerprint a truncated enumeration.`,
       );
     }
-    out.push(...models);
+    out.push(...listing.entities);
   }
   return out;
 }
@@ -120,9 +119,10 @@ export interface FingerprintReport {
 export interface FingerprintOptions {
   branch?: string;
   /**
-   * Refuse rather than fingerprint a space whose scope enumerates at or above
-   * this many entities, since the enumeration may have been truncated. Defaults
-   * to 1,000,000 — far above any real space; raise it only knowingly.
+   * Refuse rather than fingerprint a space whose scope enumerates more than
+   * this many entities, since the enumeration was truncated. A scope holding
+   * exactly the cap is complete and accepted. Defaults to 1,000,000 — far above
+   * any real space; raise it only knowingly.
    */
   enumerationCap?: number;
   /**
@@ -158,6 +158,7 @@ export function generatedInternalCellIds(
     const doc = reconstructDocument(space, {
       id: model.id,
       scope: model.scope,
+      branch: options.branch ?? "",
     });
     const internal = (doc as Record<string, unknown> | undefined)?.internal;
     if (!Array.isArray(internal)) continue;
@@ -217,9 +218,13 @@ export function contentFingerprint(
       excludedGenerated++;
       continue;
     }
+    // The models come from this branch, so the values must too — reading the
+    // default branch here would hash a parent's content under a child's name
+    // and certify two different spaces as identical.
     const doc = reconstructDocument(space, {
       id: model.id,
       scope: model.scope,
+      branch,
     });
     const value = (doc as Record<string, unknown> | undefined)?.value;
     let hash: string | null = null;

@@ -165,6 +165,36 @@ describe("toStructuredDebugValue()", () => {
       expect(result[2]).toEqual({ "/Map": "/..." });
     });
 
+    it("returns a sparse array without visiting the indices it has no element at", () => {
+      // A very sparse array has to cost its element count and not its
+      // `length`, which is what visiting only the keys it has buys.
+      const probed: string[] = [];
+      const target: unknown[] = [];
+      target.length = 1000;
+      target[0] = 1;
+      target[999] = new Map();
+      const counted = new Proxy(target, {
+        has(t, key) {
+          probed.push(String(key));
+          return Reflect.has(t, key);
+        },
+      });
+
+      const result = toStructuredDebugValue(counted) as unknown[];
+      expect(result.length).toBe(1000);
+      expect(Object.keys(result)).toEqual(["0", "999"]);
+      expect(result[999]).toEqual({ "/Map": "/..." });
+      expect(probed).toEqual([]);
+    });
+
+    it("returns an array without the named properties hung on it", () => {
+      const value: unknown[] = [1, new Map()];
+      (value as unknown as Record<string, unknown>).extra = new Map();
+      const result = toStructuredDebugValue(value) as unknown[];
+      expect(Object.keys(result)).toEqual(["0", "1"]);
+      expect(result[1]).toEqual({ "/Map": "/..." });
+    });
+
     it("returns a null-prototype object as an ordinary plain object", () => {
       // Were it treated as a general instance instead, the result would carry
       // a class-name tag rather than the object's own keys.
@@ -410,7 +440,7 @@ describe("toStructuredDebugValue()", () => {
         },
       };
       expect(toStructuredDebugValue(value))
-        .toEqual({ "/unconvertible": "getter blew up" });
+        .toEqual({ boom: { "/unconvertible": "getter blew up" } });
     });
 
     it("returns the failure in place, leaving siblings converted", () => {
@@ -425,14 +455,46 @@ describe("toStructuredDebugValue()", () => {
       };
       expect(toStructuredDebugValue(value)).toEqual({
         before: "kept",
-        bad: { "/unconvertible": "getter blew up" },
+        bad: { boom: { "/unconvertible": "getter blew up" } },
         after: [1, 2],
       });
     });
 
+    it("returns the failure at the property whose read threw", () => {
+      // The read of a property is part of converting it, so a getter that
+      // throws costs its own property and no other.
+      const value = {
+        before: "kept",
+        get boom(): number {
+          throw new Error("getter blew up");
+        },
+        after: 2,
+      };
+      expect(toStructuredDebugValue(value)).toEqual({
+        before: "kept",
+        boom: { "/unconvertible": "getter blew up" },
+        after: 2,
+      });
+    });
+
+    it("returns the failure at the element whose read threw", () => {
+      const value: unknown[] = [1, 3];
+      Object.defineProperty(value, 1, {
+        enumerable: true,
+        configurable: true,
+        get(): never {
+          throw new Error("element read failed");
+        },
+      });
+      expect(toStructuredDebugValue(value)).toEqual([
+        1,
+        { "/unconvertible": "element read failed" },
+      ]);
+    });
+
     it("returns the failure in place for a throwing proxy trap", () => {
-      // The traps differ in where they are reached from, so each has to be
-      // caught close enough to the value to cost only that value.
+      // These traps are reached before any single property is, so each costs
+      // the whole proxy. The `get` trap, reached per-property, is below.
       const traps: ProxyHandler<object>[] = [
         {
           getPrototypeOf() {
@@ -441,11 +503,6 @@ describe("toStructuredDebugValue()", () => {
         },
         {
           ownKeys() {
-            throw new Error("nope");
-          },
-        },
-        {
-          get() {
             throw new Error("nope");
           },
         },
@@ -459,6 +516,22 @@ describe("toStructuredDebugValue()", () => {
           z: 2,
         });
       }
+    });
+
+    it("returns the failure per key for a throwing `get` trap", () => {
+      const bad = new Proxy({ k: 1, j: 2 }, {
+        get() {
+          throw new Error("nope");
+        },
+      });
+      expect(toStructuredDebugValue({ a: 1, bad, z: 2 })).toEqual({
+        a: 1,
+        bad: {
+          k: { "/unconvertible": "nope" },
+          j: { "/unconvertible": "nope" },
+        },
+        z: 2,
+      });
     });
 
     it("returns the failure in place for a non-callable `toString`", () => {
@@ -481,9 +554,11 @@ describe("toStructuredDebugValue()", () => {
             throw thrown;
           },
         };
-        return (toStructuredDebugValue(value) as Record<string, unknown>)[
-          "/unconvertible"
-        ];
+        const result = toStructuredDebugValue(value) as Record<
+          string,
+          Record<string, unknown>
+        >;
+        return result.boom!["/unconvertible"];
       }
 
       it("returns an `Error`'s message, subclasses included", () => {

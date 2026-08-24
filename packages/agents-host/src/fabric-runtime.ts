@@ -1,7 +1,7 @@
 import { createSession, Identity, isDID } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
 import {
-  experimentalOptionsFromEnv,
+  experimentalOptionsForDeployedClient,
   type MemorySpace,
   Runtime,
   runtimePresets,
@@ -35,6 +35,18 @@ export async function openAgentFabricRuntime(options: {
       ? createSession({ identity, spaceDid: options.space })
       : createSession({ identity, spaceName: options.space }));
   options.signal?.throwIfAborted();
+  // The deployment's posture, with this host's explicit EXPERIMENTAL_* still
+  // winning per flag: an agents host is deployed separately from the toolshed
+  // it talks to (docs/development/EXPERIMENTAL_OPTIONS.md). Resolved as its
+  // own stage, ahead of the storage manager, so a startup cancelled while the
+  // deployment is slow to answer leaves nothing allocated behind — the
+  // request carries the signal, and every later stage is already cancellable.
+  const experimental = await experimentalOptionsForDeployedClient({
+    apiUrl,
+    env: (key) => Deno.env.get(key),
+    ...(options.signal !== undefined ? { signal: options.signal } : {}),
+  });
+  options.signal?.throwIfAborted();
   const storageManager = StorageManager.open({
     as: session.as,
     memoryHost: apiUrl,
@@ -43,7 +55,7 @@ export async function openAgentFabricRuntime(options: {
   const runtime = new Runtime(runtimePresets.remoteClient({
     apiUrl,
     storageManager,
-    experimental: experimentalOptionsFromEnv((key) => Deno.env.get(key)),
+    experimental,
     trustSnapshotProvider: () => ({
       id: `principal:${session.as.did()}`,
       actingPrincipal: session.as.did(),
