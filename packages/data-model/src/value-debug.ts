@@ -1,5 +1,6 @@
 /** Debugging-ish helpers for `FabricValue`s. */
 
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
@@ -256,10 +257,32 @@ class DebugConverter {
   /**
    * Converts an array, which is known to be at the indicated nesting depth.
    */
-  #convertArray(value: any[], depth: number): FabricValue {
-    return value.map((item, _index): FabricValue =>
-      this.#convertSubvalue(item, depth + 1)
-    );
+  #convertArray(value: any, depth: number): FabricValue {
+    const result: FabricValue[] = [];
+    // An array is indexable by property name directly, so the index names
+    // `Object.keys()` yields are used as they come.
+    const byName = result as unknown as Record<string, FabricValue>;
+
+    // Only the indices actually present are visited, which costs a sparse
+    // array its element count and not its `length`, and leaves its holes as
+    // holes.
+    result.length = value.length;
+    for (const key of Object.keys(value)) {
+      if (!isArrayIndexPropertyName(key)) {
+        // A named property, which an array's rendering doesn't carry.
+        continue;
+      }
+      try {
+        byName[key] = this.#convertSubvalue(value[key], depth + 1);
+      } catch (e) {
+        // The element read is inside the `try` along with its conversion, so
+        // that an element whose read throws costs just its own index instead
+        // of every element of the array.
+        byName[key] = DebugConverter.#makeErrorResult(e);
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -299,14 +322,23 @@ class DebugConverter {
    * Converts a plain object, which is known to be at the indicated nesting depth.
    */
   #convertPlainObject(value: any, depth: number): FabricValue {
-    const mapper = ([key, value]: [string, any]): [string, FabricValue] => {
-      if (isUnsafeObjectKey(key) || (key[0] === "/")) {
-        key = `/${key}`;
+    const result: Record<string, FabricValue> = {};
+
+    for (const key of Object.keys(value)) {
+      const resultKey = (isUnsafeObjectKey(key) || (key[0] === "/"))
+        ? `/${key}`
+        : key;
+      try {
+        result[resultKey] = this.#convertSubvalue(value[key], depth + 1);
+      } catch (e) {
+        // The property read is inside the `try` along with its conversion, so
+        // that a property whose getter throws costs just itself instead of
+        // every property of the object.
+        result[resultKey] = DebugConverter.#makeErrorResult(e);
       }
-      return [key, this.#convertSubvalue(value, depth + 1)];
-    };
-    const converted = Object.entries(value).map(mapper);
-    return Object.fromEntries(converted);
+    }
+
+    return result;
   }
 
   /**
