@@ -340,9 +340,13 @@ class DebugConverter {
       }
 
       case "function": {
-        const name = value.name;
-        const content = (name != "") ? `${name}(...)` : "<anonymous>(...)";
-        return { "/function": content };
+        try {
+          const name = value.name;
+          const content = (name != "") ? `${name}(...)` : "<anonymous>(...)";
+          return { "/function": content };
+        } catch (e) {
+          return { "/function": DebugConverter.#makeErrorResult(e) };
+        }
       }
 
       case "object": {
@@ -416,7 +420,11 @@ class DebugConverter {
           return msg;
         }
       }
-      return String(error);
+      try {
+        return String(error);
+      } catch {
+        return "/unconvertibleError";
+      }
     })();
 
     return { "/unconvertible": message };
