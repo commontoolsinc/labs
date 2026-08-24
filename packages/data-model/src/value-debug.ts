@@ -285,7 +285,10 @@ class DebugConverter {
     }
 
     const props = { ...value };
-    return { [tag]: this.#convertSubvalue(props, depth + 1) };
+    const converted = (Object.keys(props).length !== 0)
+      ? this.#convertSubvalue(props, depth + 1)
+      : "/...";
+    return { [tag]: converted };
   }
 
   /**
