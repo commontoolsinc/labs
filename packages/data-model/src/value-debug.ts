@@ -209,6 +209,7 @@ class DebugStringifier {
 class DebugConverter {
   readonly #value: any;
   readonly #maxDepth: number;
+  readonly #replacer: undefined | ((value: any) => any);
   readonly #nestingStack = new Map<object, number>();
 
   /**
@@ -219,9 +220,12 @@ class DebugConverter {
     value: unknown,
     /** Maximum nesting depth. */
     maxDepth: number,
+    /** Replacer function. */
+    replacer?: (value: any) => any,
   ) {
     this.#value = value;
     this.#maxDepth = maxDepth;
+    this.#replacer = replacer;
   }
 
   /**
@@ -299,6 +303,11 @@ class DebugConverter {
    * depth.
    */
   #convertSubvalue(value: any, depth: number): FabricValue {
+    // Give the `replacer` (if supplied) an opportunity to perform replacement.
+    value = this.#replacer
+      ? this.#replacer(value)
+      : value;
+
     // Handle all the straightforward cases.
     switch (typeof value) {
       case "bigint":
@@ -502,9 +511,13 @@ export function toDebugKindString(value: unknown): string {
  * `codec-json` encoding form, and with as little chance for ambiguity as can
  * be reasonably achieved.
  *
- * If the given `maxDepth` is specified, that is the nesting limit of the
- * result. Any items which would require further nesting are instead converted
- * into a form suggestive of the elided information.
+ * If a `maxDepth` is supplied as a positive integer, that is the nesting limit
+ * of the result. Any items which would require further nesting are instead
+ * converted into a form suggestive of the elided information.
+ *
+ * If a `replacer` is supplied, it is called on every value and sub-value
+ * encountered, to get a replacement value to use. If the `replacer` does not
+ * want to replace the value, then it should return the value it receives.
  *
  * If the conversion could not be completed (stack overflow, object
  * `toJSON()` conversion error, etc.), this function returns the literal value
@@ -522,6 +535,8 @@ export function toStructuredDebugValue(
    * maximum depth.
    */
   maxDepth?: number | undefined,
+  /** Replacer function, if desired. */
+  replacer?: (value: any) => any,
 ): FabricValue {
   const ACTUAL_MAX = 100; // To prevent blowing out the stack when converting.
 
@@ -547,5 +562,5 @@ export function toStructuredDebugValue(
 
   // We subtract one from `maxDepth` because the "suggestive forms" for elided
   // data all use one layer of depth.
-  return new DebugConverter(value, maxDepth - 1).convert();
+  return new DebugConverter(value, maxDepth - 1, replacer).convert();
 }
