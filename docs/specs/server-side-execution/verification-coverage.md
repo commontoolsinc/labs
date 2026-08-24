@@ -5753,7 +5753,18 @@ supply; OW29/OW32/OW34 closed):
     synchronous block as the claim checks, so no promise hop
     separates claim from hand-off for a stop+restart to slip a
     foreign registration into (the delta review's D2, closed by
-    construction) — after which the parent's one Cancel handle stops
+    construction) — and the hand-off is IDENTITY-EXACT (Cubic P1,
+    post-mini-delta, confirmed and fixed red-first): the attempt
+    records the registration its OWN startCore created, and only
+    that registration, still current, is handed off — because a
+    COMPETING start can install into the registry the recovery's
+    entry emptied with no stop and so no generation bump (startCore's
+    unconditional install; the only bump sites live in stopResult),
+    and the walk's already-started returns report it as success; on
+    a foreign registration the recovery YIELDS exactly as
+    `startWithTx` yields on an owned key (the piece runs under the
+    competitor's authority — an independent navigate keeps its
+    life). After the hand-off the parent's one Cancel handle stops
     the recovered run, and a cancel that landed during the wait or
     the walk is finished by that markInstalled against the real
     registration: stopped in the same breath, the walk reporting
@@ -5797,7 +5808,10 @@ supply; OW29/OW32/OW34 closed):
     recorded as one joint kill, not two), the entry authority gate
     (stop-wins pin), the stale-install CLEAR (mid-walk pin), the
     in-claim markInstalled hand-off (parent-handle AND mid-walk
-    pins — doubly load-bearing), and the cross-space CALL SITE (the
+    pins — doubly load-bearing), the hand-off's IDENTITY gate
+    (competing-start pin — watched red at the pre-fix head: the
+    parent's cancel tore down the competitor's independent run), and
+    the cross-space CALL SITE (the
     routing pin's entry-point instrumentation — the review's F13
     found the prior pin vacuous to exactly this mutation; it now
     reds). The

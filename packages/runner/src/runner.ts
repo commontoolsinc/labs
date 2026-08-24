@@ -217,6 +217,15 @@ type StartAttempt = {
   // The result this attempt resolved to, which a link start only learns by
   // following the link.
   targetKey?: `${MemorySpace}/${ScopeKey}/${URI}`;
+  // The exact registration THIS attempt's startCore created, when it
+  // created one. A walk can also report success for a registration it did
+  // NOT create (doStart's already-started returns, including the
+  // mid-resume re-check) — a COMPETING start can install into a registry
+  // the caller emptied, with no stop and so no generation bump to witness
+  // it. A caller that hands a registration to an ownership it holds must
+  // hand off THIS one, never merely whatever `cancels` holds at claim
+  // time (the catch-up recovery's Cubic-P1 fix).
+  installedRegistration?: Cancel;
 };
 
 // The debug-name builders reuse the action's already-computed
@@ -3254,7 +3263,7 @@ export class Runner {
     if (wasPreparedLocally || wasStoppedLocally) {
       if (!this.isStartAttemptCurrent(attempt)) return Promise.resolve(false);
       try {
-        this.startCore(rootCell, {
+        attempt.installedRegistration = this.startCore(rootCell, {
           givenPattern: resolvedPattern,
           schedulePatternUpdate: attempt.schedulePatternUpdate,
         });
@@ -3291,7 +3300,7 @@ export class Runner {
 
       const startCoreStart = performance.now();
       try {
-        this.startCore(rootCell, {
+        attempt.installedRegistration = this.startCore(rootCell, {
           givenPattern: resolvedPattern,
           schedulePatternUpdate: attempt.schedulePatternUpdate,
           schedulerRehydration: this.schedulerRehydrationOptions(
@@ -3576,10 +3585,18 @@ export class Runner {
    * hands the claimed registration to the token INSIDE its claim
    * mapping — the same synchronous block as the claim checks, no
    * promise hop for a stop+restart to slip a foreign registration into
-   * (delta review D2) — so a parent cancel from then on stops the
-   * recovered run, and one that landed during the wait or the walk is
-   * finished by that markInstalled against the real registration: the
-   * run is stopped in the same breath and the walk reports not-running.
+   * (delta review D2) — and the hand-off is EXACT: only the
+   * registration this attempt's own startCore created, still current
+   * (Cubic P1 — a COMPETING start can install into the registry the
+   * recovery's entry emptied with no stop and so no generation bump,
+   * and the walk's already-started returns report it as success; an
+   * identity-blind hand-off would bind the parent's token to a run
+   * whose lifecycle the parent does not own, so the recovery instead
+   * yields exactly as on an owned key). A parent cancel from the
+   * hand-off on stops the recovered run, and one that landed during
+   * the wait or the walk is finished by that markInstalled against the
+   * real registration: the run is stopped in the same breath and the
+   * walk reports not-running.
    * If another start took the key while the recovery waited, the
    * recovery yields exactly as `startWithTx` yields on an owned key:
    * the piece has a context under someone else's authority, and the
@@ -3770,8 +3787,26 @@ export class Runner {
             this.isStartAttemptCurrentFor(attempt, target) &&
             this.cancels.has(target);
           if (stillRunning && ownership !== undefined) {
-            const current = this.cancels.get(target!)!;
-            if (ownership.markInstalled(current)) {
+            const current = this.cancels.get(target!);
+            if (
+              attempt.installedRegistration === undefined ||
+              current !== attempt.installedRegistration
+            ) {
+              // Not this walk's own registration (Cubic P1): a COMPETING
+              // start claimed the result while the walk was in flight —
+              // installing into the registry the recovery's entry
+              // emptied needs no stop, so no generation bump witnesses
+              // it, and doStart's already-started returns report it as
+              // success. The piece runs under the competitor's
+              // authority; binding it to the caller's token would let a
+              // parent cancel tear down a run whose lifecycle the
+              // parent does not own. Yield exactly as startWithTx
+              // yields on an owned key: settle the token without
+              // touching the registration.
+              ownership.cancel();
+              return true;
+            }
+            if (ownership.markInstalled(current!)) {
               // A cancel was pending (it landed during the wait or the
               // walk): markInstalled just finished it against the real
               // registration — the run is stopped, not owned.
