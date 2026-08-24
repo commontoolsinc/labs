@@ -78,6 +78,13 @@ export type ExecutorHostOptions = {
     dispose: () => Promise<void>;
   }>;
   policy?: SpaceServerPolicy;
+  /** The RULED test switch for the tenure's space-root ensure (OW45
+   * arm-B stage 1, RULED 2026-08-24 — see SpaceServerOptions.
+   * ensureSpaceRoots): default ON (production posture); `false`
+   * disables it for every SpaceServer this host builds. A
+   * whole-instance switch — per-space discrimination is deferred by
+   * the same ruling. */
+  ensureSpaceRoots?: boolean;
 };
 
 export class ExecutorHost {
@@ -423,6 +430,9 @@ export class ExecutorHost {
         localSeqRef,
         stats: this.#stats,
         policy: this.#options.policy,
+        ...(this.#options.ensureSpaceRoots !== undefined
+          ? { ensureSpaceRoots: this.#options.ensureSpaceRoots }
+          : {}),
         onParked: (reason) => {
           // The backoff streak: a `loop-failed` park extends it; an
           // idle park (a healthy tenure winding down) clears it. Parks

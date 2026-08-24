@@ -62,7 +62,33 @@ export type PatternUpdateOutcome =
 
 type CheckMode =
   | { kind: "instantiated" }
-  | { kind: "default-root"; officialSource: string };
+  | {
+    kind: "default-root";
+    officialSource: string;
+    /** Per-attempt transaction hook for the default-root check's TWO
+     * write arms (the provenance repair and the transition — the
+     * fabric arm returns "current" for this mode before any write).
+     * The server-side space-root ensure passes its owner-resolved
+     * trust-snapshot setter here (OW45 arm-B stage 1, F1 of its
+     * adversarial review): a transaction's BIRTH snapshot is the
+     * runtime's ambient one — the SERVICE, on a serving runtime — and
+     * the bookkeeping stamp deliberately leaves an actor-less run's
+     * snapshot alone, so without this hook the update arm's
+     * `runtime.setup` on the space root (the label-minting class)
+     * would restage the root AS THE SERVICE after every system-pattern
+     * release — OW59's named restage shape. Runs FIRST in each
+     * attempt, before the callback's first read, so prepare and the
+     * commit-time recheck see one snapshot; the snapshot it sets
+     * SURVIVES the arm's own later bookkeeping stamp because
+     * stampServerRun leaves an actor-less run's snapshot alone — the
+     * invariant this whole hook rests on (the creation arm relies on
+     * the same property in mirror order). Client callers pass
+     * nothing and keep their ambient (own-user) snapshot,
+     * byte-identical to before. Single-flight note: the hook rides the
+     * FIRST caller's mode; on a serving runtime the only default-root
+     * caller is the ensure. */
+    stampTx?: (tx: IExtendedStorageTransaction) => void;
+  };
 
 type PendingCheck = {
   abort: AbortController;
@@ -132,6 +158,11 @@ export class PatternUpdater {
   checkDefaultPattern(
     resultCell: Cell<unknown>,
     officialSource: string,
+    options?: {
+      /** See CheckMode's default-root `stampTx` — the server ensure's
+       * owner-snapshot hook for the check's write arms. */
+      stampTx?: (tx: IExtendedStorageTransaction) => void;
+    },
   ): Promise<PatternUpdateOutcome> {
     if (!this.#runtime.experimental.systemPatternAutoUpdate) {
       return Promise.resolve("skipped-disabled");
@@ -139,6 +170,7 @@ export class PatternUpdater {
     return this.#singleFlight(resultCell, {
       kind: "default-root",
       officialSource,
+      ...(options?.stampTx !== undefined ? { stampTx: options.stampTx } : {}),
     });
   }
 
@@ -368,6 +400,9 @@ export class PatternUpdater {
             // tx.abort() here would itself be classified as retryable.
             signal.throwIfAborted();
           }
+          // The caller's snapshot hook, BEFORE the first read (canWrite
+          // reads) — see CheckMode's default-root stampTx.
+          if (mode.kind === "default-root") mode.stampTx?.(tx);
           if (!canWrite(tx)) return false;
           // The updater runs from a raw single-flight promise (no
           // scheduler run stamps it), and the serving runtime runs with
@@ -587,6 +622,11 @@ export class PatternUpdater {
           // remaining retries with the same cancellation on every attempt.
           signal.throwIfAborted();
         }
+        // The caller's snapshot hook, BEFORE the first read (canWrite
+        // reads) — see CheckMode's default-root stampTx. In this mode
+        // the update arm runs `runtime.setup` on the root below, so the
+        // snapshot set here is what its label mints resolve against.
+        if (mode.kind === "default-root") mode.stampTx?.(tx);
         if (!canWrite(tx)) return false;
         // Async source-update transition — bookkeeping per
         // serving-loop.md §3d, same reason as repairProvenance above.

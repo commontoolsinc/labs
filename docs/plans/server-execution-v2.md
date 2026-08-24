@@ -38,7 +38,34 @@ The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
-**Delta 2026-08-22 (this PR): OW45 arm B triaged on an instrumented
+**Delta 2026-08-23 (this PR): OW45 arm-B server-ensure STAGE 1 BUILT —
+the space-root ensure (existence + freshness, no start) runs at the
+SpaceServer's activation as a lease-guarded, single-flight owed step —
+non-blocking at activation, DEADLINE-BOUNDED in the first cycle
+(rootEnsureDeadlineMs, default 30 s: a wedged fetch must never hold a
+tenure's lease — the build review's F2); the client is behaviorally
+UNCHANGED.** The
+design of record is PR #6209
+(`docs/history/plans/server-execution-v2/optimize/ow45-armb-server-ensure-design.md`,
+owner-green-lit 2026-08-23); the build report with the four
+owner-may-veto operating assumptions (owner-resolved fail-closed
+attribution via the memory server's new `resolveSpaceOwner`;
+custom-`defaultAppUrl` log-and-use-system-default interim; the
+runnability-repair pair NOT moved — recorded as a STAGE-2 GATE: the ON
+client's creation retirement must not ship before the pair moves;
+ARM-B out of scope) is
+`ow45-armb-server-ensure-stage1-report.md` beside it. The ensure core
+is EXTRACTED into the runner (`ensure-space-root.ts`, beside
+pattern-updater/ensure-piece-running) and the client controller's
+creation arm now delegates to it, so OFF stays one code path; OFF
+witnesses: the toolshed bootstrap pin (flag off → no host, the seat's
+only reachability chain severed at its first link) and the piece-side
+OFF-arm creation pin, both mutation-checked. The ARM-A refusal class
+does NOT close in stage 1 (the ON client still creates; the server now
+wins most races) and the reload step's ON skip STAYS — the measurement
+section of the build report carries the before/after numbers.
+
+**Delta 2026-08-22: OW45 arm B triaged on an instrumented
 client — the starvation family is THREE defects: two FIXED red-first,
 one isolated live and FORKED to the owner; the last skip entry STAYS.**
 The instrumented bench (worker console forwarded, fresh store per run,

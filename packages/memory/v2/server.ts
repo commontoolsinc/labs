@@ -1324,6 +1324,29 @@ export class Server {
     return owners[0];
   }
 
+  /**
+   * The space's resolved ACL OWNER, for the executor's server-side
+   * space-root ensure (OW45 arm-B server-ensure stage 1, design PR
+   * #6209 §4 option (b)): the ensure's creation run carries an
+   * owner-resolved per-run CFC trust snapshot — the follow-up OW59's
+   * Q3 caveat pre-named — and derives its home-space predicate from
+   * the ACL (self-owned = home), because a serving runtime's
+   * `userIdentityDID` is the SERVICE DID. This is the same resolution
+   * the delegated READ binding uses ({@link #resolveSpaceOwnerBinding}),
+   * exposed as a first-class read: it IS the ruled "ACL can be read
+   * with service identity" (OW31, RULED 2026-08-19). `undefined` means
+   * no valid concrete-owner ACL resolves (missing, invalid, retracted,
+   * or ANYONE-only) — callers fail closed, never substitute the
+   * service DID (OW53's ruled shape; `homeSpacePrincipalFor`'s
+   * posture).
+   */
+  resolveSpaceOwner(
+    engine: Engine.Engine,
+    space: string,
+  ): string | undefined {
+    return this.#resolveSpaceOwnerBinding(engine, space);
+  }
+
   #invalidateAclCapabilities(space: string): void {
     this.#aclCapabilities.delete(space);
   }
