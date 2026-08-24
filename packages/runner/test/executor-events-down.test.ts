@@ -2767,13 +2767,22 @@ describe("Phase 3 events-down (serving side)", () => {
     }
   });
 
-  it("(α3) + a same-eventId SIBLING tx (independent review M1): the LT1 copy of a DERIVATION emitter's superseded append commits a sibling event-handler-stamped tx (the served navigateTo intent shape) inside the same wave; the orphan refusal must take the SIBLING down with the handler's contribution — neither half of an orphan lands (a navigation intent enacted for an event with zero durable entries is events.md §4's FORBIDDEN half-delivery); the refusal is counted once per EVENT (mutation: the sibling fold removed → the handler half is refused, the intent half LANDS — `side` 1)", async () => {
-    const w = await w3Setup("w3-sibling-orphan", { flushDeadlineMs: 30_000 });
+  /** Tags the ONE retryable failure of the sibling-orphan step: the
+   * held-wave probe finding the emitter's flushed "ping" durable — the
+   * structural ungated-tail window (OW57). Nothing else throws this. */
+  class A3StructuralWindow extends Error {}
+
+  /** The sibling-orphan construction, extracted whole so the bounded
+   * accept-and-retry below can re-run it FRESH (the window lottery is
+   * per-construction — a bare re-assert would just re-fail): every
+   * attempt gets its own doc/stream prefix, host tenure, and client. */
+  const runSiblingOrphanConstruction = async (prefix: string) => {
+    const w = await w3Setup(prefix, { flushDeadlineMs: 30_000 });
     const cancels: Array<() => void> = [];
     const gate = Promise.withResolvers<void>();
     const sideClient = clientRuntime.getCell<{ n?: number }>(
       space,
-      "w3-sibling-orphan-side",
+      `${prefix}-side`,
       undefined,
     );
     await sideClient.sync();
@@ -2785,7 +2794,7 @@ describe("Phase 3 events-down (serving side)", () => {
     }
     const sideServing = w.serving.getCell<{ n?: number }>(
       space,
-      "w3-sibling-orphan-side",
+      `${prefix}-side`,
       undefined,
     );
     await sideServing.sync();
@@ -2819,7 +2828,7 @@ describe("Phase 3 events-down (serving side)", () => {
       ));
       const trigger = w.serving.getCell<{ v?: number }>(
         space,
-        "w3-sibling-orphan-trigger",
+        `${prefix}-trigger`,
         undefined,
       );
       await trigger.sync();
@@ -2876,7 +2885,48 @@ describe("Phase 3 events-down (serving side)", () => {
         );
         // The wave is HELD: nothing of it has reached the store yet (the
         // sidecar holds no "ping" entry) — the rival below races it.
-        expect(w.entriesOf(w.sidecarOf(w.s2))).toEqual([]);
+        // The one shape this probe can see that is NOT a regression is
+        // the structural ungated-tail window: the serving cycle's
+        // committing tail (watermark commit → notice settle → seal-chain
+        // drain → commitWave) runs AFTER the settle's only inputSynced
+        // consultation, so an emitter interleaving into those awaits
+        // flushes past an ARMED gate (space-server.ts #waveCycle; the
+        // OW57 audit). That shape — the flushed ping durable here, and
+        // nothing else — throws the TAGGED error the bounded retry
+        // below absorbs once; anything else fails loud, first time.
+        {
+          const durableAtProbe = w.entriesOf(w.sidecarOf(w.s2));
+          // The tag requires the window's WHOLE fingerprint, not the
+          // symptom alone (Cubic P1 on the retry PR): (a) the durable
+          // content is exactly the emitter's ping — nothing else ever
+          // qualifies; (b) the queue-seam arming provably ENGAGED
+          // (`holdArmed` — set synchronously with the sealed append,
+          // so a durable ping with holdArmed still false means the
+          // arming machinery itself broke: NOT the window, fails
+          // loud, first attempt). The residual — an intermittent
+          // gate-machinery regression producing exactly an
+          // armed-flush — is indistinguishable from the window at
+          // this seam BY THE AUDIT'S CONCLUSION (no admitting-path
+          // seam exists test-side), which is what the owner ruled
+          // on: it is absorbed AT MOST ONCE, logged and countable,
+          // and a deterministic regression with this signature still
+          // reds the step on the second attempt.
+          if (
+            durableAtProbe.length > 0 &&
+            holdArmed &&
+            durableAtProbe.every((entry) =>
+              (entry.payload as { tag?: string } | undefined)?.tag === "ping"
+            )
+          ) {
+            throw new A3StructuralWindow(
+              `the held-wave probe found the emitter's ping durable ` +
+                `(${durableAtProbe.length} entry/entries) with the hold ` +
+                `armed — the committing-tail window admitted the wave ` +
+                `past the armed settle gate`,
+            );
+          }
+          expect(durableAtProbe).toEqual([]);
+        }
         w.s2.send({ tag: "rival" } as never);
         await clientRuntime.idle();
         await clientRuntime.storageManager.synced();
@@ -2926,22 +2976,70 @@ describe("Phase 3 events-down (serving side)", () => {
       expect(seen).toEqual(["rival"]);
       expect(w.engineN(sideServing)).toBe(0);
       expect(stats.events.orphanDeliveriesRefused).toBe(1);
+      // Scoped to THIS attempt's stream (Cubic P3 on the retry PR): the
+      // retry reuses the per-step server/space, so a global scan would
+      // read an absorbed attempt-1 tenure's leftovers beside this
+      // construction's — an eventId embeds its stream doc id, and each
+      // attempt's stream is prefix-fresh, so the filter is exact.
+      const s2Id = w.s2.getAsNormalizedFullLink().id;
       const consequenced = (w.engine.database.prepare(
         `SELECT consequence_of FROM "commit"
          WHERE class = 'derived' AND consequence_of IS NOT NULL`,
       ).all() as Array<{ consequence_of: string }>).flatMap((row) =>
         decodeMemoryBoundary(row.consequence_of) as unknown as string[]
-      );
+      ).filter((id) => id.includes(s2Id));
       const durableIds = new Set(
-        sidecarIdsIn(w.engine).flatMap((id) =>
-          w.entriesOf(id).map((entry) => entry.eventId)
-        ),
+        w.entriesOf(w.sidecarOf(w.s2)).map((entry) => entry.eventId),
       );
       expect(consequenced.length).toBeGreaterThanOrEqual(1);
       for (const id of consequenced) expect(durableIds.has(id)).toBe(true);
     } finally {
       gate.resolve();
       for (const cancel of cancels) cancel();
+    }
+  };
+
+  it("(α3) + a same-eventId SIBLING tx (independent review M1): the LT1 copy of a DERIVATION emitter's superseded append commits a sibling event-handler-stamped tx (the served navigateTo intent shape) inside the same wave; the orphan refusal must take the SIBLING down with the handler's contribution — neither half of an orphan lands (a navigation intent enacted for an event with zero durable entries is events.md §4's FORBIDDEN half-delivery); the refusal is counted once per EVENT (mutation: the sibling fold removed → the handler half is refused, the intent half LANDS — `side` 1) — bounded accept-and-retry on the structural window (OW57, RULED 2026-08-24)", async () => {
+    // OW57, RULED 2026-08-24 (owner, verbatim: "agreed with your
+    // recommendation: bounded accept-and-retry for now"). The audit
+    // behind the ruling (#6223's settle-gate seam audit): the serving
+    // cycle's committing tail admits seals AFTER the settle's only
+    // inputSynced consultation, so no test-side held-wave construction
+    // can be sound against an emitter that interleaves there — three
+    // arming constructions (the #6184 handler arm, a drain-sync seam,
+    // the queue seam this step keeps) failed on the identical CI
+    // signature, 5 identical observations. Bounded: TWO attempts total;
+    // ONLY the tagged structural signature retries (the held-wave probe
+    // finding the flushed ping durable — A3StructuralWindow); every
+    // other failure, the title's mutation pins included, propagates on
+    // the FIRST attempt. Each attempt re-runs the FULL construction
+    // (fresh prefix, fresh host tenure, fresh client) — the window
+    // lottery is per-construction. An absorbed hit logs the greppable
+    // marker "a3-structural-window-retry (OW57)": CI occurrences stay
+    // countable, the evidence base for the eventual tail-seam decision.
+    for (let attempt = 1;; attempt++) {
+      try {
+        await runSiblingOrphanConstruction(`w3-sibling-orphan-a${attempt}`);
+        return;
+      } catch (error) {
+        if (attempt < 2 && error instanceof A3StructuralWindow) {
+          console.warn(
+            `a3-structural-window-retry (OW57): attempt ${attempt} hit ` +
+              `the structural ungated-tail window — ${error.message}; ` +
+              `re-running the full construction (bounded: 2 attempts)`,
+          );
+          // The re-run needs the first construction torn down: the host
+          // holds the space lease and serving tenure, the client its
+          // session. (The suite's afterEach tears down only the CURRENT
+          // pair.)
+          await host?.close();
+          host = undefined;
+          await clientRuntime?.dispose();
+          await clientManager?.close();
+          continue;
+        }
+        throw error;
+      }
     }
   });
 

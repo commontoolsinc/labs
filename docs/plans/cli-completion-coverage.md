@@ -127,6 +127,45 @@ with the callback on the cases tried, including reproducing item 1 end to end.
 zsh's `_describe` rendering, the colon escaping that piece ids and DIDs need,
 and the `deno` binding are untested.
 
+## Working on this
+
+Completion swallows every error on purpose, so a provider that throws, a fabric
+that is unreachable, and a slot with no provider are one experience: no
+candidates. Nothing here can be debugged by watching a shell, and a change that
+looks like it worked at the prompt has not been observed.
+
+**Drive the callback directly.** The installed shell function calls one command,
+and so should you. It takes the line and the cursor offset, and prints what the
+shell would have offered:
+
+```bash
+cf completion complete --shell zsh --line "cf call --piece x " --point 18
+```
+
+The shell functions themselves are a separate surface and are exercised by
+sourcing what `cf completion bash` prints and calling `_cf_complete` with
+`COMP_LINE`, `COMP_POINT`, `COMP_WORDS` and `COMP_CWORD` set. Reach for that
+only when the defect is in the script rather than in the candidates.
+
+**Live slots need a space, a piece, and something deployed in it.** A piece id,
+a verb name, a cell path and a result shape are all read from a running fabric,
+so a provider cannot be exercised without one: point `CF_API_URL` at a local
+server, `CF_IDENTITY` at a keyfile, deploy a fixture, and complete against it.
+An empty result from a provider proves nothing until the same target answers
+the equivalent `cf` command.
+
+**Where the tests go.** `packages/cli/test/completion-*.test.ts` hold the pure
+half — line resolution, candidate shaping, the degrade-to-empty path — and are
+the right home for anything answerable without a fabric.
+[`unit-test-coding-style.md`](../development/unit-test-coding-style.md) governs
+their shape and is worth reading first, since not every file in that directory
+follows it. Anything that needs a fabric belongs beside
+`packages/cli/integration/verbs-over-the-cli.sh`, which is item 18.
+
+**Two traps in the parsing layer.** A throwaway Cliffy command used to parse a
+token list needs `.noExit()`, or a bad flag ends the process instead of
+throwing. And `parseExecArgs` takes the spec first and the arguments second.
+
 ## Correctness
 
 ### 1. Inline `--option=value` drops every live candidate

@@ -1,7 +1,6 @@
 import type ts from "typescript";
 // Typescript-free contract module (see engine.ts) — safe to import eagerly
 // without pulling the compiler stack onto this module's graph.
-import { sourceHasIgnoredDisableDirective } from "@commonfabric/ts-transformers/runtime-contract";
 import { compilerStack } from "./deferred-compiler-stack.ts";
 import { RuntimeProgram } from "./types.ts";
 
@@ -15,8 +14,7 @@ export function pretransformProgram(
 }
 
 // For each source file in the program, inject the internal helper import used
-// by the AST transformer by default. Files can explicitly opt out with
-// `/// <cf-disable-transform />`.
+// by the AST transformer. Every file is transformed.
 //
 // `tolerateStoredLegacyEnvelope` (CT-1838): pre-#4158 pipelines persisted the
 // helper-INJECTED form as the source-of-record, so re-injecting a stored
@@ -57,17 +55,6 @@ export function transformInjectHelperModule(
         isLegacyInjectedEnvelope(source.contents)
       ) {
         return { name: source.name, contents: source.contents };
-      }
-      // `/// <cf-disable-transform />` disables the transform only at column
-      // zero (matching TypeScript's triple-slash directives). An indented
-      // first-line lookalike is silently ignored — the file transforms as
-      // usual — so warn an author who meant to opt this file out.
-      if (sourceHasIgnoredDisableDirective(source.contents)) {
-        console.warn(
-          `${source.name}: an indented "/// <cf-disable-transform />" is ` +
-            `ignored; the directive disables the transform only at column ` +
-            `zero. Move it to the start of the line to opt this file out.`,
-        );
       }
       return {
         name: source.name,

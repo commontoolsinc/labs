@@ -121,20 +121,13 @@ export class CFHelpers {
   }
 }
 
-// The disable-directive check lives in runtime-contract.ts (typescript-free,
+// The first-content-line scan lives in runtime-contract.ts (typescript-free,
 // runtime-importable); re-exported here for the existing compile-side callers.
-export {
-  findFirstContentLineIndex,
-  sourceDisablesCfTransform,
-  sourceHasIgnoredDisableDirective,
-} from "./runtime-contract.ts";
-import {
-  findFirstContentLineIndex,
-  sourceDisablesCfTransform,
-} from "./runtime-contract.ts";
+export { findFirstContentLineIndex } from "./runtime-contract.ts";
+import { findFirstContentLineIndex } from "./runtime-contract.ts";
 
-// Rewrite a leading transform directive line, or inject helpers by default,
-// so the AST transformer pipeline has access to helpers like `lift`.
+// Inject helpers so the AST transformer pipeline has access to helpers like
+// `lift`.
 // This operates on strings, and to be used outside of
 // the TypeScript transformer pipeline, since symbol binding
 // occurs before transformers run.
@@ -161,14 +154,6 @@ export function transformCfDirective(
   const firstContentLineIndex = findFirstContentLineIndex(lines);
   if (firstContentLineIndex === null) {
     return source;
-  }
-
-  if (sourceDisablesCfTransform(source)) {
-    return [
-      ...lines.slice(0, firstContentLineIndex),
-      "",
-      ...lines.slice(firstContentLineIndex + 1),
-    ].join("\n");
   }
 
   return injectCfHelpers(source, fileName);

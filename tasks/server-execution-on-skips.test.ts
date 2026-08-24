@@ -128,27 +128,33 @@ Deno.test("main: no arguments behaves like an unknown suite", async () => {
 });
 
 Deno.test("main: empty lists print the report on stderr and nothing on stdout", async () => {
-  // The shell suite's list is empty (patterns carries the one remaining
-  // STEP entry; runner and runtime-client are empty since their lifts).
+  // The shell suite's list is empty (patterns carries the default-app
+  // STEP entry and the lunch-poll-vote FILE entry; runner and
+  // runtime-client are empty since their lifts).
   const { out, err, io } = captureIo();
   assertEquals(await main(["shell"], io), 0);
   assertEquals(out, []);
   assertMatch(err[0], /shell: no skips — full suite runs/);
 });
 
-Deno.test("main: the patterns list = ONE step entry (default-app's reload step, under OW45). The step's own interim-race trap CLOSED test-side 2026-08-22 — the assertions bind to the summary the waitForCondition predicate approves and hands back, absorbing the OW51-ruled interim-undefined-then-retrigger disposition the old post-wait single-shot read kept racing (1/10 quiet, 5/10 under load on main, every red undefined-vs-7) — and on the FIXED step the residue proved REAL: at the true ON topology the value-wait itself starves on first-hydration reads of freshly created served state — no reload between the creates and the reads (readCell of the argument's redirect-linked notes sticky-undefined across the full 5-minute net at 500ms cadence, or every client read of the piece returning nothing mid-session) — while the store holds all 7 appends and the reactive render path serves the same notes — zero loss, the OW45 row's arm-B client starvation, so the entry STAYS until that closes. The FIRST ON-LANE CI GATE set (2026-08-21, skip-and-land) is otherwise fully lifted — cellset-lww (OW47), convergence-storm (OW52), default-app's FILE skip (OW51), cfc-group-chat-demo (OW59), home-profile-reload-durability (the explicit warm request), profile-embed (OW47's re-close), the sqlite identity pair (OW53), topics-navigation (OW33 triage; the echo-drop smell is OW60). An EMPTY list is the flip PR's bar; any change here is a deliberate edit that reddens this pin", async () => {
+Deno.test("main: the patterns list = the default-app STEP entry + the lunch-poll-vote FILE entry, both under OW45 arm B. The lunch-poll-vote entry is the 2026-08-24 deliberate edit: the profile-first join (#5744) creates the viewer's profile piece mid-test, and the flag-ON client's deferred start of that fresh piece dies terminally on the first-hydration stale-confirmed-read ConflictError — the arm-B client-start member the fork memo reserves for the owner — so the wish #profile never resolves and every later step starves; a FILE entry because the whole scenario depends on that join. The step's own interim-race trap CLOSED test-side 2026-08-22 — the assertions bind to the summary the waitForCondition predicate approves and hands back, absorbing the OW51-ruled interim-undefined-then-retrigger disposition the old post-wait single-shot read kept racing (1/10 quiet, 5/10 under load on main, every red undefined-vs-7) — and on the FIXED step the residue proved REAL: at the true ON topology the value-wait itself starves on first-hydration reads of freshly created served state — no reload between the creates and the reads (readCell of the argument's redirect-linked notes sticky-undefined across the full 5-minute net at 500ms cadence, or every client read of the piece returning nothing mid-session) — while the store holds all 7 appends and the reactive render path serves the same notes — zero loss, the OW45 row's arm-B client starvation, so the entry STAYS until that closes. The FIRST ON-LANE CI GATE set (2026-08-21, skip-and-land) is otherwise fully lifted — cellset-lww (OW47), convergence-storm (OW52), default-app's FILE skip (OW51), cfc-group-chat-demo (OW59), home-profile-reload-durability (the explicit warm request), profile-embed (OW47's re-close), the sqlite identity pair (OW53), topics-navigation (OW33 triage; the echo-drop smell is OW60). An EMPTY list is the flip PR's bar; any change here is a deliberate edit that reddens this pin", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
-  // A step entry never drops its file: no --ignore flag on stdout…
-  assertEquals(out, []);
-  // …the report carries the step skip loudly…
+  // The step entry never drops its file; the lunch-poll-vote FILE entry
+  // is the one --ignore flag on stdout.
+  assertEquals(out, ["--ignore=integration/lunch-poll-vote.test.ts"]);
+  // …the report carries both skips loudly…
   assertMatch(
     err[0],
     /patterns: SKIP-STEP integration\/default-app\.test\.ts :: should persist and reload every rapidly created notebook note \(until phase-7; the rest of the file runs\)/,
   );
-  // …and the list holds EXACTLY this one step entry — a second entry, a
-  // file-level entry, or a silent lift all redden this pin.
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 1);
+  assertMatch(
+    err[0],
+    /patterns: SKIP integration\/lunch-poll-vote\.test\.ts \(until phase-7\)/,
+  );
+  // …and the list holds EXACTLY these two entries — a third entry or a
+  // silent lift both redden this pin.
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 2);
   assertEquals(
     SERVER_EXECUTION_ON_SKIPS.patterns[0].file,
     "integration/default-app.test.ts",
@@ -156,6 +162,23 @@ Deno.test("main: the patterns list = ONE step entry (default-app's reload step, 
   assertEquals(
     SERVER_EXECUTION_ON_SKIPS.patterns[0].step,
     "should persist and reload every rapidly created notebook note",
+  );
+  // The lunch-poll-vote entry is FILE-level (no step guard: every step
+  // depends on the profile-first join the class kills), same class and
+  // fork memo as the step entry above.
+  assertEquals(
+    SERVER_EXECUTION_ON_SKIPS.patterns[1].file,
+    "integration/lunch-poll-vote.test.ts",
+  );
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[1].step, undefined);
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[1].phase, "phase-7");
+  assertMatch(
+    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
+    /client-start|first-hydration/,
+  );
+  assertMatch(
+    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
+    /ow45-armb-client-start-fork\.md/,
   );
   // The guard lookup RESOLVES for the guarded step (the in-file
   // onArmStepSkip guard binds it under the ON posture), and the reason
@@ -169,11 +192,15 @@ Deno.test("main: the patterns list = ONE step entry (default-app's reload step, 
   assertEquals(entry.phase, "phase-7");
   assertMatch(entry.reason, /readCell|rehydrat/);
   assertMatch(entry.reason, /no data loss/);
-  // The shard filter passes every candidate through untouched.
+  // The shard filter drops exactly the FILE entry's file (the shard
+  // lanes feed explicit file lists) and passes every other candidate
+  // through untouched — remove the lunch-poll-vote entry and this
+  // assertion reds.
   const { files, skipped } = serverExecutionOnFilterFiles("patterns", [
     "./integration/default-app.test.ts",
     "./integration/cellset-lww.test.ts",
     "./integration/convergence-storm.test.ts",
+    "./integration/lunch-poll-vote.test.ts",
     "./integration/topics-navigation.test.ts",
   ]);
   assertEquals(files, [
@@ -182,7 +209,7 @@ Deno.test("main: the patterns list = ONE step entry (default-app's reload step, 
     "./integration/convergence-storm.test.ts",
     "./integration/topics-navigation.test.ts",
   ]);
-  assertEquals(skipped, []);
+  assertEquals(skipped, [SERVER_EXECUTION_ON_SKIPS.patterns[1]]);
   assertEquals(SERVER_EXECUTION_ON_SKIPS.shell.length, 0);
 });
 
@@ -266,7 +293,7 @@ Deno.test("validation binds a step entry: the file must name the step and call t
   ]);
 });
 
-Deno.test("main: the runner list is EMPTY — pattern-and-data-persistence LIFTED by the arrival-witness predicate (RULED 2026-08-22, candidate (B): a cover at the floor witnesses only when derived-class) on 10/10 green at the true ON topology — so the full suite runs, and NO file-level skip remains in ANY suite", async () => {
+Deno.test("main: the runner list is EMPTY — pattern-and-data-persistence LIFTED by the arrival-witness predicate (RULED 2026-08-22, candidate (B): a cover at the floor witnesses only when derived-class) on 10/10 green at the true ON topology — so the full suite runs, and the ONLY file-level skip in ANY suite is patterns' lunch-poll-vote entry (the 2026-08-24 deliberate OW45 arm-B re-skip)", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["runner"], io), 0);
   // No entries: no --ignore flag on stdout…
@@ -280,20 +307,21 @@ Deno.test("main: the runner list is EMPTY — pattern-and-data-persistence LIFTE
   // …and the report says so loudly.
   assertMatch(err[0], /runner: no skips — full suite runs\./);
   assertEquals(SERVER_EXECUTION_ON_SKIPS.runner.length, 0);
-  // The lift retired the LAST file-level skip anywhere: every remaining
-  // entry across every suite is a STEP entry (default-app's reload step
-  // under OW45 is the one survivor) — pinned so a re-skip of any FILE
-  // is a deliberate entry, never a leftover, and the flip PR's
-  // list-EMPTY bar now hangs on that one step alone.
+  // A FILE-level skip is a deliberate entry, never a leftover: the
+  // arrival-witness lift cleared the last one, and the single re-skip
+  // since — patterns' lunch-poll-vote entry (2026-08-24, the OW45 arm-B
+  // client-start class its profile-first join newly exposes) — is named
+  // here so the NEXT file-level entry still reddens this pin. The flip
+  // PR's list-EMPTY bar hangs on the default-app step and this file.
   for (const suite of ["patterns", "runner", "runtime-client", "shell"]) {
     if (!isServerExecutionSuite(suite)) throw new Error("unreachable");
     assertEquals(
-      SERVER_EXECUTION_ON_SKIPS[suite].filter((skip) =>
-        skip.step === undefined
-      ),
-      [],
-      `${suite}: no FILE-level skip may remain (the arrival-witness lift ` +
-        "cleared the last one)",
+      SERVER_EXECUTION_ON_SKIPS[suite]
+        .filter((skip) => skip.step === undefined)
+        .map((skip) => skip.file),
+      suite === "patterns" ? ["integration/lunch-poll-vote.test.ts"] : [],
+      `${suite}: the only FILE-level skip is the deliberate ` +
+        "lunch-poll-vote OW45 arm-B entry",
     );
   }
 });

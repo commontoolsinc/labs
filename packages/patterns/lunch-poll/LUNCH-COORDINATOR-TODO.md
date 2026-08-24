@@ -75,8 +75,9 @@ poll picking a place that's closed when you walk over.
 
 ## Notes
 
-- These features should layer on top of the existing scoped-cells identity model
-  (`users` per-space directory, `myName` per-user, derived `isAdmin`). See
+- These features should layer on top of the existing profile-cell identity model
+  (`users` per-space roster, the viewer's shared `#profile`, a per-space `host`
+  profile pointer, and derived `isAdmin`). See
   [`ADMIN-FUTURE.md`](./ADMIN-FUTURE.md) for the planned move from pattern-level
   admin checks to CFC integrity claims — favorites and history writes are good
   candidates for the same authorship-claim treatment.
@@ -87,6 +88,13 @@ poll picking a place that's closed when you walk over.
 
 Completed entries are ordered newest first. Dates use the local merge/commit
 date for the completed work.
+
+### 2026-07-22 — Restored host-side generated cuisine art (#4920)
+
+Restored `generated-art.tsx` as a host-only browser request. The host may keep
+the result on an option; once persisted, every viewer renders that stored image
+instead of generating another one. Focused generated-art and persistence tests
+cover the request and synchronization paths.
 
 ### 2026-07-12 — Day-scoped votes (#4661)
 
@@ -106,14 +114,18 @@ input is the fallback, shown only when no profile resolves. No change to the
 `joinAs` handler or the pattern's inputs/outputs — purely which control the join
 card offers first.
 
+Superseded by the 2026-08 profile-cell identity migration: joining now requires
+a resolved shared profile and the free-text escape hatch is gone. The empty
+state renders the profile create/pick surface instead.
+
 ### 2026-06-23 — Removed generated cuisine-image and web-search homepage (#4325/#4326)
 
-Dropped the per-option generated food thumbnail (`generated-art.tsx`, since
-deleted) and the web-search homepage enrichment, along with the per-option AI
-work they drove: image generation, web search, `generateText` homepage
-verification, and the 30s mutex that serialized them. Cold-load cost of a
-many-option poll is now graph/runtime only. This is why `city` and
-`webSearchUrl` are no longer pattern inputs.
+Dropped the then-current generated food thumbnail and the web-search homepage
+enrichment, along with the per-option AI work they drove: image generation, web
+search, `generateText` homepage verification, and the 30s mutex that serialized
+them. Cold-load cost of a many-option poll became graph/runtime only. `city` and
+`webSearchUrl` remain retired; generated cuisine art later returned in #4920 as
+the narrower, host-only persisted flow above.
 
 ### 2026-06-16 — Pattern composition refactor and sub-pattern standards
 
@@ -127,8 +139,9 @@ largest UI-bearing pieces out of `main.tsx` into sibling pattern modules:
   buttons, vote-state styling, homepage display/edit/lookup, host-only
   remove/history actions, and generated-art persistence.
 - ✅ `participant-identity-card.tsx`: join/admin identity surface. It exposes
-  `me`, `isJoined`, `isAdmin`, `joinAs`, and `claimHost` for the parent to use
-  when gating add-option controls, per-option voting, and host-only actions.
+  `isJoined`, `isAdmin`, `joinMessage`, `joinAs`, and `claimHost` for the parent
+  to use when gating add-option controls, per-option voting, and host-only
+  actions.
 
 Standards established by this factoring:
 
@@ -152,8 +165,9 @@ Standards established by this factoring:
 
 Gotchas preserved during extraction:
 
-- `myName` is resolved once in `main.tsx` into `me` before `options.map(...)`;
-  per-option children receive that resolved value, not the raw `PerUser` cell.
+- The viewer's profile cell is resolved once in `main.tsx` before
+  `options.map(...)`; per-option children receive that identity value, not a
+  display name or raw scoped cell.
 - The generated-art fallback remains a static CSS `background-image`; generated
   or stored `<img>` content is only overlaid once a safe non-empty URL resolves.
 
@@ -172,7 +186,7 @@ nobody suggests the same place three days running.
 
 - ✅ Stored in a **`PerSpace<HistoryEntry[]>` array** (the `visits` input),
   capped at the most-recent `MAX_HISTORY` (200) entries by date. Each entry is
-  `{ id, title, loggedByName (frozen), loggedBy (live Cell<User> link), wentAt,
+  `{ id, title, loggedByName (frozen), loggedBy (shared profile cell), wentAt,
   votes }`.
   Appended via the host-only `logVisit` (`visits.push`, then a cap-trim only on
   overflow). Each option still has a "✓ we went here" button.
@@ -214,7 +228,7 @@ in the entry's `votes` list. Live voting stays on the in-cell `votes` array —
 the log keeps its own frozen copy.
 
 - ✅ Each entry's `votes` is
-  `{ voter (frozen), voterLink (live Cell<User>),
+  `{ voter (frozen), voterProfile (shared profile cell),
   optionTitle (denormalized), color }[]`.
   `logVisit` loops the current votes and embeds one snapshot each (option title
   denormalized so the snapshot survives the option being removed).

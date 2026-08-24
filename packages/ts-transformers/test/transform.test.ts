@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertRejects } from "@std/assert";
+import { assert, assertEquals, assertMatch, assertRejects } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 
 import ts from "typescript";
@@ -695,28 +695,37 @@ export const build = lift((values: number[]) =>
     assert(!forCauses(parseModule(main)).includes("token"));
   });
 
-  it("transforms by default and supports cf-disable-transform opt-out", async () => {
-    const source = `
+  it("lowers computed() to lift() in every file it compiles", async () => {
+    const transformed = await transformFiles({
+      "/main.ts": `
 import { computed } from "commonfabric";
 
 const value = computed(() => 1);
 export { value };
-`;
-
-    const enabledByDefault = await transformFiles({
-      "/main.ts": source,
+`,
     });
-    const enabledRoot = parseModule(enabledByDefault["/main.ts"]!);
-    assert(callsNamed(enabledRoot, "lift").length >= 1);
-    assertEquals(callsNamed(enabledRoot, "computed").length, 0);
+    const root = parseModule(transformed["/main.ts"]!);
+    assert(callsNamed(root, "lift").length >= 1);
+    assertEquals(callsNamed(root, "computed").length, 0);
+  });
 
-    const disabled = await transformFiles({
-      "/main.ts": `/// <cf-disable-transform />\n${source}`,
+  it("transforms a file carrying the retired opt-out marker like any other", async () => {
+    // `/// <cf-disable-transform />` once suppressed the transform for the file
+    // that carried it. It is an ordinary comment now, and a source still
+    // carrying it is compiled the same as one that never did.
+    const transformed = await transformFiles({
+      "/main.ts": `/// <cf-disable-transform />
+import { computed } from "commonfabric";
+
+const value = computed(() => 1);
+export { value };
+`,
     });
-
-    const disabledRoot = parseModule(disabled["/main.ts"]!);
-    assertEquals(callsNamed(disabledRoot, "computed").length, 1);
-    assertEquals(callsNamed(disabledRoot, "lift").length, 0);
+    const output = transformed["/main.ts"]!;
+    const root = parseModule(output);
+    assert(callsNamed(root, "lift").length >= 1);
+    assertEquals(callsNamed(root, "computed").length, 0);
+    assertMatch(output, /import \{ __cfHelpers \} from "commonfabric";/);
   });
 
   it("wraps top-level data candidates with __cfHelpers.__cf_data", async () => {
@@ -816,30 +825,6 @@ export default function next(value: number) {
         c.arguments[0].text === "next"
       ),
     );
-  });
-
-  it("skips snapshot wrapping when cf-disable-transform is present", async () => {
-    const output = await transformFiles({
-      "/main.ts": `/// <cf-disable-transform />
-function pow(x: number): number {
-  return x * x;
-}
-
-export default pow(5);
-`,
-    });
-
-    const main = output["/main.ts"]!;
-
-    const root = parseModule(main);
-    // The default export stays the bare `pow(5)` call, untouched by wrapping.
-    const defaultExport = collect(root, ts.isExportAssignment)[0];
-    assert(defaultExport && ts.isCallExpression(defaultExport.expression));
-    const call = defaultExport.expression;
-    assert(ts.isIdentifier(call.expression) && call.expression.text === "pow");
-    assertEquals(literalToValue(call.arguments[0]!), 5);
-    // No snapshot wrapping was inserted.
-    assertEquals(callsNamed(root, "__cf_data").length, 0);
   });
 });
 

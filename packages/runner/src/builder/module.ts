@@ -197,7 +197,7 @@ function handlerInternal<E, T>(
   if (typeof eventSchema === "function") {
     throw new Error(
       "Handler requires schemas or CTS transformer\n" +
-        "help: CTS transforms are enabled by default; remove /// <cf-disable-transform /> for automatic schema inference, or provide explicit schemas",
+        "help: automatic schema inference needs the CTS transforms, which run as part of the Common Fabric build; provide explicit schemas to go without them",
     );
   }
 
@@ -440,7 +440,7 @@ export function action<E, R = void>(
   _event: (event?: E) => R,
 ): Stream<E, R> {
   throw new Error(
-    "action() must be used with CTS transforms enabled - remove /// <cf-disable-transform /> from your file",
+    "action() must be used with CTS transforms enabled - it is rewritten to handler() at compile time by the Common Fabric build process",
   );
 }
 

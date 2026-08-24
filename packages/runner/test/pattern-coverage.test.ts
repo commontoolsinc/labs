@@ -392,7 +392,6 @@ Deno.test("pattern coverage keeps authored lines when Common Fabric transform is
   });
   try {
     const source = [
-      "/// <cf-disable-transform />",
       "export function run() {",
       "  const value = 1;",
       "  return value;",

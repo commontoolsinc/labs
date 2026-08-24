@@ -118,6 +118,22 @@ positional path spelling.
 the default pattern and starts each registered piece to obtain its name and
 pattern metadata. It does not enumerate every stored piece root.
 
+`cf piece inspect --pattern-identity` prints one piece's source pin — pattern
+identity, export symbol, current source revision when the piece keeps a log, and
+whether the identity's source is retained in the space — without running the
+piece and without pulling its input, result, or link graph.
+
+`cf piece survey` reads a holder's own collection — the enumeration `piece ls`
+cannot provide — one cheap identity read per member, the holder last, and emits
+a plan for the bulk operations in `docs/plans/piece-bulk-operations.md`. On a
+collection survey the registry is its cross-check: a registered piece on an
+in-scope identity that the collection lacks makes the survey exit nonzero,
+naming the piece. A `--list` survey reads exactly the pieces named and makes no
+containment claim; each entry takes either reference form, and a canonical
+entry's embedded space composes the way it does on `--piece` — supplying the
+space when `--space` is absent, agreeing with it otherwise. Read-only; the
+spelling is provisional until the bulk write operations get a home.
+
 `cf piece slugs` lists the space's slug index: every name assigned through
 `--slug` or `set-slug`, each resolved to the piece it names. The index records
 assignments made since it existed, so a slug written by an older client still
@@ -774,11 +790,12 @@ The supported output switches are:
 - `cf inspect ... --json` serializes an inspector result. `inspect html` does
   not have a JSON representation, so `html` and `--json` are mutually exclusive.
   `inspect graph --dot` and `--json` are also mutually exclusive.
-- `cf piece ls`, `piece search`, `piece inspect`, `piece view`, and
-  `piece render` use `--json` as an output switch. `piece render --watch --json`
-  writes only JSON render records to stdout; watch status goes to stderr.
-  Rendering a piece without a UI fails instead of returning an empty successful
-  JSON stream.
+- `cf piece ls`, `piece search`, `piece inspect`, `piece survey`, `piece view`,
+  and `piece render` use `--json` as an output switch. `piece survey` reserves
+  stdout for the plan it emits (or, under `--json`, the full survey result); its
+  tally and findings go to stderr. `piece render --watch --json` writes only
+  JSON render records to stdout; watch status goes to stderr. Rendering a piece
+  without a UI fails instead of returning an empty successful JSON stream.
 - `cf get` and `cf wish` always return JSON. Their `--json` options are
   accepted, documented no-ops for callers that select JSON explicitly.
 - `cf check --json` compiles without evaluating and prints one object with a

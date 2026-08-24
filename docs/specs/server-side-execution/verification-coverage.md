@@ -6554,12 +6554,45 @@ supply; OW29/OW32/OW34 closed):
     identical signature — the ping durable AND consequenced at the
     probe (`expect(...).toEqual([])` received the consequenced ping
     entry) — on a loaded machine at `b775787b6`; five runs of plain
-    main's version at the same head were green. Owed, still: a
-    construction that holds under insertion-shifted timing (or an
-    owner call to accept-and-retry the step); until then a red of
-    THIS step with the ping already durable at the probe is this
-    race, not a product regression, and not the inserting PR's
-    defect. No lift trigger (test-harness item).
+    main's version at the same head were green. The owed
+    "construction that holds" was then DISPROVED as reachable
+    test-side: after two further arming constructions failed on the
+    identical signature (a drain-sync seam, then the queue seam
+    #6233 merged — the arming provably synchronous with the sealed
+    append), 5 identical CI observations on #6223's boards forced
+    the seam audit (PR #6223, comment 5401826757): the serving
+    cycle's ONLY `inputSynced` consultation is inside the settle
+    race (`space-server.ts` `#waveCycle` :3727), and the committing
+    tail after the settle break (watermark `tx.commit()` :3979 →
+    notice settle :3998 → wave capture :4002 → `await #sealChain`
+    :4005 → `commitWave` :4046) admits late seals with NO further
+    gate sample — an emitter interleaving into those awaits flushes
+    past an ARMED gate. The settle is a WATERMARK barrier, not an
+    admission barrier (no product defect asserted; W never claims
+    tail seqs), so no test-side held-wave construction can be sound
+    for tail-arriving work, and even a held gate only DELAYS (the
+    deadline arm commits what is sealed so far). RULED 2026-08-24
+    (owner, verbatim): "agreed with your recommendation: bounded
+    accept-and-retry for now". BUILT (the retry PR): the M1 SIBLING
+    step re-runs its FULL construction (fresh prefix, host tenure,
+    client) at most TWICE; ONLY the tagged structural signature
+    retries — the held-wave probe finding the flushed ping durable
+    (`A3StructuralWindow`) — and every other failure propagates on
+    the first attempt (verified: the title's sibling-fold mutation
+    reds attempt 1 with zero retries; the forced window retries
+    once, logs once, and propagates after attempt 2). Absorbed hits
+    log the greppable marker `a3-structural-window-retry (OW57)` —
+    the CI count is the evidence base for this row's DESTINATION: a
+    product-side seam on the committing tail (its own considered
+    change), which is what would let a held-wave construction bind
+    again. The plain (α3) ORPHAN step shares the construction class
+    and INHERITS this disposition if it ever fires the same
+    signature (durable flushed ping at its held-wave probe) — not
+    pre-wrapped: the ruling's scope is "for now", the observed
+    step. Until then a red of an (α3) step with the ping already
+    durable at the probe is this window, not a product regression,
+    and not the inserting PR's defect. No lift trigger
+    (test-harness item).
   - **OW58 — the consequence-notice resolved-error guard wedge
     (adversarial review of PR #6186, MAJOR-1 — probe-confirmed;
     minted 2026-08-21; PRE-EXISTING since Phase 3, NOT introduced by

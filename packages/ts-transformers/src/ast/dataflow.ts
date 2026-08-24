@@ -9,6 +9,7 @@ import {
 import { isFunctionLikeExpression } from "./function-predicates.ts";
 import { symbolDeclaresCommonFabricDefault } from "../core/common-fabric-symbols.ts";
 import { isBrandedCellType } from "../transformers/cell-type.ts";
+import { unwrapExpression } from "../utils/expression.ts";
 import { isSafeIdentifierText } from "../utils/identifiers.ts";
 import {
   detectCallKind,
@@ -97,27 +98,10 @@ const mergeAnalyses = (...analyses: InternalAnalysis[]): InternalAnalysis => {
   };
 };
 
-function unwrapStructuralDataFlowExpression(
-  expression: ts.Expression,
-): ts.Expression {
-  let current = expression;
-  while (
-    ts.isParenthesizedExpression(current) ||
-    ts.isAsExpression(current) ||
-    ts.isTypeAssertionExpression(current) ||
-    ts.isSatisfiesExpression(current) ||
-    ts.isNonNullExpression(current) ||
-    ts.isPartiallyEmittedExpression(current)
-  ) {
-    current = current.expression;
-  }
-  return current;
-}
-
 function isStructuralOpaqueKeyDataFlow(
   expression: ts.Expression,
 ): boolean {
-  const target = unwrapStructuralDataFlowExpression(expression);
+  const target = unwrapExpression(expression);
   return ts.isCallExpression(target) &&
     classifyOpaquePathTerminalCall(target) === "key";
 }
@@ -162,9 +146,9 @@ export function createDataFlowAnalyzer(
   const leftmostIdentifierIsArrayMethodElementBinding = (
     expression: ts.Expression,
   ): boolean => {
-    let current: ts.Expression = unwrapStructuralDataFlowExpression(expression);
+    let current: ts.Expression = unwrapExpression(expression);
     while (ts.isPropertyAccessExpression(current)) {
-      current = unwrapStructuralDataFlowExpression(current.expression);
+      current = unwrapExpression(current.expression);
     }
     return ts.isIdentifier(current) &&
       isArrayMethodElementBindingReference(current);
@@ -307,7 +291,7 @@ export function createDataFlowAnalyzer(
     root: ts.Expression,
     path: readonly StaticBindingAccessSegment[],
   ): ts.Expression => {
-    let current = unwrapStructuralDataFlowExpression(root);
+    let current = unwrapExpression(root);
 
     for (const segment of path) {
       if (segment.kind === "index") {
@@ -391,7 +375,7 @@ export function createDataFlowAnalyzer(
       return undefined;
     }
 
-    const target = unwrapStructuralDataFlowExpression(initializer);
+    const target = unwrapExpression(initializer);
     if (
       ts.isObjectLiteralExpression(target) ||
       ts.isArrayLiteralExpression(target)
@@ -456,7 +440,7 @@ export function createDataFlowAnalyzer(
   const shouldPreserveConstAliasIdentity = (
     initializer: ts.Expression,
   ): boolean => {
-    const target = unwrapStructuralDataFlowExpression(initializer);
+    const target = unwrapExpression(initializer);
 
     return !(
       ts.isObjectLiteralExpression(target) ||
@@ -594,7 +578,7 @@ export function createDataFlowAnalyzer(
     expression: ts.Expression,
     seenSymbols = new Set<ts.Symbol>(),
   ): boolean => {
-    const target = unwrapStructuralDataFlowExpression(expression);
+    const target = unwrapExpression(expression);
 
     if (ts.isCallExpression(target)) {
       return classifyOpaquePathTerminalCall(target) === "key";
