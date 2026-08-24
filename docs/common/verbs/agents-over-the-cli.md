@@ -215,11 +215,12 @@ several `allOf` members declare — where no refusal is available. Read a `{}`
 from either against `cf piece describe` rather than as an answer about the
 data.
 
-One of those positions goes further: a field declared ONLY through `allOf`
-members is named by the schema and still comes back `{}`, because the read does
-not reach a conjunction member's properties. There, `{}` is neither absence nor
-a typo — it is a field the read cannot deliver, and `cf piece describe` is what
-tells the three apart.
+One of those positions goes further. A field declared ONLY through an `allOf`
+member is named by the schema and refused by nothing, and no spelling on this
+surface returns it: a field list answers `{}`, a JSON `--schema` naming it
+answers `{}`, and `cf piece describe` does not list it among the fields. So
+`{}` there is neither absence nor a typo, and nothing the CLI offers separates
+it from either — the pattern's own source is what settles it.
 
 **An unregistered piece is not a missing piece.** Covered above, and repeated
 here because it is the failure that reads most like a definitive answer: `ls`
