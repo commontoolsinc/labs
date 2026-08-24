@@ -5647,7 +5647,10 @@ supply; OW29/OW32/OW34 closed):
     filled): the deferred-start transaction the ensure's creation arms
     still stamps actor-less bookkeeping — ambient SERVICE snapshot on
     the child-materialization docs, OW59 Q3's arm — threading the owner
-    through the shared arming machinery is OW59-ruling territory.
+    through the shared arming machinery is OW59-ruling territory; the
+    same family's second, pre-existing member is `PatternManager`'s
+    compile-cache write-backs minted inside `compilePattern` (escape
+    the stamp hook; enumerated with the flag in the stage-1 report).
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:

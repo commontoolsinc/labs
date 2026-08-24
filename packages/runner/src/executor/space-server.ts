@@ -195,8 +195,10 @@ export type SpaceServerPolicy = {
    * forever while the tenure keeps the lease (no failover, events
    * queueing, no loop-failed park). On the deadline the ensure lands
    * in its counted-failure arm and the tenure proceeds serving; the
-   * detached work's eventual writes are idempotent and converge by
-   * address. */
+   * detached work's eventual writes stay safe — the CREATION arm
+   * converges by address (cause-derived id + the OCC re-check), the
+   * UPDATE arm by OCC refusal (the transition's stillMatches baseline
+   * refuses a moved root, so stale-over-new is impossible). */
   rootEnsureDeadlineMs?: number;
   /** serving-loop.md §1's IDLE_PARK_MS. */
   idleParkMs?: number;
@@ -3527,7 +3529,12 @@ export class SpaceServer implements TransactionSealDestination {
         // snapshot (F1): the updater stamps its own actionIds
         // (pattern-update/provenance|transition), so this hook sets
         // ONLY the snapshot — a second stampServerRun here would
-        // overwrite those actionIds' wave context.
+        // overwrite those actionIds' wave context. The snapshot set
+        // here SURVIVES the arm's later bookkeeping stamp because the
+        // stamper leaves actor-less runs' snapshots alone — the same
+        // invariant the creation hook above relies on, in mirror
+        // order (there: stamp first, snapshot second; here: snapshot
+        // first, the arm's own stamp second).
         stampReconcileTx: (tx) => {
           tx.setCfcTrustSnapshot(
             runtime.trustSnapshotForPrincipal(owner),
@@ -3537,10 +3544,12 @@ export class SpaceServer implements TransactionSealDestination {
       // The F2 bound: race the ensure against its deadline. On the
       // deadline the throw lands in the counted-failure arm below and
       // the tenure proceeds serving; the DETACHED work keeps running —
-      // its eventual writes are idempotent and converge by address
-      // (the same OCC/cause-derived invariants every rival creator
-      // rides) — and its eventual rejection is swallowed here so it
-      // can never surface as an unhandled rejection.
+      // its eventual writes stay safe: the CREATION arm converges by
+      // address (cause-derived id + the OCC re-check every rival
+      // creator rides), the UPDATE arm by OCC refusal (stillMatches
+      // refuses a moved root, so stale-over-new is impossible) — and
+      // its eventual rejection is swallowed here so it can never
+      // surface as an unhandled rejection.
       work.catch(() => {});
       let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
       let result: Awaited<typeof work>;
@@ -3554,8 +3563,9 @@ export class SpaceServer implements TransactionSealDestination {
                   new Error(
                     `space-root ensure exceeded its ${deadlineMs}ms ` +
                       "deadline (SpaceServerPolicy.rootEnsureDeadlineMs); " +
-                      "the tenure proceeds serving and the detached " +
-                      "ensure's eventual writes converge by address",
+                      "the tenure proceeds serving; the detached " +
+                      "ensure's writes stay safe (creation converges " +
+                      "by address, the update arm by OCC refusal)",
                   ),
                 ),
               deadlineMs,

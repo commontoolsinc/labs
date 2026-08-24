@@ -121,7 +121,15 @@ any of them reverting is a bounded diff, not a redesign.
   while the ensure's own creation tx carries the owner snapshot.
   Threading a per-arm trust principal through the shared deferred-start
   machinery touches every arming site and is OW59-ruling territory;
-  flagged for the owner beside assumption 1 rather than filled.
+  flagged for the owner beside assumption 1 rather than filled. The
+  same family has a SECOND, pre-existing member (delta-review N3,
+  recorded here so the set of unstamped serving-path writers is
+  enumerated in one place): `PatternManager`'s compile-cache
+  write-backs, minted INSIDE `compilePattern`, escape the stamp hook
+  too — not new with this stage (the updater's server-side compiles
+  already ride them) and carrying the S-A delegated carriage where the
+  replicate trigger threads it; both members resolve together under
+  the OW59 follow-up, not piecemeal.
 - **Sessionless-activation ensure (design open question 5).** The owed
   step arms at `activate()` unconditionally, so event-carrying and
   warm-request activations ensure too — the design's recommendation
@@ -147,8 +155,13 @@ any of them reverting is a bounded diff, not a redesign.
   renew timer keeps the lease, so an unbounded await was a wedged
   tenure holding its lease with no failover and no loop-failed park;
   the deadline lands in the counted-failure arm, the tenure proceeds
-  serving, and the detached work's eventual writes converge by
-  address). All three activation triggers ensure (sessionless included
+  serving, and the detached work's eventual writes stay safe — the
+  CREATION arm converges by address (cause-derived id + the OCC
+  re-check), the UPDATE arm by OCC refusal: the transition's
+  `stillMatches` baseline refuses a moved root, so stale-over-new is
+  impossible — delta-review-probed live: wedge released after the
+  deadline, root durable and correct from an independent replica, no
+  unhandled rejection). All three activation triggers ensure (sessionless included
   — design open question 5's recommendation, recorded above).
 - **Single-flight is STRUCTURAL, not enforced** — the
   design-conformance fact this build verified rather than assumed: a
@@ -194,8 +207,12 @@ any of them reverting is a bounded diff, not a redesign.
   creation path still covers the space regardless. Counting caveat
   (review F4, recorded): `created`/`reconciled` count at seal-accept,
   so a wave dropped whole after admission leaves a count with no
-  durable write — stats-only, self-healing next tenure; triangulate
-  against `waves`/`lease.lost`. The no-owner WARN fires once per
+  durable write; the MIRROR direction exists too (delta-review N2,
+  confirmed live) — a deadline-detached ensure that later completes is
+  a durable write with NO count (`failures` carries the deadline while
+  `runs`/`created` stay 0 and the root lands). Stats-only in both
+  directions, self-healing next tenure; triangulate against
+  `waves`/`lease.lost`. The no-owner WARN fires once per
   tenure (review F6); re-skips count silently.
 
 ## Red-first evidence

@@ -78,7 +78,11 @@ type CheckMode =
      * would restage the root AS THE SERVICE after every system-pattern
      * release — OW59's named restage shape. Runs FIRST in each
      * attempt, before the callback's first read, so prepare and the
-     * commit-time recheck see one snapshot. Client callers pass
+     * commit-time recheck see one snapshot; the snapshot it sets
+     * SURVIVES the arm's own later bookkeeping stamp because
+     * stampServerRun leaves an actor-less run's snapshot alone — the
+     * invariant this whole hook rests on (the creation arm relies on
+     * the same property in mirror order). Client callers pass
      * nothing and keep their ambient (own-user) snapshot,
      * byte-identical to before. Single-flight note: the hook rides the
      * FIRST caller's mode; on a serving runtime the only default-root

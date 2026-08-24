@@ -391,8 +391,12 @@ export type ServingLoopStats = {
    * ensure's transactions resolve when the wave admits them, and the
    * engine write rides the wave commit — so a wave later dropped
    * whole (lease-lost abort, replay refusal) leaves a count with no
-   * durable write behind it. Stats-only: the next tenure's ensure
-   * re-resolves and heals the store; triangulate against
+   * durable write behind it. The MIRROR direction exists too
+   * (delta-review N2, confirmed live): a deadline-detached ensure that
+   * later completes is a durable write with NO count — `failures`
+   * carries the deadline while `runs`/`created` stay 0 and the root
+   * lands. Stats-only in both directions: the next tenure's ensure
+   * re-resolves and heals the accounting; triangulate against
    * `waves`/`lease.lost` when a count looks off. */
   rootEnsure: {
     /** Completed ensure runs, any outcome. */
