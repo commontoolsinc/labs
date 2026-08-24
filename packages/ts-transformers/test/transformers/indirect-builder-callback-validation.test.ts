@@ -95,15 +95,6 @@ describe("indirect-builder-callback-validation", () => {
       expect(errors).toHaveLength(1);
     });
 
-    it("reports a callback exported by a trailing clause", async () => {
-      const errors = await errorsIn(`
-        const bump = (n: number) => n + 1;
-        const inc = lift(bump);
-        export { bump };
-      `);
-      expect(errors).toHaveLength(1);
-    });
-
     it("reports a generator written at the call", async () => {
       // `tryParseDirectFunction` accepts `async`, never `function*`.
       const errors = await errorsIn(`
@@ -152,6 +143,30 @@ describe("indirect-builder-callback-validation", () => {
           }
           const alias = bump;
           const inc = lift(alias);
+        `),
+      ).toHaveLength(0);
+    });
+
+    it("accepts a callback re-exported by a trailing clause", async () => {
+      // A trailing clause emits `exports.bump = bump` and leaves local
+      // references alone, so the compiled callback is still a bare identifier.
+      expect(
+        await errorsIn(`
+          const bump = (n: number) => n + 1;
+          const inc = lift(bump);
+          export { bump };
+        `),
+      ).toHaveLength(0);
+    });
+
+    it("accepts an exported function declaration", async () => {
+      // A function declaration keeps its local binding even when exported.
+      expect(
+        await errorsIn(`
+          export function bump(n: number) {
+            return n + 1;
+          }
+          const inc = lift(bump);
         `),
       ).toHaveLength(0);
     });

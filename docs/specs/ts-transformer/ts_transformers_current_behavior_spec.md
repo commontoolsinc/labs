@@ -866,11 +866,12 @@ signature — which is erased before emit, leaving the compiled module with a
 name bound to nothing. An overloaded function resolves through its
 implementation.
 
-A binding this module **exports** is reported for the same reason §17.3
-annotates exported bindings inline: CommonJS emit reads the reference as
+An **exported variable** declaration is reported for the same reason §17.3
+annotates exported bindings inline: CommonJS emit reads its references as
 `exports.<name>`, which the verifier's grammar does not admit as a callback
-target. Both spellings count — an `export` modifier and a trailing
-`export { … }` clause.
+target. Only the `export` modifier on the declaration does this — a function
+declaration keeps its local binding even when exported, and a trailing
+`export { … }` clause rewrites no reference, so both stay accepted.
 
 The rule belongs to `verifyTrustedBuilderCall`
 (`runner/src/sandbox/compiled-bundle-verifier.ts`, normative per §17.6), which
