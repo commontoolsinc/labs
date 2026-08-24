@@ -132,7 +132,9 @@ naming the piece. A `--list` survey reads exactly the pieces named and makes no
 containment claim; each entry takes either reference form, and a canonical
 entry's embedded space composes the way it does on `--piece` — supplying the
 space when `--space` is absent, agreeing with it otherwise. Read-only; the
-spelling is provisional until the bulk write operations get a home.
+spelling is provisional until the bulk write operations get a home. To watch the
+surface work rather than read about it, `integration/bulk-survey-demo.sh`
+narrates a board-sized survey end to end against a running server.
 
 `cf piece slugs` lists the space's slug index: every name assigned through
 `--slug` or `set-slug`, each resolved to the piece it names. The index records
