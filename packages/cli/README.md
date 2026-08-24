@@ -1033,3 +1033,13 @@ Two facts cannot be read off that tree and are carried explicitly in
 `lib/completion/`: the pre-parse globals `--log-level` and `--no-color` (both
 stripped from `argv` before Cliffy parses, in `lib/log-level.ts` and
 `lib/color-mode.ts`), and the provider table binding slots to live data.
+
+The tests divide the same way. `test/completion-*.test.ts` cover everything
+answerable without a fabric — line resolution, candidate shaping, and the
+degrade-to-empty path. Every provider that reads live state is exercised by
+`integration/completion-over-the-cli.sh`, which deploys a fixture and asserts
+what a Tab offers at each slot of the chain. That split is not tidiness: a
+provider that reaches a fabric and comes back with the wrong set is invisible to
+a unit test and invisible at the prompt, because failure here is silent by
+design. The script also carries `gap` assertions for slots that answer nothing
+today, so one starting to answer fails loudly rather than passing quietly.

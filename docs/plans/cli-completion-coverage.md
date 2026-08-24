@@ -92,7 +92,7 @@ read before picking one up; this table is the roll-up.
 | 15 | Remaining path-shaped and enumerable values | CLI vocabulary | not started |
 | 16 | Two provider entries that can never fire | hygiene | not started |
 | 17 | The README table omits the top-level spellings | hygiene | not started |
-| 18 | A live-provider test seam | mechanism | not started |
+| 18 | A live-provider test seam | mechanism | done |
 | 19 | A gate that fails when a new slot has no decision | mechanism | not started |
 
 **What can be picked up today.** Everything except one wiring change and one
@@ -550,27 +550,38 @@ lands.
 
 ### 18. A live-provider test seam
 
-No test drives a provider against a fabric. `completion-providers.test.ts`
-covers the shaping functions and the degrade-to-empty path; the integration
-scripts under `packages/cli/integration/` do not mention completion.
+`packages/cli/integration/completion-over-the-cli.sh` is where every provider
+that reads live state is exercised. It deploys `pattern/completion-target.tsx`,
+then asserts what a Tab offers at each slot of the chain, and runs in CI through
+`integration.sh`'s `piece-call` section (`completion` is the standalone
+selector). `test/completion-*.test.ts` stay the home for everything answerable
+without a fabric.
 
-Every correctness defect above is a shape no live exercise runs. A script
-alongside `verbs-over-the-cli.sh` — deploy a fixture, then assert what a Tab
-offers at each slot of the chain — is the coverage that would have caught them,
-and it composes with the existing harness rather than needing a new one.
-`verb-session-gaps.sh` is the precedent for asserting a gap so that it fails
-loudly the day it closes.
+Two rules the script holds to, both forced by completion's silence. A slot is
+judged only after the equivalent `cf` command has been run against the same
+target, so an empty candidate list reads as a defect rather than as an
+unreachable fabric. And a candidate is judged by whether the command accepts it.
 
-It is also the only way to settle the questions no table walk can reach, which
-are the ones to write first:
+It carries `gap` assertions, on the `verb-session-gaps.sh` precedent, for the
+slots below that answer nothing today: each fails loudly the day its slot starts
+answering. The count is printed on the script's last line rather than restated
+here.
 
-- Whether `cellPathCandidates` should stop at a `$link` boundary or follow it,
-  and which it does.
-- Whether the `--piece` listing and the dispatcher agree about scope, so that
-  every completed id is one the same command can then read.
-- Whether a verb stored on both the input and result cells completes against the
-  cell the dispatcher will reach it on, which is the shadowing rule the verbs
-  listing states.
+The three questions no table walk can reach are settled there:
+
+- `cellPathCandidates` **follows** a `$link` boundary rather than stopping at
+  it, and the path that crosses one is a path `cf get` reads.
+- Every id the `--piece` listing offers is one the same command reads back. The
+  converse does not hold and is not a defect: the listing enumerates registered
+  pieces, while a child piece is reached by the address its parent's result
+  carries.
+- A verb on both cells completes **once**, against the result cell — the same
+  one the dispatcher reaches, which is the shadowing rule the verbs listing
+  states.
+
+One defect the script found that this list did not enumerate: the cell-path slot
+offers a piece's callables, which `cf get` refuses and redirects to `cf call`.
+It is asserted there as what happens today.
 
 ### 19. A gate that fails when a new slot has no decision
 
