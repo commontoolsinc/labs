@@ -86,6 +86,14 @@ omission. The mapping accepts exactly `"true"` and `"false"`; any other
 value is ignored with a warning rather than coerced. See
 [How flags propagate](#how-flags-propagate).
 
+A client that is not built alongside the server it talks to — the `cf` binary
+among them — starts from the posture that deployment publishes rather than
+from its own environment, with an explicit `EXPERIMENTAL_*` still winning per
+flag. Which flags it takes that way is the second registry in the same file,
+`EXPERIMENTAL_FLAG_AUTHORITY`; see
+[Clients that are not built alongside their
+server](#clients-that-are-not-built-alongside-their-server).
+
 ### `modernCellRep`
 
 - **Toggle via.** `EXPERIMENTAL_MODERN_CELL_REP` environment variable (through
@@ -1252,6 +1260,83 @@ on restart without a rebuild. The browser is also the one place a CFC dial is
 host-controlled at construction: the `browserWorker` preset takes
 `cfcEnforcementMode` and `cfcFlowLabels` from the shell's initialization data.
 
+### Clients that are not built alongside their server
+
+The shell cannot disagree with its server: toolshed bakes the defines and
+serves the bundle, so a browser runs the posture of the deployment it loaded
+from. Every other client is installed, deployed, or checked out on its own
+schedule — the `cf` binary, the pieces controller a FUSE mount opens, the
+agents host, the background-piece admin CLI — and the environment they read
+belongs to whoever launched them, not to the deployment they talk to. Left
+there, the operator has to know a deployment's flags and set them by hand, and
+nothing reports it when they do not.
+
+These clients take the posture from the server instead. Each one calls
+`experimentalOptionsForDeployedClient` in place of `experimentalOptionsFromEnv`
+before constructing its `Runtime`:
+
+```
+cf / pieces controller / agents host / cast-admin
+  |
+  +-- GET <apiUrl>/api/meta  --> { experimental: { <flag>: <boolean>, ... } }
+  |     the posture the SERVER's own Runtime resolved
+  |
+  +-- runner/runtime-presets.ts --> experimentalOptionsForDeployedClient()
+  |     explicit EXPERIMENTAL_* > server declaration > built-in default
+  |
+  +-- runtimePresets.remoteClient({ experimental, ... })
+```
+
+What the server publishes is the posture its constructed `Runtime` resolved —
+built-in defaults and preset resolution included, not a second reading of its
+own environment that could disagree with the first. A flag the server left
+unresolved is omitted, and a server that has no `Runtime` yet publishes
+`null`; a client reads either as "this deployment said nothing" and keeps its
+own default. Absence of a declaration is never a declaration of `false`, which
+is what lets a client of an older server behave exactly as it did before the
+server published anything.
+
+Three rules govern what a client does with a declaration:
+
+- **An explicit `EXPERIMENTAL_*` still wins.** It is the documented rollback
+  lever, and how CI pins a lane; neither survives a server that can overrule
+  it. Setting one is also how you disagree with a deployment on purpose.
+- **Only a server-authoritative flag is adopted.**
+  `EXPERIMENTAL_FLAG_AUTHORITY` in
+  [`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts)
+  classifies every flag as `"server"` or `"client"`, type-gated the same way as
+  the environment mapping, so a new flag does not compile until someone decides
+  whether a `cf` binary follows the deployment on it. Every flag is `"server"`
+  today: each is visible in what gets written, in what the server admits, or in
+  which side runs the compute. `"client"` is for a flag that gates a purely
+  in-process experiment — over-adopting costs nothing, while a client
+  diverging where it should not is a silent corruption, so classify toward
+  `"server"` when the answer is not obvious.
+- **A client adopts only flags it knows.** The declaration is read through an
+  allowlist of this build's own flags, and only boolean values: a key from a
+  newer server is ignored as a matter of course, and a malformed value is
+  dropped with a warning rather than coerced.
+
+`CF_ADOPT_SERVER_FLAGS=false` turns the whole mechanism off for one process,
+for the case where a deployment publishes something a client cannot run and you
+do not yet know which flag it is. Per-flag `EXPERIMENTAL_*` overrides are the
+answer when you do.
+
+Presets that run against local emulated storage — `cf test`, `cf dev`, the
+pattern harnesses — have no server to ask and keep reading the environment
+alone. Nor do the background piece service's own main and worker processes:
+they are deployed with the same environment as the toolshed they serve
+alongside, so they read it directly through `productionServer`.
+
+The adoption happens before `new Runtime(...)`, not at the memory handshake,
+even though `hello`/`hello.ok` already carries capability flags in both
+directions. Flags such as `modernCellRep` reach ambient control points inside
+the constructor, before the transport connects, so a handshake-time value
+would arrive after the process had already committed to a serialization. The
+handshake's job stays what it is: refusing a connection whose peer resolved a
+wire contract differently — which, for a client that adopts, is a mismatch
+that should no longer arise.
+
 ### Background piece service
 
 The background piece service reads the same environment variables and builds its
@@ -1347,6 +1432,13 @@ config reaches:
   a decision about how each preset treats it.
 - `coreOptions` holds the shared first-party posture (today, the CFC pins) that
   every preset composes.
+- `EXPERIMENTAL_FLAG_AUTHORITY` classifies every flag as `"server"` or
+  `"client"` for a client that is not built alongside its server, typed the same
+  way, so a new flag forces that decision too.
+  `experimentalOptionsForDeployedClient` resolves one client's posture through
+  it; see
+  [Clients that are not built alongside their
+server](#clients-that-are-not-built-alongside-their-server).
 
 - Only one set of experimental flags is active per JavaScript context at a time.
 - In the browser the web worker is a separate JavaScript context, so its flags
@@ -1471,6 +1563,12 @@ sweep does not mistake them for missing experimental flags:
   [the configuration reference](./CONFIGURATION.md#runner-diagnostics).
 - **CLI controls** (environment): `CF_EXEC_SHEBANG`, `CF_CLI_TRACE_TIMINGS`,
   `CF_PROFILE_DONE_MARKER`.
+- **`CF_ADOPT_SERVER_FLAGS`** — set to `false` to stop a client that is not
+  built alongside its server from adopting that deployment's posture, leaving
+  it on its own environment. An escape hatch over the mechanism, not a flag
+  over a feature; see
+  [Clients that are not built alongside their
+server](#clients-that-are-not-built-alongside-their-server).
 - **Operational and build toggles**: `RATE_LIMIT_TRUST_FORWARDED_FOR`
   (deployment topology, not a feature dial — see CONFIGURATION.md),
   `MEMORY_ACL_MODE` (`off` / `observe` /

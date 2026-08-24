@@ -13,7 +13,7 @@
  * single-user runner did; client CLIs running patterns against the builder's
  * hardcoded-localhost `patternEnvironment` fallback.
  *
- * How the seal works — three gates, all in this file:
+ * How the seal works — four gates, all in this file:
  *
  * 1. {@link RUNTIME_OPTION_KEYS} is a type-gated exhaustive registry of
  *    `keyof RuntimeOptions`. Adding an option to `RuntimeOptions` without
@@ -23,7 +23,13 @@
  *    for `ExperimentalOptions`, type-gated the same way. A flag that is
  *    deliberately not env-reachable is declared `null` here instead of being
  *    silently absent from one wiring.
- * 3. Every preset composes the same {@link coreOptions}, so the invariant
+ * 3. {@link EXPERIMENTAL_FLAG_AUTHORITY} says, per flag, whether a client
+ *    that is not built alongside its server follows the deployment or runs
+ *    its own value — type-gated the same way, because a `cf` binary silently
+ *    disagreeing with the server it talks to is the same drift one release
+ *    further out. {@link experimentalOptionsForDeployedClient} is what such
+ *    a client calls instead of {@link experimentalOptionsFromEnv}.
+ * 4. Every preset composes the same {@link coreOptions}, so the invariant
  *    posture (today: the CFC dials) is written once. The conformance test
  *    (`runner/test/runtime-presets.test.ts`) pins each preset's full output
  *    as a golden, so any change to fleet posture is a visible diff there.
@@ -47,8 +53,11 @@
  * |                            | an explicit `{}`; requiredness is the seal).     |
  * |                            | productionServer/remoteClient resolve an unset   |
  * |                            | `serverExecution` to the first-party default     |
- * |                            | (ON since Phase 7); the single-process presets   |
- * |                            | keep the constructor default (OFF)               |
+ * |                            | constant; the single-process presets keep the    |
+ * |                            | constructor default (OFF). A deployed CLIENT     |
+ * |                            | passes what                                      |
+ * |                            | `experimentalOptionsForDeployedClient` resolved  |
+ * |                            | from the server it talks to (Gate 3)             |
  * | cfcEnforcementMode         | core-pinned `"enforce-explicit"`; overridable in |
  * |                            | patternTest/unitTest (per-test laxer mode) and   |
  * |                            | remoteClient/browserWorker (host-controlled      |
@@ -218,14 +227,23 @@ export const EXPERIMENTAL_ENV_VARS = {
   systemPatternAutoUpdate: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE",
   computedCellIds: "EXPERIMENTAL_COMPUTED_CELL_IDS",
   lazyMaterialization: "EXPERIMENTAL_LAZY_MATERIALIZATION",
-  // Server-execution v2 (docs/specs/server-side-execution/): ON by default
-  // since the plan's Phase 7 flip — the deployed-topology presets below
-  // resolve an unset flag to `SERVER_EXECUTION_DEFAULT_ENABLED`; an
-  // explicit "false" selects the OFF arm (the rollback lever, and CI's
-  // regression-guard lanes) until the OFF path is removed. Env-reachable
-  // so every server-side process can be flipped either way.
+  // Server-execution v2 (docs/specs/server-side-execution/): the
+  // deployed-topology presets below resolve an unset flag to
+  // `SERVER_EXECUTION_DEFAULT_ENABLED`, so such a process always runs a
+  // declared arm. Env-reachable so every server-side process can be flipped
+  // either way, and an explicit value always wins over the constant.
   serverExecution: "EXPERIMENTAL_SERVER_EXECUTION",
 } as const satisfies Record<keyof ExperimentalOptions, string | null>;
+
+/** The canonical parse: exactly `"true"` / `"false"`, anything else ignored. */
+function parseFlagValue(raw: string, source: string): boolean | undefined {
+  if (raw === "true" || raw === "false") return raw === "true";
+  console.warn(
+    `[runtime-presets] Ignoring ${source}="${raw}" — ` +
+      `expected "true" or "false" (unset = default).`,
+  );
+  return undefined;
+}
 
 /**
  * Read `ExperimentalOptions` from the environment via the canonical mapping.
@@ -246,20 +264,224 @@ export function experimentalOptionsFromEnv(
     if (envVar === null) continue;
     const raw = env(envVar);
     if (raw === undefined) continue;
-    if (raw === "true" || raw === "false") {
-      opts[key] = raw === "true";
-    } else {
-      console.warn(
-        `[runtime-presets] Ignoring ${envVar}="${raw}" — ` +
-          `expected "true" or "false" (unset = default).`,
-      );
-    }
+    const parsed = parseFlagValue(raw, envVar);
+    if (parsed !== undefined) opts[key] = parsed;
   }
   return opts;
 }
 
 // ---------------------------------------------------------------------------
-// Gate 3: the shared core all presets compose.
+// Gate 3: which flags a deployed client takes from the server it talks to.
+// ---------------------------------------------------------------------------
+
+/**
+ * Where a client resolves one flag when it is not built alongside the server
+ * it talks to.
+ *
+ * - `"server"` — the deployment decides. The client adopts the value the
+ *   server publishes (see {@link experimentalOptionsForDeployedClient}). Use
+ *   this for a flag whose value is visible on the wire, in what gets stored,
+ *   or in which side runs what: peers that disagree either refuse each other
+ *   or, worse, quietly write data shaped for two different postures.
+ * - `"client"` — the flag governs in-process behavior with no wire, storage,
+ *   or division-of-labor consequence, so a client is free to run its own
+ *   value. Justify the reasoning in a comment beside the entry: over-adopting
+ *   costs nothing but a client that diverges where it should not is a silent
+ *   corruption.
+ */
+export type ExperimentalFlagAuthority = "server" | "client";
+
+/**
+ * The authority for every flag in {@link ExperimentalOptions}, type-gated the
+ * same way as {@link EXPERIMENTAL_ENV_VARS}: a new flag does not compile
+ * until it is classified here, so "does a `cf` binary follow the deployment
+ * on this?" is a decision on record rather than whatever the default happened
+ * to be.
+ *
+ * Every flag is server-authoritative today. That is the safe direction rather
+ * than a coincidence — each one is visible in what gets written (the link and
+ * entity-id encodings, receipt contents, schema references), in what the
+ * server admits (commit preconditions, per-class admission), or in which side
+ * runs the compute at all. `"client"` is here for the flag that gates a
+ * purely local experiment; nothing qualifies yet.
+ */
+export const EXPERIMENTAL_FLAG_AUTHORITY = {
+  // Link serialization: the two encodings are a hard mismatch, which the
+  // memory handshake already refuses to connect across.
+  modernCellRep: "server",
+  // Emission gate. A client that stamps schema references at a server whose
+  // space does not hold the closure provokes a QueryError; a rolled-back
+  // server needs its clients rolled back with it.
+  contentAddressedSchemas: "server",
+  // The server enforces the preconditions this flag makes a commit carry.
+  commitPreconditions: "server",
+  // Decides what a verb's receipt holds. Under server execution the SERVER
+  // runs the handler, so a client on the other value reads back a receipt
+  // shaped by a rule it does not share.
+  plainResultReceipts: "server",
+  // Whether this deployment rolls patterns forward in place. Both runtimes
+  // race the update under the flag, OCC-guarded; a client on the other value
+  // either never participates or drags a deployment that opted out.
+  systemPatternAutoUpdate: "server",
+  // Entity-id minting: a peer predating the `computed:` scheme throws on such
+  // ids arriving via sync, so the scheme has to be fleet-wide.
+  computedCellIds: "server",
+  // Changes which paths a lift's argument read, and the consumed-read set is
+  // what a commit declares and the server admits against.
+  lazyMaterialization: "server",
+  // The whole point of the flag is which side computes what is stored.
+  serverExecution: "server",
+} as const satisfies Record<
+  keyof ExperimentalOptions,
+  ExperimentalFlagAuthority
+>;
+
+/**
+ * Where a server publishes the experimental posture its own Runtime resolved.
+ * Same document as the deployment's DID and commit, so a client that already
+ * asks who it is talking to learns the posture in the same breath.
+ */
+export const SERVER_EXPERIMENTAL_PATH = "/api/meta";
+
+/**
+ * Set to `"false"` to keep a client on its own posture and ignore whatever
+ * the server publishes. The escape hatch for a deployment publishing
+ * something a client cannot run — per-flag `EXPERIMENTAL_*` overrides handle
+ * the case where you know WHICH flag, this one the case where you do not.
+ */
+export const ADOPT_SERVER_FLAGS_ENV = "CF_ADOPT_SERVER_FLAGS";
+
+/**
+ * Read a server's published posture into `ExperimentalOptions`.
+ *
+ * Deliberately incurious about anything it does not recognize. A key this
+ * build has no flag for is a NEWER server and entirely normal; a non-boolean
+ * value is a malformed declaration and is dropped with a warning rather than
+ * coerced. Neither is grounds for refusing to run — a client that cannot read
+ * the posture keeps its built-in defaults, which is what it did before the
+ * server published anything at all.
+ */
+export function parseServerExperimentalOptions(
+  declared: unknown,
+): ExperimentalOptions {
+  if (declared === null || typeof declared !== "object") return {};
+  const opts: ExperimentalOptions = {};
+  for (const key of Object.keys(EXPERIMENTAL_FLAG_AUTHORITY)) {
+    const value = (declared as Record<string, unknown>)[key];
+    if (value === undefined) continue;
+    if (typeof value !== "boolean") {
+      console.warn(
+        `[runtime-presets] Ignoring server-published ${key}=` +
+          `${JSON.stringify(value)} — expected a boolean.`,
+      );
+      continue;
+    }
+    opts[key as keyof ExperimentalOptions] = value;
+  }
+  return opts;
+}
+
+/**
+ * Resolve one client's posture from what the server published and what its
+ * own environment says, in that order of increasing authority:
+ *
+ * 1. an explicit `EXPERIMENTAL_*` wins outright — it is the documented
+ *    rollback lever and CI's way to pin a lane, and neither survives a server
+ *    that can overrule it;
+ * 2. otherwise a `"server"` flag takes the published value;
+ * 3. otherwise the flag stays unset and the built-in default governs, which
+ *    is exactly what an old server, an unreachable one, or a `"client"` flag
+ *    leaves behind.
+ */
+export function adoptServerExperimentalOptions(
+  server: ExperimentalOptions,
+  env: ExperimentalOptions,
+  /**
+   * The classification to resolve against. Defaults to the registry, and is
+   * a parameter so the `"client"` arm stays exercised while no first-party
+   * flag carries it.
+   */
+  authorities: Record<
+    keyof ExperimentalOptions,
+    ExperimentalFlagAuthority
+  > = EXPERIMENTAL_FLAG_AUTHORITY,
+): ExperimentalOptions {
+  const opts: ExperimentalOptions = { ...env };
+  for (
+    const [key, authority] of Object.entries(authorities) as [
+      keyof ExperimentalOptions,
+      ExperimentalFlagAuthority,
+    ][]
+  ) {
+    if (authority !== "server") continue;
+    if (opts[key] !== undefined) continue;
+    const published = server[key];
+    if (published !== undefined) opts[key] = published;
+  }
+  return opts;
+}
+
+export interface DeployedClientExperimentalParams {
+  /** The deployment this client runs against. */
+  apiUrl: URL;
+  /** Reads this process's environment; pass `Deno.env.get` in Deno contexts. */
+  env: EnvReader;
+  /** Injectable for tests; the real `fetch` otherwise. */
+  fetch?: typeof globalThis.fetch;
+}
+
+/**
+ * The posture a client that is NOT built alongside its server should run:
+ * the deployment's own, with this process's explicit `EXPERIMENTAL_*`
+ * overriding it flag by flag.
+ *
+ * Call it in place of {@link experimentalOptionsFromEnv} wherever a runtime
+ * talks to a deployed API — `cf`, the pieces controller, the agents host, the
+ * admin CLIs. The presets that run against LOCAL emulated storage have no
+ * server to ask and keep reading the environment alone.
+ *
+ * Every way of not getting an answer — an old server with no posture on its
+ * meta document, an unreachable one, a body that will not parse — resolves to
+ * the environment alone. Absence of a declaration is not a declaration, and
+ * the caller is about to fail loudly on its real work if the server is
+ * genuinely down; failing here first would only obscure that.
+ */
+export async function experimentalOptionsForDeployedClient(
+  params: DeployedClientExperimentalParams,
+): Promise<ExperimentalOptions> {
+  const env = experimentalOptionsFromEnv(params.env);
+  const raw = params.env(ADOPT_SERVER_FLAGS_ENV);
+  if (
+    raw !== undefined && parseFlagValue(raw, ADOPT_SERVER_FLAGS_ENV) === false
+  ) {
+    return env;
+  }
+  const fetchImpl = params.fetch ?? globalThis.fetch;
+  let declared: unknown;
+  try {
+    const response = await fetchImpl(
+      new URL(SERVER_EXPERIMENTAL_PATH, params.apiUrl),
+    );
+    if (!response.ok) {
+      // Discard the body rather than leaving the connection holding an
+      // unread stream. An error page is not a posture even when it parses
+      // as one.
+      await response.body?.cancel();
+      return env;
+    }
+    declared = ((await response.json()) as { experimental?: unknown })
+      ?.experimental;
+  } catch {
+    return env;
+  }
+  return adoptServerExperimentalOptions(
+    parseServerExperimentalOptions(declared),
+    env,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Gate 4: the shared core all presets compose.
 // ---------------------------------------------------------------------------
 
 interface CoreParams {

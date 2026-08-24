@@ -5,7 +5,7 @@ import type { Identity, Session } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
 import {
   compileAndSavePattern,
-  experimentalOptionsFromEnv,
+  experimentalOptionsForDeployedClient,
   Runtime,
   runtimePresets,
 } from "@commonfabric/runner";
@@ -26,7 +26,7 @@ export interface CastAdminDependencies {
     toolshedUrl: string,
     identity: Identity,
     envGet: typeof Deno.env.get,
-  ) => Runtime;
+  ) => Promise<Runtime>;
   readTextFile: typeof Deno.readTextFile;
   createSession: typeof createSession;
   createPiecesController: (
@@ -49,22 +49,29 @@ export interface CastAdminDependencies {
   error: typeof console.error;
 }
 
-export function createRuntime(
+export async function createRuntime(
   toolshedUrl: string,
   identity: Identity,
   envGet: typeof Deno.env.get = Deno.env.get,
-): Runtime {
+): Promise<Runtime> {
   // Shared first-party posture for client runtimes against a deployed API
   // (CT-1814); this admin CLI now honors EXPERIMENTAL_* like the rest of the
   // service instead of silently ignoring it, read through the same injected
   // env boundary as every other env consultation here (CastAdminDependencies).
+  // The values start from the deployment's own posture, an explicit
+  // EXPERIMENTAL_* here still winning per flag: this CLI is run from a
+  // checkout against whatever toolshed it is pointed at
+  // (docs/development/EXPERIMENTAL_OPTIONS.md).
   return new Runtime(runtimePresets.remoteClient({
     apiUrl: new URL(toolshedUrl),
     storageManager: StorageManager.open({
       as: identity,
       memoryHost: new URL(toolshedUrl),
     }),
-    experimental: experimentalOptionsFromEnv(envGet),
+    experimental: await experimentalOptionsForDeployedClient({
+      apiUrl: new URL(toolshedUrl),
+      env: envGet,
+    }),
   }));
 }
 
@@ -94,7 +101,7 @@ export async function castPattern(
     quit,
   });
 
-  const runtime = dependencies.createRuntime(
+  const runtime = await dependencies.createRuntime(
     toolshedUrl,
     identity,
     dependencies.envGet,

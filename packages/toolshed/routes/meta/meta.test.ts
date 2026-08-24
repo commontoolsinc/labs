@@ -1,7 +1,10 @@
 import { assertEquals } from "@std/assert";
+import { SERVER_EXPERIMENTAL_PATH } from "@commonfabric/runner";
 import env from "@/env.ts";
 import createApp from "@/lib/create-app.ts";
+import { publishExperimentalPosture } from "@/lib/experimental-posture.ts";
 import router from "@/routes/meta/meta.index.ts";
+import * as routes from "@/routes/meta/meta.routes.ts";
 
 if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");
@@ -24,5 +27,34 @@ Deno.test("meta routes", async (t) => {
     // A source run has no compiled marker: the shell's baked
     // server-execution define is unknown (null), like gitSha.
     assertEquals(json.shellServerExecutionDefine, null);
+    // No Runtime is constructed behind this app, so there is no posture to
+    // report and a client reading it keeps its own defaults.
+    assertEquals(json.experimental, null);
+  });
+
+  await t.step(
+    "GET /api/meta reports the Runtime's resolved flags",
+    async () => {
+      publishExperimentalPosture({
+        modernCellRep: false,
+        serverExecution: true,
+      });
+      try {
+        const json = await (await app.request("/api/meta")).json();
+        assertEquals(json.experimental, {
+          modernCellRep: false,
+          serverExecution: true,
+        });
+      } finally {
+        publishExperimentalPosture(null);
+      }
+    },
+  );
+
+  await t.step("serves the document clients read their posture from", () => {
+    // The client half names this path as a constant it cannot see the route
+    // from; moving the route without moving the constant would leave every
+    // deployed client silently back on its own environment.
+    assertEquals(SERVER_EXPERIMENTAL_PATH, routes.index.path);
   });
 });

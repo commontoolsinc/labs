@@ -44,13 +44,21 @@ describe("pieces-controller", () => {
           })).rejects.toThrow('Could not connect to "http://toolshed.test/".');
         });
 
-        it("asks the API for its health before reading the space", async () => {
+        it("asks the API for its posture and health before reading the space", async () => {
           await expect(PiecesController.initialize({
             apiUrl,
             identity,
             space: "unhealthy-space",
           })).rejects.toThrow();
-          expect(requested).toEqual(["http://toolshed.test/_health"]);
+          // The deployment's experimental posture first, because it decides
+          // how the runtime is constructed; then the health probe that
+          // decides whether to go on at all. Neither answers here (the stub
+          // is 503 throughout), and the posture request not answering is why
+          // the controller still reaches the health probe.
+          expect(requested).toEqual([
+            "http://toolshed.test/api/meta",
+            "http://toolshed.test/_health",
+          ]);
         });
 
         it("takes an apiUrl written as a string", async () => {

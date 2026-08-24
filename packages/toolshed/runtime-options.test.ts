@@ -4,6 +4,10 @@ import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server
 import type { RuntimeOptions } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
+  experimentalPosture,
+  publishExperimentalPosture,
+} from "@/lib/experimental-posture.ts";
+import {
   attachRuntimeOtelBridge,
   createToolshedRuntime,
   detachRuntimeOtelBridgeIfAttached,
@@ -105,4 +109,42 @@ Deno.test("createToolshedRuntime attaches the OTel bridge only when enabled", as
     }),
     false,
   );
+});
+
+// What `/api/meta` reports, and therefore what a client not built alongside
+// this server adopts (docs/development/EXPERIMENTAL_OPTIONS.md). Taken from
+// the constructed Runtime rather than re-read from the environment, so the
+// published posture includes the defaults and preset resolution the server is
+// actually running under — a second reading could disagree with the first.
+Deno.test("createToolshedRuntime publishes the posture it resolved", async () => {
+  const signer = await Identity.fromPassphrase("runtime-options-posture-test");
+  const storageManager = StorageManager.emulate({ as: signer });
+  publishExperimentalPosture(null);
+  const runtime = createToolshedRuntime(
+    {
+      MEMORY_URL: "http://memory.test:8000/",
+      API_URL: "http://api.test:9000/",
+      OTEL_ENABLED: false,
+      OTEL_SERVICE_NAME: "toolshed-test",
+      ENV: "test",
+    },
+    storageManager,
+    (name) => name === "EXPERIMENTAL_MODERN_CELL_REP" ? "true" : undefined,
+  );
+  try {
+    const posture = experimentalPosture();
+    assertEquals(posture?.modernCellRep, true);
+    // Resolved, not passed: the env reader said nothing about these, and a
+    // client adopting the posture needs the values in effect rather than the
+    // subset someone happened to set.
+    assertEquals(posture?.commitPreconditions, true);
+    assertEquals(
+      posture?.serverExecution,
+      SERVER_EXECUTION_DEFAULT_ENABLED,
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+    publishExperimentalPosture(null);
+  }
 });

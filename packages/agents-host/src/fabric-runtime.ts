@@ -1,7 +1,7 @@
 import { createSession, Identity, isDID } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
 import {
-  experimentalOptionsFromEnv,
+  experimentalOptionsForDeployedClient,
   type MemorySpace,
   Runtime,
   runtimePresets,
@@ -43,7 +43,13 @@ export async function openAgentFabricRuntime(options: {
   const runtime = new Runtime(runtimePresets.remoteClient({
     apiUrl,
     storageManager,
-    experimental: experimentalOptionsFromEnv((key) => Deno.env.get(key)),
+    // The deployment's posture, with this host's explicit EXPERIMENTAL_*
+    // still winning per flag: an agents host is deployed separately from the
+    // toolshed it talks to (docs/development/EXPERIMENTAL_OPTIONS.md).
+    experimental: await experimentalOptionsForDeployedClient({
+      apiUrl,
+      env: (key) => Deno.env.get(key),
+    }),
     trustSnapshotProvider: () => ({
       id: `principal:${session.as.did()}`,
       actingPrincipal: session.as.did(),

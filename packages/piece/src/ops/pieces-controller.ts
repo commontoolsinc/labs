@@ -26,7 +26,7 @@ import {
   type EntityIdListOptions,
   type EntityIdListResult,
   type EnvReader,
-  experimentalOptionsFromEnv,
+  experimentalOptionsForDeployedClient,
   getEntityId,
   getMetaLink,
   getPatternIdentityRef,
@@ -347,10 +347,17 @@ export class PiecesController<T = unknown> {
     // Shared first-party posture for client runtimes against a deployed API
     // (CT-1814); the CFC pin this site previously restated lives in the
     // preset core. Trust provenance stays a visible delta of this controller.
+    // The flags come from the deployment itself, this process's explicit
+    // EXPERIMENTAL_* still winning per flag — a controller opened by a cf
+    // binary or a fuse mount is not built alongside the server it talks to
+    // (docs/development/EXPERIMENTAL_OPTIONS.md).
     const runtime = new Runtime(runtimePresets.remoteClient({
       apiUrl: api,
       storageManager,
-      experimental: experimentalOptionsFromEnv(readEnv),
+      experimental: await experimentalOptionsForDeployedClient({
+        apiUrl: api,
+        env: readEnv,
+      }),
       moduleByteCache,
       patternCoverage,
       ...(cfcEnforcementMode !== undefined ? { cfcEnforcementMode } : {}),
