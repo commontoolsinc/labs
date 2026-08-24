@@ -213,7 +213,7 @@ describe("computeEntryIdentity (light, drift-free)", () => {
     ).toThrow("/other.ts");
   });
 
-  it("hashes a data file without parsing it, a declaration-like name included", () => {
+  it("returns a different identity when a declaration-named file is data", () => {
     // The contents would dangle if scanned as an import, and the name would
     // vanish under the `.d.ts` filter if data were partitioned after it.
     const files = [

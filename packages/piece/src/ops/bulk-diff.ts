@@ -17,7 +17,7 @@
 
 import { canonicalPieceAddress, type PiecePlan } from "./bulk-plan.ts";
 
-/** One half-qualified executable pointer a diff verdict was decided from. */
+/** One full executable pointer — `{identity, symbol}` — behind a verdict. */
 export interface PatternRef {
   patternIdentity: string;
   symbol: string;
@@ -58,7 +58,7 @@ export interface PlanDiff {
  * a verdict; pieces only the after-survey knows are listed as `unplanned`
  * rather than dropped, so a selection that grew mid-run stays visible.
  *
- * Two comparisons are refused rather than answered: plans from different
+ * Two comparisons are refused outright: plans from different
  * spaces — matching piece ids across spaces would read as landed while
  * saying nothing about either space — and a plan listing a piece more than
  * once, which the format promises never to hold and this function would
@@ -71,6 +71,8 @@ export function diffPlan(plan: PiecePlan, after: PiecePlan): PlanDiff {
         `${after.header.space}.`,
     );
   }
+  assertAccountedFor(plan, "plan");
+  assertAccountedFor(after, "after-survey");
   assertUniquePieces(plan, "plan");
   assertUniquePieces(after, "after-survey");
   // Keys are canonical, so the `of:` alias and the bare spelling of one
@@ -135,6 +137,22 @@ export function diffPlan(plan: PiecePlan, after: PiecePlan): PlanDiff {
 function sameRef(left: PatternRef, right: PatternRef): boolean {
   return left.patternIdentity === right.patternIdentity &&
     left.symbol === right.symbol;
+}
+
+/**
+ * A verdict from an incomplete side is not a verdict: pieces the survey did
+ * not account for would read as clean rather than as unknown.
+ */
+function assertAccountedFor(plan: PiecePlan, label: string): void {
+  if (
+    (plan.header.problems?.length ?? 0) > 0 ||
+    (plan.header.outside?.length ?? 0) > 0
+  ) {
+    throw new Error(
+      `The ${label} is incomplete: its header names pieces the survey did ` +
+        `not account for.`,
+    );
+  }
 }
 
 function assertUniquePieces(plan: PiecePlan, label: string): void {

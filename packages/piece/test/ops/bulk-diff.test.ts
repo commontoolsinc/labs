@@ -9,6 +9,7 @@ const header = {
   v: 1,
   space: "did:key:test",
   takenAt: "2026-08-24T00:00:00.000Z",
+  selector: "collection" as const,
   enumerated: { collection: 4, registry: 0, registeredOutside: 0 },
 } as const;
 
@@ -212,6 +213,19 @@ describe("bulk-diff", () => {
       const diff = diffPlan(plan, after);
       expect(diff.rows[0].status).toBe("unchanged");
       expect(diff.unplanned).toEqual([]);
+    });
+
+    it("throws for an incomplete plan on either side", () => {
+      const incomplete: PiecePlan = {
+        header: {
+          ...header,
+          problems: [{ piece: "fid1:x", problem: "unreadable" }],
+        },
+        rows: [],
+      };
+      const clean: PiecePlan = { header, rows: [] };
+      expect(() => diffPlan(incomplete, clean)).toThrow("incomplete");
+      expect(() => diffPlan(clean, incomplete)).toThrow("incomplete");
     });
 
     it("throws for an alias-spelled duplicate", () => {

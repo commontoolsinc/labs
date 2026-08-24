@@ -1,9 +1,10 @@
 # Bulk piece operations
 
-**Status:** proposed; stage 1's survey library is built and in review, its
-CLI entry points and CI drill follow in stacked changes behind it, and every
-later stage is unbuilt. The design and build sequence for changing many pieces in one space as one
-reviewable, resumable operation. Driven by recurring Topics board upgrades.
+**Status:** proposed; stage 1 — the survey library, its `cf` entry points,
+and its CI drill — is built and in review as a short stack, and every
+later stage is unbuilt. This is the design and build sequence for changing
+many pieces in one space as one reviewable, resumable operation. Driven by
+recurring Topics board upgrades.
 
 ## The short version
 
@@ -345,9 +346,9 @@ constraint that has to survive review, and one a reader can check without
 running anything.
 
 ```text
-{"kind":"piece-plan","v":1,"space":"did:key:…","takenAt":"…","enumerated":{"collection":113,"registry":7,"registeredOutside":0}}
+{"kind":"piece-plan","v":1,"space":"did:key:…","takenAt":"…","selector":"collection","enumerated":{"collection":113,"registry":7,"registeredOutside":0}}
 {"piece":"of:fid1:aaa…","phase":"topics","expect":{"patternIdentity":"PB0Gum…","symbol":"default","retained":true},"op":{"kind":"retarget","source":{"main":"topic.tsx"},"rev":"…","patternIdentity":"Xk3Lp…","symbol":"default","allowIncompatible":true}}
-{"piece":"of:fid1:bbb…","phase":"board","expect":{"patternIdentity":"WpIRvA…","symbol":"default","retained":true,"revisionId":"rev-bbb…"},"op":{"kind":"retarget","source":{"main":"main.tsx"},"rev":"…","patternIdentity":"Nq8Hw…","symbol":"default","allowIncompatible":true}}
+{"piece":"of:fid1:bbb…","phase":"holder","expect":{"patternIdentity":"WpIRvA…","symbol":"default","retained":true,"revisionId":"rev-bbb…"},"op":{"kind":"retarget","source":{"main":"main.tsx"},"rev":"…","patternIdentity":"Nq8Hw…","symbol":"default","allowIncompatible":true}}
 ```
 
 and the rollback row derived from the first of those:
@@ -395,7 +396,11 @@ that would otherwise have no mechanism:
   Selection error is the failure this design most wants to catch, and
   recording the collection count, the registry count, and how many registered
   in-scope pieces the collection lacks is what makes the check reviewable
-  afterwards rather than only at run time.
+  afterwards rather than only at run time. The header also says which
+  selector produced the rows, and an incomplete survey rides the artifact:
+  optional `problems` and `outside` lists name what the survey could not
+  account for, the count and the list must agree, and a write stage — the
+  rollback derivation today — refuses a plan carrying either.
 - **The reference is the pin; `rev` is a label.** A row's `source` names a
   main file and, when the program has them, its root, tests, data files, and
   export, and the apply resolves it through the runner's local-program
@@ -485,7 +490,8 @@ containment result, and `retained` column — run against the live board on
 day one, it answers which pieces sit on which identity and whether anything
 registered sits outside the holder; the survey-diff, which compares a survey
 against a plan or an earlier survey and is the verification every later
-stage uses; and the drill skeleton.
+stage uses; the reference a local source produces, computed without
+compiling; and the drill.
 
 - [x] Enumeration comes from the holder's collection, and the registry is
       compared against it by containment: a registered in-scope piece the
@@ -512,6 +518,11 @@ stage uses; and the drill skeleton.
 - [x] The survey-diff: a survey compared against a plan or an earlier
       survey, reporting per piece moved as planned, still outstanding, or
       moved to something the plan did not ask for.
+- [x] The survey and the pin read are invocable from `cf`
+      (`cf piece survey`, `cf piece inspect --pattern-identity`),
+      provisionally spelled per decision 1.
+- [x] The stage-1 drill runs in continuous integration, under the CLI
+      integration suite's `piece-call` section.
 
 ### 2. Repair, by a supplied fixer
 
@@ -589,9 +600,8 @@ from, is the report of what the run did. What this stage adds is the
 requirement that applying never implies it — an apply that exits zero is not
 a verdict, and the two stay separate invocations.
 
-**Delivers:** the identity computed from a source, exposed where the plan
-command can call it and a person can check which identity current `main`
-produces; the plan consumer with grouped sessions; the stop report; per-piece
+**Delivers:** the plan consumer with grouped sessions; the stop report;
+per-piece
 timing, where the number from the first rehearsal run decides whether
 siblings may run concurrently and whether stage 5 is worth building; and the
 retarget drill. This is also the stage at which the entry point gets its

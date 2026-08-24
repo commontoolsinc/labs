@@ -2,8 +2,6 @@ export {
   canonicalPieceAddress,
   decodePlan,
   deriveRollbackPlan,
-  type RegisteredOutside,
-  type SurveyProblem,
   encodePlan,
   type PieceExpect,
   type PieceOp,
@@ -11,9 +9,11 @@ export {
   type PiecePlanHeader,
   type PiecePlanRow,
   type PlanEnumeration,
+  type RegisteredOutside,
   type RestoreOp,
   type RetargetOp,
   type RetargetSource,
+  type SurveyProblem,
 } from "./bulk-plan.ts";
 export {
   diffPlan,

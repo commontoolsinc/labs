@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
+  createBuilder,
   getPatternIdentityRef,
   Runtime,
   type RuntimeProgram,
@@ -9,7 +10,6 @@ import {
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
-import { createBuilder } from "../../../runner/src/builder/factory.ts";
 import type { Cell as BuilderCell } from "../../../runner/src/builder/types.ts";
 import { pieceId } from "../../src/piece-id.ts";
 import { surveyPieces } from "../../src/ops/bulk-survey.ts";
@@ -217,6 +217,7 @@ describe("bulk-survey", () => {
       const sourced = await surveyPieces(pieces, {
         selector: collectionOf(holder),
       });
+      expect(sourced.plan.rows).toHaveLength(2);
       expect(sourced.plan.rows.every((row) => row.expect.retained)).toBe(true);
 
       // The default pattern ran from a builder value: it carries a durable
@@ -249,6 +250,19 @@ describe("bulk-survey", () => {
       });
       // Existence is not retention: nothing can restore from this document.
       expect(survey.plan.rows[0].expect.retained).toBe(false);
+    });
+
+    it("throws for a member slot holding null rather than a piece", async () => {
+      const a = await pieces.create(generationProgram("a"), { input: {} });
+      const holder = await seedHolder([a]);
+      await holder.input.set([a.getCell(), null], ["members"]);
+      await pieces.runtime.idle();
+
+      await expect(
+        surveyPieces(pieces, { selector: collectionOf(holder) }),
+      ).rejects.toThrow(
+        /does not hold a piece link|the read returned/,
+      );
     });
 
     it("throws for a path whose stored value is not a collection", async () => {
@@ -415,6 +429,61 @@ describe("bulk-survey", () => {
         symbol: "default",
       });
       expect(survey.plan.rows[1].op).toBeUndefined();
+    });
+
+    it("throws for an operation phase no selected row carries", async () => {
+      const a = await pieces.create(generationProgram("a"), { input: {} });
+      const holder = await seedHolder([a]);
+
+      await expect(
+        surveyPieces(pieces, {
+          selector: collectionOf(holder),
+          operations: {
+            membres: {
+              source: { main: "topic.tsx" },
+              patternIdentity: "target",
+              symbol: "default",
+            },
+          },
+        }),
+      ).rejects.toThrow("membres");
+    });
+
+    it("surveys a result-side collection through its stored link", async () => {
+      const a = await pieces.create(generationProgram("a"), { input: {} });
+      const holder = await seedHolder([a]);
+
+      const survey = await surveyPieces(pieces, {
+        selector: {
+          kind: "collection",
+          holder: holder.id,
+          path: ["members"],
+          side: "result",
+        },
+      });
+
+      expect(survey.plan.rows.map((row) => row.phase)).toEqual([
+        "members",
+        "holder",
+      ]);
+    });
+
+    it("names a piece whose materialized result still fails the schema", async () => {
+      const a = await pieces.create(generationProgram("a"), { input: {} });
+      const holder = await seedHolder([a]);
+
+      const survey = await surveyPieces(pieces, {
+        selector: collectionOf(holder),
+        validator: {
+          type: "object",
+          properties: { version: { type: "string", minLength: 99 } },
+          required: ["version"],
+        },
+      });
+
+      // The member's `version` materializes and still violates the schema.
+      expect(survey.validatorFailures.map((failure) => failure.piece))
+        .toContain(a.id);
     });
 
     it("stamps no op on a member already at the operation's reference", async () => {

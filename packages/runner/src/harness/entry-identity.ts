@@ -54,7 +54,7 @@ export function computeEntryIdentity(
 ): string {
   const dataPaths = [...new Set(options.dataFiles ?? [])].sort();
   if (dataPaths.includes(main)) {
-    throw new Error(`The program entry '${main}' cannot be a data file.`);
+    throw new Error(`the program entry \`${main}\` cannot be a data file`);
   }
   const rootPaths = [...new Set(options.sourceRoots ?? [])]
     .filter((root) => root !== main);
@@ -83,13 +83,17 @@ export function computeEntryIdentity(
   const codeNames = new Set(prefixedCode.map((file) => file.name));
   for (const root of rootPaths) {
     if (!codeNames.has(prefixName(root))) {
-      throw new Error(`package path '${root}' is not among the provided files`);
+      throw new Error(
+        `package path \`${root}\` is not among the provided files`,
+      );
     }
   }
   const dataNames = new Set(dataSources.map((file) => file.name));
   for (const path of dataPaths) {
     if (!dataNames.has(path)) {
-      throw new Error(`package path '${path}' is not among the provided files`);
+      throw new Error(
+        `package path \`${path}\` is not among the provided files`,
+      );
     }
   }
 

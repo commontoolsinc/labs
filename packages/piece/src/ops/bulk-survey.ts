@@ -13,6 +13,7 @@
  * design is [docs/plans/piece-bulk-operations.md](../../../../docs/plans/piece-bulk-operations.md).
  */
 
+import type { CellScope } from "@commonfabric/api";
 import {
   type Cell,
   getPatternIdentityRef,
@@ -75,8 +76,9 @@ export interface SurveyOptions {
   /**
    * Retargets to stamp onto rows, keyed by phase — a collection selector
    * labels members with the collection path and the holder with
-   * {@link HOLDER_PHASE}. Rows of an unlisted phase get no `op` and the plan
-   * stays a pre-state record for them.
+   * {@link HOLDER_PHASE}. Rows of an unlisted phase get no `op`, and neither
+   * does a row already on the operation's reference — such a row would be
+   * unverifiable — so the plan stays a pre-state record for both.
    */
   operations?: Readonly<Record<string, PlannedRetarget>>;
   /**
@@ -149,8 +151,11 @@ export async function selectPieces(
   const members = await collection.pull() ?? [];
   // An absent stored value and a misspelled path read the same, and the
   // silent holder-only plan a default would produce is the exact subset
-  // failure the survey exists to prevent — so absence is a refusal.
-  const stored = collection.getRaw();
+  // failure the survey exists to prevent — so absence is a refusal. The raw
+  // read resolves a final link the way the pull above did, so a collection
+  // stored as a link — a result-side passthrough, a linked list — reads as
+  // the array it points at rather than as the link.
+  const stored = collection.getRaw({ lastNode: "value" });
   if (stored === undefined) {
     throw new Error(
       `The holder stores no collection at ${selector.path.join("/")} — a ` +
@@ -163,6 +168,9 @@ export async function selectPieces(
       `The value at ${selector.path.join("/")} is not a collection.`,
     );
   }
+  // The cell-typed read yields one cell per stored slot — nothing shortens
+  // it — so the per-member check below covers every slot, a null one
+  // included.
   const phase = String(selector.path.at(-1) ?? "members");
   // A literal in a member slot resolves to a cell inside the holder's own
   // document rather than to another document, which is how one is told apart
@@ -204,7 +212,8 @@ function assertUniqueSelection(selected: SelectedPiece[]): SelectedPiece[] {
 
 /**
  * Survey the selected pieces and build the plan. Read-only: one identity
- * read per piece, one retained-source probe per distinct identity, and one
+ * read per piece (a second per piece when a validator is supplied), one
+ * retained-source load per distinct identity, and one
  * pass over the registry for the containment check. Every read is live —
  * nothing is served from a snapshot — so re-running after a change reflects
  * the change.
@@ -270,6 +279,18 @@ export async function surveyPieces(
   // One registry read serves the containment check and the header count, so
   // the two can never describe different live enumerations.
   const registered = await pieces.getRegisteredPieces();
+  // An operation keyed by a phase no row carries would otherwise vanish —
+  // resolved from disk, identity computed, and silently thrown away, leaving
+  // a pre-state record the operator believes is a retarget plan.
+  const phases = new Set(rows.map((row) => row.phase));
+  const unusedPhases = Object.keys(options.operations ?? {})
+    .filter((phase) => !phases.has(phase));
+  if (unusedPhases.length > 0) {
+    throw new Error(
+      `No selected row carries phase ${unusedPhases.join(", ")} — the ` +
+        `operation keyed by it would be dropped, not applied.`,
+    );
+  }
   const outside = options.selector.kind === "collection"
     ? await registeredOutsideSelection(pieces, registered, rows)
     : [];
@@ -282,6 +303,7 @@ export async function surveyPieces(
       v: 1,
       space: pieces.getSpace(),
       takenAt: options.takenAt ?? new Date().toISOString(),
+      selector: options.selector.kind,
       enumerated: {
         collection: memberCount,
         registry: registered.length,
@@ -319,17 +341,18 @@ export interface PiecePin {
 
 /**
  * Read one piece's source pin: identity, symbol, current revision when a log
- * exists, and whether the identity's source is retained. One synced read of
- * the piece plus one cached existence probe — the piece is never run, and
- * nothing else is pulled. Returns `undefined` for a piece carrying no
- * pattern identity.
+ * exists, and whether the identity's source is verifiably retained. One
+ * synced read of the piece plus one retained-source load cached per identity
+ * — the piece is never run, and nothing else is pulled. Returns `undefined`
+ * for a piece carrying no pattern identity.
  */
 export async function readPiecePin(
   pieces: PiecesController,
   piece: string,
   retainedByIdentity: Map<string, boolean> = new Map(),
+  scope?: CellScope,
 ): Promise<PiecePin | undefined> {
-  const controller = await pieces.get(piece, false);
+  const controller = await pieces.get(piece, false, undefined, scope);
   const state = readPieceSourceMetadata(pieces.runtime, controller.getCell());
   if (state.pattern === undefined) return undefined;
   return {
@@ -426,7 +449,12 @@ async function validateResult(
   const result = await controller.result.getCell();
   const shaped = result.asSchema(validator);
   await shaped.pull();
-  if (shaped.get() !== undefined) return undefined;
+  const materialized = shaped.get();
+  if (materialized !== undefined) {
+    // Materializing is necessary, not sufficient: a value can come back and
+    // still violate the schema — a string where a number is demanded.
+    return validateSchemaValue(validator, materialized);
+  }
   return validateSchemaValue(validator, undefined) === undefined
     ? undefined
     : result.getRaw() === undefined

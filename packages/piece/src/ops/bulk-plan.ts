@@ -17,7 +17,7 @@
  */
 
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
-import { hashStringForEntityAddress } from "@commonfabric/runner";
+import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
 
 /**
  * The canonical spelling of a piece address: the bare tagged-hash form every
@@ -38,7 +38,7 @@ export function canonicalPieceAddress(address: string): string {
   return bare;
 }
 
-/** One piece a survey could not read into a plan row. */
+/** One piece and what went wrong with it — unreadable, or failing a validator. */
 export interface SurveyProblem {
   piece: string;
   problem: string;
@@ -116,7 +116,12 @@ export interface RetargetSource {
   mainExport?: string;
 }
 
-/** Return a piece to a retained revision — the reversal of a retarget. */
+/**
+ * Return a piece to a retained revision — the reversal of a retarget. A
+ * restore carries no compatibility override: whether returning to a
+ * reference the piece already ran needs one is stage 4's question, and the
+ * derivation deliberately records nothing it cannot answer.
+ */
 export interface RestoreOp {
   kind: "restore";
   /**
@@ -154,7 +159,7 @@ export interface PiecePlanRow {
 
 /** The counts a survey compares to catch a selection that dropped members. */
 export interface PlanEnumeration {
-  /** Members read from the holder's collection — the authoritative set. */
+  /** Pieces the selection names: a collection's members, or a list's entries. */
   collection: number;
   /** Pieces the space's piece registry lists. */
   registry: number;
@@ -174,6 +179,8 @@ export interface PiecePlanHeader {
   space: string;
   /** When the survey behind the plan was taken, as an ISO-8601 string. */
   takenAt: string;
+  /** Which selector produced the rows: a holder's collection, or a list. */
+  selector: "collection" | "list";
   enumerated: PlanEnumeration;
   /**
    * Selected pieces the survey could not read into rows. Their absence from
@@ -206,9 +213,10 @@ export function encodePlan(plan: PiecePlan): string {
 /**
  * Parse a plan from the form {@link encodePlan} writes. Blank lines are
  * ignored so a hand-edited file round-trips; every other line must be an
- * object, the first of them the `piece-plan` header. Throws on a missing or
- * wrong header, or a row that is not an object — a malformed plan is refused
- * rather than half-read.
+ * object, the first of them the `piece-plan` header. Row addresses fold to
+ * the canonical bare spelling, and a plan listing one piece twice is
+ * refused. Throws on a missing or wrong header, or a row that is not a
+ * valid row — a malformed plan is refused rather than half-read.
  */
 export function decodePlan(text: string): PiecePlan {
   const lines = text.split("\n").filter((line) => line.trim() !== "");
@@ -240,7 +248,9 @@ export function decodePlan(text: string): PiecePlan {
  * Derive the rollback of a retarget plan, row by row: the precondition
  * becomes the reference the retarget produced, and the operation restores the
  * retained revision carrying the reference the row recorded. Nothing is
- * re-surveyed or re-supplied. Rows without a retarget op have nothing to roll
+ * re-surveyed or re-supplied. A plan whose header names pieces the survey
+ * could not account for is refused before any row is read. Rows without a
+ * retarget op have nothing to roll
  * back and are left out; a plan with no retarget rows at all is refused,
  * because deriving an empty rollback would read as having one.
  *
@@ -297,7 +307,21 @@ export function deriveRollbackPlan(
   if (rows.length === 0) {
     throw new Error("Plan has no retarget rows to derive a rollback from.");
   }
-  return { header: { ...plan.header, takenAt }, rows };
+  return {
+    header: {
+      ...plan.header,
+      takenAt,
+      // The derived plan's selection is its rows, not the survey's — a
+      // header claiming the source plan's counts would read as a rollback
+      // that dropped every op-less piece.
+      enumerated: {
+        collection: rows.length,
+        registry: plan.header.enumerated.registry,
+        registeredOutside: 0,
+      },
+    },
+    rows,
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -319,16 +343,24 @@ function isOptionalStringArray(
 function isPlanHeader(value: unknown): value is PiecePlanHeader {
   if (!isRecord(value)) return false;
   const enumerated = value.enumerated;
-  return value.kind === "piece-plan" && value.v === 1 &&
-    typeof value.space === "string" && typeof value.takenAt === "string" &&
-    isRecord(enumerated) &&
-    typeof enumerated.collection === "number" &&
-    typeof enumerated.registry === "number" &&
-    typeof enumerated.registeredOutside === "number" &&
-    (value.problems === undefined ||
-      (Array.isArray(value.problems) && value.problems.every(isProblem))) &&
-    (value.outside === undefined ||
-      (Array.isArray(value.outside) && value.outside.every(isOutside)));
+  if (
+    value.kind !== "piece-plan" || value.v !== 1 ||
+    typeof value.space !== "string" || typeof value.takenAt !== "string" ||
+    (value.selector !== "collection" && value.selector !== "list") ||
+    !isRecord(enumerated) ||
+    typeof enumerated.collection !== "number" ||
+    typeof enumerated.registry !== "number" ||
+    typeof enumerated.registeredOutside !== "number" ||
+    !(value.problems === undefined ||
+      (Array.isArray(value.problems) && value.problems.every(isProblem))) ||
+    !(value.outside === undefined ||
+      (Array.isArray(value.outside) && value.outside.every(isOutside)))
+  ) return false;
+  // The header states the outside fact twice — a count and a list — and a
+  // plan where the two disagree has been hand-edited into a lie: deleting
+  // the list must not launder an incomplete plan into a complete one.
+  const outside = value.outside as readonly unknown[] | undefined;
+  return enumerated.registeredOutside === (outside?.length ?? 0);
 }
 
 function isProblem(value: unknown): value is SurveyProblem {
@@ -346,7 +378,10 @@ function isOutside(value: unknown): value is RegisteredOutside {
 function isPlanRow(value: unknown): value is PiecePlanRow {
   if (!isRecord(value)) return false;
   if (typeof value.piece !== "string") return false;
-  if (!isOptionalString(value.phase)) return false;
+  if (
+    value.phase !== undefined &&
+    (typeof value.phase !== "string" || value.phase === "")
+  ) return false;
   const expect = value.expect;
   if (
     !isRecord(expect) || typeof expect.patternIdentity !== "string" ||

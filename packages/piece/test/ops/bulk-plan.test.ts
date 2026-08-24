@@ -13,6 +13,7 @@ const header = {
   v: 1,
   space: "did:key:test",
   takenAt: "2026-08-24T00:00:00.000Z",
+  selector: "collection" as const,
   enumerated: { collection: 2, registry: 1, registeredOutside: 0 },
 } as const;
 
@@ -195,6 +196,24 @@ describe("bulk-plan", () => {
       };
       expect(() =>
         decodePlan(JSON.stringify(header) + "\n" + JSON.stringify(row))
+      ).toThrow("row 1");
+    });
+
+    it("throws when the outside count and the outside list disagree", () => {
+      const laundered = {
+        ...header,
+        enumerated: { ...header.enumerated, registeredOutside: 3 },
+      };
+      expect(() => decodePlan(JSON.stringify(laundered) + "\n")).toThrow(
+        "header",
+      );
+    });
+
+    it("throws for an empty phase", () => {
+      const plan = retargetPlan();
+      const empty = { ...plan.rows[0], op: undefined, phase: "" };
+      expect(() =>
+        decodePlan(JSON.stringify(header) + "\n" + JSON.stringify(empty))
       ).toThrow("row 1");
     });
 
