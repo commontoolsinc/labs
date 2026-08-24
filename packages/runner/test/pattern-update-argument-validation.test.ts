@@ -93,7 +93,10 @@ const typedCount = (marker: string): RuntimeProgram =>
 const typedRow = (marker: string): RuntimeProgram =>
   programOf([
     "import { pattern } from 'commonfabric';",
-    "interface Row { name: string; other?: string }",
+    // Open like the argument object above it: the row fixtures carry slots
+    // the candidate never declares (a chained alias, a self-link), the way
+    // stored docs of another vintage routinely do.
+    "interface Row { name: string; other?: string; [key: string]: any }",
     "interface Args { row?: Row; [key: string]: any }",
     "export default pattern<Args, { marker: string }>(() => {",
     `  return { marker: ${JSON.stringify(marker)} };`,
@@ -1059,10 +1062,14 @@ describe("pattern update validates the stored argument", () => {
     const cycleA = rt.getCell<unknown>(space, "walk-cycle-a");
     const cycleB = rt.getCell<unknown>(space, "walk-cycle-b");
     const prim = rt.getCell<Record<string, unknown>>(space, "walk-primitive");
+    const metaOnly = rt.getCell<unknown>(space, "walk-meta-only");
     const { error: writeError } = await rt.editWithRetry((tx) => {
       cycleA.withTx(tx).asSchema(undefined as never).set(cycleB as never);
       cycleB.withTx(tx).asSchema(undefined as never).set(cycleA as never);
       prim.withTx(tx).asSchema(undefined as never).set({ p: true } as never);
+      // A doc record a meta-only write leaves behind: present, no value —
+      // the stamped-but-unmaterialized state real vintages hold.
+      metaOnly.withTx(tx).setMetaRaw("slug", "walk-meta-only");
     });
     expect(writeError?.message).toBeUndefined();
     await rt.idle();
@@ -1099,9 +1106,23 @@ describe("pattern update validates the stored argument", () => {
           new Set(),
         ).value,
       ).toBeUndefined();
+      expect(
+        readStoredLinkChainRaw(
+          tx,
+          metaOnly.getAsNormalizedFullLink(),
+          new Set(),
+        ).value,
+      ).toBeUndefined();
     } finally {
       await tx.commit();
     }
+
+    // Anything other than an absence surfaces instead of reading as a dead
+    // end — the same line readOrThrow draws. A committed transaction is the
+    // reachable member of that class.
+    expect(() =>
+      readStoredLinkChainRaw(tx, cycleA.getAsNormalizedFullLink(), new Set())
+    ).toThrow();
   });
 
   it("defers a PRESENT doc's absent value behind the hop", async () => {

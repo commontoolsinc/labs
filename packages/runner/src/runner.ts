@@ -102,13 +102,14 @@ import { forEachSubschema } from "./schema-walk.ts";
 import { rendererVDOMSchema } from "./schemas.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import { TransactionWrapper } from "./storage/extended-storage-transaction.ts";
-import type {
-  DID,
-  IExtendedStorageTransaction,
-  IReadOptions,
-  IStorageSubscription,
-  MemorySpace,
-  URI,
+import {
+  type DID,
+  type IExtendedStorageTransaction,
+  type IReadOptions,
+  type IStorageSubscription,
+  type MemorySpace,
+  toThrowable,
+  type URI,
 } from "./storage/interface.ts";
 import {
   machineryRead,
@@ -1143,7 +1144,18 @@ export function readStoredLinkChainRaw(
         },
         READ_NON_RECURSIVE,
       );
-      if (error !== undefined || ok.value === undefined) {
+      if (error !== undefined) {
+        // The same line readOrThrow draws: an absent document or a path
+        // through a primitive reads as no value here, and every other
+        // failure — a dead transaction, malformed storage — surfaces.
+        if (
+          error.name !== "NotFoundError" && error.name !== "TypeMismatchError"
+        ) {
+          throw toThrowable(error);
+        }
+        return { value: undefined, base: link };
+      }
+      if (ok.value === undefined) {
         return { value: undefined, base: link };
       }
       let value: unknown = ok.value;
