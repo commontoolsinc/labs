@@ -166,6 +166,29 @@ describe("select-unheld-field", () => {
     );
   });
 
+  it("refuses a field named below a verb a referenced definition carries", async () => {
+    const source = await sourceCell(
+      "unheld-referenced-stream",
+      {
+        type: "object",
+        properties: { add: { $ref: "#/$defs/Add" } },
+        $defs: {
+          Add: {
+            asCell: ["stream"],
+            type: "object",
+            properties: { title: { type: "string" } },
+          },
+        },
+      },
+      {},
+    );
+    await expect(selected(source, "add.title")).rejects.toThrow(
+      'Invalid --select at <root>.add: "title" is not a field the source ' +
+        "holds. <root>.add is a verb, which dispatches rather than holding a " +
+        "value to select from",
+    );
+  });
+
   it("crosses an array to name the position an element field was named at", async () => {
     const source = await livePieceResult("unheld-element");
     await expect(selected(source, "items.titel")).rejects.toThrow(
@@ -308,7 +331,7 @@ describe("select-unheld-field", () => {
     );
   });
 
-  it("names a conjunction member's field in the vocabulary, and lets one through", async () => {
+  it("returns the empty projection for a field only a conjunction member declares", async () => {
     const source = await sourceCell(
       "unheld-conjunction",
       {
@@ -322,8 +345,11 @@ describe("select-unheld-field", () => {
       { title: "First", subtitle: "Second" },
     );
     // A conjunction constrains one value from every member at once, so a field
-    // any member declares is a field the position declares.
-    await expect(selected(source, "subtitle")).resolves.toBeDefined();
+    // any member declares is a field the position declares, and the gate lets
+    // it through. What comes back is empty because the read's own traversal
+    // does not reach a conjunction member's properties, which is a fact about
+    // the read rather than about the gate.
+    expect(await selected(source, "subtitle")).toEqual({});
     await expect(selected(source, "subtitel")).rejects.toThrow(
       'Did you mean "subtitle"? <root> declares "title", "subtitle"',
     );
@@ -381,6 +407,43 @@ describe("select-unheld-field", () => {
     expect(await selected(source, "holder.extra")).toEqual({
       holder: { extra: "beside" },
     });
+  });
+
+  it("names no unheld field where the source's own reference does not resolve", async () => {
+    const source = await sourceCell(
+      "unheld-unresolved-reference",
+      {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          holder: { $ref: "#/$defs/Missing" },
+        },
+      },
+      { title: "First" },
+    );
+    // The position is passed over rather than refused, so what the caller
+    // reads is the source schema's own problem, named as that.
+    await expect(selected(source, "holder.title")).rejects.toThrow(
+      "Could not resolve source schema reference for --select",
+    );
+  });
+
+  it("reads a field two accounts of one position both declare", async () => {
+    const source = await sourceCell(
+      "unheld-twice-declared",
+      {
+        type: "object",
+        properties: { title: { type: "string" } },
+        allOf: [{
+          type: "object",
+          properties: { title: { type: "string" } },
+        }],
+      },
+      { title: "First" },
+    );
+    // Which account governs what sits below `title` is unsettled, so nothing
+    // below it is judged.
+    expect(await selected(source, "title.first")).toEqual({ title: "First" });
   });
 
   it("reads a field a JSON `--schema` names, which states a shape rather than naming the source's", async () => {

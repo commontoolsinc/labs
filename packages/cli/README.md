@@ -390,18 +390,20 @@ projected null.
 **A field list names positions of the source, so the source's schema decides
 whether a name can be there at all.** A path the schema proves nothing can
 appear at is refused before the read, naming the position, the vocabulary that
-position declares, and the declared name the path is one edit from. Three shapes
-are proven: a field a position neither declares nor admits, a field named below
-a scalar, and a field named below a verb, which dispatches rather than holding a
-value. A field that is merely ABSENT is a different fact and still answers with
-nothing at exit 0 — an optional field nobody has written, an interface an item
-does not implement, a link that has not synced. The refusal therefore fires only
-where the schema settles the question: a position carrying
-`additionalProperties`, a disjunction, an untyped position, and a reference that
-does not resolve all read as they always did. A JSON `--schema` states a shape
-of its own rather than naming the source's fields and is not held to the
-source's vocabulary, which is the spelling for reading a position the source
-does not declare.
+position declares, and — where the vocabulary holds a name close enough — the
+one the path is a typo of. Three shapes are proven: a field a position neither
+declares nor admits, a field named below a scalar, and a field named below a
+verb, which dispatches rather than holding a value. A field that is merely
+ABSENT is a different fact and still answers with nothing at exit 0 — an
+optional field nobody has written, an interface an item does not implement, a
+link that has not synced. The refusal therefore fires only where the schema
+settles the question. These all read as they always did: an open
+`additionalProperties`, a `patternProperties` map, a disjunction, an untyped
+position, a reference that does not resolve, a reference site that declares
+fields of its own, and a name several `allOf` members declare. A JSON `--schema`
+states a shape of its own rather than naming the source's fields and is not held
+to the source's vocabulary, which is the spelling for reading a position the
+source does not declare.
 
 Both transforms run as a short-lived computed pattern in the caller's session.
 When the declared source schema fixes the root container shape, the pattern

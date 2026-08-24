@@ -1843,6 +1843,11 @@ function firstUnheldSelectionField(
   // interface declares what it names.
   const target = resolveCfcSchemaRefs(source, scopeRoot);
   if (!isSchemaObject(target)) return undefined;
+  // The marker is read again on what the reference names, since a definition
+  // can carry it as readily as the site naming one.
+  if (carriesStreamMarker(target)) {
+    return { key: Object.keys(named)[0], position, holds: { stream: true } };
+  }
   if (target.anyOf !== undefined || target.oneOf !== undefined) {
     return undefined;
   }
@@ -1878,8 +1883,16 @@ function firstUnheldSelectionField(
   }
 
   // A pattern-matched name is declared without being named, so a position
-  // carrying one has a vocabulary no list of keys states.
-  if (target.patternProperties !== undefined) return undefined;
+  // carrying one has a vocabulary no list of keys states. An empty map names
+  // no pattern and so admits nothing, which leaves the declared names the
+  // whole vocabulary.
+  const patterns = target.patternProperties;
+  if (
+    patterns !== undefined &&
+    !(isObjectNotArray(patterns) && Object.keys(patterns).length === 0)
+  ) {
+    return undefined;
+  }
   const declared = declaredFieldsAt(target, targetRoot);
   // A position with no property map states no vocabulary, and answers with
   // whatever the value holds there.

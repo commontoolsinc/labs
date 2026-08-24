@@ -138,11 +138,13 @@ cannot refuse on absence. What it can refuse on is a path no value could ever
 appear at, which the schema settles before the read runs: a field a position
 neither declares nor admits, a field named below a scalar, a field named below
 a verb, which dispatches rather than holding a value. The refusal names the
-position, the vocabulary that position declares, and the declared name the path
-is one edit from — the wording every other misspelled name gets
-(`packages/cli/lib/refusal.ts`). Everything the schema leaves open passes:
-`additionalProperties`, a disjunction, an untyped position, a reference that
-does not resolve. Refusing there would take away a read that works, and the
+position, the vocabulary that position declares, and — where the vocabulary has
+a name close enough — the one the path is a typo of, the wording every other
+misspelled name gets (`packages/cli/lib/refusal.ts`). Everything the
+schema leaves open passes: an open `additionalProperties`, a `patternProperties`
+map, a disjunction, an untyped position, a reference that does not resolve, a
+reference site declaring fields of its own, and a name several `allOf` members
+declare. Refusing there would take away a read that works, and the
 direction to be wrong in is the permissive one. The full form is held to none
 of it, since a JSON Schema states a shape of its own rather than naming the
 source's fields — which leaves it the spelling for reading a position the
