@@ -16,17 +16,33 @@ function retargetRow(piece: string, from: string, to: string): PiecePlanRow {
   return {
     piece,
     phase: "topics",
-    expect: { patternIdentity: from, retained: true },
+    expect: { patternIdentity: from, symbol: "default", retained: true },
     op: {
       kind: "retarget",
       source: { main: "topic.tsx" },
       patternIdentity: to,
+      symbol: "default",
     },
   };
 }
 
-function surveyRow(piece: string, identity: string): PiecePlanRow {
-  return { piece, expect: { patternIdentity: identity, retained: true } };
+function restoreRow(piece: string, from: string, to: string): PiecePlanRow {
+  return {
+    piece,
+    expect: { patternIdentity: from, symbol: "default", retained: true },
+    op: { kind: "restore", patternIdentity: to, symbol: "default" },
+  };
+}
+
+function surveyRow(
+  piece: string,
+  identity: string,
+  symbol = "default",
+): PiecePlanRow {
+  return {
+    piece,
+    expect: { patternIdentity: identity, symbol, retained: true },
+  };
 }
 
 describe("bulk-diff", () => {
@@ -53,17 +69,59 @@ describe("bulk-diff", () => {
       );
     });
 
-    it("returns unchanged and changed for rows without an op", () => {
+    it("returns the same three verdicts for restore rows", () => {
       const plan: PiecePlan = {
         header,
-        rows: [surveyRow("of:fid1:aaa", "same"), surveyRow("of:fid1:bbb", "a")],
+        rows: [
+          restoreRow("of:fid1:aaa", "new", "old"),
+          restoreRow("of:fid1:bbb", "new", "old"),
+          restoreRow("of:fid1:ccc", "new", "old"),
+        ],
       };
       const after: PiecePlan = {
         header,
-        rows: [surveyRow("of:fid1:aaa", "same"), surveyRow("of:fid1:bbb", "b")],
+        rows: [
+          surveyRow("of:fid1:aaa", "old"),
+          surveyRow("of:fid1:bbb", "new"),
+          surveyRow("of:fid1:ccc", "other"),
+        ],
       };
       expect(diffPlan(plan, after).rows.map((row) => row.status)).toEqual(
-        ["unchanged", "changed"],
+        ["landed", "outstanding", "moved-elsewhere"],
+      );
+    });
+
+    it("returns moved-elsewhere for a piece on the identity but another symbol", () => {
+      const plan: PiecePlan = {
+        header,
+        rows: [retargetRow("of:fid1:aaa", "old", "new")],
+      };
+      const after: PiecePlan = {
+        header,
+        rows: [surveyRow("of:fid1:aaa", "new", "Other")],
+      };
+      expect(diffPlan(plan, after).rows[0].status).toBe("moved-elsewhere");
+    });
+
+    it("returns unchanged and changed for rows without an op", () => {
+      const plan: PiecePlan = {
+        header,
+        rows: [
+          surveyRow("of:fid1:aaa", "same"),
+          surveyRow("of:fid1:bbb", "a"),
+          surveyRow("of:fid1:ccc", "a"),
+        ],
+      };
+      const after: PiecePlan = {
+        header,
+        rows: [
+          surveyRow("of:fid1:aaa", "same"),
+          surveyRow("of:fid1:bbb", "b"),
+          surveyRow("of:fid1:ccc", "a", "Other"),
+        ],
+      };
+      expect(diffPlan(plan, after).rows.map((row) => row.status)).toEqual(
+        ["unchanged", "changed", "changed"],
       );
     });
 
@@ -83,7 +141,7 @@ describe("bulk-diff", () => {
       expect(diffPlan(plan, after).unplanned).toEqual(["of:fid1:new"]);
     });
 
-    it("returns the identities each verdict was decided from", () => {
+    it("returns the references each verdict was decided from", () => {
       const plan: PiecePlan = {
         header,
         rows: [retargetRow("of:fid1:aaa", "old", "new")],
@@ -96,9 +154,9 @@ describe("bulk-diff", () => {
         piece: "of:fid1:aaa",
         phase: "topics",
         status: "moved-elsewhere",
-        before: "old",
-        after: "other",
-        target: "new",
+        before: { patternIdentity: "old", symbol: "default" },
+        after: { patternIdentity: "other", symbol: "default" },
+        target: { patternIdentity: "new", symbol: "default" },
       });
     });
 

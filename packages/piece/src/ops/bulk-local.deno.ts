@@ -45,6 +45,7 @@ export async function localRetargetOp(
     source: request.source,
     ...(request.rev === undefined ? {} : { rev: request.rev }),
     patternIdentity: await programEntryIdentity(program),
+    symbol: program.mainExport ?? "default",
     ...(request.allowIncompatible === undefined
       ? {}
       : { allowIncompatible: request.allowIncompatible }),
@@ -71,7 +72,9 @@ export function resolveLocalSourceProgram(
 
 /**
  * The identity a resolved program's entry is stored under, computed from its
- * authored sources without compiling them.
+ * authored sources without compiling them. Source roots and data files fold
+ * into the identity exactly as the compiler folds them, so a program carrying
+ * either pins the same value the engine stores.
  */
 export function programEntryIdentity(
   program: RuntimeProgram,
@@ -87,5 +90,12 @@ export function programEntryIdentity(
       );
     }
     return Promise.resolve(contents);
+  }, {
+    ...(program.sourceRoots === undefined
+      ? {}
+      : { sourceRoots: program.sourceRoots }),
+    ...(program.dataFiles === undefined
+      ? {}
+      : { dataFiles: program.dataFiles }),
   });
 }

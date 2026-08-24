@@ -21,6 +21,13 @@ export interface PieceExpect {
   /** The pattern identity the piece is currently on. */
   patternIdentity: string;
   /**
+   * The export the identity runs. The runtime's executable pointer is the
+   * `{identity, symbol}` pair — two patterns exported by one module share an
+   * identity and differ only here — so every comparison a plan feeds carries
+   * both halves.
+   */
+  symbol: string;
+  /**
    * Whether the source behind `patternIdentity` is still retained in the
    * space, and so is a restore target. A row whose prior source is not
    * retained has no rollback target, which a run has to know before it starts
@@ -49,6 +56,8 @@ export interface RetargetOp {
   rev?: string;
   /** The identity the source produces, computed from the source, not compiled. */
   patternIdentity: string;
+  /** The export the retarget runs: the source's `mainExport`, or the default. */
+  symbol: string;
   /**
    * Whether this row may apply with the pattern and retained-link compatibility
    * checks disabled. A field on the row so a reviewer sees which rows ran with
@@ -81,6 +90,8 @@ export interface RestoreOp {
    * revision retaining that identity's source.
    */
   patternIdentity: string;
+  /** The export the restored revision runs — the pair's other half. */
+  symbol: string;
   /**
    * The revision to restore, when the survey read one — a piece that already
    * kept a log at survey time. Absent for a baseline the retarget appends,
@@ -172,28 +183,47 @@ export function decodePlan(text: string): PiecePlan {
 
 /**
  * Derive the rollback of a retarget plan, row by row: the precondition
- * becomes the identity the retarget produced, and the operation restores the
- * retained revision carrying the identity the row recorded. Nothing is
+ * becomes the reference the retarget produced, and the operation restores the
+ * retained revision carrying the reference the row recorded. Nothing is
  * re-surveyed or re-supplied. Rows without a retarget op have nothing to roll
  * back and are left out; a plan with no retarget rows at all is refused,
  * because deriving an empty rollback would read as having one.
  *
+ * A retarget row whose prior source is not retained is refused by name
+ * before any rollback row is produced: a restore of an unretained source is
+ * an operation nothing can perform, and a plan carrying one would read as a
+ * rollback while not being one.
+ *
  * A derived row's `retained` is true by construction: the retarget stored the
- * source it applied, so the identity it produced is a retained one.
+ * source it applied, so the reference it produced is a retained one.
  */
 export function deriveRollbackPlan(
   plan: PiecePlan,
   takenAt: string,
 ): PiecePlan {
+  const unretained = plan.rows.filter((row) =>
+    row.op?.kind === "retarget" && !row.expect.retained
+  );
+  if (unretained.length > 0) {
+    throw new Error(
+      "No rollback can be derived: the prior source is not retained for " +
+        unretained.map((row) => row.piece).join(", ") + ".",
+    );
+  }
   const rows = plan.rows.flatMap((row): PiecePlanRow[] => {
     if (row.op?.kind !== "retarget") return [];
     return [{
       piece: row.piece,
       ...(row.phase === undefined ? {} : { phase: row.phase }),
-      expect: { patternIdentity: row.op.patternIdentity, retained: true },
+      expect: {
+        patternIdentity: row.op.patternIdentity,
+        symbol: row.op.symbol,
+        retained: true,
+      },
       op: {
         kind: "restore",
         patternIdentity: row.expect.patternIdentity,
+        symbol: row.expect.symbol,
         ...(row.expect.revisionId === undefined
           ? {}
           : { revisionId: row.expect.revisionId }),
@@ -206,20 +236,62 @@ export function deriveRollbackPlan(
   return { header: { ...plan.header, takenAt }, rows };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isOptionalString(value: unknown): value is string | undefined {
+  return value === undefined || typeof value === "string";
+}
+
+function isOptionalStringArray(
+  value: unknown,
+): value is readonly string[] | undefined {
+  return value === undefined ||
+    (Array.isArray(value) &&
+      value.every((entry) => typeof entry === "string"));
+}
+
 function isPlanHeader(value: unknown): value is PiecePlanHeader {
-  if (typeof value !== "object" || value === null) return false;
-  const header = value as Record<string, unknown>;
-  return header.kind === "piece-plan" && header.v === 1 &&
-    typeof header.space === "string" && typeof header.takenAt === "string" &&
-    typeof header.enumerated === "object" && header.enumerated !== null;
+  if (!isRecord(value)) return false;
+  const enumerated = value.enumerated;
+  return value.kind === "piece-plan" && value.v === 1 &&
+    typeof value.space === "string" && typeof value.takenAt === "string" &&
+    isRecord(enumerated) &&
+    typeof enumerated.collection === "number" &&
+    typeof enumerated.registry === "number" &&
+    typeof enumerated.registeredOutside === "number";
 }
 
 function isPlanRow(value: unknown): value is PiecePlanRow {
-  if (typeof value !== "object" || value === null) return false;
-  const row = value as Record<string, unknown>;
-  if (typeof row.piece !== "string") return false;
-  const expect = row.expect as Record<string, unknown> | undefined;
-  return typeof expect === "object" && expect !== null &&
-    typeof expect.patternIdentity === "string" &&
-    typeof expect.retained === "boolean";
+  if (!isRecord(value)) return false;
+  if (typeof value.piece !== "string") return false;
+  if (!isOptionalString(value.phase)) return false;
+  const expect = value.expect;
+  if (
+    !isRecord(expect) || typeof expect.patternIdentity !== "string" ||
+    typeof expect.symbol !== "string" ||
+    typeof expect.retained !== "boolean" ||
+    !isOptionalString(expect.revisionId)
+  ) return false;
+  return value.op === undefined || isPieceOp(value.op);
+}
+
+function isPieceOp(value: unknown): value is PieceOp {
+  if (!isRecord(value)) return false;
+  if (
+    typeof value.patternIdentity !== "string" ||
+    typeof value.symbol !== "string"
+  ) return false;
+  if (value.kind === "restore") return isOptionalString(value.revisionId);
+  if (value.kind !== "retarget") return false;
+  const source = value.source;
+  return isRecord(source) && typeof source.main === "string" &&
+    isOptionalString(source.root) &&
+    isOptionalStringArray(source.testPaths) &&
+    isOptionalStringArray(source.dataFilePaths) &&
+    isOptionalString(source.mainExport) &&
+    isOptionalString(value.rev) &&
+    (value.allowIncompatible === undefined ||
+      typeof value.allowIncompatible === "boolean");
 }

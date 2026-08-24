@@ -341,29 +341,33 @@ running anything.
 
 ```text
 {"kind":"piece-plan","v":1,"space":"did:key:…","takenAt":"…","enumerated":{"collection":113,"registry":7,"registeredOutside":0}}
-{"piece":"of:fid1:aaa…","phase":"topics","expect":{"patternIdentity":"PB0Gum…","retained":true},"op":{"kind":"retarget","source":{"main":"topic.tsx"},"rev":"…","patternIdentity":"Xk3Lp…","allowIncompatible":true}}
-{"piece":"of:fid1:bbb…","phase":"board","expect":{"patternIdentity":"WpIRvA…","retained":true,"revisionId":"rev-bbb…"},"op":{"kind":"retarget","source":{"main":"main.tsx"},"rev":"…","patternIdentity":"Nq8Hw…","allowIncompatible":true}}
+{"piece":"of:fid1:aaa…","phase":"topics","expect":{"patternIdentity":"PB0Gum…","symbol":"default","retained":true},"op":{"kind":"retarget","source":{"main":"topic.tsx"},"rev":"…","patternIdentity":"Xk3Lp…","symbol":"default","allowIncompatible":true}}
+{"piece":"of:fid1:bbb…","phase":"board","expect":{"patternIdentity":"WpIRvA…","symbol":"default","retained":true,"revisionId":"rev-bbb…"},"op":{"kind":"retarget","source":{"main":"main.tsx"},"rev":"…","patternIdentity":"Nq8Hw…","symbol":"default","allowIncompatible":true}}
 ```
 
 and the rollback row derived from the first of those:
 
 ```text
-{"piece":"of:fid1:aaa…","phase":"topics","expect":{"patternIdentity":"Xk3Lp…"},"op":{"kind":"restore","patternIdentity":"PB0Gum…"}}
+{"piece":"of:fid1:aaa…","phase":"topics","expect":{"patternIdentity":"Xk3Lp…","symbol":"default"},"op":{"kind":"restore","patternIdentity":"PB0Gum…","symbol":"default"}}
 ```
 
 What the encoding buys — most of it a claim made earlier in this document
 that would otherwise have no mechanism:
 
 - **`expect` and `op` together are enough to derive the rollback.** A retarget
-  row's `expect` holds the identity the piece is on, whether the source behind
-  that identity is still retained in the space, and — for a piece that already
-  keeps a revision log — the revision it is at; its `op` holds the source to
-  apply and the identity that source produces, computed from the source
-  without compiling it (a source that mounts other patterns over fabric
-  imports is the exception, and a compile gives the same value). The rollback
-  row's `expect` is that produced identity, and its `op` restores the retained
-  revision carrying the recorded one. The property is mechanical because each
-  row carries both ends of the move.
+  row's `expect` holds the `{identity, symbol}` reference the piece runs —
+  the pair, because two patterns one module exports share an identity and
+  differ only in symbol — whether the source behind it is still retained in
+  the space, and, for a piece that already keeps a revision log, the revision
+  it is at; its `op` holds the source to apply and the reference that source
+  produces, computed from the source without compiling it (a source that
+  mounts other patterns over fabric imports is the exception, and a compile
+  gives the same value; extra source roots and data files fold into the
+  identity the way the compiler folds them). The rollback row's `expect` is
+  that produced reference, and its `op` restores the retained revision
+  carrying the recorded one — refusing up front any row whose prior source is
+  not retained. The property is mechanical because each row carries both ends
+  of the move.
 - **A return to a recorded revision is the runtime's own operation, not a
   second retarget.** Every source update appends a revision to the piece that
   retains the exact source closure it ran, and the runtime can restore a piece

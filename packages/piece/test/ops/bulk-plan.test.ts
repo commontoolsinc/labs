@@ -23,12 +23,13 @@ function retargetPlan(): PiecePlan {
       {
         piece: "of:fid1:aaa",
         phase: "topics",
-        expect: { patternIdentity: "old-a", retained: true },
+        expect: { patternIdentity: "old-a", symbol: "default", retained: true },
         op: {
           kind: "retarget",
           source: { main: "topic.tsx" },
           rev: "abc123",
           patternIdentity: "new-a",
+          symbol: "default",
           allowIncompatible: true,
         },
       },
@@ -37,6 +38,7 @@ function retargetPlan(): PiecePlan {
         phase: "holder",
         expect: {
           patternIdentity: "old-b",
+          symbol: "Board",
           retained: true,
           revisionId: "rev-b",
         },
@@ -44,6 +46,7 @@ function retargetPlan(): PiecePlan {
           kind: "retarget",
           source: { main: "main.tsx" },
           patternIdentity: "new-b",
+          symbol: "Board",
         },
       },
     ],
@@ -87,14 +90,31 @@ describe("bulk-plan", () => {
       expect(() => decodePlan(rowOnly)).toThrow("header");
     });
 
+    it("throws when the first line is not an object at all", () => {
+      expect(() => decodePlan('"hello"\n')).toThrow("header");
+    });
+
+    it("throws for a header whose enumerated counts are not numbers", () => {
+      const bad = {
+        ...header,
+        enumerated: { collection: "3", registry: 0, registeredOutside: 0 },
+      };
+      expect(() => decodePlan(JSON.stringify(bad) + "\n")).toThrow("header");
+    });
+
     it("throws for a row missing its precondition, naming the row", () => {
       const text = JSON.stringify(header) + "\n" +
         JSON.stringify({ piece: "of:fid1:aaa" }) + "\n";
       expect(() => decodePlan(text)).toThrow("row 1");
     });
 
-    it("throws when the first line is not an object at all", () => {
-      expect(() => decodePlan('"hello"\n')).toThrow("header");
+    it("throws for a precondition without its export symbol", () => {
+      const text = JSON.stringify(header) + "\n" +
+        JSON.stringify({
+          piece: "of:fid1:aaa",
+          expect: { patternIdentity: "x", retained: true },
+        }) + "\n";
+      expect(() => decodePlan(text)).toThrow("row 1");
     });
 
     it("throws for a row that is not an object, and for a numeric piece", () => {
@@ -104,21 +124,95 @@ describe("bulk-plan", () => {
         JSON.stringify({ piece: 7, expect: {} }) + "\n";
       expect(() => decodePlan(numericPiece)).toThrow("row 1");
     });
+
+    it("returns a derived rollback unchanged on a round-trip", () => {
+      const rollback = deriveRollbackPlan(retargetPlan(), "later");
+      expect(decodePlan(encodePlan(rollback))).toEqual(rollback);
+    });
+
+    it("throws for a phase that is not a string, and for an op that is not an object", () => {
+      const plan = retargetPlan();
+      const badPhase = { ...plan.rows[0], phase: 7 };
+      expect(() =>
+        decodePlan(JSON.stringify(header) + "\n" + JSON.stringify(badPhase))
+      ).toThrow("row 1");
+      const badOp = { ...plan.rows[0], op: 5 };
+      expect(() =>
+        decodePlan(JSON.stringify(header) + "\n" + JSON.stringify(badOp))
+      ).toThrow("row 1");
+    });
+
+    it("throws for a restore op whose revision is not a string", () => {
+      const plan = retargetPlan();
+      const row = {
+        ...plan.rows[0],
+        op: {
+          kind: "restore",
+          patternIdentity: "x",
+          symbol: "default",
+          revisionId: 7,
+        },
+      };
+      expect(() =>
+        decodePlan(JSON.stringify(header) + "\n" + JSON.stringify(row))
+      ).toThrow("row 1");
+    });
+
+    it("throws for an op of an unknown kind", () => {
+      const plan = retargetPlan();
+      const row = {
+        ...plan.rows[0],
+        op: { kind: "repaint", patternIdentity: "x", symbol: "default" },
+      };
+      const text = JSON.stringify(header) + "\n" + JSON.stringify(row) + "\n";
+      expect(() => decodePlan(text)).toThrow("row 1");
+    });
+
+    it("throws for a retarget op without a source main", () => {
+      const plan = retargetPlan();
+      const row = {
+        ...plan.rows[0],
+        op: {
+          kind: "retarget",
+          source: {},
+          patternIdentity: "x",
+          symbol: "default",
+        },
+      };
+      const text = JSON.stringify(header) + "\n" + JSON.stringify(row) + "\n";
+      expect(() => decodePlan(text)).toThrow("row 1");
+    });
+
+    it("throws for an op without its export symbol", () => {
+      const plan = retargetPlan();
+      const row = {
+        ...plan.rows[0],
+        op: { kind: "restore", patternIdentity: "x" },
+      };
+      const text = JSON.stringify(header) + "\n" + JSON.stringify(row) + "\n";
+      expect(() => decodePlan(text)).toThrow("row 1");
+    });
   });
 
   describe("deriveRollbackPlan()", () => {
-    it("returns rows whose precondition is the identity the retarget produced", () => {
+    it("returns rows whose precondition is the reference the retarget produced", () => {
       const rollback = deriveRollbackPlan(retargetPlan(), "later");
-      expect(rollback.rows.map((row) => row.expect.patternIdentity))
-        .toEqual(["new-a", "new-b"]);
-      expect(rollback.rows.every((row) => row.expect.retained)).toBe(true);
+      expect(rollback.rows.map((row) => row.expect)).toEqual([
+        { patternIdentity: "new-a", symbol: "default", retained: true },
+        { patternIdentity: "new-b", symbol: "Board", retained: true },
+      ]);
     });
 
-    it("returns restore ops naming each row's recorded identity and revision", () => {
+    it("returns restore ops naming each row's recorded reference and revision", () => {
       const rollback = deriveRollbackPlan(retargetPlan(), "later");
       expect(rollback.rows.map((row) => row.op)).toEqual([
-        { kind: "restore", patternIdentity: "old-a" },
-        { kind: "restore", patternIdentity: "old-b", revisionId: "rev-b" },
+        { kind: "restore", patternIdentity: "old-a", symbol: "default" },
+        {
+          kind: "restore",
+          patternIdentity: "old-b",
+          symbol: "Board",
+          revisionId: "rev-b",
+        },
       ]);
     });
 
@@ -133,11 +227,29 @@ describe("bulk-plan", () => {
         header,
         rows: [plan.rows[0], {
           piece: "of:fid1:ccc",
-          expect: { patternIdentity: "old-c", retained: false },
+          expect: {
+            patternIdentity: "old-c",
+            symbol: "default",
+            retained: true,
+          },
         }],
       };
       const rollback = deriveRollbackPlan(mixed, "later");
       expect(rollback.rows.map((row) => row.piece)).toEqual(["of:fid1:aaa"]);
+    });
+
+    it("throws for a retarget row whose prior source is not retained, naming it", () => {
+      const plan = retargetPlan();
+      const unretained: PiecePlan = {
+        header,
+        rows: [plan.rows[0], {
+          ...plan.rows[1],
+          expect: { ...plan.rows[1].expect, retained: false },
+        }],
+      };
+      expect(() => deriveRollbackPlan(unretained, "later")).toThrow(
+        "of:fid1:bbb",
+      );
     });
 
     it("throws for a plan with no retarget rows", () => {
@@ -145,7 +257,11 @@ describe("bulk-plan", () => {
         header,
         rows: [{
           piece: "of:fid1:aaa",
-          expect: { patternIdentity: "old-a", retained: true },
+          expect: {
+            patternIdentity: "old-a",
+            symbol: "default",
+            retained: true,
+          },
         }],
       };
       expect(() => deriveRollbackPlan(surveyOnly, "later")).toThrow(

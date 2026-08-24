@@ -31,6 +31,28 @@ function generationProgram(version: string): RuntimeProgram {
   };
 }
 
+/** One module, two patterns: one identity, told apart only by symbol. */
+function twinProgram(): RuntimeProgram {
+  return {
+    main: "/main.tsx",
+    files: [{
+      name: "/main.tsx",
+      contents: [
+        "import { NAME, pattern } from 'commonfabric';",
+        "export const second = pattern<{ seed?: string }>(() => ({",
+        "  [NAME]: 'Twin second',",
+        "  role: 'second',",
+        "}));",
+        "export default pattern<{ seed?: string }>(() => ({",
+        "  [NAME]: 'Twin default',",
+        "  role: 'default',",
+        "}));",
+        "",
+      ].join("\n"),
+    }],
+  };
+}
+
 /** A holder whose stored input carries the member collection. */
 function holderProgram(): RuntimeProgram {
   return {
@@ -164,16 +186,19 @@ describe("bulk-survey", () => {
         {
           phase: "members",
           patternIdentity: ra1.expect.patternIdentity,
+          symbol: "default",
           count: 2,
         },
         {
           phase: "members",
           patternIdentity: rb.expect.patternIdentity,
+          symbol: "default",
           count: 1,
         },
         {
           phase: "holder",
           patternIdentity: rh.expect.patternIdentity,
+          symbol: "default",
           count: 1,
         },
       ]);
@@ -243,6 +268,7 @@ describe("bulk-survey", () => {
       expect(survey.outside).toEqual([{
         piece: orphan.id,
         patternIdentity: survey.plan.rows[0].expect.patternIdentity,
+        symbol: "default",
       }]);
       expect(survey.plan.header.enumerated).toEqual({
         collection: 1,
@@ -311,6 +337,7 @@ describe("bulk-survey", () => {
             source: { main: "topic.tsx" },
             rev: "abc",
             patternIdentity: "target-identity",
+            symbol: "default",
           },
         },
       });
@@ -320,6 +347,7 @@ describe("bulk-survey", () => {
         source: { main: "topic.tsx" },
         rev: "abc",
         patternIdentity: "target-identity",
+        symbol: "default",
       });
       expect(survey.plan.rows[1].op).toBeUndefined();
     });
@@ -359,6 +387,64 @@ describe("bulk-survey", () => {
       // The member carries `version`; the holder does not.
       expect(survey.validatorFailures.map((failure) => failure.piece))
         .toEqual([holder.id]);
+    });
+
+    it("tells two exports of one module apart across the survey", async () => {
+      const program = twinProgram();
+      const a = await pieces.create(program, { input: {} });
+      const b = await pieces.create({ ...program, mainExport: "second" }, {
+        input: {},
+      });
+      const holder = await seedHolder([a, b]);
+
+      const survey = await surveyPieces(pieces, {
+        selector: collectionOf(holder),
+      });
+
+      const [ra, rb] = survey.plan.rows;
+      expect(ra.expect.patternIdentity).toBe(rb.expect.patternIdentity);
+      expect(ra.expect.symbol).not.toBe(rb.expect.symbol);
+      // Two tally entries despite the shared identity.
+      expect(survey.tally.filter((entry) => entry.phase === "members"))
+        .toHaveLength(2);
+    });
+
+    it("does not flag a registered piece on the identity but another export", async () => {
+      await installDefaultPattern();
+      const program = twinProgram();
+      const member = await pieces.create(program, { input: {} });
+      const sibling = await pieces.create(
+        { ...program, mainExport: "second" },
+        {
+          input: {},
+        },
+      );
+      await pieces.add([sibling.getCell()]);
+      const holder = await seedHolder([member]);
+
+      const survey = await surveyPieces(pieces, {
+        selector: collectionOf(holder),
+      });
+
+      expect(survey.outside).toEqual([]);
+      expect(survey.complete).toBe(true);
+    });
+
+    it("applies no containment to a hand-picked list", async () => {
+      await installDefaultPattern();
+      const a = await pieces.create(generationProgram("a"), { input: {} });
+      const registered = await pieces.create(generationProgram("a"), {
+        input: {},
+      });
+      await pieces.add([registered.getCell()]);
+
+      const survey = await surveyPieces(pieces, {
+        selector: { kind: "list", pieces: [a.id] },
+      });
+
+      expect(survey.outside).toEqual([]);
+      expect(survey.plan.header.enumerated.registeredOutside).toBe(0);
+      expect(survey.complete).toBe(true);
     });
   });
 });

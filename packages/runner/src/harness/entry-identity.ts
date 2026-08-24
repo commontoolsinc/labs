@@ -21,7 +21,10 @@ function prefixName(name: string): string {
 /**
  * The entry-module content identity of `main` within `files`, computed WITHOUT
  * compiling — the same value `Engine.compileToRecordGraph` stores as
- * `patternIdentity.identity` for a same-build compile of the same source.
+ * `patternIdentity.identity` for a same-build compile of the same source
+ * package. A program carrying extra source roots or data files must name
+ * them in `options`: the compiler folds both into the entry's hash, so the
+ * bare import-closure identity is not the stored one for such a program.
  *
  * `files` must include the entry's full internal import closure (a superset is
  * fine — unreachable files neither affect the entry's identity nor are they
@@ -44,6 +47,7 @@ function prefixName(name: string): string {
 export function computeEntryIdentity(
   main: string,
   files: readonly Source[],
+  options: EntryIdentityOptions = {},
 ): string {
   const moduleFiles = files.filter((f) => !f.name.endsWith(".d.ts"));
   const prefixed = moduleFiles.map((f) => ({
@@ -56,10 +60,47 @@ export function computeEntryIdentity(
   // so `identities` is guaranteed to contain `entryKey` below.
   assertClosureComplete(main, entryKey, prefixed);
 
+  const names = new Set(prefixed.map((file) => file.name));
+  const dataPaths = [...new Set(options.dataFiles ?? [])].sort();
+  if (dataPaths.includes(main)) {
+    throw new Error(`The program entry '${main}' cannot be a data file.`);
+  }
+  const rootPaths = [...new Set(options.sourceRoots ?? [])]
+    .filter((root) => root !== main);
+  for (const path of [...rootPaths, ...dataPaths]) {
+    if (!names.has(prefixName(path))) {
+      throw new Error(
+        `package path '${path}' is not among the provided files`,
+      );
+    }
+  }
+
   const identities = computeModuleIdentities(prefixed, {
     idPrefix: `/${ENTRY_ID}`,
+    ...(rootPaths.length || dataPaths.length
+      ? {
+        sourcePackage: {
+          entryPath: entryKey,
+          rootPaths: rootPaths.map(prefixName),
+          dataPaths: dataPaths.map(prefixName),
+        },
+      }
+      : {}),
   });
   return identities.get(entryKey)!;
+}
+
+/**
+ * The package half of a program's identity. The compiler folds extra source
+ * roots and data files into the entry's hash, so a program carrying either
+ * has an identity its bare import closure does not produce; passing them
+ * here folds them the same way. Every named path must be among `files`.
+ */
+export interface EntryIdentityOptions {
+  /** Additional entry roots beyond `main`. */
+  sourceRoots?: readonly string[];
+  /** Files stored uninterpreted as data. */
+  dataFiles?: readonly string[];
 }
 
 // Walk the entry's reachable import closure and fail loudly on any dangling
@@ -136,21 +177,30 @@ function unprefix(name: string): string {
 export async function resolveEntryIdentity(
   main: string,
   readFile: (name: string) => Promise<string>,
+  options: EntryIdentityOptions = {},
 ): Promise<string> {
-  const entry = main.startsWith("/") ? main : `/${main}`;
-  const files = await collectEntryClosure(entry, readFile);
-  return computeEntryIdentity(entry, files);
+  const rooted = (name: string) => name.startsWith("/") ? name : `/${name}`;
+  const entry = rooted(main);
+  const sourceRoots = (options.sourceRoots ?? []).map(rooted);
+  const dataFiles = (options.dataFiles ?? []).map(rooted);
+  // Every root is an entry of its own, and a data file is read rather than
+  // imported, so the walk seeds from all of them.
+  const files = await collectEntryClosure(
+    [entry, ...sourceRoots, ...dataFiles],
+    readFile,
+  );
+  return computeEntryIdentity(entry, files, { sourceRoots, dataFiles });
 }
 
 async function collectEntryClosure(
-  entry: string,
+  entries: readonly string[],
   readFile: (name: string) => Promise<string>,
 ): Promise<Source[]> {
   // Import scanning parses with the TS parser (compilerStack).
   await ensureCompilerStack();
   const { collectImportSpecifiers, ts } = compilerStack();
   const byName = new Map<string, Source>();
-  const queue: string[] = [entry];
+  const queue: string[] = [...entries];
   while (queue.length > 0) {
     const name = queue.shift()!;
     if (byName.has(name)) continue;

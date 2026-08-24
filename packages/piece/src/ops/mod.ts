@@ -14,6 +14,7 @@ export {
 } from "./bulk-plan.ts";
 export {
   diffPlan,
+  type PatternRef,
   type PieceDiffRow,
   type PieceDiffStatus,
   type PlanDiff,

@@ -65,6 +65,35 @@ describe("bulk-local", () => {
       expect(stored?.identity).toBe(computed);
     });
 
+    it("returns the stored identity for a program carrying a data file", async () => {
+      const program = {
+        main: "/main.tsx",
+        files: [
+          {
+            name: "/main.tsx",
+            contents: [
+              "import { dataFile, NAME, pattern } from 'commonfabric';",
+              "export default pattern(() => ({",
+              "  [NAME]: 'Reads a data file',",
+              "  cities: JSON.parse(dataFile('/data/cities.json')).cities,",
+              "}));",
+              "",
+            ].join("\n"),
+          },
+          { name: "/data/cities.json", contents: '{ "cities": ["Oslo"] }\n' },
+        ],
+        dataFiles: ["/data/cities.json"],
+      };
+      const computed = await programEntryIdentity(program);
+      // The compiler folds the data file into the entry's hash, so the bare
+      // import-closure identity is a different value.
+      expect(computed).not.toBe(
+        await programEntryIdentity({ ...program, dataFiles: undefined }),
+      );
+      const piece = await pieces.create(program, { input: {} });
+      expect(getPatternIdentityRef(piece.getCell())?.identity).toBe(computed);
+    });
+
     it("throws when the program lacks a file the entry imports", async () => {
       const program = {
         main: "/main.tsx",
@@ -88,6 +117,7 @@ describe("bulk-local", () => {
         });
         expect(op.kind).toBe("retarget");
         expect(op.rev).toBe("abc123");
+        expect(op.symbol).toBe("default");
         expect(op.patternIdentity).toBe(
           await programEntryIdentity({
             main: "/main.tsx",

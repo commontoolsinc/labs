@@ -100,12 +100,14 @@ export interface SurveyProblem {
 export interface RegisteredOutside {
   piece: string;
   patternIdentity: string;
+  symbol: string;
 }
 
-/** How many selected pieces sit on one identity within one phase. */
+/** How many selected pieces run one `{identity, symbol}` within one phase. */
 export interface TallyEntry {
   phase: string;
   patternIdentity: string;
+  symbol: string;
   count: number;
 }
 
@@ -198,6 +200,7 @@ export async function surveyPieces(
     }
     const expect: PieceExpect = {
       patternIdentity: pin.patternIdentity,
+      symbol: pin.symbol,
       retained: pin.retained,
       ...(pin.revisionId === undefined ? {} : { revisionId: pin.revisionId }),
     };
@@ -219,7 +222,12 @@ export async function surveyPieces(
     }
   }
 
-  const outside = await registeredOutsideSelection(pieces, rows);
+  // Containment is a property of surveying a holder's collection — the claim
+  // "this collection is all there is of its kind". A hand-picked list claims
+  // no such thing, so a registered sibling outside one is not a disagreement.
+  const outside = options.selector.kind === "collection"
+    ? await registeredOutsideSelection(pieces, rows)
+    : [];
   const memberCount = options.selector.kind === "collection"
     ? Math.max(selected.length - 1, 0)
     : selected.length;
@@ -330,15 +338,25 @@ async function registeredOutsideSelection(
   pieces: PiecesController,
   rows: readonly PiecePlanRow[],
 ): Promise<RegisteredOutside[]> {
-  const inScope = new Set(rows.map((row) => row.expect.patternIdentity));
+  // In scope by the full executable pointer: an identity alone conflates two
+  // patterns one module exports.
+  const inScope = new Set(
+    rows.map((row) => `${row.expect.patternIdentity}\x00${row.expect.symbol}`),
+  );
   const selectedIds = new Set(rows.map((row) => row.piece));
   const outside: RegisteredOutside[] = [];
   for (const registered of await pieces.getRegisteredPieces()) {
     if (selectedIds.has(registered.id)) continue;
     const synced = await pieces.get(registered.id, false);
     const ref = getPatternIdentityRef(synced.getCell());
-    if (ref !== undefined && inScope.has(ref.identity)) {
-      outside.push({ piece: synced.id, patternIdentity: ref.identity });
+    if (
+      ref !== undefined && inScope.has(`${ref.identity}\x00${ref.symbol}`)
+    ) {
+      outside.push({
+        piece: synced.id,
+        patternIdentity: ref.identity,
+        symbol: ref.symbol,
+      });
     }
   }
   return outside;
@@ -373,12 +391,14 @@ function tallyRows(rows: readonly PiecePlanRow[]): TallyEntry[] {
   const counts = new Map<string, TallyEntry>();
   for (const row of rows) {
     const phase = row.phase ?? "";
-    const key = `${phase}\x00${row.expect.patternIdentity}`;
+    const key =
+      `${phase}\x00${row.expect.patternIdentity}\x00${row.expect.symbol}`;
     const entry = counts.get(key);
     if (entry === undefined) {
       counts.set(key, {
         phase,
         patternIdentity: row.expect.patternIdentity,
+        symbol: row.expect.symbol,
         count: 1,
       });
     } else entry.count++;

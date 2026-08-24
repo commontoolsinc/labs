@@ -4,14 +4,24 @@
  * — an apply that exits zero is not a verdict, and the report of what a run
  * actually did is the before-survey held against the after-survey.
  *
- * Three verdicts matter for a row that carries a retarget: `landed` (on the
- * identity the op produces), `outstanding` (still on the recorded identity),
- * and `moved-elsewhere` (on neither — nothing in the plan accounts for where
- * it is, which is what a half-converged upgrade looks like). Rows without an
- * op are a pre-state record and diff to `unchanged`/`changed`.
+ * Three verdicts matter for a row that carries an operation — a retarget or
+ * a restore, both of which name the reference they produce: `landed` (on the
+ * reference the op produces), `outstanding` (still on the recorded
+ * reference), and `moved-elsewhere` (on neither — nothing in the plan
+ * accounts for where it is, which is what a half-converged upgrade looks
+ * like). Rows without an op are a pre-state record and diff to
+ * `unchanged`/`changed`. Every comparison is on the full executable pointer,
+ * `{identity, symbol}` — an identity alone conflates two patterns one module
+ * exports.
  */
 
 import type { PiecePlan } from "./bulk-plan.ts";
+
+/** One half-qualified executable pointer a diff verdict was decided from. */
+export interface PatternRef {
+  patternIdentity: string;
+  symbol: string;
+}
 
 /** Where one piece stands, measured against its plan row. */
 export type PieceDiffStatus =
@@ -22,17 +32,17 @@ export type PieceDiffStatus =
   | "changed"
   | "missing";
 
-/** One piece's verdict, with the identities behind it. */
+/** One piece's verdict, with the references behind it. */
 export interface PieceDiffRow {
   piece: string;
   phase?: string;
   status: PieceDiffStatus;
-  /** The identity the plan recorded. */
-  before: string;
-  /** The identity the after-survey read; absent when the piece is `missing`. */
-  after?: string;
-  /** The identity the row's retarget produces, when the row carries one. */
-  target?: string;
+  /** The reference the plan recorded. */
+  before: PatternRef;
+  /** The reference the after-survey read; absent when the piece is `missing`. */
+  after?: PatternRef;
+  /** The reference the row's operation produces, when the row carries one. */
+  target?: PatternRef;
 }
 
 /** A diff over every plan row, plus what the after-survey saw beyond them. */
@@ -59,23 +69,30 @@ export function diffPlan(plan: PiecePlan, after: PiecePlan): PlanDiff {
     missing: 0,
   };
   const rows = plan.rows.map((row) => {
-    const before = row.expect.patternIdentity;
-    const target = row.op?.kind === "retarget"
-      ? row.op.patternIdentity
-      : undefined;
+    const before: PatternRef = {
+      patternIdentity: row.expect.patternIdentity,
+      symbol: row.expect.symbol,
+    };
+    const target: PatternRef | undefined = row.op === undefined
+      ? undefined
+      : { patternIdentity: row.op.patternIdentity, symbol: row.op.symbol };
     const seen = afterById.get(row.piece);
     afterById.delete(row.piece);
     let status: PieceDiffStatus;
+    let now: PatternRef | undefined;
     if (seen === undefined) status = "missing";
     else {
-      const now = seen.expect.patternIdentity;
+      now = {
+        patternIdentity: seen.expect.patternIdentity,
+        symbol: seen.expect.symbol,
+      };
       if (target !== undefined) {
-        status = now === target
+        status = sameRef(now, target)
           ? "landed"
-          : now === before
+          : sameRef(now, before)
           ? "outstanding"
           : "moved-elsewhere";
-      } else status = now === before ? "unchanged" : "changed";
+      } else status = sameRef(now, before) ? "unchanged" : "changed";
     }
     counts[status]++;
     return {
@@ -83,9 +100,14 @@ export function diffPlan(plan: PiecePlan, after: PiecePlan): PlanDiff {
       ...(row.phase === undefined ? {} : { phase: row.phase }),
       status,
       before,
-      ...(seen === undefined ? {} : { after: seen.expect.patternIdentity }),
+      ...(now === undefined ? {} : { after: now }),
       ...(target === undefined ? {} : { target }),
     };
   });
   return { rows, unplanned: [...afterById.keys()], counts };
+}
+
+function sameRef(left: PatternRef, right: PatternRef): boolean {
+  return left.patternIdentity === right.patternIdentity &&
+    left.symbol === right.symbol;
 }
