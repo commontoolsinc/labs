@@ -173,10 +173,24 @@ start. Both recorded as the ruling's coverage, not extended.
   subscribe root-aware), but space-cell-only subscribers (CLI,
   agents-host) exist; the gap belongs to the delivery/validation
   machinery, not to this seat.
-- With the ON lanes running ensure-off, no CI lane exercises the
-  production ensure at the true topology; coverage rides the unit pins
-  and the measurement harness until a lane (or a dedicated gate) opts
-  in.
+- **CI coverage after the lanes opt out, stated plainly for future
+  readers: the four ON lanes' green does NOT speak to the ensure**
+  (they run `SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false`). What DOES
+  exercise the ensure in CI: the runner unit shards run the seat and
+  core suites un-gated at the knob's production default — including
+  the HOST-LEVEL live-glue pin added with the knob (a real
+  ExecutorHost, a real client session-open driving activation through
+  the host's admission observer, the genesis-ACL admission riding the
+  host's OWN feed into the re-arm, one root created and durably
+  visible to a fresh replica; mutation-checked: `ensureSpaceRoots:
+  false` on the host reds it) — plus the memory owner pins, the
+  toolshed env-parser/OFF pins, and the piece OFF net in their lanes.
+  What remains UNCOVERED in CI is the compiled-binary/port topology
+  glue (`startServerExecutionHost`'s env chain into a real deployed
+  process — the parser itself is unit-pinned); the out-of-CI
+  measurement harness covers it, and a dedicated knob-ON second-server
+  lane step remains the named option if binary-true CI coverage is
+  wanted.
 
 ## Flagged, not filled
 

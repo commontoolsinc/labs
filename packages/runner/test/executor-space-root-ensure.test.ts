@@ -39,6 +39,7 @@ import type {
   IExtendedStorageTransaction,
   MemorySpace,
 } from "../src/storage/interface.ts";
+import { ExecutorHost } from "../src/executor/host.ts";
 import { SpaceServer } from "../src/executor/space-server.ts";
 import { waveRunContextOf } from "../src/executor/wave.ts";
 import {
@@ -99,6 +100,7 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
   let engine: Engine.Engine;
   let files: Map<string, string>;
   let spaceServer: SpaceServer | undefined;
+  let hostUnderTest: ExecutorHost | undefined;
   let mintedTxs: IExtendedStorageTransaction[];
   let stats: ServingLoopStats;
   let cleanups: Array<() => Promise<void>>;
@@ -162,6 +164,8 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
   });
 
   afterEach(async () => {
+    await hostUnderTest?.close();
+    hostUnderTest = undefined;
     await spaceServer?.park("test-teardown");
     for (const cleanup of cleanups.reverse()) await cleanup();
     await server.close();
@@ -468,6 +472,74 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     expect(stats.rootEnsure.created).toBe(0);
     // The tenure is alive and serving — the wedge parked nothing.
     expect(created.active).toBe(true);
+  });
+
+  it("HOST-LEVEL live glue (the CI coverage seat): a real session-open activates, the genesis ACL rides the host's own admission feed, and the ensure creates at the knob's production default", async () => {
+    // The CI ON lanes run their shared toolshed with the ensure
+    // switched OFF (the RULED test posture), so the lanes' green says
+    // nothing about the ensure — THIS pin is the live-glue coverage
+    // that keeps the production path exercised in CI (it rides the
+    // runner unit shards): a REAL ExecutorHost whose admission
+    // observer sees a real client session-open (the activation
+    // trigger) and whose OWN feed delivers the client's genesis-ACL
+    // admission (the same-tenure re-arm) — nothing hand-fed — with
+    // ensureSpaceRoots left at its PRODUCTION DEFAULT (unset = ON).
+    // The genesis-vs-activation race is real and either arm is
+    // correct (genesis first: the ensure resolves the owner directly;
+    // activation first: skip + re-arm — pinned deterministically by
+    // the direct-SpaceServer re-arm pin above), so this pin asserts
+    // the invariant outcome: one ensure ran, ONE root created,
+    // durably visible to a fresh replica, home-sourced (self-owned
+    // ACL). Mutation-checked: ensureSpaceRoots:false on the host reds
+    // this pin.
+    const host = new ExecutorHost({
+      server,
+      serviceIdentity: serviceSigner.did(),
+      // deno-lint-ignore require-await
+      createRuntime: async () => {
+        const manager = EmulatedStorageManager.connectTo(server, {
+          as: serviceSigner,
+        });
+        const runtime = new Runtime({
+          apiUrl: new URL("http://toolshed.test"),
+          storageManager: manager,
+          fetch: fetchStub,
+          servingPosture: true,
+          experimental: {
+            serverExecution: true,
+            systemPatternAutoUpdate: true,
+          },
+        });
+        return {
+          runtime,
+          dispose: async () => {
+            await runtime.dispose();
+            await manager.close();
+          },
+        };
+      },
+      policy: { flushDeadlineMs: 2_000, idleParkMs: 600_000 },
+    });
+    hostUnderTest = host;
+
+    // A real client: its first session use opens the space
+    // (sessionOpened → host activation) and its genesis-ACL write is a
+    // real authored admission on the host's feed.
+    const writer = clientRuntime(spaceSigner);
+    const aclManager = new ACLManager(writer, space as never);
+    await aclManager.set(space as never, "OWNER");
+    await writer.idle();
+    await writer.storageManager.synced();
+
+    const reader = clientRuntime(readerSigner);
+    const root = await resolveRootEventually(reader);
+    expect(getPatternSource(root)).toBe(HOME_PATTERN_SOURCE);
+    await waitUntil(
+      () => host.stats().rootEnsure.created === 1,
+      "the host-driven ensure's creation counted",
+    );
+    expect(host.stats().rootEnsure.runs).toBeGreaterThanOrEqual(1);
+    expect(host.stats().rootEnsure.failures).toBe(0);
   });
 
   it("ensureSpaceRoots:false (the RULED test switch) arms NOTHING: no root, no counter movement, tenure serving", async () => {
