@@ -5651,6 +5651,28 @@ supply; OW29/OW32/OW34 closed):
     same family's second, pre-existing member is `PatternManager`'s
     compile-cache write-backs minted inside `compilePattern` (escape
     the stamp hook; enumerated with the flag in the stage-1 report).
+    **SCOPE RULED 2026-08-24 (the owner; verbatim in the stage-1
+    report): production ensures a root for EVERY activated space —
+    per-space discrimination is DEFERRED to its own design work — and
+    tests get an off switch**: `ensureSpaceRoots` on
+    SpaceServer/ExecutorHost options (the ruled in-memory setting) and
+    the toolshed's `SERVER_EXECUTION_ENSURE_SPACE_ROOTS` (literal
+    `"false"` only; garbage fails to production), off = fully inert,
+    pinned both ways. The ruling followed the stage-1 CI board going
+    red across the ON lanes: the ensured root's content-addressed
+    computed cells landed in every fixture space's plain space-cell
+    subscriptions with the root's `cid:` schema docs not
+    delivered-and-verified — an UNCAUGHT client-replica throw
+    (`#validateArrivedSchemaDocuments`) that failed files wholesale
+    (all red lanes real-toolshed; in-process harnesses unaffected;
+    main green at the identical base). The CI ON lanes now run
+    ensure-off (`cf test` needs nothing: no serving host exists in
+    `packages/cli` — the ruled opt-in is its status quo). Flagged, not
+    filled: the exposed delivery gap (computed delivered without its
+    verified `cid:` ref) is PRE-EXISTING machinery, latent again with
+    the lanes off; and no CI lane now exercises the production ensure
+    at the true topology — unit pins and the measurement harness carry
+    it until a lane opts in.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
