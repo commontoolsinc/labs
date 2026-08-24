@@ -856,10 +856,14 @@ describe("scan-extent", () => {
           expect(capped.extent.truncated).toBe(true);
           expect(isCompleteScan(capped.extent)).toBe(false);
 
-          const whole = listEntityModels(space, { kind: "piece" });
-          expect(whole.extent.truncated).toBe(false);
-          expect(whole.extent.unreadable).toBe(1);
-          expect(isCompleteScan(whole.extent)).toBe(false);
+          // Still `kind: "piece"` — uncapped, not unfiltered. The distinction
+          // decides the expected count: a FILTERED scan drops the undecodable
+          // row and counts it, where an unfiltered one would keep it as
+          // `unknown` and report zero.
+          const uncapped = listEntityModels(space, { kind: "piece" });
+          expect(uncapped.extent.truncated).toBe(false);
+          expect(uncapped.extent.unreadable).toBe(1);
+          expect(isCompleteScan(uncapped.extent)).toBe(false);
         },
       );
     });
