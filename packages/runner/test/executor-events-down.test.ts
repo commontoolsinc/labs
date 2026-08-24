@@ -87,21 +87,6 @@ class GatedStorageManager extends EmulatedStorageManager {
   /** How many syncs the sync gate has parked (a pin's evidence that a
    * drain WAS held in the window it constructs). */
   syncGateHits = 0;
-  /** Synchronous observation hook at `syncCell` entry — the settle-gate
-   * ARMING seam for the held-wave (α3) constructions (CT-2060). The
-   * drain awaits the sidecar doc's sync BEFORE any entry's guard check,
-   * so a hook keyed to the sidecar id fires strictly before the LT1
-   * copy RUNS — ahead of every seal the copy contributes and therefore
-   * ahead of the sealing cycle's settle sampling the gate predicate.
-   * Arming from the test's event HANDLER (#6184's hardening) reduced
-   * but did not eliminate the race: the handler's own tx can seal late
-   * relative to the copy's, so the settle could still sample an
-   * unarmed predicate in the window between the copy's seal and the
-   * handler running (the residual red OW57 records — the ping durable
-   * AND consequenced at the held-wave probe). Observation only: it
-   * never parks (that is `syncGate`), and it fires before the throw
-   * seam below — a failing sync is still the drain touching the doc. */
-  onSyncCell: ((id: string) => void) | undefined;
 
   override async inputSynced(): Promise<void> {
     await super.inputSynced();
@@ -128,7 +113,6 @@ class GatedStorageManager extends EmulatedStorageManager {
     cell: Cell<T>,
     options?: Parameters<EmulatedStorageManager["syncCell"]>[1],
   ): Promise<Cell<T>> {
-    this.onSyncCell?.(cell.getAsNormalizedFullLink().id);
     if (
       GatedStorageManager.syncThrowWhen?.(
         cell.getAsNormalizedFullLink().id,
@@ -2459,12 +2443,21 @@ describe("Phase 3 events-down (serving side)", () => {
       // step's gate previously polled the sealed overlay, the exact
       // shape #6184 replaced there — CT-2060's open question of
       // whether the remaining polled gates should adopt the arming).
+      // `armingGap` is the construction's own discriminator: the QUEUE
+      // seam below must have armed the hold BEFORE the copy's run
+      // reaches this handler — a gap means the gate could still be
+      // sampled unarmed after the copy's contributions sealed, which
+      // is exactly the CI flake's window.
       const servingSeen = w.servingC;
       let holdArmed = false;
+      let armingGap = false;
       cancels.push(w.serving.scheduler.addEventHandler(
         (tx: IExtendedStorageTransaction, event: unknown) => {
           const tag = (event as { tag?: string })?.tag ?? "?";
-          if (tag === "ping") holdArmed = true;
+          if (tag === "ping") {
+            if (!holdArmed) armingGap = true;
+            holdArmed = true;
+          }
           const current = servingSeen.withTx(tx).get() as
             | { seen?: string[] }
             | undefined;
@@ -2495,14 +2488,32 @@ describe("Phase 3 events-down (serving side)", () => {
 
       // Hold the wave open for the cycle that RUNS the copy — the same
       // two-seam arming as the SIBLING step (CT-2060; OW57's owed
-      // construction): the handler arms as its first act, and the
-      // drain's sidecar-doc sync arms BEFORE the copy runs, so the
-      // sealing cycle's settle can never sample an unarmed predicate
-      // after the copy sealed. Idle settles pass: nothing arms until
-      // the drain touches THIS step's sidecar.
-      const heldSidecarId = w.sidecarOf(w.s2);
-      servingManager!.onSyncCell = (id) => {
-        if (id === heldSidecarId) holdArmed = true;
+      // construction): the QUEUE seam arms when the LT1 copy is queued
+      // for dispatch, and the handler arms again as its first act
+      // (#6184's belt). The queue seam is the one point every path to
+      // the copy's run traverses BEFORE the run — the same-wave
+      // in-process copy is queued synchronously with the emitter's
+      // sealed append (cell.ts's LT1 arm: the raw entries write and
+      // `scheduler.queueEvent` sit in one synchronous block, no
+      // interleaving point between them), and the drain's later
+      // re-delivery of a durable entry dispatches through the same
+      // `queueEvent` (space-server.ts's served dispatch). So no settle
+      // can sample an unarmed predicate after any of the copy's
+      // contributions sealed. A drain-side sidecar-SYNC seam cannot do
+      // this: the same-wave copy's entry is a sealed-wave write the
+      // drain's durable query never sees, so nothing syncs the sidecar
+      // before the copy runs in that cycle (the Codex P1 finding on
+      // this PR, confirmed in code). Idle settles pass: nothing arms
+      // until THIS step's stream event is queued.
+      const s2StreamId = w.servingS2.getAsNormalizedFullLink().id;
+      const originalQueueEvent = w.serving.scheduler.queueEvent.bind(
+        w.serving.scheduler,
+      );
+      (w.serving.scheduler as {
+        queueEvent: typeof originalQueueEvent;
+      }).queueEvent = (eventLink, ...rest) => {
+        if (eventLink.id === s2StreamId) holdArmed = true;
+        return originalQueueEvent(eventLink, ...rest);
       };
       servingManager!.settleGate = gate.promise;
       servingManager!.settleGateWhen = () => holdArmed;
@@ -2533,10 +2544,18 @@ describe("Phase 3 events-down (serving side)", () => {
         released = true;
       } finally {
         if (!released) gate.resolve();
-        servingManager!.onSyncCell = undefined;
+        (w.serving.scheduler as {
+          queueEvent: typeof originalQueueEvent;
+        }).queueEvent = originalQueueEvent;
         servingManager!.settleGate = undefined;
         servingManager!.settleGateWhen = undefined;
       }
+
+      // The construction's own discriminator: the hold was armed BEFORE
+      // the copy's run reached the handler. Red under handler-only
+      // arming (#6184) and under a drain-sync seam alike — both leave
+      // the gap the CI flake rode.
+      expect(armingGap).toBe(false);
 
       const s2Sidecar = w.sidecarOf(w.s2);
       // The rival's entry is delivered (once) by the drain.
@@ -2774,14 +2793,18 @@ describe("Phase 3 events-down (serving side)", () => {
       const servingSeen = w.servingC;
       // The s2 handler records every tag; for the derivation's "ping" it
       // ALSO commits the sibling tx inline (the intent half) — and ARMS
-      // the settle gate as its first act, so the arming is sequenced
-      // before this cycle's settle reaches its barrier (see the gate
-      // installation below).
+      // the settle gate as its first act (#6184's belt; the primary
+      // arming is the QUEUE seam installed below). `armingGap` is the
+      // construction's discriminator: the queue seam must have armed
+      // BEFORE the copy's run reaches this handler — a gap is exactly
+      // the window the CI flake rode.
       let holdArmed = false;
+      let armingGap = false;
       cancels.push(w.serving.scheduler.addEventHandler(
         (tx: IExtendedStorageTransaction, event: unknown) => {
           const tag = (event as { tag?: string })?.tag ?? "?";
           if (tag === "ping") {
+            if (!holdArmed) armingGap = true;
             holdArmed = true;
             stampSibling(w.serving, tx, sideServing);
           }
@@ -2811,22 +2834,35 @@ describe("Phase 3 events-down (serving side)", () => {
       expect(seenView()).toEqual([]);
       expect(sideView()).toBe(0);
 
-      // Hold the wave open for the cycle that RUNS the copy. TWO arming
-      // seams, both required (CT-2060; the OW57 row's owed construction):
-      // the handler arms as its first act (#6184's hardening), and the
-      // drain's own sidecar-doc sync arms too — the drain awaits that
-      // sync BEFORE the entry's guard check, so this arming precedes the
-      // copy's RUN and therefore every seal the copy contributes,
-      // closing the residual window where the sealing cycle's settle
-      // sampled the predicate after the copy sealed but before the
-      // handler ran (the post-#6184 red: the ping durable AND
-      // consequenced at the probe below — 3/3 CI attempts on #6223's
-      // board, 0/12 under local timing). An idle settle already in
-      // flight still passes: nothing arms until the drain touches THIS
-      // step's sidecar.
-      const heldSidecarId = w.sidecarOf(w.s2);
-      servingManager!.onSyncCell = (id) => {
-        if (id === heldSidecarId) holdArmed = true;
+      // Hold the wave open for the cycle that RUNS the copy (CT-2060;
+      // the OW57 row's owed construction). The primary arming is the
+      // QUEUE seam: the LT1 copy is queued for dispatch synchronously
+      // with the emitter's sealed append (cell.ts's LT1 arm — the raw
+      // entries write and `scheduler.queueEvent` sit in one synchronous
+      // block, no interleaving point between them), and a drain's later
+      // re-delivery of the durable entry dispatches through the SAME
+      // `queueEvent` (space-server.ts's served dispatch) — so every
+      // path to the copy's run arms the hold strictly before the run,
+      // and no settle can sample an unarmed predicate after any of the
+      // copy's contributions sealed. This closes the post-#6184
+      // residual (the ping durable AND consequenced at the probe below
+      // — 4/4 CI attempts on #6223's board, 0/12+ under local timing):
+      // the handler's own arming can run after the copy's append
+      // sealed. A drain-side sidecar-SYNC seam cannot close it either —
+      // the same-wave copy's entry is a sealed-wave write the drain's
+      // durable query never sees, so nothing syncs the sidecar before
+      // the copy runs in that cycle (the Codex P1 finding on this PR,
+      // confirmed in code). Idle settles pass: nothing arms until THIS
+      // step's stream event is queued.
+      const s2StreamId = w.servingS2.getAsNormalizedFullLink().id;
+      const originalQueueEvent = w.serving.scheduler.queueEvent.bind(
+        w.serving.scheduler,
+      );
+      (w.serving.scheduler as {
+        queueEvent: typeof originalQueueEvent;
+      }).queueEvent = (eventLink, ...rest) => {
+        if (eventLink.id === s2StreamId) holdArmed = true;
+        return originalQueueEvent(eventLink, ...rest);
       };
       servingManager!.settleGate = gate.promise;
       servingManager!.settleGateWhen = () => holdArmed;
@@ -2856,10 +2892,17 @@ describe("Phase 3 events-down (serving side)", () => {
         released = true;
       } finally {
         if (!released) gate.resolve();
-        servingManager!.onSyncCell = undefined;
+        (w.serving.scheduler as {
+          queueEvent: typeof originalQueueEvent;
+        }).queueEvent = originalQueueEvent;
         servingManager!.settleGate = undefined;
         servingManager!.settleGateWhen = undefined;
       }
+
+      // The construction's discriminator: the hold was armed BEFORE the
+      // copy's run reached the handler — red under handler-only arming
+      // (#6184) and under a drain-sync seam alike.
+      expect(armingGap).toBe(false);
 
       const s2Sidecar = w.sidecarOf(w.s2);
       await waitUntil(
