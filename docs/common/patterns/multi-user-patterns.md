@@ -223,6 +223,15 @@ anywhere an identity appears (rosters, message authors, "playing as",
 scoreboards); inline a name into a string only as an explicit fallback. Four
 variants, all carrying the same seal (CT-1761):
 
+A roster written before the space had profiles holds a name and no cell to
+bind. Pass that stored name as `fallback-name` rather than branching the render
+on whether the row has a profile — a presence test on a cell-typed field reads
+truthy when the field is absent, so the branch would take the wrong arm exactly
+where it matters. The fallback is untrusted and shows only where no profile
+resolved: it never renders beside the seal, and never over a profile that
+resolved without a name.
+
+
 | variant | shows | use for |
 | ------- | ----- | ------- |
 | `full` (default) | avatar + name pill | roster rows, "playing as" |

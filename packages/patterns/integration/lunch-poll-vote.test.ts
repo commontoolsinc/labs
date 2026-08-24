@@ -3,7 +3,10 @@
  *
  * Drives two simultaneous browser profiles (separate identities, same piece):
  * a host who joins first and adds options, and a second user who joins and
- * votes. It exercises the path the headless multiUserTest cannot — real DOM
+ * votes. Each user joins profile-first — creating their shared profile through
+ * the `#profile` wish's create surface rendered inside the join card — since
+ * the poll's identity IS the profile cell and there is no typed-name path. It
+ * exercises the path the headless multiUserTest cannot — real DOM
  * event provenance through cf-button, login, and live cross-browser propagation
  * — and checks that two users voting on the SAME option end up with both votes
  * counted: the tally reaches "2 love it" on both browsers. The two greens are
@@ -34,6 +37,7 @@ import {
   armSenderEcho,
   clickCfButton,
   clickCfButtonsConcurrently,
+  clickTrustedAction,
   collectBrowserLoadSummary,
   fillCfInput,
   installSenderEchoProbe,
@@ -60,6 +64,10 @@ const SENDER_ECHO_ARM = (() => {
     : raw === "true";
   return on ? "ON" : "OFF";
 })();
+// The `#profile` wish's create surface: its input id and trusted action are
+// pinned by the runner (wish.ts `inputId`) and the profile-create pattern —
+// the same pair shared-profile.test.ts drives.
+const TRUSTED_PROFILE_CREATE_ACTION = "CreateProfile";
 
 const HOST = "Alice";
 const GUEST = "Bob";
@@ -235,16 +243,25 @@ describe("lunch poll: two users vote on a shared option", () => {
         ]);
       }
 
-      // Host joins first -> becomes host/admin. Fresh identities carry no
-      // shared profile, so the join card opens on the profile create/pick
-      // surface; "Continue as guest" reveals the typed-name input this test
-      // drives. The roster chip carrying the host's name appears once the join
-      // lands.
-      await clickCfButton(hostPage, "#lp-guest-button");
+      // Host joins first -> becomes host/admin. Joining is profile-first:
+      // identity is the viewer's shared `#profile` cell, and a fresh identity
+      // has none, so the join card renders the wish's own create surface
+      // (`data-profile-setup`). Creating a profile there is the only path in —
+      // there is no typed-name fallback.
       await timer.run(
-        "host name filled",
-        () => fillCfInput(hostPage, "#lp-join-name", HOST),
+        "host profile name filled",
+        () => fillCfInput(hostPage, "#wish-profile-name-input", HOST),
       );
+      await clickTrustedAction(hostPage, TRUSTED_PROFILE_CREATE_ACTION);
+      // Creation is a cross-space commit the runner drives through
+      // pending/retry cycles; runtime idle is its completion signal (the
+      // shared-profile precedent).
+      await waitForRuntimeIdle(hostPage);
+      // The join button renders once the `#profileName` wish resolves — the
+      // product's own "you can join now" affordance. The `#profile` cell the
+      // join gate also reads resolves from the same profiles list, and
+      // `clickCfButton` re-settles before clicking; a premature click would
+      // surface loudly as the rendered joinMessage, not a silent no-op.
       // Sender echo: the host's own speculative roster render — the joined
       // count ticking to "1 joined" on the CLICKING browser (the count, not
       // the name: the presentation overlay already renders "Alice").
@@ -252,9 +269,11 @@ describe("lunch poll: two users vote on a shared option", () => {
         await armSenderEcho(hostPage, "host-join", "body", "1 joined");
       }
       await clickCfButton(hostPage, "#lp-join-button");
+      // "Join as Alice" renders the name before the join lands, so the
+      // joined signal is the shared summary count, not the name.
       await timer.run(
-        "host joined (name in roster)",
-        () => waitForSettledText(hostPage, "body", HOST),
+        "host joined (count reaches 1)",
+        () => waitForSettledText(hostPage, "body", "1 joined"),
       );
 
       // Guest joins second via the same guest path. Both joins LANDED is the
@@ -268,8 +287,16 @@ describe("lunch poll: two users vote on a shared option", () => {
       // the transient. The exact-chip form is RED on a standing echo (a
       // duplicated name, or three chips) and green only on the real
       // landing, so its wall time is at least a server round trip.
-      await clickCfButton(guestPage, "#lp-guest-button");
-      await fillCfInput(guestPage, "#lp-join-name", GUEST);
+      // Guest joins second through the same profile-first flow. The board
+      // shows a participant count, so the guest's join landing is observed as
+      // "2 joined" on the host plus the guest's roster name crossing over,
+      // and on the guest as the non-host's "hosted by Alice" attribution.
+      await timer.run(
+        "guest profile name filled",
+        () => fillCfInput(guestPage, "#wish-profile-name-input", GUEST),
+      );
+      await clickTrustedAction(guestPage, TRUSTED_PROFILE_CREATE_ACTION);
+      await waitForRuntimeIdle(guestPage);
       // Sender echo: the guest's own speculative join — "2 joined" on the
       // CLICKING browser (W0 measured this echo at 7–16 ms; the confirmed
       // exact-chip roster below is the landing, this is the speculation).
@@ -296,6 +323,8 @@ describe("lunch poll: two users vote on a shared option", () => {
             }),
             waitForSettledText(hostPage, "body", "2 joined"),
             waitForSettledText(guestPage, "body", "2 joined"),
+            waitForSettledText(hostPage, "body", GUEST),
+            waitForSettledText(guestPage, "body", `hosted by ${HOST}`),
           ]),
       );
 

@@ -16,13 +16,13 @@
  * the sub-pattern level in generated-art.test.tsx.
  */
 
-import { action, assert, pattern, TESTS, UI } from "commonfabric";
+import { action, assert, pattern, TESTS, UI, Writable } from "commonfabric";
 import {
   findElement,
   findNodeByProp,
   readValue,
 } from "../test/vnode-helpers.ts";
-import CozyPoll from "./main.tsx";
+import CozyPoll, { type LunchProfile } from "./main.tsx";
 
 // 1×1 transparent PNG, the mocked generation response body. The persisted
 // value is its exact data URL: FetchBinary bytes → base64 re-encode is an
@@ -43,10 +43,16 @@ export const fetchMocks = [
 ];
 
 export default pattern(() => {
+  // Identity is a profile cell; claim the host's through the test seam.
+  const host = Writable.of<LunchProfile>({ name: "Host" });
   const poll = CozyPoll({});
 
+  const action_become_host = action(() => {
+    poll.overrideViewer.send({ profile: host, name: "Host" });
+  });
+
   const action_join_as_host = action(() => {
-    poll.joinAs.send({ name: "Host" });
+    poll.joinAs.send({});
   });
 
   const action_add_sushi = action(() => {
@@ -86,6 +92,7 @@ export default pattern(() => {
 
   return {
     [TESTS]: [
+      { action: action_become_host },
       { action: action_join_as_host },
       { action: action_add_sushi },
       { assertion: assert_option_added },
