@@ -52,6 +52,7 @@
 // └────────────────────────────────────────────────────────────────────────────┘
 
 import { isObjectNotArray } from "@commonfabric/utils/types";
+import { utf8Compare } from "@commonfabric/utils/utf8";
 
 import type { SpaceDb } from "./db.ts";
 import { countLinks, parseSigilLink, summarize } from "./decode.ts";
@@ -539,8 +540,8 @@ export interface EntityScanRow {
  *    describes — inflating the total and raising a truncation notice for a
  *    result that was never truncated.
  *
- * Ties on `revisions` break by id, so which entities a cap admits is a property
- * of the space rather than of the day's query plan.
+ * Ties on `revisions` break by id through `utf8Compare`, so which entities a
+ * cap admits is a property of the space rather than of the day's query plan.
  */
 export function visibleEntityRows(
   space: SpaceDb,
@@ -589,9 +590,11 @@ export function visibleEntityRows(
   return rows
     .filter((r) => !gone.has(`${r.link.branch}\u0000${r.id}`))
     .map((r) => ({ id: r.id, revisions: r.revisions, link: r.link }))
-    .sort((a, b) =>
-      b.revisions - a.revisions || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
-    );
+    // `utf8Compare` rather than `<`, matching `fingerprint.ts` and every other
+    // id ordering in the tree. The tie-break exists to make the order a
+    // property of the space; a hand-rolled comparison is a second definition of
+    // string order in the one domain that already has a shared one.
+    .sort((a, b) => b.revisions - a.revisions || utf8Compare(a.id, b.id));
 }
 
 /**
