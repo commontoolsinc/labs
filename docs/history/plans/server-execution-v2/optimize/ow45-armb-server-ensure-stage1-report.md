@@ -40,8 +40,18 @@ any of them reverting is a bounded diff, not a redesign.
    `bookkeeping` PLUS an owner-resolved per-run CFC trust snapshot
    (`trustSnapshotForPrincipal(owner)`), the exact follow-up OW59's Q3
    caveat pre-named. A space whose ACL yields no concrete owner gets NO
-   ensure: skip, warn, count, retry next tenure — never the service DID
-   as fallback (`homeSpacePrincipalFor`'s posture; OW53's ruled shape).
+   ensure: skip, warn, count — never the service DID as fallback
+   (`homeSpacePrincipalFor`'s posture; OW53's ruled shape). The retry
+   cadence is measurement-amended: the design said "retry next tenure"
+   under its assumption that an ACTIVE space without an owner is an
+   anomaly; run r01 measured it as the NORM for fresh spaces (the host
+   activates on session-open, BEFORE the client bootstrap's genesis ACL
+   commit — INV-13 makes genesis precede DATA, not ACTIVATION), which
+   left the ensure inert on 4/4 gate spaces. The skip now latches
+   awaiting-owner and an admitted commit touching the ACL doc
+   (`of:<space>`) re-arms the owed ensure in the SAME tenure — the
+   identity posture is untouched; the owner may veto the cadence along
+   with the rest of this assumption.
    The home-space predicate is re-derived from the ACL (self-owned =
    home): a serving runtime's `userIdentityDID` IS the service DID
    (`runtime.ts:1353`), so the client's `getSpace() === userIdentityDID`
@@ -152,8 +162,9 @@ any of them reverting is a bounded diff, not a redesign.
   runtime), and its creation transaction stamps
   `bookkeeping` + `tx.setCfcTrustSnapshot(trustSnapshotForPrincipal(owner))`
   per attempt, before the first read. No owner → skip, warn,
-  `rootEnsure.skippedNoOwner`, retry next tenure — never the service
-  DID.
+  `rootEnsure.skippedNoOwner` — never the service DID; the skip
+  latches awaiting-owner and the genesis ACL's admission re-arms the
+  owed ensure in the same tenure (else the next tenure retries).
 - **Counters** (`ServingLoopStats.rootEnsure`): `runs`, `created`,
   `reconciled`, `skippedNoOwner`, `failures`. Failures are counted and
   cleared for the tenure (the next activation retries), so a
