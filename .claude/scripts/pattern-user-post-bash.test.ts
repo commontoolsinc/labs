@@ -346,6 +346,25 @@ describe("pattern-user-post-bash", () => {
       ).toContain("Run 'cf piece step'");
     });
 
+    it("gives the same guidance under the top-level data spellings", () => {
+      // `cf get`/`set`/`call` are the spellings that survive the retirement of
+      // the `cf piece` forms. Keying on the word after `cf` alone would find
+      // no verb here and return nothing, so an agent that had moved to the new
+      // spelling would silently stop being guided.
+      expect(suggestionForPatternUserCommand("cf set --piece ID title"))
+        .toContain("Run 'cf piece step'");
+      expect(suggestionForPatternUserCommand("cf call --piece ID handler"))
+        .toBe(suggestionForPatternUserCommand("cf piece call --piece ID handler"));
+      expect(suggestionForPatternUserCommand("cf get --piece ID title"))
+        .toBe(suggestionForPatternUserCommand("cf piece get --piece ID title"));
+    });
+
+    it("still ignores a bare cf whose next word names no data command", () => {
+      // The widened match must not swallow every `cf` invocation.
+      expect(suggestionForPatternUserCommand("cf test")).toBe("");
+      expect(suggestionForPatternUserCommand("cf wish '#topic'")).toBe("");
+    });
+
     it("returns no suggestion for unrelated commands", () => {
       expect(suggestionForPatternUserCommand("git status")).toBe("");
     });
