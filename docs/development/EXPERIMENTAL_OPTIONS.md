@@ -68,7 +68,8 @@ These flags make up the `ExperimentalOptions` interface in
 are passed as `new Runtime({ experimental: { ... } })`. Each flag defaults to
 `undefined`, which means "take the built-in default", and what that default is
 for every flag is `EXPERIMENTAL_DEFAULTS` in the same file — one table rather
-than a list here that could drift from it. Read it there; today
+than a list here that could drift from it, aggregating the ambient flags'
+defaults from the modules that own them. Read it there; today
 `contentAddressedSchemas`, `commitPreconditions`, `plainResultReceipts`,
 `computedCellIds` and `lazyMaterialization` are on and the rest are off.
 `serverExecution` is the one whose entry is not a literal: it is the ONE
@@ -1466,7 +1467,17 @@ ambient setters as `undefined`, which they read as "leave the process's state
 alone". Writing a default in before that point would have a flag-less
 construction stomp what a co-hosted runtime established. The startup banner
 comes last, from `nonDefaultExperimentalFlags`, which compares the resolved
-posture against that same table.
+posture against that same table — `serverExecution` excepted, and read from
+what the construction selected, so an arm inherited from the process is not
+reported as this runtime's divergence.
+
+Three entries in the table are imported from the module that owns the flag's
+ambient control point rather than written out: `MODERN_CELL_REP_DEFAULT`,
+`CONTENT_ADDRESSED_SCHEMAS_DEFAULT` and `COMMIT_PRECONDITIONS_DEFAULT`. What an
+unset runtime resolves for those is that module's own state, so a value
+restated here would say what the default is without being able to change it —
+and this table is where the change is meant to be made. The other four have no
+ambient home, so the table is their declaration.
 
 First-party construction config is centralized in
 [`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts),

@@ -1,5 +1,6 @@
 import {
   getModernCellRepConfig,
+  MODERN_CELL_REP_DEFAULT,
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
@@ -9,6 +10,7 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
   acquireServerExecutionEnabler,
+  COMMIT_PRECONDITIONS_DEFAULT,
   commitPreconditionValueHash,
   getCommitPreconditionsConfig,
   getServerExecutionConfig,
@@ -24,6 +26,7 @@ import {
 } from "@commonfabric/memory/v2";
 import { RuntimeTelemetry } from "@commonfabric/runner";
 import {
+  CONTENT_ADDRESSED_SCHEMAS_DEFAULT,
   getContentAddressedSchemasConfig,
   setContentAddressedSchemasConfig,
 } from "./schema-doc-config.ts";
@@ -292,14 +295,23 @@ export interface ExperimentalOptions {
  * a new flag does not compile until it declares what "unset" means for it.
  *
  * The bound on that: this table is what a flag defaults TO, not what any
- * given process is running. Three flags reach the process through ambient
- * control points that a co-hosted runtime can move, and the constructor reads
- * the effective value back rather than assuming this one.
+ * given process is running. The three ambient flags can be moved by a
+ * co-hosted runtime, and the constructor reads the effective value back
+ * rather than assuming this one — which is also why their entries here are
+ * imported from the module that owns each default rather than written out.
  */
 export const EXPERIMENTAL_DEFAULTS = {
-  modernCellRep: false,
-  contentAddressedSchemas: true,
-  commitPreconditions: true,
+  // Three flags reach the process through an ambient control point in a lower
+  // layer, and that module's own state is what an unset runtime resolves. The
+  // value is imported from there rather than restated here: a copy could say
+  // what the default is without being able to change it, and this table is
+  // advertised as the place to change one.
+  modernCellRep: MODERN_CELL_REP_DEFAULT,
+  contentAddressedSchemas: CONTENT_ADDRESSED_SCHEMAS_DEFAULT,
+  commitPreconditions: COMMIT_PRECONDITIONS_DEFAULT,
+  // These four have no ambient home — they are consumed from the Runtime
+  // instance — so this table IS their declaration, and changing one here
+  // changes what an unset runtime runs.
   plainResultReceipts: true,
   computedCellIds: true,
   lazyMaterialization: true,

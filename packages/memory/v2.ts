@@ -1388,7 +1388,15 @@ const memoryLiveEnvironment = new NullLiveEnvironment(
 // These ambient flags and the memory protocol flags below are catalogued, with
 // their defaults and removal paths, in docs/development/EXPERIMENTAL_OPTIONS.md.
 // Update that registry when adding or removing one.
-let commitPreconditionsEnabled = true;
+/**
+ * What `commitPreconditions` is worth when nothing sets it. Named because the
+ * runner's `EXPERIMENTAL_DEFAULTS` aggregates it rather than restating it: a
+ * restated copy could not change what an unset runtime runs, because the
+ * runtime reads this module's state back.
+ */
+export const COMMIT_PRECONDITIONS_DEFAULT = true;
+
+let commitPreconditionsEnabled: boolean = COMMIT_PRECONDITIONS_DEFAULT;
 let syncSchemaTableEnabled = true;
 let ownWriteEchoEnabled = true;
 
@@ -1482,7 +1490,7 @@ export function acquireServerExecutionEnabler(): () => void {
  * but the memory protocol needs the value during client/server handshakes.
  */
 export function setCommitPreconditionsConfig(enabled?: boolean): void {
-  commitPreconditionsEnabled = enabled ?? true;
+  commitPreconditionsEnabled = enabled ?? COMMIT_PRECONDITIONS_DEFAULT;
 }
 
 export function getCommitPreconditionsConfig(): boolean {
@@ -1490,7 +1498,7 @@ export function getCommitPreconditionsConfig(): boolean {
 }
 
 export function resetCommitPreconditionsConfig(): void {
-  commitPreconditionsEnabled = true;
+  commitPreconditionsEnabled = COMMIT_PRECONDITIONS_DEFAULT;
 }
 
 /**

@@ -119,6 +119,39 @@ describe("ExperimentalOptions", () => {
   // own server-execution arm explicitly, and a client that is not built
   // alongside its server adopts the deployment's whole posture explicitly, so
   // both printed a banner on every construction while running nothing unusual.
+  describe("EXPERIMENTAL_DEFAULTS", () => {
+    it("is what a runtime with no flags set actually resolves", async () => {
+      // The table is advertised as the place to change a default, so an entry
+      // that only SAYS what the default is would be worse than none: three
+      // flags resolve from an ambient module's own state, and a restated copy
+      // could not move them. Those entries are imported from that module, and
+      // this is what catches one going back to a literal.
+      const sm = StorageManager.emulate({ as: signer });
+      try {
+        const runtime = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager: sm,
+        });
+        try {
+          // `serverExecution` apart: a flag-less runtime resolves the
+          // PROCESS's arm, not the fleet default this table carries for it.
+          const { serverExecution: _resolvedArm, ...resolved } =
+            runtime.experimental;
+          const { serverExecution: _fleetDefault, ...defaults } =
+            EXPERIMENTAL_DEFAULTS;
+          expect(resolved).toEqual(defaults);
+          expect(runtime.experimental.serverExecution).toBe(
+            getServerExecutionConfig(),
+          );
+        } finally {
+          await runtime.dispose();
+        }
+      } finally {
+        await sm.close();
+      }
+    });
+  });
+
   describe("nonDefaultExperimentalFlags()", () => {
     const resolved = (over: ExperimentalOptions = {}): ExperimentalOptions => ({
       ...EXPERIMENTAL_DEFAULTS,
@@ -212,16 +245,18 @@ describe("ExperimentalOptions", () => {
     ): Promise<string> => {
       const sm = StorageManager.emulate({ as: signer });
       const options = { apiUrl: new URL(import.meta.url), storageManager: sm };
-      const written = await captureStderr(async () => {
-        const runtime = new Runtime(
-          preset === "productionServer"
-            ? runtimePresets.productionServer({ ...options, experimental })
-            : runtimePresets.unitTest({ ...options, experimental }),
-        );
-        await runtime.dispose();
-      });
-      await sm.close();
-      return written;
+      try {
+        return await captureStderr(async () => {
+          const runtime = new Runtime(
+            preset === "productionServer"
+              ? runtimePresets.productionServer({ ...options, experimental })
+              : runtimePresets.unitTest({ ...options, experimental }),
+          );
+          await runtime.dispose();
+        });
+      } finally {
+        await sm.close();
+      }
     };
 
     it("stays quiet for a runtime running the defaults", async () => {

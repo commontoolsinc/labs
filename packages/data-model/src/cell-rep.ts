@@ -19,13 +19,21 @@ import type { FabricPlainObject } from "@/interface.ts";
 // Configuration flags
 //
 
+/**
+ * What the flag is worth when nothing sets it. Named because the runner's
+ * `EXPERIMENTAL_DEFAULTS` aggregates it: a table that restated the value
+ * instead would say what an unset runtime runs without being able to change
+ * it, since the runtime reads this module's state back rather than the table.
+ */
+export const MODERN_CELL_REP_DEFAULT = false;
+
 /** Module-level flag for the modern cell representation. */
-let modernCellRepEnabled = false;
+let modernCellRepEnabled: boolean = MODERN_CELL_REP_DEFAULT;
 
 /** Activates or deactivates the modern cell representation flag. */
 export function setModernCellRepConfig(enabled?: boolean): void {
   if (enabled !== undefined) {
-    modernCellRepEnabled = enabled ?? false;
+    modernCellRepEnabled = enabled;
   }
 }
 
@@ -36,7 +44,7 @@ export function getModernCellRepConfig(): boolean {
 
 /** Restores the modern cell representation flag to its default. */
 export function resetModernCellRepConfig(): void {
-  modernCellRepEnabled = false;
+  modernCellRepEnabled = MODERN_CELL_REP_DEFAULT;
 }
 
 //
