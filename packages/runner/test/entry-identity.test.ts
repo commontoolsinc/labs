@@ -178,6 +178,22 @@ describe("computeEntryIdentity (light, drift-free)", () => {
       ])
     ).toThrow(/produced no identity/);
   });
+  it("throws when the entry is named as a data file", () => {
+    const files = [{ name: "/entry.ts", contents: "export default 1;\n" }];
+    expect(() =>
+      computeEntryIdentity("/entry.ts", files, { dataFiles: ["/entry.ts"] })
+    ).toThrow("cannot be a data file");
+  });
+
+  it("throws when a package path is not among the files", () => {
+    const files = [{ name: "/entry.ts", contents: "export default 1;\n" }];
+    expect(() =>
+      computeEntryIdentity("/entry.ts", files, { dataFiles: ["/data.json"] })
+    ).toThrow("/data.json");
+    expect(() =>
+      computeEntryIdentity("/entry.ts", files, { sourceRoots: ["/other.ts"] })
+    ).toThrow("/other.ts");
+  });
 });
 
 describe("resolveEntryIdentity (closure walk via readFile)", () => {
