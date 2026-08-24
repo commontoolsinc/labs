@@ -142,7 +142,9 @@ export async function selectPieces(
   selector: PieceSelector,
 ): Promise<SelectedPiece[]> {
   if (selector.kind === "list") {
-    return selector.pieces.map((piece) => ({ piece, phase: LIST_PHASE }));
+    return assertUniqueSelection(
+      selector.pieces.map((piece) => ({ piece, phase: LIST_PHASE })),
+    );
   }
   const holder = await pieces.get(selector.holder, false);
   const io = selector.side === "result" ? holder.result : holder.input;
@@ -167,7 +169,26 @@ export async function selectPieces(
     }
     return { piece: id, phase };
   });
+  if (phase === HOLDER_PHASE) {
+    throw new Error(
+      `A collection named "${HOLDER_PHASE}" would share its phase label ` +
+        `with the holder's own row, and a per-phase operation would hit ` +
+        `both. Survey it as a list instead.`,
+    );
+  }
   selected.push({ piece: holder.id, phase: HOLDER_PHASE });
+  return assertUniqueSelection(selected);
+}
+
+/** A piece selected twice would be surveyed — and later applied — twice. */
+function assertUniqueSelection(selected: SelectedPiece[]): SelectedPiece[] {
+  const seen = new Set<string>();
+  for (const { piece } of selected) {
+    if (seen.has(piece)) {
+      throw new Error(`The selection lists ${piece} more than once.`);
+    }
+    seen.add(piece);
+  }
   return selected;
 }
 

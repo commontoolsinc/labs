@@ -57,8 +57,22 @@ export interface PlanDiff {
  * Compare an after-survey against the plan it verifies. Every plan row gets
  * a verdict; pieces only the after-survey knows are listed as `unplanned`
  * rather than dropped, so a selection that grew mid-run stays visible.
+ *
+ * Two comparisons are refused rather than answered: plans from different
+ * spaces — matching piece ids across spaces would read as landed while
+ * saying nothing about either space — and a plan listing a piece more than
+ * once, which the format promises never to hold and this function would
+ * otherwise silently collapse.
  */
 export function diffPlan(plan: PiecePlan, after: PiecePlan): PlanDiff {
+  if (plan.header.space !== after.header.space) {
+    throw new Error(
+      `Plans are from different spaces: ${plan.header.space} and ` +
+        `${after.header.space}.`,
+    );
+  }
+  assertUniquePieces(plan, "plan");
+  assertUniquePieces(after, "after-survey");
   const afterById = new Map(after.rows.map((row) => [row.piece, row]));
   const counts: Record<PieceDiffStatus, number> = {
     landed: 0,
@@ -110,4 +124,14 @@ export function diffPlan(plan: PiecePlan, after: PiecePlan): PlanDiff {
 function sameRef(left: PatternRef, right: PatternRef): boolean {
   return left.patternIdentity === right.patternIdentity &&
     left.symbol === right.symbol;
+}
+
+function assertUniquePieces(plan: PiecePlan, label: string): void {
+  const seen = new Set<string>();
+  for (const row of plan.rows) {
+    if (seen.has(row.piece)) {
+      throw new Error(`The ${label} lists ${row.piece} more than once.`);
+    }
+    seen.add(row.piece);
+  }
 }

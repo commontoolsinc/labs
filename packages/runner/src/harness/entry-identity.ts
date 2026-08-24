@@ -28,7 +28,8 @@ function prefixName(name: string): string {
  *
  * `files` must include the entry's full internal import closure (a superset is
  * fine — unreachable files neither affect the entry's identity nor are they
- * validated). `.d.ts` files are ignored. `contents` must be the **authored**
+ * validated). `.d.ts` files are ignored unless named as data files, which are
+ * kept whatever their name says. `contents` must be the **authored**
  * (pre-transform) source: the engine hashes pristine authored bytes, restoring
  * them via `pristineModuleSources` after the helper-injection pretransform, so
  * hashing the injected form here would diverge (see
@@ -49,44 +50,68 @@ export function computeEntryIdentity(
   files: readonly Source[],
   options: EntryIdentityOptions = {},
 ): string {
-  const moduleFiles = files.filter((f) => !f.name.endsWith(".d.ts"));
-  const prefixed = moduleFiles.map((f) => ({
-    name: prefixName(f.name),
-    contents: f.contents,
-  }));
-  const entryKey = prefixName(main);
-
-  // Also validates the entry is present (throws if `main` is not among `files`),
-  // so `identities` is guaranteed to contain `entryKey` below.
-  assertClosureComplete(main, entryKey, prefixed);
-
-  const names = new Set(prefixed.map((file) => file.name));
   const dataPaths = [...new Set(options.dataFiles ?? [])].sort();
   if (dataPaths.includes(main)) {
     throw new Error(`The program entry '${main}' cannot be a data file.`);
   }
   const rootPaths = [...new Set(options.sourceRoots ?? [])]
     .filter((root) => root !== main);
-  for (const path of [...rootPaths, ...dataPaths]) {
-    if (!names.has(prefixName(path))) {
-      throw new Error(
-        `package path '${path}' is not among the provided files`,
-      );
+
+  // Partition before the `.d.ts` filter and before any parsing: a data file
+  // is stored uninterpreted whatever its name says, and import-like text
+  // inside one is data, not an import.
+  const dataSet = new Set(dataPaths);
+  const moduleFiles = files.filter((f) =>
+    !dataSet.has(f.name) && !f.name.endsWith(".d.ts")
+  );
+  const dataSources = files.filter((f) => dataSet.has(f.name));
+  const prefixedCode = moduleFiles.map((f) => ({
+    name: prefixName(f.name),
+    contents: f.contents,
+  }));
+  const prefixedData = dataSources.map((f) => ({
+    name: prefixName(f.name),
+    contents: f.contents,
+  }));
+  const entryKey = prefixName(main);
+
+  const codeNames = new Set(prefixedCode.map((file) => file.name));
+  for (const root of rootPaths) {
+    if (!codeNames.has(prefixName(root))) {
+      throw new Error(`package path '${root}' is not among the provided files`);
+    }
+  }
+  const dataNames = new Set(dataSources.map((file) => file.name));
+  for (const path of dataPaths) {
+    if (!dataNames.has(path)) {
+      throw new Error(`package path '${path}' is not among the provided files`);
     }
   }
 
-  const identities = computeModuleIdentities(prefixed, {
-    idPrefix: `/${ENTRY_ID}`,
-    ...(rootPaths.length || dataPaths.length
-      ? {
-        sourcePackage: {
-          entryPath: entryKey,
-          rootPaths: rootPaths.map(prefixName),
-          dataPaths: dataPaths.map(prefixName),
-        },
-      }
-      : {}),
-  });
+  // Also validates each entry is present (throws if it is not among the
+  // files), so `identities` is guaranteed to contain `entryKey` below. Every
+  // source root is an entry of its own, so each root's closure has to be as
+  // complete as the main entry's.
+  assertClosureComplete(main, entryKey, prefixedCode);
+  for (const root of rootPaths) {
+    assertClosureComplete(root, prefixName(root), prefixedCode);
+  }
+
+  const identities = computeModuleIdentities(
+    [...prefixedCode, ...prefixedData],
+    {
+      idPrefix: `/${ENTRY_ID}`,
+      ...(rootPaths.length || dataPaths.length
+        ? {
+          sourcePackage: {
+            entryPath: entryKey,
+            rootPaths: rootPaths.map(prefixName),
+            dataPaths: dataPaths.map(prefixName),
+          },
+        }
+        : {}),
+    },
+  );
   return identities.get(entryKey)!;
 }
 
@@ -182,13 +207,17 @@ export async function resolveEntryIdentity(
   const rooted = (name: string) => name.startsWith("/") ? name : `/${name}`;
   const entry = rooted(main);
   const sourceRoots = (options.sourceRoots ?? []).map(rooted);
-  const dataFiles = (options.dataFiles ?? []).map(rooted);
-  // Every root is an entry of its own, and a data file is read rather than
-  // imported, so the walk seeds from all of them.
-  const files = await collectEntryClosure(
-    [entry, ...sourceRoots, ...dataFiles],
-    readFile,
-  );
+  const dataFiles = [...new Set((options.dataFiles ?? []).map(rooted))];
+  // Every root is an entry of its own, so the import walk seeds from each.
+  // A data file is read and never parsed: import-like text inside one is
+  // data, and following it would read files the program never named.
+  const files = await collectEntryClosure([entry, ...sourceRoots], readFile);
+  const collected = new Set(files.map((file) => file.name));
+  for (const dataPath of dataFiles) {
+    if (!collected.has(dataPath)) {
+      files.push({ name: dataPath, contents: await readFile(dataPath) });
+    }
+  }
   return computeEntryIdentity(entry, files, { sourceRoots, dataFiles });
 }
 

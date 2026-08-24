@@ -446,5 +446,36 @@ describe("bulk-survey", () => {
       expect(survey.plan.header.enumerated.registeredOutside).toBe(0);
       expect(survey.complete).toBe(true);
     });
+
+    it("throws for a list naming one piece twice", async () => {
+      const a = await pieces.create(generationProgram("a"), { input: {} });
+      await expect(
+        surveyPieces(pieces, {
+          selector: { kind: "list", pieces: [a.id, a.id] },
+        }),
+      ).rejects.toThrow("more than once");
+    });
+
+    it("throws for a collection whose phase would collide with the holder's", async () => {
+      const holder = await pieces.create({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            "import { NAME, pattern } from 'commonfabric';",
+            "export default pattern<{ holder?: unknown[] }>(({ holder }) => ({",
+            "  [NAME]: 'Colliding',",
+            "  holder,",
+            "}));",
+            "",
+          ].join("\n"),
+        }],
+      }, { input: {} });
+      await expect(
+        surveyPieces(pieces, {
+          selector: { kind: "collection", holder: holder.id, path: ["holder"] },
+        }),
+      ).rejects.toThrow("Survey it as a list");
+    });
   });
 });

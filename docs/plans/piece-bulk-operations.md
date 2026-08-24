@@ -190,25 +190,29 @@ re-derived differently each time.
 
 A piece is outstanding when it still satisfies its recorded precondition, and
 landed when it is in the state its operation produces. Both are decided from
-the plan and one read of the piece; neither compiles anything.
+the plan and one read of the piece; neither compiles anything. Every such
+comparison is on the full executable reference, `{identity, symbol}` — two
+patterns one module exports share an identity and differ only in symbol, so
+an identity-only match would call a retarget landed before it ran.
 
-The second half is cheap because a pattern identity is a function of authored
-source, not of a compile: the runtime computes the identity a source closure
-will be stored under without compiling it, and a plan carries that value on
-every retarget row beside the source it names. So "is this piece already on
-the identity this row produces?" is answered the same way as "is it still on
-the identity this row recorded?" — by comparing one identity read against a
-value already in the plan. What neither question asks is "does this piece
-already run the source I am about to apply?", which would need a compile and
-still would not see the source transition, revision history, or repository
-metadata the update path owns. Resume never needs that question.
+The landed half is cheap because the reference is a function of authored
+source, not of a compile: the runtime computes the identity a source package
+will be stored under without compiling it, the symbol is the export the
+source names, and a plan carries both on every retarget row beside the
+source. So "is this piece already on the reference this row produces?" is
+answered the same way as "is it still on the reference this row recorded?" —
+by comparing one reference read against a value already in the plan. What
+neither question asks is "does this piece already run the source I am about
+to apply?", which would need a compile and still would not see the source
+transition, revision history, or repository metadata the update path owns.
+Resume never needs that question.
 
 The consequence is that resume costs one read per piece and is decided before
 any write, which is why re-invoking a stopped run is safe and nearly free on
-the pieces that already landed — and why a piece on neither identity is a
+the pieces that already landed — and why a piece on neither reference is a
 stop rather than a skip: nothing in the plan accounts for where it is.
 
-It also bounds what resume can claim. A piece on the identity its row
+It also bounds what resume can claim. A piece on the reference its row
 produces is known to have moved as planned; it is *not* thereby known to be
 healthy. Verification is the separate pass for that, and no amount of
 pre-state checking substitutes.
@@ -348,7 +352,7 @@ running anything.
 and the rollback row derived from the first of those:
 
 ```text
-{"piece":"of:fid1:aaa…","phase":"topics","expect":{"patternIdentity":"Xk3Lp…","symbol":"default"},"op":{"kind":"restore","patternIdentity":"PB0Gum…","symbol":"default"}}
+{"piece":"of:fid1:aaa…","phase":"topics","expect":{"patternIdentity":"Xk3Lp…","symbol":"default","retained":true},"op":{"kind":"restore","patternIdentity":"PB0Gum…","symbol":"default"}}
 ```
 
 What the encoding buys — most of it a claim made earlier in this document
@@ -377,9 +381,10 @@ that would otherwise have no mechanism:
   itself: the transition first appends a baseline revision retaining the
   source the piece was on, provided that source is still retained in the
   space — so for most pieces the rollback target exists only after the
-  retarget, which is why the rollback row names the recorded identity rather
-  than a revision the survey could not have read. A piece whose prior source
-  is no longer retained has no restore target, and the survey says so up
+  retarget, which is why the rollback row names the recorded reference
+  rather than a revision the survey could not have read. A piece whose prior
+  source is no longer retained has no restore target, and the survey says so
+  up
   front (`retained`), because the read that answers it is available before
   the run. A rollback that instead re-applied an old checkout of the source
   would re-derive, by hand and from outside the space, what the piece
@@ -390,15 +395,17 @@ that would otherwise have no mechanism:
   recording the collection count, the registry count, and how many registered
   in-scope pieces the collection lacks is what makes the check reviewable
   afterwards rather than only at run time.
-- **The identity is the pin; `rev` is a label.** A row's `source` names a
-  main file and, when the program has them, its root, tests, and data files,
-  and the apply resolves it through the runner's local-program resolution so
-  nothing attached is dropped. Before writing, the apply recomputes the
-  identity of the source it actually resolved and refuses the row if that
-  differs from `op.patternIdentity` — a different checkout or an uncommitted
-  edit cannot slip through, because the hash catches it. `rev` is recorded
-  for readers and for diffing two plans, and is never enforced: enforcing it
-  would add a second refusal for a condition the identity already proves,
+- **The reference is the pin; `rev` is a label.** A row's `source` names a
+  main file and, when the program has them, its root, tests, data files, and
+  export, and the apply resolves it through the runner's local-program
+  resolution so nothing attached is dropped. Before writing, the apply
+  recomputes the identity of the source it actually resolved and refuses the
+  row if that differs from `op.patternIdentity`, or if the export it would
+  run is not `op.symbol` — a different checkout, an uncommitted edit, or a
+  renamed export cannot slip through. The codec already refuses a row whose
+  `symbol` disagrees with its source's named export. `rev` is recorded for
+  readers and for diffing two plans, and is never enforced: enforcing it
+  would add a second refusal for a condition the reference already proves,
   and would tie the plan to a git checkout.
 - **The compatibility override is a field on the row, stamped at plan
   time.** `op.allowIncompatible` is what the apply honors, and nothing else;
@@ -589,14 +596,17 @@ spelling (decision 1).
 - [ ] A retarget of a seeded board runs to completion from a checked-in plan.
 - [ ] Preconditions are proved for every row before the first write.
 - [ ] The identity of each row's resolved source is recomputed before the
-      write and must equal `op.patternIdentity`; `rev` is never enforced.
+      write and must equal `op.patternIdentity`, and the export it runs must
+      be `op.symbol`; `rev` is never enforced.
 - [ ] The compatibility override is honored from the row field alone.
-- [ ] Every retarget row carries the identity its source produces, computed
-      without compiling, and the precondition check classifies each piece as
-      outstanding, landed, or moved elsewhere against that row alone.
+- [ ] Every retarget row carries the `{identity, symbol}` reference its
+      source produces, the identity computed without compiling, and the
+      precondition check classifies each piece as outstanding, landed, or
+      moved elsewhere against that row alone — comparing both halves of the
+      reference, never the identity by itself.
 - [ ] A run interrupted partway is completed by re-invoking the same command,
       and the pieces that landed are not rewritten. A piece on neither of its
-      row's identities stops the run by name rather than being skipped or
+      row's references stops the run by name rather than being skipped or
       rewritten.
 - [ ] A stopped run names every unattempted piece, not a count of them.
 - [ ] The after-survey distinguishes "moved as planned", "still outstanding",
@@ -624,9 +634,9 @@ retained-revision restore, useful on its own for any single piece; the
 rollback-plan derivation; and the rollback drill.
 
 - [ ] A completed retarget is fully reversed from its own plan, with no
-      second artifact needed: each rollback row's precondition is the identity
-      the retarget row produced, and its operation restores the retained
-      revision carrying the recorded identity.
+      second artifact needed: each rollback row's precondition is the
+      reference the retarget row produced, and its operation restores the
+      retained revision carrying the recorded reference.
 - [ ] A row whose prior source was not retained is refused by rollback with
       the reason named, never silently skipped — and a live run is not
       started with such rows unless the operator has supplied the legacy
@@ -636,7 +646,7 @@ rollback-plan derivation; and the rollback drill.
       command in front of it, so this stage is where one appears.
 - [ ] Rollback checks preconditions the same way, so a piece changed by
       something else since the retarget stops the reversal rather than being
-      overwritten — and a piece already back on its recorded identity is
+      overwritten — and a piece already back on its recorded reference is
       landed, which is what makes a rollback resumable.
 - [ ] A rollback is itself resumable.
 - [ ] The reversal is exercised against a copy, in the drill, before any live
@@ -784,8 +794,9 @@ behind a seam and the widest of them stays unbuilt: it is the part most
 likely to be answered rather than optimized.
 
 **What durable state answers "has this piece been migrated?"** The
-precondition check above answers "is it on the identity this row recorded, or
-on the one this row produces", which is enough for resume and rollback and is
+precondition check above answers "is it on the reference this row recorded,
+or on the one this row produces", which is enough for resume and rollback and
+is
 deliberately all this design relies on. A piece does keep a durable record of
 its own source transitions — the append-only revision log that rollback
 restores from — but that log says what the piece ran and when, not which plan

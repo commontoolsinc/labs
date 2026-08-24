@@ -44,7 +44,7 @@ function retargetPlan(): PiecePlan {
         },
         op: {
           kind: "retarget",
-          source: { main: "main.tsx" },
+          source: { main: "main.tsx", mainExport: "Board" },
           patternIdentity: "new-b",
           symbol: "Board",
         },
@@ -155,6 +155,43 @@ describe("bulk-plan", () => {
       };
       expect(() =>
         decodePlan(JSON.stringify(header) + "\n" + JSON.stringify(row))
+      ).toThrow("row 1");
+    });
+
+    it("throws for a plan listing one piece twice", () => {
+      const plan = retargetPlan();
+      const text = JSON.stringify(header) + "\n" +
+        JSON.stringify(plan.rows[0]) + "\n" + JSON.stringify(plan.rows[0]);
+      expect(() => decodePlan(text)).toThrow("more than once");
+    });
+
+    it("throws for a retarget whose symbol disagrees with its source export", () => {
+      const plan = retargetPlan();
+      const row = {
+        ...plan.rows[0],
+        op: {
+          kind: "retarget",
+          source: { main: "topic.tsx", mainExport: "Other" },
+          patternIdentity: "x",
+          symbol: "default",
+        },
+      };
+      expect(() =>
+        decodePlan(JSON.stringify(header) + "\n" + JSON.stringify(row))
+      ).toThrow("row 1");
+      const numericExport = {
+        ...plan.rows[0],
+        op: {
+          kind: "retarget",
+          source: { main: "topic.tsx", mainExport: 7 },
+          patternIdentity: "x",
+          symbol: "default",
+        },
+      };
+      expect(() =>
+        decodePlan(
+          JSON.stringify(header) + "\n" + JSON.stringify(numericExport),
+        )
       ).toThrow("row 1");
     });
 

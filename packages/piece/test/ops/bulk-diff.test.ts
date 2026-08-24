@@ -183,5 +183,27 @@ describe("bulk-diff", () => {
         missing: 1,
       });
     });
+
+    it("throws for plans from different spaces", () => {
+      const plan: PiecePlan = { header, rows: [surveyRow("of:fid1:aaa", "x")] };
+      const elsewhere: PiecePlan = {
+        header: { ...header, space: "did:key:other" },
+        rows: [surveyRow("of:fid1:aaa", "x")],
+      };
+      expect(() => diffPlan(plan, elsewhere)).toThrow("different spaces");
+    });
+
+    it("throws for a plan listing one piece twice, on either side", () => {
+      const twice: PiecePlan = {
+        header,
+        rows: [surveyRow("of:fid1:aaa", "x"), surveyRow("of:fid1:aaa", "x")],
+      };
+      const once: PiecePlan = {
+        header,
+        rows: [surveyRow("of:fid1:aaa", "x")],
+      };
+      expect(() => diffPlan(twice, once)).toThrow("more than once");
+      expect(() => diffPlan(once, twice)).toThrow("more than once");
+    });
   });
 });

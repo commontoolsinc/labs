@@ -178,6 +178,13 @@ export function decodePlan(text: string): PiecePlan {
     }
     return row;
   });
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (seen.has(row.piece)) {
+      throw new Error(`Plan lists ${row.piece} more than once.`);
+    }
+    seen.add(row.piece);
+  }
   return { header, rows };
 }
 
@@ -286,11 +293,16 @@ function isPieceOp(value: unknown): value is PieceOp {
   if (value.kind === "restore") return isOptionalString(value.revisionId);
   if (value.kind !== "retarget") return false;
   const source = value.source;
-  return isRecord(source) && typeof source.main === "string" &&
-    isOptionalString(source.root) &&
+  if (!isRecord(source) || typeof source.main !== "string") return false;
+  const mainExport = source.mainExport;
+  if (!isOptionalString(mainExport)) return false;
+  // The symbol is what diff and rollback compare; the source's export is what
+  // an apply resolves. A row where the two disagree would land one pattern
+  // and verify another, so the codec refuses it.
+  if (value.symbol !== (mainExport ?? "default")) return false;
+  return isOptionalString(source.root) &&
     isOptionalStringArray(source.testPaths) &&
     isOptionalStringArray(source.dataFilePaths) &&
-    isOptionalString(source.mainExport) &&
     isOptionalString(value.rev) &&
     (value.allowIncompatible === undefined ||
       typeof value.allowIncompatible === "boolean");
