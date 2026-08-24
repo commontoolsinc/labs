@@ -361,7 +361,7 @@ class DebugConverter {
       default: {
         throw new Error(`Shouldn't happen: unknown type \`${typeof value}\``);
       }
-      // deno-coverage-ignore-stop
+        // deno-coverage-ignore-stop
     }
 
     // We have a non-null object of some sort.
