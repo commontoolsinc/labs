@@ -521,9 +521,8 @@ compiling; and the drill.
 - [x] The survey and the pin read are invocable from `cf`
       (`cf piece survey`, `cf piece inspect --pattern-identity`),
       provisionally spelled per decision 1.
-- [ ] The stage-1 drill runs in continuous integration, under the CLI
-      integration suite's `piece-call` section. Ticked by the stacked
-      change that lands it.
+- [x] The stage-1 drill runs in continuous integration, under the CLI
+      integration suite's `piece-call` section.
 
 ### 2. Repair, by a supplied fixer
 
