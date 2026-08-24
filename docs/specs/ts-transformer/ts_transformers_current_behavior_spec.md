@@ -873,6 +873,12 @@ target. Only the `export` modifier on the declaration does this — a function
 declaration keeps its local binding even when exported, and a trailing
 `export { … }` clause rewrites no reference, so both stay accepted.
 
+Which argument is judged mirrors `callbackIndexesForBuilder`, including its
+window rather than only its answer: `lift`'s callback belongs at position 0,
+but the verifier scans the leading positions and takes the first that
+resolves, so all three are judged here too. A candidate that resolves ends the
+check, because that is the one the verifier would take.
+
 The rule belongs to `verifyTrustedBuilderCall`
 (`runner/src/sandbox/compiled-bundle-verifier.ts`, normative per §17.6), which
 admits those two spellings and refuses to load a module using any other. This

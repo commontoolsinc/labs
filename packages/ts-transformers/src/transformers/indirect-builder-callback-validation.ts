@@ -65,15 +65,24 @@ function validateCallbackArgument(
 ): void {
   if (!isTrustedBuilder(builderName)) return;
   const checker = context.checker;
-  const callback = callbackArgument(call, builderName, checker);
-  if (!callback) return;
-  // Function-bearing is also what separates a builder DEFINITION from an
-  // application of one: `updateData(state)` classifies as a builder call too,
-  // and its argument is state, not a callback.
-  if (!isCallbackReference(callback, checker)) return;
-  if (resolvesToSameModuleFunction(callback, call.getSourceFile(), checker)) {
+  const sourceFile = call.getSourceFile();
+  const candidates = callbackCandidates(call.arguments, builderName);
+  // The verifier takes the first candidate that resolves, so one that does
+  // means the module loads whatever the others are.
+  if (
+    candidates.some((candidate) =>
+      resolvesToSameModuleFunction(candidate, sourceFile, checker)
+    )
+  ) {
     return;
   }
+  // Function-bearing is also what separates a builder DEFINITION from an
+  // application of one: `updateData(state)` classifies as a builder call too,
+  // and the argument it carries is state.
+  const callback = candidates.find((candidate) =>
+    isCallbackReference(candidate, checker)
+  );
+  if (callback === undefined) return;
   context.reportDiagnostic({
     severity: "error",
     type: "builder-callback:indirect-reference",
@@ -90,33 +99,34 @@ function validateCallbackArgument(
 }
 
 /**
- * The argument the verifier treats as the callback, mirroring
- * `callbackIndexesForBuilder`. `multiUserTest` is absent there — its
- * arguments are builder results — so it is absent here.
+ * The arguments the verifier considers for the callback, in the order it
+ * considers them, mirroring `callbackIndexesForBuilder`. `multiUserTest` is
+ * absent there — its arguments are builder results — so it is absent here.
  */
-function callbackArgument(
-  call: ts.CallExpression,
+function callbackCandidates(
+  args: ts.NodeArray<ts.Expression>,
   builderName: string,
-  checker: ts.TypeChecker,
-): ts.Expression | undefined {
-  const args = call.arguments;
+): readonly ts.Expression[] {
+  const at = (index: number) => args.length > index ? [args[index]!] : [];
   switch (builderName) {
     case "pattern":
     case "action":
     case "computed":
+      return at(0);
     case "lift":
-      return args[0];
+      // The callback belongs at position 0, but the verifier scans the
+      // leading positions defensively and takes the first that resolves.
+      // Judging the same window keeps a misplaced callback from passing here
+      // and then being refused at load.
+      return args.slice(0, 3);
     case "handler":
       // Function-first when the leading argument carries the callback,
       // schema-first otherwise.
-      if (args.length >= 1 && isCallbackReference(args[0]!, checker)) {
-        return args[0];
-      }
-      return args.length >= 3 ? args[2] : args[0];
+      return [...at(0), ...at(2)];
     case "derive":
-      return args.length >= 4 ? args[3] : args[1];
+      return args.length >= 4 ? at(3) : at(1);
     default:
-      return undefined;
+      return [];
   }
 }
 

@@ -95,6 +95,22 @@ describe("indirect-builder-callback-validation", () => {
       expect(errors).toHaveLength(1);
     });
 
+    it("reports a lift callback that is not in the leading position", async () => {
+      // The callback belongs at position 0, but the verifier scans the leading
+      // positions and takes the first that resolves — so one placed later and
+      // unresolvable is refused at load rather than ignored.
+      const errors = await errorsIn(`
+        const callbacks = { bump: (n: number) => n + 1 };
+        const inc = lift(
+          { type: "object" } as never,
+          undefined as never,
+          callbacks.bump as never,
+        );
+      `);
+      expect(errors).toHaveLength(1);
+      expect(errors[0].message).toContain("through a property access");
+    });
+
     it("reports a generator written at the call", async () => {
       // `tryParseDirectFunction` accepts `async`, never `function*`.
       const errors = await errorsIn(`
