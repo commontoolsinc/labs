@@ -1858,12 +1858,17 @@ function firstUnheldSelectionField(
   // of its elements — the traversal `alignConciseProjectionMask` applies to
   // the mask beside this.
   //
-  // Crossed only where the position must hold an array, which is the question
-  // {@link sourceProvesContainer} exists to settle. A position that merely may
-  // hold one — untyped beside an `items`, or a union naming both containers —
-  // settles neither depth: the name belongs to an element where the value is
-  // an array and to the position itself where it is not, and judging it at one
-  // of them refuses a read that works at the other.
+  // One rule governs the crossing: an array is crossed only where the source
+  // gives its elements ONE schema, since that schema is then the vocabulary of
+  // every element and of nothing else. The three ways a source falls short of
+  // that are checked below and each is passed over. A position that merely may
+  // hold an array — untyped beside an `items`, or a union naming both
+  // containers — settles neither depth: the name belongs to an element where
+  // the value is an array and to the position itself where it is not, and
+  // judging it at one of them refuses a read that works at the other. A tuple
+  // gives each index its own schema. And a draft-07 tuple writes that list as
+  // `items` itself, which is not a schema at all and stops the walk one level
+  // down, where a list of schemas is not a schema object.
   if (sourceProvesContainer("array", target, targetRoot)) {
     // A tuple declares a different shape per index, so its elements have no
     // one vocabulary: `items` describes the positions past the prefix and says

@@ -287,6 +287,24 @@ describe("select-unheld-field", () => {
     expect(await selected(source, "count")).toEqual([{}, { count: 2 }]);
   });
 
+  it("reads a field named across an array whose `items` is a list of schemas", async () => {
+    const source = await sourceCell(
+      "unheld-draft-07-tuple",
+      {
+        type: "array",
+        items: [
+          { type: "object", properties: { title: { type: "string" } } },
+          { type: "object", properties: { count: { type: "number" } } },
+        ],
+      } as never,
+      [{ title: "First" }, { count: 2 }],
+    );
+    // A list of schemas is not a schema, so it states no element vocabulary
+    // for the walk to judge a name against — including a name no element
+    // declares.
+    expect(await selected(source, "nope")).toEqual([{}, {}]);
+  });
+
   it("reads a field named at an untyped position beside an `items` schema", async () => {
     const source = await sourceCell(
       "unheld-untyped-items",
