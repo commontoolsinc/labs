@@ -356,9 +356,12 @@ class DebugConverter {
         break;
       }
 
+      // deno-coverage-ignore-start
+      // This will only happen if JS introduces a new type.
       default: {
         throw new Error(`Shouldn't happen: unknown type \`${typeof value}\``);
       }
+      // deno-coverage-ignore-end
     }
 
     // We have a non-null object of some sort.
