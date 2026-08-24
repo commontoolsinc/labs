@@ -410,6 +410,133 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
     }
   });
 
+  it("lets a stop during the refusal's round trip WIN: no revival", async () => {
+    // The widest async window in the flow: the deferred start INSTALLS its
+    // context before startTx.commit() is issued, so a user can navigate in
+    // and away while the refusal is still in flight. The stop tears the
+    // context down and — because the install's ownership unregistered at
+    // markInstalled — leaves no pending token for the stop to cancel, and
+    // it bumps no epoch. The recovery must NOT override that stop: it
+    // recovers only an attempt whose install is STILL THE CURRENT
+    // REGISTRATION when the refusal lands. A revived piece here would be a
+    // permanent leak — its parent already released it, and nothing ever
+    // releases it again (review F1; the reviewer's probe watched exactly
+    // this revival).
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const tx = gatedTxOn(runtime);
+    const result = runtime.getCell<{ doubled?: number }>(
+      space,
+      "stopped while the refusal was in flight",
+      undefined,
+      tx,
+    );
+    const injector = refuseDeferredStartCommits(
+      runtime,
+      staleConfirmedReadOf(result),
+      1,
+      // Inside the round trip: the stop lands as the refusal is delivered,
+      // BEFORE the error arm's continuation observes it. Unlike stopAll,
+      // a plain stop bumps no lifecycle epoch — this is the window only
+      // the install-still-current check can cover.
+      () => runtime.runner.stop(result),
+    );
+    const installed = observeContextInstalls(
+      runtime,
+      (cell) => key(cell) === key(result),
+      () => runtime.runner.cancels.has(key(result)),
+    );
+    try {
+      runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
+      expect((await tx.commit()).error).toBeUndefined();
+
+      await waitForSignal(
+        injector.refusalsReach(1),
+        "the start's transaction being refused",
+      );
+      await runtime.runner.idleDeferredStartCatchUps();
+      await runtime.idle();
+
+      // The stopped attempt's install is the only assembly there ever was,
+      // and the explicitly stopped piece stays stopped.
+      expect(injector.refusals()).toBe(1);
+      expect(installed.installs()).toBe(1);
+      expect(runtime.runner.cancels.has(key(result))).toBe(false);
+    } finally {
+      installed.restore();
+      injector.restore();
+    }
+  });
+
+  it("keeps the parent's cancel handle potent across the recovery", async () => {
+    // The parent of a deferred start holds ONE handle — the Cancel that
+    // runWithStartOwnership returned — registered in its cancel group and
+    // its lineage piece-stop. The old error arm SPENT that handle's token
+    // (ownership.cancel) before scheduling the recovery under a fresh one,
+    // so a parent teardown after the refusal could no longer reach the
+    // recovered run (review F1's second face; Cubic's P1). The recovery
+    // must ride the SAME token the parent holds: cancelling it during the
+    // wait tombstones the recovery, and cancelling it after the walk stops
+    // the recovered run.
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const harness = runtime.runner as unknown as {
+      runWithStartOwnership(
+        tx: unknown,
+        pattern: unknown,
+        argument: unknown,
+        resultCell: unknown,
+        options?: unknown,
+      ): { cancelDeferredStart?: () => void };
+    };
+    const tx = gatedTxOn(runtime);
+    const result = runtime.getCell<{ doubled?: number }>(
+      space,
+      "parent cancel reaches the recovered run",
+      undefined,
+      tx,
+    );
+    const injector = refuseDeferredStartCommits(
+      runtime,
+      staleConfirmedReadOf(result),
+    );
+    const installed = observeContextInstalls(
+      runtime,
+      (cell) => key(cell) === key(result),
+      () => runtime.runner.cancels.has(key(result)),
+    );
+    try {
+      const { cancelDeferredStart } = harness.runWithStartOwnership(
+        tx,
+        trustExecutable(runtime, Piece),
+        { value: 3 },
+        result.withTx(tx),
+      );
+      expect(cancelDeferredStart).toBeDefined();
+      runtime.prepareTxForCommit(tx);
+      expect((await tx.commit()).error).toBeUndefined();
+
+      await waitForSignal(
+        installed.nth(2),
+        "the catch-up recovery assembling the piece context",
+      );
+      await runtime.runner.idleDeferredStartCatchUps();
+      await runtime.idle();
+      expect(runtime.runner.cancels.has(key(result))).toBe(true);
+
+      // The parent tears down through the one handle it has ever held.
+      cancelDeferredStart!();
+      expect(runtime.runner.cancels.has(key(result))).toBe(false);
+    } finally {
+      installed.restore();
+      injector.restore();
+    }
+  });
+
   it("abandons the recovery when the piece is stopped first", async () => {
     // The zombie case: the user navigated away, or the piece was disposed,
     // between the refusal and the recovery. The pending recovery is

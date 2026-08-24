@@ -41,7 +41,7 @@ it in the PR that moves the state.
 **Delta 2026-08-24 (this PR): the b04 client-start DEATH closed by
 CATCH-UP-AND-START (RULED 2026-08-24); the 10/10 gate found the arm-B
 residue is TWO read-side members the start fix does not reach — the
-reload-step skip STAYS (8/10), reworded to the narrowed charge.** The
+reload-step skip STAYS (7/10), reworded to the narrowed charge.** The
 ruled mechanism (coordinator recommendation, owner ack): in the
 deferred start's stale-confirmed-read error arm, treat the refusal as
 "the server won the race" — await the conflict's readiness (the
@@ -67,7 +67,7 @@ would actually run under; fresh store + posture probe per run,
 quiet-and-loaded): the recovery arm fired live in EVERY run with
 zero terminal deferred-start deaths, and in the green runs it
 demonstrably resurrected the NOTEBOOK space's refused root start
-(catchup → step green in 22–76 s). The three reds are NOT the
+(catchup → step green, steps 22–46 s). The three reds are NOT the
 client-start death: r01 is the single-chain readCell starvation
 (notebook context fully live, store holds all 7 appends,
 argument-notes read undefined for the whole net, silent) and
