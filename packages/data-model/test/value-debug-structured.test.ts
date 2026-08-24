@@ -510,6 +510,30 @@ describe("toStructuredDebugValue()", () => {
         // throws on it; the message derivation must not throw in turn.
         expect(messageFor(Object.create(null))).toBe("/unconvertibleError");
       });
+
+      it("returns a fixed token when an `Error`'s message cannot be read", () => {
+        // Nothing is lost by not falling back to stringifying this one:
+        // `Error.prototype.toString()` reads `message` too, so `String()`
+        // throws on it just the same.
+        const error = new Error("ignored");
+        Object.defineProperty(error, "message", {
+          get() {
+            throw new Error("message trap");
+          },
+          configurable: true,
+        });
+        expect(messageFor(error)).toBe("/unconvertibleError");
+      });
+
+      it("returns a fixed token when the `instanceof` check itself throws", () => {
+        // A thrown value can refuse even to be asked what it is.
+        const thrown = new Proxy({}, {
+          getPrototypeOf() {
+            throw new Error("proto trap");
+          },
+        });
+        expect(messageFor(thrown)).toBe("/unconvertibleError");
+      });
     });
   });
 
@@ -556,6 +580,15 @@ describe("toStructuredDebugValue()", () => {
         {
           get bad(): number {
             throw Object.create(null);
+          },
+        },
+        {
+          get bad(): number {
+            throw new Proxy({}, {
+              getPrototypeOf() {
+                throw new Error("x");
+              },
+            });
           },
         },
         { deep: { deeper: { deepest: [1, { s: Symbol("x") }] } } },
