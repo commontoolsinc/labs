@@ -1,0 +1,34 @@
+[0m[38;5;245mrunning 1 test from ./integration/topics-journey-bench.scratch.test.ts[0m
+Topics journey benchmark (scratch instrument) ...
+[0m[38;5;245m------- output -------[0m
+Experimental flag overrides: serverExecution=true
+[0m[38;5;245m----- output end -----[0m
+  measures the topics journey ON-vs-OFF stimuli ...
+[0m[38;5;245m------- output -------[0m
+[ERROR][runner::18:44:36.774] pattern-load-error Failed to load pattern keyless:fid1:V9zfy3yhhItcehHTlhOcKbqR4leCjuXKOmJVWxzO3GI#default
+
+[topics-journey] arm=ON seed echo ms: 2272 673
+[topics-series] arm=ON n=3 delay=2000ms load1/5/15=5.40/7.42/7.40
+[topics-series] echo    median=741ms q1=728ms q3=1062ms p95=1062ms min=728ms max=1062ms
+[topics-series] arrival median=771ms q1=755ms q3=1087ms p95=1087ms min=755ms max=1087ms
+[topics-series] gap     median=27ms q1=25ms q3=29ms p95=29ms min=25ms max=29ms
+[topics-series] per-event echo ms: 1062 728 741
+[topics-series] per-event arrival ms: 1087 755 771
+[topics-series] per-event gap ms: 25 27 29
+
+[topics-journey ON] step timings (total 7593ms):
+      2592ms  board create + start (controller)
+      2272ms  addTopic seed 1 echo (controller)
+       673ms  addTopic seed 2 echo (controller)
+        34ms  fid capture (result.pull + resolveAsCell x2)
+       581ms  browser cold load: goto + login
+         3ms  browser runtime idle
+      1374ms  browser renders both seed titles
+        37ms  navigate-to-topic: click Open -> piece view
+        27ms  post-navigation runtime idle
+[0m[38;5;245m----- output end -----[0m
+  measures the topics journey ON-vs-OFF stimuli ... [0m[32mok[0m [0m[38;5;245m(16s)[0m
+Topics journey benchmark (scratch instrument) ... [0m[32mok[0m [0m[38;5;245m(24s)[0m
+
+[0m[32mok[0m | 1 passed (1 step) | 0 failed [0m[38;5;245m(24s)[0m
+

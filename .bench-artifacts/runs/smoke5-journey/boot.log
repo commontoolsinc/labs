@@ -1,0 +1,15 @@
+Using insecure passphrase identity.
+Memory: Using directory mode: file:///Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/runs/smoke5-journey/srv/cache/memory/
+Memory: Provider initialized successfully
+OpenTelemetry is disabled via OTEL_ENABLED env var
+[WARN][provider-registry::18:43:56.006] Missing OAuth credentials (clientId/clientSecret), skipping provider google
+[WARN][provider-registry::18:43:56.006] Missing OAuth credentials (clientId/clientSecret), skipping provider airtable
+[WARN][provider-registry::18:43:56.006] Missing OAuth credentials (clientId/clientSecret), skipping provider github
+[WARN][provider-registry::18:43:56.006] Missing OAuth credentials (clientId/clientSecret), skipping provider notion
+[WARN][provider-registry::18:43:56.006] Missing OAuth credentials (clientId/clientSecret), skipping provider linear
+[WARN][provider-registry::18:43:56.006] Missing OAuth credentials (clientId/clientSecret), skipping provider spotify
+[WARN][provider-registry::18:43:56.006] Missing OAuth credentials (clientId/clientSecret), skipping provider discord
+[WARN][provider-registry::18:43:56.006] Missing OAuth credentials (clientId/clientSecret), skipping provider strava
+ Adding 🤖 gateway (30 models from https://llm.stage.commontools.dev)
+[models] No default model available (tried gateway:claude-sonnet-4-6, anthropic:claude-sonnet-4-6, anthropic:claude-sonnet-4-5).
+Toolshed is listening; the server is running in the background (pid 13133). Logs: /Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/runs/smoke5-journey/toolshed.log

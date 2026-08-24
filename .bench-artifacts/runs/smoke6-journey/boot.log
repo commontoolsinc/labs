@@ -1,0 +1,16 @@
+Using insecure passphrase identity.
+Memory: server-execution v2 ON — process identity did:key:z6MksHnZGdHxNoCqcC3kPvBSo2goCzLSWheQ8LrVpAtQwgwW is a DELEGATING memory principal (ACL-only service reads; every other served read runs under the acting user via the actingAs binding; docs/specs/server-side-execution/protocol.md §2b)
+Memory: Using directory mode: file:///Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/runs/smoke6-journey/srv/cache/memory/
+Memory: Provider initialized successfully
+OpenTelemetry is disabled via OTEL_ENABLED env var
+[WARN][provider-registry::18:44:22.216] Missing OAuth credentials (clientId/clientSecret), skipping provider google
+[WARN][provider-registry::18:44:22.217] Missing OAuth credentials (clientId/clientSecret), skipping provider airtable
+[WARN][provider-registry::18:44:22.217] Missing OAuth credentials (clientId/clientSecret), skipping provider github
+[WARN][provider-registry::18:44:22.217] Missing OAuth credentials (clientId/clientSecret), skipping provider notion
+[WARN][provider-registry::18:44:22.217] Missing OAuth credentials (clientId/clientSecret), skipping provider linear
+[WARN][provider-registry::18:44:22.217] Missing OAuth credentials (clientId/clientSecret), skipping provider spotify
+[WARN][provider-registry::18:44:22.217] Missing OAuth credentials (clientId/clientSecret), skipping provider discord
+[WARN][provider-registry::18:44:22.217] Missing OAuth credentials (clientId/clientSecret), skipping provider strava
+ Adding 🤖 gateway (30 models from https://llm.stage.commontools.dev)
+[models] No default model available (tried gateway:claude-sonnet-4-6, anthropic:claude-sonnet-4-6, anthropic:claude-sonnet-4-5).
+Toolshed is listening; the server is running in the background (pid 13748). Logs: /Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/runs/smoke6-journey/toolshed.log
