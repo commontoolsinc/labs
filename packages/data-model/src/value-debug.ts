@@ -242,6 +242,7 @@ class DebugConverter {
   convert(): FabricValue {
     try {
       return this.#convertSubvalue(this.#value, 0);
+      // deno-coverage-ignore-start
     } catch (e) {
       // There is an inner `try-catch` which should catch most conversion errors
       // close to where they're thrown. This `catch` is a prophylactic "just
@@ -249,6 +250,7 @@ class DebugConverter {
       // `throw` out of this method.
       return DebugConverter.#makeErrorResult(e);
     }
+    // deno-coverage-ignore-stop
   }
 
   /**
