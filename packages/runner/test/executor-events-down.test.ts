@@ -87,6 +87,21 @@ class GatedStorageManager extends EmulatedStorageManager {
   /** How many syncs the sync gate has parked (a pin's evidence that a
    * drain WAS held in the window it constructs). */
   syncGateHits = 0;
+  /** Synchronous observation hook at `syncCell` entry — the settle-gate
+   * ARMING seam for the held-wave (α3) constructions (CT-2060). The
+   * drain awaits the sidecar doc's sync BEFORE any entry's guard check,
+   * so a hook keyed to the sidecar id fires strictly before the LT1
+   * copy RUNS — ahead of every seal the copy contributes and therefore
+   * ahead of the sealing cycle's settle sampling the gate predicate.
+   * Arming from the test's event HANDLER (#6184's hardening) reduced
+   * but did not eliminate the race: the handler's own tx can seal late
+   * relative to the copy's, so the settle could still sample an
+   * unarmed predicate in the window between the copy's seal and the
+   * handler running (the residual red OW57 records — the ping durable
+   * AND consequenced at the held-wave probe). Observation only: it
+   * never parks (that is `syncGate`), and it fires before the throw
+   * seam below — a failing sync is still the drain touching the doc. */
+  onSyncCell: ((id: string) => void) | undefined;
 
   override async inputSynced(): Promise<void> {
     await super.inputSynced();
@@ -113,6 +128,7 @@ class GatedStorageManager extends EmulatedStorageManager {
     cell: Cell<T>,
     options?: Parameters<EmulatedStorageManager["syncCell"]>[1],
   ): Promise<Cell<T>> {
+    this.onSyncCell?.(cell.getAsNormalizedFullLink().id);
     if (
       GatedStorageManager.syncThrowWhen?.(
         cell.getAsNormalizedFullLink().id,
@@ -2437,11 +2453,18 @@ describe("Phase 3 events-down (serving side)", () => {
     const gate = Promise.withResolvers<void>();
     try {
       // The handler on s2 records every payload tag it handles — the
-      // consequence witness. (s1 is unused here.)
+      // consequence witness (s1 is unused here) — and for the
+      // derivation's "ping" it ARMS the settle gate as its first act
+      // (#6184's arming, adopted here from the SIBLING step: this
+      // step's gate previously polled the sealed overlay, the exact
+      // shape #6184 replaced there — CT-2060's open question of
+      // whether the remaining polled gates should adopt the arming).
       const servingSeen = w.servingC;
+      let holdArmed = false;
       cancels.push(w.serving.scheduler.addEventHandler(
         (tx: IExtendedStorageTransaction, event: unknown) => {
           const tag = (event as { tag?: string })?.tag ?? "?";
+          if (tag === "ping") holdArmed = true;
           const current = servingSeen.withTx(tx).get() as
             | { seen?: string[] }
             | undefined;
@@ -2470,10 +2493,19 @@ describe("Phase 3 events-down (serving side)", () => {
         (w.servingC.get() as { seen?: string[] } | undefined)?.seen ?? [];
       expect(seenView()).toEqual([]);
 
-      // Hold the wave open once the copy's run has SEALED into it
-      // (visible through the sealed overlay: seen includes "ping").
+      // Hold the wave open for the cycle that RUNS the copy — the same
+      // two-seam arming as the SIBLING step (CT-2060; OW57's owed
+      // construction): the handler arms as its first act, and the
+      // drain's sidecar-doc sync arms BEFORE the copy runs, so the
+      // sealing cycle's settle can never sample an unarmed predicate
+      // after the copy sealed. Idle settles pass: nothing arms until
+      // the drain touches THIS step's sidecar.
+      const heldSidecarId = w.sidecarOf(w.s2);
+      servingManager!.onSyncCell = (id) => {
+        if (id === heldSidecarId) holdArmed = true;
+      };
       servingManager!.settleGate = gate.promise;
-      servingManager!.settleGateWhen = () => seenView().includes("ping");
+      servingManager!.settleGateWhen = () => holdArmed;
       let released = false;
       try {
         await w.serving.scheduler.run(emitter as never);
@@ -2501,6 +2533,7 @@ describe("Phase 3 events-down (serving side)", () => {
         released = true;
       } finally {
         if (!released) gate.resolve();
+        servingManager!.onSyncCell = undefined;
         servingManager!.settleGate = undefined;
         servingManager!.settleGateWhen = undefined;
       }
@@ -2778,11 +2811,23 @@ describe("Phase 3 events-down (serving side)", () => {
       expect(seenView()).toEqual([]);
       expect(sideView()).toBe(0);
 
-      // Hold the wave open for the cycle that RUNS the copy: the handler
-      // arms the gate as its first act, and that assignment is sequenced
-      // before the cycle's settle reaches its barrier, so the hold catches
-      // the sealing cycle structurally. An idle settle already in flight
-      // still passes: nothing arms until the copy actually runs.
+      // Hold the wave open for the cycle that RUNS the copy. TWO arming
+      // seams, both required (CT-2060; the OW57 row's owed construction):
+      // the handler arms as its first act (#6184's hardening), and the
+      // drain's own sidecar-doc sync arms too — the drain awaits that
+      // sync BEFORE the entry's guard check, so this arming precedes the
+      // copy's RUN and therefore every seal the copy contributes,
+      // closing the residual window where the sealing cycle's settle
+      // sampled the predicate after the copy sealed but before the
+      // handler ran (the post-#6184 red: the ping durable AND
+      // consequenced at the probe below — 3/3 CI attempts on #6223's
+      // board, 0/12 under local timing). An idle settle already in
+      // flight still passes: nothing arms until the drain touches THIS
+      // step's sidecar.
+      const heldSidecarId = w.sidecarOf(w.s2);
+      servingManager!.onSyncCell = (id) => {
+        if (id === heldSidecarId) holdArmed = true;
+      };
       servingManager!.settleGate = gate.promise;
       servingManager!.settleGateWhen = () => holdArmed;
       let released = false;
@@ -2811,6 +2856,7 @@ describe("Phase 3 events-down (serving side)", () => {
         released = true;
       } finally {
         if (!released) gate.resolve();
+        servingManager!.onSyncCell = undefined;
         servingManager!.settleGate = undefined;
         servingManager!.settleGateWhen = undefined;
       }
