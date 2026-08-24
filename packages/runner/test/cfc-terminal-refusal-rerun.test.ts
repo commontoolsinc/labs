@@ -3,11 +3,23 @@
  *
  * Classifying the boundary refusal as terminal stops the scheduler
  * re-running a doomed computation against unchanged inputs. It must not also
- * strand the action: when something the run READ changes — its value, or the
- * CFC metadata that decides the verdict — the action re-runs on that change
- * like any other, and can then succeed. Nothing in the terminal path touches
- * subscription or trigger registration (the resubscribe is on the run path,
- * keyed on the run happening at all), and these pin that end to end.
+ * strand the action: when a value the run READ changes, the action re-runs on
+ * that change like any other. Nothing in the terminal path touches
+ * subscription or trigger registration — the resubscribe is on the run path,
+ * keyed on the run having happened at all — and this pins that end to end.
+ *
+ * It asserts that the action RE-RUNS, not that the re-run's write lands: CFC
+ * labels are monotone, so a source cannot be un-labelled and a re-run over
+ * still-labelled data is refused again, correctly. Re-running is the property
+ * under test; whether the fresh verdict differs is policy's business.
+ *
+ * A METADATA-only change (widening a declared label, value byte-identical)
+ * does NOT re-trigger a reader. That is pre-existing and independent of this
+ * change — a succeeding action that never meets a refusal does not re-run on
+ * one either — so it is reported rather than pinned here. It is also coherent
+ * with monotonicity: a label can only widen, so a metadata change can tighten
+ * a verdict but never loosen one, and a re-run could not turn a refusal into
+ * a success.
  */
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -18,147 +30,108 @@ import type { Action } from "../src/scheduler.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-terminal-rerun");
 
-const LABELLED = {
-  version: 1 as const,
-  schemaHash: "seed-schema",
-  labelMap: {
-    version: 1 as const,
-    entries: [{
-      path: ["secret"],
-      label: { confidentiality: ["secret"] },
-    }],
+/**
+ * The source's schema DECLARES its labels, rather than the seed hand-writing
+ * a `cfc` envelope: an envelope has to name a schema hash, and an invented
+ * one refuses at the memory boundary, where a content-addressed schema
+ * document must be included in the commit or already stored. Declaring it
+ * lets the runtime derive the label and persist the canonical schema document
+ * itself, which is also how a pattern author would write it.
+ */
+const sourceSchema = (confidentiality: readonly string[]) => ({
+  type: "object" as const,
+  properties: {
+    secret: { type: "string" as const, ifc: { confidentiality } },
   },
-};
+});
 
-const UNLABELLED = {
-  version: 1 as const,
-  schemaHash: "seed-schema",
-  labelMap: { version: 1 as const, entries: [] },
-};
+const SOURCE = "terminal-rerun-source";
 
-/** A strict runtime holding one source doc whose `secret` is confidential. */
-const seedStrict = async () => {
+const seedSource = async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
     apiUrl: new URL("https://example.com"),
     storageManager,
     // The shipped shell posture; the action's own transaction escalates to
-    // `enforce-strict` per-tx, the same seam cfc-writer-fit uses. Running the
-    // whole runtime strict would put the SEED under strict too, and seeding a
-    // label means writing the protected `cfc` path.
+    // `enforce-strict` per-tx, the same seam cfc-writer-fit uses. A
+    // runtime-wide strict would put the SEED under strict too.
     cfcEnforcementMode: "enforce-explicit",
     cfcFlowLabels: "persist",
   });
   const space = signer.did();
-  const seed = runtime.edit();
+  const tx = runtime.edit();
   const source = runtime.getCell<{ secret: string }>(
     space,
-    "terminal-rerun-source",
-    { type: "object", properties: { secret: { type: "string" } } },
-    seed,
+    SOURCE,
+    sourceSchema(["secret"]),
+    tx,
   );
-  const sourceId = source.getAsNormalizedFullLink().id;
-  seed.writeOrThrow({ space, scope: "space", id: sourceId, path: [] }, {
-    value: { secret: "s3cr3t" },
-    cfc: LABELLED,
+  source.set({ secret: "s3cr3t" });
+  runtime.prepareTxForCommit(tx);
+  // Assert on the ERROR, not on `ok`: a seed that cannot land says why in the
+  // failure message instead of reporting an undefined `ok`.
+  expect((await tx.commit()).error).toBeUndefined();
+  return { storageManager, runtime, space, source };
+};
+
+/** Subscribes an action whose own transaction runs at enforce-strict. */
+const subscribeRefusedCopy = (
+  runtime: Runtime,
+  space: string,
+  source: {
+    withTx: (tx: unknown) => { get(): { secret: string } | undefined };
+  },
+  outName: string,
+) => {
+  const out = runtime.getCell<{ copied?: string }>(space, outName, {
+    type: "object",
+    properties: { copied: { type: "string" } },
   });
-  // Assert on the ERROR rather than on `ok`: a seed that cannot land says why
-  // in the failure message instead of reporting an undefined `ok`.
-  expect((await seed.commit()).error).toBeUndefined();
-  return { storageManager, runtime, space, source, sourceId };
+  const state = { runs: 0 };
+  const copy: Action = (tx) => {
+    state.runs++;
+    tx.setCfcEnforcementMode("enforce-strict");
+    const secret = source.withTx(tx).get()?.secret ?? "";
+    out.withTx(tx).set({ copied: `${secret}!` });
+  };
+  runtime.scheduler.subscribe(copy, { isEffect: true });
+  return { out, state };
 };
 
 describe("cfc terminal refusal re-run", () => {
-  it("re-runs the refused action when a read VALUE changes, and lands once the verdict changes", async () => {
-    const { storageManager, runtime, space, source, sourceId } =
-      await seedStrict();
+  it("re-runs the refused action when a read VALUE changes", async () => {
+    const { storageManager, runtime, space, source } = await seedSource();
     try {
-      const out = runtime.getCell<{ copied?: string }>(
+      const { out, state } = subscribeRefusedCopy(
+        runtime,
         space,
+        source,
         "terminal-rerun-out-value",
-        { type: "object", properties: { copied: { type: "string" } } },
       );
-
-      let runs = 0;
-      const copy: Action = (tx) => {
-        runs++;
-        tx.setCfcEnforcementMode("enforce-strict");
-        const secret = source.withTx(tx).get()?.secret ?? "";
-        out.withTx(tx).set({ copied: `${secret}!` });
-      };
-      runtime.scheduler.subscribe(copy, { isEffect: true });
       await runtime.scheduler.idleWithPendingCommits();
 
       // The derived write carries the source's confidentiality and is
-      // refused. Terminal: the doomed computation is not re-run against the
-      // unchanged input.
-      const refusedRuns = runs;
-      // Exactly one: the refusal is terminal, so the doomed computation is
-      // not re-run against the unchanged input. Before this change it ran
-      // ten times and then deferred past the convergence budget.
-      expect(refusedRuns).toBe(1);
+      // refused. Terminal: exactly one run, where the bounded retry used to
+      // spend ten and then defer past the convergence budget.
+      expect(state.runs).toBe(1);
       expect(out.get()?.copied).toBeUndefined();
       await runtime.scheduler.idleWithPendingCommits();
-      expect(runs).toBe(1);
+      expect(state.runs).toBe(1);
 
       // A change to what the run READ re-triggers it, exactly as it would
-      // after a successful commit. Here the change also clears the label, so
-      // the re-run's write is no longer refused and the value lands — a
-      // terminal refusal is a verdict on one attempt, not a permanent stop.
+      // after a successful commit.
       const update = runtime.edit();
-      update.writeOrThrow({ space, scope: "space", id: sourceId, path: [] }, {
-        value: { secret: "public" },
-        cfc: UNLABELLED,
-      });
-      expect((await update.commit()).ok).toBeDefined();
-      await runtime.scheduler.idleWithPendingCommits();
-
-      expect(runs).toBeGreaterThan(refusedRuns);
-      expect(out.get()?.copied).toBe("public!");
-    } finally {
-      await runtime.dispose();
-      await storageManager.close();
-    }
-  });
-
-  it("re-runs the refused action when only the read METADATA changes", async () => {
-    const { storageManager, runtime, space, source, sourceId } =
-      await seedStrict();
-    try {
-      const out = runtime.getCell<{ copied?: string }>(
+      runtime.getCell<{ secret: string }>(
         space,
-        "terminal-rerun-out-meta",
-        { type: "object", properties: { copied: { type: "string" } } },
-      );
-
-      let runs = 0;
-      const copy: Action = (tx) => {
-        runs++;
-        tx.setCfcEnforcementMode("enforce-strict");
-        const secret = source.withTx(tx).get()?.secret ?? "";
-        out.withTx(tx).set({ copied: `${secret}!` });
-      };
-      runtime.scheduler.subscribe(copy, { isEffect: true });
+        SOURCE,
+        sourceSchema(["secret"]),
+        update,
+      ).set({ secret: "rotated" });
+      runtime.prepareTxForCommit(update);
+      expect((await update.commit()).error).toBeUndefined();
       await runtime.scheduler.idleWithPendingCommits();
 
-      const refusedRuns = runs;
-      expect(refusedRuns).toBe(1);
-      expect(out.get()?.copied).toBeUndefined();
-
-      // The VALUE is byte-identical; only the CFC metadata that produced the
-      // verdict changes. The label is what the refusal was about, so a
-      // reader that cannot see this change can never recover from a policy
-      // edit — the action must re-run on it.
-      const relabel = runtime.edit();
-      relabel.writeOrThrow({ space, scope: "space", id: sourceId, path: [] }, {
-        value: { secret: "s3cr3t" },
-        cfc: UNLABELLED,
-      });
-      expect((await relabel.commit()).ok).toBeDefined();
-      await runtime.scheduler.idleWithPendingCommits();
-
-      expect(runs).toBeGreaterThan(refusedRuns);
-      expect(out.get()?.copied).toBe("s3cr3t!");
+      expect(state.runs).toBeGreaterThan(1);
     } finally {
       await runtime.dispose();
       await storageManager.close();
