@@ -69,6 +69,25 @@ commit could instead be *shrunk*:
 - Run s01 reproduced the arm-B RED on the first attempt (test exit 1, the step
   failing on the 300 s `waitForCondition`, load 5.32 before / 3.52 after).
 
+### Run ledger
+
+Each run drives two browser sessions (the step creates notes, then reloads), so
+each contributes two captures of the start sequence.
+
+| run | step | exit | wall | load before | 5-commit sequence | commit 5, session 1 | wave covers its 50 ops |
+|---|---|---|---|---|---|---|---|
+| s01 | ran | 1 (RED) | 329 s | 5.32 | 9/23/28/46/50 | REFUSED | 50/50 (wave localSeq 7, exact) |
+| s02 | ran | 1 (RED) | 330 s | 3.70 | 9/23/28/46/50 | REFUSED | 50/50 (wave localSeq 30, superset of 63) |
+| s03 | `ignored` | 0 | 9 s | 2.33 | — | — | — |
+| s04 | `ignored` | 0 | 14 s | 3.21 | — | — | — |
+| s05 | ran | 1 (RED) | 327 s | 3.48 | 9/23/28/46/50 | REFUSED | 50/50 (wave localSeq 6) |
+| s06 | ran | 1 (RED) | — | — | 9/23/28/46/50 | REFUSED | 50/50 (wave localSeq 7) |
+
+s03 and s04 are not informative — reverting the scratch edit between run batches
+re-enabled the step's ON skip. In every informative run the reload session ran
+the same five-commit sequence and its commit 5 was **ACCEPTED**, no 50-op wave
+having preceded it.
+
 ### The instrument
 
 The census reconstructed one commit from the client's own error payload. This
@@ -430,13 +449,16 @@ Stated as gaps rather than inferred:
   `Grid View` instances of one pattern). What is still *not* established is
   which piece the navigate itself targeted, and therefore where in the chain of
   five commits that piece's own root was written.
-- **Invariance across runs.** Two informative runs, s01 and s02 — both RED, both
-  showing the same five-commit sequence with compositions 9/23/28/46/50, the
-  same refusal at commit 5, and the same "all 50 ops present in the preceding
-  wave" result. A first pair of confirmation runs (s03, s04) turned out **not**
-  to be informative: reverting the scratch edit re-enabled the step's ON skip,
-  so the step was `ignored`. This is two observations, not the 18/18 invariance
-  the census earned for its own measurement.
+- **Invariance across runs — measured 4/4, which is fewer than the census's
+  18/18.** See the run ledger in the Bench section. Four informative runs
+  (s01, s02, s05, s06), all RED, all showing the same five-commit sequence, the
+  same refusal at commit 5, and 50/50 client operations covered by a preceding
+  wave. A first pair of confirmation runs (s03, s04) turned out **not** to be
+  informative: reverting the scratch edit re-enabled the step's ON skip, so the
+  step was `ignored` — a reminder that the skip file is read by the test
+  process from source, not baked into the binary. No GREEN run was sampled
+  with the step enabled, so "the first session always loses the race" is
+  measured on reds only.
 - **Whether shrinking the commit would fix arm B.** This is a measurement of
   what is in the commit and who else writes it, not a validation of any
   disposition. Note in particular the census's finding that the refused commit
