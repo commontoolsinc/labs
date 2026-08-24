@@ -114,7 +114,7 @@ describe("CFC envelope schema documents ride the shared staging path", () => {
     const { storageManager, runtime } = await setup();
     try {
       const tx = runtime.edit();
-      tx.stageSchemaDocClosure?.(
+      tx.stageSchemaDocClosure(
         space,
         "fid1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
       );
