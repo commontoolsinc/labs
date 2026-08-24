@@ -211,6 +211,73 @@ describe("space-root ensure core", () => {
     );
   });
 
+  it("the in-tx fast arm returns early on a live re-check, and a thrown reconcile degrades to 'current' (the best-effort catch)", async () => {
+    createRuntime(true);
+    // Fast arm (the OCC re-check seeing a LIVE root): read through the
+    // caller-supplied spaceCell hook — the same seam the delegated
+    // client passes and the piece suite's creation-race test stubs.
+    // The emulated fixture's schema-filtered read cannot produce a
+    // truthy value for an unstarted root (see the convergence pin), so
+    // the stub is what makes this arm deterministic here; the live
+    // measurement exercised it for real (r02–r06: six client-side
+    // fast-arm resolves against the served root).
+    const stubSpaceCell = {
+      withTx: () => ({
+        key: (key: string) => {
+          expect(key).toBe("defaultPattern");
+          return { get: () => ({ get: () => ({}) }) };
+        },
+      }),
+    } as never;
+    const raced = await createSpaceRootIfAbsent(
+      runtime,
+      space,
+      spaceRootPatternConfig(true),
+      { fetch: fetchStub, spaceCell: stubSpaceCell },
+    );
+    expect(raced.createdByThisCall).toBe(false);
+    expect(raced.error).toBeUndefined();
+
+    // The reconcile catch: a real root, then the updater made to THROW
+    // — the freshness half is best-effort and must degrade to
+    // "current", never fail the ensure.
+    const first = await ensureSpaceRootPattern(runtime, space, {
+      isHomeSpace: true,
+    });
+    expect(first.outcome).toBe("created");
+    await runtime.idle();
+    const originalCheck = runtime.patternUpdater.checkDefaultPattern.bind(
+      runtime.patternUpdater,
+    );
+    runtime.patternUpdater.checkDefaultPattern = (() => {
+      throw new Error("reconcile blows up (coverage pin)");
+    }) as typeof runtime.patternUpdater.checkDefaultPattern;
+    try {
+      const second = await ensureSpaceRootPattern(runtime, space, {
+        isHomeSpace: true,
+      });
+      expect(second.outcome).toBe("resolved-existing");
+      expect(second.reconcile).toBe("current");
+    } finally {
+      runtime.patternUpdater.checkDefaultPattern = originalCheck;
+    }
+    await runtime.idle();
+  });
+
+  it("creation that cannot commit AND no root to resolve THROWS with the commit error as cause", async () => {
+    createRuntime();
+    // Every creation attempt aborts its own transaction, and nothing
+    // else creates — the ensure must throw the failed-to-create-or-find
+    // error (the seat's counted-failure arm consumes it).
+    await expect(
+      ensureSpaceRootPattern(runtime, space, {
+        isHomeSpace: true,
+        stampCreationTx: (tx) => tx.abort("coverage pin: doomed creation"),
+      }),
+    ).rejects.toThrow("failed to create or find");
+    await runtime.idle();
+  });
+
   it("an aged root's ensure reconciles the obsolete patternIdentity (the updater-ordering pin)", async () => {
     createRuntime(true);
     const created = await ensureSpaceRootPattern(runtime, space, {

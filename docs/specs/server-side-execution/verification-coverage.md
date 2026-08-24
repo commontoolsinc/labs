@@ -6695,6 +6695,46 @@ supply; OW29/OW32/OW34 closed):
     arrival-witness fork's fix would NOT close this — a dropped
     run seals no overlay entry at all).**
 
+  - **OW61 — delivery of content-addressed computed cells to a
+    replica without their verified `cid:` schema docs: an UNCAUGHT
+    fail-closed throw in every space-cell-only subscriber (minted
+    2026-08-24 from PR #6210's first red board; pre-existing
+    delivery-machinery defect, NOT the ensure seat's).** Mechanism:
+    when a subscription delivers a `computed:` doc whose schema ref
+    (`cid:…`) is "not delivered and verified in this replica",
+    `SpaceReplica.#validateArrivedSchemaDocuments`
+    (`packages/runner/src/storage/v2.ts`) THROWS on the background
+    consume path (`applySessionSync` → `consumeUpdates`) — uncaught,
+    outside any caller's try, killing the consuming worker/test file
+    wholesale. Evidence: CI run 32742547103 at `7d97a80aa` — 13
+    file-level failures sharing exactly this class across the runner,
+    runtime-client, and shell ON lanes and 9/10 pattern ON shards; the
+    broken doc in the runtime-client lane
+    (`computed:fid1:7BycCyHc2yDDzr17jnXayWZMxpweSGk2JcGKILKguvo`) is
+    byte-for-byte the default-app root's computed cell (content-
+    addressed ids are space-independent), delivered through the
+    fixtures' plain space-cell subscriptions after the stage-1 server
+    ensure materialized roots in their spaces. TRIGGER: any server-side
+    materialization into a space with a subscriber that did not demand
+    the docs root-aware — today that is the stage-1 ensure wherever it
+    runs ON; the affected subscriber shape is the SPACE-CELL-ONLY
+    subscriber (no root-aware schema walk), which exists in PRODUCTION
+    (CLI, agents-host), so any real deployment with such a subscriber
+    re-surfaces this the moment the ensure runs there. Timing-
+    dependent: whether the computed doc's frame lands before its
+    `cid:` sibling is delivery-window timing (CI hit it consistently;
+    one local run at the same head did not). With the test lanes'
+    ensure opt-out (the RULED switch) the defect is LATENT again, not
+    fixed. SURFACED TO THE OWNER 2026-08-24 (the coordinator is
+    carrying it). Owed: a ruling on the delivery side — deliver the
+    schema closure with the computed doc, or make the arrival
+    validator's failure a deferred re-fetch instead of an uncaught
+    throw — and a pin reproducing the delivery race directly (the
+    ensure gives it a deterministic producer). Trigger: before any
+    production deployment that runs the ensure ON beside space-cell-
+    only subscribers, and before the flip PR's list-EMPTY bar
+    (an ON fleet re-reaches it by construction).
+
 ## 4. Standing rule
 
 A ruling batch that adds a BINDING sentence adds its coverage row

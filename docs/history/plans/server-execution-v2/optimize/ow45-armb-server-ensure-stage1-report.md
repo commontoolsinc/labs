@@ -185,12 +185,17 @@ start. Both recorded as the ruling's coverage, not extended.
   visible to a fresh replica; mutation-checked: `ensureSpaceRoots:
   false` on the host reds it) — plus the memory owner pins, the
   toolshed env-parser/OFF pins, and the piece OFF net in their lanes.
-  What remains UNCOVERED in CI is the compiled-binary/port topology
-  glue (`startServerExecutionHost`'s env chain into a real deployed
-  process — the parser itself is unit-pinned); the out-of-CI
-  measurement harness covers it, and a dedicated knob-ON second-server
-  lane step remains the named option if binary-true CI coverage is
-  wanted.
+  What remains UNCOVERED in CI is narrower than first written
+  (delta-review O1): the OFF direction THROUGH the deployed binary is
+  witnessed by every ON-lane run — dropping the
+  `startServerExecutionHost` pass-through would default hosts ON and
+  loudly re-red the opted-out lanes — so the only binary-true
+  uncovered direction is ON-through-deployed-binary (the env chain
+  delivering `true`/unset into a real process), whose failure
+  direction is the production default (fail-toward-ON, parser
+  unit-pinned). The out-of-CI measurement harness covers that
+  direction today; a dedicated knob-ON second-server lane step remains
+  the named option if binary-true ON coverage is wanted in CI.
 
 ## Flagged, not filled
 
