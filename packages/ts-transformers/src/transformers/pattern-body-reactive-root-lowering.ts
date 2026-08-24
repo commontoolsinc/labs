@@ -124,7 +124,7 @@ function isSelfPathSegment(
 }
 
 /** Carries the source-map range and inferred type to a semantic replacement. */
-function registerReplacementType(
+function registerReplacement(
   replacement: ts.Node,
   original: ts.Node,
   context: TransformationContext,
@@ -364,7 +364,7 @@ function rewriteTrackedOpaquePatternBody(
       info.path,
       context.factory,
     );
-    registerReplacementType(expression, dataFlow.expression, context);
+    registerReplacement(expression, dataFlow.expression, context);
     return { ...dataFlow, expression };
   };
 
@@ -730,7 +730,7 @@ function rewriteTrackedOpaquePatternBody(
     if (ts.isCallExpression(node)) {
       const wrappedCellGet = maybeWrapCellGetJsxCall(node);
       if (wrappedCellGet) {
-        registerReplacementType(wrappedCellGet, node, context);
+        registerReplacement(wrappedCellGet, node, context);
         return wrappedCellGet;
       }
 
@@ -755,7 +755,7 @@ function rewriteTrackedOpaquePatternBody(
       if (isDynamicElementAccess(node)) {
         const wrappedDynamicAccess = maybeWrapDynamicJsxAccess(node);
         if (wrappedDynamicAccess) {
-          registerReplacementType(wrappedDynamicAccess, node, context);
+          registerReplacement(wrappedDynamicAccess, node, context);
           return wrappedDynamicAccess;
         }
       }
@@ -809,7 +809,7 @@ function rewriteTrackedOpaquePatternBody(
       if (!hasTrackedStaticAccess && isDynamicElementAccess(visited)) {
         const wrappedDynamicAccess = maybeWrapDynamicJsxAccess(visited);
         if (wrappedDynamicAccess) {
-          registerReplacementType(wrappedDynamicAccess, visited, context);
+          registerReplacement(wrappedDynamicAccess, visited, context);
           return wrappedDynamicAccess;
         }
       }
@@ -821,7 +821,7 @@ function rewriteTrackedOpaquePatternBody(
       if (info.dynamic) {
         const wrappedDynamicAccess = maybeWrapDynamicJsxAccess(visited);
         if (wrappedDynamicAccess) {
-          registerReplacementType(wrappedDynamicAccess, visited, context);
+          registerReplacement(wrappedDynamicAccess, visited, context);
           return wrappedDynamicAccess;
         }
 
@@ -861,7 +861,7 @@ function rewriteTrackedOpaquePatternBody(
               rewrittenReceiver,
               visited.name.text,
             );
-          registerReplacementType(rewrittenMethod, visited, context);
+          registerReplacement(rewrittenMethod, visited, context);
           return rewrittenMethod;
         }
 
@@ -897,7 +897,7 @@ function rewriteTrackedOpaquePatternBody(
           info.path,
           context.factory,
         );
-        registerReplacementType(rewritten, visited, context);
+        registerReplacement(rewritten, visited, context);
         return rewritten;
       }
     }
@@ -1154,7 +1154,7 @@ function rewriteLiftAppliedCallbackComputedKeyAccesses(
       context.factory.createIdentifier(visited.expression.text),
       context.cfHelpers.getHelperExpr(keyName),
     );
-    registerReplacementType(rewritten, visited, context);
+    registerReplacement(rewritten, visited, context);
     return rewritten;
   };
 
