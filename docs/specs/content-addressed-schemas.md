@@ -406,6 +406,22 @@ exactly two guarantees, both about delivery rather than about values:
   nothing, since selecting by an uncollectable schema would produce a
   result whose shape the receiving client could never reproduce from
   what arrives.
+- **The per-frame guarantee** (OW61, RULED 2026-08-24). The delivered
+  SET spans frames, but arrival validates each FRAME against what the
+  replica then holds — so a frame's validity must not depend on the
+  fate or ordering of any earlier frame across channels
+  (subscription pushes, watch-add responses, resume catch-up). Every
+  sync frame is therefore closed at build time: after the
+  session-cache diff decides the frame's upserts, the builder re-scans
+  them and appends every referenced `cid:` document the frame does not
+  already carry — including an in-frame schema document's own refs —
+  verified through the same closure walk
+  (`closeFrameOverSchemaRefs`). Content-addressed documents are
+  immutable, so the re-ship is idempotent bytes; the appended entries
+  are frame-local freight, deliberately not recorded in the session
+  cache, so delivery-state rollback stays exact and a later mention
+  simply re-appends. A frame is independently valid under any
+  application order.
 
 Arrival mirrors the assembly pass rather than trusting it: BEFORE a frame
 applies, every schema ref its documents embed — a registered `cid:`
@@ -415,7 +431,21 @@ stored replica holds whose content passes the identity check. Verified
 content, never mere presence: a forged local copy fails even when the
 realm registry holds a valid twin from another space, and content that
 changes under a previously verified `cid:` id fails outright. A broken
-ref rejects the frame whole, with the replica untouched. The repair
+ref QUARANTINES the offending document (OW61's ACKed containment,
+RULED 2026-08-24): that document is dropped from the frame with a loud
+per-doc diagnostic and the replica keeps whatever it already held under
+its id, while the frame's other documents apply — quarantining an
+in-frame schema document re-checks refs that resolved through it, so
+dependents fail closed together. Fail-closed for the DOCUMENT (an
+unverifiable schema document never registers; a document with
+unresolvable refs never applies; a forged replacement of a stored
+verified document is itself the quarantined copy), contained for the
+PROCESS: this validation runs on the background consume path, where a
+frame-wide throw was an unhandled rejection that killed the consuming
+worker wholesale on one bad document. A compliant server never produces
+such a frame (the per-frame guarantee above is enforced at emission);
+quarantine is the net under everything else, and a quarantined document
+heals on any later closed re-delivery. The repair
 paths that do exist serve callers, not arrival: the traversal loader's
 reads are tracked (arrival re-runs the reader), the missing-target kick
 requests the fetch, and any sync of a schema document delivers its
