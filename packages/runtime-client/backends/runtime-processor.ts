@@ -1,7 +1,9 @@
 import {
   fabricFromRealmValue,
   newDefaultJsonCodecEngine,
+  realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
+import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { toStructuredDebugValue } from "@commonfabric/data-model/value-debug";
@@ -472,6 +474,17 @@ export function toConsoleDebugValue(value: unknown): FabricValue {
   );
 }
 
+/**
+ * Converts one of a pattern's `console.*` arguments into the form the
+ * notification carries it in. The other half is the `fabricFromRealmValue()`
+ * in `client/connection.ts`, which decodes before the client emits.
+ *
+ * Exported for testing.
+ */
+export function toConsoleWireValue(value: unknown): RealmEncodedValue {
+  return realmFromFabricValue(toConsoleDebugValue(value));
+}
+
 export const hasExplicitSubscriptionSchema = (schema: unknown): boolean =>
   schema === true ||
   (schema !== undefined && schema !== false &&
@@ -598,7 +611,7 @@ export class RuntimeProcessor {
           type: NotificationType.ConsoleMessage,
           metadata,
           method,
-          args: args.map((arg) => toConsoleDebugValue(arg)),
+          args: args.map((arg) => toConsoleWireValue(arg)),
         });
         return args;
       },

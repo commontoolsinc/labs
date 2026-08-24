@@ -1140,13 +1140,21 @@ export type ConsoleNotification = {
   type: NotificationType.ConsoleMessage;
   metadata?: { pieceId?: string; patternId?: string; space?: string };
   method: string;
-  // TODO(danfuzz): the producer (`toConsoleDebugValue()`,
-  // `backends/runtime-processor.ts`) yields a `FabricValue`, and the raw
-  // structured clone this rides on carries only part of one: it refuses a
-  // symbol outright and strips a `FabricPrimitive` to `{}`. A
-  // `codec-realm`-encoded envelope carries the whole of it to the
-  // `console.log()` on the far side, whose devtools inspector shows more of a
-  // live value than of a rendering of one.
+  /**
+   * The arguments, each encoded on its own. `ConsoleMessage` is this same
+   * notification with them decoded, which is what the client emits.
+   *
+   * TODO(danfuzz): once the envelope itself is encoded, this field holds a
+   * `FabricValue[]` and the encoding at each end goes away with it.
+   */
+  args: RealmEncodedValue[];
+};
+
+/**
+ * A console notification as the client emits it, with its arguments decoded
+ * back into the values the pattern logged.
+ */
+export type ConsoleMessage = Omit<ConsoleNotification, "args"> & {
   args: FabricValue[];
 };
 

@@ -49,6 +49,7 @@ import {
   renderMembershipProviderFor,
   RuntimeProcessor,
   toConsoleDebugValue,
+  toConsoleWireValue,
 } from "./runtime-processor.ts";
 import {
   assertFabricLoggerFlags,
@@ -1195,10 +1196,13 @@ describe("toConsoleDebugValue", () => {
   }
 
   describe("what the transport accepts", () => {
-    /** Sends `value` the way the notification carrying it does. */
+    /**
+     * Puts `value` through the two ends the notification actually uses: the
+     * producer's `toConsoleWireValue()`, `postMessage`'s structured clone, and
+     * the `fabricFromRealmValue()` that `client/connection.ts` decodes with.
+     */
     function acrossTheWire(value: unknown): unknown {
-      const encoded = realmFromFabricValue(toConsoleDebugValue(value));
-      return fabricFromRealmValue(structuredClone(encoded));
+      return fabricFromRealmValue(structuredClone(toConsoleWireValue(value)));
     }
 
     it("returns a value the realm encoding carries, for each shape it renders", () => {

@@ -1,3 +1,4 @@
+import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
 import { defer, type Deferred } from "@commonfabric/utils/defer";
 import { getLogger } from "@commonfabric/utils/logger";
 import { unrefTimer } from "@commonfabric/utils/sleep";
@@ -8,7 +9,7 @@ import {
   CommandRequest,
   CommandResponse,
   Commands,
-  ConsoleNotification,
+  ConsoleMessage,
   ErrorNotification,
   InitializationData,
   IPCClientNotification,
@@ -109,7 +110,7 @@ export type SubscriptionDiagnostics = {
 };
 
 export type RuntimeConnectionEvents = {
-  console: [ConsoleNotification];
+  console: [ConsoleMessage];
   navigaterequest: [NavigateRequestNotification];
   error: [ErrorNotification];
   telemetry: [TelemetryNotification];
@@ -500,7 +501,10 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       if (isCellUpdateNotification(message)) {
         this._handleCellUpdate(message);
       } else if (isConsoleNotification(message)) {
-        this.emit("console", message);
+        this.emit("console", {
+          ...message,
+          args: message.args.map((arg) => fabricFromRealmValue(arg)),
+        });
       } else if (isNavigateRequestNotification(message)) {
         this.emit("navigaterequest", message);
       } else if (isErrorNotification(message)) {
