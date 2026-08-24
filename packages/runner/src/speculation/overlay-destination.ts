@@ -352,6 +352,9 @@ export class SpeculationOverlayDestination
     Array<(outcome: IntentConsequence) => void>
   >();
   readonly #intentConsequenceMemo = new Map<string, IntentConsequence>();
+  /** Resolvers parked by `waitForIntentQuiescence`, flushed by the same
+   * untrack step that empties the outstanding-intent set (and by close). */
+  #intentQuiescenceWaiters: Array<() => void> = [];
   #closed = false;
 
   constructor(runtime: Runtime) {
@@ -1196,6 +1199,34 @@ export class SpeculationOverlayDestination
     });
   }
 
+  /** Await the outstanding-intent set EMPTYING (speculation.md §4 step 2
+   * quiescence, the set `pendingIntentCount` counts): every event this
+   * runtime fired has reached a terminal consequence — consequenced,
+   * errored, dropped, or refused — AND that signal has arrived back
+   * here. Event-driven: resolves from the same untrack step that
+   * retires the last outstanding intent, immediately when nothing is
+   * outstanding, and on overlay close (nothing can retire afterwards).
+   * Carries no deadline of its own — a caller that needs a bound races
+   * it (the multi-runtime harness's budgeted settle does). Note this is
+   * a FIRST-ORDER signal, like the count it mirrors: a server-side
+   * cascade child (an event a served handler itself emits) is no
+   * client's intent and commits in a later wave, outside this wait. */
+  waitForIntentQuiescence(): Promise<void> {
+    if (this.#closed || this.pendingIntentCount === 0) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      this.#intentQuiescenceWaiters.push(resolve);
+    });
+  }
+
+  #flushIntentQuiescenceWaiters(): void {
+    if (this.#intentQuiescenceWaiters.length === 0) return;
+    const waiters = this.#intentQuiescenceWaiters;
+    this.#intentQuiescenceWaiters = [];
+    for (const resolve of waiters) resolve();
+  }
+
   #settleIntentConsequence(
     space: MemorySpace,
     eventId: string,
@@ -1435,7 +1466,10 @@ export class SpeculationOverlayDestination
       // (contract point 5). The sidecar WATCH stays: a session's watch
       // set is coarse by ruling (R-D), and the next fire on this stream
       // is likely imminent.
-      if (this.#trackedIntents.size === 0) this.#releaseIntentListener();
+      if (this.#trackedIntents.size === 0) {
+        this.#releaseIntentListener();
+        this.#flushIntentQuiescenceWaiters();
+      }
     }
   }
 
@@ -1868,10 +1902,34 @@ export class SpeculationOverlayDestination
         // same wave commit, so the watermark sink re-sweeps at arrival).
         // Backstop for the demand walk's coverage gaps (fan-out design
         // §E residual 4) and the first-demand transient (§E residual 1).
+        //
+        // The ARRIVAL-WITNESS predicate (speculation.md §4, RULED
+        // 2026-08-22 — candidate (B) of the OW33 fork memo): a cover AT
+        // exactly the floor witnesses arrival only when its covering
+        // commit is DERIVED-class — the legitimate at-floor arrival is a
+        // re-derivation whose run read the already-arrived value at that
+        // very seq. An authored-class cover at the floor is the entry's
+        // own basis commit — the setup write that created the computed
+        // docs' structure (the client's own for a new instance, a prior
+        // session's for a resumed one) — and never witnesses the
+        // derivation's arrival: retiring on it is the OW33 hole (the
+        // entry dropped 40-260 ms before the served value landed, and
+        // the bare read saw undefined). A cover whose class the replica
+        // does not know (an OFF-arm or pre-predicate frame) fails CLOSED
+        // at the floor — toward the standing echo (value-identical
+        // in the observed arms; an unknown-class foreign write at the
+        // floor may differ, and the next cover settles it), never the
+        // undefined read. STRICTLY ABOVE the floor any
+        // confirmed cover witnesses, whatever its class: the store has
+        // moved past everything this speculation consumed.
         let arrived = true;
         for (const doc of entry.writtenDocs) {
           const state = view(doc.id, doc.scope);
           if (state.confirmedSeq === 0 || state.confirmedSeq < floor) {
+            arrived = false;
+            break;
+          }
+          if (state.confirmedSeq === floor && state.coverClass !== "derived") {
             arrived = false;
             break;
           }
@@ -1948,6 +2006,9 @@ export class SpeculationOverlayDestination
     }
     this.#intentConsequenceWaiters.clear();
     this.#intentConsequenceMemo.clear();
+    // Nothing can retire an intent after close (`#trackedIntents` was
+    // just cleared), so quiescence waiters settle now rather than hang.
+    this.#flushIntentQuiescenceWaiters();
     for (const release of this.#ackObserverReleases.values()) {
       try {
         release();

@@ -9,6 +9,10 @@ import {
   canonicalizePreparedDigestInput,
   preparedDigestFor,
 } from "../src/cfc/canonical.ts";
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { inspectStoredConfLabel } from "../src/cfc/label-introspection.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import { deriveFlowJoin } from "../src/cfc/prepare.ts";
@@ -61,13 +65,14 @@ const seedLabeledDoc = async (
       { type: "object", properties: { body: { type: "string" } } },
     ).getAsLink(),
   ).id!;
+  writeSeedEnvelopeDoc(seed, space);
   seed.writeOrThrow(
     { space, scope: "space", id: id as URI, path: [] },
     {
       value: { body: "payload" },
       cfc: {
         version: 1,
-        schemaHash: "seed-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{

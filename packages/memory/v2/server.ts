@@ -2,6 +2,7 @@ import * as FS from "@std/fs";
 import * as Path from "@std/path";
 
 import type { FabricPlainObject } from "@commonfabric/api";
+import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 
@@ -137,6 +138,15 @@ export { SessionRegistry } from "./session-registry.ts";
 // OTLP SDK installed. Spans created here are purely additive observability and
 // do not affect write/fan-out behavior.
 const tracer = trace.getTracer("memory-server", "1.0.0");
+
+/**
+ * Timing-only logger. It never logs — the statistics behind `time()` are
+ * recorded whether or not a logger is enabled, and `/api/health/stats`
+ * reports them as the `timingStats.memory` block — so the frames a
+ * connection handles are measurable on a deployed server without turning
+ * anything on.
+ */
+const timing = getLogger("memory", { enabled: false });
 
 const SUBSCRIPTION_REFRESH_DELAY_MS = 5;
 const MIN_REFRESH_QUEUE_DRAIN_WAIT_MS = 500;
@@ -394,6 +404,18 @@ export type AdmittedCommitNotice = {
    * doc instance + the eventId); the SpaceServer's drain reads the
    * stamped entries from the store, never from this record. */
   eventAppends?: Array<{ id: string; scopeKey: ScopeKey; eventId: string }>;
+  /** The EXPLICIT WARM REQUEST (serving-loop.md §1's third activation
+   * trigger; RULED 2026-08-21): set only by the serving-side
+   * provisioning path — a wave's foreign provisioning batch reported
+   * through `noteExecutorCommit` — when this authored commit STAGED
+   * SETUP into another space (protocol.md §2b's sanctioned crossing).
+   * The host activates the target on it even with no live session and
+   * no events (the deliberate, scoped signal the notify-only admission
+   * hook is not — T11.Q7's write-alone parking stays as designed), and
+   * the target's serving loop takes the commit's `writes` as
+   * identity-less warm demand so the staged setup derives. Never set on
+   * client transacts, system writes, or event deliveries. */
+  warm?: true;
 };
 
 /**
@@ -594,11 +616,25 @@ class Connection {
 
   async receive(payload: string): Promise<void> {
     this.#pendingReceives += 1;
+    // A connection handles its frames one at a time, so a frame's cost has
+    // two halves that are fixed at opposite ends of the stack: how long it
+    // WAITED behind the frames already in flight (`memory/frame/queue`), and
+    // how long it took once it started (`memory/frame/handle`). Only the
+    // second is the frame's own work — a queue time that tracks the handle
+    // time of whatever precedes it is head-of-line blocking, and the fix is
+    // to make that other frame cheaper rather than this one.
+    const arrivedAt = performance.now();
     try {
       const previous = this.#receiving;
-      const current = previous.catch(() => undefined).then(() =>
-        this.receiveOrdered(payload)
-      );
+      const current = previous.catch(() => undefined).then(async () => {
+        const startedAt = performance.now();
+        timing.time(arrivedAt, startedAt, "memory", "frame", "queue");
+        try {
+          await this.receiveOrdered(payload);
+        } finally {
+          timing.time(startedAt, "memory", "frame", "handle");
+        }
+      });
       this.#receiving = current.then(() => undefined, () => undefined);
       return await current;
     } finally {
@@ -1286,6 +1322,29 @@ export class Server {
       .map(([principal]) => principal)
       .sort();
     return owners[0];
+  }
+
+  /**
+   * The space's resolved ACL OWNER, for the executor's server-side
+   * space-root ensure (OW45 arm-B server-ensure stage 1, design PR
+   * #6209 §4 option (b)): the ensure's creation run carries an
+   * owner-resolved per-run CFC trust snapshot — the follow-up OW59's
+   * Q3 caveat pre-named — and derives its home-space predicate from
+   * the ACL (self-owned = home), because a serving runtime's
+   * `userIdentityDID` is the SERVICE DID. This is the same resolution
+   * the delegated READ binding uses ({@link #resolveSpaceOwnerBinding}),
+   * exposed as a first-class read: it IS the ruled "ACL can be read
+   * with service identity" (OW31, RULED 2026-08-19). `undefined` means
+   * no valid concrete-owner ACL resolves (missing, invalid, retracted,
+   * or ANYONE-only) — callers fail closed, never substitute the
+   * service DID (OW53's ruled shape; `homeSpacePrincipalFor`'s
+   * posture).
+   */
+  resolveSpaceOwner(
+    engine: Engine.Engine,
+    space: string,
+  ): string | undefined {
+    return this.#resolveSpaceOwnerBinding(engine, space);
   }
 
   #invalidateAclCapabilities(space: string): void {
@@ -3383,6 +3442,7 @@ export class Server {
       session.graphs = graphs;
       session.entities = entities;
       session.trackedIds = trackedIdsFromEntries(entities.values());
+      this.#addMissedToTrackedIds(session.trackedIds, graphs.values());
       session.lastSyncedSeq = serverSeq;
       this.#notifyDemandChanged(message.space, "watch", session.principal);
       return {
@@ -3585,6 +3645,7 @@ export class Server {
       const fromSeq = session.lastSyncedSeq;
       session.graphs = graphs;
       session.watches = nextWatches;
+      this.#addMissedToTrackedIds(session.trackedIds, graphs.values());
       session.lastSyncedSeq = serverSeq;
       this.#notifyDemandChanged(message.space, "watch", session.principal);
       recordSlowQueryDuration(
@@ -3847,6 +3908,31 @@ export class Server {
     );
   }
 
+  /** Union a session's graph MISS keys into a tracked-id set (the
+   * dead-end reads its walks found absent — TrackedGraphState.missed):
+   * the wake pass must treat a commit to a missed doc as touching the
+   * session, or the doc's CREATION never re-fires the query and a quiet
+   * space starves every read that dead-ended on it (OW45 arm B). Misses
+   * are wake-reactivity only — they are never delivered, so they flow
+   * into `trackedIds` beside the delivered entities at every site that
+   * rebuilds or folds that set. */
+  #addMissedToTrackedIds(
+    trackedIds: Set<string>,
+    graphs: Iterable<TrackedGraphState>,
+  ): void {
+    for (const graph of graphs) {
+      for (const [key] of graph.missed) {
+        let parsed: { id: string; scopeKey: ScopeKey };
+        try {
+          parsed = fromDocKey(key as QueryDocKey);
+        } catch {
+          continue;
+        }
+        trackedIds.add(toDirtyKey(parsed.id, parsed.scopeKey));
+      }
+    }
+  }
+
   syncSessionForConnection(
     space: string,
     sessionId: string,
@@ -4097,6 +4183,12 @@ export class Server {
                 session.entities.set(key, entry);
                 session.trackedIds.add(toDirtyKey(entry.id, entry.scopeKey));
               }
+              // A refresh's re-walk can DEAD-END on new absent targets;
+              // their misses are wake-reactivity the next commit needs.
+              this.#addMissedToTrackedIds(
+                session.trackedIds,
+                session.graphs.values(),
+              );
               if (session.trackedIds.size > sizeBefore) {
                 this.#notifyDemandChanged(
                   space,
@@ -4203,6 +4295,7 @@ export class Server {
           // the space is offered every batch — so no tracked key is
           // needed to bring the withheld instances back.)
           const evaluatedTrackedIds = trackedIdsFromEntries(entities.values());
+          this.#addMissedToTrackedIds(evaluatedTrackedIds, graphs.values());
           const commitWatchState = () => {
             // (d′) — flag 2, the full-evaluation branch: the
             // set is REPLACED (this is where it can shrink — R-D's coarse
@@ -5036,13 +5129,26 @@ export class Server {
 
   async flushSessions(spaces?: Iterable<string>): Promise<void> {
     this.cancelScheduledRefresh();
+    // The same waiting-against-working split the connection's receive keeps,
+    // one level coarser: a flush PASS, not a frame. `memory/flush/queue` is
+    // how long this pass waited for the flush in front of it,
+    // `memory/flush/refresh` how long its own evaluation and sending took —
+    // across every dirty space the pass selected and every frame those
+    // sessions were owed, so it is a batch cost and dividing it by anything
+    // to recover a per-frame one is unsound. What it does bound is how long
+    // a client's push can sit behind the server's own fan-out: push latency
+    // is at least the refresh delay plus these two.
+    const requestedAt = performance.now();
     const run = async () => {
       const refreshStart = Date.now();
+      const startedAt = performance.now();
+      timing.time(requestedAt, startedAt, "memory", "flush", "queue");
       try {
         await this.refreshLoop(
           spaces === undefined ? undefined : new Set(spaces),
         );
       } finally {
+        timing.time(startedAt, "memory", "flush", "refresh");
         this.#lastRefreshDurationMs = Math.max(
           0,
           Date.now() - refreshStart,

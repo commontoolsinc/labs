@@ -28,6 +28,19 @@ import { encodePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import {
+  containsExternalSchemaRef,
+  decomposeSchema,
+  formatExternalSchemaRef,
+  parseExternalSchemaRef,
+  recomposeSchema,
+  SchemaNotDecomposableError,
+} from "../schema-decompose.ts";
+import {
+  lookupSchemaDocument,
+  registerSchemaDocument,
+} from "../schema-registry.ts";
+import { UnknownCfcMetadataVersionError } from "./metadata.ts";
+import {
   isPrimitiveCellLink,
   isWriteRedirectLink,
   parseLink,
@@ -800,18 +813,39 @@ const storedMetadataFor = (
   scope: ReturnType<typeof normalizeCellScope>,
   type: MediaType,
 ): CfcMetadata | undefined => {
-  const document = tx.readOrThrow({
+  // Read AT ["cfc"], never the whole document: this read is a commit-time
+  // concurrency precondition scoped to what the verifier CONSUMES. A
+  // path-[] recursive read made the whole document a value dependency, so
+  // a concurrent, metadata-irrelevant value write between the reader's
+  // confirmed basis and the server head conflicted the commit — for a
+  // blind UI-input fill during its own echo's arrival window (the
+  // client's confirmed basis lags exactly then), that killed the user's
+  // typed input as a stale-confirmed-read conflict the moment the §6
+  // layer-naming half was fixed (verification-coverage.md OW47's
+  // re-close; the name-draft triage's arm (c), the path half of the
+  // ruled arm (b)). A concurrent /cfc change still conflicts — the
+  // precondition the ruling kept.
+  const metadata = tx.readOrThrow({
     space,
     id,
     scope,
     type,
-    path: [],
+    path: ["cfc"],
   }, {
     meta: INTERNAL_VERIFIER_META,
   });
-  return isObjectOrArray(document) && isObjectOrArray(document.cfc)
-    ? document.cfc as CfcMetadata
-    : undefined;
+  if (!isObjectOrArray(metadata)) {
+    return undefined;
+  }
+  const version = (metadata as { version?: unknown }).version;
+  if (version !== undefined && version !== 1) {
+    // Fail closed on a format this build postdates: reading the envelope
+    // as version 1 would walk a schema it cannot interpret and silently
+    // under-label. Callers on the commit path turn this into an
+    // unreadable envelope (rejected in enforcing modes) or abort loudly.
+    throw new UnknownCfcMetadataVersionError(version);
+  }
+  return metadata as CfcMetadata;
 };
 
 /**
@@ -4437,7 +4471,75 @@ const coalesceLabelEntries = (
   });
 };
 
-const ensureSchemaDocument = (
+/**
+ * Whether two envelope spellings decompose to the SAME root document —
+ * equality over the content-addressed form, where authored `$defs` names
+ * (which recomposition does not preserve) are matching-inert. This is the
+ * equality that keeps a reference-carrying envelope idempotent across the
+ * store→recompose→re-derive cycle: the recomposed stored schema and the
+ * freshly declared candidate differ in definition names alone, and the
+ * spelling-sensitive equality would otherwise send them into a merge that
+ * respells (and therefore re-hashes) an unchanged envelope. Stored roots
+ * carry references with or without the decomposed-write flag — a
+ * reference-form declared schema leaves one behind — so this arm is
+ * unconditional. A spelling that refuses decomposition simply fails the
+ * check and the caller falls through as before.
+ */
+// Exported for unit testing of the fallback arms; the persist loop's merge
+// is the one production caller.
+export const decomposeToSameRoot = (
+  left: JSONSchema,
+  right: JSONSchema,
+): boolean => {
+  if (!isObjectNotArray(left) || !isObjectNotArray(right)) return false;
+  try {
+    return decomposeSchema(left, { resolveDocument: lookupSchemaDocument })
+      .rootRef ===
+      decomposeSchema(right, { resolveDocument: lookupSchemaDocument }).rootRef;
+  } catch (error) {
+    if (error instanceof SchemaNotDecomposableError) return false;
+    throw error;
+  }
+};
+
+/**
+ * The decomposed spelling of an envelope schema: its root document, ready
+ * to ensure. `undefined` keeps the inline spelling — decomposition
+ * refused the input, or the root reduced to a `$defs` fragment reference,
+ * which `CfcMetadata.schemaHash` (a bare document hash) cannot carry.
+ * Registering the closure makes every member resolvable in-session;
+ * ensuring the root then stages the whole closure through the shared
+ * schema-document staging, so the documents ride the same transaction as
+ * the metadata that references them (the write-side delivery guarantee
+ * the commit boundary enforces). Exported for unit testing of the
+ * fallback arms; the metadata build is the one production caller.
+ */
+export const decomposeEnvelopeRoot = (
+  schema: JSONSchema,
+): { rootHash: string; rootDocument: JSONSchema } | undefined => {
+  if (!isObjectNotArray(schema)) return undefined;
+  let decomposed: ReturnType<typeof decomposeSchema>;
+  try {
+    decomposed = decomposeSchema(schema, {
+      resolveDocument: lookupSchemaDocument,
+    });
+  } catch (error) {
+    if (error instanceof SchemaNotDecomposableError) return undefined;
+    throw error;
+  }
+  const parsed = parseExternalSchemaRef(decomposed.rootRef);
+  if (parsed === undefined || parsed.defName !== undefined) return undefined;
+  for (const [hash, document] of decomposed.documents) {
+    registerSchemaDocument(hash, document);
+  }
+  const rootDocument = decomposed.documents.get(parsed.taggedHash);
+  if (rootDocument === undefined) return undefined;
+  return { rootHash: parsed.taggedHash, rootDocument };
+};
+
+// Exported for unit testing of the S5 mismatch refusal; the persist loop is
+// the one production caller.
+export const ensureSchemaDocument = (
   tx: IExtendedStorageTransaction,
   space: MemorySpace,
   schemaHash: string,
@@ -4452,20 +4554,18 @@ const ensureSchemaDocument = (
       `cid schema document hash mismatch: claimed ${schemaHash}, actual ${actualHash}`,
     );
   }
-  const id = `cid:${schemaHash}`;
-  // Do not pre-read the content-addressed schema document here. A read-before-
-  // write can make otherwise idempotent schema persistence fail with stale-read
-  // conflicts when another transaction already installed the same CID.
-  tx.writeOrThrow({
-    space,
-    id: id as URI,
-    type: "application/json",
-    path: [],
-  }, {
-    // System-owned canonical schema document. This is intentionally outside the
-    // phase-1 value-surface attempted-target model.
-    value: schema,
-  });
+  // The envelope document rides the SAME staging path as link-schema
+  // documents: registration makes it resolvable in-session — content
+  // re-verified against the hash, and `loadSchemaDocument` falls back to
+  // exactly this registration where no replica holds the cid: document
+  // (a frame delivers `/cfc` metadata without its schemaHash refs, and a
+  // speculative run's staged copy retires with its layer) — and the
+  // closure staging brings the per-transaction dedupe, the
+  // confirmed-persistence elision, and dependency recursion. The read
+  // side stays space-FIRST with verification: the registry supplies only
+  // what the space does not hold, never replaces what it does.
+  registerSchemaDocument(schemaHash, schema);
+  tx.stageSchemaDocClosure(space, schemaHash);
 };
 
 // Exported for unit testing of the read-side content-address verification (S5).
@@ -4484,6 +4584,20 @@ export const loadSchemaDocument = (
     meta: INTERNAL_VERIFIER_META,
   });
   if (!isObjectOrArray(existing) || existing.value === undefined) {
+    // The replica does not hold the document — but content addressing
+    // makes resolution location-indifferent: the realm's schema-document
+    // registry holds only content VERIFIED against its hash at
+    // registration (delivery, link/traverse resolution, local staging),
+    // so a registered copy IS the stored document. Stored metadata can
+    // legitimately reference a document this client never fetched as a
+    // doc — a frame delivers `/cfc` metadata without carrying its
+    // schemaHash refs — and refusing there killed the commit on a
+    // resolution gap, not a policy (silently, in the worker: the
+    // name-draft triage's flagged "missing or unreadable" class).
+    const registered = lookupSchemaDocument(schemaHash);
+    if (registered !== undefined) {
+      return registered;
+    }
     throw new Error(`stored schemaHash ${schemaHash} is missing or unreadable`);
   }
   const schema = existing.value as JSONSchema;
@@ -4499,6 +4613,38 @@ export const loadSchemaDocument = (
     );
   }
   return schema;
+};
+
+/**
+ * The envelope schema in the INLINE form every consumer walks. A
+ * self-contained root is returned as stored, spelling untouched. A root
+ * carrying `$ref: cid:` members — a decomposed write, or the root a
+ * reference-form declared schema left behind — is recomposed: one read
+ * policy, every member resolved or the envelope is unreadable (fail
+ * closed). Members resolve through `loadSchemaDocument`: space-FIRST
+ * with content verification, the registry supplying only what the space
+ * does not hold — a registered copy was itself hash-verified at
+ * registration, so content addressing makes it the stored document.
+ * Each verified member is then registered, so in-session resolvers (the
+ * decompose-root equality below among them) can supply the closure.
+ */
+const loadEnvelopeSchema = (
+  tx: IExtendedStorageTransaction,
+  space: MemorySpace,
+  metadata: CfcMetadata,
+): JSONSchema => {
+  const root = loadSchemaDocument(tx, space, metadata.schemaHash);
+  if (!containsExternalSchemaRef(root)) return root;
+  return internSchema(recomposeSchema(
+    formatExternalSchemaRef(metadata.schemaHash),
+    (hash) => {
+      const document = hash === metadata.schemaHash
+        ? root
+        : loadSchemaDocument(tx, space, hash);
+      registerSchemaDocument(hash, document);
+      return document;
+    },
+  ));
 };
 
 /**
@@ -4544,18 +4690,29 @@ export const loadStoredCfcEnvelope = (
   },
   type: MediaType = "application/json",
 ): StoredCfcEnvelope => {
-  const metadata = storedMetadataFor(
-    tx,
-    target.space,
-    target.id as URI,
-    normalizeCellScope(target.scope),
-    type,
-  );
+  let metadata: CfcMetadata | undefined;
+  try {
+    metadata = storedMetadataFor(
+      tx,
+      target.space,
+      target.id as URI,
+      normalizeCellScope(target.scope),
+      type,
+    );
+  } catch (error) {
+    // Unknown-version metadata is a property of the DOCUMENT, not of the
+    // caller's transaction, so it lands in the unreadable arm of the
+    // taxonomy; a transaction read failure keeps propagating.
+    if (error instanceof UnknownCfcMetadataVersionError) {
+      return { status: "unreadable", reason: error.message };
+    }
+    throw error;
+  }
   if (metadata === undefined) return { status: "none" };
   try {
     return {
       status: "loaded",
-      schema: loadSchemaDocument(tx, target.space, metadata.schemaHash),
+      schema: loadEnvelopeSchema(tx, target.space, metadata),
       metadata,
     };
   } catch (error) {
@@ -5398,6 +5555,7 @@ export const prepareBoundaryCommit = (
       storedSchema = stored.schema;
       try {
         mergedSchema = schemasEqualIgnoringWriterStamp(storedSchema, schema) ||
+            decomposeToSameRoot(storedSchema, schema) ||
             storedSchemaCoversCandidateEnvelope(storedSchema, schema)
           ? storedSchema
           : mergeCfcSchemaEnvelopes(storedSchema, schema, {
@@ -6550,9 +6708,16 @@ export const prepareBoundaryCommit = (
       continue;
     }
 
+    // The flag decides only the stored SPELLING: decomposed root when it
+    // asks for it and the schema decomposes to a bare root, the inline
+    // form otherwise. Reading resolves references whenever the stored
+    // root carries them, so both spellings are the same envelope.
+    const envelopeRoot = state.decomposedEnvelopes
+      ? decomposeEnvelopeRoot(schemaAndHash.schema)
+      : undefined;
     const metadata: CfcMetadata = {
       version: 1,
-      schemaHash: schemaAndHash.taggedHashString,
+      schemaHash: envelopeRoot?.rootHash ?? schemaAndHash.taggedHashString,
       labelMap: {
         version: 1,
         entries: coalescedLabelEntries,
@@ -6588,12 +6753,21 @@ export const prepareBoundaryCommit = (
       continue;
     }
 
-    ensureSchemaDocument(
-      tx,
-      space,
-      schemaAndHash.taggedHashString,
-      schemaAndHash.schema,
-    );
+    if (envelopeRoot === undefined) {
+      ensureSchemaDocument(
+        tx,
+        space,
+        schemaAndHash.taggedHashString,
+        schemaAndHash.schema,
+      );
+    } else {
+      ensureSchemaDocument(
+        tx,
+        space,
+        envelopeRoot.rootHash,
+        envelopeRoot.rootDocument,
+      );
+    }
     tx.writeOrThrow({
       space,
       id,

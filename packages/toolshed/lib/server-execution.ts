@@ -117,6 +117,32 @@ export function serverExecutionPolicyFromEnv(
 }
 
 /**
+ * The RULED test switch for the serving loop's space-root ensure (OW45
+ * arm-B stage 1, RULED 2026-08-24 — the owner: production spaces always
+ * get a default pattern; "for tests this is annoying overhead", so test
+ * harnesses may switch the ensure off). `SERVER_EXECUTION_ENSURE_SPACE_ROOTS`:
+ * unset or "true" = ON (the production posture); the literal "false" =
+ * OFF for every space this toolshed serves (a whole-instance switch —
+ * per-space discrimination is deferred by the same ruling). Parsing is
+ * FAIL-TO-PRODUCTION: garbage reads as ON with a warning, so a typo can
+ * never silently strip production spaces of their roots.
+ */
+export function ensureSpaceRootsFromEnv(
+  envGet: EnvReader,
+  warn: (message: string) => void = (message) => console.warn(message),
+): boolean {
+  const raw = envGet("SERVER_EXECUTION_ENSURE_SPACE_ROOTS");
+  if (raw === undefined || raw === "" || raw === "true") return true;
+  if (raw === "false") return false;
+  warn(
+    "Server-execution v2: ignoring SERVER_EXECUTION_ENSURE_SPACE_ROOTS=" +
+      `${JSON.stringify(raw)} (expected "true" or "false"); the space-root ` +
+      "ensure stays ON (the production posture)",
+  );
+  return true;
+}
+
+/**
  * Start the serving loop's host when the flag is on. Called once from
  * toolshed startup, after the memory server exists. Returns the host (or
  * undefined off the flag) so shutdown can close it.
@@ -141,8 +167,17 @@ export function startServerExecutionHost(options: {
     `Server-execution v2: serving loop ON (service ${options.identity.did()})`,
   );
   // Phase 6 policy knobs — see `serverExecutionPolicyFromEnv`.
+  const ensureSpaceRoots = ensureSpaceRootsFromEnv(envGet);
+  if (!ensureSpaceRoots) {
+    console.log(
+      "Server-execution v2: space-root ensure OFF by " +
+        "SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false (test posture; " +
+        "production default is ON)",
+    );
+  }
   host = new ExecutorHost({
     policy: serverExecutionPolicyFromEnv(envGet),
+    ensureSpaceRoots,
     server: options.server,
     serviceIdentity: options.identity.did(),
     createRuntime: (space) => {

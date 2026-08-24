@@ -10,7 +10,7 @@ import {
 } from "./pieces-controller.ts";
 import {
   clickTrustedActionAndWaitForText,
-  waitForText,
+  waitForSettledText,
 } from "./cfc-browser-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
@@ -77,14 +77,21 @@ describe("cfc spec gallery integration test", () => {
       "#trusted-forward-prepared",
       "Prepared for",
     );
-    await waitForText(page, "#forward-stage", "prepared");
+    // Settled waits throughout: every stage indicator below is the
+    // EFFECT of the preceding trusted click's served round trip, and a
+    // plain DOM watch cannot pump the page's own pending pull work —
+    // the state can sit one settle away from being drawn until the
+    // stuck-condition net fires (docs/development/waiting-in-tests.md;
+    // the cfc-staged-publish/#stage-pill and this file's own ON-lane
+    // occurrence in the 2026-08-20 attribution ledger were this shape).
+    await waitForSettledText(page, "#forward-stage", "prepared");
     await clickTrustedActionAndWaitForText(
       page,
       "TrustedForwardNote",
       "#trusted-forward-result",
       "Only the bounded itinerary excerpt will be forwarded.",
     );
-    await waitForText(page, "#forward-stage", "forwarded");
+    await waitForSettledText(page, "#forward-stage", "forwarded");
 
     await clickTrustedActionAndWaitForText(
       page,
@@ -92,21 +99,21 @@ describe("cfc spec gallery integration test", () => {
       "#research-stage",
       "captured",
     );
-    await waitForText(page, "#research-stage", "captured");
+    await waitForSettledText(page, "#research-stage", "captured");
     await clickTrustedActionAndWaitForText(
       page,
       "TrustedPrepareResearchBrief",
       "#trusted-command-prepared",
       "Prepared outbound",
     );
-    await waitForText(page, "#research-stage", "prepared");
+    await waitForSettledText(page, "#research-stage", "prepared");
     await clickTrustedActionAndWaitForText(
       page,
       "TrustedAuthorizeResearchSend",
       "#trusted-command-result",
       "Authorized outbound message",
     );
-    await waitForText(page, "#research-stage", "sent");
+    await waitForSettledText(page, "#research-stage", "sent");
 
     await clickTrustedActionAndWaitForText(
       page,
@@ -114,14 +121,14 @@ describe("cfc spec gallery integration test", () => {
       "#trusted-safe-link-prepared",
       "?view=summary",
     );
-    await waitForText(page, "#safe-link-stage", "prepared");
+    await waitForSettledText(page, "#safe-link-stage", "prepared");
     await clickTrustedActionAndWaitForText(
       page,
       "TrustedReleaseSafeLink",
       "#trusted-safe-link-result",
       "?view=summary",
     );
-    await waitForText(page, "#safe-link-stage", "released");
+    await waitForSettledText(page, "#safe-link-stage", "released");
   });
 
   it("renders disclaimer-style labels without a trusted click", async () => {

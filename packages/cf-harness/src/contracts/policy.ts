@@ -26,6 +26,10 @@ export interface HarnessBrowserToolInputSummary {
   action?: string;
   kind?: string;
   ref?: string;
+  /** A bound handle, carried whole: it names an address, not a value. */
+  valueHandle?: string;
+  /** A bound handle, carried whole: it names an address, not a value. */
+  urlHandle?: string;
   timeoutMs?: number;
   urlBytes?: number;
   urlDigest?: string;

@@ -718,7 +718,14 @@ these.
   NOTIFIES but the ACTIVE criteria decide, so the provisioning
   write alone leaves C parked. (Was a CONTRADICTION between §2b and
   serving-loop §1's plane (b) — RECONCILED in serving-loop §1 with
-  this fold; vetoable.)
+  this fold; vetoable.) *(Amended 2026-08-21, answer unchanged: §1's
+  third trigger — the explicit warm request — is now implemented,
+  and a SERVED provisioning wave issues one for the setup it stages,
+  so C activates promptly in that flow. The write itself still
+  activates nothing; a provisioning admission with no issuer — a
+  client's multi-space commit, a system write — parks exactly as
+  this cell rules. serving-loop.md §1's warm-request paragraph
+  carries the mechanism and the RULED marker.)*
 
 ### T12 (adjudicated COMPLETE) (re-verified after the 2026-08-05 Q1 ruling; Q4 cell updated)
 - Q1: speculate pure structural + handlers + optimistic navigate +

@@ -45,6 +45,7 @@ import type {
   IExtendedStorageTransaction,
   MemorySpace,
 } from "../src/storage/interface.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { readWatermarkSeq } from "../src/executor/watermark.ts";
 import {
@@ -61,8 +62,9 @@ import { newSharedServer } from "./memory-v2-test-utils.ts";
  * test). `settleGateWhen` scopes the hold: the serving loop runs a
  * settle in EVERY cycle (empty ones included), so an unconditional gate
  * would catch some idle cycle already in flight and starve the drain
- * the test needs — the predicate lets exactly the cycle that SEALED the
- * watched state hang. Undefined everywhere else.
+ * the test needs. The predicate must become true before the intended
+ * cycle reaches the barrier; a flag set by the handler gives that cycle
+ * a causal name. Undefined everywhere else.
  *
  * The second seam, the drain's SYNC gate (`syncGate` / `syncGateWhen`,
  * the seal→outcome-window pin): the serving drain awaits the sidecar
@@ -93,10 +95,32 @@ class GatedStorageManager extends EmulatedStorageManager {
     }
   }
 
+  /** The third seam, a sidecar whose sync FAILS transiently (the
+   * arrival-order pin): while armed, a matching doc's `syncCell` throws
+   * — the drain's sidecar-sync-failure arm, one of the two deferral
+   * arms events.md §2's arrival order must survive (the other, the
+   * index-addressed view-lag check, is the same barrier contract at the
+   * same seam; its live shape is asynchronous frame delivery under
+   * load, OW45 arm B's b01 red). STATIC on purpose: the host may rotate
+   * runtime tenures (each with a fresh manager), and the seam must hold
+   * across every tenure of the pass under test. */
+  static syncThrowWhen: ((id: string) => boolean) | undefined;
+  /** How many syncs the throw seam refused — each drain pass that
+   * touched the failing sidecar counts one. */
+  static syncThrowHits = 0;
+
   override async syncCell<T>(
     cell: Cell<T>,
     options?: Parameters<EmulatedStorageManager["syncCell"]>[1],
   ): Promise<Cell<T>> {
+    if (
+      GatedStorageManager.syncThrowWhen?.(
+        cell.getAsNormalizedFullLink().id,
+      ) === true
+    ) {
+      GatedStorageManager.syncThrowHits += 1;
+      throw new Error("emulated transient sidecar sync failure (pin seam)");
+    }
     const synced = await super.syncCell(cell, options);
     if (
       this.syncGate !== undefined &&
@@ -180,6 +204,60 @@ const THROW_PATTERN = [
   "  { value: number; explode: Stream<unknown> }",
   ">(({ value }) => ({ value, explode: explode({ value }) }));",
 ].join("\n");
+
+/** Two independent streams whose handlers append their letter to ONE
+ * shared log — the arrival-order pin reads the log as the record of
+ * consequence order. */
+const ORDERED_LOG_PATTERN = [
+  "import { handler, pattern, Stream, Writable } from 'commonfabric';",
+  "const pushA = handler<unknown, { log: Writable<string[]> }>(",
+  "  (_ev, { log }) => { log.set([...(log.get() ?? []), 'A']); },",
+  ");",
+  "const pushB = handler<unknown, { log: Writable<string[]> }>(",
+  "  (_ev, { log }) => { log.set([...(log.get() ?? []), 'B']); },",
+  ");",
+  "export default pattern<",
+  "  { log: Writable<string[]> },",
+  "  { log: string[]; a: Stream<unknown>; b: Stream<unknown> }",
+  ">(({ log }) => ({ log, a: pushA({ log }), b: pushB({ log }) }));",
+].join("\n");
+
+// OW54's refused-commit class (verification-coverage.md §3): a stored
+// envelope whose `result.anyOf` carries TWO ifc branches is genuinely
+// ambiguous — the class the RULING-5 narrowing still refuses
+// (cfc/schema-merge.ts). The FIRST writer's commit lands (nothing is
+// stored yet, so no merge runs), poisoning the stored envelope; every
+// later merging writer's commit-prep records the refusal and the
+// commit is rejected PRE-STORAGE with the "CFC enforcement rejected
+// commit" message class (extended-storage-transaction.ts). The
+// fixtures mirror cfc-prepare-crash-surfacing.test.ts, which pins the
+// mechanism at the transaction level; here the same refusal lands on a
+// SERVED event's commit, where it classifies as a give-up disposition
+// (scheduler/events.ts).
+const ow54ProfileViewSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    name: { type: "string", ifc: { confidentiality: ["secret"] } },
+  },
+} as JSONSchema;
+
+const ow54AltProfileViewSchema: JSONSchema = {
+  type: "string",
+  ifc: { confidentiality: ["other"] },
+} as JSONSchema;
+
+const ow54AmbiguousEnvelopeSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    result: {
+      anyOf: [
+        ow54ProfileViewSchema,
+        ow54AltProfileViewSchema,
+      ],
+    },
+    candidates: { type: "array", items: ow54ProfileViewSchema },
+  },
+} as JSONSchema;
 
 describe("Phase 3 events-down (serving side)", () => {
   let server: MemoryV2Server.Server;
@@ -943,6 +1021,264 @@ describe("Phase 3 events-down (serving side)", () => {
     });
     expect((doc?.value as { value?: number })?.value).toBe(0);
     cancelDemand();
+  });
+
+  it("the give-up arm's CFC discriminator (OW54): a served event whose commit is refused PRE-STORAGE by CFC enforcement — a genuinely-ambiguous stored envelope, the class RULING 5 still refuses — seals an ERROR consequence and the stream advances: ONE completed run, ONE consequence commit naming the event, ONE dropped-write report, the entry carries the refusal as its error, and a second poisoned fire seals its own consequence behind it (events.md §5; mutation: the discriminated `served.onFailure` call removed → the entry never consequences and the drain re-runs the handler every wave)", async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const { result } = await standUp(clientRuntime, BUMP_PATTERN, {
+      arg: "ow54-arg",
+      result: "ow54-result",
+    });
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    // Poison the stored envelope before the serving side exists: the
+    // first writer's commit lands, and the stored envelope is then
+    // genuinely ambiguous for every later merging writer.
+    const poisonedDocName = "ow54-poisoned-envelope";
+    {
+      const tx = clientRuntime.edit();
+      const cell = clientRuntime.getCell(
+        space,
+        poisonedDocName,
+        ow54AmbiguousEnvelopeSchema,
+        tx,
+      );
+      cell.set({ candidates: [{ name: "Bob" }] });
+      tx.prepareCfc();
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    // Warm-up fire through the pattern's own handler: activates the
+    // space, lands the sidecar, and hands the probe its stream link.
+    result.key("bump").send({ kind: "warmup" });
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+    await waitUntil(
+      () => sidecarIdsIn(engine).length === 1,
+      "the warm-up append to land",
+    );
+    const sidecarId = sidecarIdsIn(engine)[0];
+    const entriesOf = () => ((Engine.read(engine, { id: sidecarId })?.value as
+      | StreamEventsDocValue
+      | undefined)?.entries ?? []);
+    const entryByKind = (kind: string) =>
+      entriesOf().find((entry) =>
+        (entry.payload as { kind?: string } | undefined)?.kind === kind
+      );
+    const watermarkNow = () =>
+      (Engine.read(engine, { id: sidecarId })?.value as
+        | StreamEventsDocValue
+        | undefined)?.eventWatermark;
+    await waitUntil(
+      () => entryByKind("warmup")?.consequenced === true,
+      "the warm-up event to consequence",
+    );
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "the space to activate",
+    );
+
+    // The served dispatch target: the entry's self-describing stream
+    // link (the same derivation the drain uses).
+    const warmup = entryByKind("warmup")!;
+    const streamLink = {
+      space,
+      id: warmup.stream.id as never,
+      path: [...warmup.stream.path],
+      scope: (warmup.stream.scope ?? "space") as never,
+    };
+    // The live ordering: the poisoned doc (and its label metadata) is
+    // in the serving replica before the served handler's own
+    // transaction preps.
+    await servingRuntime!.getCell(
+      space,
+      poisonedDocName,
+      ow54AmbiguousEnvelopeSchema,
+    ).sync();
+
+    // The probe replaces the pattern's handler on the serving runtime:
+    // a served handler whose write meets the stored ambiguous envelope,
+    // so its commit-prep records the refusal and the commit is rejected
+    // before storage.
+    let probeRuns = 0;
+    const cancelProbe = servingRuntime!.scheduler.addEventHandler(
+      (tx, _event) => {
+        probeRuns += 1;
+        const resolved = servingRuntime!.getCell<{ name: string }>(
+          space,
+          `${poisonedDocName}-resolved`,
+          ow54ProfileViewSchema,
+          tx,
+        );
+        resolved.set({ name: "Ada" });
+        servingRuntime!.getCell(
+          space,
+          poisonedDocName,
+          ow54AmbiguousEnvelopeSchema,
+          tx,
+        ).set({ result: resolved, candidates: [] });
+      },
+      streamLink,
+    );
+
+    const beforePoison = Engine.serverSeq(engine);
+    const consequenceCommitsNaming = (eventId: string) =>
+      (engine.database.prepare(
+        `SELECT seq, consequence_of FROM "commit"
+         WHERE seq > :from_seq AND class = 'derived'
+           AND consequence_of IS NOT NULL`,
+      ).all({ from_seq: beforePoison }) as Array<
+        { seq: number; consequence_of: string }
+      >).filter((row) => row.consequence_of.includes(eventId));
+    // The unconditional dropped-write report (the give-up arm's loss
+    // report) is the direct witness that the copy took the give-up
+    // disposition — count it per event.
+    const droppedWriteReports: string[] = [];
+    const realConsoleError = console.error;
+    console.error = (...args: unknown[]) => {
+      const line = args.map((a) => String(a)).join(" ");
+      if (line.includes("Owner-protected write dropped")) {
+        droppedWriteReports.push(line);
+        return;
+      }
+      realConsoleError(...args);
+    };
+    try {
+      result.key("bump").send({ kind: "poison-1" });
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(() => probeRuns >= 1, "the served probe to run");
+
+      // THE PIN (red pre-fix: the refused copy settles with no
+      // consequence, the entry re-drains every wave, and this wait
+      // times out): the deterministic refusal seals an error
+      // consequence and the frontier advances past it.
+      await waitUntil(
+        () => {
+          const entry = entryByKind("poison-1");
+          return entry?.consequenced === true &&
+            typeof entry?.error === "string" &&
+            watermarkNow() === entry?.seq;
+        },
+        "the CFC refusal to seal an error consequence",
+      );
+      const poison1 = entryByKind("poison-1")!;
+      expect(poison1.error).toContain("CFC enforcement rejected commit");
+      expect(poison1.error).toMatch(/divergent anyOf|commit-prep crashed/);
+      // Exactly-once (the (α) invariant): one completed run, one
+      // consequence commit naming the event, one give-up report.
+      expect(probeRuns).toBe(1);
+      expect(consequenceCommitsNaming(poison1.eventId).length).toBe(1);
+      expect(droppedWriteReports.length).toBe(1);
+
+      // The stream advances: a second poisoned fire drains BEHIND the
+      // sealed consequence and seals its own — no wedge, and no second
+      // consequence for the first event.
+      result.key("bump").send({ kind: "poison-2" });
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(
+        () => {
+          const entry = entryByKind("poison-2");
+          return entry?.consequenced === true &&
+            typeof entry?.error === "string" &&
+            watermarkNow() === entry?.seq;
+        },
+        "the second refusal to seal its own error consequence",
+      );
+      const poison2 = entryByKind("poison-2")!;
+      expect(probeRuns).toBe(2);
+      expect(consequenceCommitsNaming(poison1.eventId).length).toBe(1);
+      expect(consequenceCommitsNaming(poison2.eventId).length).toBe(1);
+      expect(droppedWriteReports.length).toBe(2);
+    } finally {
+      console.error = realConsoleError;
+      cancelProbe();
+      cancelDemand();
+    }
+  });
+
+  it("a NON-CFC give-up on a served event keeps the re-drain cadence (OW54's scope boundary): a handler that aborts its own transaction leaves the entry UNCONSEQUENCED — no error, no notice, no frontier advance — and a later wave re-drains it (mutation: the give-up arm's discriminator widened to every give-up → this entry seals a consequence and the re-drain stops)", async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const { result } = await standUp(clientRuntime, BUMP_PATTERN, {
+      arg: "giveup-arg",
+      result: "giveup-result",
+    });
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    result.key("bump").send({ kind: "warmup" });
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+    await waitUntil(
+      () => sidecarIdsIn(engine).length === 1,
+      "the warm-up append to land",
+    );
+    const sidecarId = sidecarIdsIn(engine)[0];
+    const entriesOf = () => ((Engine.read(engine, { id: sidecarId })?.value as
+      | StreamEventsDocValue
+      | undefined)?.entries ?? []);
+    const entryByKind = (kind: string) =>
+      entriesOf().find((entry) =>
+        (entry.payload as { kind?: string } | undefined)?.kind === kind
+      );
+    await waitUntil(
+      () => entryByKind("warmup")?.consequenced === true,
+      "the warm-up event to consequence",
+    );
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "the space to activate",
+    );
+
+    const warmup = entryByKind("warmup")!;
+    const streamLink = {
+      space,
+      id: warmup.stream.id as never,
+      path: [...warmup.stream.path],
+      scope: (warmup.stream.scope ?? "space") as never,
+    };
+    // A give-up that is NOT the CFC pre-storage refusal: the handler
+    // discards its own transaction, so the commit settles with a
+    // non-CFC rejection and the give-up arm must NOT seal a
+    // consequence for it.
+    let probeRuns = 0;
+    const cancelProbe = servingRuntime!.scheduler.addEventHandler(
+      (tx, _event) => {
+        probeRuns += 1;
+        tx.abort(new Error("served give-up cadence probe"));
+      },
+      streamLink,
+    );
+    try {
+      result.key("bump").send({ kind: "aborted" });
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      // The wave IS the retry cadence: the unconsequenced entry is
+      // dispatched again on a later wave.
+      await waitUntil(() => probeRuns >= 2, "the entry to re-drain");
+      const aborted = entryByKind("aborted")!;
+      expect(aborted.consequenced).not.toBe(true);
+      expect(aborted.error).toBeUndefined();
+      expect((aborted as { status?: unknown }).status).toBeUndefined();
+      // The frontier stayed at the warm-up entry.
+      expect(
+        (Engine.read(engine, { id: sidecarId })?.value as StreamEventsDocValue)
+          .eventWatermark,
+      ).toBe(entryByKind("warmup")!.seq);
+    } finally {
+      cancelProbe();
+      cancelDemand();
+    }
   });
 
   it("the renderer-trust attestation rides the durable entry and is RE-MARKED at the served dispatch (fan-out stage B, OW34's sister-mark carriage): a fire whose event carried the process-local renderer-trust mark appends `rendererTrusted: true`, the served handler sees a renderer-trusted event; an unmarked fire appends no attestation and the served handler sees none; a forged attestation value is refused at admission", async () => {
@@ -2404,11 +2740,18 @@ describe("Phase 3 events-down (serving side)", () => {
     try {
       const servingSeen = w.servingC;
       // The s2 handler records every tag; for the derivation's "ping" it
-      // ALSO commits the sibling tx inline (the intent half).
+      // ALSO commits the sibling tx inline (the intent half) — and ARMS
+      // the settle gate as its first act, so the arming is sequenced
+      // before this cycle's settle reaches its barrier (see the gate
+      // installation below).
+      let holdArmed = false;
       cancels.push(w.serving.scheduler.addEventHandler(
         (tx: IExtendedStorageTransaction, event: unknown) => {
           const tag = (event as { tag?: string })?.tag ?? "?";
-          if (tag === "ping") stampSibling(w.serving, tx, sideServing);
+          if (tag === "ping") {
+            holdArmed = true;
+            stampSibling(w.serving, tx, sideServing);
+          }
           const current = servingSeen.withTx(tx).get() as
             | { seen?: string[] }
             | undefined;
@@ -2435,15 +2778,13 @@ describe("Phase 3 events-down (serving side)", () => {
       expect(seenView()).toEqual([]);
       expect(sideView()).toBe(0);
 
-      // Hold the wave open once EITHER of the copy's two seals is visible
-      // through the sealed overlay. The seal chain runs emitter → sibling
-      // (committed inline by the handler) → the handler's own tx, so the
-      // sibling's write is the earliest event-handler seal the settle's
-      // barrier can observe — the same chain position the (α3) pin's
-      // handler seal holds; the handler's seal then joins the held wave.
+      // Hold the wave open for the cycle that RUNS the copy: the handler
+      // arms the gate as its first act, and that assignment is sequenced
+      // before the cycle's settle reaches its barrier, so the hold catches
+      // the sealing cycle structurally. An idle settle already in flight
+      // still passes: nothing arms until the copy actually runs.
       servingManager!.settleGate = gate.promise;
-      servingManager!.settleGateWhen = () =>
-        sideView() === 1 || seenView().includes("ping");
+      servingManager!.settleGateWhen = () => holdArmed;
       let released = false;
       try {
         await w.serving.scheduler.run(emitter as never);
@@ -2512,6 +2853,119 @@ describe("Phase 3 events-down (serving side)", () => {
     } finally {
       gate.resolve();
       for (const cancel of cancels) cancel();
+    }
+  });
+
+  it("arrival order across streams survives a drain deferral: an earlier-arrived event whose sidecar defers (sync failure here; the view-lag check is the same barrier) HOLDS later arrivals back instead of being overtaken (events.md §2's ordering sentence; the OW45 arm-B b01 red — a deferred Create-Another consequenced after the final Create, leaving the terminal state wrong; mutation: the deferral arms back to `continue` → the log reads A,B,A)", async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+
+    // Stand the two-stream pattern up (standUp seeds a {value} argument;
+    // this pattern's argument is the shared log, seeded inline).
+    const compiled = await clientRuntime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: ORDERED_LOG_PATTERN }],
+    }, { space });
+    const argument = clientRuntime.getCell<{ log: string[] }>(
+      space,
+      "ordered-log-arg",
+      undefined,
+    );
+    const result = clientRuntime.getCell<Record<string, unknown>>(
+      space,
+      "ordered-log-result",
+      compiled.resultSchema,
+    );
+    await argument.sync();
+    await result.sync();
+    {
+      const seed = clientRuntime.edit();
+      argument.withTx(seed).set({ log: [] });
+      expect((await seed.commit()).error).toBeUndefined();
+    }
+    {
+      const tx = clientRuntime.edit();
+      clientRuntime.run(tx, compiled, argument, result);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    const argumentId = argument.getAsNormalizedFullLink().id;
+    const storedLog =
+      (): string[] => ((Engine.read(engine, { id: argumentId })?.value as
+        | { log?: string[] }
+        | undefined)?.log ?? []);
+    const send = (stream: "a" | "b") =>
+      (result.key(stream) as unknown as { send(value: unknown): unknown })
+        .send({});
+
+    try {
+      // Warm the piece and stream `a`'s sidecar: one consequenced send.
+      send("a");
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(
+        () => storedLog().length === 1,
+        "the warm-up consequence to land",
+      );
+      expect(storedLog()).toEqual(["A"]);
+      const aSidecarId = sidecarIdsIn(engine)[0];
+      expect(aSidecarId).toBeDefined();
+
+      // Make `a`'s sidecar sync fail transiently: the drain's
+      // sidecar-sync-failure deferral arm, held armed until a pass has
+      // met it with BOTH events pending.
+      GatedStorageManager.syncThrowWhen = (id) => id === aSidecarId;
+
+      // A2 arrives first, B1 second — one client's ordered appends.
+      send("a");
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(
+        () => {
+          const value = Engine.read(engine, { id: aSidecarId })?.value as
+            | StreamEventsDocValue
+            | undefined;
+          return (value?.entries?.length ?? 0) === 2;
+        },
+        "A2's append to land",
+      );
+      send("b");
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(
+        () => sidecarIdsIn(engine).length === 2,
+        "B1's append to land on its own sidecar",
+      );
+
+      // Let the drain meet the failure WITH BOTH EVENTS PENDING:
+      // baseline the throw counter only after B1's append is durable,
+      // then require one more failing pass beyond it — that pass's
+      // snapshot holds A2 (sidecar sync failing) AND B1 (healthy
+      // sidecar), the exact overtake window.
+      const failingPassesBefore = GatedStorageManager.syncThrowHits;
+      await waitUntil(
+        () => GatedStorageManager.syncThrowHits > failingPassesBefore,
+        "a failing drain pass to run with both events pending",
+      );
+      // Heal: the sidecar syncs again and the deferred entry drains.
+      GatedStorageManager.syncThrowWhen = undefined;
+
+      await waitUntil(
+        () => storedLog().length === 3,
+        "all three consequences to land",
+        30_000,
+      );
+      // THE PIN: consequence order equals arrival order. The pre-barrier
+      // drain let B1 (later arrival, warm sidecar) overtake the deferred
+      // A2 — the log read A,B,A.
+      expect(storedLog()).toEqual(["A", "A", "B"]);
+    } finally {
+      GatedStorageManager.syncThrowWhen = undefined;
+      cancelDemand();
     }
   });
 });

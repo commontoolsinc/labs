@@ -11,8 +11,8 @@ document's hash is well-founded.
 
 Design; the readers-first resolution infrastructure (Phase 0 of
 [the implementation plan](../history/plans/content-addressed-schemas-phase-0.md))
-has landed, and Phases 1 and 2 are landing together behind the
-`contentAddressedSchemas` flag (off by default): links and `$alias`
+has landed, and Phases 1 and 2 ship together behind the
+`contentAddressedSchemas` flag (on by default): links and `$alias`
 bindings stamp references with commits materializing each closure into
 the destination space, and a selector normalizes for the wire — the
 reference form only when its whole closure is confirmed persisted in
@@ -63,10 +63,12 @@ across sessions. The system already has the pieces:
   (`packages/data-model/src/schema-hash.ts`) produces a key-order-independent
   `fid1:` tagged hash; the intern table already gives structurally equal
   schemas one identity per process.
-- **Content-addressed schema documents** — CFC already persists schemas as
+- **Content-addressed schema documents** — CFC persists schemas as
   `cid:<taggedHash>` documents (`ensureSchemaDocument`,
-  `packages/runner/src/cfc/prepare.ts`) with idempotent blind writes,
-  client-side hash verification on read, and traversal support: the server's
+  `packages/runner/src/cfc/prepare.ts`) through the shared
+  schema-document staging (registration, per-transaction dedupe,
+  confirmed-persistence elision), with client-side hash verification on
+  read and traversal support: the server's
   graph traversal synthesizes a link from the `cfc.schemaHash` field and
   includes the schema document in query results and watch sets
   (`cfcMetaToSigilLink`, `packages/runner/src/traverse.ts`).
@@ -331,7 +333,12 @@ not deletions.
 
 The commit boundary also validates the closure a commit's content
 references: every schema ref introduced by a set's document, a patch's
-own values, or an installed schema document's own refs must be backed —
+own values, an installed schema document's own refs, or the
+`cfc.schemaHash` a document's stored CFC envelope names (in a
+non-`cid:` set's value, or in the post-patch document of any patch
+sequence whose pointers can reach the reserved `cfc` member — a `cid:`
+document's own `cfc` member is deliberately not a metadata position and
+is never collected) must be backed —
 in the same commit or already stored in the space — by a document whose
 content verifies against its id, transitively through the closure. A
 commit that references what it does not supply, or supplies content
@@ -503,8 +510,8 @@ any document-level caching.
 ## Migration
 
 Experimental flag (`contentAddressedSchemas`, registered in
-`docs/development/EXPERIMENTAL_OPTIONS.md` when implementation starts),
-phased on the op-migration playbook:
+`docs/development/EXPERIMENTAL_OPTIONS.md`), phased on the op-migration
+playbook:
 
 - **Phase 0 — resolution infrastructure.** Session schema registry;
   `resolveSchemaRefs` learns `cid:` refs; verification at registration;

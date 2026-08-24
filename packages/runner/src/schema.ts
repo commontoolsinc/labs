@@ -34,7 +34,11 @@ import {
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { opaqueReference, toCell } from "./back-to-cell.ts";
-import { materializeSchemaView } from "./schema-view.ts";
+import {
+  defaultForAbsentValue,
+  materializeSchemaView,
+  UnresolvedInputError,
+} from "./schema-view.ts";
 import {
   externalResolutionMissCount,
   onSchemaRegistryClear,
@@ -60,7 +64,10 @@ import {
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
 import { type JSONSchema, type SchemaScope } from "./builder/types.ts";
 import { createCell, isCell } from "./cell.ts";
-import { ContextualFlowControl } from "./cfc.ts";
+import {
+  ContextualFlowControl,
+  resolveExternalRootRefForStructure,
+} from "./cfc.ts";
 import {
   type CfcLabelView,
   cfcLabelViewForDereference,
@@ -1341,6 +1348,34 @@ export function validateAndTransform(
     const viewSchema = valueSelectedSchema ??
       combineOptionalSchema(effectiveSchema, resolvedValueLink.schema) ??
       selector.schema;
+    // The RULED unresolved-input refusal (OW51, 2026-08-21): the walk
+    // crossed a hop (or started from a data-derived handle) and
+    // dead-ended at a doc this replica cannot serve (link-resolution's
+    // `pendingHopDoc`), so nothing about the value — not even its
+    // absence — is knowable yet. When the reader's schema DECLARES a
+    // default, the view's absent-value arm stands that default in and
+    // registers the read (the existing "computed that has not produced
+    // yet" contract — schema-view.test.ts pins it); with NO default
+    // there is nothing honest to hand the body: register the dead-end
+    // doc's read FIRST (the dependency that re-triggers this reader
+    // when the doc arrives; the address-level read survives the
+    // NotFoundError `readValueOrThrow` swallows), then refuse. The
+    // action-run boundary disposes the refusal as a non-event: output
+    // `undefined`, no action failure, re-run on any registered read
+    // change — instead of handing `undefined` into a body whose schema
+    // promised a value (the OW51 splitDefinitions crash, browser and
+    // serving runtime alike). Lazy-branch only: eager reads (bindings,
+    // diffing, scheduler internals) keep today's behavior.
+    if (
+      resolvedValueLink.pendingHopDoc === true &&
+      value === undefined &&
+      defaultForAbsentValue(viewSchema) === undefined
+    ) {
+      tx.readValueOrThrow(resolvedValueLink);
+      const refusal = new UnresolvedInputError(resolvedValueLink);
+      tx.noteSchemaRefusal(refusal);
+      throw refusal;
+    }
     return materializeSchemaView(
       runtime,
       tx,
@@ -1619,8 +1654,16 @@ class TransformObjectCreator
         this.labelViewFor(link),
       );
     } else if (isObjectOrArray(link.schema)) {
-      const schema = asCellCompoundSchemaForValue(link.schema, value) ??
-        link.schema;
+      // A reference-form schema resolves here — materialization is a
+      // structural use (asCell handles, defaults), and the handle minted
+      // below works over the resolved document. The link itself keeps its
+      // reference; an unresolvable one behaves as the schemaless
+      // degradation (a plain proxy read, no handle, no defaults).
+      const structuralSchema = isObjectNotArray(link.schema)
+        ? resolveExternalRootRefForStructure(link.schema)
+        : link.schema;
+      const schema = asCellCompoundSchemaForValue(structuralSchema, value) ??
+        structuralSchema;
       const asCellValues = ContextualFlowControl.getAsCellValues(schema);
       if (asCellValues.length > 0) {
         // We'll use the first asCell for the outermost, and pass the rest

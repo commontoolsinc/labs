@@ -46,7 +46,10 @@ import {
   useDeferredCancelOwnership,
 } from "./cancel.ts";
 import { type Cell, createCell, isCell } from "./cell.ts";
-import { ContextualFlowControl } from "./cfc.ts";
+import {
+  ContextualFlowControl,
+  resolveExternalRootRefForStructure,
+} from "./cfc.ts";
 import { findAndInlineDataUriLinks } from "./data-uri.ts";
 import type { EntityKind } from "./entity-kind.ts";
 import { refuseFabricInstance } from "./fabric-special-object.ts";
@@ -271,9 +274,9 @@ function schedulerActionInstanceKey(parts: {
 function schemaCellScope(
   schema: JSONSchema | undefined,
 ): CellScope | undefined {
-  return isObjectOrArray(schema) && isCellScope(schema.scope)
-    ? schema.scope
-    : undefined;
+  if (!isObjectNotArray(schema)) return undefined;
+  schema = resolveExternalRootRefForStructure(schema);
+  return isCellScope(schema.scope) ? schema.scope : undefined;
 }
 
 function patternDefaultScope(pattern: Pattern): CellScope | undefined {

@@ -49,7 +49,18 @@ key; client speculation reads through (speculation.md §2).
 materialization**, today's shape. The reader principal is part of
 the memo key, and each (query, reader) pair materializes its own
 cleared result cell, cleared where the read is served — no two
-readers ever share a result cell.
+readers ever share a result cell. The reader is taken at the
+result's granularity (RULED 2026-08-22): a cleared result whose
+scope is `session` (the result's scope is the narrowest of the
+query's declared result scope, the db's scope, and the
+clearance-forced `user` floor — either declaration takes it below
+`user`) joins the run's SESSION to the
+request identity alongside the user, one cleared cell per
+query-and-reader-at-matching-granularity, so two sessions of one
+user share neither hash nor effect key; at `user` scope the
+request identity stays session-blind. Row admission is a user-principal
+question at every granularity — the session splits the cell and
+the keys, never which rows the user may read.
 
 FORBIDDEN: any of these executing in a client runtime under the flag;
 result caches outside the cell (no process LRU that survives the memo

@@ -32,12 +32,171 @@ tables with the v2 basis index — and partly a build. The spec §5
 deletion list is enforced by deleting on main and *not rebuilding*,
 with the survival test as the gate on anything that feels needed.
 
-## Coordination state (2026-08-21) — read this first
+## Coordination state (2026-08-22) — read this first
 
 The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
-it in the PR that moves the state. State as of 2026-08-21:
-**LAND-OFF IN PROGRESS — the integration PR is OPEN:
+it in the PR that moves the state.
+
+**Delta 2026-08-23 (this PR): OW45 arm-B server-ensure STAGE 1 BUILT —
+the space-root ensure (existence + freshness, no start) runs at the
+SpaceServer's activation as a lease-guarded, single-flight owed step —
+non-blocking at activation, DEADLINE-BOUNDED in the first cycle
+(rootEnsureDeadlineMs, default 30 s: a wedged fetch must never hold a
+tenure's lease — the build review's F2); the client is behaviorally
+UNCHANGED.** The
+design of record is PR #6209
+(`docs/history/plans/server-execution-v2/optimize/ow45-armb-server-ensure-design.md`,
+owner-green-lit 2026-08-23); the build report with the four
+owner-may-veto operating assumptions (owner-resolved fail-closed
+attribution via the memory server's new `resolveSpaceOwner`;
+custom-`defaultAppUrl` log-and-use-system-default interim; the
+runnability-repair pair NOT moved — recorded as a STAGE-2 GATE: the ON
+client's creation retirement must not ship before the pair moves;
+ARM-B out of scope) is
+`ow45-armb-server-ensure-stage1-report.md` beside it. The ensure core
+is EXTRACTED into the runner (`ensure-space-root.ts`, beside
+pattern-updater/ensure-piece-running) and the client controller's
+creation arm now delegates to it, so OFF stays one code path; OFF
+witnesses: the toolshed bootstrap pin (flag off → no host, the seat's
+only reachability chain severed at its first link) and the piece-side
+OFF-arm creation pin, both mutation-checked. The ARM-A refusal class
+does NOT close in stage 1 (the ON client still creates; the server now
+wins most races) and the reload step's ON skip STAYS — the measurement
+section of the build report carries the before/after numbers.
+
+**Delta 2026-08-22: OW45 arm B triaged on an instrumented
+client — the starvation family is THREE defects: two FIXED red-first,
+one isolated live and FORKED to the owner; the last skip entry STAYS.**
+The instrumented bench (worker console forwarded, fresh store per run,
+merged-main ON binary) caught two reds in four runs, each a different
+member. FIXED: (1) the event drain's deferral arm let a later-arrived
+event overtake a deferred earlier one — run b01's store-verified
+cross-stream inversion of one user's last two clicks, against
+events.md §2's stated arrival order; the drain now processes across
+sidecars in append commit-seq order with deferral as a BARRIER
+(red-first pin `executor-events-down.test.ts` "arrival order across
+streams", watched `A,B,A` → `A,A,B`). (2) The graph walk's
+absent-hop-target demand hole — a link-hop target absent at
+evaluation was tracked NOWHERE server-side, so its birth never passed
+the session wake pass's touched check and the watch never delivered
+it, while the client's selector tracker answered every re-read
+locally: the row's "first-read lottery", permanent on a quiet space;
+the walk now records the dead-end in a MISS SET on the graph state —
+wake-reactivity only, never delivered — so the birth re-evaluates and
+delivers the real document while the wire stays byte-identical until
+then (red-first pin `v2-watch-absent-arrival.test.ts`, the hop pin
+watched starving at its net). FORKED (the remaining charge): run b04 caught the
+whole-piece shape live — the flag-ON client's navigate-deferred piece
+start dies terminally on a `ConflictError` whose basis read the
+served piece's computed docs at seq 0, PRE-BIRTH (the first-hydration
+race), and the deferred-start error arm has no retry; the piece never
+starts client-side and every dependent read is undefined for the
+session. Dispositions + recommendation ((a) retry-on-conflict now,
+(b) adopt-not-start under ON as the destination):
+[`optimize/ow45-armb-client-start-fork.md`](../history/plans/server-execution-v2/optimize/ow45-armb-client-start-fork.md).
+The ON skip list still holds exactly ONE entry (the reload step, its
+reason updated to the refined map); the flip's list-EMPTY bar hangs on
+the client-start close. Full evidence: verification-coverage.md OW45
+(the ARM-B TRIAGE block).
+
+**Delta 2026-08-22 (#6197): the arrival-witness fork RULED (candidate
+(B)) and BUILT — the runner `pattern-and-data-persistence` skip LIFTED,
+the LAST file-level ON skip.** The overlay's arrival gate now witnesses
+a cover AT an entry's floor only when the covering commit is
+DERIVED-class (strictly above the floor any class witnesses; unknown
+class at the floor fails closed toward the standing echo) — the
+class-blind gate had retired first-run speculations on their own
+AUTHORED setup cover at the floor, 40–260 ms before the served value
+landed (the OW33 rotating flake, both arms). The covering commit's
+class rides session frames as the flag-gated `coverClass` field (OFF
+wire byte-identical) into the replica's confirmed record and the
+sweep. Lift: 10/10 green at the true ON topology (ON-built binary,
+fresh store + posture probe per run). Binding sentence:
+speculation.md §4's arrival-witness predicate; ruling + build record:
+the register's OW33 row and
+[`optimize/ow33-arrival-witness-fork.md`](../history/plans/server-execution-v2/optimize/ow33-arrival-witness-fork.md).
+The ON skip list now holds ONE entry, the default-app reload STEP
+(OW45) — the flip PR's list-EMPTY bar hangs on that step alone.
+
+**Delta 2026-08-22 (#6198): the default-app reload STEP's charge
+SPLIT — its test half CLOSED, its product half ISOLATED; the skip
+entry STAYS, reworded.** The step's red population was BIMODAL and
+the old post-wait single-shot read could not tell the halves apart.
+The test-side pass binds the step's assertions to the summary its
+`waitForCondition` predicate approves and hands back (re-approved
+after the sync barrier), closing the OW51-interim race half
+(red-first watched at the true ON topology; 16 greens across
+regimes; mutation-checked that a missing note reds the wait's net;
+OFF control 2/2). On the FIXED step the residue proved REAL and is
+now store-verified in the OW45 row: sticky client-side unresolved
+reads on FIRST HYDRATION of freshly created served state (no reload
+sits between the creates and the reads) — `readCell` of the
+argument's redirect-linked `notes` undefined across the full
+5-minute net at 500 ms cadence, or every client read of the piece
+returning nothing mid-session (rf2's shape) — while the store
+holds all 7 appends and the reactive render path serves the same
+notes; 3/5 at ambient-to-spike loads on a churning shared box, zero
+data loss; repro is create-then-read under serving. The patterns
+ON-skip list therefore still holds exactly ONE entry (the reload
+step, now naming the starvation; its in-file guard is unchanged
+from main except the comment, and the pin test pins the single
+entry);
+the runner and runtime-client lists are as the OW33 triage left
+them. Full evidence chain: verification-coverage.md OW45.
+
+**Delta 2026-08-22 (#6194): OW53 CLOSED — the sqlite identity pair
+LIFTED.** The triage determined BOTH halves IMPLEMENTATION (no model
+fork): the sqlite builtins consumed the RUNTIME's ambient identity —
+the SERVICE, on a serving runtime — at the db-owner mint, the
+cleared-read hash keying, the flush's reader/ceiling reads, and the
+completion writeback's partition, where the ruled model
+(serving-loop.md §3c/§4, protocol.md §1, builtins.md §2, 06-cfc.md's
+dbOwner) carries the RUN's acting principal. Re-pointed
+(`sqliteRunActingPrincipal` + the flush's captured identity on the
+OW17 seam); red-first unit pins + both integration files 5/5
+fresh-store true-ON; the two `patterns` FILE skips are LIFTED — the
+first-ON-CI-gate set is now fully lifted at the FILE level. The ON
+skip list is down to: patterns `topics-navigation` + the default-app
+reload STEP (OW45), runner `pattern-and-data-persistence` (OW33),
+runtime-client 2 steps (OW33). One flagged, severable arm rides the
+register row for owner ratification: an actor-less served creation
+mints NO owner (fail closed — never the service DID). Full trail:
+verification-coverage.md OW53 +
+[`optimize/ow53-triage-report.md`](../history/plans/server-execution-v2/optimize/ow53-triage-report.md).
+
+**State as of 2026-08-21 (evening): OPTIMIZE ON MAIN.** The train is
+LANDED dark (#6096 merged as `71e99fc33`; OW31's ruled identity posture
+followed as #6156 `9d989c0c1`); the phase is the register's OW rows
+(verification-coverage.md §3) plus the flip gates below. Today's delta:
+
+- **The two parked rulings are RULED.** OW51 = **option 3** (this PR,
+  #6179): the refusal's re-trigger is independent of the root-level
+  arrival re-arm; verification found the re-fire contract already held
+  and the deadlock was the refusal mis-firing on SCOPED-row absence —
+  the scoped carve-out + the mutation-verified re-fire pin are the
+  build (ow51-build-report.md §8). The §8.5b surfaced residual
+  (schema-examples red on both bases) is root-caused and CLOSED
+  (§8.5c): the consumer was the test's own missed assertion-churn
+  site — no product-code consumer; the row is CLOSED and #6179 holds
+  only for the coordinator's delta review. OW34 = all seven §10
+  recommendations ACCEPTED; its implementation train launched
+  separately.
+- **Four PRs MERGED tonight** (latest `572b07cbc`): **#6187** — the
+  §2b send-axis fix (a served run's send to a foreign stream crosses
+  via the outbox; profile-embed's gate 4/10 → 7/10, skip re-scoped to
+  the name-draft OW47-family residual); **#6186** — a served event
+  refused pre-storage by CFC seals an error consequence (OW54; OW58
+  minted, OW57's closure withdrawn); **#6189** — chained test events
+  gated on arrived consequences (settle stimulus-effect text waits);
+  **#6190** — a served run's CFC trust snapshot carries the acting
+  principal (OW34-family; the group-chat skip lifted under OW59).
+  This PR (#6179) carries the default-app lift.
+- **Trains in flight:** verifier-read-basis; warm-request; the
+  name-draft triage; arrival-wait hardening.
+
+Prior state (kept for the trail — the paragraphs below describe the
+land itself): **LAND-OFF — the integration PR was
 [#6096](https://github.com/commontoolsinc/labs/pull/6096)
 (`claude/server-exec-v2-land-off` = the train tip `45cca4167` + the
 merge of `origin/main` `bbcc7a348` + the reconciliation + the catch-up
@@ -455,8 +614,9 @@ record:
 the coordinator merges on green** — then continue on main; (8) the
 flip's ordered gates as listed under Phase 7, unchanged by the gate
 and now concretely enumerated: the ON skip list back to **EMPTY**
-(today: patterns 7 files + 2 steps, runner 1, runtime-client 2 steps
-— every entry naming its owed row), **OW31's ruled posture BUILT**,
+(2026-08-22: patterns 1 file + 1 step, runner 1 file, runtime-client
+2 steps — every entry naming its owed row), **OW31's ruled posture
+BUILT**,
 the gate's **owed rows OW45–OW53 CLOSED**, deployed binaries
 exercised ON, and the **benchmark against the owner's ruled bar**
 (OW38 (ii)) — then the flip PR and the soak.

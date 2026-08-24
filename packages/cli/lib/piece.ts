@@ -32,6 +32,7 @@ import {
 } from "@commonfabric/piece/ops";
 import {
   Cell,
+  decomposeSchema,
   deepEqual,
   encodeJsonPointer,
   entityIdFrom,
@@ -44,8 +45,15 @@ import {
   isCellResult,
   isReadableCell,
   isSlugAddress,
+  lookupSchemaDocument,
+  mapSubschemas,
   type MemorySpace,
   NAME,
+  type NormalizedFullLink,
+  parseExternalSchemaRef,
+  recomposeSchema,
+  resolveLink,
+  resolveLinkTracingDereferences,
   Runtime,
   runtimePresets,
   RuntimeProgram,
@@ -65,6 +73,7 @@ import {
   resolveCfcSchemaRefs,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
+import { entityKindOfIdString } from "@commonfabric/runner/entity-kind";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import {
@@ -2356,7 +2365,15 @@ export function withDeclaredFieldProse(
   served: JSONSchema | true,
   declared: JSONSchema | undefined,
 ): JSONSchema | true {
-  if (served === true || declared === undefined || !isObjectOrArray(served)) {
+  if (served === true || !isObjectOrArray(served)) {
+    return served;
+  }
+  // A caller-facing surface serves the expanded form: a schema stored as a
+  // content-addressed reference recomposes here, with `$defs` names
+  // recovered from the declared document — the stored form knows a
+  // definition only by its hash.
+  served = expandServedSchemaReference(served, declared);
+  if (declared === undefined || !isObjectOrArray(served)) {
     return served;
   }
   const edits: DescriptionEdit[] = [];
@@ -2371,6 +2388,99 @@ export function withDeclaredFieldProse(
     { edits, written: new Set<string>(), openDefinitions: [], openRefs: [] },
   );
   return applyDescriptionEdits(served, edits);
+}
+
+/**
+ * Recomposes a served schema stored as a content-addressed reference into
+ * its expanded form, keeping the reference's siblings (a `description`
+ * beside a `$ref` stays beside the expansion). An unresolvable reference is
+ * served as it is — the surface cannot invent structure.
+ */
+function expandServedSchemaReference(
+  served: JSONSchema & object,
+  declared: JSONSchema | undefined,
+): JSONSchema {
+  const ref = served.$ref;
+  if (typeof ref !== "string" || parseExternalSchemaRef(ref) === undefined) {
+    return served;
+  }
+  const nameByHash = declaredDefNamesByHash(declared);
+  let recomposed: JSONSchema;
+  try {
+    recomposed = recomposeSchema(ref, lookupSchemaDocument, {
+      nameFor: (hash) => nameByHash.get(hash),
+    });
+  } catch {
+    return served;
+  }
+  const { $ref: _expanded, ...siblings } = served as Record<string, unknown>;
+  return isObjectOrArray(recomposed)
+    ? { ...recomposed, ...siblings } as JSONSchema
+    : recomposed;
+}
+
+/**
+ * The declared document's `$defs` names, keyed by the content hash each
+ * definition decomposes to — the same hashes the served document's
+ * references carry, so a recomposition can put the author's names back.
+ *
+ * Each definition maps under TWO hashes: as declared, and with every
+ * `description` stripped. Descriptions participate in schema hashing, and
+ * the served structural document may carry a definition without the prose
+ * the author declared — hashing only the prose-bearing form would miss it,
+ * and the name would fall back to a hash-derived one exactly for the
+ * definitions an author documented best.
+ */
+function declaredDefNamesByHash(
+  declared: JSONSchema | undefined,
+): Map<string, string> {
+  const names = new Map<string, string>();
+  if (!isObjectOrArray(declared) || !isObjectOrArray(declared.$defs)) {
+    return names;
+  }
+  const strippedDefs = Object.fromEntries(
+    Object.entries(declared.$defs).map((
+      [name, def],
+    ) => [name, withoutSchemaProse(def as JSONSchema)]),
+  );
+  const defGroups = [declared.$defs, strippedDefs as typeof declared.$defs];
+  for (const name of Object.keys(declared.$defs)) {
+    for (const defs of defGroups) {
+      try {
+        const { rootRef } = decomposeSchema(
+          {
+            $ref: encodeJsonPointer(["#", "$defs", name]),
+            $defs: defs,
+          } as Parameters<typeof decomposeSchema>[0],
+        );
+        const parsed = parseExternalSchemaRef(rootRef);
+        if (parsed !== undefined && !names.has(parsed.taggedHash)) {
+          names.set(parsed.taggedHash, name);
+        }
+      } catch {
+        // An undecomposable definition keeps its hash-derived name.
+      }
+    }
+  }
+  return names;
+}
+
+/**
+ * `schema` with every SCHEMA-NODE `description` removed — the one keyword
+ * `withDeclaredFieldProse` folds, so the stripped form is the structural
+ * shape a prose-free served document hashes to. The walk is schema-aware:
+ * data-bearing keyword values (`default`, `const`, `enum`, `examples`) are
+ * opaque, so a data member that happens to be NAMED `description` rides
+ * through untouched.
+ */
+function withoutSchemaProse(schema: JSONSchema): JSONSchema {
+  if (!isObjectOrArray(schema)) return schema;
+  const { description: _prose, ...rest } = schema as Record<string, unknown>;
+  return mapSubschemas(
+    rest as Parameters<typeof mapSubschemas>[0],
+    (child) => withoutSchemaProse(child),
+    { includeUnused: true, includeDefs: true },
+  );
 }
 
 /**
@@ -3652,18 +3762,123 @@ export async function generateSpaceMap(
   return formatSpaceMap(connections, format);
 }
 
-export async function inspectPiece(
-  config: PieceConfig,
-  deps: PieceOperationDependencies = {},
-): Promise<{
+/**
+ * A result field whose resolution crosses computed state. Each computed cell
+ * holds what its last committed derivation produced, and reading the field
+ * does not re-derive it, so either a terminal value or a cached choice of link
+ * can describe an earlier instant than the current argument.
+ */
+export interface CachedResultField {
+  /** The field's name on the piece's result. */
+  name: string;
+  /** The computed documents crossed while resolving the field's value. */
+  cells: CachedResultCell[];
+}
+
+/** One computed document crossed while resolving a result field. */
+export interface CachedResultCell {
+  /** The computed entity's id. */
+  id: string;
+  /** The space whose commit sequence contains `derivedAtCommit`. */
+  space: MemorySpace;
+  /** The computed entity's memory scope. */
+  scope: CellScope;
+  /**
+   * The commit the entity's document last stood at. Absent when the local
+   * replica holds no confirmed version of that document.
+   */
+  derivedAtCommit?: number;
+}
+
+/**
+ * The commit `link`'s document last stood at, read from the space's local
+ * replica. Commit sequences are assigned per space, so two documents read from
+ * one replica can be ordered against each other.
+ */
+function commitOfDocument(
+  runtime: Runtime,
+  link: { id: string; space: MemorySpace; scope: CellScope },
+): number | undefined {
+  const provider = runtime.storageManager.open(link.space);
+  return provider.replica.get({
+    id: link.id as NormalizedFullLink["id"],
+    scope: link.scope,
+  })?.since;
+}
+
+/**
+ * Which fields of `result` resolve through a computed cell when read from
+ * `resultCell`.
+ *
+ * The runtime's own link resolution supplies every dereference. A computed
+ * document counts even when its cached value is another link and the terminal
+ * entity is live: choosing that link was itself a derivation which can be
+ * stale. Every id that is not a computed one counts as live, unknown URI
+ * schemes included, which is the strict reading `entityKindOfIdString`
+ * requires of its callers.
+ */
+export function cachedResultFields(
+  resultCell: Cell<unknown>,
+  result: Readonly<unknown>,
+): CachedResultField[] {
+  if (!isObjectNotArray(result)) return [];
+  const runtime = resultCell.runtime;
+  const tx = runtime.readTx();
+  const cached: CachedResultField[] = [];
+  for (const name of Object.keys(result)) {
+    const start = resultCell.key(name).getAsNormalizedFullLink();
+    const { link: resolved, traces } = resolveLinkTracingDereferences(
+      runtime,
+      tx,
+      start,
+    );
+    const documents = [start, ...traces.map(({ target }) => target), resolved];
+    const cells = new Map<string, CachedResultCell>();
+    for (const document of documents) {
+      if (entityKindOfIdString(document.id) !== "computed") continue;
+      const key =
+        `${document.space}\u0000${document.scope}\u0000${document.id}`;
+      if (cells.has(key)) continue;
+      const derivedAtCommit = commitOfDocument(runtime, document);
+      cells.set(key, {
+        id: document.id,
+        space: document.space,
+        scope: document.scope,
+        ...(derivedAtCommit !== undefined && { derivedAtCommit }),
+      });
+    }
+    if (cells.size > 0) {
+      cached.push({ name, cells: [...cells.values()] });
+    }
+  }
+  return cached;
+}
+
+/** What {@link inspectPiece} reports about one piece. */
+export interface PieceInspection {
   id: string;
   name?: string;
   patternRef?: PiecePatternRef;
   source?: Readonly<unknown>;
-  result: Readonly<unknown>;
+  result: Readonly<unknown> | null | undefined;
+  /**
+   * The commit the argument document behind `source` last stood at. It can be
+   * ordered against a {@link CachedResultCell} commit only when both have the
+   * same `space`.
+   */
+  sourceCommit?: number;
+  /** The space whose commit sequence contains `sourceCommit`. */
+  sourceSpace?: MemorySpace;
+  /** The fields of `result` whose resolution crosses a computed-cell cache. */
+  cachedResultFields: CachedResultField[];
   readingFrom: Array<{ id: string; name?: string }>;
   readBy: Array<{ id: string; name?: string }>;
-}> {
+}
+
+export async function inspectPiece(
+  config: PieceConfig,
+  deps: PieceOperationDependencies = {},
+): Promise<PieceInspection> {
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
   let resolvedConfig: PieceConfig;
   try {
@@ -3701,13 +3916,26 @@ export async function inspectPiece(
     id: piece.id,
     name: piece.name(),
   }));
+  const resultCell = await piece.result.getCell();
+  const inputCell = await piece.input.getCell();
+  const runtime = resultCell.runtime;
+  const sourceLink = resolveLink(
+    runtime,
+    runtime.readTx(),
+    inputCell.getAsNormalizedFullLink(),
+  );
+  const sourceCommit = commitOfDocument(runtime, sourceLink);
+  const cached = cachedResultFields(resultCell, result);
 
   return {
     id,
     name,
     patternRef,
     source,
+    ...(sourceCommit !== undefined && { sourceCommit }),
+    sourceSpace: sourceLink.space,
     result,
+    cachedResultFields: cached,
     readingFrom,
     readBy,
   };
@@ -3716,15 +3944,7 @@ export async function inspectPiece(
 async function inspectSlugTargetCell(
   pieces: PiecesController,
   slug: string,
-): Promise<{
-  id: string;
-  name?: string;
-  patternRef?: PiecePatternRef;
-  source?: Readonly<unknown>;
-  result: Readonly<unknown>;
-  readingFrom: Array<{ id: string; name?: string }>;
-  readBy: Array<{ id: string; name?: string }>;
-}> {
+): Promise<PieceInspection> {
   const target = await resolveSlugTargetCell(pieces, slug);
   await target.pull();
   const result = target.get() as Readonly<unknown>;
@@ -3752,6 +3972,7 @@ async function inspectSlugTargetCell(
     name,
     patternRef,
     result,
+    cachedResultFields: cachedResultFields(target, result),
     readingFrom: [],
     readBy: [],
   };

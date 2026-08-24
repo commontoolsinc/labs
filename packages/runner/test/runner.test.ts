@@ -16,6 +16,7 @@ import {
 import { Runtime } from "../src/runtime.ts";
 import { entityKey } from "../src/scheduler/keys.ts";
 import { validateSchemaValue } from "../src/cfc/mod.ts";
+import { resolvedSchema } from "./schema-ref-helpers.ts";
 import {
   areNormalizedLinksSame,
   getDerivedInternalCell,
@@ -202,7 +203,10 @@ describe("runPattern", () => {
     expect(derivedLink).toBeDefined();
     expect(derivedLink!.id).not.toBe(resultCell.getAsNormalizedFullLink().id);
     expect(derivedLink!.path).toEqual([]);
-    expect(derivedLink!.schema).toEqual({ type: "number", default: 0 });
+    expect(resolvedSchema(derivedLink!.schema)).toEqual({
+      type: "number",
+      default: 0,
+    });
 
     const derivedCell = runtime.getCellFromLink(derivedLink!);
     expect(await derivedCell.get()).toBe(5);
@@ -241,7 +245,7 @@ describe("runPattern", () => {
     const firstLink = Array.isArray(firstManifest)
       ? parseLink(firstManifest[0].link, resultCell)
       : undefined;
-    expect(firstLink?.schema).toEqual(wide);
+    expect(resolvedSchema(firstLink?.schema)).toEqual(wide);
 
     await setupTrusted(runtime, undefined, pattern(narrow), {}, resultCell);
     const nextManifest = resultCell.getMetaRaw("internal");
@@ -249,7 +253,7 @@ describe("runPattern", () => {
       ? parseLink(nextManifest[0].link, resultCell)
       : undefined;
     expect(nextLink?.id).toBe(firstLink?.id);
-    expect(nextLink?.schema).toEqual(narrow);
+    expect(resolvedSchema(nextLink?.schema)).toEqual(narrow);
   });
 
   it("sets scoped write-redirect metadata links for argument and internal cells", async () => {
@@ -317,7 +321,7 @@ describe("runPattern", () => {
     expect(argumentLink!.path).toEqual([]);
     expect(argumentLink!.space).toBe(space);
     expect(argumentLink!.scope).toBe("user");
-    expect(argumentLink!.schema).toEqual(argumentSchema);
+    expect(resolvedSchema(argumentLink!.schema)).toEqual(argumentSchema);
     expect(argumentLink!.overwrite).toBe("redirect");
 
     const argumentCell = runtime.getCellFromLink(argumentLink!);
@@ -330,11 +334,19 @@ describe("runPattern", () => {
     expect(outputLink.path).toEqual([]);
     expect(outputLink.space).toBe(space);
     expect(outputLink.scope).toBe("user");
-    expect(outputLink.schema).toEqual({ type: "number" });
-    expect(getMetaLink(argumentCell, "result")).toEqual({
+    expect(resolvedSchema(outputLink.schema)).toEqual({ type: "number" });
+    const resultMetaLink = getMetaLink(argumentCell, "result")!;
+    expect({
+      ...resultMetaLink,
+      schema: resolvedSchema(resultMetaLink.schema),
+    }).toEqual({
       ...resultCellLink,
       schema: resultSchema,
       overwrite: "redirect",
+      // getMetaLink parses the stored sigil, which carries the read-side
+      // data-derived mark (OW51 `viaLinkHop`); resultCellLink came off a
+      // Cell and does not, so add it to the expected shape.
+      viaLinkHop: true,
     });
     // getDerivedInternalCell doesn't generate a redirect link,
     // but that's what we want to match, so add that property.

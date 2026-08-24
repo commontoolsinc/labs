@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 
 import { lift } from "../src/builder/module.ts";
+import { resolvedSchema } from "./schema-ref-helpers.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { reactive } from "../src/builder/reactive.ts";
 import {
@@ -444,11 +445,11 @@ describe("pattern", () => {
         $alias: {
           partialCause: { $generated: 1 },
           path: ["double"],
-          schema: {
-            ifc: ArgumentSchema.properties.x.ifc,
-          },
         },
       },
+    });
+    expect(resolvedSchema((result as any).double.$alias.schema)).toMatchObject({
+      ifc: ArgumentSchema.properties.x.ifc,
     });
 
     expect(nodes.length).toBe(2);
@@ -460,38 +461,42 @@ describe("pattern", () => {
         $alias: {
           cell: "argument",
           path: ["x"],
-          schema: ArgumentSchema.properties?.x,
         },
       },
     });
+    expect(
+      resolvedSchema((nodes[0].inputs as any).x.$alias.schema),
+    ).toMatchObject(ArgumentSchema.properties?.x);
     // I don't like that we don't know the other properties of our output here
     expect(nodes[0].outputs).toMatchObject({
       $alias: {
         partialCause: { $generated: 0 },
         path: [],
-        schema: { ifc: ArgumentSchema.properties.x.ifc },
       },
     });
+    expect(
+      resolvedSchema((nodes[0].outputs as any).$alias.schema),
+    ).toMatchObject({ ifc: ArgumentSchema.properties.x.ifc });
     expect(nodes[1].inputs).toMatchObject({
       x: {
         $alias: {
           partialCause: { $generated: 0 },
           path: ["double"],
-          schema: {
-            ifc: ArgumentSchema.properties.x.ifc,
-          },
         },
       },
     });
+    expect(
+      resolvedSchema((nodes[1].inputs as any).x.$alias.schema),
+    ).toMatchObject({ ifc: ArgumentSchema.properties.x.ifc });
     expect(nodes[1].outputs).toMatchObject({
       $alias: {
         partialCause: { $generated: 1 },
         path: [],
-        schema: {
-          ifc: ArgumentSchema.properties.x.ifc,
-        },
       },
     });
+    expect(
+      resolvedSchema((nodes[1].outputs as any).$alias.schema),
+    ).toMatchObject({ ifc: ArgumentSchema.properties.x.ifc });
   });
 
   it("pattern with mixed ifc properties has correct confidentiality in the schema of the ssn result", () => {
@@ -567,17 +572,21 @@ describe("pattern", () => {
     expect(nodeOutputAlias).toMatchObject({
       partialCause: { $generated: 0 },
       path: [],
-      schema: { ifc: { confidentiality: ["confidential"] } },
+    });
+    expect(resolvedSchema(nodeOutputAlias.schema)).toMatchObject({
+      ifc: { confidentiality: ["confidential"] },
     });
     expect(result).toMatchObject({
       capitalized: {
         $alias: {
           partialCause: { $generated: 0 },
           path: ["capitalized"],
-          schema: { ifc: { confidentiality: ["confidential"] } },
         },
       },
     });
+    expect(
+      resolvedSchema((result as any).capitalized.$alias.schema),
+    ).toMatchObject({ ifc: { confidentiality: ["confidential"] } });
     expect(resultSchema).toMatchObject({
       ...ResultSchema,
       ...{ ifc: { confidentiality: ["confidential"] } },

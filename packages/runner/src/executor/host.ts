@@ -5,8 +5,13 @@
 // - plane (b): the memory server's admission observer notifies the host
 //   on any AUTHORED admission (an admission-side hook, never a poll) and
 //   on session open; the host activates the space when it meets the
-//   ACTIVE criteria (≥1 live client session or undelivered events — the
-//   latter has no instances until Phase 3 lands events on the wire);
+//   ACTIVE criteria — ≥1 live client session, undelivered events (an
+//   event-carrying admission), or an EXPLICIT WARM REQUEST
+//   (serving-loop.md §1's third trigger, RULED 2026-08-21): a
+//   warm-marked admission notice, set only by the serving-side
+//   provisioning path when its wave staged setup into the space, which
+//   activates a sessionless target where an ordinary authored write
+//   deliberately does not (T11.Q7's write-alone parking);
 // - plane (c): lease acquire/renew by direct table write (the
 //   SpaceServer's cycle);
 // - plane (d): admitted-commit records route to the space's SpaceServer
@@ -15,7 +20,8 @@
 // A park racing an incoming commit self-heals: the hook re-fires on the
 // next admission. Host boot discovery (stream head past eventWatermark ⇒
 // undelivered events ⇒ activate) has nothing to discover until Phase 3;
-// spaces activate on their first session or authored admission.
+// spaces activate on their first session, event, warm request, or
+// session-implying authored admission.
 
 import {
   type AdmittedCommitNotice,
@@ -72,6 +78,13 @@ export type ExecutorHostOptions = {
     dispose: () => Promise<void>;
   }>;
   policy?: SpaceServerPolicy;
+  /** The RULED test switch for the tenure's space-root ensure (OW45
+   * arm-B stage 1, RULED 2026-08-24 — see SpaceServerOptions.
+   * ensureSpaceRoots): default ON (production posture); `false`
+   * disables it for every SpaceServer this host builds. A
+   * whole-instance switch — per-space discrimination is deferred by
+   * the same ruling. */
+  ensureSpaceRoots?: boolean;
 };
 
 export class ExecutorHost {
@@ -83,10 +96,24 @@ export class ExecutorHost {
    * feed at registration — an admission racing activation must never be
    * dropped (its seq may pass the activation's scan head). */
   readonly #pendingNotices = new Map<string, AdmittedCommitNotice[]>();
-  /** Process-lifetime localSeq counters per space (the sink's replay
-   * keying — engine-wave-sink.ts): survive park/re-activate, floored at
-   * the engine's stored max on first use. */
-  readonly #localSeqBySpace = new Map<string, { value: number }>();
+  /** The ONE process-lifetime localSeq counter for every sink this host
+   * builds (the replay keying — engine-wave-sink.ts): survives
+   * park/re-activate, shared across ALL spaces. It must be
+   * process-global, not per-space, because every sink commits under the
+   * SAME process-stable session id (the DR1 holder) and a HOME space's
+   * sink writes FOREIGN provisioning batches into OTHER spaces' engines
+   * (protocol.md §2b): with per-space counters, a target space's own
+   * sink later re-mints (session, localSeq) pairs the home sink's
+   * foreign batches already consumed in that engine, and the engine's
+   * replay detection kills the target's waves as "commit replay
+   * mismatch" — dropping their derivations with nothing to re-arm them
+   * (exposed by the warm request's activation of freshly provisioned
+   * spaces; the executor-warm-request pin). One shared monotonic
+   * counter makes every (session, localSeq) pair globally unique across
+   * writers and engines; per-session localSeq gaps are already normal
+   * in every store (the engine keys replay by equality, never
+   * contiguity). */
+  readonly #sinkLocalSeq = { value: 0 };
   /** Consecutive `loop-failed` parks per space (the re-activation
    * backoff's streak). Incremented at each failure park, cleared by a
    * successfully committed wave — real served progress, not merely a
@@ -191,10 +218,35 @@ export class ExecutorHost {
       // only commits before its head). A PARKING server (registered,
       // no longer active, no activation in flight) is the third case:
       // chain a fresh activation behind the park so a space with live
-      // demand is never left unserved by the race.
+      // demand is never left unserved by the race. A WARM notice racing
+      // the park BUFFERS for the successor activation (drained at its
+      // registration, exactly like the mid-activation window below):
+      // the dying tenure's feed — and the warm capture that just went
+      // into it — die with the tenure, and SEVERAL warm notices in one
+      // park window chain ONE shared reactivation, so a notice passed
+      // by argument would be dropped for every notice but the first
+      // (#activate joins the in-flight activation without merging its
+      // pending list — the #6191 review's P1).
       existing.enqueueCommit(notice);
       if (!existing.active && !this.#activating.has(notice.space)) {
-        this.#reactivateAfterPark(existing, notice.space as MemorySpace);
+        if (notice.warm === true) {
+          // Only in the true parking window (no successor in flight):
+          // once a successor is activating, the enqueue above already
+          // reached a feed that survives — its registration drain has
+          // either run against this buffer or the notice landed on the
+          // registered server directly.
+          let buffered = this.#pendingNotices.get(notice.space);
+          if (buffered === undefined) {
+            buffered = [];
+            this.#pendingNotices.set(notice.space, buffered);
+          }
+          buffered.push(notice);
+        }
+        this.#reactivateAfterPark(
+          existing,
+          notice.space as MemorySpace,
+          notice.warm === true,
+        );
       }
       return;
     }
@@ -220,12 +272,20 @@ export class ExecutorHost {
     // server's service session, and the target may have no client).
     // System/direct writes alone activate nothing — a provisioning
     // write into a lease-less space stays parked until its first
-    // session or event (trace finding T11.Q7).
+    // session or event (trace finding T11.Q7). The one further
+    // activation trigger is the EXPLICIT WARM REQUEST (serving-loop.md
+    // §1's third trigger; RULED 2026-08-21): a warm-marked notice — set
+    // only by the serving-side provisioning path when its wave staged
+    // setup into this space — activates like the carries-events arm,
+    // sessionless target included. T11.Q7 stays as designed: the
+    // admission ALONE still activates nothing; the warm mark is the
+    // provisioning run's own deliberate signal, never a property of
+    // ordinary writes.
     if (notice.class !== "authored") return;
     const carriesEvents = notice.eventAppends !== undefined &&
       notice.eventAppends.length > 0;
     if (
-      !carriesEvents &&
+      !carriesEvents && notice.warm !== true &&
       !this.#options.server.hasLiveSessionsForSpace(notice.space, {
         excludePrincipal: this.#options.serviceIdentity,
       })
@@ -271,11 +331,23 @@ export class ExecutorHost {
    * event-only admission racing the park (a delegated cross-space
    * delivery with no client anywhere) chains through here, and a
    * sessions-only gate declined it — the delivered event sat unserved
-   * until an unrelated trigger. */
-  #reactivateAfterPark(parking: SpaceServer, space: MemorySpace): void {
+   * until an unrelated trigger. A WARM notice racing the park (`warm`)
+   * satisfies the gate the same way — the staged setup is durable and
+   * undemanded, exactly the state the warm request exists for. The
+   * notice itself travels through `#pendingNotices` (buffered by the
+   * caller, drained at the successor's registration), NOT as an
+   * argument: several warm notices in one park window share ONE
+   * reactivation, and only a buffer merges them all (the #6191
+   * review's P1). */
+  #reactivateAfterPark(
+    parking: SpaceServer,
+    space: MemorySpace,
+    warm = false,
+  ): void {
     void parking.whenParked.then(async () => {
       if (this.#closed || this.#spaces.get(space)?.active) return;
       if (
+        !warm &&
         !this.#options.server.hasLiveSessionsForSpace(space, {
           excludePrincipal: this.#options.serviceIdentity,
         })
@@ -334,21 +406,21 @@ export class ExecutorHost {
       await this.#backoffSleep(delayMs);
       if (this.#closed || this.#spaces.get(space)?.active) return;
     }
+    // The warm notices this activation CONSUMES (the argument now; the
+    // drained buffer appends at drain time): re-buffered by the failure
+    // arms below — see #rebufferConsumedWarm. Collected from the start
+    // so an early throw (the engine open) loses nothing either.
+    const consumedWarm = pending.filter((notice) => notice.warm === true);
     try {
       const engine = await this.#options.server.engineForSpace(space);
-      let localSeqRef = this.#localSeqBySpace.get(space);
-      if (localSeqRef === undefined) {
-        // Fresh per (space, process): the sink's session key IS the DR1
-        // holder, whose process-instance component makes a new process a
-        // NEW engine session — no stored localSeqs to collide with, so
-        // the counter starts at 0. Same-process park/re-activate reuses
-        // this ref, which is the whole replay-keying obligation
-        // (engine-wave-sink.ts). A holder scheme WITHOUT a process
-        // component would need a stored-max floor here instead; no such
-        // scheme exists, so none is kept.
-        localSeqRef = { value: 0 };
-        this.#localSeqBySpace.set(space, localSeqRef);
-      }
+      // The sink's session key IS the DR1 holder, whose process-instance
+      // component makes a new process a NEW engine session — so the
+      // process-global counter starting at 0 never collides with a prior
+      // process's commits, and sharing ONE counter across every space's
+      // sink keeps same-process writers from colliding with each OTHER
+      // (see #sinkLocalSeq: a home sink's foreign provisioning batches
+      // land in other spaces' engines under this same session).
+      const localSeqRef = this.#sinkLocalSeq;
       const server = new SpaceServer({
         space,
         server: this.#options.server,
@@ -358,6 +430,9 @@ export class ExecutorHost {
         localSeqRef,
         stats: this.#stats,
         policy: this.#options.policy,
+        ...(this.#options.ensureSpaceRoots !== undefined
+          ? { ensureSpaceRoots: this.#options.ensureSpaceRoots }
+          : {}),
         onParked: (reason) => {
           // The backoff streak: a `loop-failed` park extends it; an
           // idle park (a healthy tenure winding down) clears it. Parks
@@ -399,10 +474,14 @@ export class ExecutorHost {
       if (buffered !== undefined) {
         this.#pendingNotices.delete(space);
         for (const notice of buffered) server.enqueueCommit(notice);
+        for (const notice of buffered) {
+          if (notice.warm === true) consumedWarm.push(notice);
+        }
       }
       const activated = await server.activate();
       if (!activated) {
         this.#spaces.delete(space);
+        this.#rebufferConsumedWarm(space, consumedWarm);
         return;
       }
       if (this.#closed) {
@@ -414,8 +493,35 @@ export class ExecutorHost {
       }
     } catch (error) {
       this.#spaces.delete(space);
+      this.#rebufferConsumedWarm(space, consumedWarm);
       logger.error("activate-failed", `activation of ${space} failed`, error);
     }
+  }
+
+  /** Re-buffer the warm notices a FAILED activation consumed — its
+   * `pending` argument plus what it drained from `#pendingNotices` —
+   * so the next trigger's activation drains them into a live
+   * successor. A warm notice is a ONE-SHOT signal from a provisioning
+   * wave that has already committed: nothing re-issues it, and in the
+   * home-profile shape there is no client backstop — an activation
+   * dying AFTER the drain (`activate()` refusing on a rival process's
+   * unexpired lease, or throwing) would otherwise strand the staged
+   * setup underived with no crash anywhere (the OW46-family
+   * no-crash-required loss; pinned in executor-warm-request.test.ts).
+   * Prepended: the consumed notices are older than anything buffered
+   * while the failed activation was in flight. */
+  #rebufferConsumedWarm(
+    space: MemorySpace,
+    consumedWarm: readonly AdmittedCommitNotice[],
+  ): void {
+    if (consumedWarm.length === 0) return;
+    const standing = this.#pendingNotices.get(space);
+    this.#pendingNotices.set(
+      space,
+      standing === undefined
+        ? [...consumedWarm]
+        : [...consumedWarm, ...standing],
+    );
   }
 
   /** A cancellable backoff sleep: close() flushes the wakers so a

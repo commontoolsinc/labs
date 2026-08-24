@@ -1266,6 +1266,10 @@ export type TraversalContext = {
   onMissingLinkTarget?: (
     link: NormalizedFullLink,
     sourceSpace: MemorySpace,
+    /** The document whose link dead-ended (the miss's referrer), when
+     * the call site knows it — lets a server-side graph walk attribute
+     * the miss so a referrer that changes away retires it. */
+    source?: { id: string; scope?: CellScope },
   ) => void;
   /**
    * Schema-document tracker keys this traversal has already attempted to
@@ -1297,6 +1301,7 @@ export function createTraversalContext(
   onMissingLinkTarget?: (
     link: NormalizedFullLink,
     sourceSpace: MemorySpace,
+    source?: { id: string; scope?: CellScope },
   ) => void,
   schemaDocsLoaded: Set<string> = new Set<string>(),
   schemaDocsAvailable: Set<string> = new Set<string>(),
@@ -1322,6 +1327,7 @@ export function createDefaultTraversalContext(
   onMissingLinkTarget?: (
     link: NormalizedFullLink,
     sourceSpace: MemorySpace,
+    source?: { id: string; scope?: CellScope },
   ) => void,
 ): TraversalContext {
   return createTraversalContext(
@@ -2225,6 +2231,7 @@ function reportMissingLinkTarget(
   link: NormalizedFullLink,
   selector: SchemaPathSelector | undefined,
   sourceSpace: MemorySpace,
+  source?: { id: string; scope?: CellScope },
 ): void {
   context.onMissingLinkTarget?.(
     {
@@ -2243,6 +2250,7 @@ function reportMissingLinkTarget(
         : {}),
     } as NormalizedFullLink,
     sourceSpace,
+    source,
   );
 }
 
@@ -2436,7 +2444,10 @@ function followPointer(
       // queries. The reported link carries the selector's target-rooted
       // path (minus its "value" prefix) and schema so the fetch covers the
       // shape this read needs.
-      reportMissingLinkTarget(context, link, selector, doc.address.space);
+      reportMissingLinkTarget(context, link, selector, doc.address.space, {
+        id: doc.address.id,
+        scope: doc.address.scope,
+      });
       // We include the path in the address, so that information is available,
       return [notFound(target), selector];
     } else if (error.name !== "NotFoundError") {
@@ -4437,6 +4448,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       link,
       { path: target.path, schema: selector.schema },
       doc.address.space,
+      { id: doc.address.id, scope: doc.address.scope },
     );
   }
 

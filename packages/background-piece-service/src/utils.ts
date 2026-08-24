@@ -4,7 +4,7 @@ import {
   type MemorySpace,
   type Runtime,
 } from "@commonfabric/runner";
-import { Identity, type IdentityCreateConfig } from "@commonfabric/identity";
+import { Identity } from "@commonfabric/identity";
 import {
   BG_CELL_CAUSE,
   BG_SYSTEM_SPACE_ID,
@@ -20,40 +20,41 @@ export function isValidPieceId(id: string): boolean {
   return !!id && id.length === 59;
 }
 
-// Derives the identity configured for this service,
-// receiving an `IDENTITY` and `OPERATOR_PASS` from the environment.
-//
-// First, uses the key path to load a key.
-// If not set, falls back to operator pass to
-// use an insecure passphrase.
-// This fallback should be removed once fully migrated
-// over to using keyfiles.
+/**
+ * Derives the identity configured for this service, from an `IDENTITY` and an
+ * `OPERATOR_PASS` taken from the environment. A key path loads a key; absent
+ * one, the operator pass stands in as an insecure passphrase identity. That
+ * fallback should be removed once fully migrated over to using keyfiles.
+ *
+ * The ed25519 implementation is left to the platform, which on a supporting
+ * one means Web Crypto: the seed each form starts from is imported into a
+ * non-extractable `CryptoKey` and then dropped, so what this service holds
+ * afterwards -- and what it hands a worker realm, structured cloning carrying
+ * a `CryptoKey` whole -- is a key handle. For the keyfile form that is the
+ * whole of it; the passphrase form leaves `OPERATOR_PASS` in the environment,
+ * from which the key can be derived again, which is part of what makes it the
+ * insecure one.
+ *
+ * @throws If the key path names something unreadable or unusable, or if
+ *   neither variable is set.
+ */
 export async function getIdentity(
   identityPath?: string,
   operatorPass?: string,
 ): Promise<Identity> {
-  // Deno does not support serializing `CryptoKey`, safely
-  // passing keys to workers. Explicitly use the fallback implementation,
-  // which makes key material available to the JS context, in order
-  // to transfer key material to workers.
-  // https://github.com/denoland/deno/issues/12067#issuecomment-1975001079
-  const keyConfig: IdentityCreateConfig = {
-    implementation: "noble",
-  };
-
   if (identityPath) {
     console.log(`Using identity at ${identityPath}`);
     try {
       const pkcs8Key = await Deno.readFile(identityPath);
-      return await Identity.fromPkcs8(pkcs8Key, keyConfig);
+      return await Identity.fromPkcs8(pkcs8Key);
     } catch (_e) {
       throw new Error(`Could not read key at ${identityPath}.`);
     }
   } else if (operatorPass) {
     console.warn("Using insecure passphrase identity.");
-    return await Identity.fromPassphrase(operatorPass, keyConfig);
+    return await Identity.fromPassphrase(operatorPass);
   }
-  throw new Error("No IDENTITY or OPERATOR_PASS environemnt set.");
+  throw new Error("No IDENTITY or OPERATOR_PASS environment set.");
 }
 
 export async function setBGPiece({

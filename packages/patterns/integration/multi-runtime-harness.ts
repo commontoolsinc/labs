@@ -47,7 +47,6 @@ import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import { experimentalOptionsFromEnv } from "@commonfabric/runner";
 import {
-  fabricFromKeyPairRaw,
   type RuntimeDiagnosticsSnapshot,
   type TrustedUiDescriptor,
   type WorkerRequest,
@@ -327,6 +326,29 @@ export class MultiRuntimeSession {
   }
 
   /**
+   * Wait — with no budget of its own, backstopped by the RPC timeout —
+   * until every event THIS session fired has its terminal consequence
+   * (consequenced, errored, dropped, or refused) arrived back here:
+   * the overlay's outstanding-intent set is empty (speculation.md §4
+   * step 2). Instant on the OFF arm and when nothing is outstanding.
+   *
+   * This is the gate between two CHAINED events whose second served
+   * handler reads state the first one writes (a draft-then-trusted-
+   * action pair): events on different streams have no cross-stream
+   * serve-order guarantee (events.md §2), so firing the second while
+   * the first is in flight can serve it against a pre-first view — a
+   * precondition-reading handler then no-ops silently, an interleaving
+   * the real UI forbids (the trusted control stays disabled until the
+   * served precondition round-trips). Await this before the second
+   * fire; once the first consequence has arrived back, its commit is
+   * in the space's history and every later-fired event is served
+   * against a view that includes it.
+   */
+  async awaitEventConsequences(): Promise<void> {
+    await this.#client.call("awaitEventConsequences");
+  }
+
+  /**
    * Force an ordered-after round trip on this runtime's open space connections,
    * so any subscription fan-out the server has already sent has landed here.
    * See `MultiRuntimeHarness.settle`.
@@ -414,7 +436,7 @@ export class MultiRuntimeHarness {
           );
         const client = new WorkerClient(normalized.label);
         await client.call("init", {
-          identity: fabricFromKeyPairRaw(identity.serialize()),
+          identity: identity.keyPair,
           spaceName,
           apiUrl,
           diagnostics: options.diagnostics === true,
@@ -434,7 +456,7 @@ export class MultiRuntimeHarness {
       // compile state.
       bootstrap = new WorkerClient("bootstrap");
       await bootstrap.call("init", {
-        identity: fabricFromKeyPairRaw(sessions[0].identity.serialize()),
+        identity: sessions[0].identity.keyPair,
         spaceName,
         apiUrl,
         diagnostics: options.diagnostics === true,

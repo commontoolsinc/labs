@@ -13,7 +13,8 @@ import type { Signer } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { PiecesController } from "@commonfabric/piece/ops";
-import { Runtime } from "@commonfabric/runner";
+import { decomposeSchema, Runtime } from "@commonfabric/runner";
+import { registerSchemaDocument } from "../runner/src/schema-registry.ts";
 import {
   type Options as V2StorageOptions,
   type SessionFactory,
@@ -2644,6 +2645,104 @@ Deno.test("CellBridge.hydratePieceProp renders link-backed handlers only at disc
     JSON.parse(getFileContent(tree, resultIno!, "nested.json")).recordMessage,
     { text: "not callable" },
   );
+});
+
+Deno.test("CellBridge bakes a handler's content-addressed schema into the shim expanded", async () => {
+  // The shim runs later, under `cf exec`, with no registry to resolve
+  // against — so a schema the runtime carries as a `cid:` reference has to
+  // be written into the shim in its expanded form, here and not there.
+  const eventSchema = {
+    type: "object",
+    properties: { text: { type: "string" } },
+  } as const;
+  const { rootRef, documents } = decomposeSchema(eventSchema);
+  for (const [hash, document] of documents) {
+    registerSchemaDocument(hash, document);
+  }
+
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "home", []);
+
+  const handlerLink = {
+    "/": {
+      "link@1": {
+        path: ["recordMessage"],
+        id: "of:handler-target",
+        space: "did:key:zTest",
+      },
+    },
+  };
+  const streamCell = (schema: unknown): FakeCell => ({
+    schema: schema as FakeCell["schema"],
+    get: () => handlerLink,
+    getRaw: () => ({ $stream: true }),
+    asSchemaFromLinks() {
+      return this;
+    },
+    key: () => makeCell(undefined, undefined),
+    sink: () => () => {},
+    isStream: () => true,
+  });
+  // A reference the registry cannot supply stays a reference: the shim
+  // carries it verbatim rather than inventing structure or failing the bake.
+  const absentRef = rootRef.slice(0, -4) + "AAAA";
+  const resultCell = makeCell(
+    { recordMessage: handlerLink, recordUnresolved: handlerLink },
+    {
+      type: "object",
+      properties: {
+        recordMessage: { type: "object" },
+        recordUnresolved: { type: "object" },
+      },
+    },
+    {
+      recordMessage: streamCell({ $ref: rootRef }),
+      recordUnresolved: streamCell({ $ref: absentRef }),
+    },
+  );
+
+  const piece = {
+    id: "of:entity-ref-schema-handler",
+    name: () => "Ref Schema Handler",
+    getPatternMeta: () => Promise.resolve({}),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(resultCell),
+      get: () =>
+        Promise.resolve({
+          recordMessage: handlerLink,
+          recordUnresolved: handlerLink,
+        }),
+    },
+  };
+
+  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+    .loadPieceTree(piece, state.piecesIno, "Ref-Schema-Handler", "home");
+  const hydrated = await (bridge as unknown as {
+    hydratePieceProp: HydratePieceProp;
+  }).hydratePieceProp(pieceIno, "result");
+  assertEquals(hydrated, true);
+
+  const resultIno = tree.lookup(pieceIno, "result");
+  const shimIno = tree.lookup(resultIno!, "recordMessage.handler");
+  const shimNode = tree.getNode(shimIno!);
+  assertEquals(shimNode?.kind, "callable");
+  const shim = new TextDecoder().decode(
+    (shimNode as { script: Uint8Array }).script,
+  );
+  assertEquals(shim.includes('"text"'), true);
+  assertEquals(shim.includes("cid:"), false);
+
+  const unresolvedIno = tree.lookup(resultIno!, "recordUnresolved.handler");
+  const unresolvedNode = tree.getNode(unresolvedIno!);
+  const unresolvedShim = new TextDecoder().decode(
+    (unresolvedNode as { script: Uint8Array }).script,
+  );
+  assertEquals(unresolvedShim.includes(absentRef), true);
 });
 
 Deno.test("CellBridge.hydratePieceProp materializes input and result on demand", async () => {

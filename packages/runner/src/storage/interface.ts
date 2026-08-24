@@ -5,6 +5,7 @@ import type {
 } from "@commonfabric/api";
 import type {
   ClientCommit,
+  CommitClass,
   CommitPrecondition,
   EntityDocument,
   EntityIdListOptions,
@@ -18,6 +19,7 @@ import type {
   SqliteQueryResult,
   SqliteRegisterDiskSourceResult,
 } from "@commonfabric/memory/v2";
+import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
 import type { EntityId } from "../create-ref.ts";
 import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import {
@@ -28,6 +30,7 @@ import {
   type MemorySpace,
   type QueryError as IQueryError,
   type Result,
+  type Revision,
   type Signer,
   type State,
   type The as MediaType,
@@ -44,6 +47,7 @@ import type {
   CfcAddress,
   CfcDeclaredMonotonicityMode,
   CfcDeclaredWideningExemption,
+  CfcDecomposedEnvelopes,
   CfcDereferenceTrace,
   CfcEnforcementMode,
   CfcFlowLabelsMode,
@@ -139,6 +143,15 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * space.
    */
   open(space: MemorySpace): IStorageProvider;
+  /**
+   * Whether SPACE's replica holds server-confirmed verified content for
+   * `cid:<hash>` — the write-side elision seam for schema-document
+   * staging. Confirmed only: a pending local write is not evidence the
+   * server holds the document. Consults an already-open replica and
+   * answers false otherwise; false stages, which is always the safe
+   * direction.
+   */
+  isSchemaDocPersisted?(space: MemorySpace, hash: string): boolean;
 
   /**
    * Observer of FIRST opens per space (server-execution v2 Phase 4): the
@@ -1079,6 +1092,12 @@ export interface IStorageTransaction {
    * instead of materializing novelty/history attestations.
    */
   getWriteDetails?(space: MemorySpace): Iterable<TransactionWriteDetail>;
+  /**
+   * The manager's `isSchemaDocPersisted`, reachable from the transaction
+   * (the staging scan runs inside one). Optional the same way; absent
+   * means never elide.
+   */
+  isSchemaDocPersisted?(space: MemorySpace, hash: string): boolean;
 
   /**
    * Optional read details for the given space: the values this transaction
@@ -1297,6 +1316,35 @@ export interface TransactionSealDestination {
   seal(tx: IExtendedStorageTransaction): Promise<Result<Unit, CommitError>>;
 
   /**
+   * The HOME space of the wave this destination seals into (the space
+   * the serving loop serves). The send site's LT1-vs-outbox decision
+   * reads it: an emission targeting THIS space rides the wave's own
+   * commit (LT1's same-space arm), any other space stages the outbox's
+   * cross-space append (events.md §2; protocol.md §2b). The SpaceServer
+   * and the wave accumulator both expose it; a destination that names
+   * none (bare test doubles) leaves the send site on the sending cell's
+   * own space as the proxy — a same-space-only harness shape. An
+   * outbox-capable destination ({@link stageOutboundAppend} present)
+   * MUST name it: the send site refuses the decision rather than
+   * guessing (a wrong guess is the pre-fix cross-space raw write).
+   */
+  readonly space?: MemorySpace;
+
+  /**
+   * Stage a cross-space event append onto the CURRENT wave for the run
+   * owning `tx` (events.md §2's cross-space arm; serving-loop.md §5):
+   * the entry becomes a durable outbox row inside the wave's own store
+   * transaction — iff the run's contribution survives the wave commit —
+   * and the acting identity travels WITH it. The send site (cell.ts's
+   * serving branch) dispatches here whenever a served run's emission
+   * targets a space other than {@link space}.
+   */
+  stageOutboundAppend?(
+    tx: IExtendedStorageTransaction,
+    row: OutboxAppendRow,
+  ): void;
+
+  /**
    * Take ownership of a sealed transaction's post-commit effects
    * (server-execution v2 stage G, serving-loop.md §3/§5): the loop hands
    * external effects to the OUTBOX post-wave-commit — never at seal
@@ -1316,6 +1364,15 @@ export interface TransactionSealDestination {
 }
 
 export interface IExtendedStorageTransaction extends IStorageTransaction {
+  /**
+   * Stages `cid:<rootHash>` and its referenced closure into this
+   * transaction from the realm registry, with per-transaction dedupe and
+   * the confirmed-persistence elision (see ExtendedStorageTransaction).
+   * Required: every schema-document write rides this seam, so the
+   * dedupe, the elision, and the closure recursion cannot be bypassed by
+   * a caller writing documents itself.
+   */
+  stageSchemaDocClosure(space: MemorySpace, rootHash: string): void;
   tx: IStorageTransaction;
 
   /**
@@ -1402,6 +1459,8 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * Anti-downgrade pinned: once enabled, disabling throws.
    */
   setCfcTriggerReadGating(enabled: CfcTriggerReadGating): void;
+
+  setCfcDecomposedEnvelopes(enabled: CfcDecomposedEnvelopes): void;
   /**
    * Set the exchange-rule policy evaluation dial (Epic B5, spec §4.4.5).
    * Anti-downgrade pinned: once `enforce`, weakening throws.
@@ -2162,9 +2221,11 @@ export type EventAppendDeliveryOutcome =
 export interface ISpaceReplica extends ISpace {
   /**
    * Return a state for the requested entry or returns `undefined` if replica
-   * does not have it.
+   * does not have it. The state carries `since`, the commit sequence the
+   * entry's document last stood at in this space, so two entries read from
+   * one replica can be ordered against each other.
    */
-  get(entry: BaseMemoryAddress): State | undefined;
+  get(entry: BaseMemoryAddress): Revision<State> | undefined;
 
   /**
    * The doc's visible document (confirmed + this replica's pending
@@ -2176,6 +2237,27 @@ export interface ISpaceReplica extends ISpace {
    * exactly the pre-stage-A read.
    */
   getDocument(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): EntityDocument | undefined;
+
+  /**
+   * The doc's NON-speculative document: confirmed state plus only the
+   * durable pending layers (own commits awaiting their verdict),
+   * skipping client speculation overlay layers (entries sealed
+   * `speculative: true` — speculation.md §1). This is the state a CFC
+   * internal-verifier read of a blind UI-input write transaction bases
+   * on (RULED 2026-08-21; verification-coverage.md OW47, second
+   * producer): the verifier verifies the durable policy state the
+   * server will enforce against — a speculation layer never reaches
+   * the wire — and the value read here matches the basis `buildReads`
+   * names for such reads (speculative layers excluded). Optional:
+   * implementations without a speculation overlay may omit it, and
+   * readers fall back to {@link getDocument}, whose view is then
+   * identical.
+   */
+  getNonSpeculativeDocument?(
     id: URI,
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
@@ -2290,11 +2372,21 @@ export interface ISpaceReplica extends ISpace {
    * promotion keeps the echo alive, exactly speculation.md §4 step 3's
    * "acked AND W ≥ that commit's seq" condition, evaluated on replica
    * state instead of tracked acks.
+   *
+   * `coverClass` is the covering commit's class where the replica knows
+   * it (the arrival-witness predicate, RULED 2026-08-22: a cover AT an
+   * entry's floor witnesses arrival only when derived-class). Undefined
+   * — an OFF-arm or pre-predicate frame, or a fake in tests — reads as
+   * "class unknown", which never witnesses arrival at the floor.
    */
   speculationRetirementView?(
     id: URI,
     scope?: CellScope,
-  ): { confirmedSeq: number; pendingLocalSeqs: number[] };
+  ): {
+    confirmedSeq: number;
+    coverClass?: CommitClass;
+    pendingLocalSeqs: number[];
+  };
 
   /**
    * The store seq a local commit's accept committed at (speculation.md

@@ -3,6 +3,10 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -174,6 +178,7 @@ describe("PatternManager program persistence", () => {
       undefined,
       seed,
     );
+    writeSeedEnvelopeDoc(seed, space);
     seed.writeOrThrow({
       space,
       id: sourceCell.getAsNormalizedFullLink().id,
@@ -183,7 +188,7 @@ describe("PatternManager program persistence", () => {
       value: sourceCell.get(),
       cfc: {
         version: 1,
-        schemaHash: "confidential-pattern-source",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{

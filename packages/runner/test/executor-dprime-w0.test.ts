@@ -113,6 +113,21 @@ const NESTED_PUBLISH_PATTERN = [
   "});",
 ].join("\n");
 
+/** OW51 option-3 contract pin: a computed whose `src` argument holds a
+ * stored LINK to a doc NOBODY has written — a genuine unresolved input
+ * behind a followed hop, so the served run is REFUSAL-DISPOSED with the
+ * dead-end doc's read registered. A FOREIGN writer later creates the
+ * doc; the registered read must re-fire the disposed run. */
+const FOREIGN_ARRIVAL_PATTERN = [
+  "import { computed, pattern, Writable } from 'commonfabric';",
+  "export default pattern<",
+  "  { n?: number; src?: Writable<string> },",
+  "  { view: string }",
+  ">(({ src }) => ({",
+  "  view: computed(() => 'view:' + (src!.get() as string)),",
+  "}));",
+].join("\n");
+
 /** T2′ (isolated): a HANDLER writes a LINK to a computed it never reads
  * (`slot.set(hiddenCell)` — the link-tool shape); `hidden` is exposed
  * nowhere else, so it is reachable only through the link the wave writes. */
@@ -1277,6 +1292,90 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
     expect(walkRuns()).toBe(0);
     bobCancel();
     aliceCancel();
+  });
+
+  it("OW51 refusal re-trigger (the RULED option-3 contract): a refusal-disposed served run re-fires when the awaited doc arrives from a FOREIGN writer — a disposed instance is CLEAN and every root-level re-arm keeps clean instances, so only the refusal's registered dead-end read can re-fire it; it does, and the value lands", async () => {
+    // The disposition under pin (speculation.md §2, RULED 2026-08-21):
+    // a refusal-disposed run re-triggers "when any of the reads so far
+    // change (just like a regular call)" — the arriving dead-end doc
+    // included. The root-level machinery is structurally unable to
+    // deliver this: a disposed run finishes CLEAN (`fanOutRunFinished`
+    // — the ruled interim output `undefined` IS its current value), and
+    // both root-level re-arms (`invalidateActionsForDemandRoots`, the
+    // arrival currency check) mark the node invalid with
+    // `fanOutInstances: "keep"`, which re-runs only NOT-clean
+    // instances. The ONLY path from the write to the re-run is the
+    // refusal's own registered read: the disposed run's committed log
+    // (dead-end read included) joins the node's union subscription, and
+    // the write's cause-bearing dirty un-cleans exactly the covered
+    // instances. The writer is FOREIGN — a third session that watches
+    // nothing and merely writes the doc; the target is no piece's
+    // demand root, so no arrival re-arm ever names it.
+    //
+    // Load-bearing seams (mutation-verified, recorded in the OW51
+    // build report §8.4): M-CLEAN — remove `dirtyFanOutKey`'s
+    // `clean.delete`, so a cause-bearing dirty can no longer un-clean
+    // a disposed instance — and this landing times out. M-UNION (the
+    // #6179 review's sharper kill) — drop zero-write logs from
+    // `fanOutUnionLog`, and only THIS pin goes red: the union
+    // subscription never learns the disposed run's dead-end read and
+    // the foreign arrival re-fires nothing. (The refusal-disposed
+    // run's tx COMMITS through the ordinary path — §8.1 — which is
+    // exactly why its log reaches the union subscription at all.)
+    const setup = await standUp({
+      names: { arg: "dp-f-arg", result: "dp-f-result" },
+      pattern: FOREIGN_ARRIVAL_PATTERN,
+      clients: [aliceSigner],
+      // deno-lint-ignore require-await
+      argExtras: async (alice) => {
+        const target = alice.getCell<string>(
+          space,
+          "dp-f-target",
+          { type: "string" } as never,
+        );
+        return { src: target };
+      },
+    });
+    const { engine } = setup;
+    // Quiesce: the served run read `src` through the stored sigil, the
+    // walk followed the hop and dead-ended at the unwritten target doc,
+    // and the run was REFUSAL-disposed — output undefined, no landing.
+    await servingRuntime!.idle();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(instanceHolds(engine, "space", '"view:')).toBe(false);
+    // The demand registry covers the piece (alice watches the result
+    // root); the target doc never becomes a demanded ROOT of the piece.
+    expect(
+      demandRows().some((r) => r.id === setup.resultId && r.root),
+    ).toBe(true);
+    const traceBefore = servingRuntime!.scheduler.getActionRunTrace().length;
+    // The FOREIGN writer: a third session that watches nothing writes
+    // the awaited doc.
+    const carolClient = openClient(carolSigner);
+    const carolTarget = carolClient.runtime.getCell<string>(
+      space,
+      "dp-f-target",
+      { type: "string" } as never,
+    );
+    await carolTarget.sync();
+    {
+      const tx = carolClient.runtime.edit();
+      carolTarget.withTx(tx).set("hello");
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await carolClient.runtime.idle();
+    await carolClient.runtime.storageManager.synced();
+    // The arrival re-fires the DISPOSED run through its registered
+    // read, and the derived value lands.
+    await waitUntil(
+      () => instanceHolds(engine, "space", '"view:hello"'),
+      "the disposed run to re-fire on the foreign arrival",
+    );
+    expect(
+      servingRuntime!.scheduler.getActionRunTrace().length,
+    ).toBeGreaterThan(traceBefore);
+    expect(walkRuns()).toBe(0);
+    setup.cancel();
   });
 
   // T2′ (cross-piece) and T3′ (array growth): the ONE-PUSH-LATE structural

@@ -6,13 +6,16 @@ import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-
 
 import { decomposeSchema } from "../src/schema-decompose.ts";
 import { registerSchemaDocument } from "../src/schema-registry.ts";
-import { setContentAddressedSchemasConfig } from "../src/schema-doc-config.ts";
+import {
+  resetContentAddressedSchemasConfig,
+  setContentAddressedSchemasConfig,
+} from "../src/schema-doc-config.ts";
 import { externalizeSyncSelector } from "../src/storage/v2-watch.ts";
 
 describe("v2-watch", () => {
   describe("externalizeSyncSelector()", () => {
     afterEach(() => {
-      setContentAddressedSchemasConfig(false);
+      resetContentAddressedSchemasConfig();
     });
 
     const schema: JSONSchemaObj = {
@@ -27,6 +30,7 @@ describe("v2-watch", () => {
     };
 
     it("returns the selector unchanged with the flag off", () => {
+      setContentAddressedSchemasConfig(false);
       const selector = { path: [], schema } as const;
       expect(externalizeSyncSelector(selector, () => true)).toBe(selector);
     });
@@ -89,6 +93,7 @@ describe("v2-watch", () => {
     });
 
     it("inlines a ref-bearing schema even with the flag off", () => {
+      setContentAddressedSchemasConfig(false);
       const doc: JSONSchemaObj = {
         type: "string",
         title: "vintage-client-inline",

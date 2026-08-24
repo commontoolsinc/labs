@@ -154,6 +154,15 @@ export type ServingLoopStats = {
    * cannot open (disk trouble, or a provisioning target with an
    * unusable path). */
   foreignEngineFailures: number;
+  /** EXPLICIT WARM REQUESTS issued (serving-loop.md §1's third
+   * activation trigger; RULED 2026-08-21): one per foreign provisioning
+   * batch a wave durably committed — the serving-side provisioning path
+   * telling the host that staged setup landed in another space, so a
+   * parked, SESSIONLESS target activates and derives it (the
+   * setup-after-park ordering race's fix — the home-profile reload
+   * residual). Counted at issue; an already-active target consumes the
+   * request as a demand-union no-op. */
+  warmRequests: number;
   /** Server-execution v2 fan-out stage B (design §B5, RULED 2026-08-16
    * accept-and-count): derivation runs under the wave-level FALLBACK
    * identity — an action NOBODY demands with an identity — that
@@ -219,6 +228,13 @@ export type ServingLoopStats = {
     demandPassMs: number;
     pushGrowthWakes: number;
     watchWakes: number;
+    /** Demand-pass wakes from WARM captures (the explicit warm
+     * request's staged instances entering the tenure's warm demand,
+     * serving-loop.md §1; RULED 2026-08-21) — counted apart so
+     * `watchWakes` keeps meaning exactly the session-watch notifies.
+     * Like the other wake counters, counts notifies before the grace
+     * coalescing. */
+    warmWakes: number;
   };
   /** SERVER SETTLE per authored input (serving-loop.md §7; stage-C design
    * §6 W4's metric): from the authored commit's ADMISSION on the server
@@ -302,6 +318,21 @@ export type ServingLoopStats = {
      * that grows without `processed` settling names a drain copy that
      * never completes. */
     drainInFlightSkips: number;
+    /** OW45 arm-B round: entries stuck at the drain's PRE-QUEUE
+     * deferral barrier (a lagging sidecar view, a failing sidecar
+     * sync, or a queue-time throw — the third under its own
+     * `queue\0`-prefixed streak key, since the view check clears the
+     * bare eventId before the queue attempt) for
+     * `EVENT_PREQUEUE_STUCK_AFTER` consecutive passes —
+     * counted once at the crossing, per blocking key, mirroring
+     * `structureLoadStuck`. Neither barrier arm reaches the queued
+     * class's `#eventDeferrals`, so without this the only detection is
+     * grepping warn logs. The streak also WARNs at each doubling. A
+     * §2-conforming hardening escape (a persistent streak becomes a
+     * DROP/ERROR notice IN ARRIVAL POSITION, lifting the barrier
+     * order-preserved — the §5 pattern the queued class has) is the
+     * register's owed follow-up on the OW45 row. */
+    preQueueDeferralStuck: number;
     /** Stage C build W3, (α1) — events.md §4's RULED one-entry-one-
      * completed-run sentence: LT1 same-space in-process copies (`served
      * !== undefined && served.streamEntry === undefined`) the flush
@@ -353,6 +384,39 @@ export type ServingLoopStats = {
     budgetDeferrals: number;
   };
   lease: { held: number; lost: number };
+  /** OW45 arm-B server-ensure stage 1 (design PR #6209 §10): the
+   * SpaceServer's space-root ensure — one lease-guarded owed step per
+   * tenure (existence + freshness, no start). Counting caveat (review
+   * F4, recorded): `created`/`reconciled` count at SEAL-ACCEPT — the
+   * ensure's transactions resolve when the wave admits them, and the
+   * engine write rides the wave commit — so a wave later dropped
+   * whole (lease-lost abort, replay refusal) leaves a count with no
+   * durable write behind it. The MIRROR direction exists too
+   * (delta-review N2, confirmed live): a deadline-detached ensure that
+   * later completes is a durable write with NO count — `failures`
+   * carries the deadline while `runs`/`created` stay 0 and the root
+   * lands. Stats-only in both directions: the next tenure's ensure
+   * re-resolves and heals the accounting; triangulate against
+   * `waves`/`lease.lost` when a count looks off. */
+  rootEnsure: {
+    /** Completed ensure runs, any outcome. */
+    runs: number;
+    /** Runs whose creation transaction materialized the root. */
+    created: number;
+    /** Runs whose freshness reconcile moved the root ("updated" or
+     * "repaired-provenance" from the awaited default-root check). */
+    reconciled: number;
+    /** Fail-closed skips: the space's ACL resolved no concrete owner
+     * (missing, invalid, retracted, ANYONE-only). The tenure serves
+     * without a root ensure and NEVER substitutes the service DID
+     * (OW53's ruled shape); the next tenure retries. */
+    skippedNoOwner: number;
+    /** Ensure attempts that threw (source resolve, compile, creation,
+     * or resolution failure). Counted AND warned; cleared for the
+     * tenure — the next tenure retries — so a deterministic failure
+     * cannot spin the wave loop. */
+    failures: number;
+  };
 };
 
 export const emptyServingLoopStats = (): ServingLoopStats => ({
@@ -377,6 +441,7 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
   reactivationBackoffs: 0,
   foreignWriteRefusals: 0,
   foreignEngineFailures: 0,
+  warmRequests: 0,
   undemandedNarrowingRuns: 0,
   earlyEmitRefusals: 0,
   demandArrivals: 0,
@@ -395,6 +460,7 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
     demandPassMs: 0,
     pushGrowthWakes: 0,
     watchWakes: 0,
+    warmWakes: 0,
   },
   settle: { series: [], dropped: 0 },
   settleAdvances: { count: 0, lastDelta: 0, series: [], dropped: 0 },
@@ -404,6 +470,7 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
     coalescedPerWaveMax: 0,
     skippedIdempotent: 0,
     drainInFlightSkips: 0,
+    preQueueDeferralStuck: 0,
     lt1LeftoversPurged: 0,
     lt1LateSealsRefused: 0,
     orphanDeliveriesRefused: 0,
@@ -411,6 +478,13 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
   memo: { hits: 0, misses: 0, inflight: 0 },
   outbox: { queued: 0, completed: 0, failed: 0, budgetDeferrals: 0 },
   lease: { held: 0, lost: 0 },
+  rootEnsure: {
+    runs: 0,
+    created: 0,
+    reconciled: 0,
+    skippedNoOwner: 0,
+    failures: 0,
+  },
 });
 
 /** The `derivedCommitsBySpace` cap (the settle.series bounding

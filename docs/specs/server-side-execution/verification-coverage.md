@@ -2818,13 +2818,12 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   persist do not carry the carriage (no run context is reachable at
   those triggers today) — their foreign-write case stays fail-closed
   refused; if live gates surface residual refusals from them, that is
-  the named follow-up, not a re-widening. (iii) CFC AUTHORSHIP LABELS
-  (`authored-by`/`represents-principal`) on served rows still carry
-  the SERVICE signer: they come from the runtime-level CFC trust
-  snapshot (`storageManager.as`), NOT the memory-plane carriage this
-  build landed — so cfc-group-chat-demo's CI shape does NOT lift on
-  this build alone; per-run CFC attribution is a CFC-owner seam
-  (OW34's family), flagged rather than filled. (iv) the ruled
+  the named follow-up, not a re-widening. (iii) CFC AUTHORSHIP LABELS on served rows carrying the SERVICE
+  signer (the runtime-level ambient trust snapshot, not this build's
+  memory-plane carriage): CLOSED-BY **OW59** (2026-08-21, the
+  OW34-family implementation train — per-run trust snapshots attached
+  at the SpaceServer's run stamp; design RULED 2026-08-21). The
+  cfc-group-chat-demo lift rode that train, not this build. (iv) the ruled
   ACL-only-read allowance is exercised as the server-side owner
   resolution at session.open; no raw ACL-doc query surface was built
   (nothing needs one — smaller surface, permissive clause). (v) SHARED
@@ -2855,9 +2854,11 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   Acceptance beyond the executor pins rides the PR's CI ON lanes and
   the flip train's live gates (the lunch/served-wish log criteria and
   the store dump), which stay the flip PR's bar; the
-  `home-profile-reload-durability` and `cfc-group-chat-demo` ON skips
-  stay listed — they lift jointly with OW45 and OW47 (+ the CFC
-  attribution residual above).
+  `home-profile-reload-durability` ON skip was LIFTED 2026-08-21 (the
+  explicit warm request — OW45's row carries the ruling and the 6/6
+  gate), and the `cfc-group-chat-demo` skip was LIFTED the same day
+  by OW59 (the OW34-family train closed the CFC-attribution residual
+  above and removed the entry on its green ON gate + store audit).
 - OW32 — the CLIENT-side `scheduler-non-settling` loop under the full
   ON posture in the two-browser journeys — the EVIDENCED mechanism of
   the two two-browser gates' red, UNATTRIBUTED (P7 independent review
@@ -3064,6 +3065,120 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   ExecutorHost) are single-process harnesses, OFF by construction in
   either lane. Trigger: with OW32's triage (the same "client under ON
   never settles/renders" family); the flip PR needs the skip list EMPTY.
+  **TRIAGED (2026-08-22, main 51350077e — every member re-reproduced
+  at the true ON topology before theorizing; report:
+  docs/history/plans/server-execution-v2/optimize/ow33-triage-report.md):
+  (b) and (c) are HEALED — 12/12 green (10 on the ON-built binary,
+  fresh store, posture probed per run; both steps executing) — their
+  STEP skips LIFTED; (d) is HEALED (counter 50/50, 5/5). The
+  UNTRIAGED demand question is DISCHARGED: `pull()`'s sync joins the
+  session's tracked set and the server serves both instances durably
+  every run — the ruled `.pull`-for-round-one flow works. (a)
+  persists as a rotating flake (4/8 original-file runs red in the
+  triage series; 1-2 of 8-10 in instrumented variants) whose
+  failing read alternates between the new and the resumed instance,
+  ROOT-CAUSED to the speculation overlay's ARRIVAL GATE
+  (speculation.md §4, RULED 2026-08-16): the
+  implementation witnesses arrival as `confirmedSeq(writtenDoc) >=
+  floor`, and a first-run speculation's computed docs carry an
+  AUTHORED STRUCTURE write at exactly the floor seq — the client's
+  OWN setup for the new instance, a PRIOR session's setup for the
+  resumed one. Store-proven invariant (both decoded red stores, both
+  arms; independently reproduced by the #6195 review): the covering
+  watermark reaches the client at least one frame BEFORE the
+  victim's served value — via a values-free advance commit or a
+  values wave preceding the victim's, or pre-existing for the
+  resumed arm; never an exhausted wave, which freezes
+  `derivedThrough` (space-server.ts) — and the only confirmed cover
+  at/above the floor is that authored structure write, so the entry
+  retires on it while the served value is frames away (40–260 ms
+  observed) and the
+  bare read falls in the hole. Fix direction determined by the ruled
+  sentence; the witness PREDICATE is a design fork FLAGGED for the
+  owner (five candidates, their edges, and a recommendation:
+  optimize/ow33-arrival-witness-fork.md) — no build until ruled; the
+  runner skip stays re-tensed, lift bar 10/10 at the true ON
+  topology once the ruled predicate lands. The topics-navigation
+  sibling's recorded fail-fast myName validation red did NOT
+  reproduce (9/11 green at the true topology); its residual 2/10
+  flake was a different surface — the controller's addTopic ECHO run
+  dropped at the stream-action validation guard (`$ctx` resolving
+  without the required derived `crossrefs` at send time; topics
+  still created correctly server-side: store exactly-two, events
+  28/28 appended==processed) plus the unbarriered `topicAt` capture.
+  LIFTED (the review pass, 2026-08-22): the capture is barriered on
+  both created topics being readable (waitForCellValue — the
+  waiting-in-tests non-browser shape; the red-first evidence is the
+  recorded 2/10 red series, the exact mechanism the barrier closes),
+  10/10 green at the true ON topology WITH the echo-drop occurring
+  in 2 of the 10 gate runs and absorbed — the smell persists and is
+  now tracked as its own row, OW60 (the stream-action validation
+  guard's silent echo skip; flagged there: whether it should take
+  the OW51 refusal+retrigger disposition is a spec decision — #6179
+  scoped the refusal to the schema-aware lazy READ path). The
+  patterns skip entry is REMOVED.** **RULED AND CLOSED (2026-08-22):
+  the arrival-witness fork is RULED — owner ("agreed with all the
+  recommendations above, continue"): candidate (B) of the fork memo
+  adopted — a confirmed cover witnesses arrival STRICTLY ABOVE the
+  entry's floor whatever its class, and AT the floor only when the
+  covering commit is DERIVED-class; unknown class at the floor fails
+  CLOSED toward the standing echo (value-identical in the observed
+  arms — an unknown-class foreign cover may differ, and the next cover
+  settles it); seq-keyed (C)
+  the ruled fallback, not needed — and BUILT (speculation.md §4's
+  arrival-witness predicate sentence, binding): the sweep's gate in
+  `overlay-destination.ts` consults the covering commit's class at
+  equality, threaded as the optional `coverClass` session-frame
+  field (populated only under the flag — the OFF wire is
+  byte-identical, key-set-pinned in `v2-cover-class-frames.test.ts`)
+  through the replica's confirmed record (frames on integrate, the
+  same-seq echo preserving a known class, `authored` at own-transact
+  promotion, `derived` at the sealed wave confirm) into
+  `speculationRetirementView`. Red-first: both observed arms
+  replayed as deterministic scripted pins from the decoded store
+  shapes (run 5's new arm — authored setup cover at floor 11,
+  values-free advance, derived values at 13; run 1's resumed arm —
+  pre-existing watermark at 7 — the base gate retired on the first
+  covering watermark after seal, not literally at seal), red at base
+  (entryCount 0 — the entry retired on the authored cover), green
+  with (B); the elision posture, the legitimate at-floor derived
+  retirement, and above-floor-any-class pinned both-sides;
+  mutation-checked in both directions (class-demanded-above-floor
+  kills 5 pins including 3 pre-existing arrival pins;
+  equality-never-witnesses kills the at-floor-derived pin). The
+  runner skip entry is LIFTED — the LAST file-level skip — on
+  **10/10 green at the true ON topology** (ON-built binary sha256
+  `d3ef4a47f4354977…`, fresh store per run, posture probed per run:
+  `shellServerExecutionDefine === "true"` + `servingLoop` present;
+  1-min loads 4.2–6.5; per-run stores show the loop serving — run
+  7: 7 authored + 13 derived commits). Suites at the fix head:
+  runner 1280 (7359 steps), memory 564 (274 steps), skips pins
+  17/17, repo typecheck/fmt/lint green. Posture notes: a
+  `system`-class cover at the floor fails closed via `!== "derived"`
+  (the predicate demands the derivation itself, not merely a
+  server-side write — conservative, converging on the next cover);
+  the `queryGraph`/`watch.set` snapshot surface also carries
+  `coverClass` under the flag (`EntitySnapshot`), and no query-result
+  reader consumes it today — the consumed surface is the session-frame
+  upsert into the replica's confirmed record; a same-seq frame whose
+  class arrives LATE (undefined to defined) fires the arrival re-sweep
+  (the mixed-window gap — an entry failed closed at its floor is not
+  stranded until an unrelated commit). OW60 is NOT closed by this
+  predicate, as the fork memo said: a dropped echo run seals no
+  overlay entry, so no witness predicate can reach it.**
+  **NAMED RESIDUAL (2026-08-22, flagged not built — owner to rule):
+  the at-floor-derived edge.** An event-handler echo on a RESUMED
+  instance whose floor EQUALS the prior session's wave-commit seq
+  retires through the shared gate's backstop on that derived-class
+  cover with no NEW consequence arrived — a flash-revert window until
+  the served consequence lands. Mechanism demonstrated in review;
+  reachability unproven; strictly less aggressive than the base gate
+  (which retired on ANY cover there). Confirming instrument: a
+  resumed counter-click at the true ON topology — check whether the
+  sealed echo's floor equals the target's confirmed cover, and
+  measure the revert window. Disposition option on file (not built):
+  hybrid (B)+(C) at equality — derived-class AND cover seq not in the
+  entry's basis-seq set. The owner rules whether to build it.**
 
 Delta 2026-08-15 — Phase 7 (the flip; the phase PR):
 
@@ -5132,9 +5247,13 @@ supply; OW29/OW32/OW34 closed):
   converge on the register's already-owed **OW31/§2b write-authority
   carriage build** (cfc-group-chat-demo's served rows carrying the
   SERVICE identity; home-profile's `compile-cache/writeback` fallback
-  refused without carriage): NO new row is minted for what OW31
-  already owes — those skip entries point at OW31, which now carries
-  two CI surfaces as its lift evidence. A ninth CI-red family member,
+  refused without carriage): NO new row was minted at the gate for
+  what OW31 already owed — both skip entries pointed at OW31 then.
+  The group-chat surface has since split and closed: its memory-plane
+  carriage half closed with OW31's build, its CFC-attribution half
+  (the service-identity authorship labels) closed by **OW59** (the
+  OW34-family train), which lifted that skip — so OW31's remaining CI
+  surface is home-profile's, riding OW31/OW45. A ninth CI-red family member,
   `cfc-group-chat-demo-multi-runtime`, was the test HARNESS's own
   mixed posture (the self-hosted OFF-arm standalone server refusing
   the ON workers' event appends deterministically) — fixed IN the
@@ -5150,8 +5269,20 @@ supply; OW29/OW32/OW34 closed):
   `tasks/server-execution-on-skips.ts` (at the gate: SIX file entries
   + TWO step-level entries; the skip-list test pins the CURRENT set —
   both step entries were lifted the same day, cellset-lww with OW47's
-  close and convergence-storm with OW52's, leaving the six file
-  entries); they gate the
+  close and convergence-storm with OW52's, the group-chat file entry
+  was lifted with OW59's close, default-app's file entry converted
+  to its OW45 reload-step entry with OW51's close,
+  home-profile-reload-durability's file entry lifted the same day too
+  with the explicit warm request (OW45's row), and profile-embed's
+  file entry fell with OW47's re-close, leaving TWO file
+  entries — the sqlite identity pair — beside default-app's step
+  entry; then both sqlite entries fell with OW53's close and
+  topics-navigation with the OW33 triage's review pass (both
+  2026-08-22), leaving default-app's step entry alone — which STAYS
+  (2026-08-22): the test-side pass closed the step's own interim-race
+  half and ISOLATED the residue as the OW45 row's real arm-B client
+  starvation, so the entry now names that product charge, not a test
+  flake); they gate the
   FLIP — whose bar is the list EMPTY — not the land. Rows, one per
   mechanism cluster; each row's trigger names the skip entry it
   lifts:
@@ -5213,12 +5344,335 @@ supply; OW29/OW32/OW34 closed):
     shelf-ready start (client-side heal riding `replicateClosures`
     under the client's own identity, green red-first runner pins,
     serving posture pinned fail-closed; marked do-not-merge).
-    Trigger: lifts the
-    `integration/home-profile-reload-durability.test.ts` ON skip
-    JOINTLY with OW31's cf:module cross-space run residual — S-A and
-    S-B are both MERGED (9d989c0c1, b27a2fb43), and the optimize
-    pass's joint preview run had step 1 green in ~10 s with step 2
-    red ONLY on that residual.
+    Trigger DISCHARGED for the home-profile half — the
+    `integration/home-profile-reload-durability.test.ts` ON skip is
+    LIFTED (2026-08-21). The last blocker was not a carriage residual:
+    the §2b derivation-carriage scoping pass
+    (`optimize/2b-derivation-carriage-scope.md` §4) decomposed step
+    2's red to a SETUP-AFTER-PARK ORDERING RACE — authored setup
+    landing in a parked, sessionless space activates nothing (T11.Q7's
+    designed parking) and nothing ever re-demands it (the post-reload
+    summary reads the missing computed through the HOME space's free
+    cross-space read, which registers no target-side demand) — and
+    flagged three candidate mechanisms for the owner. **RULED
+    2026-08-21 (owner: "three decisions: i agree with all
+    recommendations")**: implement serving-loop.md §1's third,
+    then-unimplemented activation trigger — the EXPLICIT WARM REQUEST,
+    issued by the SERVING-SIDE PROVISIONING PATH when it stages setup
+    into a parked space (not a synthetic client session, and not
+    S-C-shape healing). BUILT the same day: the wave commit step
+    reports every durably committed foreign provisioning batch as a
+    warm-marked notice; the host activates a sessionless target on it
+    (the carries-events arm's sibling; T11.Q7's write-alone parking
+    untouched); the target tenure takes the staged instances as
+    identity-less warm demand, so the setup derives. The build also
+    closed the latent sink localSeq collision the warm activation
+    exposed (per-space counters under the process-stable holder
+    session — a home sink's foreign batches consumed pairs the
+    target's own sink later re-minted, killing its waves as replay
+    mismatches; now one process-global counter). Red-first:
+    `executor-warm-request.test.ts` (watched failing at the
+    activation wait, then at the derivation on the collision, then
+    green end to end). Lift evidence: 6/6 fresh-store ON gate runs at
+    the fix head, BOTH steps green in 12–24 s (the prior shape: step 1
+    ~10 s green, step 2 red at 5m+ on "Alan Turing"), posture verified
+    and loads (4.3–5.9) recorded per run, `warmRequests` 4–6 per run
+    in the live stats. The row's REMAINING charge: it gates
+    `integration/default-app.test.ts`'s "persist and reload every
+    rapidly created notebook note" STEP — the OW51 fix (2026-08-21)
+    lifted that file's FILE skip and UNMASKED this same
+    reload-durability surface there — the reloaded notebook's
+    `noteCount` reads `undefined` past the step's wait (1/10 local ON
+    at the OW51 build; re-measured 2026-08-22 by the warm-request P-1
+    probe as heavily LOAD-SENSITIVE: 5/10 red on pure main and 7/10
+    red on the warm-request head — statistically indistinguishable at
+    n=10 — on a shared box at loads 3-16, every red the same
+    `undefined`-vs-7 shape, and the warm request structurally INERT in
+    this flow: `warmRequests` 0 in 10/10, the notebook stages no
+    foreign provisioning). The test-side close RAN 2026-08-22 and
+    SPLIT that charge in two — the red population was BIMODAL and the
+    old single-shot shape structurally could not tell the halves
+    apart (both print undefined-vs-7 at one instant). (i) CLOSED —
+    the step's own interim race: its assertions now bind to the
+    summary the `waitForCondition` predicate approves and hands back
+    (taken at the instant the condition held, re-approved after the
+    sync barrier; the failure path's one-shot read is
+    diagnostics-only), absorbing the OW51-ruled
+    interim-undefined-then-retrigger disposition the old post-wait
+    single-shot read kept racing — the waiting-in-tests trap. Watched
+    red-first at the true ON topology (ON-built binary sha256
+    00fcf833…, deliberate load ~11-14): the old shape red in 20 s
+    with the failed read's own dump showing `noteCount` 7 beside
+    `argumentNotesLength` undefined and the RENDER fully healthy
+    (7/7/7) — the interim landing on one field of one read while the
+    product was correct. The fixed step then ran 16 greens across the
+    day's regimes (fix-loop battery 10/10 loads ~5-7; gate-attempt-1
+    g01-g04 4/4 loads 6-9; h02-h03 at 9.6-11.5). Mutation-checked:
+    suppressing the seventh create reds the fixed wait at its
+    stuck-condition net with the true 6-vs-7 state in the
+    diagnostics — the value-wait cannot vacuously green. (ii) OPEN,
+    and now ISOLATED, STORE-VERIFIED — the row's REMAINING charge,
+    the arm-B client starvation: on the FIXED step at the true ON
+    topology (rebuilt binary sha256 c724d7c6…, fresh store + posture
+    probe per run, shared box with a sibling train churning) the
+    value-wait itself starves — gate-attempt-2 red 3/5: h01 (ambient
+    ~7) and h05 (ambient 6.6) with the client's `readCell` of the
+    argument's redirect-linked `notes` sticky-`undefined` across the
+    FULL 5-minute net at the predicate's 500 ms re-read cadence
+    while `noteCount` (internal manifest) resolved 7 and the page's
+    reactive render path held ALL SEVEN notes (chips one short at
+    6/7 — the starved doc is the missing chip's own dependency); h04
+    (load spike ~20) the rf2 whole-piece shape — `isNotebook` false
+    with the view id still pointing at the piece: every client read
+    of it (argument, internal manifest, the render's own) returning
+    nothing MID-SESSION, persisting after load fell back to 6.
+    PRECISION (independent review P2, confirmed in code and
+    artifacts): these are FIRST-HYDRATION reads of freshly created
+    served state — the step's only navigation (dispose +
+    `shell.goto` into the fresh space) precedes the notebook's
+    existence, and NO reload sits between the creates and the reads
+    (h01's single post-goto "Await runtime idle" marker precedes
+    every create, nothing between the creates and the red) — so the
+    arm-B repro is CREATE-THEN-READ under serving, not
+    reload-then-read (the true reload surface is the reload shard's,
+    `integration/reload/default-app-notebook.test.ts`).
+    Store-verified in every red: all 7 `/value/notes`
+    appends present, event pipeline healthy (each `event-view-lag`
+    deferral drained in seconds during the create phase, none in the
+    wait window) — ZERO data loss, sticky client-side unresolved
+    reads. Candidate mechanism (recorded, not concluded): the OW51
+    disposition's re-trigger never lands for these reads — a first
+    read in the interim leaves the client cache permanently
+    `undefined` (a first-read lottery, explaining the load
+    sensitivity: wider interim window under load); a poll-retrigger
+    interaction (each 500 ms re-read re-opening the interim) is not
+    excluded, but rf2's OLD-shape saturation stall — the
+    piece-structure read never resolving over a 5-minute net with NO
+    polling predicate — shows the starvation predates the value-wait.
+    Retro-reading P-1: its 1/10-quiet and 5/10-loaded rates were a
+    MIXTURE of the two populations; and the same box ran 14 straight
+    greens before h-phase red 3/5 at the same nominal loadavg — the
+    starvation is environment-coupled beyond what loadavg captures.
+    The step's ON skip therefore STAYS, reworded to the isolated
+    charge (the in-file guard KEPT — unchanged from main except its
+    comment, which now names the product charge; the skips pin test
+    pins the single entry; h06-h10 of the gate incidentally proved
+    the guard skips loudly). OFF control on a default-built
+    binary at the same head, guard in place: 2/2 green (6 s steps).
+    Lift bar: the starvation closes and the FIXED step greens ON
+    10/10 quiet-and-loaded. Measurement-integrity note, recorded
+    because the artifacts are cited: gate-attempt-1 aborted
+    mid-flight when the shared box filled to 0 B and macOS's temp
+    purge deleted the gate workdir (g05 died to `database or disk is
+    full` wave-commit rejections — an environment fault, discarded);
+    attempt 2 re-ran uniformly on a rebuilt binary from a purge-safe
+    workdir, and its h06-h10 burner phase self-invalidated (the step
+    skipped) when the skip ENTRY's restoration landed in the working
+    tree mid-gate — the 3/5 rate is the five valid runs h01-h05.
+    **ARM-B TRIAGE 2026-08-22 (evening): the starvation family is
+    THREE defects — two FIXED red-first, one isolated LIVE and
+    FORKED; the step entry STAYS.** The instrumented bench (the
+    name-draft triage's FORWARD_WORKER_CONSOLE aid + fresh-store
+    harness at merged main) caught two reds in four runs, each a
+    DIFFERENT member: (i) **run b01 — the event drain's deferral arm
+    reordered one user's clicks (FIXED).** Store-verified: the
+    `usedCreateAnotherNote` doc's terminal write is `true` at
+    19:41-equivalent seq 90 AFTER the final Create's clearing `false`
+    at seq 85 — a deferred Create-Another (five `event-view-lag`
+    deferrals logged on its sidecar) consequenced after the
+    later-arrived Create on its own healthy sidecar, violating
+    events.md §2's stated order (per stream commit-seq; across
+    streams arrival). The client read the state correctly — the
+    PRODUCT state was wrong, so the value-wait's 300 s report was
+    faithful. Fix: the drain processes ACROSS sidecars in append
+    commit-seq order and a deferral (view-lag or sidecar-sync
+    failure) is a BARRIER — later arrivals wait behind it — instead
+    of a skip (`space-server.ts` `#drainStreamEvents`); red-first pin
+    watched `["A","B","A"]` pre-fix and green after
+    (`executor-events-down.test.ts` "arrival order across streams",
+    deterministic via a transient sidecar-sync-failure seam; the
+    view-lag arm is the same barrier, pinned through that sibling —
+    the emulated harness cannot hold an async view lag across passes,
+    the OW47-hydration precedent's shape, so the live ON gate remains
+    the view-lag half's bench). (ii) **The walk's
+    absent-hop-target demand hole (FIXED, the register's candidate
+    mechanism made precise).** A server graph walk that dead-ends on
+    a link-hop target absent at evaluation recorded NOTHING for it
+    (`followPointer` returns before `trackVisitedDoc`; the meta-doc
+    loader already tracked its absent targets, with the re-fire
+    rationale in its comment), so the target's birth commit failed
+    the session wake pass's touched check (`trackedIds` derives from
+    DELIVERED entities) and the standing watch never delivered it —
+    while the client's selector tracker legitimately answered every
+    re-read locally after the first pull (a schema-false pull is
+    covered by any registered selector) and `#docPullKicks` is
+    one-shot. On a quiet space (create-then-read ends with a write
+    then pure reads — the store shows the last commit ONE SECOND
+    after the 7th append in every red) no later commit exists to
+    heal, so the absence is permanent for the session: the
+    first-read lottery. Fix: the walk records the dead-end in a MISS
+    SET on the tracked graph state (`TrackedGraphState.missed`,
+    same-space only, fed by the server walk's `onMissingLinkTarget`)
+    — wake-reactivity ONLY, folded into `session.trackedIds` beside
+    the delivered entities at every rebuild/fold site, and consulted
+    by the dirty refresh so the birth re-evaluates and delivers the
+    real document. Deliberately NOT the schema tracker: tracker
+    entries materialize as delivered entities, and putting absence
+    markers for every dangling value link on the wire changed client
+    replica state at scale and broke the deliberate
+    absence-confirmation flow (the list-resume-container-defer
+    harness caught it — the first cut of this fix rode the tracker
+    and wedged that suite's held-transport step; absent ROOTS keep
+    their narrower pre-existing marker contract). Red-first:
+    `v2-watch-absent-arrival.test.ts` — the hop pin watched starving
+    at its 10 s net, both pins green with the fix; the list-defer
+    suite and the (d′) demand-set equality
+    (`executor-dprime-w0.test.ts`) green with the miss-set shape
+    where the tracker-marker shape had broken both. The PR's review
+    pass hardened the lifecycle: a miss carries its REFERRER
+    attribution (the walk hands the dead-ended link's holder to the
+    recorder), a referrer's re-walk releases its previous
+    attributions — so a link edited away retires the miss instead of
+    leaving a stale wake and an unreachable delivery on birth
+    (mutation-killed pin: "retires a miss when its referrer is
+    repointed away") — and a dirtied-but-still-absent miss stays a
+    miss, never the tracker whose entries reach the wire (the sink
+    routing's KILLING pin is the UNIT-isolation test in
+    `v2-query.test.ts`, driving `refreshTrackedGraph` against a bare
+    engine; the integration flicker test binds the no-frame contract
+    end to end). Disclosed
+    ripple (corrected by the adversarial round — the first wording
+    claimed a structure-load park, mechanically wrong: structure
+    loads iterate ROOT keys only and misses emit as NON-ROOT demand
+    rows, so the root filter never sees them and no park or OW46
+    count occurs): misses join `trackedIds` and therefore the (d′)
+    demand rows as non-root entries, whose actual effects are
+    `enterDemandedEntity` — the missing doc's WRITERS become demand
+    roots, mildly beneficial (the docs that would create it get
+    served) — plus a `rearmNotCurrentForDemander` per
+    (key, demander) and demand-union growth; all bounded by the live
+    misses. OWED FOLLOW-UP (recorded by the adversarial round, not
+    built here): the drain's PRE-QUEUE deferral barrier (view-lag,
+    sidecar-sync failure, queue-time throw) never reaches the queued
+    class's `#eventDeferrals`, so events.md §5's DROP hardening does
+    not apply before queueing — detection is the
+    `preQueueDeferralStuck` counter and its doubling warn (added
+    with the round). The §2-CONFORMING escape: a persistent
+    pre-queue streak hardens into a DROP/ERROR NOTICE IN ARRIVAL
+    POSITION — a consequence, so arrival order is preserved and the
+    barrier lifts — the same §5 pattern the queued class has. (iii) **run b04 — the flag-ON client's
+    navigate-deferred piece start dies terminally on the
+    first-hydration race (ISOLATED LIVE, FORKED — the remaining
+    charge).** The h04 whole-piece shape reproduced with the worker
+    console forwarded: the client's deferred start tx REFUSED with
+    `ConflictError: stale confirmed read: computed:… at seq 0
+    conflicted with seq 10` — its basis read the served piece's
+    computed docs PRE-BIRTH while the serving side materialized them
+    — then `pattern-load-error`, then silence; the error arm of the
+    deferred-start commit cancels ownership with NO retry
+    (`runner.ts` ~3453), so the piece never starts client-side, its
+    demand never registers, and every dependent read is undefined
+    for the session (root doc readable via the registry closure —
+    98 stored chip labels — every link hop dead; ZERO
+    `sync-load-failure` lines, excluding the swallowed-pull class
+    for this red). Dispositions and recommendation — (a)
+    retry-on-conflict now, (b) adopt-not-start under ON as the
+    model's destination, (c) heal-on-read re-opens the ruled S-C
+    with new evidence — in
+    `../../history/plans/server-execution-v2/optimize/ow45-armb-client-start-fork.md`.
+    The skip entry therefore STAYS, its reason updated to the
+    refined map; the lift bar is unchanged (the client-start class
+    closes and the fixed step greens ON 10/10 quiet-and-loaded —
+    unreachable while a per-run lottery can kill the client's piece
+    context). Retro-reading the h-runs: h01/h05's converged-but-one-
+    chain shape is the same die-off later in the start walk; rf2's
+    old-shape stall is the die-off at the front; b01's shape hid
+    inside the population as "the product not answering" with the
+    client blameless.
+    **SERVER-ENSURE STAGE 1 BUILT 2026-08-23 (design PR #6209,
+    owner-green-lit; build report
+    `../../history/plans/server-execution-v2/optimize/ow45-armb-server-ensure-stage1-report.md`).**
+    The space-root ensure — existence + freshness, the START not moved —
+    runs at the SpaceServer's activation as a lease-guarded owed step,
+    single-flight STRUCTURALLY (a SpaceServer is single-tenure:
+    `#parkRequested` never resets and the host builds a replacement per
+    re-activation, so the guard's lifetime is the tenure's). The ensure
+    core is extracted into the runner (`ensure-space-root.ts`) and the
+    client controller's creation arm delegates to it (OFF one code
+    path); attribution is owner-resolved fail-closed through the memory
+    server's new `resolveSpaceOwner` (the OW31-ruled service-identity
+    ACL read; the OW59 Q3 caveat's named follow-up — the creation tx
+    AND the freshness half's write arms carry
+    `trustSnapshotForPrincipal(owner)`, both pinned live on the minted
+    transactions; the reconcile arm was the build review's F1 — it
+    shipped first under the ambient SERVICE snapshot, exactly OW59's
+    restage shape, caught by live probe and fixed red-first by
+    threading the ensure's snapshot hook through `checkDefaultPattern`'s
+    two default-root write arms). Design §4(b)'s ACTING-IDENTITY
+    carriage is NOT built (review F3, recorded): the stamp carries no
+    `acting`, so `homeSpacePrincipalFor`/`getHomeSpaceCell` would
+    fail-closed-throw if a served setup resolved home — inert today
+    and consistent with the custom-URL interim, but stage 2's
+    owner-scoped home read needs it built first. With
+    no-owner spaces SKIPPED counted-and-warned (OW53's shape) — plus
+    the measurement-driven SAME-TENURE retry: the live boot order has
+    activation (session-open-triggered) PRECEDE the client bootstrap's
+    genesis ACL commit, so a fresh space's first ensure always finds no
+    owner; the skip therefore latches awaiting-owner and an admitted
+    commit touching the ACL doc re-arms the owed ensure — identity
+    posture unchanged, only the retry cadence moved from next-tenure to
+    owner-became-resolvable (without it, r01 measured the ensure INERT
+    on 4/4 gate spaces; with it, r02 measured the server creating 4/4).
+    The
+    custom-`defaultAppUrl` fork stays UNRULED: stage 1
+    logs-and-uses-the-system-default on fresh non-home creations.
+    Recorded STAGE-2 GATE: the runnability-repair pair (cold-start
+    setup repair + roll-forward heal) did NOT move — the ON client's
+    creation retirement must not ship before it does, or aged spaces
+    brick under ON. What stage 1 changes live: the server wins most
+    creation races from activation onward; the ARM-A refusal class does
+    NOT close (the ON client still creates on the slow path and still
+    deferred-starts on the fast path), so THE STEP'S SKIP STAYS and the
+    lift bar is unchanged. Pins: fresh-space materialization at
+    activation (watched red pre-seat), park/re-activate convergence on
+    ONE root + aged-identity reconcile-before-load across tenures
+    (which also live-caught a FIXTURE class worth naming: a per-tenure
+    localSeqRef re-mints (session, localSeq) pairs and engine replay
+    detection kills the second tenure's waves — the host's shared
+    counter contract, now stated in the suite), the owner-snapshot pin,
+    the fail-closed skip pin (service-DID-fallback mutation killed),
+    the toolshed OFF bootstrap pin (gate-bypass mutation killed), and
+    the piece OFF-arm creation pin (provenance-stamp mutation killed
+    through the delegated controller). Named residual (flagged, not
+    filled): the deferred-start transaction the ensure's creation arms
+    still stamps actor-less bookkeeping — ambient SERVICE snapshot on
+    the child-materialization docs, OW59 Q3's arm — threading the owner
+    through the shared arming machinery is OW59-ruling territory; the
+    same family's second, pre-existing member is `PatternManager`'s
+    compile-cache write-backs minted inside `compilePattern` (escape
+    the stamp hook; enumerated with the flag in the stage-1 report).
+    **SCOPE RULED 2026-08-24 (the owner; verbatim in the stage-1
+    report): production ensures a root for EVERY activated space —
+    per-space discrimination is DEFERRED to its own design work — and
+    tests get an off switch**: `ensureSpaceRoots` on
+    SpaceServer/ExecutorHost options (the ruled in-memory setting) and
+    the toolshed's `SERVER_EXECUTION_ENSURE_SPACE_ROOTS` (literal
+    `"false"` only; garbage fails to production), off = fully inert,
+    pinned both ways. The ruling followed the stage-1 CI board going
+    red across the ON lanes: the ensured root's content-addressed
+    computed cells landed in every fixture space's plain space-cell
+    subscriptions with the root's `cid:` schema docs not
+    delivered-and-verified — an UNCAUGHT client-replica throw
+    (`#validateArrivedSchemaDocuments`) that failed files wholesale
+    (all red lanes real-toolshed; in-process harnesses unaffected;
+    main green at the identical base). The CI ON lanes now run
+    ensure-off (`cf test` needs nothing: no serving host exists in
+    `packages/cli` — the ruled opt-in is its status quo). Flagged, not
+    filled: the exposed delivery gap (computed delivered without its
+    verified `cid:` ref) is PRE-EXISTING machinery, latent again with
+    the lanes off; and no CI lane now exercises the production ensure
+    at the true topology — unit pins and the measurement harness carry
+    it until a lane opts in.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
@@ -5243,9 +5697,42 @@ supply; OW29/OW32/OW34 closed):
     `executor-space-server.test.ts` (a pattern-unloadable root
     deferring per cycle: stuck stays 0 below the threshold, crosses
     to exactly 1, never re-counts while the streak grows; the OW19
-    terminal/re-arm pins unchanged). Residual (the original
-    trigger): the home-profile lift run should show the park
-    counted/logged — that run belongs to OW45/OW31's joint lift.
+    terminal/re-arm pins unchanged). Residual DISCHARGED with the
+    lift (2026-08-21): the home-profile lift landed via the explicit
+    warm request (OW45's row), which PREVENTS the parked state in
+    that flow — the staged setup activates and derives, so the 6/6
+    gate runs had no stuck park to count and the counter correctly
+    stayed quiet. The counter's live purpose stands unchanged for
+    genuinely dead spaces (OW45's named die-before-flush residual;
+    its revisit trigger reads this counter in real ON usage).
+    **Family variant, closed same-day (the warm request's adversarial
+    review; no crash required)**: an activation FAILURE after the
+    host drained buffered warm notices into it — `activate()`
+    refusing on a rival process's unexpired lease, or throwing —
+    stranded the staged setup underived with no crash anywhere: the
+    warm one-shot died with the failed server and nothing re-issued
+    it. Fixed red-first (the host re-buffers the consumed warm
+    notices on either failure arm; `executor-warm-request.test.ts`'s
+    post-drain-failure pin, watched red at the drained root never
+    reaching the eventual successor). The re-buffer collects what the
+    activation CONSUMED — its argument and the drained buffer — so
+    the family's remaining losses are TWO: the PROCESS-crash window
+    recorded above, and a mid-activate-arrival SLIVER (no crash
+    required): a warm notice arriving AFTER the successor registered
+    and BEFORE its `activate()` failed routes through the
+    existing-server arm straight into the doomed server's feed — in
+    neither re-buffer collection. Recovery caveat, stated: re-buffered
+    notices activate nothing by themselves — they recover on the next
+    QUALIFYING trigger (a session open, an event, or another warm
+    request), which in the strict no-backstop shape may be indefinite;
+    the diagnostic read is §7's `warmRequests` against the target
+    space's subsequent serving activity (requests issued with no
+    derived commits following). Review observation, recorded: a
+    tenure's warm-demand key set grows monotonically until park —
+    bounded by the provisioning volume aimed at the space per tenure,
+    and worth a stats eye (`warmRequests` — a loop-global counter; no
+    per-space breakdown exists today) if a provisioning-heavy space
+    ever holds a very long tenure.
   - **OW47 — client own-write durability under ON (seats S-E/S-F/S-G;
     rootcause §2b + the cellset-lww reproducer). CLOSED 2026-08-21
     (optimize-on-main client-durability pass; report:
@@ -5300,9 +5787,130 @@ supply; OW29/OW32/OW34 closed):
     (true ON topology, lane-shaped toolshed) after 2/6-red pre-fix at
     the same tip; the `integration/cellset-lww.test.ts` step entry is
     REMOVED. The `integration/cfc-group-chat-demo.test.ts` file skip
-    REMAINS: its CI shape is OW31's §2b acting-identity carriage
-    (that train lifts it jointly; the OW47 half of its reason is
-    closed).
+    was subsequently LIFTED by OW59 (the OW34-family train): its
+    remaining CI shape was the per-run CFC trust attribution seam,
+    closed there — the OW47 half of its reason had closed here.
+    **RE-OPENED AND RE-CLOSED 2026-08-21 (the SECOND
+    layer-naming producer — the CFC internal-verifier read; ruling:
+    arm (b) of the name-draft triage's §9 fork, owner 2026-08-21).**
+    The close above covered the blind write's STRUCTURAL read and its
+    report's §5 deliberately left the CFC-read corner "refusing loudly
+    rather than widening the exclusion" — the profile-embed residual
+    proved the consequence: `storedMetadataFor` (cfc/prepare.ts), the
+    verifier's path-[] recursive read of the write-target doc issued
+    AFTER `unmarkUiInputBlindWriteTx` by design, entered the commit
+    set with no exclusion, so under a standing startEditing seed echo
+    the basis named the echo layer and §6 refused the USER's name fill
+    terminally — refusing in the WORKER console where nothing
+    forwards, while the served `saveName` then amended the STALE SEED
+    value (store-proven; the triage measured the loss at one
+    knife-edge rate across three arms, 2/10 pre-#6187, 2/10 at its
+    head, 1/10 on merged main —
+    `../../history/plans/server-execution-v2/optimize/name-draft-loss-triage.md`).
+    The ruled fix (this close): the blind-write tx's verifier reads
+    base on the doc's NON-speculative stack — the VALUE they consume
+    (`ISpaceReplica.getNonSpeculativeDocument`, served by the
+    transaction read path) and the basis they contribute
+    (`excludeSpeculativeLayers` in `buildReads`) — so the verifier
+    verifies exactly the durable policy state the server will enforce
+    against, and verify-durable + name-durable travel together. Four
+    completions the live gates forced (each caught live — the
+    forwarded worker console and a local commit-outcome tap — the triage's harness aid, landed with
+    this close): (1) CONTENT-ADDRESSED (`cid:`) reads keep their
+    ordinary overlay value — identical to the durable content by
+    construction (the replica refuses content that does not hash to
+    its id) — while their layers stay basis-excluded; during the
+    echo's arrival window the client's durable copy of an echo-staged
+    schema doc can lag the server's, and serving the verifier "durably
+    absent" there moved the silent loss into CFC prepare's
+    `stored schemaHash … missing or unreadable` abort (the first live
+    red's signature). (2) Stored `/cfc` metadata can reference a
+    schema document NO client view holds — a frame delivers metadata
+    without its schemaHash refs (store-proven: the server held the
+    `cid:` doc as a head while the client's prepare died on it) — so
+    `loadSchemaDocument` falls back to the realm schema registry,
+    which holds only hash-verified content and which
+    `ensureSchemaDocument` now populates at the stamping site
+    (whoever stamped the reference held the content); this also
+    un-silences the triage's flagged pre-existing "missing or
+    unreadable" worker class wherever the stamper's session is alive.
+    (3) The live stamper is the SERVER's own derivation and the ON
+    watch frames carry no refs, so no in-process source could resolve
+    — `hydrateArrivedCfcSchemaRefs` (storage/v2.ts) pulls the
+    referenced `cid:` document as arrived metadata integrates
+    (deferred, deduped, failure-retried on a later frame), the
+    standing-watch sibling of the explicit-sync path's existing
+    `syncCfcSchemaDocument` hydration; not unit-pinnable in the
+    emulated harness (loopback frames already carry refs — a pin
+    there is vacuous by construction), so the ON gate below is its
+    red-first bench. (4) The verifier read's commit-set entry is
+    scoped to what it CONSUMES: `storedMetadataFor` reads AT
+    `["cfc"]`, never the document root (the triage's arm (c), the
+    path half of the ruled arm (b)) — the root-recursive read made
+    the whole doc a value dependency at the reader's confirmed basis,
+    which lags exactly while the echo stands, so the covering served
+    commit's own value patch killed the fill server-side as
+    `stale confirmed read … conflicted with` (the commit-outcome tap's
+    signature, store-confirmed: basis = the draft mint's seq, head =
+    the served seed's); a concurrent `/cfc` change still conflicts —
+    the precondition the ruling kept. Pinned red-first
+    in `speculation-overlay.test.ts`, six ways: the CFC-relevant
+    blind write over a standing echo EXPORTS (base red:
+    `SpeculativeBasisError` naming the echo layer; exactly one engine
+    commit — re-issues nothing, cannot double-apply); the echo-staged
+    cid: shape EXPORTS (base red: the schemaHash-missing abort); the
+    registry-only stored-schemaHash shape EXPORTS (base red: the same
+    abort, the second live signature); the exported fill's
+    commit-set verifier reads sit AT ["cfc"] (base red: path []); the
+    SAME write without the blind mark is STILL REFUSED (the exclusion
+    never leaves the `unmarkUiInputBlindWriteTx` family); and the
+    verifier-shaped read in a blind tx sees the DURABLE doc while an
+    ordinary read in the same tx sees the overlay (verify-durable
+    consistency, both directions). Value-consuming reads keep the
+    ruled §6 refusal untouched (the standing pin). Lift evidence: the
+    profile-embed ON gate at the fix head — TEN fresh-store runs,
+    **10/10 GREEN**, 10–16 s each (the loss's reds ran 300 s+; the
+    triage's three-arm baseline for this defect was 2/10–2/10–1/10
+    red), the name AND bio amends STORE-DURABLE in every run (4
+    value-bearing commit rows each, queried post-teardown — never the
+    render), posture verified per run (`shellServerExecutionDefine` +
+    live `servingLoop`), per-iteration fresh store on :8125,
+    self-referential API_URL/MEMORY_URL, loads 4.6–10.9 recorded —
+    and the `integration/profile-embed.test.ts` skip entry is
+    REMOVED (its two prior blockers fell to RULING 5/OW49 and the §2b
+    derivation-carriage close; this was the last). **The #6192
+    adversarial review round (LANDABLE-WITH-FIXES) hardened four
+    edges:** (i) cid: reads are dropped from the commit CONFLICT SET
+    entirely (`buildReads`) — the resolution fallbacks leave the
+    replica's confirmed basis for a registry-/overlay-resolved schema
+    doc at 0 while the doc's first install is a real revision row, so
+    the exported `confirmed {seq: 0}` died server-side as
+    `stale confirmed read: cid:… at seq 0 conflicted with seq N` in
+    the delivery-gap window (the review's probe, now a permanent pin —
+    the gap pins had left the engine EMPTY at the hash, a satisfiable
+    read; layer-indifference extended from layers to seqs, presence
+    owned by server-side closure validation); (ii) the hydration
+    dedupe RE-ARMS on a pull that completes without delivering (doc
+    not yet installed — legal), so a later reference-carrying frame
+    re-kicks instead of the window going permanent (the emulated
+    loopback attaches installed refs to frames, so the pin for it is
+    an end-to-end net and the discriminating bench is the live
+    kick-before-install ordering); (iii) a PRESENT-but-empty durable
+    envelope serves `{}` at the root and no-metadata under ["cfc"],
+    never a deleted doc (the empty-collapse deviation, pinned); (iv)
+    hydration pull failures log at the REPLICA layer, the only layer
+    the path crosses. Recorded, not fixed: `setupResultSchemaFor`
+    (cfc/prepare.ts) still reads its SOURCE doc at path [] for
+    `.schema` alone — the surviving over-breadth instance, a named
+    follow-up under the same scoped-to-what-it-consumes rule; the
+    relevance-probe divergence now has a CONCRETE loss shape
+    (overlay-says-irrelevant + durable-says-relevant → the fill
+    exports UNPREPARED → silent server-side CFC refusal; confirming
+    step: seal an echo omitting /cfc over a durably-relevant doc,
+    blind-fill, watch the commit outcome) — still the separate ruling
+    flagged at the close; and the echo-CREATED-target sub-case (the
+    blind fill's leaf path missing at apply because only the echo
+    created the doc) is pre-existing and outside the ruled scope.
   - **OW48 — CLOSED 2026-08-21 (refuted premise; optimize-on-main
     served-wish seat,
     [`optimize/ow48-50-wish-path-report.md`](../../history/plans/server-execution-v2/optimize/ow48-50-wish-path-report.md)
@@ -5379,9 +5987,25 @@ supply; OW29/OW32/OW34 closed):
     blocker (the resolved-profile amend steps intermittently red 6/10
     with the amended values durably absent from every store; the
     OW45+OW31-family cross-space derivation signatures in every run —
-    triage in optimize/ruling5-ow49-report.md §3). Closure and the
-    successor's row-mapping are the coordinator's; the skip entry now
-    names the amend-convergence blocker.
+    triage in optimize/ruling5-ow49-report.md §3). That
+    amend-convergence blocker was ROOT-CAUSED AND CLOSED 2026-08-21
+    by the §2b derivation-carriage scoping pass
+    (optimize/2b-derivation-carriage-scope.md): ONE send-site defect —
+    cell.ts's serving branch picked the LT1-vs-outbox arm by the
+    sending CELL's space instead of the WAVE's home space, so the
+    served amend handlers' sends into the profile's exported streams
+    (direct foreign cell handles) raw-wrote the foreign space and
+    died on the one-tx-one-space isolation error — fixed red-first
+    (executor-cross-space.test.ts's outbox-arm pin); the amends now
+    cross via the outbox with the carried actor and are durably
+    present in both stores. The ten-run gate at that fix head
+    separated a REMAINING, different-family red — the client
+    name-draft own-write loss, OW47's family — which the verifier-read
+    basis close (OW47's re-close above, RULED 2026-08-21) has since
+    CLOSED: profile-embed greens ON at that fix head and its skip
+    entry is removed, so the ruled closure condition (profile-embed
+    greens ON) is now MET. Declaring this row closed on that evidence
+    remains the coordinator's call, per the row's own provision.
   - **OW50 — CLOSED 2026-08-21 (built; optimize-on-main served-wish
     seat,
     [`optimize/ow48-50-wish-path-report.md`](../../history/plans/server-execution-v2/optimize/ow48-50-wish-path-report.md)
@@ -5415,39 +6039,114 @@ supply; OW29/OW32/OW34 closed):
     budget, and whether the browser should run raw:wish at all under
     ON given the served result is already durable.
   - **OW51 — the default-app `splitDefinitions` undefined-read (the
-    ON read-semantics seam): ROOT-CAUSED (2026-08-21, the
-    optimize-phase loss triage) — ARRIVAL ORDERING (mechanism CLASS,
-    established by elimination; the exact failing hop is inferred,
-    not traced — the report's evidence-status block draws the line);
-    the fix fork is
-    FLAGGED for the owner.** The undefined read is a scheduler lift
-    on a freshly SERVED-instantiated note (default-app's menuNewNote
-    runs authoritatively in the wave; the client's speculative child
-    is refused at piece-start commit and carries different
-    handler-frame ids per speculation.md §4 W2.1) evaluated while its
-    input's link chain — through the piece's result/process doc to
-    the schema-default-only `pendingEdit` cell — is still
-    materializing in the reading runtime's replica view: the
-    mid-chain resolution yields `undefined` and the leaf schema's
-    `default: null` is never consulted (every leaf default site is
-    null-safe; the undefined enters above the leaf). NOT client-only:
-    the toolshed's own serving runtime hits the identical TypeError
-    in its pull-settle loop (no overlay, no runtime-client protocol
-    in that stack), amid `event-view-lag` replica-view warnings.
-    Racy, load-sensitive (1/6 local browser runs; W4's loaded bench
-    2-for-2 at n=20); single-creation headless flows never hit it.
-    Not served-value vintage; "schema default not applied" only as
-    the symptom of the chain dying early. Owed: the OWNER's call on
-    the fix fork — (1) defer-on-unresolved-chain in the runner
-    (speculation.md §2's client-side PENDING sentence arguably
-    already states it; the serving-runtime equivalent is UNSTATED —
-    new spec wording + scheduler-semantics blast radius), vs (2)
-    "lifts tolerate undefined during arrival" (a pattern-contract
-    change: under OFF a schema-defaulted input never reads
-    undefined) — then the fix red-first on the ruled arm. Evidence:
+    ON read-semantics seam): CLOSED (2026-08-21, second ruling —
+    option 3 built; the §8.5b surfaced residual root-caused and
+    closed same day, §8.5c).** The residual's consumer was NAMED
+    under the coordinator's find-first directive: `schema-examples`'
+    two baseless-`parseLink` deep-equals — the §3 assertion-churn
+    class the churn commit missed in that one file; the visible
+    crash cascade was afterEach-teardown fallout over the test's
+    unawaited seed commit. No product-code consumer of the carrier
+    exists; the §3 observability audit stands; §7's flake exclusion
+    stays corrected as a mis-verification. Fixed by the same churn
+    convention (`8777de478`), red watched via the named assertion
+    diff. The refusal-scope fork the first build surfaced
+    (build report §6–§7) was RULED by the owner (option 3: the
+    refusal's re-trigger is independent of the root-level arrival
+    re-arm — verbatim: "client-side doesn't react to its own writes,
+    server should do, but i'm not sure this is about that. what does
+    self-demanded mean? either way, option 3 sounds good") and closed
+    in two parts. (i) The memo-variant fix (§7) closed the alias class,
+    pinned both directions (`link-resolution-memo.test.ts`). (ii) The
+    §8 build closed the demand-closure class: verification showed the
+    re-fire contract ALREADY held (a disposed run's committed log
+    joins the union subscription; any writer's arrival cause-dirties
+    and re-runs it; root-level re-arms keep clean instances and so
+    can never deliver it) — the deadlock was the refusal MIS-FIRING
+    on a SCOPED instance row's absence, which is knowledge (the
+    scoped first-write idiom the fan-out run supply materializes
+    instances over), not transit. `pendingHopDoc` now marks only a
+    missing SPACE-scoped doc (`link-resolution.ts`); the relayed read
+    of an absent user/session row reads `undefined` exactly as the
+    flat form does. NAMED RESIDUAL WINDOW (the #6179 review,
+    MINOR-3): a scoped row ALREADY WRITTEN elsewhere — another
+    device, or a cold/lagging serving replica — is transit, not
+    knowledge, and the carve-out returns such mid-arrival reads to
+    main's interim-undefined-then-heal (fragile-body crash included);
+    outside the refusal's protection, matching main. No shipped
+    pattern routes link chains through user-scoped docs (the review's
+    population audit is the evidence). Red-first: `executor-dprime-w0`
+    "P-arrival-closure" watched red ×3 at the rebased head (22 s
+    timeout), green after (9/9 ×3). The ruled re-fire contract
+    carries its own pin — "OW51 refusal re-trigger": a
+    refusal-disposed served run re-fires on a FOREIGN writer's
+    arrival through its registered dead-end read alone —
+    mutation-verified load-bearing (clean-bit kill times out; stated
+    honestly, it guards a contract the code already delivered rather
+    than witnessing a fix). Two adjacent latent findings FLAGGED, not
+    filled (report §8.5): capture type-shrinking strips `Default<>`
+    from directly-captured argument schemas, and a relayed PerUser
+    read's scope resolution is era-dependent. Evidence:
     docs/history/plans/server-execution-v2/optimize/
-    ow51-undefined-read-report.md. Trigger: lifts the
-    `integration/default-app.test.ts` ON skip.
+    ow51-build-report.md §8. The mechanism, the first ruling, and the
+    lift:
+    The undefined read was
+    a scheduler lift whose input LINK CHAIN dead-ended at a doc the
+    replica could not serve yet (a note's `pendingEdit` reached
+    through the piece's result/process doc during a freshly
+    SERVED-instantiated note's materialization); the read handed
+    `undefined` into a body whose schema promised a value, crashing
+    `splitDefinitions` on BOTH the client and the toolshed's serving
+    runtime (shared read path — the "arrival ordering" root cause of
+    the triage report). The owner ruled the fix fork, option (a),
+    verbatim:
+
+    > (a), server-side should match the current client behavior
+    > exactly. also note that with the lazy proxy based evaluation a
+    > lift can throw a specific error and mark a tx aborted with that
+    > reason and that should also be handled just like an unresolved
+    > input, i.e. being retriggered when any of the reads so far
+    > change (just like a regular call), and the output being
+    > `undefined`.
+
+    — owner (Berni), 2026-08-21. Built: link resolution marks a
+    data-derived dead-end behind a hop (`pendingHopDoc` /
+    `viaLinkHop`); the LAZY read path (action bodies; eager reads
+    unchanged) refuses with `UnresolvedInputError` (a
+    `SchemaMismatchError` subclass, so the action-run boundary's
+    existing "argument did not resolve" disposal treats it
+    identically — output `undefined`, no action failure, re-triggered
+    when any registered read changes), UNLESS the reader's schema
+    declares a default (the stated absent value still flows — the
+    `get() ?? fallback` idiom and a not-yet-produced computed are
+    unchanged). A dead-end at the handle's OWN root doc is likewise
+    not this shape. The (ii) lift-throw clause holds by inheritance:
+    the refusal propagating out of a lift body takes the same
+    disposal; a pattern body MINTING the error is the FLAGGED
+    pattern-facing-export question, still with the owner. Server
+    matches client by construction (`servingPosture` gates nothing on
+    this path). Pinned: `packages/runner/test/
+    unresolved-input-lift.test.ts` (the hop-target dead-end disposes
+    and re-triggers on arrival; the stated-null control still flows),
+    the full schema-view suite green; serving-runtime match witnessed
+    by `integration/default-app.test.ts` ON 10/10 with ZERO
+    `splitDefinitions` occurrences (the pre-fix crash surface). Spec:
+    speculation.md §2's RULED unresolved-lift-input paragraph.
+    Evidence: docs/history/plans/server-execution-v2/optimize/
+    ow51-build-report.md (and ow51-undefined-read-report.md for the
+    triage). NAMED RESIDUAL (owed pin, not a reopening): the
+    optional-property refusal swallow (`createObjectView`) correctly
+    disposes an unresolved OPTIONAL read as eager-parity `undefined`
+    with the retrigger preserved (the swallow clears the note; the
+    read registration survives) — verified by mechanism, a dedicated
+    pin owed (build-report §3, caution 4). LIFT: default-app's
+    FILE-level ON skip is LIFTED — its "should create a note" step
+    (the OW51 surface) runs ON; the "persist and reload" step stays a
+    STEP skip under **OW45** (the reload-durability flake the OW51
+    crash had been masking — a reloaded notebook's `noteCount` reads
+    `undefined` past the step's wait, 1/10 local ON; the OW51 fix's
+    clean-undefined-plus-retrigger surfaces it, OW45's territory to
+    close with an event-driven wait).
   - **OW52 — the convergence-storm ON loss (landed 23/40): CLOSED
     (2026-08-21, the optimize-phase loss triage) — NOT a loss.** The
     full 40-event accounting (serving-loop counters + the space's
@@ -5482,55 +6181,241 @@ supply; OW29/OW32/OW34 closed):
     intent-quiescence barrier under ON (OFF's idle implies own-send
     consequence visibility; ON's does not) — a spec question beside
     OW47's pending-commit-barrier seat, surfaced in the report.
-  - **OW53 — the sqlite multi-runtime identity pair under ON.** Two
-    semantic asserts under the TRUE ON topology: db-owner — a SECOND
-    user's runtime re-mints itself as the sqlite db handle owner
-    ("bob's runtime must not re-mint itself as the db owner");
-    read-clearance — the cleared-read request hash becomes
-    READER-keyed ("baseline request hash stays reader-blind" fails)
-    and the cleared result doc carries more than the declared
-    surface. The sqlite handle/clearance identity model diverges
-    under served execution — an identity-model decision ADJACENT to
-    OW31's ruled posture but not covered by it (who mints the owner
-    under served runs; what keys the cleared-read request hash).
-    UNTRIAGED whether the fix is model or implementation. Owed: the
-    decision and the fix. Trigger: lifts BOTH
-    `integration/sqlite-db-owner-multi-runtime.test.ts` and
-    `integration/sqlite-read-clearance-multi-runtime.test.ts` ON
-    skips.
+    ADDENDUM (2026-08-22, arrival-wait-hardening pass): the report's
+    §7 claim that this fix also covered the census's group-chat
+    waitFor flakes (items 1+3) is CORRECTED — those recurred
+    post-merge with quiescence clean (runs 32543810077 /
+    32547606642) and were a different race entirely: the test's
+    chained draft→trusted-send events, on different streams with
+    cross-stream serve order unpromised (events.md §2), let the
+    served handler no-op SILENTLY on a pre-draft view, so the
+    awaited write never existed — terminal before any wait began.
+    Root-caused, made deterministic (delay injection at the seam),
+    and closed — helper gates on the arrived-consequence signal
+    (`SpeculationOverlayDestination.waitForIntentQuiescence` /
+    `MultiRuntimeSession.awaitEventConsequences`, pinned both with
+    killing mutations), plus the staged-publish / spec-gallery
+    settled-text conversions (the ledger's browser members) — in
+    `optimize/arrival-wait-hardening-report.md`. This row's own
+    closure (the storm-loss triage and the settle fix) STANDS.
+  - **OW53 — the sqlite multi-runtime identity pair under ON: CLOSED
+    (2026-08-22, the OW53 triage+build — determination: BOTH halves
+    IMPLEMENTATION, no model fork).** The row was minted UNTRIAGED
+    whether the fix is model or implementation; the rulings that
+    landed after the mint COMPLETED the model — builtins.md §2 (RULED
+    2026-08-02: the reader principal is part of the memo key, one
+    cleared result cell per (query, reader), "cleared where the read
+    is served"), serving-loop.md §3c (the run's identity, "never the
+    serving runtime's ambient identity"), serving-loop.md §4 (the
+    effect carries the run's identity carriage; the completion's
+    annotations source from it), protocol.md §1 ("identity arrives
+    WITH the work ... carried into keys, not resolved from ambient
+    state"), and 06-cfc.md's dbOwner definition ("the principal that
+    created the SqliteDb cell") — and what remained was code lagging
+    them. Traced at main `51350077e` (true-ON topology, fresh
+    stores): the failure shapes had MOVED off this row's minted text.
+    Db-owner half: the committed owner was the SERVICE DID (the
+    toolshed identity) — not a bob re-mint — because the serving-side
+    creating run carried alice (`scopeKeyIdentity.principal`,
+    `attributionFromScope`) and the OW34 per-run tx snapshot was
+    CORRECT (alice), while the mint read
+    `runtime.trustSnapshotProvider()` — the runtime-ambient service
+    (exactly the direct provider read OW34's Q5 deliberately left
+    here). Read-clearance half: the cleared queries never completed —
+    each reader's claim `{pending, requestHash}` landed per-user (the
+    stamped runs), but the flush's UNSTAMPED writeback resolved the
+    SERVICE's user-partition, found no claim, and no-opped forever
+    (the stage-A OW17 residual flagged in space-server.ts
+    `#commitEffectCompletion`); and both readers' cleared hashes were
+    IDENTICAL (clearanceReader = the ambient provider = service), so
+    the two instances' effects also collided on one outbox key. Four
+    defects, ONE family — ambient identity consumed where the ruled
+    model requires run-carried identity: the owner mint, the
+    cleared-hash keying, the flush-time reader/ceiling reads, and the
+    completion writeback's partition. Fix (sqlite-builtins.ts):
+    `sqliteRunActingPrincipal` — a stamped run's carried actor
+    (`acting.user ?? scopeKeyIdentity.principal`), else the ambient
+    provider (client/OFF byte-identical) — consumed at the mint and
+    the hash; the flush captures the requesting run's reader and
+    `scopeKeyIdentity` and every writeback transaction sets the OW17
+    identity seam (`tx.tx.scopeKeyIdentity`) so its guard reads and
+    writes resolve the REQUESTING instance; reader-keyed hashes also
+    split the effect keys, dissolving the cross-reader outbox
+    collision. Fail-closed arm (RULED 2026-08-22 — ratified as
+    built; the owner, Berni: "agreed with all the recommendations
+    above, continue" — one ruling over the presented batch: this
+    arm, and the session-identity join below): a served creating
+    run with NO carried actor mints NO owner — ownerless handle,
+    dbOwner() fails closed (the OW31 genesis-arm /
+    `homeSpacePrincipalFor` posture, "never the service DID") — and
+    the Q3 keep-service reading, which would have minted the
+    SERVICE and thereby granted it dbOwner() row admission, is
+    REJECTED. Spec (docs-move-together): 06-cfc.md's dbOwner row +
+    Phase 3.b acting-reader sentence.
+    Red-first: `packages/runner/test/sqlite-served-identity.test.ts`
+    — the mint pin WATCHED RED at base (a stamped alice run minted
+    the ambient service DID), the actor-less fail-closed pin RED
+    (service), the unstamped-neutrality guard green both sides, the
+    cleared-hash pin RED (both stamped readers staged ONE
+    service-keyed hash) — plus both integration files re-reproduced
+    RED at main under the true ON topology before the fix (db-owner:
+    owner = the service DID in both views; read-clearance: settle
+    timeout + equal cleared hashes + bare-claim docs). Lift evidence:
+    the true-ON gate (fresh store per run, posture verified —
+    serving-loop waves/derivedCommits live, `serverExecution=true` in
+    every worker — loads 5.9–9.0 recorded per round):
+    `sqlite-db-owner-multi-runtime` 5/5 and
+    `sqlite-read-clearance-multi-runtime` 5/5 (all 3 steps as then
+    present; PR #6196 adds a fourth two-tabs step — the session-fork
+    close below — run 4/4 under the same gate topology); BOTH ON
+    skips LIFTED (this row's minted trigger). Residuals, recorded
+    not closed: llm-dialog's direct provider read
+    (`llm-dialog.ts:2426` — same family, named untouched by OW34 §7
+    and by this close; no ON surface pins it yet); NOTE-6 below
+    (delegated read sessions' demand under the process DID —
+    label-inert, unchanged); the OTHER effect kinds' UNSTAMPED
+    writebacks — every non-sqlite effect kind: the
+    `fetch*`/`generate*` families, `llm`, and llm-dialog (which
+    additionally marks completions at 4 sites with bare
+    `llmDialog:`-prefixed keys never widened by `effectTargetKey` —
+    a separate pre-existing quirk) — whose hash-guard reads still
+    resolve the service's instances (the OW17 stage-A flag's
+    remaining scope after this row's sqlite carve-out; the
+    space-server.ts `#commitEffectCompletion` comment names the
+    split); the acting≠demanded split: every context the stamper
+    produces derives `acting` FROM the demanded pair where both
+    exist, so a run whose two halves disagree is an identity-model
+    question no ruling has decided — `sqliteRunActingPrincipal`
+    tripwires on it (fails loud, citing this row) rather than
+    picking whose rows a cleared read admits; the per-instance
+    effect-key gap for NON-clearance
+    user/session-scoped queries (a reader-blind hash by design
+    means one scope-name-widened outbox key across ALL the scope's
+    instances, session and user alike — no live surface; the fix
+    direction is the instance key joining the effect target key);
+    and the
+    provider READ RPC's partition resolution (recorded 2026-08-22
+    by the session-identity build, flagged not filled): a
+    sub-space-scoped db's ON-DISK partition resolves from the
+    TRANSPORT session — memory/v2/server.ts `sqliteQuery`'s
+    `resolveScopeKey(db.scope, {principal: session.principal,
+    sessionId: message.sessionId})`, the service's own session on a
+    serving runtime — same ambient-identity family, distinct
+    surface (which FILE gets read, not which cell or key is
+    written), outside the 2026-08-22 request-identity ruling, and
+    no live surface reaches it (the clearance fixture's db is
+    space-scoped, whose resolution is identity-free) — and it
+    BLOCKS the session split's live completion coverage: until the
+    partition resolves from the requesting identity, a
+    session-scoped cleared query cannot be driven to completion
+    end-to-end, which is why the session-fork close binds staged
+    hashes at unit level and user-granularity sharing in
+    integration, never a session-scoped completion. The
+    SESSION-scoped cleared-result collision variant (the #6194
+    review's find) is CLOSED — RULED 2026-08-22 (the same ruling as
+    the fail-closed arm above) and built in the session-identity
+    train (PR #6196): `narrowestScope` legitimately resolves a cleared
+    result to SESSION scope when the db itself is session-scoped,
+    and pre-build `clearanceReader` and the effect key carried the
+    USER principal only — two sessions of one user on one serving
+    runtime shared hash + effect key across DISTINCT session
+    instances, and the second rode the in-flight dedupe (starvation
+    until a re-run; ON-only; off-model against builtins.md §2's one
+    cell per (query, reader)). NOT clamped to exactly `user`: a
+    session-scoped db's cleared result MUST stay session-scoped (a
+    user clamp would memo-collide two session dbs' results in one
+    cell); instead the SESSION JOINS the request identity for
+    session-scoped cleared results — one cleared cell per
+    query-and-reader-at-matching-granularity. The build
+    (sqlite-builtins.ts): the hash's `clearanceReader` component
+    carries `{user, session}` when the cleared result's scope is
+    `session`, sourced from the run's `scopeKeyIdentity` — the same
+    identity the flush's writebacks resolve instances against, so
+    request identity and cell instance split together — and the
+    effect/outbox key splits through the hash; user-scoped cleared
+    results and the whole unstamped arm (clients, ON-arm
+    speculation, OFF) are byte-identical. Pinned red-first in
+    sqlite-served-identity (two sessions of one user against a
+    session-scoped cleared db: ONE identical hash watched red at
+    base, distinct after; the user-scoped session-blind guard green
+    both sides; a determinism pin re-stages the same session from a
+    fresh builtin instance and expects the SAME hash — the split is
+    identity-derived, not per-run noise; mutant-watched: a salted
+    session arm reddened ONLY this pin, the other 7 steps green),
+    and GUARDED
+    both-sides-green by the read-clearance integration file's
+    two-tabs-of-one-user step (one Identity in two harness
+    sessions: user-granularity sharing — same cell, same hash —
+    green OFF and under the true-ON gate, serving loop live).
   - **OW54 — a served EVENT whose commit-prep crashes seals NO
     consequence (adversarial review of PR #6157, F1 —
-    CONFIRMED-by-trace; minted 2026-08-21).** Pre-#6157, a prep crash
-    on the EVENT path threw out of `prepareTxForCommit` inside the
-    event finalize, was caught by the `.catch((error) =>
-    finalize(error))` chain, and took the handler-error arm —
-    `served.onFailure({kind: "error"})` sealed an ERROR consequence
-    and the durable LT1 entry was consequenced. With OW50's totality
-    (`prepareCfc` records the crash as a modeled pre-storage
-    rejection), the same crash now classifies on the event path as a
-    give-up "non-retryable" disposition: `runFinalCommitCallback()` +
-    `reportDroppedCfcRejectedWrite`, but NO `served.onFailure` and
-    nothing seals a consequence (the pre-storage rejection returns
-    before the `#sealDestination.seal` branch). The drain-in-flight
-    guard releases in the "queued" state, the durable entry stays
-    unconsequenced, and the post-wave re-arm re-drains it — "the wave
-    IS the retry cadence" — so a DETERMINISTIC prep crash (the OW49
-    poison-envelope class) is a forever re-drain, and under #6158's
-    settle wait the unretired client intent pays the full bounded
-    quiescence timeout per settle round (bounded and loud by design,
-    but every round). Scope honesty: the give-up-without-consequence
-    gap PRE-EXISTS for modeled CFC refusals; what changed is that the
-    CRASH class — previously the one class that DID seal an error
-    consequence — joins it. Exposure today: none live (the poisoned
-    class is reactive wish docs; profile-embed is skipped ON). Owed:
-    seal an error consequence for a served event whose commit is
-    refused pre-storage with a deterministic CFC reason (mirror the
-    terminal arm's honesty), or route CFC pre-storage rejections on
-    served events through `served.onFailure({kind: "error"})` — the
-    events seal path is (α)-critical, so the fix belongs to a
-    deliberate pass, not a side-swipe. Trigger: the OW49 fix arc or
-    the `integration/profile-embed.test.ts` ON-skip lift, whichever
-    comes first.
+    CONFIRMED-by-trace; minted 2026-08-21): CLOSED (2026-08-21, the
+    OW54 follow-on fix — the give-up arm's discriminated
+    `served.onFailure`).** The gap as confirmed: a deterministic CFC
+    pre-storage rejection of a served event's commit (the
+    "CFC enforcement rejected commit" class,
+    `rejectCommitBeforeStorage` — including a prep CRASH, which OW50's
+    totality records as a modeled rejection of this class) classified
+    give-up "non-retryable", and the give-up arm settled the commit
+    callback and reported the dropped write but sealed NO consequence:
+    the durable entry stayed unconsequenced and re-drained every wave
+    ("the wave IS the retry cadence"), and under #6158's settle wait
+    the unretired client intent paid the full bounded quiescence
+    timeout per settle round. Pre-OW50 the same crash THREW from
+    `prepareTxForCommit` and took the ERROR arm, which seals "the
+    error IS the consequence". The fix restores that contract on the
+    modeled path: the give-up arm, when the event is served AND the
+    error is the deterministic CFC pre-storage rejection (the SAME
+    message-prefix discriminator `reportDroppedCfcRejectedWrite` keys
+    on — `isCfcRejectedCommitError`, scheduler/events.ts), calls
+    `served.onFailure({kind: "error", message})` before settling, and
+    the error consequence seals through the drain's existing notice
+    machinery (events.md §5 now states the class). Lift evidence: the
+    red-first pin in `executor-events-down.test.ts` ("the give-up
+    arm's CFC discriminator (OW54)") — RED on the unmodified base
+    (the served copy took the give-up disposition twice for one
+    eventId across two waves, no consequence, and the wait for the
+    seal timed out), GREEN with the fix (exactly ONE completed run,
+    ONE consequence commit naming the event, ONE dropped-write
+    report, the entry's `error` carries the refusal, the watermark
+    advances, and a second poisoned fire seals its own consequence
+    behind it) — plus the scope-boundary pin ("a NON-CFC give-up on a
+    served event keeps the re-drain cadence": a handler `tx.abort()`
+    re-drains unconsequenced with no frontier advance, green on base
+    AND after, so the non-CFC cadence is byte-identical). #6158
+    interaction, recorded: with the consequence sealed, the client
+    intent retires through the normal arrived-terminal-consequence
+    path, so the unretired-intent settle-timeout class for this shape
+    disappears. RULING-5 interaction, resolved: the narrowing had
+    shrunk the exposed class to genuinely ambiguous envelopes; the
+    corner is now closed for the whole pre-storage-rejection message
+    class (genuine ambiguity, unreadable stored envelopes, prepared
+    digest drift). Sub-case honesty (the #6186 review's MINOR-2,
+    recorded as-built): the message class also covers OW50's modeled
+    prep-crash recordings ("commit-prep crashed: …"), so a prep crash
+    caused by TRANSIENT local state seals a terminal error consequence
+    where a re-drain might have succeeded — whether transient
+    prep-crashes deserve the re-drain instead is on the owner's
+    one-liner list; the behavior here is as-built, not ruled. Scope
+    honesty, deliberate and pinned: non-CFC
+    give-ups (transport, authorization, a handler abort, opt-out)
+    still seal nothing and re-drain on the wave cadence; and a
+    storage-time commit-rule refusal (`RowLabelCommitError`) of a
+    served event also seals no consequence today — verified (#6186
+    Cubic round): it never reaches the scheduler's terminal
+    disposition on a served copy (the handler tx sealed and resolved
+    at seal-accept), it refuses the WAVE's store commit instead, and
+    the refused wave reports the event's contributions as requeued
+    (`aborted: "rejected"`, executor/wave.ts) — guard released,
+    unconsequenced entry re-drained, the same durable fate through
+    the wave verdict channel. An adjacent residual of the same shape,
+    FLAGGED (not silently included) in
+    docs/history/plans/server-execution-v2/optimize/
+    ow54-build-report.md. The sealed consequence itself rides the
+    consequence-notice machinery, whose resolved-error guard wedge is
+    the OW58 row below (pre-existing, not introduced by the OW54 fix):
+    a notice whose commit RESOLVES `{error}` pre-destination strands
+    the entry guarded-unconsequenced until park.
   - **OW55 — the serving runtimes' pattern-fetch trust surface
     (adversarial review of PR #6157, F7; the OW48 investigation's
     security-adjacent residual; minted 2026-08-21).** Under ON,
@@ -5550,7 +6435,12 @@ supply; OW29/OW32/OW34 closed):
     local-repro runbook note (API_URL/MEMORY_URL must be set
     explicitly when the default port is occupied). Follow-up class
     (flip-follow-up family): no lift trigger; close with the ruled
-    posture landed.
+    posture landed. CONSUMER ADDED 2026-08-23: the stage-1 server-side
+    space-root ensure's creation fetch rides the same
+    `apiUrl`-over-self-HTTP loop (deliberately — design #6209 open
+    question 9's self-pin recommendation is flagged, not filled, in the
+    stage-1 report; the ruled posture, when it lands, covers this
+    consumer with the updater's).
   - **OW56 — FUTURE (optimize-phase-future) — the server owns program
     materialization AND compilation; clients wait (minted 2026-08-21
     with the S-C ruling).** The owner's stated ideal, verbatim:
@@ -5642,26 +6532,273 @@ supply; OW29/OW32/OW34 closed):
     pin's PR is not blamed when the lane first flakes; renumbered
     OW56 → OW57 pre-merge for the parallel-mint collision with the
     durability train's #6173, which keeps OW56 for server-owned
-    program compilation).** The
+    program compilation; tracked as CT-2060).** The
     "(α3) + a same-eventId SIBLING tx" step's held-wave construction
     (#6096's W3 pins) sets `settleGate`/`settleGateWhen` and then
     probes `expect(entriesOf(sidecar)).toEqual([])` — asserting the
-    wave is still HELD (its "ping" entry not yet durable). The gate
-    engages at the settle's `inputSynced` barrier, and the
-    when-predicate flips only once a seal is visible through the
-    sealed overlay — so a commit whose settle pass checked the gate
-    BEFORE the predicate flipped can complete in that same cycle,
-    landing the ping before the probe: measured 2/15 full-suite reds
-    at #6170's head vs 0/10 on main's version (the pin inserted
-    ahead plausibly shifts timing into the window;
-    fresh-server-per-step rules out state coupling). An event-driven
-    closure is NOT cheap: an unconditional gate starves the drain
-    the step needs (the step's own comment), and holding reliably
-    means restructuring the construction to re-arm on a lost race.
-    Owed: the hardened construction (or an owner call to
-    accept-and-retry the step); until then a red of THIS step with
-    the ping already durable at the probe is this race, not a
-    product regression. No lift trigger (test-harness item).
+    wave is still HELD (its "ping" entry not yet durable). As
+    originally filed, the when-predicate flipped only once a seal was
+    visible through the sealed overlay, so a commit whose settle pass
+    checked the gate BEFORE the flip could complete in that same
+    cycle, landing the ping before the probe: measured 2/15
+    full-suite reds at #6170's head vs 0/10 on main's version (a pin
+    inserted ahead plausibly shifts timing into the window;
+    fresh-server-per-step rules out state coupling). #6184
+    (`c31397906`) landed a HARDENING: the gate now ARMS from the
+    handler itself — a flag set synchronously as the handler starts —
+    intending the sealing cycle to be held structurally while idle
+    cycles pass. The hardening REDUCED but did not eliminate the
+    race. Measured at the #6184 construction (the OW54 follow-on
+    PR's runs, 2026-08-21, with that PR's two tests inserted ahead
+    of the step): 14/15 full-file runs green, ONE red with the
+    identical signature — the ping durable AND consequenced at the
+    probe (`expect(...).toEqual([])` received the consequenced ping
+    entry) — on a loaded machine at `b775787b6`; five runs of plain
+    main's version at the same head were green. Owed, still: a
+    construction that holds under insertion-shifted timing (or an
+    owner call to accept-and-retry the step); until then a red of
+    THIS step with the ping already durable at the probe is this
+    race, not a product regression, and not the inserting PR's
+    defect. No lift trigger (test-harness item).
+  - **OW58 — the consequence-notice resolved-error guard wedge
+    (adversarial review of PR #6186, MAJOR-1 — probe-confirmed;
+    minted 2026-08-21; PRE-EXISTING since Phase 3, NOT introduced by
+    #6186).** `#sealEventConsequenceNotice` (executor/space-server.ts)
+    seals the skip/error/drop consequences in its own transaction,
+    and its guard-release paths do not cover a commit that RESOLVES
+    `{error}`: the `.catch` beside the seal releases the
+    drain-in-flight guard on promise REJECTION only, and the
+    wave-outcome release covers only eventIds the wave actually
+    carried — a notice refused PRE-destination
+    (`rejectCommitBeforeStorage`, extended-storage-transaction.ts,
+    which resolves the commit promise with `{error}` rather than
+    rejecting it) never enters a wave, so NEITHER path fires. The
+    guard stays "marked", every re-drain skips the guarded id, and
+    park's `#drainInFlight.clear()` is the only remaining release:
+    the entry strands unconsequenced for the space's whole active
+    tenure — the OPPOSITE failure of OW54's forever-re-drain.
+    Probe evidence (the #6186 reviewer): a flag-gated patch forcing
+    the notice commit to resolve `{error}` left 3 events with
+    runsByKind 1/1/1 and ALL unconsequenced across two scanned waves,
+    reproduced through the THROW arm — the OW54 diff uninvolved.
+    Reachability: PLAUSIBLE, no live repro yet — a LABELED sidecar
+    doc under enforce mode makes the notice tx CFC-relevant (its
+    entry-field writes), and nothing prepares that tx (`commit()`
+    self-prepares only in observe mode), so the commit resolves the
+    CFC pre-storage `{error}` — the wedge shape. Owed: the small
+    guard fix — consume the commit RESULT (`sealed.then((r) => …)`
+    releasing the guard when `r?.error` is set, beside the existing
+    `.catch`) — and consider preparing the notice tx before commit;
+    the seal path is (α)-critical, so the fix belongs to its own
+    deliberate pass, not a side-swipe. Trigger: next seal-machinery
+    pass, or first live sighting of a stranded-unconsequenced entry
+    with a guarded id and no notice.
+  - **OW59 — OW34-family: per-run CFC trust attribution for served
+    runs (the FLAG-5 seam; design RULED 2026-08-21, all seven §10
+    recommendations adopted): CLOSED (2026-08-21, the OW34-family
+    implementation train).** The defect as designed against: a served
+    run's `__ctCurrentPrincipal` mints (authored-by /
+    represents-principal) resolved against the RUNTIME-level ambient
+    trust snapshot — `storageManager.as`, the SERVICE — so every
+    durable served row carried service-DID authorship labels
+    (rootcause §2a's store shape; the first-ON-CI-gate row-2 red),
+    collapsing the authorship-verification property to a tautology
+    and blocking the `cfc-group-chat-demo` ON lift. The build, per
+    the design's §8: `Runtime.trustSnapshotForPrincipal(principal)`
+    — `{id: "principal:<did>", actingPrincipal, revision}` on the
+    runtime's ONE trust-revision composition site (the default
+    provider refactored onto it, so a trust-config change invalidates
+    per-run served digests exactly as ambient ones — INV-G); the
+    SpaceServer's `#stampRun` attaches the per-run snapshot via
+    `tx.setCfcTrustSnapshot(...)` with the ruled precedence —
+    `delegated.acting.user`, else the handler's acting
+    (LT6-inherited pairs included), else a demanded derivation's
+    `scopeKeyIdentity.principal` (the Q2 arm — ships, severable),
+    else the ambient service snapshot stays (the Q3 ruling:
+    actor-less bookkeeping and wave-fallback derivations are the
+    loop's own writes). Spec: serving-loop.md §3c's binding sentence
+    + SC-38 (cfc-spec-changes.md). Lift evidence
+    (`executor-trust-attribution.test.ts`): the FLAG-5 mint pin
+    WATCHED RED at base — the persisted subjects were the service
+    DID, the §2a query shape verbatim — and green with the fix (the
+    served docs' authored-by / represents-principal subjects equal
+    the entry's `firedAt.user`); INV-E negative arms (a
+    schema-authored literal-DID claim still refuses "must be runtime
+    resolved"; an unprivileged direct `["cfc"]` labelMap rewrite on a
+    minted envelope still fails closed with the S18
+    "unprivileged write to protected cfc path" reason, the stored
+    envelope untouched); per-wave multi-principal (two users' runs in
+    one drain mint each run's own user, both commits recheck clean —
+    no `cfc-prepared-digest-mismatch`); replay (a re-drained entry
+    mints from the DURABLE entry's actor; a second activation re-runs
+    nothing — ONE consequence commit per eventId — and the labels
+    stay byte-identical); the live stamp seam's precedence pinned on
+    the real stamper (delegated / acting / LT6-inherited / demanded /
+    actor-less-keeps-service); OFF-arm neutrality (no stamper ⇒ no
+    snapshot call — the OFF client and flag-ON client speculation
+    leave the edit()-attached ambient snapshot untouched); INV-G
+    revision-composition equality with and without a trust config.
+    The `cfc-group-chat-demo` ON gate is this row's live lift
+    condition (the skip entry is removed by this train; green 4/4 —
+    three fresh-store lift runs plus a quiet-machine solo run, every
+    run's store audited); the
+    store-dump audit (zero authored-by / represents-principal atoms
+    naming the service DID — INV-D) arbitrates Q3's flagged caveat:
+    a serving-side system-pattern restage of an owner-gated pattern
+    (the setup/defaults mint carve-out) would mint
+    `represents-principal: <service>` under keep-service; if a live
+    gate ever surfaces that shape, the named follow-up is an
+    owner-resolved snapshot (OW31's ACL owner resolution), not a
+    silent widening. Out of scope, left where the ruling put them:
+    the sqlite/llm-dialog direct RUNTIME-provider reads (OW53's
+    identity-model decision — the per-run tx snapshot is the
+    substrate a fix would re-point them at); label option (b)'s
+    served-provenance mark (future, on product need, with its own
+    spec sentence). OW53-adjacent note (the #6190 review's NOTE-6,
+    recorded not fixed): delegated READ sessions register their
+    demand under the PROCESS DID rather than the acting principal
+    (memory/v2/server.ts — the session-demand identity assembly,
+    `session.principal` into the demander identity) —
+    label-inert (no mint reads it) and operator-allowlisted; an
+    identity-model decision for OW53's family, not this row's.
+  - **OW60 — the echo-drop smell: the stream-action validation guard
+    silently skips a client echo run whose composite `$ctx` has not
+    materialized (OW33 triage review pass, 2026-08-22; the canary
+    moved here from the topics-navigation flake).** The trace, exact
+    (ow33-triage-report.md §6): on a flag-ON Deno controller,
+    `board.result.set(..., ["addTopic"])` fires the stream handler
+    whose `$ctx` schema REQUIRES `myName`/`topics`/`crossrefs`; at
+    send time the resolved `$ctx` can hold `myName: ""` and
+    `topics: []` while the derived `crossrefs` member is still
+    missing, and the pre-OW51 validation guard
+    (`packages/runner/src/runner.ts` — "action argument is
+    undefined (potential schema mismatch) -- not running") SKIPS
+    the echo run silently: no refusal, no re-trigger, no echo
+    cover. The board stays CORRECT (the event still appends; the
+    served run has the materialized `$ctx`; store exactly-two
+    topics, events appended == processed) — the loss is purely the
+    client's speculative cover, so any unbarriered read between the
+    drop and the served arrival sees pre-consequence state.
+    Occurrence ~2/10 on the topics-navigation setup at the true ON
+    topology, OBSERVED SURVIVING the test-side fix (the barriered
+    fid capture absorbed the drop in 2 of the 10 lift-gate runs —
+    the smell persists; only its test-flake symptom is closed).
+    FLAGGED, not filled: whether this guard should take the OW51
+    refusal+retrigger disposition (dispose as a non-event,
+    re-trigger when the reads change) is a spec decision — #6179
+    deliberately scoped the refusal to the schema-aware lazy READ
+    path, and a composite-context validation failure is a
+    neighboring but distinct shape; a ruling here gets its own
+    events.md/speculation.md sentence before any build. Trigger:
+    the next echo-semantics pass, or any live surface where a
+    dropped echo's missing cover is user-visible (the OW33
+    arrival-witness fork's fix would NOT close this — a dropped
+    run seals no overlay entry at all).**
+
+  - **OW61 — delivery of content-addressed computed cells to a
+    replica without their verified `cid:` schema docs: an UNCAUGHT
+    fail-closed throw in every space-cell-only subscriber (minted
+    2026-08-24 from PR #6210's first red board; pre-existing
+    delivery-machinery defect, NOT the ensure seat's).** Mechanism:
+    when a subscription delivers a `computed:` doc whose schema ref
+    (`cid:…`) is "not delivered and verified in this replica",
+    `SpaceReplica.#validateArrivedSchemaDocuments`
+    (`packages/runner/src/storage/v2.ts`) THROWS on the background
+    consume path (`applySessionSync` → `consumeUpdates`) — uncaught,
+    outside any caller's try, killing the consuming worker/test file
+    wholesale. Evidence: CI run 32742547103 at `7d97a80aa` — 13
+    file-level failures sharing exactly this class across the runner,
+    runtime-client, and shell ON lanes and 9/10 pattern ON shards; the
+    broken doc in the runtime-client lane
+    (`computed:fid1:7BycCyHc2yDDzr17jnXayWZMxpweSGk2JcGKILKguvo`) is
+    byte-for-byte the default-app root's computed cell (content-
+    addressed ids are space-independent), delivered through the
+    fixtures' plain space-cell subscriptions after the stage-1 server
+    ensure materialized roots in their spaces. TRIGGER: any server-side
+    materialization into a space with a subscriber that did not demand
+    the docs root-aware — today that is the stage-1 ensure wherever it
+    runs ON; the affected subscriber shape is the SPACE-CELL-ONLY
+    subscriber (no root-aware schema walk), which exists in PRODUCTION
+    (CLI, agents-host), so any real deployment with such a subscriber
+    re-surfaces this the moment the ensure runs there. Timing-
+    dependent: whether the computed doc's frame lands before its
+    `cid:` sibling is delivery-window timing (CI hit it consistently;
+    one local run at the same head did not). With the test lanes'
+    ensure opt-out (the RULED switch) the defect is LATENT again, not
+    fixed. SURFACED TO THE OWNER 2026-08-24 (the coordinator is
+    carrying it). Owed: a ruling on the delivery side — deliver the
+    schema closure with the computed doc, or make the arrival
+    validator's failure a deferred re-fetch instead of an uncaught
+    throw — and a pin reproducing the delivery race directly (the
+    ensure gives it a deterministic producer). Trigger: before any
+    production deployment that runs the ensure ON beside space-cell-
+    only subscribers, and before the flip PR's list-EMPTY bar
+    (an ON fleet re-reaches it by construction).
+
+  - **OW62 — adopt-not-start: the piece-open seam is where the ON
+    execution model's "one starter per piece" has to land. POST-FLIP
+    (RULED 2026-08-22, owner: "ok, let's do (a) and record (b) as a
+    post-flip task").** LIFT NOTE (2026-08-24): this row was minted as
+    "OW61" on PR #6208's branch (`claude/server-exec-v2-client-start-retry`,
+    unmerged) and is lifted here essentially verbatim under the next
+    free number, because it records an OWNER RULING that must not live
+    only on a branch that may never land; the parallel-mint collision
+    (both branches picked OW61 — the OW56/OW57 hazard again) is
+    resolved first-come: OW61 on main is the delivery-defect row
+    above. CONSEQUENCE FOR #6208 IF IT LANDS: its own OW61 row is
+    SUPERSEDED by this OW62 and must be dropped, and its
+    cross-reference to it (its `verification-coverage.md` ~:5596,
+    "model's destination in OW61 below") must re-point to OW62 —
+    otherwise the union-merge mints the silent duplicate this note
+    exists to prevent. The "(a)" retry this row's landing duty retires
+    is #6208's own unmerged build; the duty binds whenever both land.
+    The destination the OW45 arm-B fork named (b),
+    recorded rather than built: a flag-ON client whose navigate lands
+    on a piece the SERVER materialized does not run a deferred start
+    of its own at all — it ADOPTS the served instance (sync the root,
+    register demand through the served closure) and starts nothing.
+    That DISSOLVES the first-hydration race instead of re-attempting
+    it, and it is the posture canon already states rather than a new
+    mechanism: runtime-mapping.md's N62 row deleted the old
+    observation-adoption feature precisely BECAUSE under the flag
+    "clients no longer run committed derivations at all (reload is
+    read-and-render, §3b)", and serving-loop.md §3b states that
+    posture. The client-side deferred start is the remnant still
+    running against it at the navigate/piece-open seam. Design seed:
+    `../../history/plans/server-execution-v2/optimize/ow45-armb-client-start-fork.md`
+    (disposition (b), with the instrumented catch that motivates it).
+    WHY POST-FLIP: it touches the piece-open path for every ON
+    navigate. (This row first said the flip's empty-skip-list bar was
+    reached by (a) without moving that path. The live gate DISPROVED
+    that — see the arm-B gate evidence in OW45 — so which arm reaches
+    the bar is an OPEN question, not a settled one, and (b)'s
+    scheduling is the only claim this row still makes.) **The five
+    pieces it still needs, none of them settled by this row:**
+    (i) how the ADOPTED context is constructed client-side — what a
+    client holds for a piece it did not start, and which of today's
+    start-walk products (node wiring, the cancel registration, the
+    demand registration) it keeps; (ii) the BIRTH-adoption flow — a
+    navigate that arrives BEFORE the server has materialized the
+    piece has nothing to adopt, so the seam needs a defined wait or a
+    defined fallback; (iii) whether §3d's speculative-consequence
+    stamp SURVIVES at all once no client start transaction exists —
+    §3d's sanction is written for the deferred start, and adoption
+    deletes the thing it sanctions, so that sentence needs
+    restatement, not inference; (iv) the UNMATERIALIZED-piece
+    fallback, i.e. whether the OFF-arm start path is retained as a
+    fallback under ON and under exactly which predicate; (v) the
+    first-hydration UX gates — what the user sees between navigate
+    and adoption, which is today covered by the client's own start
+    rendering immediately. **Its landing DUTY: retire (a)'s retry.**
+    With no client start transaction there is no start commit to be
+    refused, so `reattemptDeferredStartOnStaleRead` and the
+    `isStaleConfirmedReadConflict` predicate become dead code on the
+    ON arm and must be removed with it (the OFF arm keeps them while
+    the OFF path exists — see #6208's OW45-row disclosed ripple: that
+    fix is deliberately not flag-gated). Trigger: the post-flip soak,
+    or any ON surface where a re-attempted start is observed
+    exhausting its budget in real usage
+    (`deferred-start-conflict-exhausted`), whichever comes first.**
 
 ## 4. Standing rule
 

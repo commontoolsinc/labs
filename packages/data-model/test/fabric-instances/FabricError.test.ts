@@ -420,66 +420,76 @@ describe("FabricError", () => {
       });
     });
 
-    describe("`[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]`", () => {
-      it("via dispatch: `[DEEP_FREEZE]` freezes wrapper + recurses cause", () => {
-        const inner = FabricError.fromNativeError(new Error("cause"));
-        const fe = FabricError.fromNativeError(
-          new Error("outer", { cause: inner }),
-        );
-        const result = deepFreeze(fe);
-        expect(result).toBe(fe); // freeze-in-place identity
-        expect(Object.isFrozen(fe)).toBe(true);
-        expect(isDeepFrozen(inner)).toBe(true);
+    describe("[DEEP_FREEZE]", () => {
+      describe("via dispatch", () => {
+        it("freezes wrapper + recurses cause", () => {
+          const inner = FabricError.fromNativeError(new Error("cause"));
+          const fe = FabricError.fromNativeError(
+            new Error("outer", { cause: inner }),
+          );
+          const result = deepFreeze(fe);
+          expect(result).toBe(fe); // freeze-in-place identity
+          expect(Object.isFrozen(fe)).toBe(true);
+          expect(isDeepFrozen(inner)).toBe(true);
+        });
+
+        it("recurses enumerable custom props (preserved via extras)", () => {
+          const err = new Error("e");
+          const childObj = { nested: 1 };
+          (err as unknown as Record<string, unknown>).custom = childObj;
+          const fe = FabricError.fromNativeError(err);
+          deepFreeze(fe);
+          // Non-string custom state is preserved AND deep-frozen.
+          expect(fe.getExtra("custom")).toBe(childObj);
+          expect(Object.isFrozen(childObj)).toBe(true);
+        });
       });
 
-      it("via dispatch: `[DEEP_FREEZE]` recurses enumerable custom props (preserved via extras)", () => {
-        const err = new Error("e");
-        const childObj = { nested: 1 };
-        (err as unknown as Record<string, unknown>).custom = childObj;
-        const fe = FabricError.fromNativeError(err);
-        deepFreeze(fe);
-        // Non-string custom state is preserved AND deep-frozen.
-        expect(fe.getExtra("custom")).toBe(childObj);
-        expect(Object.isFrozen(childObj)).toBe(true);
+      describe("via direct member invocation", () => {
+        it("freezes wrapper + recurses cause", () => {
+          const inner = FabricError.fromNativeError(new Error("cause"));
+          const fe = FabricError.fromNativeError(
+            new Error("outer", { cause: inner }),
+          );
+          const result = fe[DEEP_FREEZE](subFreeze);
+          expect(result).toBe(fe); // freeze-in-place identity
+          expect(Object.isFrozen(fe)).toBe(true);
+          expect(isDeepFrozen(inner)).toBe(true);
+        });
+
+        it("recurses enumerable custom props (preserved via extras)", () => {
+          const err = new Error("e");
+          const childObj = { nested: 1 };
+          (err as unknown as Record<string, unknown>).custom = childObj;
+          const fe = FabricError.fromNativeError(err);
+          fe[DEEP_FREEZE](subFreeze);
+          // Non-string custom state is preserved AND deep-frozen.
+          expect(fe.getExtra("custom")).toBe(childObj);
+          expect(Object.isFrozen(childObj)).toBe(true);
+        });
+      });
+    });
+
+    describe("[IS_DEEP_FROZEN]", () => {
+      describe("via dispatch", () => {
+        it("is `true` only when wrapper + cause are frozen", () => {
+          const fe = FabricError.fromNativeError(new Error("test"));
+          expect(isValidDeepFrozenFabricValue(fe)).toBe(false);
+          Object.freeze(fe); // wrapper only; some descendants still mutable
+          // (May be true since this particular FabricError has no nested
+          // FabricValue descendants beyond primitive strings.)
+          deepFreeze(fe);
+          expect(isValidDeepFrozenFabricValue(fe)).toBe(true);
+        });
       });
 
-      it("via dispatch: `[IS_DEEP_FROZEN]` is `true` only when wrapper + cause are frozen", () => {
-        const fe = FabricError.fromNativeError(new Error("test"));
-        expect(isValidDeepFrozenFabricValue(fe)).toBe(false);
-        Object.freeze(fe); // wrapper only; some descendants still mutable
-        // (May be true since this particular FabricError has no nested
-        // FabricValue descendants beyond primitive strings.)
-        deepFreeze(fe);
-        expect(isValidDeepFrozenFabricValue(fe)).toBe(true);
-      });
-
-      it("via direct member invocation: `[DEEP_FREEZE]` freezes wrapper + recurses cause", () => {
-        const inner = FabricError.fromNativeError(new Error("cause"));
-        const fe = FabricError.fromNativeError(
-          new Error("outer", { cause: inner }),
-        );
-        const result = fe[DEEP_FREEZE](subFreeze);
-        expect(result).toBe(fe); // freeze-in-place identity
-        expect(Object.isFrozen(fe)).toBe(true);
-        expect(isDeepFrozen(inner)).toBe(true);
-      });
-
-      it("via direct member invocation: `[DEEP_FREEZE]` recurses enumerable custom props (preserved via extras)", () => {
-        const err = new Error("e");
-        const childObj = { nested: 1 };
-        (err as unknown as Record<string, unknown>).custom = childObj;
-        const fe = FabricError.fromNativeError(err);
-        fe[DEEP_FREEZE](subFreeze);
-        // Non-string custom state is preserved AND deep-frozen.
-        expect(fe.getExtra("custom")).toBe(childObj);
-        expect(Object.isFrozen(childObj)).toBe(true);
-      });
-
-      it("via direct member invocation: `[IS_DEEP_FROZEN]` is `true` only when wrapper is frozen", () => {
-        const fe = FabricError.fromNativeError(new Error("test"));
-        expect(fe[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(false);
-        fe[DEEP_FREEZE](subFreeze);
-        expect(fe[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
+      describe("via direct member invocation", () => {
+        it("is `true` only when wrapper is frozen", () => {
+          const fe = FabricError.fromNativeError(new Error("test"));
+          expect(fe[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(false);
+          fe[DEEP_FREEZE](subFreeze);
+          expect(fe[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
+        });
       });
     });
 
@@ -488,7 +498,7 @@ describe("FabricError", () => {
     // round-trip). These cases pin the template contract for this concrete
     // implementor.
     describe("deepClone()", () => {
-      it("frozen clone is deep-frozen with equal state", () => {
+      it("returns a deep-frozen clone with equal state", () => {
         const fe = FabricError.fromNativeError(
           new Error("boom", { cause: { detail: 1 } }),
         );
@@ -515,7 +525,7 @@ describe("FabricError", () => {
         expect(fe.deepClone(true)).not.toBe(fe);
       });
 
-      it("mutable clone is a distinct, mutable instance with equal state", () => {
+      it("returns a distinct, mutable clone with equal state", () => {
         const fe = FabricError.fromNativeError(
           new Error("outer", { cause: { detail: 1 } }),
         );
@@ -536,7 +546,7 @@ describe("FabricError", () => {
       // `cause` with the original -- contrary to the `deepClone(false)`
       // contract on `FabricInstance`. Pinned to record the actual behavior,
       // not to bless it.
-      it("mutable clone currently SHARES the nested `cause` reference (known gap)", () => {
+      it("returns a mutable clone that currently SHARES the nested `cause` reference (known gap)", () => {
         const cause = { detail: 1 };
         const fe = FabricError.fromNativeError(new Error("outer", { cause }));
         const clone = fe.deepClone(false) as FabricError;

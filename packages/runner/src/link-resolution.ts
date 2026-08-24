@@ -168,7 +168,22 @@ export const undefinedDataLink = (
 ): NormalizedFullLink => {
   // `path` is rebased to [], so any recorded cap depths now address segments
   // of a different document. Drop them rather than leave them misaligned.
-  const { scopeCaps: _dropped, ...rest } = link;
+  // Drop the read-side stamps too (OW51): a deliberately undefined-data
+  // result is an HONEST undefined, not a pending hop-target, so it must
+  // not carry `pendingHopDoc` (would refuse an honest-undefined read).
+  // What this strip GUARANTEES is scoped to the exported
+  // asCell-boundary callers, which return the result as built here. On
+  // the walk's own scope-blocked break the exit stamps `viaLinkHop`
+  // back onto the result (behaviorally inert today: nothing consumes
+  // the flag on an undefined-data link) — the re-stamp skip is a named
+  // cleanup in the OW51 build report §8.5, not a contract this comment
+  // can promise.
+  const {
+    scopeCaps: _dropped,
+    pendingHopDoc: _p,
+    viaLinkHop: _v,
+    ...rest
+  } = link;
   return {
     ...rest,
     id: dataUriFromValueWithResolvedLinks(undefined, link),
@@ -266,8 +281,20 @@ const linkAddressKey = (link: NormalizedFullLink): string =>
 /**
  * What distinguishes two resolutions of the same address. `schema` and
  * `scopeCaps` decide which hops may be followed and what the result carries,
- * `overwrite` survives into the result under `preserveOverwrite`, and both
- * arguments change the answer for the same link.
+ * `overwrite` survives into the result under `preserveOverwrite`, and all of
+ * these change the answer for the same link.
+ *
+ * `viaLinkHop` (OW51) belongs here too: a DATA-DERIVED input link makes a
+ * missing-doc dead-end resolve to a `pendingHopDoc` result (`inputViaLinkHop`
+ * in the walk), while a clean input link at the same address resolves to a
+ * plain undefined-data result. Two resolutions of one address differing only
+ * in this flag therefore have DIFFERENT answers and must NOT share a memo
+ * entry — otherwise, within one lazy tx, a clean first-write
+ * `get() ?? fallback` read and a derived read of the same missing doc alias:
+ * whichever runs first seeds the cache and the other inherits the wrong
+ * verdict (a spurious refusal on the clean read, or the lost refusal — the
+ * OW51 crash surviving — on the derived read). Confirmed both directions by
+ * #6179's review (Finding 1); pinned in `link-resolution-memo.test.ts`.
  */
 const resolutionMemoVariant = (
   link: NormalizedFullLink,
@@ -281,7 +308,7 @@ const resolutionMemoVariant = (
     ? ""
     : `#${identityTag(link.scopeCaps)}`;
   return `link:${lastNode}|${preserveOverwrite ? 1 : 0}|` +
-    `${link.overwrite ?? ""}|${schema}|${caps}|`;
+    `${link.overwrite ?? ""}|${schema}|${caps}|${link.viaLinkHop ? "v" : ""}|`;
 };
 
 /**
@@ -421,8 +448,25 @@ export function resolveLinkTracingDereferences(
   let memoizable = true;
 
   let iteration = 0;
+  // The RULED OW51 dead-end marker (link-types.ts `pendingHopDoc`): a
+  // walk that FOLLOWED at least one hop and then stopped because the
+  // current doc itself is missing may be pointing into data that has
+  // simply not arrived — the value at the returned link is unknowable,
+  // not absent. `followedHop` distinguishes that from a first-hop read
+  // of the handle's own absent doc (the ordinary first-write idiom);
+  // `deadEndDocMissing` is re-decided per iteration from the sigil
+  // probe's NotFoundError path (`[]` = the DOC is missing, anything
+  // else = a present doc without this path).
+  let followedHop = false;
+  let pendingDeadEnd = false;
+  // The input handle's own provenance (link-types.ts `viaLinkHop`): a
+  // handle minted from a stored sigil starts AT its hop target, so a
+  // first-probe dead-end there is still a dead-end behind a hop — the
+  // asCell boundary consumed the hop when it minted the handle.
+  const inputViaLinkHop = link.viaLinkHop === true;
 
   while (true) {
+    let deadEndDocMissing = false;
     if (iteration++ > MAX_PATH_RESOLUTION_LENGTH) {
       logger.error("link-res-error", `Link resolution iteration limit reached`);
       throw new Error(`Link resolution iteration limit reached`);
@@ -477,6 +521,7 @@ export function resolveLinkTracingDereferences(
       };
     } else if (sigilProbe.error?.name === "NotFoundError") {
       const lastValid = (sigilProbe.error as INotFoundError).path.slice(); // [] => doc missing
+      if (lastValid.length === 0) deadEndDocMissing = true;
 
       if (lastValid.length > 0) {
         // remove `value` prefix
@@ -581,6 +626,7 @@ export function resolveLinkTracingDereferences(
         throw new Error(`Link cycle detected at ${key}: ${detail}`);
       }
       traces.push(recordDereferenceHop(tx, nextHop));
+      followedHop = true;
       const nextLink = nextHop.link;
       const crossSpace = nextLink.space !== link.space;
       // The hop consumed `nextHop.depth` of our path and re-rooted the rest
@@ -624,11 +670,45 @@ export function resolveLinkTracingDereferences(
       }
       addressKey = linkAddressKey(link);
     } else {
+      // The walk stops here. When it stops because the CURRENT doc is
+      // missing AND we got here by following a hop, the chain may
+      // continue inside the unarrived doc — mark the result pending
+      // (see the declaration above; the lazy read boundary refuses on
+      // it). A stop at a PRESENT doc, or on the handle's own root doc,
+      // is an honest end.
+      //
+      // SPACE scope only: a missing USER- or SESSION-scoped row is
+      // KNOWLEDGE, not transit — a principal's instance row exists only
+      // once that principal writes it (the scoped first-write idiom),
+      // and the fan-out run supply materializes instances by running
+      // derivations over exactly such absent rows, so a refusal here
+      // starves every first materialization whose scoped input carries
+      // no schema default. Composition must not change the verdict
+      // either: relaying a per-user cell through a nested pattern's arg
+      // doc stores a sigil, which makes the child's handle data-derived
+      // — the same absent row that reads `undefined` through the flat
+      // form must read `undefined` through the relay.
+      if (
+        (followedHop || inputViaLinkHop) && deadEndDocMissing &&
+        link.scope === "space"
+      ) {
+        pendingDeadEnd = true;
+      }
       break;
     }
   }
 
   const result = { ...link } satisfies NormalizedFullLink;
+  // Clear the input's stale `pendingHopDoc` before deciding this walk's own
+  // (Finding 2): a successful walk that followed no hop spreads the input's
+  // stamp, and nothing else unsets it — a later read of a now-present doc
+  // through a handle minted from a once-pending result would then refuse an
+  // honest value. Only THIS walk's dead-end verdict may set it.
+  delete result.pendingHopDoc;
+  if (pendingDeadEnd) result.pendingHopDoc = true;
+  // A post-hop result is itself data-derived: a handle minted from it
+  // (the asCell boundary) carries the provenance its later reads need.
+  if (followedHop || inputViaLinkHop) result.viaLinkHop = true;
 
   // Intern the schema at this single link-resolution exit so downstream
   // consumers see an identity-canonical, deep-frozen schema reference.

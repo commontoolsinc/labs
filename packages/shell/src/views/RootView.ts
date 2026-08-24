@@ -1,9 +1,4 @@
-import {
-  type DID,
-  type Identity,
-  KeyStore,
-  type TransferrableInsecureCryptoKeyPair,
-} from "@commonfabric/identity";
+import { type DID, type Identity, KeyStore } from "@commonfabric/identity";
 import { resolveSpaceDid, RuntimeInternals } from "@commonfabric/lib-shell";
 import {
   AppView,
@@ -30,6 +25,7 @@ import {
   isAppStateConfigKey,
   resolveIdentity,
   serialize,
+  type SerializedIdentity,
   ShellApp,
 } from "../lib/app-state.ts";
 import {
@@ -438,7 +434,7 @@ export class XRootView extends BaseView implements ShellApp {
   }
 
   async setIdentity(
-    id: Identity | TransferrableInsecureCryptoKeyPair | undefined,
+    id: Identity | SerializedIdentity | undefined,
   ): Promise<void> {
     const identity = await resolveIdentity(id);
     assertIdentityChangeAllowed(this.app.identity, identity);

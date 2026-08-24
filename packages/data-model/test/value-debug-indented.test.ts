@@ -13,7 +13,7 @@ import { expect } from "@std/expect";
 import { toCompactDebugString, toIndentedDebugString } from "@/value-debug.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 
-describe("toIndentedDebugString (direct wrapper coverage)", () => {
+describe("toIndentedDebugString()", () => {
   it("returns a non-empty string for a plain nested object", () => {
     const result = toIndentedDebugString({ a: 1, nested: { b: 2 } });
     expect(typeof result).toBe("string");

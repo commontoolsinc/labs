@@ -61,7 +61,7 @@ describe("schema-utils", () => {
       });
     }
 
-    describe("`canShare=true`", () => {
+    describe("canShare=true", () => {
       it("freezes input in place", () => {
         const originalProperties = {
           name: { type: "string" } as JSONSchemaObj,
@@ -98,7 +98,7 @@ describe("schema-utils", () => {
       });
     });
 
-    describe("`canShare=false`", () => {
+    describe("canShare=false", () => {
       it("clones before freezing", () => {
         const schema: JSONSchemaObj = {
           type: "object",
@@ -852,13 +852,13 @@ describe("schema-utils", () => {
     testType("FabricHash", new FabricHash(new Uint8Array(32), "fid1"));
     testType("FabricRegExp", new FabricRegExp(/x/));
 
-    describe("`undefined`", () => {
+    describe("undefined", () => {
       it("returns `undefined`", () => {
         expect(schemaForValueType(undefined)).toBe(undefined);
       });
     });
 
-    describe("`bigint`", () => {
+    describe("bigint", () => {
       it("returns `undefined`", () => {
         expect(schemaForValueType(BigInt(42))).toBe(undefined);
       });

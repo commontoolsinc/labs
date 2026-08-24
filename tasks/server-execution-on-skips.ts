@@ -88,16 +88,17 @@ const SUITE_PACKAGE_DIR: Record<ServerExecutionSuite, string> = {
  * the load pass runs under the flush deadline), so the surface runs —
  * carrying the in-CI amplification-ratio gate and the pattern-updater
  * CHECK-half witness (verification-coverage.md's closed OW19 row).
- * Every list is EMPTY but for TWO `phase-7` entries: one `patterns`
- * — topics-navigation (Phase 4's mixed-posture entry, re-justified by
- * Phase 7 — the ON shell build now runs in the ON lanes, the inherited
- * red did not lift) — and one `runner` entry,
- * `pattern-and-data-persistence`, red once the runner integration
- * clients DECLARE the ON posture (the lane was mixed before;
- * verification-coverage.md OW33) — plus two STEP-level
- * `runtime-client` entries in `integration/client.test.ts` (the CT-1606
- * PerUser header render, 3/3 red; the single-navigateTo dispatch, 1/3
- * red) whose file otherwise runs ON. The ON arm otherwise runs the full
+ * The OW33-family entries this paragraph tracked have moved (OW33
+ * triage, 2026-08-22): the two STEP-level `runtime-client` entries and
+ * the `patterns` topics-navigation entry are LIFTED (12/12 and 10/10
+ * green at the true ON topology — see each list's comment; the topics
+ * lift barriers the test's fid capture and moves the echo-drop smell
+ * to verification-coverage.md OW60), and the surviving `runner` entry
+ * (`pattern-and-data-persistence`) carries a ROOT-CAUSED reason
+ * superseding its UNTRIAGED 2026-08-16 note — the speculation
+ * overlay's arrival-witness hole
+ * (docs/history/plans/server-execution-v2/optimize/
+ * ow33-triage-report.md). The ON arm otherwise runs the full
  * suites; the flip PR lands only once this list is empty again.
  *
  * `lunch-poll-vote` LIFTED by stage-C W3.1 (2026-08-19, tip
@@ -169,277 +170,113 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
   // removed by construction, the two-deriver interim's CAS storm with
   // it — the exact unskipping condition the entry named. That gate now
   // runs (and passes) ON.
+  // topics-navigation LIFTED by the OW33 triage's review pass
+  // (2026-08-22, main 51350077e): the entry's recorded fail-fast red
+  // (`missing required property myName` at PiecePropIo.set →
+  // validateWriteDestination) did NOT reproduce in 11 true-ON runs, and
+  // the residual 2/10 flake was a TEST-POSTURE defect — the beforeAll's
+  // unbarriered `topicAt` fid capture reading a pre-arrival `topics`
+  // when the client's echo run is dropped (the OW60 echo-drop smell,
+  // verification-coverage.md — the board itself was always correct
+  // server-side). The capture is now barriered on both created topics
+  // being readable (waitForCellValue, the waiting-in-tests non-browser
+  // shape). Lift evidence: 10/10 green on the ON-built binary
+  // (sha256 68331b3f…, fresh store, posture probed per run) WITH the
+  // echo-drop occurring in 2 of the 10 runs and absorbed by the
+  // barrier — the exact former 2/10 red mechanism, no longer failing.
+  // The product smell the flake used to witness stays tracked as
+  // verification-coverage.md OW60, not as a flaky test.
   patterns: [
     {
-      file: "integration/topics-navigation.test.ts",
-      phase: "phase-7",
-      reason: "Phase 7 (2026-08-15; lane roles re-tensed 2026-08-16 — the " +
-        "flip landed DARK, so this runs in the explicit-true ON lanes on " +
-        "the ON-built binary, not in the default lanes): the ON shell " +
-        "build now RUNS in CI (`build-toolshed-on` bakes the shell ON for " +
-        "the ON lanes), which " +
-        "discharges the first of this entry's two lifting conditions — " +
-        "the second (the inherited red) does NOT lift: under the full " +
-        "ON posture the file fails FAST at the " +
-        "controller's prop set (`updated result does not match its " +
-        "write destination: missing required property myName`, " +
-        "PiecePropIo.set → validateWriteDestination), reproduced on the " +
-        "Phase-7 tree 2026-08-15; a browser-ON/controller-ON red owed to " +
-        "the flip-follow-up triage. Original entry: " +
-        "MIXED-POSTURE honesty (Phase 4 fixer, 2026-08-11; the " +
-        "workflow contract's list-the-affected-tests clause): the " +
-        "ON-arm CI lane ships the binary's OFF-built browser shell, " +
-        "so its green run of this file exercised an OFF-shell + " +
-        "ON-server posture that asserts nothing about the browser-ON " +
-        "behavior Phase 4 added — while under the FULL flag-ON " +
-        "posture (shell define baked ON, the local harness's " +
-        "start-local-dev env inheritance) the file is RED, reproduced " +
-        "verbatim on the unmodified Phase-3 base (5-minute " +
-        "'Navigation target' render timeout — the base-inherited " +
-        "browser-ON red family the P3 triage tracks, leg C's " +
-        "speculation-basis wedge pending its owner ruling). Skipped " +
-        "rather than green-by-vacuity; lifts when the ON shell build " +
-        "lands in CI (verification-coverage.md OW25) AND the " +
-        "inherited red is fixed.",
-    },
-    // ---- First ON-lane CI gate entries (2026-08-21; skip-and-land) ----
-    {
+      // The arm-B starvation is now a MAPPED FAMILY (the 2026-08-22
+      // evening triage on an instrumented client, verification-coverage.md
+      // OW45's ARM-B TRIAGE block): of its three members, TWO are fixed
+      // red-first in that pass — the event drain's deferral arm let a
+      // later-arrived event overtake a deferred earlier one (run b01's
+      // store-verified inversion of one user's last two clicks; the drain
+      // now processes across sidecars in append order with deferral as a
+      // barrier), and the graph walk's absent link-hop targets were
+      // tracked nowhere server-side so their birth never re-fired the
+      // watch (the first-read lottery on a quiet space; the walk now
+      // registers the miss and the birth delivers). The REMAINING member
+      // keeps this entry: run b04 caught the whole-piece shape live —
+      // the flag-ON client's navigate-deferred piece start dies
+      // terminally on a ConflictError whose basis read the served
+      // piece's computed docs at seq 0 (pre-birth, the first-hydration
+      // race) and the deferred-start error arm has no retry, so the
+      // piece never starts client-side and every dependent readCell
+      // stays undefined for the session while the store holds all 7
+      // appends (fork memo with dispositions:
+      // docs/history/plans/server-execution-v2/optimize/
+      // ow45-armb-client-start-fork.md). Lifts when the client-start
+      // class closes and the FIXED step greens ON 10/10
+      // quiet-and-loaded; the flip PR needs this list EMPTY.
       file: "integration/default-app.test.ts",
+      step: "should persist and reload every rapidly created notebook note",
       phase: "phase-7",
-      reason: "First ON-lane CI gate (2026-08-21, run 32447348664; " +
-        "skip-and-land — gates the FLIP, not the land): the browser " +
-        "console gate (integration/shell-utils.ts afterEach) trips on " +
-        "`TypeError: Cannot read properties of undefined (reading " +
-        "'split')` at `splitDefinitions` " +
-        "(api/patterns/notes/reference-block.ts:62) inside note.tsx lift " +
-        "callbacks. ROOT-CAUSED by the optimize-phase triage " +
-        "(2026-08-21): ARRIVAL ORDERING — a scheduler lift on a freshly " +
-        "SERVED-instantiated note runs while its input's link chain " +
-        "(through the piece's result/process doc to the " +
-        "schema-default-only pendingEdit cell) is still materializing in " +
-        "the reading runtime's replica view; the mid-chain resolution " +
-        "yields undefined and the leaf default:null is never consulted. " +
-        "NOT a demand hole (the gate's classification stands — the value " +
-        "is served and lands; the read races its arrival), and NOT " +
-        "client-only (the toolshed's serving runtime hits the same " +
-        "TypeError in its pull-settle loop); racy and load-sensitive " +
-        "(W4's loaded bench 2-for-2 at n=20; quiet-box browser runs " +
-        "mostly green); OFF green by construction (instantiate-and-read " +
-        "in one runtime). The fix fork is FLAGGED for the owner " +
-        "(defer-on-unresolved-chain in the runner vs lifts tolerating " +
-        "undefined during arrival — both change a stated/relied-upon " +
-        "semantic). Evidence: docs/history/plans/server-execution-v2/" +
-        "optimize/ow51-undefined-read-report.md (and " +
-        "stage-c/first-on-ci-gate.md). Lifts when verification-" +
-        "coverage.md OW51 closes and the file greens ON; the flip PR " +
-        "needs this list EMPTY.",
+      reason: "Real ON-regime client defect (verification-coverage.md " +
+        "OW45 arm B, triaged 2026-08-22 on an instrumented client): the " +
+        "flag-ON client's navigate-deferred piece start dies terminally " +
+        "on a stale-confirmed-read ConflictError against the serving " +
+        "side's own materialization of the freshly created piece (the " +
+        "first-hydration race; no retry arm), so the piece never starts " +
+        "client-side and every dependent readCell stays undefined for " +
+        "the session — while the store holds all 7 appends: no data " +
+        "loss. The family's two sibling defects (the event drain's " +
+        "deferral reordering one user's clicks; the graph walk's absent " +
+        "hop targets never re-firing the watch on birth) are FIXED " +
+        "red-first in the same pass. Fork memo: " +
+        "optimize/ow45-armb-client-start-fork.md. Lifts when the " +
+        "client-start class closes and the fixed step greens ON 10/10.",
     },
-    {
-      file: "integration/cfc-group-chat-demo.test.ts",
-      phase: "phase-7",
-      reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
-        "the FLIP, not the land): TWO write-path defects, one per failure " +
-        "point, NEITHER a demand hole (the served derivation chain was " +
-        "clean end-to-end: 33–41 derived commits, healthy demand " +
-        "counters). CI shape (Alice's authorship check): served " +
-        "events-down rows carry the SERVICE identity — authored-by/" +
-        "represents-principal name the service signer, not Alice — so CFC " +
-        "authorship verification stays 'unverified' forever; this IS the " +
-        "owed OW31/§2b acting-identity carriage build (post-merge, " +
-        "pre-flip), now with a CI surface as its lift evidence — OW31's " +
-        "build LANDED 2026-08-21, but the authorship labels come from " +
-        "the runtime-level CFC trust snapshot (storageManager.as), not " +
-        "the memory-plane carriage that build landed, so this shape does " +
-        "NOT lift on it alone (the flagged CFC-attribution residual in " +
-        "OW31's register row; OW34's family). Local " +
-        "shape (Bob's send click): Bob's messageDraft $value binding " +
-        "write into the serve-owned user-scope instance doc NEVER reaches " +
-        "the store (0/4 runs incl. a 300 s probe; his session committed " +
-        "12 OTHER writes meanwhile), so the served sendDisabled correctly " +
-        "never flips — the client own-write durability seam, " +
-        "verification-coverage.md OW47. OW47 is CLOSED (2026-08-21, " +
-        "optimize pass): the mechanism was the speculation.md §6 export " +
-        "refusal firing on a blind write's structural parent read that " +
-        "named a standing handler-echo layer; fixed in storage/v2.ts " +
-        "buildReads (excludeSpeculativeLayers) with unit + cellset-lww " +
-        "lift evidence — see optimize/ow47-client-durability-report.md. " +
-        "Mechanism + store/log evidence: docs/history/plans/" +
-        "server-execution-v2/stage-c/on-render-stall-rootcause.md §2 (and " +
-        "first-on-ci-gate.md). OW31's build and OW47 are both DONE " +
-        "(2026-08-21); what remains is the FLAG-5 CFC-attribution seam " +
-        "(the trust snapshot supplying the SERVICE identity to served " +
-        "authorship labels — OW34's family, flagged in OW31's register " +
-        "row). Lifts when that seam closes and the file greens ON; the " +
-        "flip PR needs this list EMPTY.",
-    },
-    {
-      file: "integration/profile-embed.test.ts",
-      phase: "phase-7",
-      reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
-        "the FLIP, not the land), re-scoped twice by the optimize-on-main " +
-        "served-wish seat. The ORIGINAL killer — OW49, " +
-        "`assertNoDivergentIfcBranches` refusing the wish builtin's own " +
-        '`anyOf[{type:"undefined"}, <requested schema>]` /result ' +
-        "declaration — is FIXED: RULING 5 (CFC owner, 2026-08-21) narrowed " +
-        "the assert to actual ambiguity (verification-coverage.md OW49; " +
-        "runner cfc/schema-merge.ts), and 10 fresh-store live ON runs at " +
-        "the ruling head show the assert EXTINCT (0 occurrences; the wish " +
-        "UI mounts and the profile resolves every run). The lift attempt " +
-        "then surfaced the NEXT blocker: the resolved-profile AMEND steps " +
-        "are intermittently red (6/10 — setName/badge 4x, setBio 2x, " +
-        "300 s waits; passes take 19–41 s), and the amended values are " +
-        "durably ABSENT from EVERY run's store, pass and fail — the " +
-        "passing renders ride a non-durable echo. Standing signatures in " +
-        "every run: 60–70 foreign-write refusals of the home wave running " +
-        "the profile module's lifts (cf:module/…:applyInitialName, " +
-        "__cfLift_*) into the profile's own space with no §2b carriage, " +
-        "and the profile space never activates a serving wave — the " +
-        "rootcause §1 / OW45+OW31-family surface, newly REACHABLE now " +
-        "that OW49's kill is gone; row-mapping with the coordinator " +
-        "(triage: optimize/ruling5-ow49-report.md §3). NOT a demand " +
-        "hole. Gate record: docs/history/plans/server-execution-v2/" +
-        "stage-c/first-on-ci-gate.md; seat evidence: " +
-        "docs/history/plans/server-execution-v2/optimize/" +
-        "ow48-50-wish-path-report.md. " +
-        "OW48 was REFUTED as environment contamination (stale " +
-        "localhost:8000 toolshed serving pre-#6019 sources); OW50's " +
-        "failure surfacing is BUILT. Lifts when the amend-convergence " +
-        "blocker closes and the file greens ON; the flip PR needs this " +
-        "list EMPTY.",
-    },
-    {
-      file: "integration/home-profile-reload-durability.test.ts",
-      phase: "phase-7",
-      reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
-        "the FLIP, not the land): under ON the created profile piece's " +
-        "PROGRAM (code + CFC labelMap + schema docs) is only ever written " +
-        "by the client's own post-arrival commit; the reload kills the " +
-        "trailing create's program commit, and the server's fallback — " +
-        "`compile-cache/writeback` into the profile space — is REFUSED as " +
-        "a foreign-space write with no §2b delegated carriage " +
-        "(seal-space-commit-failed, 17 refusals per space observed), so " +
-        "the space's serving loop parks the structure load forever, " +
-        "SILENTLY, and the name renders the #id placeholder. NOT a demand " +
-        "hole — the identical demand derived the name wherever the " +
-        "program write survived (72 basis rows on Grace's space; 0 on the " +
-        "broken two). The carriage half (S-A) LANDED 2026-08-21 with " +
-        "OW31's build — the replicate trigger's writebacks now ride the " +
-        "instantiating run's §2b carriage; the client barriers and " +
-        "heal-on-read are " +
-        "verification-coverage.md OW45 (S-B/S-C); the silent forever-park " +
-        "is OW46 (S-D). Mechanism + store/log evidence: docs/history/" +
-        "plans/server-execution-v2/stage-c/on-render-stall-rootcause.md " +
-        "§1 (and first-on-ci-gate.md). OW31's build is DONE " +
-        "(2026-08-21), OW45's client half too (S-B merged; S-C SKIPPED " +
-        "by owner ruling 2026-08-21 — off the lift critical path, the " +
-        "test's own idle-barrier contract covers every create before " +
-        "any reload); lifts when OW31's cf:module cross-space run " +
-        "residual closes and the file greens ON (the optimize pass's " +
-        "joint run had step 1 green in ~10 s and step 2 red ONLY on " +
-        "that residual); the flip PR needs this list EMPTY.",
-    },
-    {
-      file: "integration/sqlite-db-owner-multi-runtime.test.ts",
-      phase: "phase-7",
-      reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
-        "the FLIP, not the land): red under the TRUE ON topology (the " +
-        "harness posture fix routes ON runs at the lane's toolshed) with " +
-        "a semantic assert — `bob's runtime must not re-mint itself as " +
-        "the db owner`: a second user's runtime re-mints the sqlite db " +
-        "handle owner under ON, the served-execution half of the sqlite " +
-        "identity pair (verification-coverage.md OW53; its sibling below " +
-        "carries the read-clearance half). NOT a demand hole. Evidence: " +
-        "docs/history/plans/server-execution-v2/stage-c/" +
-        "first-on-ci-gate.md. Lifts when OW53 closes and the file greens " +
-        "ON; the flip PR needs this list EMPTY.",
-    },
-    {
-      file: "integration/sqlite-read-clearance-multi-runtime.test.ts",
-      phase: "phase-7",
-      reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
-        "the FLIP, not the land): red under the TRUE ON topology with " +
-        "semantic asserts — `baseline request hash stays reader-blind` " +
-        "fails (the cleared-read request hash becomes keyed by READER " +
-        "under ON) and `the cleared result doc carries ONLY the declared " +
-        "surface` fails: the sqlite read-time clearance identity model " +
-        "diverges under served execution — the read-clearance half of " +
-        "the sqlite identity pair (verification-coverage.md OW53). NOT a " +
-        "demand hole. Evidence: docs/history/plans/server-execution-v2/" +
-        "stage-c/first-on-ci-gate.md. Lifts when OW53 closes and the " +
-        "file greens ON; the flip PR needs this list EMPTY.",
-    },
+    // The sqlite identity pair's two FILE entries were LIFTED (OW53
+    // CLOSED, 2026-08-22): the sqlite builtins consumed the RUNTIME's
+    // ambient identity — the SERVICE, on a serving runtime — where the
+    // ruled model carries the RUN's acting principal (serving-loop.md
+    // §3c; protocol.md §1). The db-owner mint, the cleared-read hash
+    // keying, and the effect flush's reader and writeback identity now
+    // consume the run-carried principal (client/OFF byte-identical), so
+    // `sqlite-db-owner-multi-runtime` and
+    // `sqlite-read-clearance-multi-runtime` both green under the true ON
+    // topology (fresh-store gate 5/5 each; verification-coverage.md OW53
+    // carries the traces and the lift evidence).
   ],
-  runner: [
-    {
-      file: "integration/pattern-and-data-persistence.test.ts",
-      phase: "phase-7",
-      reason: "Phase 7 (2026-08-16, P7 fixer on the independent review's " +
-        "finding 7): the runner integration tests that talk to the lane's " +
-        "toolshed now DECLARE the posture from the env, so under the ON lane " +
-        "this Deno client really runs the ON client arm — and this file is " +
-        "RED there (reproduced locally, uniform ON: 13/14 green, this one " +
-        "red; it was 'green ON' only while the lane ran a MIXED posture, an " +
-        "OFF client against an ON server). Mechanism as observed: Phase 3 " +
-        "starts a NEW piece, `pull()`s its result cell and reads " +
-        "`getAsQueryResult().sum` — 15 under the derive-and-commit client " +
-        "(OFF), `undefined` under ON. The test holds no sink on the result " +
-        "(the sink is the demand — serving-loop.md §1: pull-based laziness), " +
-        "so nothing served the derivation, and the ON client's OWN " +
-        "speculative run did not surface the value through this read path " +
-        "either — UNTRIAGED whether the Deno-client speculation overlay " +
-        "should have (verification-coverage.md OW33; the same family shows " +
-        "as `derive_array_leak`'s own 'Counter value is 0, expected 50' " +
-        "warning under ON — green only because that test asserts memory). " +
-        "The remaining runner integration files that serve toolshed's " +
-        "`app.ts` in-process (no ExecutorHost) are single-process harnesses, " +
-        "OFF by construction in either lane. Skipped rather than red-by-" +
-        "design; lifts when OW33 is triaged and this file greens under the " +
-        "uniform ON posture; the flip PR needs this list EMPTY.",
-    },
-  ],
-  "runtime-client": [
-    // STEP-LEVEL entries (the suite is ONE file with 45 steps; dropping the
-    // file would make the runtime-client ON lane vacuous). The rest of
-    // `client.test.ts` runs ON — the worker DECLARES the posture from the
-    // env since the P7 fixer (finding 7); these two steps are red under the
-    // uniform ON posture, reproduced 3/3 and 1/3 respectively against a
-    // local ON toolshed (2026-08-16).
-    {
-      file: "integration/client.test.ts",
-      step:
-        "renders PerUser-derived computed JSX inside cf-screen header slot (CT-1606)",
-      phase: "phase-7",
-      reason: "Phase 7 (2026-08-16, P7 fixer on the independent review's " +
-        "finding 7): with the worker declaring the ON posture this step " +
-        "never reaches its FIRST render within 15 s (3/3 red under uniform " +
-        "ON; green under the mixed posture the lane ran before) — a page " +
-        "whose header renders a `computed` over a `PerUser<myName>` input " +
-        "(the SAME PerUser shape topics-navigation fails on under the full " +
-        "ON posture). Mechanism UNATTRIBUTED — the Deno-worker client's " +
-        "per-user derivation neither speculates into the render nor " +
-        "arrives served in time; folded into verification-coverage.md OW33 " +
-        "(the ON-posture Deno-client family) beside topics-navigation's " +
-        "inherited red. Skipped at STEP granularity so the other 43 steps " +
-        "keep running ON; lifts when OW33's triage greens it 5/5; the flip " +
-        "PR needs this list EMPTY.",
-    },
-    {
-      file: "integration/client.test.ts",
-      step:
-        "dispatches one navigateTo when a rendered handler changes local state",
-      phase: "phase-7",
-      reason: "Phase 7 (2026-08-16, P7 fixer on the independent review's " +
-        "finding 7): under the uniform ON posture this step is FLAKY (1/3 " +
-        "red: expected ONE navigateTo dispatch, observed TWO — the " +
-        "double-dispatch class the F10 handler-fork contract exists to " +
-        "prevent, here on a Deno-worker client whose handler fire commits " +
-        "the event while the served consequence also navigates). " +
-        "UNATTRIBUTED; folded into verification-coverage.md OW33. Skipped " +
-        "at STEP granularity (the other steps keep running ON) rather than " +
-        "left to flake the lane; lifts when OW33's triage greens it 10/10; " +
-        "the flip PR needs this list EMPTY.",
-    },
-  ],
+  // pattern-and-data-persistence LIFTED (the arrival-witness predicate,
+  // RULED 2026-08-22 — candidate (B) of the OW33 fork memo, built with
+  // red-first pins for both observed arms): the entry's root cause was
+  // the speculation overlay's ARRIVAL GATE witnessing arrival as
+  // `confirmedSeq(writtenDoc) >= floor`, class-blind — a first-run
+  // speculation's computed docs carry an AUTHORED setup cover at
+  // exactly the floor seq (the client's own phase-3 setup for the new
+  // instance; a prior session's for the resumed one), so the entry
+  // retired 40-260 ms before the served value landed and the bare read
+  // saw undefined (a rotating ~4/8 flake). The ruled predicate: a
+  // cover witnesses STRICTLY ABOVE the floor (any class), or AT the
+  // floor only when derived-class; unknown class at the floor fails
+  // closed toward the standing echo. Lift evidence: 10/10 green at the
+  // true ON topology (ON-built binary sha256 d3ef4a47f4354977…, fresh
+  // store per run, posture probed per run — shellServerExecutionDefine
+  // "true" + servingLoop present; loads 4.2-6.5; per-run stores show
+  // the loop serving, e.g. 13 derived commits in run 7). The register
+  // row (verification-coverage.md OW33) and the fork memo carry the
+  // ruling and the build.
+  runner: [],
+  // The two STEP-level entries this list held (the CT-1606 PerUser header
+  // render, 3/3 red 2026-08-16; the single-navigateTo dispatch, 1/3 red)
+  // were LIFTED by the OW33 triage (2026-08-22, main 51350077e): both
+  // steps are GREEN at the true ON topology — ON-built binary
+  // (sha256 68331b3f…), fresh store, posture probed per run
+  // (`shellServerExecutionDefine === "true"`, `servingLoop` present) —
+  // 10/10 full-suite runs with both steps executing (45 steps, 0 failed,
+  // every run), plus 2 earlier source-toolshed ON runs (12/12 total).
+  // The reds healed with the stack landed since the entries were written
+  // (fan-out stage B's per-demander run supply, the OW51 unresolved-input
+  // semantics, stage-C's arrival/retirement tuning, OW34 attribution).
+  // Evidence: docs/history/plans/server-execution-v2/optimize/
+  // ow33-triage-report.md. The in-file `onArmStepSkip` guard stays — it
+  // is the binding mechanism for any future step entry and is inert while
+  // no entry names it.
+  "runtime-client": [],
   shell: [],
 };
 

@@ -76,8 +76,9 @@ grep -E 'PB0GumS5vkDPyKAWciwh-4UtypoJwKFUXcDj3SsspHY|-85Wmyd9iwUjbpwnTYR2YolxkMU
 The count check is the point: the space holds 319 pieces across 150 identities,
 so "did I migrate the right 74?" is a question the manifest answers and a
 hand-copied list does not. It is also the rollback record — the second column is
-the source id to `setsrc` back to, which the Going-live section requires be
-captured before starting.
+the identity each piece has to be returned to, and the Going-live section says
+what can take a piece back there and what else must be captured before
+starting.
 
 **Upgrading to:** `packages/patterns/topics/{topic,main}.tsx` at current `main`
 (#4997's legacy-safety fixes plus #4991's body-at-create and thrown
@@ -353,14 +354,23 @@ piece — a pass whose midpoint is unknown is not one of the two clean passes.
 ## Going live
 
 Only after two clean passes, and with a rollback manifest written down first:
-the pristine snapshot path, the exact reset command, the prior source ids
-for every piece (`cf inspect piece <space> <fid>` records the current pattern
-identity — capture all 74 before starting), and a **fresh content export**
+the pristine snapshot path, the exact reset command, the prior pattern
+identity of every piece (`cf inspect piece <space> <fid>` records it — capture
+all 74 before starting) together with the source checkout that produced each
+of those identities, pinned by git rev, and a **fresh content export**
 taken from a snapshot of production at the start of the quiet window, so the
 per-topic restore has current data rather than rehearsal-age data.
 
-There is no `cf space reset` for production. The rollback is a `setsrc` back to
-the recorded source ids, which is why capturing them beforehand is not optional.
+There is no `cf space reset` for production. The rollback returns each piece
+to its recorded identity, and `setsrc` cannot be pointed at an identity — it
+takes a source path — so a rollback by `setsrc` re-applies the legacy source
+checked out at the rev that produced the identity, which is why that rev is
+captured beside the manifest and not reconstructed afterwards. The runtime
+also retains, on the piece, a revision for the source it was on before the
+migration — when that source is still present in the space — which is what
+[bulk piece operations](piece-bulk-operations.md) builds rollback on; no
+command fronts that restore yet, so until one does, the recorded-rev `setsrc`
+is the rollback.
 Above it sit two content tiers: `topics-restore.ts` repairs an individual
 damaged topic in place from the export, and the last resort is the operator
 swapping the store file back to the snapshot — which loses everything written

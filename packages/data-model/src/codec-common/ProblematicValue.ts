@@ -32,10 +32,10 @@ type ProblematicValueState = {
 };
 
 /**
- * Container for a value whose encoding or decoding failed.
- * Preserves the tag and raw state at fault, for round-tripping and debugging.
- * Used in lenient mode to allow graceful degradation rather than hard
- * failures. See Section 3.5 of the formal spec.
+ * Container for a value whose encoding or decoding failed. Preserves the tag
+ * and raw state at fault, for round-tripping and debugging. Used in lenient
+ * mode to allow graceful degradation rather than hard failures. See Section 3.5
+ * of the formal spec.
  *
  * Both of the things it preserves are whatever was at fault, which is why the
  * constructor takes anything at all for either: the one thing this class must
@@ -44,20 +44,20 @@ type ProblematicValueState = {
  * `toReportableState()` for the state, `toReportableTag()` for the tag.
  *
  * A rendering is deliberately not a conversion. A `Uint8Array` could be turned
- * into a `FabricBytes` and a `RegExp` into a `FabricRegExp`, and doing so
- * would misreport the wire: a reader would find a `FabricBytes` in `state` and
+ * into a `FabricBytes` and a `RegExp` into a `FabricRegExp`, and doing so would
+ * misreport the wire: a reader would find a `FabricBytes` in `state` and
  * conclude the payload carried one, when it carried raw bytes this format does
  * not accept. A string plainly reads as a description of the value rather than
  * the value, which is the honest answer where fidelity is not available.
  *
  * **This class encodes under a tag of its own**, `Problematic@1`, and carries
- * the preserved tag as data beside the state and the error. `UnknownValue`
- * does the opposite, round-tripping to the tag it preserved -- and can,
- * because that tag is a real tag. Here the preserved tag need not be one:
- * reporting a malformed tag is among the things this class is for, and a value
- * whose whole content is "this tag was not a tag" cannot go back out under
- * that tag. Encoding under a fixed tag keeps the wire form decodable whatever
- * was preserved, and keeps it a single shape rather than one shape per kind of
+ * the preserved tag as data beside the state and the error. `UnknownValue` does
+ * the opposite, round-tripping to the tag it preserved -- and can, because that
+ * tag is a real tag. Here the preserved tag need not be one: reporting a
+ * malformed tag is among the things this class is for, and a value whose whole
+ * content is "this tag was not a tag" cannot go back out under that tag.
+ * Encoding under a fixed tag keeps the wire form decodable whatever was
+ * preserved, and keeps it a single shape rather than one shape per kind of
  * fault.
  */
 export class ProblematicValue extends BaseFabricInstance {

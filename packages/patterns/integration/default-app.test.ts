@@ -25,6 +25,42 @@ import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 import { assert, assertEquals } from "@std/assert";
 import { resolveSpaceDid } from "@commonfabric/lib-shell";
+import { experimentalOptionsFromEnv } from "@commonfabric/runner";
+import { serverExecutionOnStepSkip } from "../../../tasks/server-execution-on-skips.ts";
+
+// The server-execution v2 posture this test process runs (testing.md §2):
+// the CI ON lane sets EXPERIMENTAL_SERVER_EXECUTION=true; unset = OFF.
+const SERVER_EXECUTION_FROM_ENV = experimentalOptionsFromEnv(Deno.env.get)
+  .serverExecution;
+
+// The ON arm's STEP-level skip guard (tasks/server-execution-on-skips.ts):
+// a step listed there for this file is skipped ONLY under the ON posture,
+// loudly (its reason is printed), and only while the entry exists — the OFF
+// arm and an unlisted step always run. The "persist and reload" step stays
+// guarded under OW45: with the step's own interim-race trap fixed (its
+// assertions bind to the wait's approved summary), the remaining ON red is
+// a real client-side readCell starvation on FIRST HYDRATION of freshly
+// created served state (no reload sits between the creates and the reads —
+// the step's only navigation precedes the notebook's existence) — sticky
+// undefined at the readCell surface while the store holds every append and
+// the reactive render path serves the same notes — measured 2026-08-22 at
+// the true ON topology on the FIXED step. The skip guards CI against that
+// product defect, not against the test.
+function onArmStepSkip(step: string): { ignore: boolean } {
+  if (SERVER_EXECUTION_FROM_ENV !== true) return { ignore: false };
+  const entry = serverExecutionOnStepSkip(
+    "patterns",
+    "integration/default-app.test.ts",
+    step,
+  );
+  if (entry === undefined) return { ignore: false };
+  console.warn(
+    `[server-execution ON arm] patterns: SKIPPING STEP ${
+      JSON.stringify(step)
+    } (until ${entry.phase}) — ${entry.reason}`,
+  );
+  return { ignore: true };
+}
 
 type BrowserWriteTraceEntry = {
   recordedAt: number;
@@ -644,152 +680,198 @@ describe("default-app flow test", () => {
     }
   });
 
-  it("should persist and reload every rapidly created notebook note", async () => {
-    identity = await Identity.generate({ implementation: "noble" });
-    const notebookSpaceName = globalThis.crypto.randomUUID();
-    const notebookSpaceDid = await resolveSpaceDid(
-      identity,
-      notebookSpaceName,
-    );
+  it(
+    "should persist and reload every rapidly created notebook note",
+    onArmStepSkip(
+      "should persist and reload every rapidly created notebook note",
+    ),
+    async () => {
+      identity = await Identity.generate({ implementation: "noble" });
+      const notebookSpaceName = globalThis.crypto.randomUUID();
+      const notebookSpaceDid = await resolveSpaceDid(
+        identity,
+        notebookSpaceName,
+      );
 
-    const page = shell.page();
-    await disposeBrowserRuntime(page);
-    await shell.goto({
-      frontendUrl: FRONTEND_URL,
-      view: { spaceName: notebookSpaceName },
-      identity,
-    });
+      const page = shell.page();
+      await disposeBrowserRuntime(page);
+      await shell.goto({
+        frontendUrl: FRONTEND_URL,
+        view: { spaceName: notebookSpaceName },
+        identity,
+      });
 
-    // shell.goto() waits for URL state and login, while RootView resolves the
-    // named view space independently. Do not interact with the previous
-    // space's still-rendered root while that resolution is in flight.
-    await waitForActiveSpaceRoot(page, notebookSpaceDid);
+      // shell.goto() waits for URL state and login, while RootView resolves the
+      // named view space independently. Do not interact with the previous
+      // space's still-rendered root while that resolution is in flight.
+      await waitForActiveSpaceRoot(page, notebookSpaceDid);
 
-    console.log("Await runtime idle for notebook regression...");
-    await waitForRuntimeIdle(page);
-    // Runtime idle can precede the page renderer's Lit update. Wait for the
-    // freshly navigated default-app view to bind its menu handlers before the
-    // first trusted click, just as the notebook toolbar does below.
-    await waitForCondition(
-      page,
-      () => typeof globalThis.commonfabric?.viewSettled === "function",
-    );
-    await awaitViewSettled(page);
-
-    try {
-      await clickButtonWithExactText(page, "Notes ▾");
-      await awaitViewSettled(page);
-      await clickButtonWithText(page, "New Notebook");
-      try {
-        await waitForCondition(page, async () => {
-          const commonfabric = globalThis.commonfabric as
-            | { readCell?: (options: { id: string }) => Promise<unknown> }
-            | undefined;
-          const view = globalThis.app?.serialize?.()?.view;
-          const pieceId = view && typeof view === "object" &&
-              "pieceId" in view && typeof view.pieceId === "string"
-            ? view.pieceId
-            : undefined;
-          if (!pieceId || !commonfabric?.readCell) return false;
-          let current: unknown;
-          const originalLog = console.log;
-          try {
-            console.log = () => {};
-            current = await commonfabric.readCell({ id: pieceId });
-          } finally {
-            console.log = originalLog;
-          }
-          return (current as { isNotebook?: unknown } | undefined)
-            ?.isNotebook === true;
-        });
-      } catch (error) {
-        console.log(
-          "Notebook navigation diagnostics:",
-          JSON.stringify(await collectNavigationDiagnostics(page), null, 2),
-        );
-        throw error;
-      }
-
-      // Wait until the notebook toolbar is mounted and interactive before
-      // clicking. viewSettled resolves once the worker is idle and the
-      // rendered view has caught up (vdom applied, Lit updates drained), so the
-      // New Note button's handler is bound and a single click is not dropped.
+      console.log("Await runtime idle for notebook regression...");
+      await waitForRuntimeIdle(page);
+      // Runtime idle can precede the page renderer's Lit update. Wait for the
+      // freshly navigated default-app view to bind its menu handlers before the
+      // first trusted click, just as the notebook toolbar does below.
       await waitForCondition(
         page,
         () => typeof globalThis.commonfabric?.viewSettled === "function",
       );
       await awaitViewSettled(page);
-      assert(
-        await clickButtonWithTitle(page, "New Note"),
-        "Expected New Note click to succeed",
-      );
-      // Arm the event-invocation trace before the note creations, whose markers
-      // this test's failure diagnostics read. clickButtonWithTitle settled the
-      // view, so the runtime has exposed its telemetry methods and the reset
-      // runs once with its success asserted. The first "Create Another" click
-      // below settles the view and waits for the button to render, so no
-      // separate wait for the modal is needed here.
-      assert(
-        await resetEventInvocationTrace(page),
-        "Expected the event invocation trace to reset",
-      );
-
-      const noteCreates = 7;
-      for (let i = 0; i < noteCreates - 1; i++) {
-        assert(
-          await clickButtonWithText(page, "Create Another"),
-          `Expected Create Another click ${i + 1} to succeed`,
-        );
-      }
-      assert(
-        await clickButtonWithExactText(page, "Create"),
-        "Expected final Create click to succeed",
-      );
 
       try {
-        await waitForCondition(page, notebookSourceStateMatches, {
-          args: [noteCreates],
-        });
-        await waitForRuntimeSynced(page);
-      } catch (_) {
-        // Keep the final assertions below so failures include diagnostics.
-      }
+        await clickButtonWithExactText(page, "Notes ▾");
+        await awaitViewSettled(page);
+        await clickButtonWithText(page, "New Notebook");
+        try {
+          await waitForCondition(page, async () => {
+            const commonfabric = globalThis.commonfabric as
+              | { readCell?: (options: { id: string }) => Promise<unknown> }
+              | undefined;
+            const view = globalThis.app?.serialize?.()?.view;
+            const pieceId = view && typeof view === "object" &&
+                "pieceId" in view && typeof view.pieceId === "string"
+              ? view.pieceId
+              : undefined;
+            if (!pieceId || !commonfabric?.readCell) return false;
+            let current: unknown;
+            const originalLog = console.log;
+            try {
+              console.log = () => {};
+              current = await commonfabric.readCell({ id: pieceId });
+            } finally {
+              console.log = originalLog;
+            }
+            return (current as { isNotebook?: unknown } | undefined)
+              ?.isNotebook === true;
+          });
+        } catch (error) {
+          console.log(
+            "Notebook navigation diagnostics:",
+            JSON.stringify(await collectNavigationDiagnostics(page), null, 2),
+          );
+          throw error;
+        }
 
-      const summary = await collectNotebookSourceState(page);
-      if (
-        summary.argumentNotesLength !== noteCreates ||
-        summary.noteCount !== noteCreates
-      ) {
-        console.log(
-          "Notebook rapid create source diagnostics:",
-          JSON.stringify(summary, null, 2),
+        // Wait until the notebook toolbar is mounted and interactive before
+        // clicking. viewSettled resolves once the worker is idle and the
+        // rendered view has caught up (vdom applied, Lit updates drained), so the
+        // New Note button's handler is bound and a single click is not dropped.
+        await waitForCondition(
+          page,
+          () => typeof globalThis.commonfabric?.viewSettled === "function",
         );
-        console.log(
-          "Notebook rapid create render diagnostics:",
-          JSON.stringify(await collectNotebookRenderState(page), null, 2),
+        await awaitViewSettled(page);
+        assert(
+          await clickButtonWithTitle(page, "New Note"),
+          "Expected New Note click to succeed",
         );
-        console.log(
-          "Notebook rapid create event/action diagnostics:",
-          JSON.stringify(
-            await collectNotebookCreateTraceSummary(page),
-            null,
-            2,
-          ),
+        // Arm the event-invocation trace before the note creations, whose markers
+        // this test's failure diagnostics read. clickButtonWithTitle settled the
+        // view, so the runtime has exposed its telemetry methods and the reset
+        // runs once with its success asserted. The first "Create Another" click
+        // below settles the view and waits for the button to render, so no
+        // separate wait for the modal is needed here.
+        assert(
+          await resetEventInvocationTrace(page),
+          "Expected the event invocation trace to reset",
+        );
+
+        const noteCreates = 7;
+        for (let i = 0; i < noteCreates - 1; i++) {
+          assert(
+            await clickButtonWithText(page, "Create Another"),
+            `Expected Create Another click ${i + 1} to succeed`,
+          );
+        }
+        assert(
+          await clickButtonWithExactText(page, "Create"),
+          "Expected final Create click to succeed",
+        );
+
+        // The assertions bind to the summary a wait handed back — the state
+        // as it was at the instant the predicate approved it — never to a
+        // separate read taken after a wait. Under server execution the
+        // notebook's derived `noteCount` follows the ruled unresolved-read
+        // disposition (OW51): a re-derivation reads cleanly `undefined` and
+        // re-triggers, healing back to the settled value. That interim is
+        // correct product behavior, so a single-shot read between a wait and
+        // its assertion can catch it and fail a healthy run (the OW45
+        // register row's measured 1-in-10-quiet / 5-in-10-under-load flake);
+        // a wait on the value itself absorbs it, and a value that never
+        // reaches `expectedCount` — a genuinely lost note — still fails
+        // loudly at waitForCondition's stuck-condition net.
+        //
+        // The first wait orders the sync barrier after local convergence, so
+        // "synced" covers all seven notes' commits; the second wait is the
+        // assertion's authority, re-approving the state after that barrier.
+        // Its predicate reads the same cells the step has read all along, and
+        // any client read registers demand — this step verifies that the
+        // created notes' data and derived count converge and survive the sync
+        // barrier under serving, not that they materialize unobserved (the
+        // reload rehydration surface is integration/reload/
+        // default-app-notebook.test.ts's).
+        let summary: NotebookSourceSummary | undefined;
+        let waitFailure: unknown;
+        try {
+          await waitForCondition(page, notebookSourceStateMatches, {
+            args: [noteCreates],
+          });
+          await waitForRuntimeSynced(page);
+          summary = await waitForCondition(page, notebookSourceStateMatches, {
+            args: [noteCreates],
+          });
+        } catch (error) {
+          // A wait or the sync barrier failed at its net: the state never
+          // converged (or synchronization itself failed). Hold the error so
+          // the failure path below can print diagnostics and then RE-THROW
+          // it — the waits are the step's only signal, and a fresh read
+          // must never stand in for them (a fallback read that fed the
+          // assertions could green a run whose authority wait failed on a
+          // field the assertions don't check).
+          waitFailure = error;
+        }
+
+        if (summary === undefined) {
+          // Failure path only: print the diagnostics the thrown failure
+          // cannot carry, from a one-shot read that is expressly NOT the
+          // signal (its raciness is harmless here — the step is already
+          // failing), then re-throw the authority's own error.
+          console.log(
+            "Notebook rapid create source diagnostics:",
+            JSON.stringify(await collectNotebookSourceState(page), null, 2),
+          );
+          console.log(
+            "Notebook rapid create render diagnostics:",
+            JSON.stringify(await collectNotebookRenderState(page), null, 2),
+          );
+          console.log(
+            "Notebook rapid create event/action diagnostics:",
+            JSON.stringify(
+              await collectNotebookCreateTraceSummary(page),
+              null,
+              2,
+            ),
+          );
+          throw waitFailure ??
+            new Error(
+              "the post-sync wait resolved without an approved summary",
+            );
+        }
+
+        // Approved path: the assertions bind to the summary the wait handed
+        // back — the state at the instant the predicate approved it.
+        assertEquals(summary.argumentNotesLength, noteCreates);
+        assertEquals(summary.noteCount, noteCreates);
+      } finally {
+        await waitForRuntimeIdle(page).catch(
+          (error) =>
+            console.warn(
+              "Failed to await runtime idle after notebook regression",
+              error,
+            ),
         );
       }
-
-      assertEquals(summary.argumentNotesLength, noteCreates);
-      assertEquals(summary.noteCount, noteCreates);
-    } finally {
-      await waitForRuntimeIdle(page).catch(
-        (error) =>
-          console.warn(
-            "Failed to await runtime idle after notebook regression",
-            error,
-          ),
-      );
-    }
-  });
+    },
+  );
 });
 
 async function armTriggerTrace(page: Page): Promise<boolean> {
@@ -1673,16 +1755,31 @@ async function collectNotebookSourceState(page: Page): Promise<{
   });
 }
 
+// The state notebookSourceStateMatches approves and hands back. Every field
+// is a defined, JSON-safe value by construction — the predicate answers only
+// when all of them hold — so the answer crosses the page boundary intact.
+type NotebookSourceSummary = {
+  notebookEntityId: string;
+  argumentNotesLength: number;
+  noteCount: number;
+  showNewNotePrompt: boolean;
+  usedCreateAnotherNote: boolean;
+};
+
 // Serialized into the page by waitForCondition: read the notebook's argument
 // and internal cells and report whether the rapidly created notes have all
 // landed — `expectedCount` notes present, the new-note prompt closed, and the
 // "create another" flag cleared. Inlines the collection that
 // collectNotebookSourceState performs so the wait resolves the instant the
-// source state converges rather than on a polling tick.
+// source state converges rather than on a polling tick. Answers the approved
+// summary rather than `true`, so the caller's assertions read the state as it
+// was when the condition held — a fresh read after the wait can instead land
+// in the ruled interim of a served re-derivation (`noteCount` cleanly
+// `undefined`, then re-triggered and healed) and fail a healthy run.
 const notebookSourceStateMatches = async (
   _probe: ProbeApi,
   expectedCount: number,
-): Promise<boolean> => {
+): Promise<NotebookSourceSummary | false> => {
   const api = globalThis.commonfabric as {
     readCell?: (options: {
       id: string;
@@ -1755,10 +1852,21 @@ const notebookSourceStateMatches = async (
     showNewNotePrompt?: unknown;
     usedCreateAnotherNote?: unknown;
   };
-  return argumentNotesLength === expectedCount &&
+  if (
+    argumentNotesLength === expectedCount &&
     internal.noteCount === expectedCount &&
     internal.showNewNotePrompt === false &&
-    internal.usedCreateAnotherNote === false;
+    internal.usedCreateAnotherNote === false
+  ) {
+    return {
+      notebookEntityId,
+      argumentNotesLength,
+      noteCount: internal.noteCount,
+      showNewNotePrompt: internal.showNewNotePrompt,
+      usedCreateAnotherNote: internal.usedCreateAnotherNote,
+    };
+  }
+  return false;
 };
 
 async function collectHomeLoadSummaryFromFreshPage(

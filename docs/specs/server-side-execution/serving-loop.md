@@ -116,6 +116,41 @@ per-space check: stream head past `eventWatermark` means undelivered
 events, so activate. A park racing an incoming commit self-heals: the
 hook re-fires on the next admission.
 
+The EXPLICIT WARM REQUEST *(RULED 2026-08-21 — the owner adopted the
+recommendation set for the home-profile setup-after-park residual;
+implemented the same day)*: the SERVING-SIDE PROVISIONING PATH issues
+it — the wave commit step reports every durably committed foreign
+provisioning batch (§2b's sanctioned authored crossing: a served
+`.inSpace()` create's scaffolding, the delegated program-
+materialization writeback) to the co-hosted memory server as a
+warm-marked admission notice carrying the staged doc instances. The
+host activates a parked target on it even with NO live session and NO
+events (the carries-events arm's sibling), and the target's tenure
+takes the staged instances as identity-less WARM DEMAND — the
+anonymous-session shape, a demand key with no demanding pair, unioned
+into the demand pass for that tenure — so the staged piece
+structure-loads and derives. This is the one deliberate extension of
+the demand union beyond client sessions: the issuer is the
+provisioning run that KNOWS it staged setup needing derivation — a
+scoped signal, never a blanket write-trigger — so T11.Q7 stays as
+designed (the admission hook alone still notifies without activating;
+a provisioning write ALONE still parks). Lifecycle: idempotent
+against an active target (the union is a no-op under standing client
+demand); a request racing a park re-carries itself into the successor
+activation; the captured warm demand is TENURE-scoped (it dies with
+the tenure — recompute-on-demand, §6 step 2, is the recovery posture
+for anything a dying tenure drops), and the request itself is a
+one-shot in-process signal, not a durable row — loss across a process
+crash in the staged-but-underived window is the OW46 silent-park
+observability family. One deliberate side effect, stated: the
+warm notice rides `noteExecutorCommit`, whose dirtiness marking means a
+foreign provisioning batch's staged writes now also PUSH to any client
+session subscribed to those docs in the target space — previously those
+engine-direct commits produced no notice at all, so a subscribed client
+saw them only on its next own sync. Beneficial (staleness removed),
+never load-bearing: no client in the ruled flows subscribes to setup
+docs before activation.
+
 Wiring, by plane. Every byte between these components travels on
 exactly ONE of two planes; the split is what keeps bookkeeping off
 the commit stream (README §3.3):
@@ -749,6 +784,21 @@ action's public write. Therefore, normatively:
 - Handler runs are actions: a server-side handler run gets per-run CFC
   exactly as its client run did. D-v2-1 moves WHERE handlers run, never
   the enforcement unit.
+- **The run's CFC trust snapshot carries the run's ACTING principal** —
+  the event's server-stamped actor, the demanded instance's principal,
+  or the delegated carriage's actor — never the serving runtime's
+  ambient identity; a run with no acting principal keeps the service
+  snapshot and cannot mint USER-NAMED current-principal claims. (The
+  actor-less setup/defaults mint carve-out can still resolve a
+  placeholder to the SERVICE under keep-service — the same ruling's
+  flagged Q3 caveat, recorded in the OW34 design of record and
+  arbitrated by the OW59 row's store audit.) (OW34-family,
+  RULED 2026-08-21. The snapshot attaches at the SpaceServer's run
+  stamp, before the run's first read, so the mid-run grant writes and
+  the commit-prep label mints of one run read one value. SC-38 in
+  `docs/specs/cfc-spec-changes.md` records the current-principal
+  family's served-execution reading; verification-coverage.md OW59 is
+  the coverage row.)
 
 FORBIDDEN: wave-level label unions; deferring any CFC check to commit
 or admission time; a server bypass ("the server is trusted") — the
@@ -1210,11 +1260,12 @@ structureLoadFailures, structureLoadDeferred, structureLoadStuck,
 structureLoadTerminal,
 structureLoadRearmed, watermarkClamped,
 unstampedSealRefusals, foreignWriteRefusals, foreignEngineFailures,
+warmRequests,
 watermarkLag, demandArrivals, undemandedNarrowingRuns, earlyEmitRefusals,
 demand: {demandedRows, demandedInstances, demandedInstancesMax,
 demandedPairs, demandedWriters, demandedWritersMax, demandRootEnters,
 demandRootLeaves, notCurrentRearms, demandPasses, demandPassMs,
-pushGrowthWakes, watchWakes}, settle: {series, dropped},
+pushGrowthWakes, watchWakes, warmWakes}, settle: {series, dropped},
 settleAdvances: {count, lastDelta, series, dropped}, events:
 {appended, processed, coalescedPerWaveMax, skippedIdempotent,
 drainInFlightSkips, lt1LeftoversPurged, lt1LateSealsRefused,
@@ -1257,7 +1308,11 @@ accept-gate refusals — carriage-less AND ungranted foreign writes,
 both action-scoped; `foreignEngineFailures` counts commit-step
 foreign-engine resolutions that failed and were isolated per space —
 a growing count names a foreign store that persistently cannot open,
-never a home-space outage) (`effectAcks` counts
+never a home-space outage; `warmRequests` counts explicit warm
+requests issued — one per foreign provisioning batch a wave durably
+committed (§1's third activation trigger, RULED 2026-08-21) — so a
+provisioning flow whose target never derives its staged setup is
+diagnosable from the issue count against the target's activity) (`effectAcks` counts
 effect-channel ack writes, so the
 §3 amplification metric is computable from counters alone —
 `settleAdvances` counts S1's drain-settle quiescence advances (RULED
@@ -1298,8 +1353,10 @@ time — which INCLUDES the awaited structure-load segments
 (`ensurePieceRunning`) for first-demand/pending root keys, NOT only the
 O(rows) reconcile (the reconcile does no per-row engine read and runs on
 registry deltas; the label is wall time, review MINOR-3);
-`pushGrowthWakes`/`watchWakes` count NOTIFIES (the push-time
-`demandChanged` and the `session.watch.set`/`.add` notifies) BEFORE the
+`pushGrowthWakes`/`watchWakes`/`warmWakes` count NOTIFIES (the push-time
+`demandChanged`, the `session.watch.set`/`.add` notifies, and the warm
+request's staged-instance captures — the third kept apart so
+`watchWakes` keeps meaning exactly the session-watch notifies) BEFORE the
 300 ms-grace coalescing — a burst is several notifies but one demand pass,
 so these exceed the pass-wake count (review NIT-5); the service (loopback)
 session's notifies are DROPPED — its tracked-set growth is the serving

@@ -4,7 +4,7 @@ import type {
   FabricPlainObject,
   FabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import type { DID, KeyPairRaw } from "@commonfabric/identity";
+import type { DID } from "@commonfabric/identity";
 import { type Program } from "@commonfabric/js-compiler/interface";
 import type { CfcConfClause } from "@commonfabric/runner/cfc";
 import type { CfcLabelView } from "@commonfabric/runner/cfc/label-view-core";
@@ -170,19 +170,19 @@ export type InitializationData = {
   // Plain record: structured-clone-safe — no functions cross the worker
   // IPC boundary. Fixed for the connection's lifetime.
   spaceHostMap?: Record<string, string>;
-  // Signer.
-  //
-  // TODO(danfuzz): this and `spaceIdentity` below are the other crossing the
-  // `InsecureCryptoKeyPair` marker in `@commonfabric/identity`'s
-  // `interface.ts` is about, and want the same `FabricBytes` for the same
-  // reason.
-  identity: KeyPairRaw;
+  /**
+   * Signer, as a `codec-realm` encoding of the `FabricKeyPair` it signs with.
+   * Encoded rather than plain because that is the one format which carries
+   * either state of a key pair -- key handles included -- across a realm
+   * boundary whole.
+   */
+  identity: RealmEncodedValue;
   // Identity of space.
   spaceDid: DID;
   // Temporary space name
   spaceName?: string;
-  // Temporary identity of space.
-  spaceIdentity?: KeyPairRaw;
+  /** Temporary identity of space, encoded as `identity` above is. */
+  spaceIdentity?: RealmEncodedValue;
   // Default timeout in milliseconds.
   timeoutMs?: number;
   // Experimental space-model feature flags.
@@ -201,7 +201,7 @@ export type InitializationData = {
     serverExecution?: boolean;
     // Link writers emit cid: schema-document references, with each closure
     // materialized in the carrying transaction (content-addressed schemas
-    // Phase 1). Default off.
+    // Phase 1). Default on; an explicit false is the rollback override.
     contentAddressedSchemas?: boolean;
   };
   // Commit-boundary CFC mode for the worker runtime.
@@ -981,14 +981,11 @@ export type VDomMountResponse = {
 
 /**
  * TODO(danfuzz): This type should be made compatible with `FabricValue`, for
- * transport implemented using `codec-realm`. As of this writing, secure crypto
- * keypairs cannot be properly represented: `InitializeRequest`'s `identity` is
- * a `KeyPairRaw`, whose `CryptoKeyPair` arm is a pair of opaque host objects
- * that no fabric class covers. Note also that an `interface` never satisfies
- * `FabricPlainObject` -- TypeScript grants an implicit index signature to an
- * anonymous object type and not to an interface -- so every arm here has to
- * become a type alias. The two ends of the crossing carry the matching
- * markers: `WebWorkerRuntimeTransport.send()` in
+ * transport implemented using `codec-realm`. Note that an `interface` never
+ * satisfies `FabricPlainObject` -- TypeScript grants an implicit index
+ * signature to an anonymous object type and not to an interface -- so every
+ * arm here has to become a type alias. The two ends of the crossing carry the
+ * matching markers: `WebWorkerRuntimeTransport.send()` in
  * `../client/transports/web-worker/transport-web-worker.ts`, and the `message`
  * listener in `../backends/web-worker/index.ts`.
  */

@@ -9,6 +9,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { isSigilLink } from "../src/link-utils.ts";
+import { resolvedSchema } from "./schema-ref-helpers.ts";
 import { type SigilLink } from "../src/sigil-types.ts";
 import { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -217,7 +218,7 @@ describe("getAsLink method", () => {
     // Link with schema included
     const link = cell.getAsLink({ includeSchema: true });
 
-    expect(linkRefPayload(link).schema).toEqual(schema);
+    expect(resolvedSchema(linkRefPayload(link).schema)).toEqual(schema);
     expect(linkRefPayload(link).id).toBeDefined();
     expect(linkRefPayload(link).path).toEqual(["value"]);
   });
@@ -279,7 +280,7 @@ describe("getAsLink method", () => {
     expect(linkRefPayload(link).id).toBeDefined();
     expect(linkRefPayload(link).space).toBeUndefined();
     expect(linkRefPayload(link).path).toEqual(["value"]);
-    expect(linkRefPayload(link).schema).toEqual(schema);
+    expect(resolvedSchema(linkRefPayload(link).schema)).toEqual(schema);
   });
 
   it("should handle cell without schema when includeSchema is true", () => {

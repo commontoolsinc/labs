@@ -1,10 +1,14 @@
-import {
-  deserializeKeyPairRaw,
-  DID,
-  Identity,
-  TransferrableInsecureCryptoKeyPair,
-} from "@commonfabric/identity";
+import { fabricFromJsonValue } from "@commonfabric/data-model/codecs";
+import { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
+import { DID, Identity } from "@commonfabric/identity";
 import { AppView } from "@commonfabric/navigation";
+
+/**
+ * An identity as it crosses the integration-test page boundary: its key pair
+ * in the `FabricValue` JSON encoding. A string, that boundary carrying only
+ * what JSON can express.
+ */
+export type SerializedIdentity = string;
 
 // Primary application state.
 export interface AppState {
@@ -72,20 +76,43 @@ export interface ShellApp {
   getRuntimeSpaceDID(): DID | undefined;
   setView(view: AppView): Promise<void>;
   setIdentity(
-    id: Identity | TransferrableInsecureCryptoKeyPair | undefined,
+    id: Identity | SerializedIdentity | undefined,
   ): Promise<void>;
   setConfig(key: AppStateConfigKey, value: boolean): Promise<void>;
 }
 
-// Turns either form an identity arrives in — a live `Identity`, or the raw key
-// pair that crosses the integration-test page boundary — into the `Identity`
-// application state holds.
+/**
+ * Turns either form an identity arrives in — a live `Identity`, or the encoded
+ * key pair that crosses the integration-test page boundary — into the
+ * `Identity` application state holds.
+ */
 export async function resolveIdentity(
-  id: Identity | TransferrableInsecureCryptoKeyPair | undefined,
+  id: Identity | SerializedIdentity | undefined,
 ): Promise<Identity | undefined> {
   if (id === undefined) return undefined;
   if (id instanceof Identity) return id;
-  return await Identity.fromRaw(deserializeKeyPairRaw(id).privateKey);
+  // From the seed rather than from the pair itself: this page picks its own
+  // ed25519 implementation, as it does for every identity it mints.
+  return await Identity.fromRaw(
+    keyPairFromSerialized(id).privateKeyBytes.slice(),
+  );
+}
+
+/**
+ * Decodes a {@link SerializedIdentity}, which is what the integration harness
+ * sends a page to log it in.
+ *
+ * @throws If the encoding is well-formed and decodes to something other than a
+ *   key pair.
+ */
+function keyPairFromSerialized(id: SerializedIdentity): FabricKeyPair {
+  const keyPair = fabricFromJsonValue(id);
+
+  if (!(keyPair instanceof FabricKeyPair)) {
+    throw new Error("Serialized identity is not a key pair.");
+  }
+
+  return keyPair;
 }
 
 // One identity replaces another only by way of a logged-out state. Clearing

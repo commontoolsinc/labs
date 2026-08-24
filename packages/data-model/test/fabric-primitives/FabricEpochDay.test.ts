@@ -62,7 +62,7 @@ describe("FabricEpochDay", () => {
   });
 
   describe("static members", () => {
-    describe("`[JSON_CODEC]`", () => {
+    describe("[JSON_CODEC]", () => {
       const codec = FabricEpochDay[JSON_CODEC];
       const expectedTag = CODEC_TYPE_TAGS.EpochDay;
       const env = NULL_LIVE_ENVIRONMENT;
@@ -160,7 +160,7 @@ describe("FabricEpochDay", () => {
 
   // Exercises the free `shallowFabricFromNativeValue()` rather than a member
   // of the class, so it lives directly under the class `describe()`.
-  describe("shallowFabricFromNativeValue() integration", () => {
+  describe("`shallowFabricFromNativeValue()` integration", () => {
     it("passes through unchanged even with `freeze=false`", () => {
       const days = new FabricEpochDay(456n);
       // freeze=false should still return the same instance (not a copy).

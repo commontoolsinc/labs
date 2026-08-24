@@ -6,7 +6,7 @@ import {
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
-import { Identity } from "@commonfabric/identity";
+import { Identity, realmValueFromKeyPair } from "@commonfabric/identity";
 import { EXPERIMENTAL_ENV_VARS, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
@@ -393,6 +393,15 @@ describe("background piece utility functions", () => {
     const fromPassphrase = await getIdentity(undefined, "operator");
     assertEquals(fromPassphrase.did().startsWith("did:key:"), true);
 
+    // Both hold key handles rather than material, which is the point of
+    // leaving the implementation to the platform: what the service keeps, and
+    // what it hands a worker, is a handle. Asserted rather than guarded on
+    // support -- this service runs on Deno, which has ed25519 in Web Crypto,
+    // and a build that quietly lost it would have this service holding its own
+    // signing secret again.
+    assertEquals(fromFile.keyPair.hasMaterial, false);
+    assertEquals(fromPassphrase.keyPair.hasMaterial, false);
+
     await assertRejects(
       () => getIdentity(`${dir}/missing.pem`),
       Error,
@@ -401,7 +410,7 @@ describe("background piece utility functions", () => {
     await assertRejects(
       () => getIdentity(),
       Error,
-      "No IDENTITY or OPERATOR_PASS environemnt set.",
+      "No IDENTITY or OPERATOR_PASS environment set.",
     );
     await Deno.remove(dir, { recursive: true });
   });
@@ -841,17 +850,41 @@ describe("SpaceManager", () => {
 describe("background worker", () => {
   it("handles ready, invalid requests, initialization, run errors, and cleanup", async () => {
     await withRealWorker(async (worker, nextMessage) => {
-      const identity = await Identity.generate({ implementation: "noble" });
+      // The platform's own implementation, as `getIdentity()` leaves it, so
+      // this exercises the key pair the service actually sends: one holding
+      // `CryptoKey` handles, which only the realm encoding can carry.
+      const identity = await Identity.generate();
+      assertEquals(identity.keyPair.hasMaterial, false);
       const ready = await nextMessage((message) => message.type === "ready");
       assertEquals(ready.msgId, -1);
 
       worker.postMessage({
         msgId: 1,
         type: "initialize",
-        data: { rawIdentity: { privateKey: "secret" } },
+        data: { encodedIdentity: { privateKey: "secret" } },
       });
       const invalid = await nextMessage((message) => message.msgId === 1);
       assertStringIncludes(String(invalid.error), "<REDACTED>");
+
+      // Well-formed as an encoding and wrong as a payload, which the shape
+      // guard cannot tell apart from the real thing: only the decode says so.
+      const notAKeyPair = await workerRequest(
+        worker,
+        nextMessage,
+        9,
+        WorkerIPCMessageType.Initialize,
+        {
+          did: TEST_DID,
+          toolshedUrl: TEST_API_URL,
+          encodedIdentity: realmValueFromKeyPair(
+            "not a key pair" as unknown as never,
+          ),
+        },
+      );
+      assertStringIncludes(
+        String(notAKeyPair.error),
+        "is not a key pair",
+      );
 
       const cleanupBeforeInitialize = await workerRequest(
         worker,
@@ -881,7 +914,7 @@ describe("background worker", () => {
         {
           did: identity.did(),
           toolshedUrl: TEST_API_URL,
-          rawIdentity: identity.serialize(),
+          encodedIdentity: realmValueFromKeyPair(identity.keyPair),
           experimental: { modernCellRep: true },
         },
       );
@@ -895,7 +928,7 @@ describe("background worker", () => {
         {
           did: identity.did(),
           toolshedUrl: TEST_API_URL,
-          rawIdentity: identity.serialize(),
+          encodedIdentity: realmValueFromKeyPair(identity.keyPair),
         },
       );
       assertEquals("error" in initializedAgain, false);

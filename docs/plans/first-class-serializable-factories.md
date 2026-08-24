@@ -249,7 +249,7 @@ Focused tests:
 - `packages/data-model/test/cloneForMutation.test.ts`
 - `packages/data-model/test/shallowMutableClone.test.ts`
 - `packages/data-model/test/value-clone.test.ts`
-- `packages/data-model/test/valueEquals.test.ts`
+- `packages/data-model/test/valueEqual.test.ts`
 - `packages/data-model/test/value-hash.test.ts`
 
 Each suite must cover all three factory kinds, nested factory state, independent

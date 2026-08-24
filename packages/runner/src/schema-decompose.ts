@@ -545,6 +545,16 @@ export function decomposeSchema(
 export function recomposeSchema(
   rootRef: string,
   lookup: (taggedHash: string) => JSONSchema | undefined,
+  options?: {
+    /**
+     * Preferred `$defs` name for a document reached by BARE reference —
+     * the case whose authored name the decomposition rewrote away. A
+     * caller that knows the original naming (a declared document at hand)
+     * supplies it here; collisions still break by suffixing, and
+     * fragment-referenced group members keep their own names regardless.
+     */
+    nameFor?: (taggedHash: string) => string | undefined;
+  },
 ): JSONSchema {
   const parsedRoot = parseExternalSchemaRef(rootRef);
   if (parsedRoot === undefined) {
@@ -612,7 +622,8 @@ export function recomposeSchema(
         if (external !== undefined) {
           const name = assignName(
             fragment.$ref,
-            external.defName ?? derivedName(external.taggedHash),
+            external.defName ?? options?.nameFor?.(external.taggedHash) ??
+              derivedName(external.taggedHash),
           );
           result = { ...result, $ref: encodeJsonPointer(["#", "$defs", name]) };
         }

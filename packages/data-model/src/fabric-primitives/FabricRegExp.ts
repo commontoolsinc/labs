@@ -51,8 +51,7 @@ type FabricRegExpState = {
  * validates the pattern syntax eagerly and makes `value` cheap. Other flavors
  * are stored faithfully (`source` / `flags` / `flavor`) but cannot yet produce
  * a native `RegExp`, so `value` throws for them -- leaving room to represent
- * other regex syntaxes in the future.
- * See Section 1.4.1 of the formal spec.
+ * other regex syntaxes in the future. See Section 1.4.1 of the formal spec.
  */
 export class FabricRegExp extends BaseFabricPrimitive
   implements ApiFabricRegExp {

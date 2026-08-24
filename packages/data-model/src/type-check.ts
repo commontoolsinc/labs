@@ -30,10 +30,10 @@ import { BaseFabricPrimitive } from "./fabric-bases/BaseFabricPrimitive.ts";
 /**
  * Indicates whether the value is a `FabricValue`, accepting
  * `FabricSpecialObject`s (both `FabricInstance` and `FabricPrimitive`),
- * `undefined`, and arrays with `undefined` elements or sparse holes
- * -- in addition to the base fabric types (`null`, `boolean`, `number`,
- * `string`, plain objects, dense arrays). An array must be a direct `Array`
- * instance; a subclass instance is not a `FabricValue`.
+ * `undefined`, and arrays with `undefined` elements or sparse holes -- in
+ * addition to the base fabric types (`null`, `boolean`, `number`, `string`,
+ * plain objects, dense arrays). An array must be a direct `Array` instance; a
+ * subclass instance is not a `FabricValue`.
  *
  * This function is a TypeScript type guard for `FabricValueLayer`.
  */
@@ -116,6 +116,11 @@ export function isValidFabricValueLayer(
  * Contrast the shallow, single-level sibling `isValidFabricValueLayer()` and
  * `isValidFabricConvertibleValue()` (which additionally accepts native values
  * *convertible* to fabric form).
+ *
+ * This is the admission test the encoding path's input contract is written
+ * against: a value this accepts encodes, and one it does not gets whatever
+ * best-effort handling costs correct input nothing. See
+ * `BaseCodecEngine.encode()`.
  */
 export function isValidFabricValue(value: unknown): value is FabricValue {
   // Fast leaf paths first, so a function or a primitive returns without
@@ -211,14 +216,14 @@ export function isValidFabricPlainObject(
 /**
  * Indicates whether a `FabricValue` is a plain object, an array, or a
  * `FabricSpecialObject` -- everything a `typeof value === "object"` test
- * accepts, minus `null`. The name states the array case because "object"
- * alone reads as excluding it.
+ * accepts, minus `null`. The name states the array case because "object" alone
+ * reads as excluding it.
  *
  * The runtime behavior matches a bare `isObjectOrArray()` exactly. The
- * difference is static: `isObjectOrArray()` narrows to
- * `Record<string, unknown>`, which discards the fact that the value is a
- * `FabricValue` -- so a guarded value can no longer be handed to a
- * `FabricValue` API. This keeps that half.
+ * difference is static: `isObjectOrArray()` narrows to `Record<string,
+ * unknown>`, which discards the fact that the value is a `FabricValue` -- so a
+ * guarded value can no longer be handed to a `FabricValue` API. This keeps that
+ * half.
  *
  * Contrast `isFabricPlainObject()`, which is strictly narrower at RUNTIME: it
  * accepts only plain objects, rejecting arrays and `FabricSpecialObject`s. The
@@ -235,9 +240,9 @@ export function isFabricObjectOrArray(
  * object whose prototype is `Object.prototype` or `null`. This rejects arrays,
  * `FabricSpecialObject`s, and other class instances (`Date`, `Map`, …), none of
  * which are representable as a `FabricPlainObject`. Unlike a bare
- * `isObjectOrArray()`
- * check, it preserves the value type — `FabricPlainObject`'s string index of
- * `FabricValue` keeps an indexed value typed as a `FabricValue`.
+ * `isObjectOrArray()` check, it preserves the value type —
+ * `FabricPlainObject`'s string index of `FabricValue` keeps an indexed value
+ * typed as a `FabricValue`.
  *
  * This asks a shape question -- "may I read this by property name?" -- of a
  * value the type already says is a `FabricValue`, and a null-prototype object

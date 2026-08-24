@@ -10,7 +10,11 @@ import {
   EmulatedStorageManager,
   StorageManager,
 } from "@commonfabric/runner/storage/cache.deno";
-import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
+import {
+  decodeMemoryBoundary,
+  encodeMemoryBoundary,
+} from "@commonfabric/memory/v2";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { readStoredCfcMetadata } from "@commonfabric/runner/cfc";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
@@ -524,10 +528,96 @@ describe("setsrc compatibility preflight", () => {
       );
       await freshPieces.synced();
       const reloaded = await freshPieces.get(piece.id, false);
+      // Under content-addressed schemas the forged document also fails sync
+      // delivery verification, so the fresh replica cannot load the piece's
+      // pattern identity at all — an even harder refusal than the graceful
+      // report. The guarded principle is the same: corruption never
+      // green-lights a swap.
+      await expect(reloaded.checkPattern(labelledNext())).rejects.toThrow(
+        "piece missing pattern identity",
+      );
+    } finally {
+      await freshRuntime.dispose();
+      await freshStorage.close();
+    }
+  });
+
+  it("reports the blocker when the envelope names a schema document that is not there", async () => {
+    // The case above poisons the DOCUMENT, and content-address verification
+    // refuses the sync outright. This one severs the NAME instead: metadata
+    // whose schemaHash nothing stored. The metadata rides on the argument
+    // document — a regular document, delivered without objection — so the
+    // load failure surfaces inside the review, which must degrade to the
+    // graceful blocker rather than green-light the swap.
+    const piece = await pieces.create(labelledBase(), {
+      input: { seed: "hello" },
+    });
+    await runtime.idle();
+    const link = pieces.getArgument(piece.getCell())
+      .getAsNormalizedFullLink();
+    const metadata = readStoredCfcMetadata(runtime.readTx(), {
+      space: link.space,
+      id: link.id,
+      scope: link.scope,
+    });
+    expect(
+      metadata?.schemaHash,
+      "the labeled fixture stored no CFC envelope, so there is nothing for " +
+        "this case to sever",
+    ).toBeDefined();
+
+    const server = (storageManager as unknown as {
+      server(): MemoryV2Server.Server;
+    }).server();
+    const engine = await (server as unknown as {
+      openEngine(space: string): Promise<{
+        database: {
+          prepare(sql: string): {
+            run(params: Record<string, unknown>): void;
+            get(params: Record<string, unknown>): { data?: string } | undefined;
+          };
+        };
+      }>;
+    }).openEngine(link.space);
+    const row = engine.database.prepare(
+      `SELECT data FROM revision WHERE id = :id`,
+    ).get({ id: link.id });
+    const stored = decodeMemoryBoundary(row!.data!) as {
+      cfc?: Record<string, unknown>;
+    };
+    const absentHash = internSchemaAsTaggedHashString({
+      type: "string",
+      title: "never-stored-envelope",
+    });
+    const severed = encodeMemoryBoundary({
+      ...stored,
+      cfc: { ...stored.cfc, schemaHash: absentHash },
+    } as never);
+    engine.database.prepare(
+      `UPDATE revision SET data = :data, seq = seq + 1 WHERE id = :id`,
+    ).run({ data: severed, id: link.id });
+    engine.database.prepare(
+      `UPDATE head SET seq = seq + 1 WHERE id = :id`,
+    ).run({ id: link.id });
+
+    const freshStorage = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const freshRuntime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager: freshStorage,
+    });
+    try {
+      const freshPieces = new PiecesController(
+        await createSession({ identity: signer, spaceName }),
+        freshRuntime,
+      );
+      await freshPieces.synced();
+      const reloaded = await freshPieces.get(piece.id, false);
       const report = await reloaded.checkPattern(labelledNext());
       expect(report.compatible).toBe(false);
+      expect(report.issues.cfc).toBeDefined();
       expect(report.message).toContain("could not be read");
-      expect(report.message).toContain("hash mismatch");
     } finally {
       await freshRuntime.dispose();
       await freshStorage.close();

@@ -100,80 +100,88 @@ describe("FabricLink", () => {
   });
 
   describe("deep-freeze protocol", () => {
-    it("`deepFreeze()` freezes the instance, its payload, and nested values", () => {
-      const link = new FabricLink({
-        id: "fid1:abc",
-        schema: { type: "object" },
+    describe("deepFreeze()", () => {
+      it("freezes the instance, its payload, and nested values", () => {
+        const link = new FabricLink({
+          id: "fid1:abc",
+          schema: { type: "object" },
+        });
+        const frozen = deepFreeze(link);
+        expect(frozen).toBe(link); // frozen in place
+        expect(isDeepFrozen(frozen)).toBe(true);
+        expect(Object.isFrozen(frozen.payload)).toBe(true);
+        expect(Object.isFrozen(frozen.payload.schema)).toBe(true);
       });
-      const frozen = deepFreeze(link);
-      expect(frozen).toBe(link); // frozen in place
-      expect(isDeepFrozen(frozen)).toBe(true);
-      expect(Object.isFrozen(frozen.payload)).toBe(true);
-      expect(Object.isFrozen(frozen.payload.schema)).toBe(true);
     });
 
-    it("`isDeepFrozen()` is `false` for a mutable instance", () => {
-      expect(isDeepFrozen(new FabricLink({ id: "fid1:abc" }))).toBe(false);
+    describe("isDeepFrozen()", () => {
+      it("is `false` for a mutable instance", () => {
+        expect(isDeepFrozen(new FabricLink({ id: "fid1:abc" }))).toBe(false);
+      });
     });
 
-    it("`[IS_DEEP_FROZEN]` (direct) is `false` before and `true` after `[DEEP_FREEZE]`", () => {
-      // Direct member invocation: `isDeepFrozen()` short-circuits via
-      // `deepFreeze()`'s cache, so the protocol method only runs when called
-      // straight, as here.
-      const link = new FabricLink({ id: "fid1:abc", path: ["a"] });
-      expect(link[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(false);
-      link[DEEP_FREEZE](subFreeze);
-      expect(link[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
-    });
-  });
-
-  describe("deepClone()", () => {
-    it("frozen clone is deep-frozen with an equal payload", () => {
-      const link = new FabricLink({ id: "fid1:abc", path: ["a"] });
-      const clone = link.deepClone(true) as FabricLink;
-      expect(isDeepFrozen(clone)).toBe(true);
-      expect(clone.payload).toEqual(link.payload);
-    });
-
-    it("identity-returns an already-deep-frozen instance", () => {
-      const link = deepFreeze(new FabricLink({ id: "fid1:abc" }));
-      expect(link.deepClone(true)).toBe(link);
-    });
-
-    it("mutable clone is independent (no shared payload structure)", () => {
-      const link = new FabricLink({ id: "fid1:abc" });
-      const clone = link.deepClone(false) as FabricLink;
-      expect(Object.isFrozen(clone)).toBe(false);
-      expect(clone.payload).not.toBe(link.payload);
-      (clone.payload as MutableFabricPlainObjectLayer).id = "fid1:xyz";
-      expect(link.payload.id).toBe("fid1:abc");
-    });
-
-    it("frozen clone identity-shares an already-deep-frozen payload subtree", () => {
-      // The `[DEEP_CLONE_CORE](frozen)` core clones the payload to the
-      // requested frozenness, so the "maximal structural sharing" the
-      // `deepClone()` contract promises holds: a nested subtree that is
-      // already deep-frozen rides into the frozen clone by identity.
-      const schema = deepFreeze({ type: "object" });
-      const link = new FabricLink({ id: "fid1:abc", schema });
-      const clone = link.deepClone(true) as FabricLink;
-      expect(clone).not.toBe(link);
-      expect(isDeepFrozen(clone)).toBe(true);
-      expect(clone.payload.schema).toBe(schema);
+    describe("`[IS_DEEP_FROZEN]` (direct)", () => {
+      it("is `false` before and `true` after `[DEEP_FREEZE]`", () => {
+        // Direct member invocation: `isDeepFrozen()` short-circuits via
+        // `deepFreeze()`'s cache, so the protocol method only runs when called
+        // straight, as here.
+        const link = new FabricLink({ id: "fid1:abc", path: ["a"] });
+        expect(link[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(false);
+        link[DEEP_FREEZE](subFreeze);
+        expect(link[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
+      });
     });
   });
 
-  describe("shallowClone()", () => {
-    it("mutable shallow clone shares the payload reference", () => {
-      const link = new FabricLink({ id: "fid1:abc" });
-      const clone = link.shallowClone(false) as FabricLink;
-      expect(clone).not.toBe(link);
-      expect(clone.payload).toBe(link.payload);
+  describe("instance members", () => {
+    describe("deepClone()", () => {
+      it("returns a deep-frozen clone with an equal payload", () => {
+        const link = new FabricLink({ id: "fid1:abc", path: ["a"] });
+        const clone = link.deepClone(true) as FabricLink;
+        expect(isDeepFrozen(clone)).toBe(true);
+        expect(clone.payload).toEqual(link.payload);
+      });
+
+      it("identity-returns an already-deep-frozen instance", () => {
+        const link = deepFreeze(new FabricLink({ id: "fid1:abc" }));
+        expect(link.deepClone(true)).toBe(link);
+      });
+
+      it("returns an independent mutable clone (no shared payload structure)", () => {
+        const link = new FabricLink({ id: "fid1:abc" });
+        const clone = link.deepClone(false) as FabricLink;
+        expect(Object.isFrozen(clone)).toBe(false);
+        expect(clone.payload).not.toBe(link.payload);
+        (clone.payload as MutableFabricPlainObjectLayer).id = "fid1:xyz";
+        expect(link.payload.id).toBe("fid1:abc");
+      });
+
+      it("returns a frozen clone that identity-shares an already-deep-frozen payload subtree", () => {
+        // The `[DEEP_CLONE_CORE](frozen)` core clones the payload to the
+        // requested frozenness, so the "maximal structural sharing" the
+        // `deepClone()` contract promises holds: a nested subtree that is
+        // already deep-frozen rides into the frozen clone by identity.
+        const schema = deepFreeze({ type: "object" });
+        const link = new FabricLink({ id: "fid1:abc", schema });
+        const clone = link.deepClone(true) as FabricLink;
+        expect(clone).not.toBe(link);
+        expect(isDeepFrozen(clone)).toBe(true);
+        expect(clone.payload.schema).toBe(schema);
+      });
     });
 
-    it("identity-returns an already-frozen instance when asked for frozen", () => {
-      const link = deepFreeze(new FabricLink({ id: "fid1:abc" }));
-      expect(link.shallowClone(true)).toBe(link);
+    describe("shallowClone()", () => {
+      it("returns a mutable shallow clone that shares the payload reference", () => {
+        const link = new FabricLink({ id: "fid1:abc" });
+        const clone = link.shallowClone(false) as FabricLink;
+        expect(clone).not.toBe(link);
+        expect(clone.payload).toBe(link.payload);
+      });
+
+      it("identity-returns an already-frozen instance when asked for frozen", () => {
+        const link = deepFreeze(new FabricLink({ id: "fid1:abc" }));
+        expect(link.shallowClone(true)).toBe(link);
+      });
     });
   });
 

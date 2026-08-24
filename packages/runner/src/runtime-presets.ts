@@ -58,6 +58,8 @@
  * | cfcWriteFloor              | core-default (off) — flip in coreOptions when a  |
  * |                            | first-party rollout begins                       |
  * | cfcTriggerReadGating       | core-default (off) — same                        |
+ * | cfcDecomposedEnvelopes     | core-default (off) — flip after every deployed   |
+ * |                            | reader resolves stored roots' references         |
  * | cfcPolicyEvaluation        | core-default (off) — same                        |
  * | cfcLabelMetadataProtection | core-default (off) — same (inv-12 Stage 1        |
  * |                            | rollout: observe first, then enforce)            |
@@ -153,6 +155,7 @@ export const RUNTIME_OPTION_KEYS = [
   "cfcFlowLabels",
   "cfcWriteFloor",
   "cfcTriggerReadGating",
+  "cfcDecomposedEnvelopes",
   "cfcPolicyEvaluation",
   "cfcLabelMetadataProtection",
   "cfcDeclaredMonotonicity",
@@ -202,8 +205,8 @@ export type EnvReader = (name: string) => string | undefined;
  */
 export const EXPERIMENTAL_ENV_VARS = {
   modernCellRep: "EXPERIMENTAL_MODERN_CELL_REP",
-  // Content-addressed schemas Phase 1 rollout: env-reachable so a process
-  // can opt in while the flag exists.
+  // Content-addressed schemas (Phases 1 and 2) are default-on; env-reachable
+  // so a process can opt out with an explicit "false" while the flag exists.
   contentAddressedSchemas: "EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS",
   // Scheduler-v2 lineage (#4090) is default-on. Keep a programmatic rollback
   // override while the flag exists; no environment exposure is needed.
@@ -313,6 +316,7 @@ function coreOptions(params: CoreParams): RuntimeOptions {
     // lives once. Same value as the constructor default today.
     cfcEnforcementMode: "enforce-explicit",
     // cfcFlowLabels / cfcWriteFloor / cfcTriggerReadGating /
+    // cfcDecomposedEnvelopes /
     // cfcPolicyEvaluation / cfcLabelMetadataProtection /
     // cfcDeclaredMonotonicity / cfcPolicyRecords /
     // cfcTrustConfig / cfcSinkMaxConfidentiality ride the constructor

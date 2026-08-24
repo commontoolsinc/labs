@@ -19,7 +19,22 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { JSONSchema } from "@commonfabric/api";
+import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
+import { decomposeSchema } from "@commonfabric/runner";
+import { registerSchemaDocument } from "../../runner/src/schema-registry.ts";
+import { externalRefTo } from "../../runner/test/schema-ref-helpers.ts";
+
+/**
+ * The root reference of `schema`, with its closure registered the way the
+ * link writer's stamping registers one — decomposition alone only computes.
+ */
+function registeredRefTo(schema: JSONSchema): string {
+  const { rootRef, documents } = decomposeSchema(schema as JSONSchemaObj);
+  for (const [hash, document] of documents) {
+    registerSchemaDocument(hash, document);
+  }
+  return rootRef;
+}
 import { declaredVerbProse, withDeclaredFieldProse } from "../lib/piece.ts";
 
 /** `withDeclaredFieldProse` with both sides as plain objects. */
@@ -336,6 +351,128 @@ describe("verb prose", () => {
 
       it("returns an unconstrained served schema untouched", () => {
         expect(fold(true, object({ x: { type: "string" } }))).toBe(true);
+      });
+    });
+
+    describe("references it expands", () => {
+      it("serves a content-addressed reference expanded, with the declared names put back", () => {
+        // A served schema stored as a reference reaches the caller in the
+        // expanded form, and the recomposition takes its `$defs` names from
+        // the declared document — the stored form knows a definition only
+        // by its hash. A sibling riding beside the reference stays beside
+        // the expansion.
+        const declared = object({ row: { $ref: "#/$defs/Row" } }, {
+          $defs: {
+            Row: object({ label: { type: "string", description: "L." } }),
+          },
+        });
+        const rootRef = registeredRefTo(declared);
+        const result = fold(
+          { $ref: rootRef, description: "kept" } as JSONSchema,
+          declared,
+        );
+        expect(result.description).toBe("kept");
+        expect(result.properties.row.$ref).toBe("#/$defs/Row");
+        expect(result.$defs.Row.properties.label.description).toBe("L.");
+      });
+
+      it("restores the declared name when the served definition dropped the prose", () => {
+        // Descriptions participate in schema hashing, so a served document
+        // whose definitions carry no prose hashes differently from the
+        // declaration that documents them. The name map must bridge that
+        // gap, or the definitions an author documented best are exactly the
+        // ones renamed def_XXXX.
+        const declared = object({ pet: { $ref: "#/$defs/Pet" } }, {
+          $defs: {
+            Pet: {
+              type: "object",
+              description: "A household pet.",
+              properties: {
+                name: { type: "string", description: "The pet's name." },
+              },
+            },
+          },
+        });
+        const servedSource = object({ pet: { $ref: "#/$defs/Pet" } }, {
+          $defs: {
+            Pet: {
+              type: "object",
+              properties: { name: { type: "string" } },
+            },
+          },
+        });
+        const rootRef = registeredRefTo(servedSource);
+        const result = fold({ $ref: rootRef } as JSONSchema, declared);
+        expect(Object.keys(result.$defs)).toEqual(["Pet"]);
+        expect(result.properties.pet.$ref).toBe("#/$defs/Pet");
+      });
+
+      it("strips schema prose without rewriting application data", () => {
+        // A `default` carries DATA, and data may contain a member named
+        // `description`. The name map's prose-stripped hash must remove
+        // only schema prose, or the definition hashes to a third form
+        // nothing served ever carries — and the authored name is lost for
+        // exactly the definitions that ship default data.
+        const declared = object({ pet: { $ref: "#/$defs/Pet" } }, {
+          $defs: {
+            Pet: {
+              type: "object",
+              description: "A household pet.",
+              default: { description: "literal application data" },
+              properties: { name: { type: "string" } },
+            },
+          },
+        });
+        const servedSource = object({ pet: { $ref: "#/$defs/Pet" } }, {
+          $defs: {
+            Pet: {
+              type: "object",
+              default: { description: "literal application data" },
+              properties: { name: { type: "string" } },
+            },
+          },
+        });
+        const rootRef = registeredRefTo(servedSource);
+        const result = fold({ $ref: rootRef } as JSONSchema, declared);
+        expect(Object.keys(result.$defs)).toEqual(["Pet"]);
+        expect(result.$defs.Pet.default).toEqual({
+          description: "literal application data",
+        });
+      });
+
+      it("serves a reference to a boolean document as that boolean", () => {
+        // A definition can be a boolean, so a document can be one too, and
+        // a boolean has no siblings to keep or prose to fold.
+        const ref = externalRefTo(true);
+        registerSchemaDocument(
+          ref.$ref!.slice("cid:".length),
+          true,
+        );
+        expect(fold(ref as JSONSchema, undefined)).toBe(true);
+      });
+
+      it("serves hash-derived names when a declared definition will not decompose", () => {
+        // The name map decomposes each declared definition against the whole
+        // declared `$defs`, so a dangling reference anywhere in that group —
+        // here, `Dangling` — fails every definition's decomposition. The
+        // expansion itself must not fail with it: the closure is still
+        // served, under the hash-derived names the stored form knows.
+        const row = object({ label: { type: "string" } });
+        const servedSource = object({ row: { $ref: "#/$defs/Row" } }, {
+          $defs: { Row: row },
+        });
+        const rootRef = registeredRefTo(servedSource);
+        const declared = object({ row: { $ref: "#/$defs/Row" } }, {
+          $defs: {
+            Row: row,
+            Dangling: { $ref: "#/$defs/Missing" },
+          },
+        });
+        const result = fold({ $ref: rootRef } as JSONSchema, declared);
+        const defNames = Object.keys(result.$defs);
+        expect(defNames.length).toBe(1);
+        expect(defNames[0].startsWith("def_")).toBe(true);
+        expect(result.properties.row.$ref).toBe(`#/$defs/${defNames[0]}`);
       });
     });
 

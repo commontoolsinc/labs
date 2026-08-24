@@ -20,7 +20,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { resolve } from "@std/path";
-import { Identity } from "@commonfabric/identity";
+import { Identity, realmValueFromKeyPair } from "@commonfabric/identity";
 import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";
 import { runTests } from "../lib/test-runner.ts";
 import type {
@@ -167,7 +167,7 @@ describe(
             { implementation: "noble" },
           );
           await client.call("init", {
-            rawIdentity: identity.serialize(),
+            identity: realmValueFromKeyPair(identity.keyPair),
             spaceName,
             apiUrl: server.url.href,
             // Any two-participant descriptor will do: the markers this test

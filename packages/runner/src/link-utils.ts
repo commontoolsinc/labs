@@ -1,5 +1,6 @@
 import { MetaLinkField } from "@commonfabric/api";
 import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
@@ -7,14 +8,18 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { JSONSchemaObj } from "@commonfabric/api";
 import {
   decomposeSchema,
+  isExternalSchemaRef,
+  recomposeSchema,
   SchemaNotDecomposableError,
 } from "./schema-decompose.ts";
+import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import {
   lookupSchemaDocument,
+  onSchemaRegistryClear,
   registerSchemaDocument,
 } from "./schema-registry.ts";
 import { getContentAddressedSchemasConfig } from "./schema-doc-config.ts";
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import {
   type AnyCell,
@@ -29,7 +34,10 @@ import {
   type MemorySpace,
   type Stream,
 } from "./cell.ts";
-import { ContextualFlowControl } from "./cfc.ts";
+import {
+  ContextualFlowControl,
+  resolveExternalRootRefForStructure,
+} from "./cfc.ts";
 import { createRef } from "./create-ref.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
@@ -116,12 +124,19 @@ export function parseLink(
   if (isCell(value)) return value.getAsNormalizedFullLink();
 
   if (isPrimitiveCellLink(value)) {
+    // A sigil-parsed link is DATA-DERIVED (link-types.ts `viaLinkHop`):
+    // it names somebody else's doc, so a later read that dead-ends at
+    // that doc missing is an unresolved input, not a known absence.
+    const markDerived = <L extends NormalizedLink | undefined>(link: L): L =>
+      link === undefined ? link : { ...link, viaLinkHop: true as const };
     if (!base) {
-      return parseLinkPrimitive(value);
+      return markDerived(parseLinkPrimitive(value));
     } else if (isAnyCell(base)) {
-      return parseLinkPrimitive(value, base.getAsNormalizedFullLink());
+      return markDerived(
+        parseLinkPrimitive(value, base.getAsNormalizedFullLink()),
+      );
     } else if (isNormalizedLink(base)) {
-      return parseLinkPrimitive(value, base);
+      return markDerived(parseLinkPrimitive(value, base));
     }
     throw new Error(`Unexpected link base: ${base}`);
   }
@@ -229,6 +244,34 @@ export function externalizeSchema(schema: JSONSchemaObj): JSONSchema {
 }
 
 /**
+ * Rewrites reference-form link schemas inside `value` back to their inline
+ * (recomposed) form. A `data:` document is self-contained by construction —
+ * the value lives in the id and no write ever installs anything alongside
+ * it — so a link serialized into one carries its schema inline, exactly as
+ * with the flag off. A reference whose closure the registry cannot supply
+ * stays a reference; the traversal's loader gates that read either way.
+ */
+export function inlineExternalSchemaRefsInValue<T extends FabricValue>(
+  value: T,
+): T {
+  return mapLinkSchemas(value, (schema) => {
+    if (!isObjectNotArray(schema)) return schema;
+    const ref = schema.$ref;
+    if (typeof ref !== "string" || !isExternalSchemaRef(ref)) return schema;
+    try {
+      // Recomposition never mints an empty `$defs` (a closure of one
+      // document returns the body alone), so the result rides as it is. A
+      // schema document is plain JSON, hence a FabricValue.
+      return internSchema(
+        recomposeSchema(ref, lookupSchemaDocument),
+      ) as FabricValue;
+    } catch {
+      return schema;
+    }
+  }) as T;
+}
+
+/**
  * Creates a sigil reference (link or alias) with shared logic
  */
 export function createSigilLinkFromParsedLink(
@@ -316,10 +359,20 @@ export enum KeepAsCell {
 // Values are always deep-frozen OBJECT schemas: boolean/undefined inputs take
 // the early return and never reach the memo, and outputs are frozen before
 // caching (their sub-trees are shared across callers).
-const _sanitizeCache = new WeakMap<
+//
+// Dropped on the registry-clear transition, per the registry's rule for
+// resolution-success memos: a sanitized result can EMBED references the
+// strip minted (re-externalized sanitized documents), and those documents
+// live in the epoch's registry. A result cached in one epoch would keep
+// stamping references the next epoch's writer cannot stage — the link
+// would ship without its closure, and the stored schema would go cold.
+let _sanitizeCache = new WeakMap<
   object,
   Map<KeepAsCell, JSONSchema & object>
 >();
+onSchemaRegistryClear(() => {
+  _sanitizeCache = new WeakMap();
+});
 
 /**
  * Traverse schema and remove all asCell flags.
@@ -345,6 +398,14 @@ export function sanitizeSchemaForLinks(
   if (schema === undefined || typeof schema === "boolean") {
     return schema;
   }
+  // A reference-form schema sanitizes as its resolved document: the strip is
+  // a structural operation, and letting a reference pass through unstripped
+  // would carry `asCell` entries into stored link schemas the flag-off
+  // sanitize removed — a reader would mint handles where values are
+  // expected. The sanitized (inline) result re-externalizes at the emission
+  // site as usual; an unresolvable reference passes through unchanged (the
+  // helper returns it as it is, and a reference has nothing to strip).
+  schema = resolveExternalRootRefForStructure(schema);
 
   // Memoize by input identity: sanitize is a pure function of
   // `(schema, keepAsCell)`, and at pattern-build time the same interned/frozen
@@ -457,6 +518,37 @@ function recursiveStripAsCellFromSchema(
   // Prevent infinite recursion from proxy objects or very deep schemas
   // JSON Schema shouldn't need more than ~50 levels of nesting in practice
   if (depth > 100) return schema;
+
+  // A NESTED reference-form schema stays a reference, but the strip must
+  // reach THROUGH it: the referenced closure may carry `asCell`, and a
+  // reference left unexamined would reintroduce it the moment a reader
+  // resolves it — visibly clean, actually not. The referenced document
+  // sanitizes through the whole pipeline (its own cycles, its own memo); a
+  // document the strip leaves untouched keeps the reference verbatim, and
+  // one it changes re-externalizes to the sanitized closure, so only the
+  // target moves. Siblings stay on the node and strip in the walk below.
+  // External references are hash-based, so document-to-document recursion
+  // cannot cycle; an unresolvable reference passes through unchanged, as
+  // at the root.
+  const nestedRef = (schema as { $ref?: unknown }).$ref;
+  if (typeof nestedRef === "string" && isExternalSchemaRef(nestedRef)) {
+    const bare = internSchema({ $ref: nestedRef }) as JSONSchemaObj;
+    const resolved = resolveExternalRootRefForStructure(bare);
+    if (resolved !== bare && isObjectNotArray(resolved)) {
+      const sanitizedDoc = sanitizeSchemaForLinks(
+        resolved,
+        context.keepAsCell,
+      );
+      const target =
+        internSchema(sanitizedDoc as JSONSchemaObj) === internSchema(resolved)
+          ? bare
+          : externalizeSchema(internSchema(sanitizedDoc as JSONSchemaObj));
+      const { $ref: _nested, ...siblings } = schema as Record<string, unknown>;
+      schema = Object.keys(siblings).length > 0 && isObjectNotArray(target)
+        ? { ...siblings, ...target }
+        : target;
+    }
+  }
 
   // If we've already fully processed this schema, return the result
   if (context.seen.has(schema) && !context.inProgress.has(schema)) {

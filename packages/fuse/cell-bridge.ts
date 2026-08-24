@@ -12,7 +12,12 @@ import {
   PiecesController,
 } from "@commonfabric/piece/ops";
 import type { Cell } from "@commonfabric/runner";
-import { schemaToTypeString } from "@commonfabric/runner";
+import {
+  lookupSchemaDocument,
+  parseExternalSchemaRef,
+  recomposeSchema,
+  schemaToTypeString,
+} from "@commonfabric/runner";
 import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
 import { nameSchema } from "@commonfabric/runner/schemas";
 import { linkRefPayload } from "@commonfabric/runner/shared";
@@ -54,10 +59,38 @@ import {
 } from "./tree-builder.ts";
 import { FsTree, type TransplantChanges } from "./tree.ts";
 
+/**
+ * A schema stored as a content-addressed reference, reconstructed for the
+ * shim this mount bakes it into: `cf exec` runs later with no registry to
+ * resolve against, so the expansion has to happen here, where the mount's
+ * session holds the documents. An unresolvable reference stays as it is.
+ */
+function expandSchemaReference(
+  schema: JSONSchema | undefined,
+): JSONSchema | undefined {
+  if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
+    return schema;
+  }
+  const ref = schema.$ref;
+  if (typeof ref !== "string" || parseExternalSchemaRef(ref) === undefined) {
+    return schema;
+  }
+  try {
+    const recomposed = recomposeSchema(ref, lookupSchemaDocument);
+    const { $ref: _expanded, ...siblings } = schema as Record<string, unknown>;
+    return typeof recomposed === "object" && recomposed !== null
+      ? { ...recomposed, ...siblings } as JSONSchema
+      : recomposed;
+  } catch {
+    return schema;
+  }
+}
+
 /** Strip asCell markers from a schema for display as input schema. */
 function getInputSchema(
   schema: JSONSchema | undefined,
 ): JSONSchema | undefined {
+  schema = expandSchemaReference(schema);
   if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
     return undefined;
   }
@@ -3485,8 +3518,9 @@ export class CellBridge {
         resolvedCandidate = candidate;
       }
 
-      let callableKind = classifyCallableEntry(candidate, childCell.schema) ??
-        classifyCallableEntry(resolvedCandidate, childCell.schema);
+      const childSchema = expandSchemaReference(childCell.schema);
+      let callableKind = classifyCallableEntry(candidate, childSchema) ??
+        classifyCallableEntry(resolvedCandidate, childSchema);
 
       if (!callableKind) {
         try {
@@ -3506,7 +3540,7 @@ export class CellBridge {
       callables.push({
         key,
         callableKind,
-        schema: getInputSchema(childCell.schema),
+        schema: getInputSchema(childSchema),
       });
       callableKinds.set(key, callableKind);
       if (typeof candidate === "object" && candidate !== null) {

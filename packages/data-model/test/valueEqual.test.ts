@@ -235,7 +235,7 @@ describe("valueEqual()", () => {
     });
 
     describe("given a special object and a plain value", () => {
-      it("are not equal", () => {
+      it("returns `false`", () => {
         expect(valueEqual(new FabricBytes(new Uint8Array([1])), { 0: 1 }))
           .toBe(false);
         expect(valueEqual(new FabricBytes(new Uint8Array([])), {}))
@@ -303,14 +303,14 @@ describe("valueEqual()", () => {
   // without computing a hash (taken when the sides are not both deep-frozen).
   describe("object-subtype-check branch", () => {
     describe("given a plain object and an array", () => {
-      it("are not equal", () => {
+      it("returns `false`", () => {
         expect(valueEqual({ 0: 1, 1: 2 }, [1, 2])).toBe(false);
         expect(valueEqual([1, 2], { 0: 1, 1: 2 })).toBe(false);
       });
     });
 
     describe("given a Fabric* value and a plain object or array", () => {
-      it("are not equal", () => {
+      it("returns `false`", () => {
         const fb = new FabricBytes(new Uint8Array([1, 2]));
         expect(valueEqual(fb, { 0: 1, 1: 2 })).toBe(false);
         expect(valueEqual({ 0: 1, 1: 2 }, fb)).toBe(false);

@@ -2,9 +2,9 @@
 
 This document specifies the wire format used to carry `FabricValue`s between
 realms over a structured-clone transport — `structuredClone()` and
-`postMessage()` — including the outer envelope and its marker, the tagged
-form, per-type encodings, the ownership contract on decode, and what the
-format refuses.
+`postMessage()`, and a durable store one realm writes for a later one to read
+— including the outer envelope and its marker, the tagged form, per-type
+encodings, the ownership contract on decode, and what the format refuses.
 
 ## Status
 
@@ -15,11 +15,27 @@ Draft formal spec — the realm-crossing counterpart to
 
 ## 1. Overview
 
-This format exists for one boundary: worker IPC, where a value is constructed,
-handed to a transport that clones it, decoded on the far side, and discarded.
-It is not a storage format and has no persistence story. A value written down
-for later, or read by something that did not receive it directly, uses the JSON
-encoding.
+This format is built around one kind of boundary: a **self-dealing** one,
+internal to a runtime, where whatever encodes a value is what decodes it and
+no other party reads what passes between. Nothing crossing such a boundary is
+owed interoperability, which is what lets the format be as narrow as it is.
+
+Worker IPC is the case it was written for: a value constructed, handed to a
+transport that clones it, decoded on the far side, and discarded. A durable
+store that a runtime writes and later reads back is the same boundary with
+time in it, on the conditions Section 1.2 states, and is the reason the format
+states its requirements of a transport rather than of a mechanism. A value
+that crosses to another party, or that must be read through a transport not
+meeting Section 1.1, uses the JSON encoding.
+
+Time is what the two instances do not share, and Section 1.2 turns on the
+difference. Section 1.1 is what a transport must preserve; Section 2.4 is
+what the format declines to offer, namely a payload readable by a build other
+than the one that wrote it. Worker IPC closes the gap so completely that the
+second never arises. A durable store meets Section 1.1 in full while leaving
+the gap unbounded, so its two ends need not be the same build — which is what
+Section 1.2's conditions are about, and why a value that must outlive the
+build that wrote it belongs in the JSON encoding.
 
 The two formats divide along what their transports carry. JSON reaches a
 `string`, so every type JavaScript has and JSON lacks — `bigint`, `undefined`,
@@ -63,6 +79,43 @@ ordinary data as a tagged value. A transport is therefore something to verify
 against this contract before use, not something to try and see.
 
 The structured clone algorithm provides all three.
+
+### 1.2 Self-Dealing Storage
+
+Storage is the self-dealing boundary with time in it: a runtime writes a
+value to a durable store and reads it back later, with no other party in it.
+`IndexedDB` is the case in hand. What it supplies is Section 1.1, by the same
+mechanism worker IPC does — that store serializes with the structured clone
+algorithm, so what satisfies those requirements for `postMessage()` satisfies
+them here — and Section 1.1 is the whole of what a medium can supply. Whether
+a given *use* of that store is self-dealing is a separate question, settled by
+the conditions below.
+
+What the time costs is Section 2.4. A durable payload can outlive the build
+that wrote it, so a reader must expect that refusal rather than treat it as
+unreachable. Three conditions follow, and a use meeting all three stays within
+this boundary:
+
+1. **The stored value must be reconstructible from something the store does
+   not hold.** This is the condition that decides the question, because it is
+   what makes a version bump a cache flush rather than data loss. A use whose
+   store holds the only copy of anything is outside this boundary, whatever
+   else is true of it, and a medium meeting Section 1.1 does not soften it.
+2. **A reader must treat a refused payload as absent**, rather than report it
+   as an error. A version bump refuses every stored payload at once, which is
+   an expected path and has to be written as one.
+3. **A reader must decode strictly.** A lenient decode yields a
+   `ProblematicValue` at the root, which is worse here than a miss: it is a
+   result that reads as one.
+
+A `CryptoKey` is what this admits that no other format could carry, and
+Section 1.1 is also what makes storing one safe: extractability arrives
+unchanged, so a key held as a handle is still a handle when it comes back, and
+its material was never written down to begin with.
+
+None of this obliges a store to be durable in fact. A browser evicts what it
+likes, and a reader built for the refusal in condition 2 is already built for
+that.
 
 ## 2. The Outer Envelope and the Marker
 
@@ -117,10 +170,10 @@ existence before the walk starts, and none of them can be the marker. **The
 confinement requirement is what makes the argument hold without resting on
 that.** An encoder is handed values by callers, not by the type system; a value
 carrying live code — an accessor that runs mid-walk, after the marker exists —
-is outside the model, and confinement means such a value still has
-nowhere to read the marker from. It is stated as a requirement rather than
-left to inertness because a rule that fails open on out-of-model input is not
-worth much.
+is outside the model, and confinement means such a value still has nowhere to
+read the marker from. It is stated as a requirement rather than left to
+inertness because a rule that fails open on out-of-model input is not worth
+much.
 
 A marker held across calls fails the first of these. A value may legitimately
 contain a subtree of some *earlier* encoding — the code that assembled it is
@@ -169,11 +222,18 @@ otherwise control: `postMessage()` spans tabs, windows and frames, any of which
 could pair two different deployments, and a payload written by a build the
 decoder does not understand is refused rather than walked.
 
-The check earns little in the deployment this format is for, where both ends
-are the same build and the marker always matches. It costs one comparison, and
-it is what makes adoption safe to state as a rule: without it a decoder takes
-an arbitrary object as its marker, every tagged form beneath goes unrecognized,
-and a foreign tree decodes as ordinary data instead of being refused.
+The check earns little across worker IPC, where both ends are the same build
+and the marker always matches. It costs one comparison, and it is what makes
+adoption safe to state as a rule: without it a decoder takes an arbitrary
+object as its marker, every tagged form beneath goes unrecognized, and a
+foreign tree decodes as ordinary data instead of being refused.
+
+On a self-dealing store (Section 1.2) it earns everything, and is the whole of
+what that use rests on. There a mismatch is expected rather than exceptional:
+a payload written before a version bump is refused on the first read after it,
+and a reader takes that refusal as a miss. This format offers no reading of an
+earlier version's payload and no decoder is obliged to attempt one, which is
+why Section 1.2 admits only stores whose contents can be rebuilt.
 
 ## 3. Type Encodings
 
@@ -283,12 +343,11 @@ own. A decoder tells the two apart by the type in the key slots.
 That second state is the reason this format admits `CryptoKey` at all. A
 non-extractable key's material is reachable through no synchronous call and, by
 construction, through no call whatever, so a format that writes bytes down
-cannot represent one: the JSON encoding refuses a pair in that state
-(Section 3 of [3-json-encoding.md](./3-json-encoding.md), under `KeyPair@1`)
-and its hash is
-undefined (Section 4.17 of
-[2-hash-byte-format.md](./2-hash-byte-format.md)). Here the key crosses as
-itself, which is what the transport requirement in Section 1.1 asks for.
+cannot represent one: the JSON encoding refuses a pair in that state (Section 3
+of [3-json-encoding.md](./3-json-encoding.md), under `KeyPair@1`) and its hash
+is undefined (Section 4.17 of [2-hash-byte-format.md](./2-hash-byte-format.md)).
+Here the key crosses as itself, which is what the transport requirement in
+Section 1.1 asks for.
 
 Types binding a format-neutral codec — `FabricError`, `UnknownValue`,
 `ProblematicValue`, and every `FabricInstance` — encode the same way under both
@@ -389,6 +448,10 @@ the tree is the receiver's own clone of a value it will not be handed again,
 which is the whole reason the copy can be elided. A caller wanting two readings
 of one payload keeps the value it decoded, not the tree it decoded from.
 
+A self-dealing store (Section 1.2) satisfies this the same way and for the
+same reason: a read deserializes afresh, so what it hands back is the reader's
+own and reading twice means reading the store twice.
+
 ## 6. Refusals
 
 A conforming decoder refuses, reporting each as a malformation settled against
@@ -459,12 +522,13 @@ This is a requirement rather than an observation. An implementation that
 coerced instead would satisfy every other claim in this document while
 producing values a sender never sent.
 
-**Do not guard against shapes the transport cannot deliver.** `structuredClone()`
-normalizes what it carries: a plain object arrives with `Object.prototype`
-however its original was made, an `Array` subclass arrives as a plain `Array`,
-and an accessor arrives as a data property. A check for a null-prototype record, an
-exotic array, or a getter-backed index is therefore unreachable, and reads to a
-later maintainer as though the boundary defended against something it does not.
+**Do not guard against shapes the transport cannot deliver.**
+`structuredClone()` normalizes what it carries: a plain object arrives with
+`Object.prototype` however its original was made, an `Array` subclass arrives as
+a plain `Array`, and an accessor arrives as a data property. A check for a
+null-prototype record, an exotic array, or a getter-backed index is therefore
+unreachable, and reads to a later maintainer as though the boundary defended
+against something it does not.
 
 What the transport *does* carry faithfully is an array's extra own properties,
 which arrive intact. Nothing here emits one, which is what rules them out --

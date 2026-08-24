@@ -13,6 +13,7 @@ import {
   uiContractsFromSchema,
 } from "../src/cfc/ui-contract.ts";
 import { Runtime } from "../src/runtime.ts";
+import { resolvedSchema } from "./schema-ref-helpers.ts";
 import type { EventHandler } from "../src/scheduler.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -2109,7 +2110,10 @@ describe("CFC trusted UI event enforcement", () => {
     });
 
     expect(
-      holder.key("messages").resolveAsCell().getAsNormalizedFullLink().schema,
+      resolvedSchema(
+        holder.key("messages").resolveAsCell().getAsNormalizedFullLink()
+          .schema,
+      ),
     ).toEqual(protectedMessagesSchema);
 
     const handler = Object.assign(

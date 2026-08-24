@@ -1,12 +1,8 @@
 import { afterAll, afterEach, beforeAll, beforeEach } from "@std/testing/bdd";
 
 import { ConsoleEvent, PageErrorEvent } from "@astral/astral";
-import {
-  Identity,
-  InsecureCryptoKeyPair,
-  serializeKeyPairRaw,
-  TransferrableInsecureCryptoKeyPair,
-} from "@commonfabric/identity";
+import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
+import { Identity } from "@commonfabric/identity";
 import {
   Browser,
   dismissDialogs,
@@ -20,7 +16,10 @@ import {
   appViewToUrlPath,
   isAppViewEqual,
 } from "@commonfabric/navigation";
-import { AppStateSerialized } from "@commonfabric/shell/app-state";
+import {
+  AppStateSerialized,
+  type SerializedIdentity,
+} from "@commonfabric/shell/app-state";
 
 import { describeThrown } from "./describe-thrown.ts";
 import {
@@ -72,28 +71,30 @@ export async function describeShellReadyFailure(page: Page): Promise<string> {
   )}`;
 }
 
-// Pass the key over the boundary. When the state is returned,
-// the key is serialized to Uint8Arrays, and then turned into regular arrays,
-// which can then by transferred across the astral boundary.
-//
-// The passed in identity must use the `noble` implementation, which
-// contains raw private key material.
+/**
+ * Logs `page`'s shell in as `identity`, passing the key over the boundary. The
+ * astral boundary carries only what JSON can express, so the key pair crosses
+ * in the `FabricValue` JSON encoding, which is a string.
+ *
+ * @throws If `identity` is not a `noble` implementation: a key pair holding
+ *   handles has no JSON encoding, `CryptoKey` material being unreachable.
+ */
 export async function login(page: Page, identity: Identity): Promise<void> {
-  const transferrableId = serializeKeyPairRaw(
-    identity.serialize() as InsecureCryptoKeyPair,
-  );
+  const { keyPair } = identity;
 
-  if (!transferrableId) {
+  if (!keyPair.hasMaterial) {
     throw new Error(
       "Could not serialize identity. Requires 'noble' implementation.",
     );
   }
 
+  const serializedId = jsonFromFabricValue(keyPair);
+
   // Everything from here on runs against the page, and every way it can fail
   // says nothing about the page it failed against. The runtime handshake below
   // reports which of its two stages ran out, and no more than that.
   try {
-    await loginToPublishedApp(page, transferrableId, identity.did());
+    await loginToPublishedApp(page, serializedId, identity.did());
   } catch (error) {
     throw new Error(
       `Logging in as ${identity.did()} failed: ${
@@ -108,16 +109,13 @@ export async function login(page: Page, identity: Identity): Promise<void> {
 // the identity and wait for the runtime to come up under it.
 async function loginToPublishedApp(
   page: Page,
-  transferrableId: TransferrableInsecureCryptoKeyPair,
+  serializedId: SerializedIdentity,
   nextDID: string,
 ): Promise<void> {
   await waitForShellReady(page);
 
-  await page!.evaluate<
-    Promise<void>,
-    [TransferrableInsecureCryptoKeyPair, string]
-  >(
-    async (rawId, nextDID) => {
+  await page!.evaluate<Promise<void>, [SerializedIdentity, string]>(
+    async (serializedId, nextDID) => {
       const currentIdentity = globalThis.app.state().identity;
       if (currentIdentity && currentIdentity.did() !== nextDID) {
         await globalThis.app.setIdentity(undefined);
@@ -137,7 +135,7 @@ async function loginToPublishedApp(
           check();
         });
       }
-      await globalThis.app.setIdentity(rawId);
+      await globalThis.app.setIdentity(serializedId);
       await new Promise<void>((resolve, reject) => {
         const startedAt = performance.now();
         const check = async () => {
@@ -163,7 +161,7 @@ async function loginToPublishedApp(
       });
     },
     {
-      args: [transferrableId, nextDID],
+      args: [serializedId, nextDID],
     },
   );
 }
@@ -387,6 +385,15 @@ export class ShellIntegration {
     // to be set after the page has an origin to store it against and before the
     // login below.
     await enablePatternCoverage(page);
+    // [NDT] triage aid: seed the worker-console host toggle before login so
+    // the worker runtime's console (where the storage taps live) reaches the
+    // page console — and, with PIPE_CONSOLE, the test output. Same
+    // read-at-runtime-creation contract as patternCoverage above.
+    if (Deno.env.get("FORWARD_WORKER_CONSOLE") === "1") {
+      await page.evaluate(() => {
+        globalThis.localStorage.setItem("forwardWorkerConsole", "true");
+      });
+    }
     await this.waitForState({ view });
     if (identity) {
       await this.login(identity);
@@ -420,6 +427,13 @@ export class ShellIntegration {
     }
     if (this.#config.failOnConsoleError) {
       const offending = this.#errorLogs.filter((msg) =>
+        // [NDT] triage aid: with FORWARD_WORKER_CONSOLE=1 the worker's
+        // console.error lines reach the page console for OBSERVATION only.
+        // The console-error gate never saw them before forwarding existed,
+        // so they must not change a run's verdict — exclude the forwarded
+        // ("[worker]"-prefixed) lines to keep verdicts comparable.
+        !(Deno.env.get("FORWARD_WORKER_CONSOLE") === "1" &&
+          msg.startsWith("[worker]")) &&
         !this.#config.allowedConsoleErrors.some((pattern) =>
           typeof pattern === "string"
             ? msg.includes(pattern)
