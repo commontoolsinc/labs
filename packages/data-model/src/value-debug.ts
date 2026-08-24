@@ -7,7 +7,7 @@ import {
   FabricInstance,
   FabricPrimitive,
   FabricSpecialObject,
-  FabricValue
+  FabricValue,
 } from "./interface.ts";
 // Imported from its own module rather than the package barrel, deliberately:
 // the barrel pulls in every codec, and three of those import
@@ -218,7 +218,8 @@ class DebugConverter {
     /** Value to convert. */
     value: unknown,
     /** Maxiumum nesting depth. */
-    maxDepth: number) {
+    maxDepth: number,
+  ) {
     this.#value = value;
     this.#maxDepth = maxDepth;
   }
@@ -314,10 +315,17 @@ class DebugConverter {
         const contents = codec.encode(value, NULL_LIVE_ENVIRONMENT);
         return { [`/${tag}`]: this.#convertSubvalue(contents, depth + 1) };
       } else if (Array.isArray(value)) {
-        return value.map((item, _index): FabricValue => this.#convertSubvalue(item, depth + 1));
+        return value.map((item, _index): FabricValue =>
+          this.#convertSubvalue(item, depth + 1)
+        );
       } else if (isPlainObject(value)) {
         return Object.fromEntries(
-          Object.entries(value).map(([key, value]): [string, FabricValue] => [key, this.#convertSubvalue(value, depth + 1)])
+          Object.entries(value).map((
+            [key, value],
+          ): [string, FabricValue] => [
+            key,
+            this.#convertSubvalue(value, depth + 1),
+          ]),
         );
       } else {
         // General instance.
@@ -471,8 +479,8 @@ export function toStructuredDebugValue(
    * Maximum depth of result nesting. Must be a positive integer if
    * specified.
    */
-  maxDepth?: number): FabricValue {
-
+  maxDepth?: number,
+): FabricValue {
   // Validate `maxDepth` and transform as necessary.
   maxDepth = (() => {
     switch (typeof maxDepth) {
@@ -488,7 +496,9 @@ export function toStructuredDebugValue(
     }
 
     const badDepth = backtickQuote(toCompactDebugString(maxDepth, 20));
-    throw new Error(`\`maxDepth\` must be an integer or \`undefined\`; got ${badDepth}`);
+    throw new Error(
+      `\`maxDepth\` must be an integer or \`undefined\`; got ${badDepth}`,
+    );
   })();
 
   // We subtract one from `maxDepth` because the "suggestive forms" for elided
