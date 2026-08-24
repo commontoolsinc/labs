@@ -1125,6 +1125,15 @@ looked in $root_store and $toolshed_store. Set CF_DRILL_STORE_DIR."
   echo "Successfully ran the topics restore drill for ${API_URL}."
 }
 
+# The bulk-survey drill needs no store: the survey is API-only, so unlike the
+# topics restore drill there is nothing to discover on disk.
+run_bulk_survey_drill() {
+  echo "Running the bulk-survey drill..."
+  API_URL="$API_URL" bash "$SCRIPT_DIR/bulk-survey-drill.sh" ||
+    error "The bulk-survey drill failed."
+  echo "Successfully ran the bulk-survey drill for ${API_URL}."
+}
+
 # The top-level spellings are the same commands as their `cf piece`
 # counterparts (docs/plans/cli-surface-shape.md, step 5). The unit guard
 # (test/piece-data-spellings.test.ts) proves the two mounts share one
@@ -1353,6 +1362,8 @@ case "$SECTION" in
     run_verb_session_gaps
     cf_test_step_begin topics-restore-drill
     run_topics_restore_drill
+    cf_test_step_begin bulk-survey-drill
+    run_bulk_survey_drill
     ;;
   piece-call-retry)
     cf_test_step_begin piece-call-retry
@@ -1377,6 +1388,10 @@ case "$SECTION" in
   topics-drill)
     cf_test_step_begin topics-restore-drill
     run_topics_restore_drill
+    ;;
+  bulk-survey-drill)
+    cf_test_step_begin bulk-survey-drill
+    run_bulk_survey_drill
     ;;
   *)
     error "Unknown CLI integration section: $SECTION"
