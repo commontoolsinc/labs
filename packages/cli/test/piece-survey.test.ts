@@ -165,6 +165,7 @@ describe("piece-survey", () => {
             path: "topics",
             retarget: ["topics=topic.tsx@r1"],
             root: "patterns",
+            mainExport: "Other",
             dangerouslyAllowIncompatibleSchema: true,
             validator: "demand.json",
           },
@@ -180,6 +181,7 @@ describe("piece-survey", () => {
       expect(request?.retargets?.[0].phase).toBe("topics");
       expect(request?.retargets?.[0].source.root?.endsWith("/patterns"))
         .toBe(true);
+      expect(request?.retargets?.[0].source.mainExport).toBe("Other");
       expect(request?.allowIncompatible).toBe(true);
       expect(request?.validatorPath?.endsWith("/demand.json")).toBe(true);
     });

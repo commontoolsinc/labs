@@ -2322,6 +2322,10 @@ export const piece = targetOptions(
     { collect: true },
   )
   .option(
+    "--main-export <symbol:string>",
+    "The export every --retarget source runs, recorded as each row's symbol; the default export otherwise.",
+  )
+  .option(
     "--dangerously-allow-incompatible-schema",
     "Stamp allowIncompatible onto every retarget row. The apply honors only the row field, so the plan shows exactly which rows run with the compatibility gate open.",
   )
@@ -3204,6 +3208,9 @@ export async function surveyFromCommand(
     ...(options.datafile === undefined
       ? {}
       : { dataFilePaths: options.datafile.map((p) => absPath(p)) }),
+    ...(options.mainExport === undefined
+      ? {}
+      : { mainExport: options.mainExport }),
   };
   const retargets = (options.retarget ?? []).map((spec) => {
     const parsed = parseRetargetFlag(spec);
