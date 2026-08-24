@@ -270,10 +270,12 @@ class DebugConverter {
     const tag = `/${className}`;
 
     const stringForm = value.toString();
-    const matchedGenericName: string | undefined =
-      stringForm.match(/^\[object (?<name>[a-zA-Z0-9_$]+)\]$/)?.groups.name;
-    if ((matchedGenericName !== "Object") && (matchedGenericName !== className)) {
-      return { [tag]: stringForm };
+    if (typeof stringForm === 'string') {
+      const matchedGenericName: string | undefined =
+        stringForm.match(/^\[object (?<name>[a-zA-Z0-9_$]+)\]$/)?.groups?.name;
+      if ((matchedGenericName !== "Object") && (matchedGenericName !== className)) {
+        return { [tag]: stringForm };
+      }
     }
 
     if (typeof value.toJSON === "function") {
@@ -303,10 +305,15 @@ class DebugConverter {
    * depth.
    */
   #convertSubvalue(value: any, depth: number): FabricValue {
-    // Give the `replacer` (if supplied) an opportunity to perform replacement.
-    value = this.#replacer
-      ? this.#replacer(value)
-      : value;
+    try {
+      // Give the `replacer` (if supplied) an opportunity to perform replacement.
+      value = this.#replacer
+        ? this.#replacer(value)
+        : value;
+    } catch {
+      // Fall through: Treat `replacer` failure as refusal to replace and not an
+      // actual error.
+    }
 
     // Handle all the straightforward cases.
     switch (typeof value) {
@@ -556,7 +563,7 @@ export function toStructuredDebugValue(
 
     const badDepth = backtickQuote(toCompactDebugString(maxDepth, 20));
     throw new Error(
-      `\`maxDepth\` must be an integer or \`undefined\`; got ${badDepth}`,
+      `\`maxDepth\` must be a positive integer or \`undefined\`; got ${badDepth}`,
     );
   })();
 
