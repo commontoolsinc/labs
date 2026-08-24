@@ -1,0 +1,58 @@
+[0m[32mCheck[0m integration/topics-journey-bench.scratch.test.ts
+[0m[38;5;245mrunning 1 test from ./integration/topics-journey-bench.scratch.test.ts[0m
+Topics journey benchmark (scratch instrument) ...
+[0m[38;5;245m------- output -------[0m
+Experimental flag overrides: serverExecution=false
+[0m[38;5;245m----- output end -----[0m
+  measures the topics journey ON-vs-OFF stimuli ...
+[0m[38;5;245m------- output -------[0m
+
+[topics-journey OFF] step timings (total 3743ms):
+      1937ms  board create + start (controller)
+       346ms  addTopic seed 1 echo (controller)
+       242ms  addTopic seed 2 echo (controller)
+        27ms  fid capture (result.pull + resolveAsCell x2)
+       669ms  browser cold load: goto + login
+        10ms  browser runtime idle
+       482ms  browser renders both seed titles
+        30ms  navigate-to-topic: click Open -> piece view
+[0m[38;5;245m----- output end -----[0m
+  measures the topics journey ON-vs-OFF stimuli ... [0m[31mFAILED[0m [0m[38;5;245m(10s)[0m
+Topics journey benchmark (scratch instrument) ... [0m[31mFAILED[0m (due to 1 failed step) [0m[38;5;245m(14s)[0m
+
+[0m[1m[37m[41m ERRORS [0m
+
+Topics journey benchmark (scratch instrument) ... measures the topics journey ON-vs-OFF stimuli [0m[38;5;245m=> https://jsr.io/@std/testing/1.0.19/_test_suite.ts:172:39[0m
+[0m[1m[31merror[0m: AssertionError: Values are not equal: Open navigated to of:fid1:ygu8AWNhMhb3ZDSea8JvKTmj26ec2xIQPYrFAmOVGN4, which is neither seed topic
+
+
+    [90m[1m[Diff][22m[39m [31m[1mActual[22m[39m / [32m[1mExpected[22m[39m
+
+
+[31m[1m-   false[22m[39m
+[32m[1m+   true[22m[39m
+
+  throw new AssertionError(message);
+[0m[31m        ^[0m
+    at [0m[1m[3massertEquals[0m ([0m[36mhttps://jsr.io/@std/assert/1.0.19/equals.ts[0m:[0m[33m67[0m:[0m[33m9[0m)
+    at [0m[1m[3mObject.<anonymous>[0m ([0m[2m[38;5;245mfile:///Users/berni/labs-worktrees/topics-benchmark/packages/patterns/[0m[0m[36mintegration/topics-journey-bench.scratch.test.ts[0m:[0m[33m222[0m:[0m[33m7[0m)
+    at async [0m[1m[3mTestSuiteInternal.runTest[0m ([0m[36mhttps://jsr.io/@std/testing/1.0.19/_test_suite.ts[0m:[0m[33m437[0m:[0m[33m7[0m)
+    at async [0m[1m[3mTestSuiteInternal.runTest[0m ([0m[36mhttps://jsr.io/@std/testing/1.0.19/_test_suite.ts[0m:[0m[33m425[0m:[0m[33m9[0m)
+    at async [0m[1m[3mfn[0m ([0m[36mhttps://jsr.io/@std/testing/1.0.19/_test_suite.ts[0m:[0m[33m386[0m:[0m[33m13[0m)
+    [0m[2m[38;5;245mat [0m[0m[2m[38;5;245masync [0m[0m[2m[38;5;245minnerWrapped[0m[0m[2m[38;5;245m ([0m[0m[2m[38;5;245mext:cli/40_test.js[0m[0m[2m[38;5;245m:[0m[0m[2m[38;5;245m300[0m[0m[2m[38;5;245m:[0m[0m[2m[38;5;245m5[0m[0m[2m[38;5;245m)[0m
+    [0m[2m[38;5;245mat [0m[0m[2m[38;5;245masync [0m[0m[2m[38;5;245mexitSanitizer[0m[0m[2m[38;5;245m ([0m[0m[2m[38;5;245mext:cli/40_test.js[0m[0m[2m[38;5;245m:[0m[0m[2m[38;5;245m201[0m[0m[2m[38;5;245m:[0m[0m[2m[38;5;245m27[0m[0m[2m[38;5;245m)[0m
+    [0m[2m[38;5;245mat [0m[0m[2m[38;5;245masync [0m[0m[2m[38;5;245mObject.outerWrapped [as fn][0m[0m[2m[38;5;245m ([0m[0m[2m[38;5;245mext:cli/40_test.js[0m[0m[2m[38;5;245m:[0m[0m[2m[38;5;245m239[0m[0m[2m[38;5;245m:[0m[0m[2m[38;5;245m22[0m[0m[2m[38;5;245m)[0m
+    [0m[2m[38;5;245mat [0m[0m[2m[38;5;245masync [0m[0m[2m[38;5;245mTestContext.step[0m[0m[2m[38;5;245m ([0m[0m[2m[38;5;245mext:cli/40_test.js[0m[0m[2m[38;5;245m:[0m[0m[2m[38;5;245m855[0m[0m[2m[38;5;245m:[0m[0m[2m[38;5;245m22[0m[0m[2m[38;5;245m)[0m
+    at async [0m[1m[3mTestSuiteInternal.run[0m ([0m[36mhttps://jsr.io/@std/testing/1.0.19/_test_suite.ts[0m:[0m[33m402[0m:[0m[33m7[0m)
+    at async [0m[1m[3mfn[0m ([0m[36mhttps://jsr.io/@std/testing/1.0.19/_test_suite.ts[0m:[0m[33m172[0m:[0m[33m15[0m)
+
+    [0m[33minfo:[0m This program assigned to [4mObject.prototype.__proto__[24m, which Deno disables by default.
+    [0m[36mhint:[0m If this caused the error, run again with [4m--unsafe-proto[24m to restore it.
+
+[0m[1m[37m[41m FAILURES [0m
+
+Topics journey benchmark (scratch instrument) ... measures the topics journey ON-vs-OFF stimuli [0m[38;5;245m=> https://jsr.io/@std/testing/1.0.19/_test_suite.ts:172:39[0m
+
+[0m[31mFAILED[0m | 0 passed | 1 failed (1 step) [0m[38;5;245m(14s)[0m
+
+[0m[1m[31merror[0m: Test failed

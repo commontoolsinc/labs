@@ -1,0 +1,77 @@
+== smoke0-journey
+start_utc=2026-08-23T04:54:35Z workload=journey arm=off port=9871 series_n=3
+load_before={ 3.53 4.14 4.16 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-off sha256=427af32ac2a4de61 repo=/Users/berni/labs-worktrees/topics-benchmark head=26be6c909b84
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=57620
+  posture: gitSha=26be6c909b84 define=None servingLoop_pre=False
+test_rc=1 test_wall_s=20 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+load_after={ 3.88 4.16 4.17 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=149 authored=149 derived=0 system=0 per-space: did:key:z6Mkh8Gf3e8gFz3YZMiNGDq7VXjqFcVtpZ5t5ygBZ8NiUwQf.sqlite:2/0/0 did:key:z6MkhXvFiRMnJNz8wcvrrsRL1eqZU2AxUm7SkHYq6v5ANY4W.sqlite:147/0/0
+
+== smoke1-journey
+start_utc=2026-08-23T04:56:26Z workload=journey arm=off port=9871 series_n=3
+load_before={ 7.26 5.05 4.50 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-off sha256=427af32ac2a4de61 repo=/Users/berni/labs-worktrees/topics-benchmark head=26be6c909b84
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=60903
+  posture: gitSha=26be6c909b84 define=None servingLoop_pre=False
+test_rc=0 test_wall_s=16 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+load_after={ 7.24 5.18 4.55 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=151 authored=151 derived=0 system=0 per-space: did:key:z6MkjaHe7TJBCfc182GvY9ReeWtEYzTz4rmRm4x4uXNU3xcF.sqlite:149/0/0 did:key:z6Mkw3ccQG8DEnsaaDraiyi4b1qpUzpiG1VEv3P7o31WmU4u.sqlite:2/0/0
+
+== smoke2-journey
+start_utc=2026-08-23T04:56:57Z workload=journey arm=on port=9872 series_n=3
+load_before={ 6.35 5.05 4.52 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-on sha256=ab036a38c3d6d9b0 repo=/Users/berni/labs-worktrees/topics-benchmark head=26be6c909b84
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=62260
+  posture: gitSha=26be6c909b84 define=true servingLoop_pre=True
+test_rc=0 test_wall_s=19 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+load_after={ 6.19 5.13 4.56 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=65 authored=15 derived=50 system=0 per-space: did:key:z6Mkghf6BWpFohKsU3CA5MCMemvZpFFSZ91L3yFjQziHfhmt.sqlite:14/49/0 did:key:z6Mkj7w2yppBFeVcqW2RdxnFPhmT7mGGvC8X5cRuUJ211iHM.sqlite:1/1/0
+
+== smoke3-test
+start_utc=2026-08-23T04:58:08Z workload=test arm=off port=9871 series_n=20
+load_before={ 4.48 4.83 4.48 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-off sha256=427af32ac2a4de61 repo=/Users/berni/labs-worktrees/topics-benchmark head=26be6c909b84
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=64076
+  posture: gitSha=26be6c909b84 define=None servingLoop_pre=False
+test_rc=0 test_wall_s=27 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=0
+load_after={ 5.90 5.13 4.60 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=77 authored=77 derived=0 system=0 per-space: did:key:z6MknEnP4idANnpaw3kw8SemwB1wzKs1TVt7Mp4HU8u6YBKG.sqlite:75/0/0 did:key:z6MkumxzkNbGvcDhfyn6ZM3Xvr2UnWg3pec1yDqZdYgKNJos.sqlite:2/0/0
+
+== smoke4-test
+start_utc=2026-08-23T04:58:42Z workload=test arm=on port=9872 series_n=20
+load_before={ 5.90 5.13 4.60 }
+binary=/Users/berni/labs-worktrees/topics-benchmark/.bench-artifacts/bin/toolshed-on sha256=ab036a38c3d6d9b0 repo=/Users/berni/labs-worktrees/topics-benchmark head=26be6c909b84
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=64825
+  posture: gitSha=26be6c909b84 define=true servingLoop_pre=True
+test_rc=0 test_wall_s=12 (rc 124 = hard cap 520s hit)
+echo_drop_guard_lines=0
+tx_commit_error_lines=1
+load_after={ 5.36 5.06 4.59 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=47 authored=12 derived=35 system=0 per-space: did:key:z6MkrzvHjE8WSaWEJqM3kvCyZEr1UBHu4P8PXaRH8EnSbEMG.sqlite:1/1/0 did:key:z6Mkw4Yh85prJKee9dkeiGqZqcRqCCCdkQnKK93zXNr5eD8d.sqlite:11/34/0
+

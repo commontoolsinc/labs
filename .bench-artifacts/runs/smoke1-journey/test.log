@@ -1,0 +1,34 @@
+[0m[32mCheck[0m integration/topics-journey-bench.scratch.test.ts
+[0m[38;5;245mrunning 1 test from ./integration/topics-journey-bench.scratch.test.ts[0m
+Topics journey benchmark (scratch instrument) ...
+[0m[38;5;245m------- output -------[0m
+Experimental flag overrides: serverExecution=false
+[0m[38;5;245m----- output end -----[0m
+  measures the topics journey ON-vs-OFF stimuli ...
+[0m[38;5;245m------- output -------[0m
+
+[topics-journey] arm=OFF seed echo ms: 356 279
+[topics-series] arm=OFF n=3 delay=2000ms load1/5/15=7.24/5.18/4.55
+[topics-series] echo    median=354ms q1=245ms q3=528ms p95=528ms min=245ms max=528ms
+[topics-series] arrival median=379ms q1=285ms q3=628ms p95=628ms min=285ms max=628ms
+[topics-series] gap     median=40ms q1=25ms q3=100ms p95=100ms min=25ms max=100ms
+[topics-series] per-event echo ms: 528 245 354
+[topics-series] per-event arrival ms: 628 285 379
+[topics-series] per-event gap ms: 100 40 25
+
+[topics-journey OFF] step timings (total 3855ms):
+      1731ms  board create + start (controller)
+       356ms  addTopic seed 1 echo (controller)
+       279ms  addTopic seed 2 echo (controller)
+        26ms  fid capture (result.pull + resolveAsCell x2)
+       587ms  browser cold load: goto + login
+        21ms  browser runtime idle
+       802ms  browser renders both seed titles
+        27ms  navigate-to-topic: click Open -> piece view
+        26ms  post-navigation runtime idle
+[0m[38;5;245m----- output end -----[0m
+  measures the topics journey ON-vs-OFF stimuli ... [0m[32mok[0m [0m[38;5;245m(11s)[0m
+Topics journey benchmark (scratch instrument) ... [0m[32mok[0m [0m[38;5;245m(14s)[0m
+
+[0m[32mok[0m | 1 passed (1 step) | 0 failed [0m[38;5;245m(14s)[0m
+
