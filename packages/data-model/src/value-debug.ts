@@ -1,7 +1,7 @@
 /** Debugging-ish helpers for `FabricValue`s. */
 
 import { backtickQuote } from "@commonfabric/utils/markdown";
-import { isPlainObject } from "@commonfabric/utils/types";
+import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
 import {
   FabricInstance,
@@ -246,6 +246,54 @@ class DebugConverter {
   }
 
   /**
+   * Converts an array, which is known to be at the indicated nesting depth.
+   */
+  #convertArray(value: any[], depth: number): FabricValue {
+    return value.map((item, _index): FabricValue =>
+      this.#convertSubvalue(item, depth + 1)
+    );
+  }
+
+  /**
+   * Converts a general instance (non-plain, non-`FabricValue` object), which is
+   * known to be at the indicated nesting depth.
+   */
+  #convertInstance(value: any, depth: number): FabricValue {
+    const className =
+      (value as { constructor?: { name?: string } }).constructor?.name ??
+        "<anonymous>";
+    const tag = `/${className}`;
+
+    const stringForm = value.toString();
+    const matchedGenericName: string | undefined =
+      stringForm.match(/^\[object (?<name>[a-zA-Z0-9_$]+)\]$/)?.groups.name;
+    if ((matchedGenericName !== "Object") && (matchedGenericName !== className)) {
+      return { [tag]: stringForm };
+    }
+
+    if (typeof value.toJSON === "function") {
+      return { [tag]: this.#convertSubvalue(value.toJSON(), depth + 1) };
+    }
+
+    const props = { ...value };
+    return { [tag]: this.#convertSubvalue(props, depth + 1) };
+  }
+
+  /**
+   * Converts a plain object, which is known to be at the indicated nesting depth.
+   */
+  #convertPlainObject(value: any, depth: number): FabricValue {
+    const mapper = ([key, value]: [string, any]): [string, FabricValue] => {
+      if (isUnsafeObjectKey(key) || (key[0] === '/')){
+        key = `/${key}`;
+      }
+      return [key, this.#convertSubvalue(value, depth + 1)];
+    };
+    const converted = Object.entries(value).map(mapper);
+    return Object.fromEntries(converted);
+  }
+
+  /**
    * Converts the given value, which is known to be at the indicated nesting
    * depth.
    */
@@ -293,6 +341,14 @@ class DebugConverter {
 
     // We have a non-null object of some sort.
 
+    if (value instanceof FabricPrimitive) {
+      // These can in effect require an additional layer of nesting to convert,
+      // by the time they actually hit _some_ real transports. We hereby accept
+      // the fact that there can be an arguable inconsistency between intended
+      // and actual maximum nesting when these are converted "at the edge."
+      return value;
+    }
+
     const nestedAt = this.#nestingStack.get(value);
     if (nestedAt !== undefined) {
       return { "/circle": nestedAt };
@@ -300,10 +356,6 @@ class DebugConverter {
 
     if (depth >= this.#maxDepth) {
       return { "/...": toDebugKindString(value) };
-    }
-
-    if (value instanceof FabricPrimitive) {
-      return value;
     }
 
     this.#nestingStack.set(value, depth);
@@ -315,24 +367,11 @@ class DebugConverter {
         const contents = codec.encode(value, NULL_LIVE_ENVIRONMENT);
         return { [`/${tag}`]: this.#convertSubvalue(contents, depth + 1) };
       } else if (Array.isArray(value)) {
-        return value.map((item, _index): FabricValue =>
-          this.#convertSubvalue(item, depth + 1)
-        );
+        return this.#convertArray(value, depth);
       } else if (isPlainObject(value)) {
-        return Object.fromEntries(
-          Object.entries(value).map((
-            [key, value],
-          ): [string, FabricValue] => [
-            key,
-            this.#convertSubvalue(value, depth + 1),
-          ]),
-        );
+        return this.#convertPlainObject(value, depth);
       } else {
-        // General instance.
-        const className =
-          (value as { constructor?: { name?: string } }).constructor?.name ??
-            "<anonymous>";
-        return { [`/${className}`]: value.toString() };
+        return this.#convertInstance(value, depth);
       }
     } finally {
       this.#nestingStack.delete(value);
@@ -481,17 +520,19 @@ export function toStructuredDebugValue(
    */
   maxDepth?: number,
 ): FabricValue {
+  const ACTUAL_MAX = 100; // To prevent blowing out the stack when converting.
+
   // Validate `maxDepth` and transform as necessary.
   maxDepth = (() => {
     switch (typeof maxDepth) {
       case "number": {
         if (Number.isSafeInteger(maxDepth) && (maxDepth > 0)) {
-          return maxDepth;
+          return Math.min(maxDepth, ACTUAL_MAX);
         }
         break;
       }
       case "undefined": {
-        return Infinity;
+        return ACTUAL_MAX;
       }
     }
 
