@@ -22,7 +22,13 @@ import { ExecutorHost } from "../src/executor/host.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
-import { Runtime } from "../src/runtime.ts";
+import {
+  EXPERIMENTAL_DEFAULTS,
+  type ExperimentalOptions,
+  nonDefaultExperimentalFlags,
+  Runtime,
+} from "../src/runtime.ts";
+import { runtimePresets } from "../src/runtime-presets.ts";
 
 const signer = await Identity.fromPassphrase("test experimental");
 
@@ -54,6 +60,7 @@ describe("ExperimentalOptions", () => {
         plainResultReceipts: false,
         computedCellIds: false,
         lazyMaterialization: false,
+        systemPatternAutoUpdate: false,
         serverExecution: false,
       });
       await runtime.dispose();
@@ -76,6 +83,7 @@ describe("ExperimentalOptions", () => {
         plainResultReceipts: true,
         computedCellIds: true,
         lazyMaterialization: true,
+        systemPatternAutoUpdate: false,
         serverExecution: false,
       });
       await runtime.dispose();
@@ -96,10 +104,147 @@ describe("ExperimentalOptions", () => {
         plainResultReceipts: true,
         computedCellIds: true,
         lazyMaterialization: true,
+        systemPatternAutoUpdate: false,
         serverExecution: false,
       });
       await runtime.dispose();
       await sm.close();
+    });
+  });
+
+  // What the startup banner reports. It exists so an operator can check that
+  // a flag took effect, and the answer to that is what is UNUSUAL about this
+  // process — a list of everything resolved buries it. Two ways that went
+  // wrong before the defaults table: the deployed presets select the fleet's
+  // own server-execution arm explicitly, and a client that is not built
+  // alongside its server adopts the deployment's whole posture explicitly, so
+  // both printed a banner on every construction while running nothing unusual.
+  describe("nonDefaultExperimentalFlags()", () => {
+    const resolved = (over: ExperimentalOptions = {}): ExperimentalOptions => ({
+      ...EXPERIMENTAL_DEFAULTS,
+      ...over,
+    });
+
+    it("returns nothing for a runtime running every default", () => {
+      expect(nonDefaultExperimentalFlags(resolved(), {})).toEqual([]);
+    });
+
+    it("names a default-off flag that is on", () => {
+      expect(nonDefaultExperimentalFlags(resolved({ modernCellRep: true }), {}))
+        .toEqual(["modernCellRep=true"]);
+    });
+
+    it("names a default-on flag that is off", () => {
+      expect(
+        nonDefaultExperimentalFlags(
+          resolved({ lazyMaterialization: false }),
+          {},
+        ),
+      ).toEqual(["lazyMaterialization=false"]);
+    });
+
+    it("names every diverging flag, in flag order", () => {
+      expect(
+        nonDefaultExperimentalFlags(
+          resolved({ modernCellRep: true, computedCellIds: false }),
+          {},
+        ),
+      ).toEqual(["modernCellRep=true", "computedCellIds=false"]);
+    });
+
+    it("says nothing of an unselected serverExecution, whatever the process resolved", () => {
+      // A flag-less runtime in a serving process inherits the process's arm
+      // rather than choosing one; reporting that as ITS divergence would be a
+      // claim about a decision it did not make.
+      expect(
+        nonDefaultExperimentalFlags(
+          resolved({ serverExecution: !EXPERIMENTAL_DEFAULTS.serverExecution }),
+          {},
+        ),
+      ).toEqual([]);
+    });
+
+    it("says nothing of a serverExecution selected at the fleet default", () => {
+      // The deployed-topology presets always pass it, so this is the case
+      // that used to print on every toolshed start and every cf command.
+      expect(
+        nonDefaultExperimentalFlags(resolved(), {
+          serverExecution: EXPERIMENTAL_DEFAULTS.serverExecution,
+        }),
+      ).toEqual([]);
+    });
+
+    it("names a serverExecution arm selected against the fleet default", () => {
+      const other = !EXPERIMENTAL_DEFAULTS.serverExecution;
+      expect(
+        nonDefaultExperimentalFlags(resolved({ serverExecution: other }), {
+          serverExecution: other,
+        }),
+      ).toEqual([`serverExecution=${other}`]);
+    });
+  });
+
+  describe("the startup banner", () => {
+    /** Runs `body` with this process's stderr captured. */
+    const captureStderr = async (
+      body: () => Promise<void>,
+    ): Promise<string> => {
+      const stderr = Deno.stderr as unknown as {
+        writeSync: (bytes: Uint8Array) => number;
+      };
+      const real = stderr.writeSync.bind(Deno.stderr);
+      let written = "";
+      stderr.writeSync = (bytes: Uint8Array) => {
+        written += new TextDecoder().decode(bytes);
+        return bytes.length;
+      };
+      try {
+        await body();
+      } finally {
+        stderr.writeSync = real;
+      }
+      return written;
+    };
+
+    const withRuntime = async (
+      experimental: ExperimentalOptions,
+      preset: "unitTest" | "productionServer",
+    ): Promise<string> => {
+      const sm = StorageManager.emulate({ as: signer });
+      const options = { apiUrl: new URL(import.meta.url), storageManager: sm };
+      const written = await captureStderr(async () => {
+        const runtime = new Runtime(
+          preset === "productionServer"
+            ? runtimePresets.productionServer({ ...options, experimental })
+            : runtimePresets.unitTest({ ...options, experimental }),
+        );
+        await runtime.dispose();
+      });
+      await sm.close();
+      return written;
+    };
+
+    it("stays quiet for a runtime running the defaults", async () => {
+      expect(await withRuntime({}, "unitTest")).toBe("");
+    });
+
+    it("stays quiet for a deployed server, which selects the fleet's own arm", async () => {
+      // `productionServer` resolves an unset serverExecution to the
+      // first-party default, so this construction passes it explicitly while
+      // running nothing unusual.
+      expect(await withRuntime({}, "productionServer")).toBe("");
+    });
+
+    it("stays quiet for a client that adopted a stock deployment's posture", async () => {
+      // What `experimentalOptionsForDeployedClient` hands a cf binary when
+      // the deployment runs defaults: every flag explicit, nothing unusual.
+      expect(await withRuntime({ ...EXPERIMENTAL_DEFAULTS }, "unitTest"))
+        .toBe("");
+    });
+
+    it("names what a runtime runs off its default", async () => {
+      expect(await withRuntime({ modernCellRep: true }, "unitTest"))
+        .toBe("Non-default experimental flags: modernCellRep=true\n");
     });
   });
 
