@@ -26,6 +26,8 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
+import type { Cell } from "../src/cell.ts";
+import type { MemorySpace } from "../src/storage/interface.ts";
 import type { Action } from "../src/scheduler.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-terminal-rerun");
@@ -77,10 +79,8 @@ const seedSource = async () => {
 /** Subscribes an action whose own transaction runs at enforce-strict. */
 const subscribeRefusedCopy = (
   runtime: Runtime,
-  space: string,
-  source: {
-    withTx: (tx: unknown) => { get(): { secret: string } | undefined };
-  },
+  space: MemorySpace,
+  source: Cell<{ secret: string }>,
   outName: string,
 ) => {
   const out = runtime.getCell<{ copied?: string }>(space, outName, {
