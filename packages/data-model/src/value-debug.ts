@@ -264,7 +264,7 @@ class DebugConverter {
         const key = Symbol.keyFor(value);
         if (key === undefined) {
           // Unique (uninterned) symbol.
-          return { "/uniqueSymbol": value };
+          return { "/uniqueSymbol": value.description };
         } else {
           // Interned symbol.
           return value;
