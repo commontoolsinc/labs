@@ -6735,6 +6735,71 @@ supply; OW29/OW32/OW34 closed):
     only subscribers, and before the flip PR's list-EMPTY bar
     (an ON fleet re-reaches it by construction).
 
+  - **OW62 — adopt-not-start: the piece-open seam is where the ON
+    execution model's "one starter per piece" has to land. POST-FLIP
+    (RULED 2026-08-22, owner: "ok, let's do (a) and record (b) as a
+    post-flip task").** LIFT NOTE (2026-08-24): this row was minted as
+    "OW61" on PR #6208's branch (`claude/server-exec-v2-client-start-retry`,
+    unmerged) and is lifted here essentially verbatim under the next
+    free number, because it records an OWNER RULING that must not live
+    only on a branch that may never land; the parallel-mint collision
+    (both branches picked OW61 — the OW56/OW57 hazard again) is
+    resolved first-come: OW61 on main is the delivery-defect row
+    above. CONSEQUENCE FOR #6208 IF IT LANDS: its own OW61 row is
+    SUPERSEDED by this OW62 and must be dropped, and its
+    cross-reference to it (its `verification-coverage.md` ~:5596,
+    "model's destination in OW61 below") must re-point to OW62 —
+    otherwise the union-merge mints the silent duplicate this note
+    exists to prevent. The "(a)" retry this row's landing duty retires
+    is #6208's own unmerged build; the duty binds whenever both land.
+    The destination the OW45 arm-B fork named (b),
+    recorded rather than built: a flag-ON client whose navigate lands
+    on a piece the SERVER materialized does not run a deferred start
+    of its own at all — it ADOPTS the served instance (sync the root,
+    register demand through the served closure) and starts nothing.
+    That DISSOLVES the first-hydration race instead of re-attempting
+    it, and it is the posture canon already states rather than a new
+    mechanism: runtime-mapping.md's N62 row deleted the old
+    observation-adoption feature precisely BECAUSE under the flag
+    "clients no longer run committed derivations at all (reload is
+    read-and-render, §3b)", and serving-loop.md §3b states that
+    posture. The client-side deferred start is the remnant still
+    running against it at the navigate/piece-open seam. Design seed:
+    `../../history/plans/server-execution-v2/optimize/ow45-armb-client-start-fork.md`
+    (disposition (b), with the instrumented catch that motivates it).
+    WHY POST-FLIP: it touches the piece-open path for every ON
+    navigate. (This row first said the flip's empty-skip-list bar was
+    reached by (a) without moving that path. The live gate DISPROVED
+    that — see the arm-B gate evidence in OW45 — so which arm reaches
+    the bar is an OPEN question, not a settled one, and (b)'s
+    scheduling is the only claim this row still makes.) **The five
+    pieces it still needs, none of them settled by this row:**
+    (i) how the ADOPTED context is constructed client-side — what a
+    client holds for a piece it did not start, and which of today's
+    start-walk products (node wiring, the cancel registration, the
+    demand registration) it keeps; (ii) the BIRTH-adoption flow — a
+    navigate that arrives BEFORE the server has materialized the
+    piece has nothing to adopt, so the seam needs a defined wait or a
+    defined fallback; (iii) whether §3d's speculative-consequence
+    stamp SURVIVES at all once no client start transaction exists —
+    §3d's sanction is written for the deferred start, and adoption
+    deletes the thing it sanctions, so that sentence needs
+    restatement, not inference; (iv) the UNMATERIALIZED-piece
+    fallback, i.e. whether the OFF-arm start path is retained as a
+    fallback under ON and under exactly which predicate; (v) the
+    first-hydration UX gates — what the user sees between navigate
+    and adoption, which is today covered by the client's own start
+    rendering immediately. **Its landing DUTY: retire (a)'s retry.**
+    With no client start transaction there is no start commit to be
+    refused, so `reattemptDeferredStartOnStaleRead` and the
+    `isStaleConfirmedReadConflict` predicate become dead code on the
+    ON arm and must be removed with it (the OFF arm keeps them while
+    the OFF path exists — see #6208's OW45-row disclosed ripple: that
+    fix is deliberately not flag-gated). Trigger: the post-flip soak,
+    or any ON surface where a re-attempted start is observed
+    exhausting its budget in real usage
+    (`deferred-start-conflict-exhausted`), whichever comes first.**
+
 ## 4. Standing rule
 
 A ruling batch that adds a BINDING sentence adds its coverage row
