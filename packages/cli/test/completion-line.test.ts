@@ -147,6 +147,69 @@ Deno.test("resolve: a pre-parse global does not disturb later resolution", () =>
   assertEquals(line.slot?.kind, "subcommand");
 });
 
+Deno.test("resolve: a stopEarly command offers no option slot past its callable", () => {
+  // `piece call` ends option parsing at the callable name, so every later word
+  // belongs to the callable's own parser. Offering `--invocation` there names a
+  // flag the command refuses.
+  const line = resolve("cf piece call --piece x addItem --");
+  assert(line.slot?.kind === "argument");
+  assertEquals(line.slot.argument.name, "tail");
+});
+
+Deno.test("resolve: a flag past that boundary does not shift the positional index", () => {
+  // Read as an option, `--title x` would consume two words and put the cursor
+  // at the wrong tail position.
+  const line = resolve("cf piece call --piece x addItem --title x ");
+  assert(line.slot?.kind === "argument");
+  assertEquals(line.slot.index, 3);
+  assertEquals(line.options.get("piece"), "x");
+});
+
+Deno.test("resolve: the boundary does not reach a command that parses to the end", () => {
+  // `piece get` is not stopEarly(), so its own flags stay reachable after the
+  // path argument.
+  const line = resolve("cf piece get --piece x items --");
+  assertEquals(line.slot?.kind, "option-name");
+});
+
+Deno.test("resolve: `--` after the callable name still opens the passthrough slot", () => {
+  const line = resolve("cf piece call --piece x addItem -- --title ");
+  assertEquals(line.slot?.kind, "passthrough");
+});
+
+Deno.test("resolve: a positional canonical address names the target, not the argument", () => {
+  // The command reads the address out before the rest, so the callable is
+  // still the argument that follows it.
+  const line = resolve("cf piece call -s team /of:fid1:abc ");
+  assertEquals(line.address, "/of:fid1:abc");
+  assert(line.slot?.kind === "argument");
+  assertEquals(line.slot.argument.name, "callable");
+});
+
+Deno.test("resolve: an address in `cf get` leaves the path argument next", () => {
+  const line = resolve("cf get -s team /of:fid1:abc ");
+  assertEquals(line.address, "/of:fid1:abc");
+  assert(line.slot?.kind === "argument");
+  assertEquals(line.slot.argument.name, "addressOrPath");
+  assertEquals(line.slot.index, 0);
+});
+
+Deno.test("resolve: a cell path in the same position is not read as an address", () => {
+  // A relative cell path never begins with `/`, which is the whole of the
+  // grammar that tells the two apart.
+  const line = resolve("cf get -s team items ");
+  assertEquals(line.address, undefined);
+  assertEquals(line.positionals, ["items"]);
+});
+
+Deno.test("resolve: a command with no positional address reads the word as its argument", () => {
+  // `piece get-label` takes a path and nothing else, so a `/`-leading word is
+  // that path rather than a target.
+  const line = resolve("cf piece get-label --piece x /of:fid1:abc ");
+  assertEquals(line.address, undefined);
+  assertEquals(line.positionals, ["/of:fid1:abc"]);
+});
+
 Deno.test("stripInvocationPrefix: leaves a plain cf line alone", () => {
   assertEquals(stripInvocationPrefix(["cf", "piece"]), {
     words: ["cf", "piece"],

@@ -126,6 +126,33 @@ Deno.test("space context: a malformed --url resolves to nothing, not a throw", a
   });
 });
 
+Deno.test("space context: an embedded space supplies one the line did not name", async () => {
+  // A canonical reference carries the space DID, which is the one spelling a
+  // line can name a space with and never write `--space`.
+  await withEnv({ identity: "/env.key", apiUrl: "http://env:9999" }, () => {
+    const config = resolveSpaceContext(
+      lineFor("cf get --piece /@did:key:zEmbedded/of:fid1:abc "),
+      "did:key:zEmbedded",
+    );
+    assert(config);
+    assertEquals(config.space, "did:key:zEmbedded");
+  });
+});
+
+Deno.test("space context: the line's own --space wins over an embedded one", async () => {
+  // Which of the two is right is the command's judgment to make; completion
+  // offers candidates and defers, so it reads the space the caller wrote.
+  await withEnv({ identity: "/env.key", apiUrl: "http://env:9999" }, () => {
+    assertEquals(
+      resolveSpaceContext(
+        lineFor("cf get -s team --piece /@did:key:zEmbedded/of:fid1:abc "),
+        "did:key:zEmbedded",
+      )?.space,
+      "team",
+    );
+  });
+});
+
 Deno.test("live candidates: unmapped slots ask for nothing", async () => {
   // A subcommand or option-name slot is answered statically; reaching for live
   // data there would spend a fabric round trip per keystroke for no reason.

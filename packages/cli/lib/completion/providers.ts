@@ -20,6 +20,8 @@ import type { Candidate } from "./static.ts";
 import type { CompletionLine } from "./line.ts";
 import { longName } from "./line.ts";
 import { absPath } from "../utils.ts";
+import { normalizeLLMFriendlyRef } from "../llm-friendly-ref.ts";
+import { parseScopedIdSegment } from "@commonfabric/runner/shared";
 import type { PieceConfig, SpaceConfig } from "../piece.ts";
 import ports from "@commonfabric/ports" with { type: "json" };
 
@@ -57,6 +59,7 @@ function directive(...directives: Directive[]): ProviderResult {
  */
 export function resolveSpaceContext(
   line: CompletionLine,
+  embeddedSpace?: string,
 ): SpaceConfig | null {
   const url = line.options.get("url");
   const identity = line.options.get("identity") ??
@@ -64,7 +67,11 @@ export function resolveSpaceContext(
   if (!identity) return null;
 
   let apiUrl = line.options.get("api-url") ?? Deno.env.get("CF_API_URL");
-  let space = line.options.get("space");
+  // A reference carrying a space DID supplies one the line did not name, which
+  // is what `parsePieceOptions` does with the same reference. Where the line
+  // named a space it wins, and a mismatch between the two is settled by the
+  // command rather than here: completion offers candidates, it does not judge.
+  let space = line.options.get("space") ?? embeddedSpace;
 
   if (url) {
     try {
@@ -95,16 +102,76 @@ export function resolveSpaceContext(
   }
 }
 
-/** Same as `resolveSpaceContext`, plus the `--piece` the line already names. */
+/**
+ * The target reference the line names, in whichever of the four spellings it
+ * was written: `--piece`, a positional canonical address, or the piece a
+ * `--url` carries.
+ */
+function writtenPieceRef(line: CompletionLine): string | undefined {
+  const piece = line.options.get("piece") ?? line.address;
+  if (piece) return piece;
+  const url = line.options.get("url");
+  if (!url) return undefined;
+  try {
+    return new URL(url).pathname.split("/").filter(Boolean)[1];
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Same as `resolveSpaceContext`, plus the target the line already names —
+ * parsed through the same grammar the command's own intake parses it with.
+ *
+ * `normalizeLLMFriendlyRef` reads the canonical reference: the embedded space,
+ * the `@scope` suffix, an embedded path, and the `#argument` suffix that
+ * selects the arguments cell the way `--input` does. What it does not
+ * recognize falls through to the alias grammar, which is `id[@scope]`. Taking
+ * the word verbatim as a piece id — which this did — meant every documented
+ * spelling but the bare id resolved to a listing call that could not succeed,
+ * and so to a slot that silently offered nothing.
+ *
+ * A malformed reference is `null` rather than a throw: the caller is a
+ * provider, and a half-typed word is the normal state of one.
+ */
 function resolvePieceContext(line: CompletionLine): PieceConfig | null {
-  const space = resolveSpaceContext(line);
+  const written = writtenPieceRef(line);
+  if (!written) return null;
+
+  let ref;
+  try {
+    ref = normalizeLLMFriendlyRef(written, {
+      space: line.options.get("space"),
+    });
+  } catch {
+    return null;
+  }
+
+  if (!ref) {
+    let alias;
+    try {
+      alias = parseScopedIdSegment(written);
+    } catch {
+      return null;
+    }
+    const space = resolveSpaceContext(line);
+    if (!space) return null;
+    return {
+      ...space,
+      piece: alias.id,
+      ...(alias.scope && { pieceScope: alias.scope }),
+    };
+  }
+
+  const space = resolveSpaceContext(line, ref.embeddedSpace);
   if (!space) return null;
-  const piece = line.options.get("piece") ??
-    (line.options.get("url")
-      ? new URL(line.options.get("url")!).pathname.split("/").filter(Boolean)[1]
-      : undefined);
-  if (!piece) return null;
-  return { ...space, piece };
+  return {
+    ...space,
+    piece: ref.pieceId,
+    ...(ref.scope && { pieceScope: ref.scope }),
+    ...(ref.path.length > 0 && { piecePath: ref.path }),
+    ...(ref.input && { pieceInput: true }),
+  };
 }
 
 /**
@@ -181,7 +248,9 @@ async function cellPathCandidates(
 
   const { parentPath, prefix } = splitPathPrefix(line.word);
   const keys = await childKeys(config, parentPath, {
-    input: line.flags.has("input"),
+    // `#argument` on the reference and `--input` as a flag are two spellings
+    // of one selection, so both reach the arguments cell here.
+    input: line.flags.has("input") || config.pieceInput === true,
   });
   if (keys.length === 0) return NOTHING;
 
@@ -195,6 +264,10 @@ async function cellPathCandidates(
  * Keys directly under `path` on a piece's cell. An array yields its indices, an
  * object its property names, and a leaf yields nothing — which is the correct
  * signal that the path is already complete.
+ *
+ * A path embedded in the reference comes first, the way `mergePiecePath` puts
+ * it, so `--piece /of:fid1:…/items` completes `items`' keys rather than the
+ * root's.
  */
 async function childKeys(
   config: PieceConfig,
@@ -203,7 +276,10 @@ async function childKeys(
 ): Promise<string[]> {
   const { getCellValue } = await import("../piece.ts");
   const { parseCellPath } = await import("@commonfabric/runner");
-  const segments = path ? parseCellPath(path) : [];
+  const segments = [
+    ...(config.piecePath ?? []),
+    ...(path ? parseCellPath(path) : []),
+  ];
   return keysOf(await getCellValue(config, segments, options));
 }
 

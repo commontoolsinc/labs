@@ -77,9 +77,9 @@ read before picking one up; this table is the roll-up.
 
 | # | Item | Rank | Status |
 | --- | --- | --- | --- |
-| 1 | Inline `--option=value` drops every live candidate | correctness | not started |
-| 2 | Flags offered past a `stopEarly()` boundary | correctness | not started |
-| 3 | Target resolution lags the reference grammar | correctness | not started |
+| 1 | Inline `--option=value` drops every live candidate | correctness | done |
+| 2 | Flags offered past a `stopEarly()` boundary | correctness | done |
+| 3 | Target resolution lags the reference grammar | correctness | done |
 | 4 | Verb flags do not complete | pattern vocabulary | shaper now, wiring after step 10 |
 | 5 | Result field paths for `get` and `wish` | pattern vocabulary | not started |
 | 6 | Result field paths for `call` and `exec` | pattern vocabulary | needs step 10 |
@@ -98,33 +98,24 @@ read before picking one up; this table is the roll-up.
 | 19 | A gate that fails when a new slot has no decision | mechanism | not started |
 
 **What can be picked up today.** Everything except one wiring change and one
-item. Items 1, 2, 3, 5 and 7 are independent of each other and of the surface
-work, and are worth doing in that order. Items 9, 10, 12, 13, 14, 15, 16 and 17
-are mechanical and can be taken at any time.
-
-Item 2 holds under either grammar. A `cf` flag written past the verb is refused
-today and belongs to the callable after step 10, so declining to offer one there
-is correct now and stays correct. It leaves the position offering nothing until
-item 4 fills it, which is the honest state for a position whose vocabulary the
-command cannot yet name — and a great deal better than offering flags the
-command rejects.
+item. Items 5 and 7 are independent of each other and of the surface work. Items
+9, 10, 12, 13, 14, 15, 16 and 17 are mechanical and can be taken at any time.
 
 Item 4 splits. Turning a verb's `inputSchema` into `--kebab-case` candidates is
 a pure function of the listing, belongs beside `shapeVerbCandidates`, needs no
 fabric to test, and is the same function under either grammar. Build it now.
 Only its wiring — which slot receives it — waits, because step 10 decides
-whether a verb's fields are written before the marker or after it.
+whether a verb's fields are written before the marker or after it. The position
+offers nothing until then, which is the honest state for one whose vocabulary
+the command cannot yet name.
 
 Item 6 is the one to leave alone. Under the current grammar it needs the whole
 line read for context, since a projection precedes the verb it shapes; after
 step 10 the verb is already before the cursor and it needs nothing. Building it
 now means building the machinery that step 10 makes unnecessary.
 
-Items 8 and 11 hold open decisions and are not work yet. Item 18 is the
-mechanism the rest is worked against, and it landed first for that reason: it
-is the only way to see a live provider fail, and the slots the items above
-describe are asserted there as gaps so that each one closing announces itself.
-Item 19 is its other half and is still to do.
+Items 8 and 11 hold open decisions and are not work yet. Item 19 is the other
+half of the mechanism item 18 landed.
 
 ## What this list covers, and what it cannot
 
@@ -196,44 +187,27 @@ throwing. And `parseExecArgs` takes the spec first and the arguments second.
 
 ### 1. Inline `--option=value` drops every live candidate
 
-`--space=<TAB>`, `--piece=<TAB>`, and `--api-url=<TAB>` offer nothing, while the
-same options completed as `--space <TAB>` work. Enumerated values are
-unaffected: `--log-level=<TAB>` completes.
-
-`complete` in `lib/completion/mod.ts` filters candidates against the word under
-the cursor, which for this spelling is `--piece=`. `staticCandidates`
-re-attaches that prefix through `withInlinePrefix`, so its candidates survive
-the filter.
-`liveCandidates` returns bare values, so every one of them fails the prefix test
-and is dropped.
-
-The fix is to apply the inline prefix to the live half as well, which means
-`complete` carrying the slot's `inlinePrefix` across both sources rather than
-`staticCandidates` owning it alone.
+`complete` in `lib/completion/mod.ts` attaches the slot's `inlinePrefix` to
+every candidate, whichever source produced it. `staticCandidates` returns bare
+values, so one rule covers the static half and the live half alike — where the
+static half owning the prefix alone left every live candidate failing the
+prefix filter that `--piece=` is.
 
 This spelling is why `tokenizeLine` exists — bash splits its own words on `=` —
-so it is the one form the implementation is built to serve and the one that does
-not work.
+so it is the one form the implementation is built to serve.
 
-Directives are the other half of the same slot: `--identity=<TAB>` emits a files
-directive whose glob the shell applies to a word still carrying `--identity=`.
-Settle both in one change.
+The directive half of the same slot lives in the shell functions, because it is
+the shell that applies a glob. `$cur` is the whole word (`--identity=~/keys/a`)
+while readline replaces only the fragment after the last word-break character,
+so bash globs that fragment and zsh `compset -P`s the flag into `IPREFIX`.
 
 ### 2. Flags offered past a `stopEarly()` boundary
 
-After the callable name, `cf call` offers `--invocation`, `--filter`,
-`--select`, `--quiet` and the rest of its own flags. The command rejects all of
-them there: `buildCallCommand` in `commands/piece.ts` is `stopEarly()`, so the
-first positional ends option parsing and every later word belongs to the
-callable's schema-derived parser. The flags' own help text says so — each
-description ends "(before the callable name)". `cf exec` has the same shape and
-the same defect, its descriptions ending "(before the mounted file)".
-
-`resolveCompletionLine` in `lib/completion/line.ts` has no notion of the
-boundary, so `option-name` stays reachable for the whole line. Cliffy records it
-as `_stopEarly` with no accessor; either read that field or have the completion
-layer name the two commands. Reading the field keeps the property where the
-command declares it, which is the reason to prefer it.
+`resolveCompletionLine` in `lib/completion/line.ts` reads Cliffy's `_stopEarly`
+field, so past the callable name on `cf call` and past the mounted file on
+`cf exec` no option slot is reachable and a flag-shaped word does not shift the
+positional index. That keeps the property where the command declares it: a
+third command becoming `stopEarly()` needs no edit in the completion layer.
 
 This holds under either grammar. A `cf` flag past the verb is refused today, and
 after step 10 of [Naming the target](cli-surface-shape.md#naming-the-target) the
@@ -244,32 +218,27 @@ should offer.
 
 ### 3. Target resolution lags the reference grammar
 
-Three documented ways to name a target complete nothing:
+`resolvePieceContext` in `lib/completion/providers.ts` parses the target through
+`normalizeLLMFriendlyRef`, which is the function the command's own intake parses
+it with: the embedded space, the `@scope` suffix, a trailing path, and the
+`#argument` suffix that selects the arguments cell the way `--input` does. What
+that does not recognize falls through to the alias grammar
+(`parseScopedIdSegment`). Taking the word verbatim as a piece id — which this
+did — meant every documented spelling but the bare id resolved to a listing
+call that could not succeed, and so to a slot that silently offered nothing.
 
-```bash
-cf call --piece /@did:key:.../of:fid1:... <TAB>   # canonical reference
-cf call --space donuts /of:fid1:... <TAB>          # positional address
-cf get --piece fid1:...#argument <TAB>             # the arguments cell
-```
+An embedded space DID supplies the space where the line names none, the way
+`parsePieceOptions` does with the same reference. Where the line names one it
+wins, and a mismatch between the two is the command's to report.
 
-The `--url` spelling of the same target works, which is what makes this read as
-random rather than as a missing capability.
-
-`resolvePieceContext` in `lib/completion/providers.ts` takes `--piece` verbatim
-as a piece id. The canonical form is not one, so the listing call fails and the
-slot degrades to empty. `normalizeLLMFriendlyRef` is the function that already
-parses this grammar — the embedded space, the `@scope` suffix, the trailing
-path, and `#argument` — and completion is an intake seam that does not use it.
-
-The positional address is a second, independent break: it occupies positional
-index 0, so `resolveSlot` resolves the cursor to the variadic `tail` rather than
-to `callable`, and the callable provider is never consulted. Whichever way
-completion learns the address form, it has to shift the positional index the way
-the command does.
-
-`#argument` selects the arguments cell, the same selection `--input` spells as a
-flag. `cellPathCandidates` reads `--input` and not the suffix, so the two
-spellings of one selection complete differently.
+The positional address was a second, independent break: it occupied positional
+index 0, so the cursor resolved to the variadic `tail` rather than to
+`callable`. `resolveCompletionLine` now reads it out as `line.address` instead
+of counting it, which shifts the index the way `readCallTarget` and
+`readTargetPositionals` shift it. Which commands accept one is carried in
+`POSITIONAL_ADDRESS_COMMANDS`, for the reason `PRE_PARSE_GLOBALS` is carried:
+nothing on the command tree distinguishes those arguments from an ordinary
+string.
 
 ## Pattern vocabulary
 
