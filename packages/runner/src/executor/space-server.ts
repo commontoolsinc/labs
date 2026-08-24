@@ -599,13 +599,17 @@ export class SpaceServer implements TransactionSealDestination {
    * activation owes the tenure ONE space-root ensure — existence +
    * freshness, no start — run as the first serialized step of the wave
    * loop's first cycle (the #eventScanOwed / #outboxDrainOwed shape).
-   * Single-flight per tenure: consumed before the ensure runs and
-   * never re-armed mid-tenure — a failure or a fail-closed no-owner
-   * skip is counted and retried by the NEXT tenure's activation, so a
-   * deterministic failure cannot spin the loop. Idempotent across
-   * tenures and against clients: the creation transaction's OCC
-   * re-read plus the cause-derived root address converge every race
-   * on one root. */
+   * Single-flight per tenure, STRUCTURALLY: a SpaceServer is a
+   * single-tenure object (#parkRequested never resets; the host builds
+   * a REPLACEMENT SpaceServer per re-activation — host.ts
+   * #activateInner / #reactivateAfterPark), so this flag's lifetime is
+   * the tenure's and no re-arm bookkeeping exists to get wrong. It is
+   * consumed before the ensure runs and never re-armed mid-tenure — a
+   * failure or a fail-closed no-owner skip is counted and retried by
+   * the NEXT tenure's activation, so a deterministic failure cannot
+   * spin the loop. Idempotent across tenures and against clients: the
+   * creation transaction's OCC re-read plus the cause-derived root
+   * address converge every race on one root. */
   #rootEnsureOwed = false;
   /** Phase 4 (protocol.md §5): an effects-doc-touching authored commit
    * (an ack) — or activation (a crash between ack and retirement must

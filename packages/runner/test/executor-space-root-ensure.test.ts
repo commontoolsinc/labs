@@ -103,6 +103,15 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
   let mintedTxs: IExtendedStorageTransaction[];
   let stats: ServingLoopStats;
   let cleanups: Array<() => Promise<void>>;
+  /** ONE localSeq counter across every SpaceServer this test builds —
+   * the HOST's contract (host.ts #sinkLocalSeq: the counter is
+   * process-lifetime and SURVIVES park/re-activate, because every
+   * tenure's sink commits under the same process-stable session id; a
+   * fresh counter per tenure re-mints (session, localSeq) pairs the
+   * engine already consumed and replay detection kills the second
+   * tenure's waves as "commit replay mismatch" — observed live while
+   * building the aged-reconcile pin). */
+  let sinkLocalSeq: { value: number };
 
   const identityFor = (entry: string): Promise<string> =>
     resolveEntryIdentity(entry, (name) => {
@@ -139,6 +148,7 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     ]);
     mintedTxs = [];
     stats = emptyServingLoopStats();
+    sinkLocalSeq = { value: 0 };
     spaceServer = undefined;
     servingRuntime = undefined;
     cleanups = [];
@@ -219,7 +229,7 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
           },
         };
       },
-      localSeqRef: { value: 0 },
+      localSeqRef: sinkLocalSeq,
       stats,
       policy: { flushDeadlineMs: 2_000, idleParkMs: 600_000 },
     });
@@ -304,21 +314,32 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
       () => stats.rootEnsure.runs === 2,
       "second tenure's ensure",
     );
+    // The server side first: the second tenure RESOLVED (created stays
+    // 1 — one root ever) and its freshness half MOVED the identity.
+    expect(stats.rootEnsure.created).toBe(1);
+    await waitUntil(
+      () => stats.rootEnsure.reconciled === 1,
+      "second tenure's reconcile counted",
+    );
+
+    // Then the DURABLE outcome: a fresh replica per attempt (client
+    // push freshness of meta is a different mechanism's contract; the
+    // ensure's promise is the store).
     {
       const deadline = Date.now() + 20_000;
-      while (getPatternIdentityRef(firstRoot)?.identity !== freshIdentity) {
+      while (true) {
+        const probeReader = clientRuntime(readerSigner);
+        const current = await resolveRootEventually(probeReader);
+        if (getPatternIdentityRef(current)?.identity === freshIdentity) {
+          expect(getEntityId(current)).toEqual(getEntityId(firstRoot));
+          break;
+        }
         if (Date.now() > deadline) {
           throw new Error("timed out waiting for aged identity reconcile");
         }
-        await new Promise((resolve) => setTimeout(resolve, 50));
-        await firstRoot.sync();
+        await new Promise((resolve) => setTimeout(resolve, 250));
       }
     }
-
-    const secondRoot = await resolveRootEventually(reader);
-    expect(getEntityId(secondRoot)).toEqual(getEntityId(firstRoot));
-    expect(stats.rootEnsure.created).toBe(1);
-    expect(stats.rootEnsure.reconciled).toBe(1);
   });
 
   it("the ensure's creation tx carries the resolved OWNER's trust snapshot, never the service's (granted-owner space, default-app source)", async () => {
