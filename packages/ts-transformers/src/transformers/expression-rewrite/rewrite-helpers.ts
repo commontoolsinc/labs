@@ -1,6 +1,7 @@
 import ts from "typescript";
 
 import {
+  classifyArrayMethodCall,
   detectCallKind,
   isSyntheticNode,
   type NormalizedDataFlow,
@@ -9,8 +10,45 @@ import {
   typeToTypeNodeWithRegistry,
 } from "../../ast/mod.ts";
 import { isModuleScopedDeclaration } from "../../ast/scope-analysis.ts";
+import { unwrapTransparentWrapperOnce } from "../../utils/expression.ts";
 import { TransformationContext } from "../../core/mod.ts";
 import { createLiftAppliedCall } from "../builtins/lift-applied.ts";
+
+/**
+ * True when `node` is the receiver an array-method call is made on, looking
+ * through any transparent wrappers between the two: `xs`, `(xs)`, and
+ * `(xs as T[])!` are all the receiver of `.map(...)`.
+ *
+ * The walk runs outward through parents and checks at each step that it is on
+ * the wrapper's `expression` spine, so a node sitting in a wrapper's *type*
+ * position is not mistaken for the value being wrapped.
+ */
+export function isArrayMethodReceiverExpression(node: ts.Node): boolean {
+  let current: ts.Node = node;
+  let parent = current.parent;
+  while (parent) {
+    const wrapped = unwrapTransparentWrapperOnce(parent);
+    if (!wrapped) break;
+    if (wrapped !== current) return false;
+    current = parent;
+    parent = parent.parent;
+  }
+
+  if (
+    !parent ||
+    (
+      !ts.isPropertyAccessExpression(parent) &&
+      !ts.isElementAccessExpression(parent)
+    ) ||
+    parent.expression !== current
+  ) {
+    return false;
+  }
+
+  const call = parent.parent;
+  return !!call && ts.isCallExpression(call) && call.expression === parent &&
+    !!classifyArrayMethodCall(call);
+}
 
 function getCaptureRootExpression(expression: ts.Expression): ts.Expression {
   let current = expression;
