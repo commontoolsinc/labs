@@ -1,8 +1,9 @@
 # Bulk piece operations
 
-**Status:** proposed, unbuilt. The design and build sequence for changing
-many pieces in one space as one reviewable, resumable operation. Driven by
-recurring Topics board upgrades.
+**Status:** proposed; stage 1 — the survey library, its CLI entry points,
+and its CI drill — is built and in review, and every later stage is unbuilt.
+The design and build sequence for changing many pieces in one space as one
+reviewable, resumable operation. Driven by recurring Topics board upgrades.
 
 ## The short version
 
@@ -160,10 +161,10 @@ A plan is a list of rows, each naming a piece, the state it must be in, and
 what to do to it:
 
 ```text
-piece         precondition               operation
-of:fid1:aaa…  pattern-identity=PB0Gum…   retarget=topic.tsx@<rev>
-of:fid1:bbb…  pattern-identity=PB0Gum…   retarget=topic.tsx@<rev>
-of:fid1:ccc…  document-hash=9f2c…        repair=<fixer>
+piece         precondition                  operation
+of:fid1:aaa…  reference=PB0Gum…#default     retarget=topic.tsx@<rev>
+of:fid1:bbb…  reference=PB0Gum…#default     retarget=topic.tsx@<rev>
+of:fid1:ccc…  document-hash=9f2c…           repair=<fixer>
 ```
 
 Four properties follow from making this a file rather than a command line:
@@ -434,9 +435,12 @@ holder's own demanded schema, so the common case supplies no code at all.
 Code-shaped checking waits for the fixer, which is the same question asked
 of a transform.
 
-**The identity read returns the identity and nothing else.** One piece in,
-`{piece, patternIdentity, symbol}` out, no input document, no result, no link
-graph. Whether it surfaces as a flag on the existing per-piece inspection or
+**The pin read returns the source pin and nothing else.** One piece in —
+`{piece, patternIdentity, symbol, revisionId?, retained}` out: the reference,
+the current source revision when the piece keeps a log, and whether the
+reference's source is retained in the space. No input document, no result, no
+link graph. Whether it surfaces as a flag on the existing per-piece inspection
+or
 as its own thing resolves with the entry-point question above; the function
 underneath is the same either way, and it is what makes a survey over a large
 board affordable.

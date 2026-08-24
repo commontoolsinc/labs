@@ -15,7 +15,7 @@
  * exports.
  */
 
-import type { PiecePlan } from "./bulk-plan.ts";
+import { canonicalPieceAddress, type PiecePlan } from "./bulk-plan.ts";
 
 /** One half-qualified executable pointer a diff verdict was decided from. */
 export interface PatternRef {
@@ -73,7 +73,11 @@ export function diffPlan(plan: PiecePlan, after: PiecePlan): PlanDiff {
   }
   assertUniquePieces(plan, "plan");
   assertUniquePieces(after, "after-survey");
-  const afterById = new Map(after.rows.map((row) => [row.piece, row]));
+  // Keys are canonical, so the `of:` alias and the bare spelling of one
+  // piece match rather than reading as a missing piece plus an unplanned one.
+  const afterById = new Map(
+    after.rows.map((row) => [canonicalPieceAddress(row.piece), row]),
+  );
   const counts: Record<PieceDiffStatus, number> = {
     landed: 0,
     outstanding: 0,
@@ -90,8 +94,9 @@ export function diffPlan(plan: PiecePlan, after: PiecePlan): PlanDiff {
     const target: PatternRef | undefined = row.op === undefined
       ? undefined
       : { patternIdentity: row.op.patternIdentity, symbol: row.op.symbol };
-    const seen = afterById.get(row.piece);
-    afterById.delete(row.piece);
+    const key = canonicalPieceAddress(row.piece);
+    const seen = afterById.get(key);
+    afterById.delete(key);
     let status: PieceDiffStatus;
     let now: PatternRef | undefined;
     if (seen === undefined) status = "missing";
@@ -118,7 +123,13 @@ export function diffPlan(plan: PiecePlan, after: PiecePlan): PlanDiff {
       ...(target === undefined ? {} : { target }),
     };
   });
-  return { rows, unplanned: [...afterById.keys()], counts };
+  // Unplanned pieces are reported in the after-survey's own spelling; the
+  // canonical form was only the matching key.
+  return {
+    rows,
+    unplanned: [...afterById.values()].map((row) => row.piece),
+    counts,
+  };
 }
 
 function sameRef(left: PatternRef, right: PatternRef): boolean {
@@ -129,9 +140,10 @@ function sameRef(left: PatternRef, right: PatternRef): boolean {
 function assertUniquePieces(plan: PiecePlan, label: string): void {
   const seen = new Set<string>();
   for (const row of plan.rows) {
-    if (seen.has(row.piece)) {
+    const key = canonicalPieceAddress(row.piece);
+    if (seen.has(key)) {
       throw new Error(`The ${label} lists ${row.piece} more than once.`);
     }
-    seen.add(row.piece);
+    seen.add(key);
   }
 }

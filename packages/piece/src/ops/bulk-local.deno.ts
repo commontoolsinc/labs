@@ -39,10 +39,15 @@ export async function localRetargetOp(
   runtime: Runtime,
   request: LocalRetargetRequest,
 ): Promise<RetargetOp> {
-  const program = await resolveLocalSourceProgram(runtime, request.source);
+  // The resolver drops a falsy export and runs the default, so an empty
+  // `mainExport` normalizes to absent here — the op the codec accepts is the
+  // op the apply performs.
+  const { mainExport, ...withoutExport } = request.source;
+  const source = mainExport ? request.source : withoutExport;
+  const program = await resolveLocalSourceProgram(runtime, source);
   return {
     kind: "retarget",
-    source: request.source,
+    source,
     ...(request.rev === undefined ? {} : { rev: request.rev }),
     patternIdentity: await programEntryIdentity(program),
     symbol: program.mainExport ?? "default",

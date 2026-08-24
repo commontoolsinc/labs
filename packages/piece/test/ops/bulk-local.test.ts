@@ -106,6 +106,23 @@ describe("bulk-local", () => {
   });
 
   describe("localRetargetOp()", () => {
+    it("normalizes an empty mainExport to the default export", async () => {
+      const dir = await Deno.makeTempDir({ prefix: "bulk-local-empty" });
+      try {
+        await Deno.writeTextFile(`${dir}/main.tsx`, entryContents);
+        await Deno.writeTextFile(`${dir}/flavor.ts`, flavorContents);
+        const op = await localRetargetOp(runtime, {
+          source: { main: `${dir}/main.tsx`, mainExport: "" },
+        });
+        expect(op.symbol).toBe("default");
+        // The op the codec accepts is the op the apply performs: the empty
+        // export is gone, not carried as text the resolver would drop.
+        expect(op.source.mainExport).toBeUndefined();
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
     it("returns an op pinned to the identity the on-disk source produces", async () => {
       const dir = await Deno.makeTempDir({ prefix: "bulk-local-test" });
       try {

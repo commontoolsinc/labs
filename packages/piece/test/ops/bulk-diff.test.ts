@@ -205,5 +205,22 @@ describe("bulk-diff", () => {
       expect(() => diffPlan(twice, once)).toThrow("more than once");
       expect(() => diffPlan(once, twice)).toThrow("more than once");
     });
+
+    it("folds the of: alias when matching plan and after-survey rows", () => {
+      const plan: PiecePlan = { header, rows: [surveyRow("of:fid1:aaa", "x")] };
+      const after: PiecePlan = { header, rows: [surveyRow("fid1:aaa", "x")] };
+      const diff = diffPlan(plan, after);
+      expect(diff.rows[0].status).toBe("unchanged");
+      expect(diff.unplanned).toEqual([]);
+    });
+
+    it("throws for an alias-spelled duplicate", () => {
+      const twice: PiecePlan = {
+        header,
+        rows: [surveyRow("fid1:aaa", "x"), surveyRow("of:fid1:aaa", "x")],
+      };
+      const once: PiecePlan = { header, rows: [surveyRow("fid1:aaa", "x")] };
+      expect(() => diffPlan(twice, once)).toThrow("more than once");
+    });
   });
 });

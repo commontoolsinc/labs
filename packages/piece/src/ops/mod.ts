@@ -1,4 +1,5 @@
 export {
+  canonicalPieceAddress,
   decodePlan,
   deriveRollbackPlan,
   encodePlan,

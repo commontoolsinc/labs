@@ -22,11 +22,12 @@ import {
 import { validateSchemaValue } from "@commonfabric/runner/cfc";
 
 import { pieceId } from "../piece-id.ts";
-import type {
-  PieceExpect,
-  PiecePlan,
-  PiecePlanRow,
-  RetargetOp,
+import {
+  canonicalPieceAddress,
+  type PieceExpect,
+  type PiecePlan,
+  type PiecePlanRow,
+  type RetargetOp,
 } from "./bulk-plan.ts";
 import { readPieceSourceMetadata } from "./piece-origin.ts";
 import type { PiecesController } from "./pieces-controller.ts";
@@ -142,8 +143,13 @@ export async function selectPieces(
   selector: PieceSelector,
 ): Promise<SelectedPiece[]> {
   if (selector.kind === "list") {
+    // Canonicalized before the uniqueness check, so the `of:` alias and the
+    // bare spelling of one piece cannot pass as two.
     return assertUniqueSelection(
-      selector.pieces.map((piece) => ({ piece, phase: LIST_PHASE })),
+      selector.pieces.map((piece) => ({
+        piece: canonicalPieceAddress(piece),
+        phase: LIST_PHASE,
+      })),
     );
   }
   const holder = await pieces.get(selector.holder, false);
@@ -225,7 +231,12 @@ export async function surveyPieces(
       retained: pin.retained,
       ...(pin.revisionId === undefined ? {} : { revisionId: pin.revisionId }),
     };
-    const operation = options.operations?.[phase];
+    // An own-property check: a phase named like an `Object.prototype` member
+    // must not resolve an inherited value into a phantom operation.
+    const operation = options.operations !== undefined &&
+        Object.hasOwn(options.operations, phase)
+      ? options.operations[phase]
+      : undefined;
     rows.push({
       piece: pin.piece,
       phase,
@@ -246,8 +257,11 @@ export async function surveyPieces(
   // Containment is a property of surveying a holder's collection — the claim
   // "this collection is all there is of its kind". A hand-picked list claims
   // no such thing, so a registered sibling outside one is not a disagreement.
+  // One registry read serves the containment check and the header count, so
+  // the two can never describe different live enumerations.
+  const registered = await pieces.getRegisteredPieces();
   const outside = options.selector.kind === "collection"
-    ? await registeredOutsideSelection(pieces, rows)
+    ? await registeredOutsideSelection(pieces, registered, rows)
     : [];
   const memberCount = options.selector.kind === "collection"
     ? Math.max(selected.length - 1, 0)
@@ -357,6 +371,7 @@ async function isSourceRetained(
  */
 async function registeredOutsideSelection(
   pieces: PiecesController,
+  registered: readonly { id: string }[],
   rows: readonly PiecePlanRow[],
 ): Promise<RegisteredOutside[]> {
   // In scope by the full executable pointer: an identity alone conflates two
@@ -366,9 +381,9 @@ async function registeredOutsideSelection(
   );
   const selectedIds = new Set(rows.map((row) => row.piece));
   const outside: RegisteredOutside[] = [];
-  for (const registered of await pieces.getRegisteredPieces()) {
-    if (selectedIds.has(registered.id)) continue;
-    const synced = await pieces.get(registered.id, false);
+  for (const candidate of registered) {
+    if (selectedIds.has(candidate.id)) continue;
+    const synced = await pieces.get(candidate.id, false);
     const ref = getPatternIdentityRef(synced.getCell());
     if (
       ref !== undefined && inScope.has(`${ref.identity}\x00${ref.symbol}`)

@@ -47,6 +47,7 @@ export {
   entityIdFrom,
   getEntityId,
 } from "./create-ref.ts";
+export { hashStringForEntityAddress } from "./entity-kind.ts";
 export type { CellResult as QueryResult } from "./query-result-proxy.ts";
 export type {
   Action,

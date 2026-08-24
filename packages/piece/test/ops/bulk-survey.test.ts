@@ -447,11 +447,61 @@ describe("bulk-survey", () => {
       expect(survey.complete).toBe(true);
     });
 
+    it("stamps no phantom operation for a phase named like a prototype member", async () => {
+      const holder = await pieces.create({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            "import { NAME, pattern } from 'commonfabric';",
+            "export default pattern<{ toString?: unknown[] }>((input) => ({",
+            "  [NAME]: 'Proto-named',",
+            "  echo: input,",
+            "}));",
+            "",
+          ].join("\n"),
+        }],
+      }, { input: {} });
+      const member = await pieces.create(generationProgram("a"), {
+        input: {},
+      });
+      await holder.input.set([member.getCell()], ["toString"]);
+      await pieces.runtime.idle();
+
+      const survey = await surveyPieces(pieces, {
+        selector: {
+          kind: "collection",
+          holder: holder.id,
+          path: ["toString"],
+        },
+        operations: {},
+      });
+
+      // `{}` owns no "toString"; the inherited one must not become an op.
+      expect(survey.plan.rows.every((row) => row.op === undefined)).toBe(true);
+    });
+
     it("throws for a list naming one piece twice", async () => {
       const a = await pieces.create(generationProgram("a"), { input: {} });
       await expect(
         surveyPieces(pieces, {
           selector: { kind: "list", pieces: [a.id, a.id] },
+        }),
+      ).rejects.toThrow("more than once");
+    });
+
+    it("canonicalizes the of: alias in a list selection", async () => {
+      const a = await pieces.create(generationProgram("a"), { input: {} });
+      const aliased = a.id.startsWith("of:") ? a.id.slice(3) : `of:${a.id}`;
+
+      const survey = await surveyPieces(pieces, {
+        selector: { kind: "list", pieces: [aliased] },
+      });
+      expect(survey.plan.rows[0].piece).toBe(a.id);
+
+      await expect(
+        surveyPieces(pieces, {
+          selector: { kind: "list", pieces: [a.id, aliased] },
         }),
       ).rejects.toThrow("more than once");
     });

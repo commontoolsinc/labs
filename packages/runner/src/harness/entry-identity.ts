@@ -28,8 +28,10 @@ function prefixName(name: string): string {
  *
  * `files` must include the entry's full internal import closure (a superset is
  * fine — unreachable files neither affect the entry's identity nor are they
- * validated). `.d.ts` files are ignored unless named as data files, which are
- * kept whatever their name says. `contents` must be the **authored**
+ * validated). Ambient (non-rooted) `.d.ts` files are dropped as the engine
+ * drops them; an authored, rooted declaration file is a module like any
+ * other, and a data file is kept whatever its name says. `contents` must be
+ * the **authored**
  * (pre-transform) source: the engine hashes pristine authored bytes, restoring
  * them via `pristineModuleSources` after the helper-injection pretransform, so
  * hashing the injected form here would diverge (see
@@ -59,10 +61,13 @@ export function computeEntryIdentity(
 
   // Partition before the `.d.ts` filter and before any parsing: a data file
   // is stored uninterpreted whatever its name says, and import-like text
-  // inside one is data, not an import.
+  // inside one is data, not an import. The `.d.ts` line matches the engine's
+  // `persistableSourceFiles`: authored (rooted) declaration files are part of
+  // the closure and the hash; only ambient ones are dropped.
   const dataSet = new Set(dataPaths);
   const moduleFiles = files.filter((f) =>
-    !dataSet.has(f.name) && !f.name.endsWith(".d.ts")
+    !dataSet.has(f.name) &&
+    (!f.name.endsWith(".d.ts") || f.name.startsWith("/"))
   );
   const dataSources = files.filter((f) => dataSet.has(f.name));
   const prefixedCode = moduleFiles.map((f) => ({

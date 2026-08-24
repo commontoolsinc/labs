@@ -16,6 +16,19 @@
  * [docs/plans/piece-bulk-operations.md](../../../../docs/plans/piece-bulk-operations.md).
  */
 
+import { hashStringForEntityAddress } from "@commonfabric/runner";
+
+/**
+ * The canonical spelling of a piece address: the bare tagged-hash form every
+ * survey row carries. The `of:` URI alias names the same entity and folds to
+ * it here, so two spellings of one piece cannot slip past a uniqueness check
+ * or a diff key. A kinded (`computed:`) address is refused by the underlying
+ * parser — the `of:` id over the same hash names a different entity.
+ */
+export function canonicalPieceAddress(address: string): string {
+  return hashStringForEntityAddress(address);
+}
+
 /** What a plan row requires of its piece before its operation applies. */
 export interface PieceExpect {
   /** The pattern identity the piece is currently on. */
@@ -176,7 +189,7 @@ export function decodePlan(text: string): PiecePlan {
     if (!isPlanRow(row)) {
       throw new Error(`Plan row ${index + 1} is not a valid row object.`);
     }
-    return row;
+    return { ...row, piece: canonicalPieceAddress(row.piece) };
   });
   const seen = new Set<string>();
   for (const row of rows) {
@@ -288,14 +301,18 @@ function isPieceOp(value: unknown): value is PieceOp {
   if (!isRecord(value)) return false;
   if (
     typeof value.patternIdentity !== "string" ||
-    typeof value.symbol !== "string"
+    value.patternIdentity === "" ||
+    typeof value.symbol !== "string" || value.symbol === ""
   ) return false;
   if (value.kind === "restore") return isOptionalString(value.revisionId);
   if (value.kind !== "retarget") return false;
   const source = value.source;
   if (!isRecord(source) || typeof source.main !== "string") return false;
   const mainExport = source.mainExport;
-  if (!isOptionalString(mainExport)) return false;
+  // An empty export name is refused rather than read as the default: the
+  // resolver drops a falsy export and runs the default, so a row carrying
+  // one would execute something its own text does not say.
+  if (!isOptionalString(mainExport) || mainExport === "") return false;
   // The symbol is what diff and rollback compare; the source's export is what
   // an apply resolves. A row where the two disagree would land one pattern
   // and verify another, so the codec refuses it.

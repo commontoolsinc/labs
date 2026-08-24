@@ -178,6 +178,24 @@ describe("computeEntryIdentity (light, drift-free)", () => {
       ])
     ).toThrow(/produced no identity/);
   });
+  it("matches the engine for an entry importing an authored declaration file", async () => {
+    const program: RuntimeProgram = {
+      main: "/entry.tsx",
+      files: [
+        {
+          name: "/entry.tsx",
+          contents: 'import type { N } from "./types.d.ts";\n' +
+            "export default (): N => 1;\n",
+        },
+        { name: "/types.d.ts", contents: "export type N = number;\n" },
+      ],
+    };
+    const { entryIdentity } = await engine.compileToRecordGraph(program);
+    expect(computeEntryIdentity(program.main, program.files)).toBe(
+      entryIdentity,
+    );
+  });
+
   it("throws when the entry is named as a data file", () => {
     const files = [{ name: "/entry.ts", contents: "export default 1;\n" }];
     expect(() =>
