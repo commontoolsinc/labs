@@ -80,6 +80,7 @@ import * as Engine from "./engine.ts";
 import { respondToHello } from "./handshake.ts";
 import {
   cloneTrackedGraphState,
+  closeFrameOverSchemaRefs,
   extendTrackedGraph,
   fromDirtyKey,
   fromDocKey,
@@ -3640,6 +3641,15 @@ export class Server {
           upserts.push(entry);
         }
       }
+      // Per-frame schema-ref closure (OW61): the diff above elides
+      // entries the session cache says were delivered before, so an
+      // extension re-reaching a cid-mentioning doc would otherwise ship
+      // it without its cid: sibling — a frame whose validity depends on
+      // an earlier frame's delivery order. Frame-local freight, not
+      // recorded in the session cache (see closeFrameOverSchemaRefs).
+      upserts.push(
+        ...closeFrameOverSchemaRefs(message.space, engine, identity, upserts),
+      );
 
       const serverSeq = Engine.serverSeq(engine);
       const fromSeq = session.lastSyncedSeq;
@@ -4167,6 +4177,20 @@ export class Server {
             for (const key of filteredKeys) {
               updates.delete(key);
             }
+            // Per-frame schema-ref closure (OW61): the diff above (and
+            // the own-write elision) drops entries the session cache
+            // says the client holds, so a re-delivered cid-mentioning
+            // doc would otherwise ride a frame without its cid: sibling
+            // — the delivery-race frame that killed space-cell-only
+            // consumers. Every push frame must be independently valid;
+            // the appended entries are frame-local freight (not
+            // session-cached — see closeFrameOverSchemaRefs). A throw
+            // here is the assembly's SchemaClosureError discipline: the
+            // catch below logs, skips this session's frame, and forces
+            // the full re-evaluation.
+            upserts.push(
+              ...closeFrameOverSchemaRefs(space, engine, identity, upserts),
+            );
             // The session cache commits only after the frame is fully
             // built: a throw during marker/adoption attachment must leave
             // the diff recomputable, or the requeued batch would elide the
@@ -4247,10 +4271,11 @@ export class Server {
             return message;
           }
 
+          const fullEvalEngine = await this.openEngine(space);
           const { serverSeq, graphs, entities } = await this.evaluateWatchSet(
             space,
             session.watches,
-            undefined,
+            fullEvalEngine,
             {
               principal: session.principal,
               sessionId,
@@ -4284,6 +4309,18 @@ export class Server {
             serverSeq,
             delivered,
             keyed,
+            // Per-frame schema-ref closure (OW61) on the full-evaluation
+            // branch: the diff elides entries the session cache says the
+            // client holds, so a re-delivered cid-mentioning doc must
+            // still carry its cid: sibling in THIS frame. Frame-local
+            // freight (see closeFrameOverSchemaRefs).
+            (diffed) =>
+              closeFrameOverSchemaRefs(
+                space,
+                fullEvalEngine,
+                this.#sessionScopeIdentity(session),
+                diffed,
+              ) as SessionCacheEntry[],
           );
           // As above: commit the re-evaluated watch state only once the
           // frame is built, so a throw leaves the diff recomputable. The

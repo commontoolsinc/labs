@@ -277,12 +277,25 @@ export const buildDiffSync = (
   },
   // Lease-holder frames carry instance keys (see toWireUpsert).
   keyed = false,
+  // Per-frame schema-ref closure (OW61): receives the diffed upserts and
+  // returns the cid: schema-document entries the frame must additionally
+  // carry so every embedded schema ref resolves within the frame itself —
+  // the diff elides entries `previous` says were delivered, and a frame
+  // whose validity depends on an earlier frame's delivery order is the
+  // OW61 race. Injected (rather than computed here) so this module stays
+  // free of the engine; the entries join the wire frame AND `delivered`.
+  closeOver?: (
+    upserts: readonly SessionCacheEntry[],
+  ) => SessionCacheEntry[],
 ): SessionSync => {
   const upserts: SessionCacheEntry[] = [];
   for (const [key, current] of next.entries()) {
     if (!sameSnapshot(previous.get(key), current)) {
       upserts.push(current);
     }
+  }
+  if (closeOver !== undefined) {
+    upserts.push(...closeOver(upserts));
   }
   const removedEntries = [...previous.entries()]
     .filter(([key]) => !next.has(key))
