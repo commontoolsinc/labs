@@ -216,6 +216,10 @@ type StartAttempt = {
   // The result this attempt resolved to, which a link start only learns by
   // following the link.
   targetKey?: `${MemorySpace}/${ScopeKey}/${URI}`;
+  // The attempt's outcome, which a concurrent start of the same doc joins
+  // instead of running a second resolution pipeline. Assigned by start() once
+  // the pipeline promise exists.
+  settled?: Promise<boolean>;
 };
 
 // The debug-name builders reuse the action's already-computed
@@ -1309,6 +1313,12 @@ export class Runner {
   // Covers the pre-resolution window where a link attempt does not know its
   // eventual target doc and therefore cannot appear in the per-doc index yet.
   private activeStartAttempts = new Set<StartAttempt>();
+  // The attempt a concurrent start() of the same doc joins, keyed by the doc
+  // the call entered through. One entry per doc: the newest attempt that is
+  // still current. Entries are removed when their attempt settles; a stale
+  // entry (stop moved the doc's generation, or the epoch changed) is
+  // overwritten by the fresh attempt that replaces it.
+  #inFlightStartsByDoc = new Map<string, StartAttempt>();
   private crossSpaceChildSpaces = new WeakMap<
     IExtendedStorageTransaction,
     MemorySpace[]
@@ -2277,12 +2287,33 @@ export class Runner {
    * running with a lifetime of its own, false when it was superseded or the
    * piece was stopped while the start resolved, or rejects with an error.
    * Runs synchronously when data is available (important for tests).
+   *
+   * Single-flight per doc: a call whose doc already carries a current
+   * in-flight attempt returns that attempt's outcome instead of running a
+   * second resolution pipeline. The dependency pre-sync is the expensive phase
+   * of a start, and concurrent callers — several views asking for the same
+   * space root during one page load, say — would otherwise each run it in
+   * full. Joining shares the outcome, rejection included, and runs under the
+   * first caller's options: a joiner's `schedulePatternUpdate` is not applied,
+   * which matches the already-running fast path, where only the attempt that
+   * instantiates schedules the update check. A call made after a stop never
+   * joins — the stop moved the doc's start generation, so the held attempt is
+   * no longer current and a fresh attempt runs. Calls entering through
+   * different docs whose links resolve to the same piece do not join either;
+   * they run separate resolutions and converge at the registration guard
+   * before instantiation.
    */
   start<T = any>(
     resultCell: Cell<T>,
     options: { schedulePatternUpdate?: boolean } = {},
   ): Promise<boolean> {
     const startKey = this.getDocKey(resultCell);
+    const inFlight = this.#inFlightStartsByDoc.get(startKey);
+    if (
+      inFlight?.settled !== undefined && this.isStartAttemptCurrent(inFlight)
+    ) {
+      return inFlight.settled;
+    }
     const attempt: StartAttempt = {
       lifecycleEpoch: this.lifecycleEpoch,
       schedulePatternUpdate: options.schedulePatternUpdate ?? true,
@@ -2292,7 +2323,7 @@ export class Runner {
     this.activeStartAttempts.add(attempt);
     this.trackStartAttempt(attempt, startKey);
     try {
-      return this.doStart(resultCell, new Set(), attempt)
+      const settled = this.doStart(resultCell, new Set(), attempt)
         .then((started) => {
           // This start gives the result a lifetime of its own, so an enclosing
           // pattern releasing it later leaves it running. An attempt whose
@@ -2315,6 +2346,9 @@ export class Runner {
         .finally(() => {
           this.finishStartAttempt(attempt);
         });
+      attempt.settled = settled;
+      this.#inFlightStartsByDoc.set(startKey, attempt);
+      return settled;
     } catch (error) {
       this.finishStartAttempt(attempt);
       return Promise.reject(error);
@@ -3275,7 +3309,11 @@ export class Runner {
         return await this.doStart(rootCell, seenCells, attempt);
       }
 
-      // we may already be in the midst of starting this, so don't start again
+      // Another path may have installed this piece's registration while the
+      // pre-sync was awaiting I/O. start() joins same-doc calls before they
+      // get here, so the remaining writers of this race are an identity-change
+      // restart within this same attempt and an attempt that entered through a
+      // different doc whose links resolve to this piece.
       if (this.cancels.has(this.getDocKey(rootCell))) {
         return true;
       }
@@ -4538,6 +4576,9 @@ export class Runner {
   private finishStartAttempt(attempt: StartAttempt): void {
     this.activeStartAttempts.delete(attempt);
     for (const key of attempt.generationsByDoc.keys()) {
+      if (this.#inFlightStartsByDoc.get(key) === attempt) {
+        this.#inFlightStartsByDoc.delete(key);
+      }
       const active = this.activeStartAttemptsByDoc.get(key);
       if (!active?.delete(attempt)) continue;
       if (active.size === 0) {
@@ -4619,6 +4660,9 @@ export class Runner {
     // storage teardown, but they can neither publish a cache nor call
     // startCore under the new epoch.
     this.lifecycleEpoch++;
+    // The epoch change already makes every held attempt non-current, so no
+    // later start can join one; dropping the index releases the attempts too.
+    this.#inFlightStartsByDoc.clear();
     this.independentlyStartedResults.clear();
     for (const key of [...this.pendingDeferredStarts.keys()]) {
       this.cancelPendingDeferredStarts(key);
