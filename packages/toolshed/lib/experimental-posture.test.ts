@@ -1,3 +1,9 @@
+/**
+ * What `/api/meta` reports, and therefore what every client not built
+ * alongside this server adopts: the base a constructed Runtime publishes,
+ * and the flags a serving runtime forces over it.
+ */
+
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {

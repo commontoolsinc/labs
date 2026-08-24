@@ -27,10 +27,19 @@ Deno.test("meta routes", async (t) => {
     // A source run has no compiled marker: the shell's baked
     // server-execution define is unknown (null), like gitSha.
     assertEquals(json.shellServerExecutionDefine, null);
-    // No Runtime is constructed behind this app, so there is no posture to
-    // report and a client reading it keeps its own defaults.
-    assertEquals(json.experimental, null);
   });
+
+  await t.step(
+    "GET /api/meta reports no posture until one is published",
+    async () => {
+      // The state of a server whose Runtime does not exist yet. Set here
+      // rather than assumed: the posture is module state, and another test
+      // file in the same process publishes one.
+      publishExperimentalPosture(null);
+      const json = await (await app.request("/api/meta")).json();
+      assertEquals(json.experimental, null);
+    },
+  );
 
   await t.step(
     "GET /api/meta reports the Runtime's resolved flags",

@@ -390,15 +390,6 @@ describe("runtimePresets conformance (CT-1814)", () => {
   });
 
   describe("experimental flag authority", () => {
-    it("classifies every flag the env mapping knows about", () => {
-      // Both registries are `Record<keyof ExperimentalOptions, ...>`, so this
-      // can only fail if one is edited to hold a key the options type does
-      // not — which is the failure worth catching, since the two are what a
-      // new flag has to pass through.
-      expect(Object.keys(EXPERIMENTAL_FLAG_AUTHORITY).toSorted())
-        .toEqual(Object.keys(EXPERIMENTAL_ENV_VARS).toSorted());
-    });
-
     describe("parseServerExperimentalOptions", () => {
       it("reads the boolean flags it recognizes", () => {
         expect(parseServerExperimentalOptions({

@@ -1,23 +1,28 @@
-// The experimental-flag posture this server resolved for its own Runtime,
-// published on `/api/meta` so a client that is not built alongside it can
-// adopt the deployment's flags instead of being configured to match by hand
-// (docs/development/EXPERIMENTAL_OPTIONS.md, "Clients that are not built
-// alongside their server").
-//
-// Held here rather than read off the Runtime at request time because the meta
-// route is part of the app and the Runtime is constructed by the process that
-// serves it: reaching for the instance would make the route import the
-// server's entry point. The startup path publishes what the Runtime ACTUALLY
-// resolved, so what a client reads is the effective posture — built-in
-// defaults and preset resolution included — never a second reading of the
-// environment that could disagree with the first.
-//
-// Two halves, because a serving process runs two kinds of runtime: the
-// generic one this toolshed constructs for webhook pattern execution, whose
-// resolved flags are the base, and the per-space SERVING runtimes the
-// executor host builds under server-execution, which force a posture of
-// their own on top. The base alone would tell a client the deployment runs
-// flags it does not.
+/**
+ * The experimental-flag posture this server runs at, published on `/api/meta`
+ * so a client that is not built alongside it can adopt the deployment's flags
+ * instead of being configured to match by hand
+ * (`docs/development/EXPERIMENTAL_OPTIONS.md`, "Clients that are not built
+ * alongside their server").
+ *
+ * Held here rather than read off the Runtime at request time because the meta
+ * route is part of the app and the Runtime is constructed by the process that
+ * serves it: reaching for the instance would make the route import the
+ * server's entry point. The startup path publishes what the Runtime ACTUALLY
+ * resolved, so what a client reads is the effective posture — built-in
+ * defaults and preset resolution included — never a second reading of the
+ * environment that could disagree with the first.
+ *
+ * Two halves, because a serving process runs two kinds of runtime: the
+ * generic one this toolshed constructs for webhook pattern execution, whose
+ * resolved flags are the base, and the per-space SERVING runtimes the
+ * executor host builds under server-execution, which force a posture of their
+ * own on top. The base alone would tell a client the deployment runs flags it
+ * does not.
+ *
+ * Module state, and one process serves one deployment; the tests that publish
+ * a posture reset it, because nothing else would.
+ */
 
 import type { ExperimentalOptions } from "@commonfabric/runner";
 

@@ -62,14 +62,12 @@ export async function createRuntime(
   // EXPERIMENTAL_* here still winning per flag: this CLI is run from a
   // checkout against whatever toolshed it is pointed at
   // (docs/development/EXPERIMENTAL_OPTIONS.md).
+  const apiUrl = new URL(toolshedUrl);
   return new Runtime(runtimePresets.remoteClient({
-    apiUrl: new URL(toolshedUrl),
-    storageManager: StorageManager.open({
-      as: identity,
-      memoryHost: new URL(toolshedUrl),
-    }),
+    apiUrl,
+    storageManager: StorageManager.open({ as: identity, memoryHost: apiUrl }),
     experimental: await experimentalOptionsForDeployedClient({
-      apiUrl: new URL(toolshedUrl),
+      apiUrl,
       env: envGet,
     }),
   }));
