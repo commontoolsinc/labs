@@ -75,3 +75,11 @@ port_free=yes
 orphan_headless=none
 store_commits: total=47 authored=12 derived=35 system=0 per-space: did:key:z6MkrzvHjE8WSaWEJqM3kvCyZEr1UBHu4P8PXaRH8EnSbEMG.sqlite:1/1/0 did:key:z6Mkw4Yh85prJKee9dkeiGqZqcRqCCCdkQnKK93zXNr5eD8d.sqlite:11/34/0
 
+==== CAMPAIGN 2026-08-24 at rebased tip 2ea87cea9 (park checkpoint 97f0745e5 on top) ====
+Binaries REBUILT at 2ea87cea9 (deno task --no-lock build-binaries toolshed, COMMIT_SHA baked,
+both 617461362 bytes): toolshed-off sha256=849204a9f6e1f5ef (flag UNSET at build),
+toolshed-on sha256=3da66132e4cc6173 (EXPERIMENTAL_SERVER_EXECUTION=true at build).
+Stale 26be6c909 pair (427af32a../ab036a38..) DELETED. smoke0-4 above are the OLD head's
+smokes (smoke0 rc=1 = instrument assert accepting only seed fids, fixed before smoke1).
+Sequence: smoke5/6 (instrument+posture validation at new tip, not series data), then
+M1 t1..t6 (6 order-balanced test pairs), M2 j1..j10 (10 order-balanced journey pairs, n=20 @2s).
