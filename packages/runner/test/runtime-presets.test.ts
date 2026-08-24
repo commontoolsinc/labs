@@ -565,6 +565,48 @@ describe("runtimePresets conformance (CT-1814)", () => {
         expect(passed).toBe(controller.signal);
       });
 
+      it("throws the abort reason even under CF_ADOPT_SERVER_FLAGS=false", async () => {
+        // The opt-out is over adopting a posture, not over the caller's
+        // cancellation: a startup that has already stopped gets the abort
+        // whichever way it was going to resolve its flags.
+        const controller = new AbortController();
+        controller.abort(new Error("shutting down"));
+        await expect(experimentalOptionsForDeployedClient({
+          apiUrl: new URL("https://deployment.example"),
+          env: (name) => name === ADOPT_SERVER_FLAGS_ENV ? "false" : undefined,
+          signal: controller.signal,
+          fetch: () => Promise.reject(new Error("must not be reached")),
+        })).rejects.toThrow("shutting down");
+      });
+
+      it("throws the abort reason when the body read is cancelled", async () => {
+        // The signal rides the request, so aborting it errors the response
+        // stream: a deployment that sends headers and then stalls its body
+        // cannot hold a cancellable startup open.
+        const controller = new AbortController();
+        await expect(experimentalOptionsForDeployedClient({
+          apiUrl: new URL("https://deployment.example"),
+          env: () => undefined,
+          signal: controller.signal,
+          fetch: (_input, init) =>
+            Promise.resolve(
+              new Response(
+                new ReadableStream({
+                  start(chunk) {
+                    chunk.enqueue(new TextEncoder().encode('{"experimental":'));
+                    init?.signal?.addEventListener(
+                      "abort",
+                      () => chunk.error(init.signal!.reason),
+                    );
+                    controller.abort(new Error("shutting down"));
+                  },
+                }),
+                { headers: { "content-type": "application/json" } },
+              ),
+            ),
+        })).rejects.toThrow("shutting down");
+      });
+
       it("throws the abort reason instead of resolving a cancelled startup", async () => {
         // The one failure that is NOT read as "the server said nothing": the
         // caller asked to stop, so handing back a posture would feed a

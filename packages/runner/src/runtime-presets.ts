@@ -456,11 +456,16 @@ export interface DeployedClientExperimentalParams {
  *
  * An aborted `signal` is the one case that does NOT resolve: the caller
  * asked to stop, so this throws the abort reason rather than handing back a
- * posture nobody is going to use.
+ * posture nobody is going to use. That holds whether the abort arrives before
+ * the call, while the request is in flight, or while its body is being read —
+ * every one of those paths ends at the same throw.
  */
 export async function experimentalOptionsForDeployedClient(
   params: DeployedClientExperimentalParams,
 ): Promise<ExperimentalOptions> {
+  // Before anything else, including the opt-out below: a caller that has
+  // already stopped gets the abort, not a posture.
+  params.signal?.throwIfAborted();
   const env = experimentalOptionsFromEnv(params.env);
   const raw = params.env(ADOPT_SERVER_FLAGS_ENV);
   if (
@@ -471,6 +476,10 @@ export async function experimentalOptionsForDeployedClient(
   const fetchImpl = params.fetch ?? globalThis.fetch;
   let declared: unknown;
   try {
+    // The signal rides the request, which is what makes the BODY read below
+    // cancellable too: aborting a signal passed to `fetch` terminates the
+    // ongoing fetch and errors the response's stream, so a stalled
+    // `response.json()` rejects rather than hanging, and lands in the catch.
     const response = await fetchImpl(
       new URL(SERVER_EXPERIMENTAL_PATH, params.apiUrl),
       params.signal !== undefined ? { signal: params.signal } : {},
