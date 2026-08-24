@@ -70,12 +70,20 @@ export type {
  * consumer then pays a maybe at the call site, whose obvious spelling
  * (`piece.verb?.send(...)`) skips in silence.
  *
- * The membership, measured rather than guessed: the card list renders
- * `title`, `body`, `commentCount`, `createdBy`, `createdByName` and
- * `lastActivityAt`; `index` publishes `title`, `createdAt`, `createdBy`,
- * `commentCount`, `lastActivityAt`; `crossrefTable` joins on `mentions`;
- * `cardsByActivity` sorts on `lastActivityAt`; `topicCount` reads only a
- * length. Eight fields, no verbs.
+ * The membership, measured rather than guessed. Eight fields the board
+ * READS: the card list renders `title`, `body`, `commentCount`, `createdBy`,
+ * `createdByName` and `lastActivityAt`; `index` publishes `title`,
+ * `createdAt`, `createdBy`, `commentCount`, `lastActivityAt` — the same
+ * array declared through a narrower row schema, which is why a field it
+ * names has to be demanded here to resolve at all; `crossrefTable` joins on
+ * `mentions`; `cardsByActivity` sorts on `lastActivityAt`; `topicCount`
+ * reads only a length.
+ *
+ * Nine members, then, because `[NAME]` is demanded for a reason none of
+ * those readers show: the board hands this same array on as each topic's
+ * mention universe, so the name has to survive the demand to reach the
+ * editor. Counting only what the board reads is what nearly dropped it.
+ * No verbs.
  *
  * Every field carries a default, and that is load-bearing rather than
  * stylistic: a demanded path an older topic cannot produce makes the WHOLE
