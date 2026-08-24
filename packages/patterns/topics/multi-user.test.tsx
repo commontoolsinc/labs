@@ -18,13 +18,21 @@
  */
 import { action, assert, multiUserTest, pattern, TESTS } from "commonfabric";
 import Topics, { type TopicsOutput } from "./main.tsx";
+import Topic, { type TopicOutput } from "./topic.tsx";
 
 interface Setup {
   board: TopicsOutput;
+  thread: TopicOutput;
 }
 
 export const setup = pattern(() => ({
   board: Topics({}),
+  // The shared thread both participants append to, held directly rather than
+  // reached through `board.topics[0]`. The board demands a projection that
+  // carries no verbs, so a participant who found this topic through the board
+  // could not comment on it — in production the equivalent move is surveying
+  // `index` for the topic's own address and calling the topic there.
+  thread: Topic({ title: "First topic" }),
 }));
 
 export const gideon = pattern<{ setup: Setup }>(({ setup }) => {
@@ -34,10 +42,10 @@ export const gideon = pattern<{ setup: Setup }>(({ setup }) => {
     board.addTopic.send({ title: "First topic", agentName: "Sol" });
   });
   const action_comment = action(() => {
-    const topic = board.topics?.[0];
-    if (topic) {
-      topic.addComment.send({ body: "opening the thread", agentName: "Sol" });
-    }
+    setup.thread.addComment.send({
+      body: "opening the thread",
+      agentName: "Sol",
+    });
   });
 
   const assert_topic_created = assert(() =>
@@ -48,17 +56,17 @@ export const gideon = pattern<{ setup: Setup }>(({ setup }) => {
   );
 
   const assert_own_comment = assert(() =>
-    board.topics?.[0]?.comments?.[0]?.author?.kind === "agent" &&
-    board.topics?.[0]?.comments?.[0]?.author?.name === "Sol" &&
-    board.topics?.[0]?.comments?.[0]?.body === "opening the thread" &&
-    board.topics?.[0]?.commentCount === 1
+    setup.thread.comments?.[0]?.author?.kind === "agent" &&
+    setup.thread.comments?.[0]?.author?.name === "Sol" &&
+    setup.thread.comments?.[0]?.body === "opening the thread" &&
+    setup.thread.commentCount === 1
   );
 
   // Fable commented on my topic and started a second topic. Use literal paths
   // here, as required for cross-runtime reads above; aggregate length and
   // commentCount reads can remain stale until this runtime performs a write.
   const assert_sees_fable_comment = assert(() =>
-    board.topics?.[0]?.comments?.[1]?.author?.name === "Fable"
+    setup.thread.comments?.[1]?.author?.name === "Fable"
   );
   const assert_fable_topic_authorship = assert(() =>
     board.topics?.[1]?.createdBy?.name === "Fable"
@@ -82,10 +90,10 @@ export const fable = pattern<{ setup: Setup }>(({ setup }) => {
   const board = setup.board;
 
   const action_comment = action(() => {
-    const topic = board.topics?.[0];
-    if (topic) {
-      topic.addComment.send({ body: "seconding this", agentName: "Fable" });
-    }
+    setup.thread.addComment.send({
+      body: "seconding this",
+      agentName: "Fable",
+    });
   });
   const action_start_second = action(() => {
     board.addTopic.send({ title: "Second topic", agentName: "Fable" });
@@ -95,16 +103,16 @@ export const fable = pattern<{ setup: Setup }>(({ setup }) => {
   const assert_sees_sol_setup = assert(() =>
     (board.topics ?? []).length === 1 &&
     board.topics?.[0]?.title === "First topic" &&
-    board.topics?.[0]?.comments?.[0]?.author?.name === "Sol" &&
-    board.topics?.[0]?.commentCount === 1
+    setup.thread.comments?.[0]?.author?.name === "Sol" &&
+    setup.thread.commentCount === 1
   );
 
   // Both comments landed (mergeable append, no clobber), in thread order.
   const assert_both_comments = assert(() =>
-    board.topics?.[0]?.commentCount === 2 &&
-    board.topics?.[0]?.comments?.[0]?.author?.name === "Sol" &&
-    board.topics?.[0]?.comments?.[1]?.author?.name === "Fable" &&
-    board.topics?.[0]?.comments?.[1]?.body === "seconding this"
+    setup.thread.commentCount === 2 &&
+    setup.thread.comments?.[0]?.author?.name === "Sol" &&
+    setup.thread.comments?.[1]?.author?.name === "Fable" &&
+    setup.thread.comments?.[1]?.body === "seconding this"
   );
 
   const assert_second_topic = assert(() =>

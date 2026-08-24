@@ -17,10 +17,17 @@ export default pattern(() => {
   const board = Topics({});
   const legacyBoard = Topics({});
 
-  // One valid signed topic so the child-verb rejections have a target.
+  // One valid signed topic on the board, so `addTopic`'s own rejections have a
+  // board to leave unchanged.
   const action_seed_topic = action(() => {
     board.addTopic.send({ title: "Seed", agentName: "Sol" });
   });
+
+  // The child verbs are rejected on a direct instance, for the reason `setTitle`
+  // already is below: a verb lives on the topic's own interface, and the board
+  // demands a projection that carries none of them. A caller reaches a topic by
+  // its own address and calls it there, so that is where the rejection belongs.
+  const seedTopic = Topic({ title: "Seed", body: "" });
 
   // addTopic: empty title; blank (provided) agentName. An *omitted* agentName
   // is the legacy caller path and stays accepted — covered in topics.test.tsx.
@@ -36,10 +43,10 @@ export default pattern(() => {
 
   // addComment: empty body; blank agentName.
   const action_blank_comment = action(() => {
-    board.topics?.[0]?.addComment.send({ body: "   ", agentName: "Sol" });
+    seedTopic.addComment.send({ body: "   ", agentName: "Sol" });
   });
   const action_comment_unsigned = action(() => {
-    board.topics?.[0]?.addComment.send({
+    seedTopic.addComment.send({
       body: "unsigned",
       agentName: "   ",
     });
@@ -47,7 +54,7 @@ export default pattern(() => {
 
   // addLink: unsafe scheme; blank URL; blank agentName.
   const action_link_unsafe = action(() => {
-    board.topics?.[0]?.addLink.send({
+    seedTopic.addLink.send({
       kind: "web",
       url: "javascript:alert(1)",
       label: "evil",
@@ -55,7 +62,7 @@ export default pattern(() => {
     });
   });
   const action_link_blank = action(() => {
-    board.topics?.[0]?.addLink.send({
+    seedTopic.addLink.send({
       kind: "web",
       url: "   ",
       label: "x",
@@ -63,7 +70,7 @@ export default pattern(() => {
     });
   });
   const action_link_unsigned = action(() => {
-    board.topics?.[0]?.addLink.send({
+    seedTopic.addLink.send({
       kind: "web",
       url: "https://example.com/ok",
       label: "ok",
@@ -74,7 +81,7 @@ export default pattern(() => {
   // setBody: blank agentName. (An empty body is legal — clearing a body is a
   // legitimate edit — so only the signature is guarded here.)
   const action_set_body_unsigned = action(() => {
-    board.topics?.[0]?.setBody.send({
+    seedTopic.setBody.send({
       body: "should not land",
       agentName: "   ",
     });
@@ -89,11 +96,11 @@ export default pattern(() => {
   // type-checked.
   const action_mention_text_address = action(() => {
     // deno-lint-ignore no-explicit-any
-    (board.topics?.[0]?.mention as any)?.send({ topic: "fid1:notAReference" });
+    (seedTopic.mention as any)?.send({ topic: "fid1:notAReference" });
   });
   const action_unmention_text_address = action(() => {
     // deno-lint-ignore no-explicit-any
-    (board.topics?.[0]?.unmention as any)?.send({
+    (seedTopic.unmention as any)?.send({
       topic: "fid1:notAReference",
     });
   });
@@ -120,17 +127,22 @@ export default pattern(() => {
     board.topics?.[0]?.title === "Seed"
   );
 
-  // No inert entry was stored by either rejection.
+  // No inert entry was stored by either rejection. Read on the instance the
+  // verbs were called on: asserting the board here would pass whatever the
+  // verb did, because the board is not what `mention` writes to.
   const assert_no_mentions = assert(() =>
-    (board.topics?.[0]?.mentions ?? []).length === 0
+    (seedTopic.mentions ?? []).length === 0
   );
 
-  // The one seeded topic, untouched: no comments, no links, empty body.
-  const assert_board_unchanged = assert(() =>
-    board.topicCount === 1 &&
-    board.topics?.[0]?.commentCount === 0 &&
-    (board.topics?.[0]?.links ?? []).length === 0 &&
-    board.topics?.[0]?.body === ""
+  // No topic was filed by a rejected `addTopic`.
+  const assert_board_unchanged = assert(() => board.topicCount === 1);
+
+  // The direct topic, untouched by every rejected child verb: no comments, no
+  // links, empty body.
+  const assert_seed_topic_untouched = assert(() =>
+    (seedTopic.comments ?? []).length === 0 &&
+    (seedTopic.links ?? []).length === 0 &&
+    seedTopic.body === ""
   );
 
   const assert_legacy_board_empty = assert(() => legacyBoard.topicCount === 0);
@@ -151,17 +163,17 @@ export default pattern(() => {
       { action: action_add_blank_legacy_agent },
       { assertion: assert_legacy_board_empty },
       { action: action_blank_comment },
-      { assertion: assert_board_unchanged },
+      { assertion: assert_seed_topic_untouched },
       { action: action_comment_unsigned },
-      { assertion: assert_board_unchanged },
+      { assertion: assert_seed_topic_untouched },
       { action: action_link_unsafe },
-      { assertion: assert_board_unchanged },
+      { assertion: assert_seed_topic_untouched },
       { action: action_link_blank },
-      { assertion: assert_board_unchanged },
+      { assertion: assert_seed_topic_untouched },
       { action: action_link_unsigned },
-      { assertion: assert_board_unchanged },
+      { assertion: assert_seed_topic_untouched },
       { action: action_set_body_unsigned },
-      { assertion: assert_board_unchanged },
+      { assertion: assert_seed_topic_untouched },
       { action: action_mention_text_address },
       { assertion: assert_no_mentions },
       { action: action_unmention_text_address },
