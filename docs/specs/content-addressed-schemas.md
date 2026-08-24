@@ -419,9 +419,13 @@ exactly two guarantees, both about delivery rather than about values:
   (`closeFrameOverSchemaRefs`). Content-addressed documents are
   immutable, so the re-ship is idempotent bytes; the appended entries
   are frame-local freight, deliberately not recorded in the session
-  cache, so delivery-state rollback stays exact and a later mention
-  simply re-appends. A frame is independently valid under any
-  application order.
+  cache, and a later mention simply re-appends. Rollback of an
+  undelivered frame is fail-safe rather than exact: the freight rides
+  the frame's delivery record, so rolling the frame back also forgets
+  any session-cache entry an earlier real delivery made for the same
+  cid document — re-dirtied and re-delivered on the next pass.
+  Over-delivery, never under-delivery. A frame is independently valid
+  under any application order.
 
 Arrival mirrors the assembly pass rather than trusting it: BEFORE a frame
 applies, every schema ref its documents embed — a registered `cid:`
@@ -445,7 +449,12 @@ frame-wide throw was an unhandled rejection that killed the consuming
 worker wholesale on one bad document. A compliant server never produces
 such a frame (the per-frame guarantee above is enforced at emission);
 quarantine is the net under everything else, and a quarantined document
-heals on any later closed re-delivery. The repair
+heals on any later closed re-delivery. Against a server that still
+elides (a deployment predating the per-frame guarantee), an unchanged
+quarantined document may never be re-delivered mid-session — its
+session cache claims the client holds it — so the heal there waits for
+the next full evaluation (a watch.set, a reconnect), with the arrival
+diagnostic as the loud record meanwhile. The repair
 paths that do exist serve callers, not arrival: the traversal loader's
 reads are tracked (arrival re-runs the reader), the missing-target kick
 requests the fetch, and any sync of a schema document delivers its

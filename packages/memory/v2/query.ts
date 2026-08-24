@@ -694,11 +694,18 @@ export type FrameUpsertEntry = {
  *
  * The returned entries are frame-local freight: callers append them to
  * the wire frame WITHOUT recording them in the session cache — a later
- * mention re-appends them (idempotent), and delivery-state rollback
- * stays exact. A cid doc loads and ships on the branch of the entry
- * that mentions it, mirroring the per-graph assembly. Throws
- * {@link SchemaClosureError} exactly as assembly does when the store
- * cannot produce a verified closure.
+ * mention simply re-appends them (idempotent bytes). Rollback of an
+ * undelivered frame is fail-safe rather than exact: freight rides the
+ * frame's delivery record, so rolling the frame back also deletes any
+ * session-cache entry an EARLIER real delivery made for the same cid
+ * doc — which re-dirties it and re-delivers on the next pass.
+ * Over-delivery, never under-delivery. A cid doc loads and ships on
+ * the branch of the entry that mentions it, mirroring the per-graph
+ * assembly. Throws {@link SchemaClosureError} exactly as assembly does
+ * when the store cannot produce a verified closure — and callers must
+ * order that throw BEFORE committing any delivery state the frame
+ * claims (review S4: a poisoned session cache elides the frame's
+ * entries from every later diff).
  */
 export const closeFrameOverSchemaRefs = (
   space: string,

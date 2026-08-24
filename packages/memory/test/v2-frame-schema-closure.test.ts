@@ -464,3 +464,200 @@ Deno.test("memory v2 sync frames re-carry the cid schema docs their documents me
     await server.close();
   }
 });
+
+Deno.test("memory v2 watch.add: a closure failure answers the requester WITHOUT poisoning the session cache (review S4)", async () => {
+  // The staging invariant: watch.add commits the session cache (the
+  // delivered-entries diff base) only after the frame — freight
+  // included — is fully built. If the per-frame closure pass throws
+  // AFTER the cache mutation, the requester gets a QueryError while
+  // the cache already claims the entries delivered, and every later
+  // diff elides them: durable silent under-delivery for the session.
+  //
+  // Reaching a closure throw that the evaluation's own assembly did
+  // not already raise needs the two walks to read DIFFERENT store
+  // states: the graph's long-lived manager serves the cid doc from its
+  // read cache (loaded by the earlier watch), while the frame pass's
+  // fresh manager reads the engine — corrupted out-of-band between the
+  // two watches (the v2-query corruption precedent: direct database
+  // manipulation models genuine corruption; the commit API refuses
+  // every cid: mutation).
+  const depSchema = { type: "string", title: "s4-staging-leaf" } as const;
+  const depHash = internSchemaAsTaggedHashString(depSchema);
+  const depId = `cid:${depHash}`;
+  const mention = (marker: string) => ({
+    value: {
+      marker,
+      linked: {
+        "/": {
+          "link@1": {
+            id: "of:s4-target",
+            path: [],
+            schema: { $ref: depId },
+          },
+        },
+      },
+    },
+  });
+
+  const server = new Server({
+    ...testSessionOpenServerOptions,
+    store: new URL("memory://memory-v2-frame-closure-s4"),
+    subscriptionRefreshDelayMs: 0,
+  });
+  const writerMessages: ServerMessage[] = [];
+  const watcherMessages: ServerMessage[] = [];
+  const writer = server.connect((message) => writerMessages.push(message));
+  const watcher = server.connect((message) => watcherMessages.push(message));
+  const space = "did:key:z6Mk-frame-closure-s4-staging";
+
+  try {
+    for (const connection of [writer, watcher]) {
+      await connection.receive(encodeMemoryBoundary(HELLO));
+    }
+    const writerSessionOpen = expectHelloOk(writerMessages);
+    const watcherSessionOpen = expectHelloOk(watcherMessages);
+    await writer.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "writer-open",
+      space,
+      session: {},
+      invocation: authInvocation(writerSessionOpen),
+    }));
+    const writerSessionId = nextResponse<{ sessionId: string }>(
+      writerMessages,
+    ).ok!.sessionId;
+    await watcher.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "watcher-open",
+      space,
+      session: {},
+      invocation: authInvocation(watcherSessionOpen),
+    }));
+    const watcherSessionId = nextResponse<{ sessionId: string }>(
+      watcherMessages,
+    ).ok!.sessionId;
+
+    await writer.receive(encodeMemoryBoundary({
+      type: "transact",
+      requestId: "tx-1",
+      space,
+      sessionId: writerSessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          { op: "set", id: depId, value: { value: depSchema } },
+          { op: "set", id: "of:s4-carrier-a", value: mention("a") },
+          { op: "set", id: "of:s4-carrier-b", value: mention("b") },
+        ],
+      },
+    }));
+    assertExists(nextResponse(writerMessages).ok);
+
+    // Watch 1 loads the cid doc into the graph manager's read cache and
+    // delivers it.
+    await watcher.receive(encodeMemoryBoundary({
+      type: "session.watch.set",
+      requestId: "watch-1",
+      space,
+      sessionId: watcherSessionId,
+      watches: [{
+        id: "s4-carrier-a",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:s4-carrier-a",
+            selector: { path: [], schema: false },
+          }],
+        },
+      }],
+    }));
+    const frame1 = assertResponse<WatchSyncResult>(
+      shiftMessage(watcherMessages),
+    ).ok!.sync;
+    assert(upsertIds(frame1.upserts).includes(depId), "setup: dep delivered");
+
+    // Out-of-band corruption: the stored schema doc's content is
+    // swapped. The graph manager still holds the verified copy in its
+    // read cache, so the extension's assembly passes; the frame pass's
+    // fresh engine read sees the forgery and throws.
+    const engine = await server.engineForSpace(space);
+    const forged = encodeMemoryBoundary({
+      value: { type: "number", title: "s4-forged" },
+    });
+    engine.database.prepare(
+      `UPDATE revision SET data = :data, seq = seq + 1 WHERE id = :id`,
+    ).run({ data: forged, id: depId });
+    engine.database.prepare(
+      `UPDATE head SET seq = seq + 1 WHERE id = :id`,
+    ).run({ id: depId });
+
+    await watcher.receive(encodeMemoryBoundary({
+      type: "session.watch.add",
+      requestId: "watch-2",
+      space,
+      sessionId: watcherSessionId,
+      watches: [{
+        id: "s4-carrier-b",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:s4-carrier-b",
+            selector: { path: [], schema: false },
+          }],
+        },
+      }],
+    }));
+    const failed = assertResponse<WatchSyncResult>(
+      shiftMessage(watcherMessages),
+    );
+    assertExists(
+      failed.error,
+      "the corrupted closure must answer the requester (QueryError)",
+    );
+
+    // Heal the store (restore the true content; the bumped seq stays).
+    engine.database.prepare(
+      `UPDATE revision SET data = :data WHERE id = :id`,
+    ).run({ data: encodeMemoryBoundary({ value: depSchema }), id: depId });
+
+    // The SAME watch.add again (the failed one registered nothing). The
+    // failed attempt must not have poisoned the session cache: this
+    // response still delivers the carrier and its cid doc. (Pre-fix,
+    // the cache mutation ran before the closure pass, so the retry's
+    // diff elided the carrier as already delivered.)
+    await watcher.receive(encodeMemoryBoundary({
+      type: "session.watch.add",
+      requestId: "watch-3",
+      space,
+      sessionId: watcherSessionId,
+      watches: [{
+        id: "s4-carrier-b",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:s4-carrier-b",
+            selector: { path: [], schema: false },
+          }],
+        },
+      }],
+    }));
+    const retry = assertResponse<WatchSyncResult>(
+      shiftMessage(watcherMessages),
+    );
+    assertExists(retry.ok, "the healed retry succeeds");
+    assert(
+      upsertIds(retry.ok!.sync.upserts).includes("of:s4-carrier-b"),
+      `the retry must deliver the carrier the failed attempt never ` +
+        `delivered (got: ${
+          JSON.stringify(upsertIds(retry.ok!.sync.upserts))
+        }) — a failed watch.add must not claim its frame delivered`,
+    );
+    assert(
+      upsertIds(retry.ok!.sync.upserts).includes(depId),
+      "the retry's frame is closed over the mention",
+    );
+  } finally {
+    await server.close();
+  }
+});

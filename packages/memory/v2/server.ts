@@ -3634,10 +3634,7 @@ export class Server {
 
       const upserts: SessionCacheEntry[] = [];
       for (const [key, entry] of updates) {
-        const previous = session.entities.get(key);
-        session.entities.set(key, entry);
-        session.trackedIds.add(toDirtyKey(entry.id, entry.scopeKey));
-        if (!sameSnapshot(previous, entry)) {
+        if (!sameSnapshot(session.entities.get(key), entry)) {
           upserts.push(entry);
         }
       }
@@ -3647,9 +3644,20 @@ export class Server {
       // it without its cid: sibling — a frame whose validity depends on
       // an earlier frame's delivery order. Frame-local freight, not
       // recorded in the session cache (see closeFrameOverSchemaRefs).
+      // Runs BEFORE the session cache commits (review finding S4): a
+      // SchemaClosureError here answers the requester as a QueryError,
+      // and the cache must not already claim the frame's entries
+      // delivered — a poisoned cache elides them from every later diff,
+      // a durable silent under-delivery for the session.
       upserts.push(
         ...closeFrameOverSchemaRefs(message.space, engine, identity, upserts),
       );
+      // The frame is fully built; commit the evaluation state (the same
+      // build-then-commit discipline as the push path's commitEntities).
+      for (const [key, entry] of updates) {
+        session.entities.set(key, entry);
+        session.trackedIds.add(toDirtyKey(entry.id, entry.scopeKey));
+      }
 
       const serverSeq = Engine.serverSeq(engine);
       const fromSeq = session.lastSyncedSeq;

@@ -5374,6 +5374,11 @@ class SpaceReplica implements ISpaceReplica {
     // applies. Dependencies resolve against it first.
     const overlay = new Map<string, unknown>();
     const deletedInFrame = new Set<string>();
+    // The quarantine unit is the upsert ID, not the document instance:
+    // this validator's maps were id-keyed (branch- and instance-blind)
+    // in the frame-wide era too, so a same-id entry on another branch
+    // in the same frame drops with the offender — strictly less damage
+    // than the whole-frame rejection this replaces (review note S1).
     const quarantined = new Set<string>();
     for (const remove of sync.removes) {
       if (typeof remove.id === "string") deletedInFrame.add(remove.id);

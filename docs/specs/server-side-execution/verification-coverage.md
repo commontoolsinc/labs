@@ -6764,8 +6764,13 @@ supply; OW29/OW32/OW34 closed):
     refresh, full-evaluation diff via buildDiffSync's injected
     closeOver); watch.set and graph.query ship the whole assembled
     set and were already closed; appended entries are frame-local
-    freight (not session-cached), so rollback stays exact and
-    re-mention re-appends idempotent bytes. (2) Containment:
+    freight (not session-cached; a rolled-back frame that carried
+    freight can forget an earlier real delivery of the same cid doc —
+    re-dirtied into OVER-delivery, never under), and the closure runs
+    BEFORE any session-cache commit at every builder (the review's
+    S4: watch.add committed first, so a closure throw poisoned the
+    diff base — pinned red-first, cache-vs-engine corruption
+    divergence as the reachable trigger). (2) Containment:
     `#validateArrivedSchemaDocuments` returns a quarantine set
     instead of throwing — the offending doc drops from the frame
     with a loud per-doc diagnostic (fixpoint over in-frame schema
