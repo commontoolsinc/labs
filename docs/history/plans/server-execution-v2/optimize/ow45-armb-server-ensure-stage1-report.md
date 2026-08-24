@@ -475,10 +475,13 @@ in-branch control that reproduces exactly that before-signature.
 Counts at the final tree (one file per invocation):
 
 - `packages/memory` `v2-server-space-owner.test.ts` — 4/4.
-- `packages/runner` `ensure-space-root.test.ts` — 6/6 steps;
-  `executor-space-root-ensure.test.ts` — 6/6 steps (real-clock list;
-  includes the review-fix pins F1 — reconcile attribution on the live
-  transactions — and F2 — the wedged-ensure deadline).
+- `packages/runner` `ensure-space-root.test.ts` — 8/8 steps (the
+  review cycle added the fast-arm/reconcile-catch and doomed-creation
+  coverage pins); `executor-space-root-ensure.test.ts` — 8/8 steps
+  (real-clock list; includes the review-fix pins F1 — reconcile
+  attribution on the live transactions — and F2 — the wedged-ensure
+  deadline — plus the RULED-switch off pin and the host-level
+  live-glue pin).
 - `packages/piece` `pattern-source-provenance.test.ts` 3/3 steps (the
   OFF-arm witness included), `ensure-default-pattern.test.ts` 16/16
   steps, `check-update-default-pattern.test.ts` 69/69 steps,
