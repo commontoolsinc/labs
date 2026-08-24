@@ -1,9 +1,11 @@
 import { Command, ValidationError } from "@cliffy/command";
 import { Table } from "@cliffy/table";
 import type { CellScope } from "@commonfabric/api";
-import type {
-  PatternCompatibilityReport,
-  PiecePatternRef,
+import {
+  encodePlan,
+  type PatternCompatibilityReport,
+  type PiecePatternRef,
+  type PieceSelector,
 } from "@commonfabric/piece/ops";
 import ports from "@commonfabric/ports" with { type: "json" };
 import { parseCellPath, UI } from "@commonfabric/runner";
@@ -13,6 +15,7 @@ import {
 } from "@commonfabric/runner/shared";
 import { decode } from "@commonfabric/utils/encoding";
 
+import { type PhaseRetarget, readSourcePin, runSurvey } from "../lib/bulk.ts";
 import { addressArgument, VerbInputValidationError } from "../lib/callable.ts";
 import type {
   InvocationIdentity,
@@ -2264,27 +2267,74 @@ export const piece = targetOptions(
     "--summary",
     "Show a compact summary: scalars only, arrays/objects replaced with type descriptors, $-prefixed internal keys omitted",
   )
-  .action(async (options) => {
-    const pieceConfig = parsePieceOptions(options);
-
-    const pieceData = await inspectPiece(pieceConfig);
-
-    const displayData = options.summary
-      ? {
-        ...pieceData,
-        source: summarizeForDisplay(pieceData.source),
-        result: summarizeForDisplay(pieceData.result),
-      }
-      : pieceData;
-
-    if (options.json) {
-      // In JSON mode, use render with JSON output
-      render(displayData, { json: true });
-      return;
-    }
-
-    render(renderPieceInspection(pieceData, options.summary === true));
-  })
+  .option(
+    "--pattern-identity",
+    "Print only the piece's source pin — pattern identity, export symbol, current source revision, and whether the identity's source is retained — without pulling the input, result, or link graph",
+    { conflicts: ["summary"] },
+  )
+  .action(inspectPieceFromCommand)
+  /* piece survey */
+  .command(
+    "survey",
+    "Survey a holder's collection into a plan: one cheap read per piece, cross-checked against the piece registry. Read-only. Provisional spelling — the bulk entry point may move when the write operations get a home (docs/plans/piece-bulk-operations.md, decision 1).",
+  )
+  .usage(pieceUsage)
+  .example(
+    cliText(
+      `cf piece survey ${EX_ID} ${EX_COMP_PIECE} --path topics --out plan.jsonl`,
+    ),
+    "Survey the holder's topics collection into plan.jsonl.",
+  )
+  .option(
+    "-c,--piece <piece:string>",
+    "The holder piece whose collection is surveyed.",
+  )
+  .option(
+    "--path <path:string>",
+    "Path to the collection inside the holder's document; segments joined with '/'.",
+  )
+  .option(
+    "--side <side:string>",
+    "Which document holds the collection: input (the default) or result.",
+  )
+  .option(
+    "--list <piece:string>",
+    "Survey this piece instead of a collection. Repeatable.",
+    { collect: true, conflicts: ["piece", "path", "side"] },
+  )
+  .option(
+    "--retarget <spec:string>",
+    "Stamp a retarget onto one phase's rows, as <phase>=<main.tsx>[@rev]. A collection's members carry the path's last segment as their phase; the holder carries 'holder'. Repeatable.",
+    { collect: true },
+  )
+  .option(
+    "--root <path:string>",
+    "Root directory for every --retarget source.",
+  )
+  .option(
+    "--test <path:string>",
+    "Attach a test source file to every --retarget source. Repeatable.",
+    { collect: true },
+  )
+  .option(
+    "--datafile <path:string>",
+    "Attach a data file to every --retarget source. Repeatable.",
+    { collect: true },
+  )
+  .option(
+    "--dangerously-allow-incompatible-schema",
+    "Stamp allowIncompatible onto every retarget row. The apply honors only the row field, so the plan shows exactly which rows run with the compatibility gate open.",
+  )
+  .option(
+    "--validator <path:string>",
+    "A JSON-schema file each piece's result is read under; pieces that fail it are named on stderr.",
+  )
+  .option("--out <file:string>", "Write the plan to a file instead of stdout.")
+  .option(
+    "--json",
+    "Write the full survey result as JSON to stdout instead of the plan.",
+  )
+  .action(surveyFromCommand)
   /* piece view */
   .command("view", "Display the rendered view for a piece")
   .usage(pieceUsage)
@@ -3010,6 +3060,203 @@ export async function listPiecesFromCommand(
     parseSpaceOptions(options),
   );
   (deps.renderPieceSummaries ?? renderPieceSummaries)(pieces, !!options.json);
+}
+
+export interface PieceInspectCommandDependencies {
+  inspectPiece?: typeof inspectPiece;
+  readSourcePin?: typeof readSourcePin;
+  render?: typeof render;
+  printError?: (message: string) => void;
+  exit?: (code: number) => never;
+}
+
+export async function inspectPieceFromCommand(
+  options: PieceCLIOptions & { summary?: boolean; patternIdentity?: boolean },
+  deps: PieceInspectCommandDependencies = {},
+): Promise<void> {
+  const pieceConfig = parsePieceOptions(options);
+  const print = deps.render ?? render;
+  if (options.patternIdentity) {
+    const pin = await (deps.readSourcePin ?? readSourcePin)(pieceConfig);
+    if (pin === undefined) {
+      exitWithDataError(
+        { message: `Piece ${pieceConfig.piece} carries no pattern identity.` },
+        deps,
+      );
+    }
+    if (options.json) {
+      print(pin, { json: true });
+      return;
+    }
+    print(
+      [
+        `piece:    ${pin.piece}`,
+        `identity: ${pin.patternIdentity}`,
+        `symbol:   ${pin.symbol}`,
+        ...(pin.revisionId === undefined
+          ? []
+          : [`revision: ${pin.revisionId}`]),
+        `retained: ${pin.retained}`,
+      ].join("\n"),
+    );
+    return;
+  }
+  const pieceData = await (deps.inspectPiece ?? inspectPiece)(pieceConfig);
+  const displayData = options.summary
+    ? {
+      ...pieceData,
+      source: summarizeForDisplay(pieceData.source),
+      result: summarizeForDisplay(pieceData.result),
+    }
+    : pieceData;
+  if (options.json) {
+    print(displayData, { json: true });
+    return;
+  }
+  print(renderPieceInspection(pieceData, options.summary === true));
+}
+
+/**
+ * Parse one `--retarget` flag: `<phase>=<main>[@rev]`. The `@rev` label is
+ * recorded for readers and for diffing plans, never enforced — the identity
+ * computed from the source is the pin.
+ */
+export function parseRetargetFlag(spec: string): PhaseRetarget {
+  const eq = spec.indexOf("=");
+  if (eq <= 0 || eq === spec.length - 1) {
+    throw new ValidationError(
+      `--retarget takes <phase>=<main>[@rev], got "${spec}".`,
+      { exitCode: 1 },
+    );
+  }
+  const phase = spec.slice(0, eq);
+  const rest = spec.slice(eq + 1);
+  const at = rest.lastIndexOf("@");
+  const main = at > 0 ? rest.slice(0, at) : rest;
+  const rev = at > 0 ? rest.slice(at + 1) : undefined;
+  return {
+    phase,
+    source: { main: absPath(main) },
+    ...(rev === undefined || rev === "" ? {} : { rev }),
+  };
+}
+
+export interface SurveyCLIOptions extends PieceCLIOptions {
+  path?: string;
+  side?: string;
+  list?: string[];
+  retarget?: string[];
+  validator?: string;
+  out?: string;
+}
+
+export interface SurveyCommandDependencies {
+  runSurvey?: typeof runSurvey;
+  render?: typeof render;
+  writeTextFile?: typeof Deno.writeTextFile;
+  printError?: (message: string) => void;
+  printHint?: (message: string) => void;
+  exit?: (code: number) => never;
+}
+
+export async function surveyFromCommand(
+  options: SurveyCLIOptions,
+  deps: SurveyCommandDependencies = {},
+): Promise<void> {
+  let selector: PieceSelector;
+  let spaceConfig;
+  if (options.list !== undefined && options.list.length > 0) {
+    spaceConfig = parseSpaceOptions(options);
+    selector = { kind: "list", pieces: options.list };
+  } else {
+    const pieceConfig = parsePieceOptions(options);
+    spaceConfig = pieceConfig;
+    const path = (options.path ?? "").split("/").filter((s) => s !== "");
+    if (path.length === 0) {
+      throw new ValidationError(
+        "--path names the collection to survey; use --list to survey pieces directly.",
+        { exitCode: 1 },
+      );
+    }
+    if (
+      options.side !== undefined && options.side !== "input" &&
+      options.side !== "result"
+    ) {
+      throw new ValidationError(
+        `--side takes input or result, got "${options.side}".`,
+        { exitCode: 1 },
+      );
+    }
+    selector = {
+      kind: "collection",
+      holder: pieceConfig.piece,
+      path,
+      ...(options.side === undefined
+        ? {}
+        : { side: options.side as "input" | "result" }),
+    };
+  }
+  const shared = {
+    ...(options.root === undefined ? {} : { root: absPath(options.root) }),
+    ...(options.test === undefined
+      ? {}
+      : { testPaths: options.test.map((p) => absPath(p)) }),
+    ...(options.datafile === undefined
+      ? {}
+      : { dataFilePaths: options.datafile.map((p) => absPath(p)) }),
+  };
+  const retargets = (options.retarget ?? []).map((spec) => {
+    const parsed = parseRetargetFlag(spec);
+    return { ...parsed, source: { ...parsed.source, ...shared } };
+  });
+
+  const result = await (deps.runSurvey ?? runSurvey)(spaceConfig, {
+    selector,
+    ...(retargets.length === 0 ? {} : { retargets }),
+    ...(options.dangerouslyAllowIncompatibleSchema
+      ? { allowIncompatible: true }
+      : {}),
+    ...(options.validator === undefined
+      ? {}
+      : { validatorPath: absPath(options.validator) }),
+  });
+
+  const print = deps.render ?? render;
+  const printHint = deps.printHint ?? hint;
+  if (options.json) {
+    print(result, { json: true });
+  } else {
+    const plan = encodePlan(result.plan);
+    if (options.out !== undefined) {
+      await (deps.writeTextFile ?? Deno.writeTextFile)(options.out, plan);
+      printHint(`Wrote ${result.plan.rows.length} plan rows to ${options.out}`);
+    } else {
+      print(plan.trimEnd());
+    }
+  }
+  for (const entry of result.tally) {
+    printHint(`${entry.phase}: ${entry.count} on ${entry.patternIdentity}`);
+  }
+  for (const failure of result.validatorFailures) {
+    printHint(`validator: ${failure.piece} ${failure.problem}`);
+  }
+  if (!result.complete) {
+    exitWithDataError(
+      {
+        message: [
+          "Survey is incomplete; a write stage must refuse this plan.",
+          ...result.problems.map(
+            (problem) => `  unreadable: ${problem.piece} ${problem.problem}`,
+          ),
+          ...result.outside.map(
+            (outside) =>
+              `  registered outside the selection: ${outside.piece} on ${outside.patternIdentity}`,
+          ),
+        ].join("\n"),
+      },
+      deps,
+    );
+  }
 }
 
 export interface SlugListCommandDependencies {
