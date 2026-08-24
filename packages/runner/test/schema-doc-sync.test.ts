@@ -670,7 +670,7 @@ describe("schema-doc-sync", () => {
     // bug), self-restoring: the belt in consumeUpdates must swallow it,
     // keep the loop alive, and apply the NEXT frame.
     const original = replica.applySessionSync.bind(replica);
-    replica.applySessionSync = (sync: unknown, type: string) => {
+    replica.applySessionSync = (_sync: unknown, _type: string) => {
       replica.applySessionSync = original;
       throw new Error("synthetic apply failure");
     };
