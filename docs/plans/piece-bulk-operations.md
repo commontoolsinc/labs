@@ -1,8 +1,7 @@
 # Bulk piece operations
 
-**Status:** proposed; stage 1's survey library is built and in review, its
-`cf` entry points and CI drill follow in stacked changes immediately behind
-it, and every later stage is unbuilt. This is the design and build sequence for changing
+**Status:** proposed; stage 1 — the survey library, its `cf` entry points,
+and its CI drill — is built, and every later stage is unbuilt. This is the design and build sequence for changing
 many pieces in one space as one reviewable, resumable operation. Driven by
 recurring Topics board upgrades.
 
@@ -502,7 +501,7 @@ compiling; and the drill.
 - [x] Each row records whether the source behind its recorded identity is
       still retained in the space, so a row with no rollback target is known
       before the run rather than during the incident.
-- [ ] One process handles a board-sized set, start to finish.
+- [x] One process handles a board-sized set, start to finish.
 - [x] The read reports live state on every invocation, and a test proves it:
       a read taken after a change reflects the change.
 - [x] The output is a plan — the same artifact the later stages consume —

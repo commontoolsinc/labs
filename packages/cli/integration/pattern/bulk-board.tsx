@@ -28,6 +28,17 @@ interface AddMemberResult {
   member: MemberOutput;
 }
 
+/** Seed many members in one call; the board-sized set arrives as one write. */
+interface SeedMembersEvent {
+  /** How many members to file. */
+  count: number;
+}
+
+interface SeedMembersResult {
+  /** How many members this call filed. */
+  filed: number;
+}
+
 interface BoardInput {
   items?: Writable<MemberOutput[] | Default<[]>>;
 }
@@ -38,6 +49,8 @@ interface BoardOutput {
   items: MemberOutput[];
   /** File a new member on the board. */
   addMember: Stream<AddMemberEvent, AddMemberResult>;
+  /** Seed many members in one call. */
+  seedMembers: Stream<SeedMembersEvent, SeedMembersResult>;
 }
 
 export default pattern<BoardInput, BoardOutput>(({ items }) => {
@@ -49,9 +62,23 @@ export default pattern<BoardInput, BoardOutput>(({ items }) => {
     return { member };
   });
 
+  const seedMembers = action<SeedMembersEvent, SeedMembersResult>(
+    (event) => {
+      const count = event.count ?? 0;
+      if (!Number.isSafeInteger(count) || count < 1) {
+        throw new Error("seedMembers: count must be a positive integer");
+      }
+      for (let index = 0; index < count; index += 1) {
+        items.push(Member({ title: `seed-${index}` }));
+      }
+      return { filed: count };
+    },
+  );
+
   return {
     [NAME]: "Bulk survey board",
     items,
     addMember,
+    seedMembers,
   };
 });
