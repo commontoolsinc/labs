@@ -327,6 +327,24 @@ emitted address composes into the next command unchanged, without being
 reassembled. Neither spelling composes with `--filter`. See
 `packages/cli/README.md` for the exact syntax and supported schema subset.
 
+A field list is held to the source's own vocabulary, and a position states that
+vocabulary by carrying a `properties` map: one declaring no fields
+(`properties: {}`) refuses every name, while a position with no map at all
+declares nothing and refuses none. A path the schema proves nothing can appear
+at — a field the position neither declares nor admits, a field named below a
+scalar, a field named below a verb — is refused before the read, naming the
+position, what it declares, and, where one is close enough, the declared name
+the path is a typo of. A field that is merely absent still returns nothing at
+exit 0, so a `{}` from a field list reads as "nothing here" rather than "you may
+have mistyped". Where the source schema settles nothing — an open
+`additionalProperties`, a `patternProperties` map that names a pattern, a
+disjunction, an untyped position, a position that only may hold an array, a
+tuple-shaped array, a reference site declaring fields of its own, a name several
+`allOf` members declare — no refusal is available. An unresolvable reference is
+passed over too, and the read reports the reference itself. A JSON `--schema`
+states a shape of its own rather than naming the source's fields, and is not
+held to that vocabulary.
+
 `piece call` takes the same three flags, before the callable name, with the same
 grammar, the same `--select`/`--schema` conflict, and the same error messages.
 They shape the result of the call — a handler's `result` inside the Invocation
