@@ -39,24 +39,24 @@
     ]
   },
   "exports": {
+    "./SchemaAndHash": "./src/SchemaAndHash.ts",
     "./cell-rep": "./src/cell-rep.ts",
+    "./codec-common": "./src/codec-common/index.ts",
+    "./codec-json": "./src/codec-json/index.ts",
+    "./codec-realm": "./src/codec-realm/index.ts",
+    "./codecs": "./src/codecs.ts",
+    "./data-uri-codec": "./src/data-uri-codec.ts",
     "./deep-freeze": "./src/deep-freeze.ts",
     "./fabric-bases": "./src/fabric-bases/index.ts",
     "./fabric-instances": "./src/fabric-instances/index.ts",
     "./fabric-primitives": "./src/fabric-primitives/index.ts",
     "./fabric-value": "./src/fabric-value.ts",
-    "./value-clone": "./src/value-clone.ts",
     "./frozen-builtins": "./src/frozen-builtins.ts",
-    "./codec-json": "./src/codec-json/index.ts",
-    "./codec-realm": "./src/codec-realm/index.ts",
-    "./codecs": "./src/codecs.ts",
-    "./data-uri-codec": "./src/data-uri-codec.ts",
     "./native-type-tags": "./src/native-type-tags.ts",
     "./schema-hash": "./src/schema-hash.ts",
     "./schema-utils": "./src/schema-utils.ts",
-    "./SchemaAndHash": "./src/SchemaAndHash.ts",
+    "./value-clone": "./src/value-clone.ts",
     "./value-debug": "./src/value-debug.ts",
-    "./value-hash": "./src/value-hash.ts",
-    "./codec-common": "./src/codec-common/index.ts"
+    "./value-hash": "./src/value-hash.ts"
   }
 }
