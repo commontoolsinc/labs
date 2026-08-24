@@ -239,6 +239,47 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "deferred-start death. Lifts when that residue closes and the " +
         "fixed step greens ON 10/10.",
     },
+    {
+      // Re-listed by the lunch-poll identity PR (#5744). This file was
+      // LIFTED 2026-08-19 for the swatch-stall class (stage-C W3.1 —
+      // history in the header comment above); the profile-first join
+      // that PR introduces newly exposes the arm-B family's REMAINING
+      // member (the entry above): the test now creates the viewer's
+      // profile piece mid-test, and the flag-ON client's deferred start
+      // of that fresh piece dies terminally on the first-hydration
+      // stale-confirmed-read ConflictError, killing the client's piece
+      // context for the session — so the wish `#profile` never
+      // resolves and the join card never renders `#lp-join-button`.
+      // Both the 2026-08-22 red (run 32539777265, shards 7 and 9 —
+      // shard 9's cfc-staged-publish red is the same class's per-run
+      // lottery) and the 2026-08-24 red (run 32769542550) carry the
+      // deferred-start tx-commit-error signature; the OFF lane runs
+      // this file green. Every later step depends on that join, hence
+      // a FILE entry rather than a step guard. Same class, same fork
+      // memo as the entry above. MERGE NOTE (the catch-up-and-start
+      // PR): both recorded reds PREDATE the recovery landing — the
+      // "dies terminally" mechanism is exactly the b04 death that
+      // recovery closes (verification-coverage.md OW45's
+      // CATCH-UP-AND-START block), so this entry's lift condition is
+      // now concretely testable; it lifts on its own gate evidence at
+      // the merged head, never by inference from the default-app gate.
+      file: "integration/lunch-poll-vote.test.ts",
+      phase: "phase-7",
+      reason: "Same OW45 arm-B client-start class as the default-app " +
+        "entry (fork memo: optimize/ow45-armb-client-start-fork.md): " +
+        "the profile-first join creates the viewer's profile piece " +
+        "mid-test, and the flag-ON client's deferred start of the " +
+        "freshly created piece dies terminally on a " +
+        "stale-confirmed-read ConflictError against the serving side's " +
+        "own materialization (the first-hydration race; recorded before " +
+        "the catch-up-and-start recovery landed), " +
+        "killing the client's piece context for the session — the wish " +
+        "#profile never resolves and #lp-join-button never renders, " +
+        "while the serving side's materialization of the piece is what " +
+        "won the race. Every later step depends on that join, so the " +
+        "whole file waits. Lifts when the client-start class closes " +
+        "and the file greens ON.",
+    },
     // The sqlite identity pair's two FILE entries were LIFTED (OW53
     // CLOSED, 2026-08-22): the sqlite builtins consumed the RUNTIME's
     // ambient identity — the SERVICE, on a serving runtime — where the

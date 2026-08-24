@@ -77,8 +77,10 @@ then one watcher `pattern-load-error` for a KEYLESS identity (the
 CT-1923 stranded shape) and every read of the piece returned
 nothing at diagnostics time — which disproves the fork memo's
 working hypothesis that h01/h05/rf2 were "the same die-off" as the
-start class. The flip's list-EMPTY bar still hangs on this
-one step.
+start class. The flip's list-EMPTY bar hangs on this step plus the
+lunch-poll-vote FILE entry #5744 landed mid-review (the same
+client-start class, its reds recorded BEFORE this recovery landed —
+it lifts on its own gate evidence at the merged head).
 
 **Delta 2026-08-23: OW45 arm-B server-ensure STAGE 1 BUILT —
 the space-root ensure (existence + freshness, no start) runs at the

@@ -1,11 +1,13 @@
 /** Debugging-ish helpers for `FabricValue`s. */
 
-import { isPlainObject } from "@commonfabric/utils/types";
+import { backtickQuote } from "@commonfabric/utils/markdown";
+import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
 import {
   FabricInstance,
   FabricPrimitive,
   FabricSpecialObject,
+  FabricValue,
 } from "./interface.ts";
 // Imported from its own module rather than the package barrel, deliberately:
 // the barrel pulls in every codec, and three of those import
@@ -16,6 +18,7 @@ import {
 // initialization". `codecOf.ts` itself is a leaf.
 import { codecOf } from "@/codec-common/codecOf.ts";
 import { JSON_CODEC } from "@/codec-interface/interface.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 
 /**
  * Sentinel marker used to wrap content that should appear unquoted in the
@@ -122,11 +125,13 @@ class DebugStringifier {
           return marked("Infinity");
         } else if (value === -Infinity) {
           return marked("-Infinity");
-        } else {
-          // Shouldn't happen; there aren't any other non-finite possibilites.
-          return marked(`<non-finite ${value}>`);
         }
+
+        // Shouldn't happen; there aren't any other non-finite possibilites.
+        // deno-coverage-ignore-start
+        return marked(`<non-finite ${value}>`);
       }
+      // deno-coverage-ignore-stop
 
       case "object": {
         if (value === null) {
@@ -196,6 +201,241 @@ class DebugStringifier {
         return value;
       }
     }
+  }
+}
+
+/**
+ * Helper class for converting values to their valid `FabricValue` debug
+ * representations.
+ */
+class DebugConverter {
+  readonly #value: any;
+  readonly #maxDepth: number;
+  readonly #replacer: undefined | ((value: any) => any);
+  readonly #nestingStack = new Map<object, number>();
+
+  /**
+   * Constructs an instance.
+   */
+  constructor(
+    /** Value to convert. */
+    value: unknown,
+    /** Maximum nesting depth. */
+    maxDepth: number,
+    /** Replacer function. */
+    replacer?: (value: any) => any,
+  ) {
+    this.#value = value;
+    this.#maxDepth = maxDepth;
+    this.#replacer = replacer;
+  }
+
+  //
+  // Instance members
+  //
+
+  /**
+   * Converts the configured value. This method is meant to be called no more
+   * than once per instance of this class. In particular, it doesn't cache the
+   * result, so a second call repeats the conversion.
+   */
+  convert(): FabricValue {
+    try {
+      return this.#convertSubvalue(this.#value, 0);
+      // deno-coverage-ignore-start
+    } catch (e) {
+      // There is an inner `try-catch` which should catch most conversion errors
+      // close to where they're thrown. This `catch` is a prophylactic "just
+      // in case" to help nail down the intention of really really trying not to
+      // `throw` out of this method.
+      return DebugConverter.#makeErrorResult(e);
+    }
+    // deno-coverage-ignore-stop
+  }
+
+  /**
+   * Converts an array, which is known to be at the indicated nesting depth.
+   */
+  #convertArray(value: any[], depth: number): FabricValue {
+    return value.map((item, _index): FabricValue =>
+      this.#convertSubvalue(item, depth + 1)
+    );
+  }
+
+  /**
+   * Converts a general instance (non-plain, non-`FabricValue` object), which is
+   * known to be at the indicated nesting depth.
+   */
+  #convertInstance(value: any, depth: number): FabricValue {
+    const className =
+      (value as { constructor?: { name?: string } }).constructor?.name ??
+        "<anonymous>";
+    const tag = `/${className}`;
+
+    const stringForm = value.toString();
+    if (typeof stringForm === "string") {
+      const matchedGenericName: string | undefined = stringForm.match(
+        /^\[object (?<name>[a-zA-Z0-9_$]+)\]$/,
+      )?.groups?.name;
+      if (
+        (matchedGenericName !== "Object") && (matchedGenericName !== className)
+      ) {
+        return { [tag]: stringForm };
+      }
+    }
+
+    if (typeof value.toJSON === "function") {
+      return { [tag]: this.#convertSubvalue(value.toJSON(), depth + 1) };
+    }
+
+    const props = { ...value };
+    const converted = (Object.keys(props).length !== 0)
+      ? this.#convertSubvalue(props, depth + 1)
+      : "/...";
+    return { [tag]: converted };
+  }
+
+  /**
+   * Converts a plain object, which is known to be at the indicated nesting depth.
+   */
+  #convertPlainObject(value: any, depth: number): FabricValue {
+    const mapper = ([key, value]: [string, any]): [string, FabricValue] => {
+      if (isUnsafeObjectKey(key) || (key[0] === "/")) {
+        key = `/${key}`;
+      }
+      return [key, this.#convertSubvalue(value, depth + 1)];
+    };
+    const converted = Object.entries(value).map(mapper);
+    return Object.fromEntries(converted);
+  }
+
+  /**
+   * Converts the given value, which is known to be at the indicated nesting
+   * depth.
+   */
+  #convertSubvalue(value: any, depth: number): FabricValue {
+    try {
+      // Give the `replacer` (if supplied) an opportunity to perform replacement.
+      value = this.#replacer ? this.#replacer(value) : value;
+    } catch {
+      // Fall through: Treat `replacer` failure as refusal to replace and not an
+      // actual error.
+    }
+
+    // Handle all the straightforward cases.
+    switch (typeof value) {
+      case "bigint":
+      case "boolean":
+      case "number":
+      case "string":
+      case "undefined": {
+        return value;
+      }
+
+      case "symbol": {
+        const key = Symbol.keyFor(value);
+        if (key === undefined) {
+          // Unique (uninterned) symbol.
+          return { "/uniqueSymbol": value.description };
+        } else {
+          // Interned symbol.
+          return value;
+        }
+      }
+
+      case "function": {
+        try {
+          const name = value.name;
+          const content = (name != "") ? `${name}(...)` : "<anonymous>(...)";
+          return { "/function": content };
+        } catch (e) {
+          return { "/function": DebugConverter.#makeErrorResult(e) };
+        }
+      }
+
+      case "object": {
+        if (value === null) {
+          return null;
+        }
+        break;
+      }
+
+      // deno-coverage-ignore-start
+      // This will only happen if JS introduces a new type.
+      default: {
+        throw new Error(`Shouldn't happen: unknown type \`${typeof value}\``);
+      }
+        // deno-coverage-ignore-stop
+    }
+
+    // We have a non-null object of some sort.
+
+    try {
+      if (value instanceof FabricPrimitive) {
+        // These can in effect require an additional layer of nesting to
+        // convert, by the time they actually hit _some_ real transports. We
+        // hereby accept the fact that there can be an arguable inconsistency
+        // between intended and actual maximum nesting when these are converted
+        // "at the edge."
+        return value;
+      }
+
+      const nestedAt = this.#nestingStack.get(value);
+      if (nestedAt !== undefined) {
+        return { "/circle": nestedAt };
+      }
+
+      if (depth >= this.#maxDepth) {
+        return { "/...": toDebugKindString(value) };
+      }
+
+      this.#nestingStack.set(value, depth);
+
+      try {
+        if (value instanceof FabricInstance) {
+          const codec = codecOf(value);
+          const tag = codec.tagForValue(value);
+          const contents = codec.encode(value, NULL_LIVE_ENVIRONMENT);
+          return { [`/${tag}`]: this.#convertSubvalue(contents, depth + 1) };
+        } else if (Array.isArray(value)) {
+          return this.#convertArray(value, depth);
+        } else if (isPlainObject(value)) {
+          return this.#convertPlainObject(value, depth);
+        } else {
+          return this.#convertInstance(value, depth);
+        }
+      } finally {
+        this.#nestingStack.delete(value);
+      }
+    } catch (e) {
+      return DebugConverter.#makeErrorResult(e);
+    }
+  }
+
+  //
+  // Static members
+  //
+
+  /**
+   * Produces the appropriate error-bearing result form, for an error thrown
+   * during processing.
+   */
+  static #makeErrorResult(error: any) {
+    const message = (() => {
+      try {
+        if (error instanceof Error) {
+          const msg = error.message;
+          if (typeof msg === "string") {
+            return msg;
+          }
+        }
+        return String(error);
+      } catch {
+        return "/unconvertibleError";
+      }
+    })();
+
+    return { "/unconvertible": message };
   }
 }
 
@@ -309,4 +549,68 @@ export function toDebugKindString(value: unknown): string {
   }
   if (isPlainObject(value)) return "object";
   return value.constructor?.name ?? "object";
+}
+
+/**
+ * Produces a valid `FabricValue` meant to represent the given value as
+ * accurately as possible, suitable for use in debugging, including rendering as
+ * a debug string or including in a structured debug log. All valid
+ * `FabricValue`s are self-represented in the result. Beyond that, no specific
+ * guarantees are made as to the exact nature of the conversion. The general aim
+ * is to represent non-`FabricValue` results in a way reminiscent of the
+ * `codec-json` encoding form, and with as little chance for ambiguity as can
+ * be reasonably achieved.
+ *
+ * If a `maxDepth` is supplied as a positive integer, that is the nesting limit
+ * of the result. Any items which would require further nesting are instead
+ * converted into a form suggestive of the elided information.
+ *
+ * If a `replacer` is supplied, it is called on every value and sub-value
+ * encountered, to get a replacement value to use. If the `replacer` does not
+ * want to replace the value, then it should return the value it receives.
+ *
+ * If the conversion could not be completed (stack overflow, object
+ * `toJSON()` conversion error, etc.), this function returns the literal value
+ * `{ "/unconvertible": "<errorMessage>" }`.
+ *
+ * @throws {Error} if given an invalid value for `maxDepth`.
+ */
+export function toStructuredDebugValue(
+  /** Value to convert. */
+  value: any,
+  /**
+   * Maximum depth of result nesting. Must be a positive integer or `undefined`
+   * if specified. `undefined` and large integers are taken to mean "as high as
+   * reasonably possible." There is no guarantee about the _actual_ possible
+   * maximum depth.
+   */
+  maxDepth?: number | undefined,
+  /** Replacer function, if desired. */
+  replacer?: (value: any) => any,
+): FabricValue {
+  const ACTUAL_MAX = 100; // To prevent blowing out the stack when converting.
+
+  // Validate `maxDepth` and transform as necessary.
+  maxDepth = (() => {
+    switch (typeof maxDepth) {
+      case "number": {
+        if (Number.isSafeInteger(maxDepth) && (maxDepth > 0)) {
+          return Math.min(maxDepth, ACTUAL_MAX);
+        }
+        break;
+      }
+      case "undefined": {
+        return ACTUAL_MAX;
+      }
+    }
+
+    const badDepth = backtickQuote(toCompactDebugString(maxDepth, 20));
+    throw new Error(
+      `\`maxDepth\` must be a positive integer or \`undefined\`; got ${badDepth}`,
+    );
+  })();
+
+  // We subtract one from `maxDepth` because the "suggestive forms" for elided
+  // data all use one layer of depth.
+  return new DebugConverter(value, maxDepth - 1, replacer).convert();
 }

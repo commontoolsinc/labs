@@ -5889,6 +5889,12 @@ supply; OW29/OW32/OW34 closed):
     quiet-and-loaded — and its class half is now the named read-side
     residue (the START class the bar originally named is closed by
     this build); the step entry's reason names the narrowed charge.
+    Sibling entry, landed mid-review: #5744 (lunch-poll profile-first
+    join) re-skipped `integration/lunch-poll-vote.test.ts` as a FILE
+    entry on this row's b04 signature — its recorded reds PREDATE the
+    recovery, whose mechanism targets exactly that death; the entry
+    lifts on its own gate evidence at the merged head, never by
+    inference from the default-app gate.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:

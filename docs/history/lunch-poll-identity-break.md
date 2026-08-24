@@ -1,0 +1,83 @@
+---
+status: historical
+created: 2026-08-19
+archived: 2026-08-19
+reason: "Decision record for the lunch-poll identity contract break:
+  display-name identity replaced by profile cells, approved in person
+  2026-08-18."
+---
+
+# Lunch-poll identity contract break
+
+The lunch poll's identity moved from display names to the viewer's shared
+profile cell, compared with `equals()` — agreed in Discord and approved in
+person on 2026-08-18. The checker exemptions are recorded in
+`tasks/pattern-compat-accepted-breaks.ts`; this file records why those precise
+paths were accepted.
+
+## The decision
+
+A display name was the primary key for votes, roster membership, and host
+status: mutable, non-unique, and silently lossy (same-name participants shared
+votes and host status; renames orphaned votes; the live roster carries
+name-variant duplicates people created to work around silent join rejections).
+Identity is now the `#profile` cell. A vote carries its voter's cell; roster
+entries carry `profile` with name/avatar as cosmetic snapshots; joined-ness
+and host status are derived by cell comparison, so no per-user state can go
+stale. Joining requires an identity that reads as present — the typed-name
+path is gone, and a rejected join says why (`joinMessage`).
+
+## What broke, on purpose
+
+The compatibility checker reports three paths across two pattern/baseline
+pairs:
+
+- `lunch-poll/main.tsx` removes the published name-keyed admin result
+  (`result.adminName`).
+- The same contract changes the visit array's nested defaults while replacing
+  legacy roster links with optional profile links. The proof summarizes that
+  change at `argument.visits[]` and cannot prove it stable under default
+  insertion.
+- `participant-identity-card.tsx` removes the published viewer-name identity
+  (`result.me`).
+
+Other name-keyed inputs also disappear, but removing optional inputs is
+compatible and needs no exemption. The registry deliberately names only the
+paths the checker actually reports.
+
+## What deliberately did NOT break
+
+Stored state applies cleanly. The new identity fields (`users[].profile`,
+`votes[].voter`, visit snapshots' `voterProfile`) are optional — every row
+this pattern writes carries them, enforced by store-site gates that require
+the identity to read as present — and the new display field (`loggedByName`)
+carries a default. A piece holding name-keyed rows keeps its data: legacy
+rows become display ghosts (they match no viewer, tally anonymously, and
+their people re-join with profiles as themselves). The Tier 2 state gate
+passes with two accepted-drop entries, recorded in
+`tasks/pattern-vintage-accepted-drops.ts`: a name-keyed vintage's capture user
+matches no profile, so the name-derived membership surface (`adminName`,
+`myName`, the joined-ness they anchored, and each stored vote's `voterName`)
+does not survive on purpose, and the current-day vote views (`todaysVotes`,
+`todayVoteCount`) additionally empty because a pinned vintage is replayed long
+after its capture day. The stored votes themselves survive whole.
+
+## Disposition of deployed pieces
+
+A fresh piece is required, not merely preferred. The checker reports three
+paths across two accepted pair entries. The load-bearing one is
+`argument.visits[]`, whose nested defaults are not stable under default
+insertion; the root argument is exactly what `setPattern` checks, so `cf piece
+setsrc` refuses the swap on a populated piece. Only
+`--dangerously-allow-incompatible-schema` overrides that, which is not a step
+this change asks anyone to take.
+
+What that costs is the CHANNEL, not the data. The Tier 2 gate replays real
+stored state under this source and the visit log reads back whole; a piece
+that could be updated would keep its history. The refusal is a schema
+judgment made before any of that is consulted.
+
+So the team's populated poll moves to a fresh piece, carrying its state across
+with the identity-migration copy procedure in `DEPLOY-AND-SHARE.md`. Legacy
+name-keyed roster and vote rows survive as display-only history; participants
+create or pick a shared profile and re-join as themselves.

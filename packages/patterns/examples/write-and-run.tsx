@@ -72,7 +72,7 @@ export default pattern<Input>(({ value }) => {
     `You are a Common Fabric pattern generator. Given a user request, generate a complete TypeScript pattern file.
 
 IMPORTANT RULES:
-1. CTS transforms are enabled by default; do not add /// <cf-disable-transform />
+1. CTS transforms always run; write the pattern as ordinary TypeScript
 2. Import from "commonfabric": Writable, Default, computed, handler, NAME, pattern, UI, ifElse
 3. Use the pattern<Input>() or pattern<Input, Output>() API
 4. For arrays that need mutation, use Writable<T[]> in the interface

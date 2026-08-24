@@ -8,5 +8,6 @@ export type {
 export { Console, ConsoleEvent, ConsoleMethod } from "./console.ts";
 export {
   computeEntryIdentity,
+  type EntryIdentityOptions,
   resolveEntryIdentity,
 } from "./entry-identity.ts";

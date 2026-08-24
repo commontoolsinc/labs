@@ -863,9 +863,17 @@ and (for the current viewer) a verified seal that user-space cannot forge.
 | --- | --- | --- |
 | **any participant** whose live profile cell you hold — the viewer (via `wish`) or anyone who contributed their cell on join | `cf-profile-badge` bound to that cell | trusted; draws name + avatar + a DID-derived verified seal; cross-space reads resolve for every viewer (CT-1667/1687) |
 | a person you hold **only a snapshot** for — a self-contained piece, or an offline remote profile space | `cf-avatar` + their name | untrusted fallback, safe for any value; needs no profile cell |
+| a row that **may or may not** carry a profile — one written before the space had profiles, beside rows that do | `cf-profile-badge` with `fallback-name` | one binding for both, so nothing has to test a cell-typed field for presence; the name shows only where no profile resolves |
 
 `cf-profile-badge` is the one preferred way to render an identity; `cf-avatar` is
-the explicit fallback for when no live profile cell is available. See
+the explicit fallback for when no live profile cell is available.
+
+`fallback-name` is for the mixed case only, and it is **untrusted**: it renders
+where no profile value resolved, never beside the verification seal, and never
+over a profile that resolved without a name — such a profile reads as unknown
+rather than borrowing the caller's string. A name a caller supplies can never
+acquire the treatment a resolved cell earns, which is what makes the seal worth
+reading. See
 [multi-user-patterns → Presenting Identity](../patterns/multi-user-patterns.md#presenting-identity)
 for the end-to-end flow (resolve the viewer, store each joiner's profile cell, mark "me").
 

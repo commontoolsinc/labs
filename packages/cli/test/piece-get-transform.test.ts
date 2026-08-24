@@ -1010,11 +1010,13 @@ describe("cf piece get transforms", () => {
         projection: await parseSelectionProjection("id"),
       }),
     ).toEqual({ id: 1 });
-    expect(
-      await deriveSelectedValue(runtime, space, source, {
+    await expect(
+      deriveSelectedValue(runtime, space, source, {
         projection: await parseSelectionProjection("missing"),
       }),
-    ).toEqual({});
+    ).rejects.toThrow(
+      'Invalid --schema at <root>: "missing" is not a field the source holds',
+    );
     expect(
       await deriveSelectedValue(runtime, space, source, {
         projection: await parseSelectionProjection(JSON.stringify({

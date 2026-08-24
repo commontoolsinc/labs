@@ -34,16 +34,14 @@ If this document conflicts with code or passing tests, code/tests win.
 
 Before AST transforms, `transformCfDirective()`:
 
-1. Scans the first non-empty source line for transform directives.
-2. Unless that line is `/// <cf-disable-transform />`, injects:
-   - `import { __cfHelpers } from "commonfabric";` (a named import of the
-     internal helper binding, not a namespace import)
-   - a forwarding `h(...)` helper delegating to `__cfHelpers.h` (so authors
-     need not import the JSX factory manually, and so the helper module is not
-     tree-shaken before binding).
+1. Locates the first non-empty source line.
+2. Prepends `import { __cfHelpers } from "commonfabric";` ahead of it (a named
+   import of the internal helper binding, not a namespace import), and appends
+   after the source a forwarding `h(...)` helper delegating to
+   `__cfHelpers.h` — so authors need not import the JSX factory manually, and
+   the helper module is not tree-shaken before binding. §16.5 depends on that
+   split: exactly one line is prepended.
 3. Rejects sources that contain identifier `__cfHelpers` anywhere in the AST.
-4. Strips opt-out `/// <cf-disable-transform />` from the source before later
-   stages.
 
 These string-level steps run in `transformCfDirective()`
 (`src/core/cf-helpers.ts`) before any AST transformer, because symbol binding
@@ -66,17 +64,6 @@ Legacy stored-envelope compatibility is deliberately separate from
   unchanged because it already contains the injected helper envelope. Normal
   authoring paths never set that option, so authored `__cfHelpers` input still
   throws (`packages/runner/src/harness/pretransform.ts`).
-
-Opt-out note:
-
-- `/// <cf-disable-transform />` is the explicit opt-out. It is honored only
-  at **column zero** of the first content line (leading blank lines are fine;
-  leading whitespace on the directive line is not), mirroring TypeScript's
-  own triple-slash directives (CT-1815, #4618;
-  `src/core/runtime-contract.ts`). An indented lookalike is silently ignored
-  and the file transforms normally; `sourceHasIgnoredDisableDirective` is
-  exported so compile-time callers can warn the author (the runtime boot path
-  never consults it).
 
 ### 2.2 Pipeline object and cross-stage state
 
@@ -136,7 +123,7 @@ present; no stage handles a missing one.
 
 The authoritative ordering lives in `CFC_TRANSFORMER_STAGES` /
 `CFC_TRANSFORMER_STAGE_NAMES` in `src/cf-pipeline.ts`. Transformers always run
-in this order (25 stages):
+in this order (26 stages):
 
 1. `CastValidationTransformer`
 2. `EmptyArrayOfValidationTransformer`
@@ -144,41 +131,42 @@ in this order (25 stages):
 4. `PatternContextValidationTransformer`
 5. `MergeablePushValidationTransformer`
 6. `VerbReturnValidationTransformer`
-7. `CfcPolicyAuthoringTransformer`
-8. `CfcPolicyOfValidationTransformer`
-9. `JsxExpressionSiteRouterTransformer`
-10. `AssertDiagnosticsTransformer`
-11. `LiftLoweringTransformer`
-12. `ClosureTransformer`
-13. `PatternOwnedExpressionSiteLoweringTransformer`
-14. `HelperOwnedExpressionSiteLoweringTransformer`
-15. `WriteAuthorizedByValidationTransformer`
-16. `PatternCallbackLoweringTransformer`
-17. `SchemaInjectionTransformer`
-18. `BuilderCallHoistingTransformer`
-19. `SchemaGeneratorTransformer`
-20. `VerbTierMarkTransformer`
-21. `ReactiveVariableForTransformer`
-22. `ModuleScopeShadowingTransformer`
-23. `ModuleScopeCfDataTransformer`
-24. `PatternCoverageTransformer`
-25. `ModuleScopeFunctionHardeningTransformer`
+7. `IndirectBuilderCallbackValidationTransformer`
+8. `CfcPolicyAuthoringTransformer`
+9. `CfcPolicyOfValidationTransformer`
+10. `JsxExpressionSiteRouterTransformer`
+11. `AssertDiagnosticsTransformer`
+12. `LiftLoweringTransformer`
+13. `ClosureTransformer`
+14. `PatternOwnedExpressionSiteLoweringTransformer`
+15. `HelperOwnedExpressionSiteLoweringTransformer`
+16. `WriteAuthorizedByValidationTransformer`
+17. `PatternCallbackLoweringTransformer`
+18. `SchemaInjectionTransformer`
+19. `BuilderCallHoistingTransformer`
+20. `SchemaGeneratorTransformer`
+21. `VerbTierMarkTransformer`
+22. `ReactiveVariableForTransformer`
+23. `ModuleScopeShadowingTransformer`
+24. `ModuleScopeCfDataTransformer`
+25. `PatternCoverageTransformer`
+26. `ModuleScopeFunctionHardeningTransformer`
 The order is behaviorally significant (invariant C-002). Two ordering facts
 worth calling out:
 
-- `BuilderCallHoistingTransformer` (stage 18) runs **after**
-  `SchemaInjectionTransformer` (stage 17) so each builder call it relocates to
+- `BuilderCallHoistingTransformer` (stage 19) runs **after**
+  `SchemaInjectionTransformer` (stage 18) so each builder call it relocates to
   module scope already carries its injected schemas — see CT-1644 and
   `packages/ts-transformers/docs/derive-to-lift-design.md`. This stage hoists
   `lift`, `handler`, and `pattern` builder calls. It absorbed and replaced the
   former separate `LiftHoistingTransformer` (which hoisted only `lift`); the
   even-older `BuilderCallbackHoistingTransformer` was deleted (#3864). Earlier
   spec revisions listing those two as distinct stages are obsolete.
-- The final five stages (20–24) run last so they operate on fully lowered and
+- The final five stages (22–26) run last so they operate on fully lowered and
   schema-injected output; they are documented stage by stage in §13–§17.
 - `MergeablePushValidationTransformer` (stage 5; #4450/#4505) is
   validation-only and is documented with the other validators (§6.9).
-- `PatternCoverageTransformer` (stage 24) does no work unless pattern runtime
+- `PatternCoverageTransformer` (stage 25) does no work unless pattern runtime
   coverage is enabled. When enabled, it runs before
   `ModuleScopeFunctionHardeningTransformer` so coverage counters are added to
   authored bodies before hardening helpers are emitted (§16).
@@ -841,7 +829,57 @@ decision rather than a gap:
 - **Returns inside nested function-likes** — they return to their own
   callers.
 
-### 6.11 Diagnostics emitted by lowering stages
+### 6.11 Indirect builder callback validation
+
+`IndirectBuilderCallbackValidationTransformer` (stage 7) reports a callback a
+trusted builder reaches through a reference the module verifier cannot follow:
+
+- **Error** `builder-callback:indirect-reference`
+  (`src/transformers/indirect-builder-callback-validation.ts`) — the argument
+  the verifier treats as the callback is function-bearing, but resolves to
+  neither a function written at the call nor a name bound to a function this
+  module emits. A property access (`handler(event, state, callbacks.save)`)
+  and an imported binding are the two shapes that reach it most often. The
+  message names how the callback was reached and points the author at binding
+  the function in this module or writing it at the call.
+
+Resolution follows a name through this module's own declarations, so a chain
+of aliases ending at a local function resolves exactly as the verifier's
+binding walk resolves it. Two shapes that read as functions are not ones the
+verifier admits, and are reported: a **generator**, which is not
+direct-callback syntax to `tryParseDirectFunction` (it accepts `async`, never
+`function*`), and a declaration with **no body** — ambient, or an overload
+signature — which is erased before emit, leaving the compiled module with a
+name bound to nothing. An overloaded function resolves through its
+implementation.
+
+An **exported variable** declaration is reported for the same reason §17.3
+annotates exported bindings inline: CommonJS emit reads its references as
+`exports.<name>`, which the verifier's grammar does not admit as a callback
+target. Only the `export` modifier on the declaration does this — a function
+declaration keeps its local binding even when exported, and a trailing
+`export { … }` clause rewrites no reference, so both stay accepted.
+
+Which argument is judged mirrors `callbackIndexesForBuilder`, including its
+window rather than only its answer: `lift`'s callback belongs at position 0,
+but the verifier scans the leading positions and takes the first that
+resolves, so all three are judged here too. A candidate that resolves ends the
+check, because that is the one the verifier would take.
+
+The rule belongs to `verifyTrustedBuilderCall`
+(`runner/src/sandbox/compiled-bundle-verifier.ts`, normative per §17.6), which
+admits those two spellings and refuses to load a module using any other. This
+stage exists so the refusal arrives from the compile that produced the module,
+against the offending argument, rather than at load from a message phrased in
+terms the pattern source never mentions. Its per-builder callback positions
+mirror that verifier's, so a trusted-builder result passed in a data position
+is never judged as a miswritten callback.
+
+An argument that is not function-bearing is left alone: that is a different
+mistake, and whatever already rejects it describes it more accurately than a
+callback diagnostic would.
+
+### 6.12 Diagnostics emitted by lowering stages
 
 Not every diagnostic comes from a validation transformer. The lowering stages
 report these through the same collector (deduplicated via §2.2's
@@ -1439,7 +1477,7 @@ adjustments:
   which disables shrinking for the whole parameter: its declared shape is
   emitted intact, without the capability wrappers a walked operand would derive
 - capability analysis reads through the operand recording an `assert(...)` body
-  wraps a method call's receiver in. `AssertDiagnosticsTransformer` (stage 10)
+  wraps a method call's receiver in. `AssertDiagnosticsTransformer` (stage 11)
   rewrites `event.details.includes(text)` so that `includes` is called on
   `__cfHelpers.assertCapture(parts, "event.details", event.details)` rather
   than on `event.details`. The recording hands its third argument straight
@@ -1528,7 +1566,7 @@ Parameters Are a Capability Contract").
 
 ## 11. Builder Call Hoisting And `__cfReg` Registration
 
-`BuilderCallHoistingTransformer` (stage 18, **after** SchemaInjection) hoists
+`BuilderCallHoistingTransformer` (stage 19, **after** SchemaInjection) hoists
 every reactive *builder call* to module scope and emits a single trailing
 content-addressing registration. It is the sole module-scope hoisting phase; it
 absorbed the former `LiftHoistingTransformer` (lift-only) and replaced the
@@ -1809,7 +1847,7 @@ Special path:
 
 ### 12.1 Verb Tier Marks (Post-Generation)
 
-`VerbTierMarkTransformer` (stage 20) runs immediately after schema generation,
+`VerbTierMarkTransformer` (stage 21) runs immediately after schema generation,
 in the one window where its inference is pure syntax: handler factories are
 already hoisted with LITERAL bound-state schemas, the pattern call carries its
 generated result-schema literal, and the callback's returned identifiers are
@@ -1848,7 +1886,7 @@ topics patterns' transformed output.
 
 ## 13. Reactive Variable `.for()` Naming
 
-`ReactiveVariableForTransformer` (stage 21, first of the five trailing stages
+`ReactiveVariableForTransformer` (stage 22, first of the five trailing stages
 that run on fully lowered, schema-injected output — §3) derives stable,
 human-readable **causes** from authored names and attaches them to reactive
 values as `.for(<cause>, true)` calls. The cause is the runtime identity seed:
@@ -2047,10 +2085,10 @@ preserved from the original initializer (`preserveNodeSourceMap`).
 
 ### 13.6 Ordering and the hoisting interplay
 
-Running at stage 19 means causes are derived from the final lowered shape:
+Running at stage 22 means causes are derived from the final lowered shape:
 `computed`/`action`/JSX expression sites have already become lift/handler
-applications and IIFE-local consts (stages 8–13), schemas are injected and
-generated (15, 17), and builder calls are hoisted (16). Two concrete
+applications and IIFE-local consts (stages 9–14), schemas are injected and
+generated (18, 20), and builder calls are hoisted (19). Two concrete
 dependencies on `BuilderCallHoistingTransformer` (§11):
 
 - Hoisted module-scope consts are named `__cfLift_N` / `__cfHandler_N` /
@@ -2092,7 +2130,7 @@ The emitted-shape contract is pinned primarily by the "adds stable … causes"
 
 ## 14. Module-Scope Shadow Guards
 
-`ModuleScopeShadowingTransformer` (stage 22,
+`ModuleScopeShadowingTransformer` (stage 23,
 `src/transformers/module-scope-shadowing.ts`) inserts one module-scope
 `const <name> = undefined;` declaration for each name in
 `SHADOWED_FACTORY_BINDINGS` — as of this writing `define`, `runtimeDeps`, and
@@ -2122,12 +2160,8 @@ not override `filter()` (the default returns `true`;
 source file the pipeline visits receives the guards, including:
 
 - files with no Common Fabric imports or builders at all, and
-- files that opted out via `/// <cf-disable-transform />` — the opt-out only
-  suppresses the string-level helper injection (§2.1); the AST pipeline still
-  runs, and for a **function-free** opted-out file the guards are the only
-  synthetic addition; an opted-out file with top-level functions still gets
-  stage-22 hardening (§17), which has no helper gate (verified by direct
-  pipeline probe; no committed fixture pins the opt-out case).
+- **function-free** files, where the guards are the only synthetic addition; a
+  file with top-level functions also gets stage-26 hardening (§17).
 
 The stage reads no cross-stage state and never reports diagnostics: its
 `transform()` touches only `context.factory` and `context.sourceFile`.
@@ -2171,13 +2205,13 @@ verifier compares against (§14.4). The transformer performs no dedupe or
 collision check: it does not look for existing declarations of the guard names
 before inserting.
 
-### 14.3 Ordering (why stage 21)
+### 14.3 Ordering (why stage 23)
 
-The stage sits in the trailing module-scope emission group (21
-`ModuleScopeShadowing`, 22 `ModuleScopeCfData`, 24
+The stage sits in the trailing module-scope emission group (23
+`ModuleScopeShadowing`, 24 `ModuleScopeCfData`, 26
 `ModuleScopeFunctionHardening`), which runs after lowering and schema work is
 complete (§3). It is purely syntactic — no checker, `typeRegistry`, or
-capability state — so no output from schema generation (stage 19) feeds it;
+capability state — so no output from schema generation (stage 20) feeds it;
 conversely the
 later module-scope stages leave the guards untouched: `ModuleScopeCfData` never
 wraps them (`undefined` is not a data candidate — every guard appears verbatim
@@ -2255,15 +2289,14 @@ corpus, not the verifier, is what pins them today.
   `imports → guards → … → __cfLift_N/__cfPattern_N consts before their owning
   statements` (§11.3 interplay).
 - **Not pinned by committed tests** (verified only by direct probe as of this
-  writing): guard insertion into `/// <cf-disable-transform />` files;
-  insertion after only the *first* contiguous import run when imports are
+  writing): insertion after only the *first* contiguous import run when imports are
   interleaved with statements; behavior when authored code already declares a
   guard name at module scope (no collision check exists in the transformer).
 
 
 ## 15. Module-Scope `__cf_data` Wrapping (SES Plain-Data Snapshots)
 
-`ModuleScopeCfDataTransformer` (stage 23,
+`ModuleScopeCfDataTransformer` (stage 24,
 `src/transformers/module-scope-cf-data.ts`) wraps qualifying module-scope
 initializers and default exports in `__cfHelpers.__cf_data(...)`. The wrap
 exists for the runner's SES sandbox: the module verifier only admits top-level
@@ -2284,10 +2317,8 @@ level the helper is an identity function (`CfDataFunction = <T>(value: T) =>
 T`, `packages/api/index.ts`), so wrapping does not perturb inference.
 
 The stage extends `HelpersOnlyTransformer` (`src/core/transformers.ts`), so it
-runs only when the injected `__cfHelpers` import is present — i.e. for every
-default-transformed source (§2.1) and never under
-`/// <cf-disable-transform />` (asserted by `test/transform.test.ts`, "skips
-snapshot wrapping when cf-disable-transform is present"). Introduced when SES
+runs when the injected `__cfHelpers` import is present, which §2.1 makes true
+of every source the pipeline compiles. Introduced when SES
 became the default runner sandbox (#3168, originally emitting `__ct_data`;
 renamed with the Common Tools compatibility-layer removal, #3252); the
 default-export callable rule below was added by the SES default-export
@@ -2312,7 +2343,7 @@ An initializer is wrapped when `shouldWrapTopLevelExpression` accepts it.
 First, two negative gates: initializers asserted to `any`/`unknown` (`as any`,
 `<unknown>expr`, including parenthesized forms) are never wrapped
 (`isAnyLikeTypeAssertion`), and arrow functions, function expressions, and
-class expressions are never wrapped (functions are stage 24's business, see
+class expressions are never wrapped (functions are stage 26's business, see
 §15.4). Classification then looks through non-semantic wrappers —
 parentheses, `as`, `satisfies`, `!`, angle-bracket assertions
 (`unwrapExpression`, `src/utils/expression.ts`) — while the emitted wrap
@@ -2369,7 +2400,7 @@ const matcher = /^[a-z]+$/;
 const tags = new Set(["a", "b"]);
 const passthrough = lift((value: string) => value);
 
-// After stage 21 (abridged from test/transform.test.ts):
+// After stage 24 (abridged from test/transform.test.ts):
 const model = __cfHelpers.__cf_data(schema({ type: "string" } as const));
 const days = __cfHelpers.__cf_data(Array.from({ length: 3 }, (_, i) => String(i + 1)));
 const matcher = __cfHelpers.__cf_data(/^[a-z]+$/);
@@ -2379,7 +2410,7 @@ const passthrough = lift((value: string) => value); // builder call — excluded
 
 The most common wrap in fixture output is the schema literal §12 materializes:
 `toSchema<T>()` becomes `{...} as const satisfies __cfHelpers.JSONSchema`,
-which stage 21 then wraps whole — assertions preserved inside the call:
+which stage 24 then wraps whole — assertions preserved inside the call:
 
 ```ts
 // Shown at module scope.
@@ -2433,25 +2464,25 @@ trust-requiring sites check the trusted brand, not the structural shape
 (`packages/runner/src/builder/pattern-metadata.ts`,
 `packages/runner/src/pattern-manager.ts`).
 
-### 15.4 Why stage 21
+### 15.4 Why stage 24
 
-- **After `SchemaGeneratorTransformer` (stage 19):** materialized schema
+- **After `SchemaGeneratorTransformer` (stage 20):** materialized schema
   literals are object literals at module scope; running after materialization
   is what gets them wrapped (§15.2 fixtures). Before it, the authored
   `toSchema<T>()` call matches no wrap arm, so the literal would reach the
   verifier raw and be rejected as mutable top-level data.
-- **After `BuilderCallHoistingTransformer` (stage 18):** the hoisted
-  `const __cfLift_N = __cfHelpers.lift(...)` consts exist by stage 21 and are
+- **After `BuilderCallHoistingTransformer` (stage 19):** the hoisted
+  `const __cfLift_N = __cfHelpers.lift(...)` consts exist by stage 24 and are
   excluded by the trusted-builder arm; the trailing `__cfReg({...})` call is
   an expression statement and out of scope (§15.1).
-- **Before `ModuleScopeFunctionHardeningTransformer` (stage 25):** hardening
+- **Before `ModuleScopeFunctionHardeningTransformer` (stage 26):** hardening
   rewrites top-level function initializers to `__cfHardenFn(...)` calls and
   declares `__cfHardenFn` as a top-level function. Had cf-data run afterwards,
   those calls would match the local-helper-call arm and function values would
   be mis-wrapped into throwing `__cf_data` snapshots. (Derived from
   `isTopLevelLocalHelperCall` plus the hardening emission; no dedicated
   regression test pins this ordering.)
-- The relative order against `ModuleScopeShadowingTransformer` (stage 22) is
+- The relative order against `ModuleScopeShadowingTransformer` (stage 23) is
   not observably load-bearing: the shadow guards' `undefined` initializers
   match no wrap arm (derived; guards in
   `src/transformers/module-scope-shadowing.ts`).
@@ -2528,7 +2559,7 @@ this removal no code in the package references the identifier at all.
 
 ## 16. Pattern Runtime Coverage Instrumentation
 
-`PatternCoverageTransformer` (stage 24) injects statement-level coverage
+`PatternCoverageTransformer` (stage 25) injects statement-level coverage
 counters into authored runtime code. It is off by default and is the only
 stage gated on a harness-supplied option rather than on source content: its
 `filter` requires `TransformationOptions.patternCoverage` to be set and the
@@ -2655,7 +2686,7 @@ line 1 registers (after that test's +10/+100 `mapSpan`):
   startLine: 101, endLine: 101, startColumn: 1, endColumn: 16 }
 ```
 
-### 16.4 Why stage 21 (ordering)
+### 16.4 Why stage 25 (ordering)
 
 Coverage runs second-to-last: after every lowering, schema, and module-scope
 rewriting stage, so counters attach to the final shape of authored bodies
@@ -2663,10 +2694,10 @@ rewriting stage, so counters attach to the final shape of authored bodies
 records callback body lines after the full pipeline" in
 `packages/runner/test/pattern-coverage.test.ts`), with the original-node
 fallback of §16.2 recovering authored positions for rebuilt statements. It
-runs **before** `ModuleScopeFunctionHardeningTransformer` (stage 25) for the
+runs **before** `ModuleScopeFunctionHardeningTransformer` (stage 26) for the
 reason stated on the stage spec itself (`src/cf-pipeline.ts`): "Coverage runs
 before function hardening. That keeps coverage counters out of the hardening
-helper output." — i.e. the synthetic hardening helpers emitted by stage 23
+helper output." — i.e. the synthetic hardening helpers emitted by stage 26
 never acquire counters, so coverage reports only authored code. The stage
 list itself is pinned by `test/pipeline-regressions.test.ts`.
 
@@ -2680,9 +2711,10 @@ authored bytes. `injectCfHelpers` (`src/core/cf-helpers.ts`) builds
 appended after the source. The runner compensates in its `mapSpan`
 (`patternCoverageOptionsForCompile`, `packages/runner/src/harness/engine.ts`):
 
-- every span is shifted by `lineOffset: -1` — or `0` when the source disables
-  the transform (`sourceDisablesCfTransform`), since the opt-out path blanks
-  the directive line in place and injects nothing;
+- every span is shifted by `lineOffset: -1`, the single prepended line — or by
+  `0` for the two shapes that reach the compiler unchanged: a stored legacy
+  envelope whose bytes already carry the helper import, and a file with no
+  content line to inject ahead of;
 - spans falling outside `[1, authoredLineCount]` after the shift are vetoed
   (`mapSpan` returns `undefined`), which drops counters from injected helper
   code: the prepended import could never span (imports are excluded, §16.2),
@@ -2799,7 +2831,7 @@ counters.
 
 ## 17. Module-Scope Function Hardening And Verified-Binding Annotation
 
-`ModuleScopeFunctionHardeningTransformer` (stage 25, **last**) rewrites a
+`ModuleScopeFunctionHardeningTransformer` (stage 26, **last**) rewrites a
 module's top level so that every surviving module-scope function value is
 frozen at module-evaluation time, and so that CFC trusted bindings carry a
 machine-readable binding identity. It emits up to two module-local helper
@@ -2929,7 +2961,7 @@ Everything else at top level is exempt: builder-call initializers
 runtime instead, `packages/runner/src/builder/module.ts`), `__cf_data`
 wrappers and other call results, literals, classes, interfaces/type aliases
 (erased at emit), `export default pattern(…)` (a call, not a direct
-function), and the stage-16 hoisted `const __cfLift_N = __cfHelpers.lift(…)`
+function), and the stage-19 hoisted `const __cfLift_N = __cfHelpers.lift(…)`
 consts (call initializers; see the negative assertions in
 `test/closures/module-scope-helper-hoisting.test.ts`).
 
@@ -2955,7 +2987,7 @@ so a `WriteAuthorizedBy` claim embedded in a schema can later be matched to
 the live handler that performs the write.
 
 **Which bindings are trusted.** `collectWriteAuthorizedByBindingNames` scans
-the stage-22 AST for type references to `WriteAuthorizedBy`,
+the stage-23 AST for type references to `WriteAuthorizedBy`,
 `TrustedActionWrite`, or `TrustedActionWriteWithIntegrity` (binding position
 = type argument 1 for all three, seeded in
 `discoverWriteAuthorizedByBindingPositions`), plus any local type aliases
@@ -2966,9 +2998,9 @@ bindings"). Within each binding-position type argument, every `typeof x`
 type-query identifier contributes `x` to the trusted-name set
 (`collectTypeQueryIdentifiers`). Detection is purely name-based (no
 symbol/import resolution), and it sees only type references **still present
-after stages 14–16**: a reference that lived solely inside a
+after stages 15–17**: a reference that lived solely inside a
 `toSchema<WriteAuthorizedBy<…>>()` type argument was already replaced by the
-schema literal in stage 17 and contributes nothing (verified by direct
+schema literal in stage 18 and contributes nothing (verified by direct
 pipeline run — such a module gets a plain `__cfHardenFn` wrap and no
 annotation), whereas references surviving in `interface`/type-alias
 declarations or un-lowered type arguments do.
@@ -3142,10 +3174,10 @@ __cfBindVerifiedBinding(saveTitle, {
 
 ### 17.5 Why it runs last
 
-The stage-22 slot (after everything, and specifically after
+The stage-26 slot (after everything, and specifically after
 `PatternCoverageTransformer`) is behaviorally significant (C-002):
 
-- **After coverage (stage 21):** "Coverage runs before function hardening.
+- **After coverage (stage 25):** "Coverage runs before function hardening.
   That keeps coverage counters out of the hardening helper output"
   (`src/cf-pipeline.ts` stage-list comment). Coverage inserts
   `globalThis.__cfPatternCoverage?.hit(…)` statements into function bodies
@@ -3155,7 +3187,7 @@ The stage-22 slot (after everything, and specifically after
   executions as pattern coverage. The verifier separately allows the
   coverage-hit statements themselves at module scope
   (`isPatternCoverageHitStatement`, `compiled-bundle-verifier.ts`).
-- **After hoisting (stage 16) and schema generation (stage 17):** the
+- **After hoisting (stage 19) and schema generation (stage 20):** the
   module-scope surface it freezes/annotates is final — hoisted
   `__cfLift_N`/`__cfPattern_N` consts exist (and stay unwrapped, being call
   initializers), and trusted-name discovery sees the post-lowering AST
@@ -3265,15 +3297,15 @@ lists).
   verifier regardless (`module-loading-verifier-and-engine-design.md`,
   security-classification list).
 - Trusted names referenced **only** via `toSchema<…>()` type arguments get a
-  schema-side claim but no binding annotation, because stage 17 erased the
-  reference before stage 23 ran (direct pipeline run; compare
+  schema-side claim but no binding annotation, because stage 18 erased the
+  reference before stage 26 ran (direct pipeline run; compare
   `test/cfc-authoring.test.ts` "preserves the local binding identity through
   schema emission", which asserts only `__ctWriterIdentityOf`).
 - A trusted binding whose initializer is neither a call nor a direct
   function (e.g. a literal) is skipped entirely — trusted-ness alone does
   not annotate (`transformVariableStatement` gate on `isTrustedCallable ||
   isDirectFunction`). Malformed `WriteAuthorizedBy` usage was already
-  diagnosed at stage 13 (§6.8).
+  diagnosed at stage 16 (§6.8).
 - The hardening wrapper preserves evaluation semantics (`return fn`), so
   wrapped initializers remain direct-function-classifiable to the verifier,
   while debug `fn.src` is resolved independently through the compiler sidecar
