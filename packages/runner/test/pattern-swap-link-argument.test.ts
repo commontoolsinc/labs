@@ -8,18 +8,21 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 
 // CT-1917 (2026-07-28 estuary): a hot-swap to a new pattern version re-runs
 // setup, and setup re-validates the STORED argument against the candidate
-// schema by materializing it — dereferencing every link. An argument slot
-// whose stored value is a link to a doc that is absent (or simply not loaded
-// in this session — the normal client cold state) materializes to nothing,
-// the key is dropped, and required-validation kills the swap with
-// "missing required property <slot>". The piece then stays pinned to the old
-// pattern (or, on a fresh open, never comes up) even though the stored
-// argument is exactly what the original instantiation wrote.
+// schema by materializing it — dereferencing every link. What that validation
+// may conclude about a link-valued slot is tri-state, and this file pins the
+// line: a target the replica has never pulled is NOT judged (the swap
+// postpones and retries on convergence — the two-session cases cover that
+// shape); a target the replica holds, or holds the CONFIRMED ABSENCE of, is
+// judged as the data it is — so a required slot over a confirmed-absent doc
+// holds the swap, V1 keeps running, and the first write that materializes
+// the doc re-fires the watcher and completes it. No verdict is ever minted
+// over bytes nobody read; no data that was read escapes its verdict.
 //
-// Production shape: BacklinksIndex's `pieceRegistry` argument links into its
-// host default-app's registry cell; the host was down (its own pattern failed
-// to compile), the link read cold, and the official-pattern upgrade of
-// BacklinksIndex died on "missing required property pieceRegistry".
+// Production shape (the original incident): BacklinksIndex's `pieceRegistry`
+// argument links into its host default-app's registry cell; the host was down
+// (its own pattern failed to compile), the link read cold, and the
+// official-pattern upgrade of BacklinksIndex died on "missing required
+// property pieceRegistry".
 
 const signer = await Identity.fromPassphrase("pattern-swap-link-argument");
 const space = signer.did();
@@ -122,32 +125,44 @@ describe("pattern swap with a link-valued argument slot", () => {
     expect((cell.getAsQueryResult() as { marker: string }).marker).toBe("v2");
   });
 
-  it("swaps when the linked registry doc is absent (cold link)", async () => {
-    // Never written: models the client whose link target is not loaded — the
-    // production state whenever the argument links into a piece that is down.
+  it("holds the swap while a REQUIRED linked slot is confirmed absent", async () => {
+    // Never written anywhere, and this single-store session has synced: the
+    // replica does not MISS the registry doc, it holds the server's word that
+    // the doc is absent. That is a judged read, not an unconverged one, so
+    // strict validation refuses the swap over it — `registry` is required —
+    // and the piece keeps running V1 with its stored argument untouched. The
+    // refusal is a verdict about the data as it stands, not a permanent
+    // sentence on the piece: the recovery — the next cold load's repair
+    // completing the swap once a write materializes the registry — is pinned
+    // in pattern-setup-validation-convergence.test.ts, whose shared-server
+    // harness can cold-start a second session; a target that is merely
+    // UNLOADED (rather than confirmed absent) postpones instead of refusing,
+    // pinned there too.
     const registry = rt.getCell<{ name?: string }[]>(
       space,
       "swap-link-argument-registry-absent",
     );
 
     const { cell } = await startThenSwap(registry);
-    // Bug under test: swap-setup rejects with "registry: value does not match
-    // type array" (the link-valued slot dereferenced to nothing), so the piece
-    // stays on V1. The stored argument still holds the link and is exactly
-    // what V1's own instantiation wrote — the swap must survive it.
-    expect((cell.getAsQueryResult() as { marker: string }).marker).toBe("v2");
+    expect(
+      (cell.getAsQueryResult() as { marker: string }).marker,
+      "a swap committed over a required slot whose linked doc is confirmed " +
+        "absent — validation judged bytes nobody read",
+    ).toBe("v1");
   });
 
-  it("swaps when a link INSIDE an array slot is cold (item-level link)", async () => {
-    // Links live at any depth: an array slot whose ITEM is a link to an
-    // absent doc must get the same deferral as a link at the slot itself.
+  it("holds the swap while an ITEM-level linked slot is confirmed absent", async () => {
+    // Links live at any depth: an array slot whose ITEM links to a confirmed
+    // absent doc gets the same verdict as a link at the slot itself — the
+    // item reads as a judged absence against the required item type, so the
+    // swap holds and V1 keeps running.
     const entry = rt.getCell<{ name?: string }>(
       space,
       "swap-link-argument-array-item-absent",
     );
 
     const { cell } = await startThenSwap([entry]);
-    expect((cell.getAsQueryResult() as { marker: string }).marker).toBe("v2");
+    expect((cell.getAsQueryResult() as { marker: string }).marker).toBe("v1");
   });
 
   it("swaps when the argument doc itself reads cold (nested-piece shape)", async () => {

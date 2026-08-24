@@ -176,6 +176,7 @@ export {
   getPieceSourceRevisions,
   getPieceSourceSnapshot,
   isStoredArgumentSchemaRefusal,
+  isStoredArgumentValidationPending,
   mergeSchemaDefaults,
   patternIdentityKey,
   type PieceSourceRevision,
@@ -189,6 +190,7 @@ export {
   setPatternRepository,
   setPatternSource,
   STORED_ARGUMENT_SCHEMA_REFUSAL,
+  StoredArgumentValidationPendingError,
 } from "./runner.ts";
 
 // Builder functionality (migrated from @commonfabric/builder package)

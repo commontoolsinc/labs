@@ -86,7 +86,10 @@ import { ignoreReadForScheduling } from "./scheduler.ts";
 import { arrayMatchesPositionally } from "./schema-match.ts";
 import { forEachSubschema } from "./schema-walk.ts";
 import { canFollowScopedLink, isCellScope } from "./scope.ts";
-import { internalVerifierRead } from "./storage/reactivity-log.ts";
+import {
+  internalVerifierRead,
+  noteMissingLinkTargetTx,
+} from "./storage/reactivity-log.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
@@ -1412,9 +1415,14 @@ export function validateAndTransform(
       // same-space only when the replica has never seen the doc); the
       // tracked read re-runs the reader on arrival. A served per-instance
       // run's absent target loads AS that run's instance (stage A — the
-      // runner's explicit-instance read).
-      (missing, sourceSpace) =>
-        runtime.ensureLinkedDocLoaded(missing, sourceSpace, runIdentity),
+      // runner's explicit-instance read). The miss is also noted on the
+      // transaction, so a caller that judges the materialized value can
+      // tell an absence it must wait out from a value it read and judged
+      // (setup's argument validation — see `Runner.validateArgument`).
+      (missing, sourceSpace) => {
+        noteMissingLinkTargetTx(tx!, missing);
+        runtime.ensureLinkedDocLoaded(missing, sourceSpace, runIdentity);
+      },
     ),
     objectCreator,
   );

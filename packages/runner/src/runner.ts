@@ -110,6 +110,7 @@ import type {
 } from "./storage/interface.ts";
 import {
   machineryRead,
+  missingLinkTargetsTx,
   schedulerDependencyRead,
 } from "./storage/reactivity-log.ts";
 import {
@@ -904,22 +905,10 @@ type RunnerRunOptions = {
   parentPieceRootId?: string;
 };
 
-// Placeholder standing in for an argument slot whose stored raw value is a
-// link that cannot be dereferenced in the current transaction (target doc
-// absent or not yet synced). Validation accepts it anywhere: the slot HAS a
-// value — we just cannot read it right now — so its schema check is deferred
-// to instantiation-time reactive reads, exactly like the running pattern's
-// own reads of the same slot. See applySetupState's pattern-change branch.
-const UNRESOLVED_LINK_PLACEHOLDER = Object.freeze({
-  "unresolved cell link": true,
-});
-
-const acceptsOpaqueCellOrUnresolvedLink = (
+const acceptsOpaqueCell = (
   value: unknown,
   schema: JSONSchema,
-): boolean =>
-  value === UNRESOLVED_LINK_PLACEHOLDER ||
-  schemaAcceptsOpaqueCellValue(value, schema);
+): boolean => schemaAcceptsOpaqueCellValue(value, schema);
 
 // The relaxed copy of a handler's argument schema, built once per schema
 // rather than once per dispatched event: `generateHandlerSchema` interns its
@@ -1066,51 +1055,6 @@ function closedWorldEventRejection(
 }
 
 /**
- * Rebuild `materialized` so every slot whose counterpart in `raw` is a link
- * that materialized to nothing carries {@link UNRESOLVED_LINK_PLACEHOLDER}
- * instead of being absent/undefined. Slots that DID materialize keep their
- * materialized value (and full strict validation); everything else is
- * returned unchanged.
- */
-function overlayUnresolvedLinkPlaceholders(
-  materialized: unknown,
-  raw: unknown,
-): unknown {
-  if (isCellLink(raw)) {
-    return materialized === undefined
-      ? UNRESOLVED_LINK_PLACEHOLDER
-      : materialized;
-  }
-  if (Array.isArray(raw)) {
-    if (!Array.isArray(materialized)) return materialized;
-    let result: unknown[] | undefined;
-    for (let i = 0; i < raw.length; i++) {
-      const child = overlayUnresolvedLinkPlaceholders(materialized[i], raw[i]);
-      if (child !== materialized[i]) {
-        result ??= materialized.slice();
-        result[i] = child;
-      }
-    }
-    return result ?? materialized;
-  }
-  if (isObjectOrArray(raw) && isObjectOrArray(materialized)) {
-    let result: Record<string, unknown> | undefined;
-    for (const [key, rawChild] of Object.entries(raw)) {
-      const child = overlayUnresolvedLinkPlaceholders(
-        (materialized as Record<string, unknown>)[key],
-        rawChild,
-      );
-      if (child !== (materialized as Record<string, unknown>)[key]) {
-        result ??= { ...(materialized as Record<string, unknown>) };
-        result[key] = child;
-      }
-    }
-    return result ?? materialized;
-  }
-  return materialized;
-}
-
-/**
  * Prefix of the error setup throws when a piece's stored argument does not
  * satisfy the argument schema of the pattern being installed.
  *
@@ -1133,6 +1077,44 @@ export const STORED_ARGUMENT_SCHEMA_REFUSAL =
 export function isStoredArgumentSchemaRefusal(error: unknown): boolean {
   return error instanceof Error &&
     error.message.startsWith(`${STORED_ARGUMENT_SCHEMA_REFUSAL}:`);
+}
+
+/**
+ * Setup could not JUDGE a piece's argument: the validating materialization
+ * crossed a link whose target the local replica could not serve, so the
+ * value behind that link is unknowable here — not read and found wanting,
+ * simply not read. A distinct class from {@link STORED_ARGUMENT_SCHEMA_REFUSAL}
+ * because no permanent verdict may be minted over bytes nobody saw: the
+ * update does not proceed, the piece keeps its current version, and the
+ * attempt is repeatable — the materialization's reads are registered and the
+ * loads it kicked are tracked, so convergence re-arms it. `runSynced` retries
+ * on that convergence itself; a reaction-driven setup re-fires when the
+ * missing document arrives; nothing classifies this as a refusal, so a boot
+ * repair treats it as transient rather than escalating.
+ *
+ * The whole argument's judgment waits, deliberately: a readable
+ * wrong-typed slot beside a missing one is refused only once every slot has
+ * been read, so a refusal — when it comes — is always a verdict over the
+ * complete value.
+ */
+export class StoredArgumentValidationPendingError extends Error {
+  /** One key per link target the materialization missed, deduplicated. */
+  readonly missing: readonly string[];
+  constructor(missing: readonly string[], detail: string) {
+    super(
+      `stored argument validation awaits ${missing.length} unloaded link ` +
+        `target(s); strict validation meanwhile reports: ${detail}`,
+    );
+    this.name = "StoredArgumentValidationPendingError";
+    this.missing = missing;
+  }
+}
+
+/** Whether `error` is setup postponing judgment over an unconverged replica. */
+export function isStoredArgumentValidationPending(
+  error: unknown,
+): error is StoredArgumentValidationPendingError {
+  return error instanceof StoredArgumentValidationPendingError;
 }
 
 /**
@@ -1561,18 +1543,15 @@ export class Runner {
 
   /** Stage an argument write, materialize aliases in the same transaction, and
    * reject the transaction unless the resulting value satisfies its schema.
-   * `unresolvedLinkRaw` (the staged pre-materialization value) makes slots
-   * whose raw value is a link that cannot currently be dereferenced validate
-   * as opaque instead of as their unreadable materialization — pass it only
-   * when re-staging a STORED argument (pattern hot-swap), never for a
-   * caller-supplied value. */
+   * A value that cannot be fully READ from this replica is neither accepted
+   * nor refused: the throw is a {@link StoredArgumentValidationPendingError}
+   * postponement instead, and the update waits for convergence. */
   private updateAndValidateArgument<T>(
     tx: IExtendedStorageTransaction,
     argumentLink: NormalizedFullLink,
     argument: T,
     argumentSchema: JSONSchema,
     defaults: FabricValue,
-    options: { unresolvedLinkRaw?: unknown } = {},
   ): void {
     this.updateArgument(tx, argumentLink, argument, argumentSchema);
     this.validateArgument(
@@ -1580,7 +1559,6 @@ export class Runner {
       argumentLink,
       argumentSchema,
       defaults,
-      options,
     );
   }
 
@@ -1589,33 +1567,37 @@ export class Runner {
     argumentLink: NormalizedFullLink,
     argumentSchema: JSONSchema,
     defaults: FabricValue,
-    options: { unresolvedLinkRaw?: unknown } = {},
   ): void {
     const argumentCell = this.runtime.getCellFromLink(
       argumentLink,
       undefined,
       tx,
     );
+    // The bracket that makes the verdict tri-state: the materialization
+    // resolves the argument's whole link graph through this transaction, and
+    // every link target it crosses that the local replica cannot serve is
+    // noted on the transaction (and its load kicked) by the read path. A
+    // failure with no such note is a verdict over data that was read; a
+    // failure alongside one is no verdict at all — the value is unknowable
+    // HERE, and judging its absence would mint a permanent refusal over a
+    // replication state (the 2026-08-21 fleet outage: a profile name's seed
+    // doc sat one value-hop past everything the cold-start closure delivers,
+    // and validating the resulting `undefined` bricked every home space).
+    const missedBefore = missingLinkTargetsTx(tx).length;
     const materializedArgument = argumentCell.asSchema(undefined).withTx(tx)
       .get();
-    let validationArgument: unknown = mergeSchemaDefaults(
+    const validationArgument: unknown = mergeSchemaDefaults(
       materializedArgument,
       defaults,
       argumentSchema,
       { mergeMaterializedLinks: true },
     );
-    if (options.unresolvedLinkRaw !== undefined) {
-      validationArgument = overlayUnresolvedLinkPlaceholders(
-        validationArgument,
-        options.unresolvedLinkRaw,
-      );
-    }
     const validationFailure = validateSchemaValue(
       argumentSchema,
       validationArgument,
       argumentSchema,
       {
-        acceptOpaqueValue: acceptsOpaqueCellOrUnresolvedLink,
+        acceptOpaqueValue: acceptsOpaqueCell,
         // An OPTIONAL key holding `undefined` carries no data, and a handler
         // mints one without meaning to: `comments.push({ author, ... })` with
         // no author in hand writes the key, and the codec stores that presence.
@@ -1632,11 +1614,20 @@ export class Runner {
         optionalUndefinedIsAbsent: true,
       },
     );
-    if (validationFailure !== undefined) {
-      throw new Error(
-        `${STORED_ARGUMENT_SCHEMA_REFUSAL}: ${validationFailure}`,
-      );
+    if (validationFailure === undefined) return;
+    const missed = missingLinkTargetsTx(tx).slice(missedBefore);
+    if (missed.length > 0) {
+      const keys = [
+        ...new Set(missed.map((link) => {
+          const { space, id, scope } = link as NormalizedFullLink;
+          return `${space}/${String(scope ?? "space")}/${id}`;
+        })),
+      ];
+      throw new StoredArgumentValidationPendingError(keys, validationFailure);
     }
+    throw new Error(
+      `${STORED_ARGUMENT_SCHEMA_REFUSAL}: ${validationFailure}`,
+    );
   }
 
   /**
@@ -1644,12 +1635,14 @@ export class Runner {
    * anything. Used where the caller must not move the piece but must not
    * report success over an argument nobody has checked either.
    *
-   * Mirrors the re-stage branch's deferrals deliberately, so the two paths
+   * Mirrors the re-stage branch's non-verdicts deliberately, so the two paths
    * cannot disagree about what counts as valid: an argument doc that reads
    * nothing right now is skipped (CT-1917 — a nested piece's argument lives in
-   * its host's doc, and "not synced" is not "invalid"), and the staged raw is
-   * passed so a slot holding an unreadable link validates as opaque rather than
-   * as its missing materialization.
+   * its host's doc, and "not synced" is not "invalid"), and an argument whose
+   * materialization crossed an unloaded link target is left unjudged the same
+   * way — this path must not move the piece, so a postponement here has
+   * nothing to postpone: the kicked loads and registered reads already re-arm
+   * whoever reads next, and only a verdict over fully-read data may surface.
    */
   private validateStoredArgument<R>(
     tx: IExtendedStorageTransaction,
@@ -1662,19 +1655,16 @@ export class Runner {
       .getRaw({ meta: ignoreReadForScheduling });
     if (stored === undefined) return;
     const defaults = extractDefaultValues(pattern.argumentSchema);
-    this.validateArgument(
-      tx,
-      argumentLink,
-      pattern.argumentSchema,
-      defaults,
-      {
-        unresolvedLinkRaw: mergeSchemaDefaults(
-          stored,
-          defaults,
-          pattern.argumentSchema,
-        ),
-      },
-    );
+    try {
+      this.validateArgument(
+        tx,
+        argumentLink,
+        pattern.argumentSchema,
+        defaults,
+      );
+    } catch (error) {
+      if (!isStoredArgumentValidationPending(error)) throw error;
+    }
   }
 
   private updateResultSchemaMeta<R>(
@@ -2003,16 +1993,14 @@ export class Runner {
         );
 
         // Stage the exact Fabric-layer representation before validating it.
-        // The untyped materialization below resolves ordinary sigil links
+        // The untyped materialization inside resolves ordinary sigil links
         // through this same transaction without dropping fields that fail the
         // candidate schema. A thrown validation error aborts the transaction,
         // so neither this write nor the schema retarget can become durable on
-        // failure. When no argument was supplied (a pattern hot-swap re-using
-        // the stored value), a slot holding a link whose target cannot be
-        // read RIGHT NOW must not fail validation — the staged raw is passed
-        // so such slots validate as opaque instead of as their (unreadable)
-        // materialization. A supplied argument keeps strict validation:
-        // callers stage exactly the value they were given. (At least one of
+        // failure — and the throw is tri-state: a slot the replica cannot
+        // read RIGHT NOW postpones the update (a pending error, retried on
+        // convergence) rather than refusing it, so a verdict is only ever
+        // minted over data that was read. (At least one of
         // `argument`/`previousArgument` is defined here — the skip branch
         // above owns the both-undefined case — so the merge yields a value.)
         this.updateAndValidateArgument(
@@ -2021,7 +2009,6 @@ export class Runner {
           nextArgument,
           pattern.argumentSchema,
           defaults,
-          argument === undefined ? { unresolvedLinkRaw: nextArgument } : {},
         );
         argumentUpdated = true;
       }
@@ -3805,41 +3792,59 @@ export class Runner {
         },
       );
     } else {
-      const { error } = await this.runtime.editWithRetry((tx) => {
-        // runSynced's own setup tx (async surface, e.g. compileAndRun's
-        // continuation on a served run): no scheduler run around it;
-        // bookkeeping per serving-loop.md §3d.
-        this.runtime.stampServerRun(tx, {
-          actionId: `piece-run-synced/${resultCell.sourceURI}`,
-          kind: "bookkeeping",
+      // Setup judges the stored argument over this replica, and a replica
+      // still converging yields no verdict: a pending postponement names the
+      // link targets the materialization could not read, whose loads it has
+      // already kicked — so await their settlement and try again. Each retry
+      // waits on a real event (storage settlement), and the loop ends when a
+      // missing set REPEATS: the loads for those targets settled and the
+      // replica still cannot serve them, so waiting longer changes nothing
+      // and the postponement surfaces to the caller — as a pending error,
+      // never a refusal.
+      const seenMissing = new Set<string>();
+      while (true) {
+        const { error } = await this.runtime.editWithRetry((tx) => {
+          // runSynced's own setup tx (async surface, e.g. compileAndRun's
+          // continuation on a served run): no scheduler run around it;
+          // bookkeeping per serving-loop.md §3d.
+          this.runtime.stampServerRun(tx, {
+            actionId: `piece-run-synced/${resultCell.sourceURI}`,
+            kind: "bookkeeping",
+          });
+          assertExpectedPatternIdentity(resultCell.withTx(tx));
+          setupRes = this.setupInternal(
+            tx,
+            pattern,
+            inputs,
+            resultCell.withTx(tx),
+            {
+              patternRepository: options?.patternRepository,
+              pieceSourceTransition: options?.pieceSourceTransition,
+              validateCurrentArgument: options?.validateCurrentArgument,
+              validateArgumentLinks: options?.validateArgumentLinks,
+            },
+          );
         });
-        assertExpectedPatternIdentity(resultCell.withTx(tx));
-        setupRes = this.setupInternal(
-          tx,
-          pattern,
-          inputs,
-          resultCell.withTx(tx),
-          {
-            patternRepository: options?.patternRepository,
-            pieceSourceTransition: options?.pieceSourceTransition,
-            validateCurrentArgument: options?.validateCurrentArgument,
-            validateArgumentLinks: options?.validateArgumentLinks,
-          },
-        );
-      });
-      if (error) {
-        if (
-          error.name === "StorageTransactionAborted" &&
-          error.message.startsWith("editWithRetry action threw:") &&
-          error.reason instanceof Error
-        ) {
-          throw error.reason;
+        if (!error) break;
+        const thrown = error.name === "StorageTransactionAborted" &&
+            error.message.startsWith("editWithRetry action threw:") &&
+            error.reason instanceof Error
+          ? error.reason
+          : undefined;
+        if (thrown !== undefined && isStoredArgumentValidationPending(thrown)) {
+          const missingKey = thrown.missing.join("\n");
+          if (seenMissing.has(missingKey)) throw thrown;
+          seenMissing.add(missingKey);
+          await this.runtime.storageManager.synced();
+          continue;
         }
+        if (thrown !== undefined) throw thrown;
         if (options?.expectedPatternIdentity) {
           throw error;
         }
         logger.error("pattern-setup-error", "Error setting up pattern", error);
         setupRes = undefined;
+        break;
       }
     }
 
