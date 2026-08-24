@@ -466,6 +466,16 @@ const summarizeToolInput = async (
         ...(typeof input.action === "string" ? { action: input.action } : {}),
         ...(typeof input.kind === "string" ? { kind: input.kind } : {}),
         ...(typeof input.ref === "string" ? { ref: input.ref } : {}),
+        // A handle is a selector, not a value: it names an address the model
+        // already holds and the summary carries it whole. Digesting it would
+        // be pointless, and digesting what it stands for would turn the
+        // summary into an oracle for the value the handle exists to withhold.
+        ...(typeof input.valueHandle === "string"
+          ? { valueHandle: input.valueHandle }
+          : {}),
+        ...(typeof input.urlHandle === "string"
+          ? { urlHandle: input.urlHandle }
+          : {}),
         ...(isSafeNonNegativeInteger(input.timeoutMs)
           ? { timeoutMs: input.timeoutMs }
           : {}),
@@ -3483,7 +3493,17 @@ export class CfHarnessPromptLoop {
         : {}),
       ...(delegateInput.profile === BROWSER_SUBAGENT_PROFILE &&
           this.#browserAccess !== undefined
-        ? { browserAccess: this.#browserAccess }
+        ? {
+          browserAccess: this.#browserAccess,
+          // The destination allowlist belongs to the lease rather than to the
+          // run. Two browser children share one persistent profile and
+          // therefore one page, and a missing allowlist would make the one
+          // tool that can materialize a value the one run that cannot say
+          // where it may go.
+          ...(this.engine.config.handleValueOrigins !== undefined
+            ? { handleValueOrigins: this.engine.config.handleValueOrigins }
+            : {}),
+        }
         : {}),
       cfcEnforcementMode: parentRunState.cfcEnforcementMode,
       // The child shares the parent's fabric session, so a subagent can call

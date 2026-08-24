@@ -206,7 +206,7 @@ describe("FabricBytes", () => {
   });
 
   describe("static members", () => {
-    describe("`[JSON_CODEC]`", () => {
+    describe("[JSON_CODEC]", () => {
       const codec = FabricBytes[JSON_CODEC];
       const expectedTag = CODEC_TYPE_TAGS.Bytes;
       const env = NULL_LIVE_ENVIRONMENT;

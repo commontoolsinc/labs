@@ -76,30 +76,34 @@ describe("UnknownValue", () => {
 
   describe("instance members", () => {
     describe("`[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]`", () => {
-      it("via dispatch: recurses state, freezes in place", () => {
-        const child = { y: 2 };
-        const uv = new UnknownValue(
-          "Fancy@3",
-          child,
-        );
-        const result = deepFreeze(uv);
-        expect(result).toBe(uv);
-        expect(Object.isFrozen(uv)).toBe(true);
-        expect(Object.isFrozen(child)).toBe(true);
-        expect(isValidDeepFrozenFabricValue(uv)).toBe(true);
+      describe("via dispatch", () => {
+        it("recurses state, freezes in place", () => {
+          const child = { y: 2 };
+          const uv = new UnknownValue(
+            "Fancy@3",
+            child,
+          );
+          const result = deepFreeze(uv);
+          expect(result).toBe(uv);
+          expect(Object.isFrozen(uv)).toBe(true);
+          expect(Object.isFrozen(child)).toBe(true);
+          expect(isValidDeepFrozenFabricValue(uv)).toBe(true);
+        });
       });
 
-      it("via direct member invocation: recurses state, freezes in place", () => {
-        const child = { y: 2 };
-        const uv = new UnknownValue(
-          "Fancy@3",
-          child,
-        );
-        const result = uv[DEEP_FREEZE](subFreeze);
-        expect(result).toBe(uv);
-        expect(Object.isFrozen(uv)).toBe(true);
-        expect(Object.isFrozen(child)).toBe(true);
-        expect(uv[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
+      describe("via direct member invocation", () => {
+        it("recurses state, freezes in place", () => {
+          const child = { y: 2 };
+          const uv = new UnknownValue(
+            "Fancy@3",
+            child,
+          );
+          const result = uv[DEEP_FREEZE](subFreeze);
+          expect(result).toBe(uv);
+          expect(Object.isFrozen(uv)).toBe(true);
+          expect(Object.isFrozen(child)).toBe(true);
+          expect(uv[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
+        });
       });
     });
   });

@@ -1,0 +1,23 @@
+# at-floor instrument OFF CONTROL re-run (2 trials) - captured evidence (F2 fix round)
+# date_utc=2026-08-23T00:11:53Z
+# server binary=toolshed-off sha256=7b0094b9fbbf3038 (rebuilt at worktree a125ccc67; git diff 0c0261df3..HEAD -- packages/ tasks/ = EMPTY, so the built code is the measured 0c0261df3; COMMIT_SHA=0c0261df3a9c4f8fd89bdbf47bc53db01765eda3 baked, /api/meta gitSha confirms)
+# server posture: shellServerExecutionDefine=null, /api/health/stats has NO servingLoop key (probed pre-run)
+# client posture: EXPERIMENTAL_SERVER_EXECUTION unset (OFF)
+# instrument revision: the HARDENED live copy (packages/runner/integration/atfloor-instrument.scratch.ts; snapshot committed beside this log as atfloor-instrument-hardened.ts.txt) - awaited clicks with fail-on-error, try/finally lifetimes; measurement semantics unchanged from the as-ran ON revision
+# load before: { 2.75 3.34 4.01 }
+# ONE server boot, ONE fresh store dir for this control (srv/ fresh at boot)
+trial 1: A initial get = {"increment":{"/":{"link@1":{"path":[],"id":"of:fid1:B4KyupgByt_D3WvHDlFwYykrILxQKXkVBvGkQX4kpPs","space":"did:key:z6MkggmcCU7zqJqgjet3A3tSxi7F8ambmJgp7RH2vHB66VwY","scope":"space"}}},"value":0}
+trial 1: A settled at value 1; entityId = {"/":"fid1:W7UXR1fKl13jTjkah2eWsOR2seXL4l4PkmQUKMH6rFE"}
+trial 1: B hydrated in 0ms
+trial 1: B preClick get = {"increment":{"/":{"link@1":{"path":[],"id":"of:fid1:B4KyupgByt_D3WvHDlFwYykrILxQKXkVBvGkQX4kpPs","space":"did:key:z6MkggmcCU7zqJqgjet3A3tSxi7F8ambmJgp7RH2vHB66VwY","scope":"space"}}},"value":1}
+trial 1: preClick=1 final=2 verdict=clean obs=[1,2] clickToFirstEcho=7ms
+trial 2: A initial get = {"increment":{"/":{"link@1":{"path":[],"id":"of:fid1:TEjtnSFrJXiQ5padrgaZD1Ubm1dlzAkG6SruqQv9BXc","space":"did:key:z6MkvyTDjYMWF68u6izU6iw73Q5n8fPaYxNNjk8oNqYF491M","scope":"space"}}},"value":0}
+trial 2: A settled at value 1; entityId = {"/":"fid1:2RnHWiCpsZ2XT0p86yPI9F4S2tlTcaL3Lfp76nkrn4M"}
+trial 2: B hydrated in 0ms
+trial 2: B preClick get = {"increment":{"/":{"link@1":{"path":[],"id":"of:fid1:TEjtnSFrJXiQ5padrgaZD1Ubm1dlzAkG6SruqQv9BXc","space":"did:key:z6MkvyTDjYMWF68u6izU6iw73Q5n8fPaYxNNjk8oNqYF491M","scope":"space"}}},"value":1}
+trial 2: preClick=1 final=2 verdict=clean obs=[1,2] clickToFirstEcho=8ms
+
+[atfloor-instrument] summary:
+  trials=2 reverts=0 reachability-negative at this head (no revert observed)
+# instrument rc=0 load after: { 3.09 3.40 4.02 }
+# post-run stats: servingLoop key present = False

@@ -37,9 +37,9 @@ type FabricHashState = {
 /**
  * Content-addressed identifier: a hash digest paired with an algorithm tag.
  *
- * Stringification produces `<tag>:<base64urlHash>` where
- * `<base64urlHash>` is the unpadded base64url encoding (RFC 4648 section 5)
- * of the hash bytes. For example: `fid1:abc123...`
+ * Stringification produces `<tag>:<base64urlHash>` where `<base64urlHash>` is
+ * the unpadded base64url encoding (RFC 4648 section 5) of the hash bytes. For
+ * example: `fid1:abc123...`
  *
  * Immutable: instances are `Object.freeze()`-d at construction time, and an
  * instance owns its hash bytes outright, holding a buffer no other code can

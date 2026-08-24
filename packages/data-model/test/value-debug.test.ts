@@ -503,26 +503,26 @@ describe("value-debug", () => {
       expect(toDebugKindString(weird)).toBe("object");
     });
   });
-});
 
-describe("custom inspector", () => {
-  // Without the inspector these all render as `{}`: state lives in private
-  // fields, which have no enumerable own properties for an inspector to find.
-  // The elided `(...)` is the debug renderer's own current limitation, marked
-  // by a TODO there; delegating means this surface inherits the fix.
-  it("renders a FabricPrimitive as its debug string, not `{}`", () => {
-    const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
-    expect(Deno.inspect(bytes)).toBe("/Bytes(...)");
-  });
+  describe("custom inspector", () => {
+    // Without the inspector these all render as `{}`: state lives in private
+    // fields, which have no enumerable own properties for an inspector to find.
+    // The elided `(...)` is the debug renderer's own current limitation, marked
+    // by a TODO there; delegating means this surface inherits the fix.
+    it("renders a FabricPrimitive as its debug string, not `{}`", () => {
+      const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+      expect(Deno.inspect(bytes)).toBe("/Bytes(...)");
+    });
 
-  it("renders a FabricInstance as its debug string, not `{}`", () => {
-    const err = FabricError.fromNativeError(new Error("boom"));
-    expect(Deno.inspect(err)).toBe("/Error(...)");
-  });
+    it("renders a FabricInstance as its debug string, not `{}`", () => {
+      const err = FabricError.fromNativeError(new Error("boom"));
+      expect(Deno.inspect(err)).toBe("/Error(...)");
+    });
 
-  it("renders when nested in containers", () => {
-    const bytes = new FabricBytes(new Uint8Array([9]));
-    expect(Deno.inspect({ blob: bytes })).toBe("{ blob: /Bytes(...) }");
-    expect(Deno.inspect([bytes, bytes])).toBe("[ /Bytes(...), /Bytes(...) ]");
+    it("renders when nested in containers", () => {
+      const bytes = new FabricBytes(new Uint8Array([9]));
+      expect(Deno.inspect({ blob: bytes })).toBe("{ blob: /Bytes(...) }");
+      expect(Deno.inspect([bytes, bytes])).toBe("[ /Bytes(...), /Bytes(...) ]");
+    });
   });
 });

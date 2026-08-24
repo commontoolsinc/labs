@@ -147,10 +147,10 @@ export function tagFromNativeClass(
  * the array rule, which alone decides what an array may be.
  *
  * Otherwise dispatches via the value's constructor (O(1) switch in
- * `tagFromNativeClass`, which matches `Error` subclasses via
- * `prototype instanceof Error`), falling back to native error detection for
- * values whose constructor is unreachable -- a severed prototype, or another
- * realm -- and to a prototype check for null-prototype objects.
+ * `tagFromNativeClass`, which matches `Error` subclasses via `prototype
+ * instanceof Error`), falling back to native error detection for values whose
+ * constructor is unreachable -- a severed prototype, or another realm -- and to
+ * a prototype check for null-prototype objects.
  */
 export function tagFromNativeValue(value: unknown): NativeTag | null {
   if (value === null || typeof value !== "object") {

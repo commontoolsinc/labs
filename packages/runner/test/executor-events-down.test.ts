@@ -95,10 +95,32 @@ class GatedStorageManager extends EmulatedStorageManager {
     }
   }
 
+  /** The third seam, a sidecar whose sync FAILS transiently (the
+   * arrival-order pin): while armed, a matching doc's `syncCell` throws
+   * — the drain's sidecar-sync-failure arm, one of the two deferral
+   * arms events.md §2's arrival order must survive (the other, the
+   * index-addressed view-lag check, is the same barrier contract at the
+   * same seam; its live shape is asynchronous frame delivery under
+   * load, OW45 arm B's b01 red). STATIC on purpose: the host may rotate
+   * runtime tenures (each with a fresh manager), and the seam must hold
+   * across every tenure of the pass under test. */
+  static syncThrowWhen: ((id: string) => boolean) | undefined;
+  /** How many syncs the throw seam refused — each drain pass that
+   * touched the failing sidecar counts one. */
+  static syncThrowHits = 0;
+
   override async syncCell<T>(
     cell: Cell<T>,
     options?: Parameters<EmulatedStorageManager["syncCell"]>[1],
   ): Promise<Cell<T>> {
+    if (
+      GatedStorageManager.syncThrowWhen?.(
+        cell.getAsNormalizedFullLink().id,
+      ) === true
+    ) {
+      GatedStorageManager.syncThrowHits += 1;
+      throw new Error("emulated transient sidecar sync failure (pin seam)");
+    }
     const synced = await super.syncCell(cell, options);
     if (
       this.syncGate !== undefined &&
@@ -181,6 +203,23 @@ const THROW_PATTERN = [
   "  { value: Writable<number> },",
   "  { value: number; explode: Stream<unknown> }",
   ">(({ value }) => ({ value, explode: explode({ value }) }));",
+].join("\n");
+
+/** Two independent streams whose handlers append their letter to ONE
+ * shared log — the arrival-order pin reads the log as the record of
+ * consequence order. */
+const ORDERED_LOG_PATTERN = [
+  "import { handler, pattern, Stream, Writable } from 'commonfabric';",
+  "const pushA = handler<unknown, { log: Writable<string[]> }>(",
+  "  (_ev, { log }) => { log.set([...(log.get() ?? []), 'A']); },",
+  ");",
+  "const pushB = handler<unknown, { log: Writable<string[]> }>(",
+  "  (_ev, { log }) => { log.set([...(log.get() ?? []), 'B']); },",
+  ");",
+  "export default pattern<",
+  "  { log: Writable<string[]> },",
+  "  { log: string[]; a: Stream<unknown>; b: Stream<unknown> }",
+  ">(({ log }) => ({ log, a: pushA({ log }), b: pushB({ log }) }));",
 ].join("\n");
 
 // OW54's refused-commit class (verification-coverage.md §3): a stored
@@ -2814,6 +2853,119 @@ describe("Phase 3 events-down (serving side)", () => {
     } finally {
       gate.resolve();
       for (const cancel of cancels) cancel();
+    }
+  });
+
+  it("arrival order across streams survives a drain deferral: an earlier-arrived event whose sidecar defers (sync failure here; the view-lag check is the same barrier) HOLDS later arrivals back instead of being overtaken (events.md §2's ordering sentence; the OW45 arm-B b01 red — a deferred Create-Another consequenced after the final Create, leaving the terminal state wrong; mutation: the deferral arms back to `continue` → the log reads A,B,A)", async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+
+    // Stand the two-stream pattern up (standUp seeds a {value} argument;
+    // this pattern's argument is the shared log, seeded inline).
+    const compiled = await clientRuntime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: ORDERED_LOG_PATTERN }],
+    }, { space });
+    const argument = clientRuntime.getCell<{ log: string[] }>(
+      space,
+      "ordered-log-arg",
+      undefined,
+    );
+    const result = clientRuntime.getCell<Record<string, unknown>>(
+      space,
+      "ordered-log-result",
+      compiled.resultSchema,
+    );
+    await argument.sync();
+    await result.sync();
+    {
+      const seed = clientRuntime.edit();
+      argument.withTx(seed).set({ log: [] });
+      expect((await seed.commit()).error).toBeUndefined();
+    }
+    {
+      const tx = clientRuntime.edit();
+      clientRuntime.run(tx, compiled, argument, result);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    const argumentId = argument.getAsNormalizedFullLink().id;
+    const storedLog =
+      (): string[] => ((Engine.read(engine, { id: argumentId })?.value as
+        | { log?: string[] }
+        | undefined)?.log ?? []);
+    const send = (stream: "a" | "b") =>
+      (result.key(stream) as unknown as { send(value: unknown): unknown })
+        .send({});
+
+    try {
+      // Warm the piece and stream `a`'s sidecar: one consequenced send.
+      send("a");
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(
+        () => storedLog().length === 1,
+        "the warm-up consequence to land",
+      );
+      expect(storedLog()).toEqual(["A"]);
+      const aSidecarId = sidecarIdsIn(engine)[0];
+      expect(aSidecarId).toBeDefined();
+
+      // Make `a`'s sidecar sync fail transiently: the drain's
+      // sidecar-sync-failure deferral arm, held armed until a pass has
+      // met it with BOTH events pending.
+      GatedStorageManager.syncThrowWhen = (id) => id === aSidecarId;
+
+      // A2 arrives first, B1 second — one client's ordered appends.
+      send("a");
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(
+        () => {
+          const value = Engine.read(engine, { id: aSidecarId })?.value as
+            | StreamEventsDocValue
+            | undefined;
+          return (value?.entries?.length ?? 0) === 2;
+        },
+        "A2's append to land",
+      );
+      send("b");
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(
+        () => sidecarIdsIn(engine).length === 2,
+        "B1's append to land on its own sidecar",
+      );
+
+      // Let the drain meet the failure WITH BOTH EVENTS PENDING:
+      // baseline the throw counter only after B1's append is durable,
+      // then require one more failing pass beyond it — that pass's
+      // snapshot holds A2 (sidecar sync failing) AND B1 (healthy
+      // sidecar), the exact overtake window.
+      const failingPassesBefore = GatedStorageManager.syncThrowHits;
+      await waitUntil(
+        () => GatedStorageManager.syncThrowHits > failingPassesBefore,
+        "a failing drain pass to run with both events pending",
+      );
+      // Heal: the sidecar syncs again and the deferred entry drains.
+      GatedStorageManager.syncThrowWhen = undefined;
+
+      await waitUntil(
+        () => storedLog().length === 3,
+        "all three consequences to land",
+        30_000,
+      );
+      // THE PIN: consequence order equals arrival order. The pre-barrier
+      // drain let B1 (later arrival, warm sidecar) overtake the deferred
+      // A2 — the log read A,B,A.
+      expect(storedLog()).toEqual(["A", "A", "B"]);
+    } finally {
+      GatedStorageManager.syncThrowWhen = undefined;
+      cancelDemand();
     }
   });
 });

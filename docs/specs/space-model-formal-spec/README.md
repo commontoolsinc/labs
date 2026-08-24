@@ -1,9 +1,9 @@
 # Space Model Formal Spec: Data Model
 
 This directory contains the formal specification for the Space Model data model.
-It is derived from the proposal sections of the original
-[data model spec](../space-model/1-data-model.md), reformulated as a
-self-contained, implementable specification.
+It is derived from the proposal sections of the original [data model
+spec](../space-model/1-data-model.md), reformulated as a self-contained,
+implementable specification.
 
 ## Scope
 
@@ -14,8 +14,8 @@ This spec covers:
   `[CODEC]` or `[JSON_CODEC]` -- yielding a `FabricCodec`) for custom type
   participation in encoding
 - **Unknown types** (Section 3) -- forward-compatibility via `UnknownValue`
-- **Codec engines** (Section 4) -- boundary-crossing encoding
-  strategy, the `encode()`/`decode()` boundary, and boundary inventory
+- **Codec engines** (Section 4) -- boundary-crossing encoding strategy, the
+  `encode()`/`decode()` boundary, and boundary inventory
 - **JSON encoding** -- the `fvj1:` encoding prefix, the `/<Type>@<Version>`
   wire format for special types, escaping, detection rules, and the `/`-key
   reservation rule
@@ -34,15 +34,17 @@ system, schemas.
   three-layer architecture, the fabric protocol, unknown types, encoding
   contexts, hashing, implementation guidance, and conversion functions.
   (Sections 1-4, 6-8.)
-- [2-hash-byte-format.md](./2-hash-byte-format.md) --
-  Byte-level encoding for the hash algorithm.
+- [2-hash-byte-format.md](./2-hash-byte-format.md) -- Byte-level encoding for
+  the hash algorithm.
 - [3-json-encoding.md](./3-json-encoding.md) -- The JSON wire format for
   `FabricValue`s: the `fvj1:` encoding prefix, `/<Type>@<Version>` tagged
   objects, standard type encodings, detection, escaping, and the `/`-key
   reservation rule.
 - [4-realm-encoding.md](./4-realm-encoding.md) -- The realm-crossing wire
-  format, for `structuredClone()` and `postMessage()`: the `[marker, tree]`
-  outer envelope, identity-based detection, standard type encodings, cycles
-  and sharing, and the ownership contract each direction carries -- an encoded
-  tree sharing structure with the value it came from, and a decoded one
-  carrying no guarantee of being usable again.
+  format, for the self-dealing boundary internal to a runtime --
+  `structuredClone()` and `postMessage()`, and a durable structured-clone
+  store read back later: the `[marker, tree]` outer envelope, identity-based
+  detection, standard type encodings, cycles and sharing, and the ownership
+  contract each direction carries -- an encoded tree sharing structure with
+  the value it came from, and a decoded one carrying no guarantee of being
+  usable again.

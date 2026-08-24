@@ -179,9 +179,9 @@ export function schemaWithProperties(
 
   // Both `schema` and `overrides` are objects.
 
-  // `shallowMutableClone()` gives a mutable top-level object whose
-  // bound children are deep-frozen -- cloning any mutable ones rather than
-  // freezing the `schema`/`overrides` inputs in place -- so the subsequent
+  // `shallowMutableClone()` gives a mutable top-level object whose bound
+  // children are deep-frozen -- cloning any mutable ones rather than freezing
+  // the `schema`/`overrides` inputs in place -- so the subsequent
   // `toDeepFrozenSchema(result, true)` only has to seal the (owned) top.
   const result = shallowMutableClone(
     { ...schema, ...overrides },
@@ -471,17 +471,16 @@ export function internPathSelector(
 }
 
 /**
- * Canonical "reject everything at the root" path selector. Used by sites
- * that want to record a doc dependency (or normalize a `{ schema: false,
- * ... }` input) without actually traversing into it.
+ * Canonical "reject everything at the root" path selector. Used by sites that
+ * want to record a doc dependency (or normalize a `{ schema: false, ... }`
+ * input) without actually traversing into it.
  *
- * Frozen at module load, but its `schema: false` member is NOT routed
- * through `internSchema()` here (because doing so during `schema-utils.ts`'s
- * module-load would reach into a not-yet-initialized `schema-hash.ts`
- * due to the pre-existing circular import between the two modules). The
- * boolean-schema intern path uses prefab singletons anyway, so
- * lazy-interning the `false` on first real selector use is
- * behaviorally equivalent to interning here.
+ * Frozen at module load, but its `schema: false` member is NOT routed through
+ * `internSchema()` here (because doing so during `schema-utils.ts`'s
+ * module-load would reach into a not-yet-initialized `schema-hash.ts` due to
+ * the pre-existing circular import between the two modules). The boolean-schema
+ * intern path uses prefab singletons anyway, so lazy-interning the `false` on
+ * first real selector use is behaviorally equivalent to interning here.
  */
 export const REJECTING_SELECTOR: SchemaPathSelector = Object.freeze({
   path: Object.freeze([]) as readonly string[],
@@ -489,13 +488,13 @@ export const REJECTING_SELECTOR: SchemaPathSelector = Object.freeze({
 });
 
 /**
- * Canonical "accept the full value" path selector. `SchemaPathSelector`s
- * are relative to the doc root, so to look at the value of the doc the
- * path needs to have `"value"` in it.
+ * Canonical "accept the full value" path selector. `SchemaPathSelector`s are
+ * relative to the doc root, so to look at the value of the doc the path needs
+ * to have `"value"` in it.
  *
- * Frozen at module load; like `REJECTING_SELECTOR`, the boolean
- * `schema: true` member is not routed through `internSchema()` here
- * (same circular-import reason — see `REJECTING_SELECTOR` doc comment).
+ * Frozen at module load; like `REJECTING_SELECTOR`, the boolean `schema: true`
+ * member is not routed through `internSchema()` here (same circular-import
+ * reason — see `REJECTING_SELECTOR` doc comment).
  */
 export const DEFAULT_SELECTOR: SchemaPathSelector = Object.freeze({
   path: Object.freeze(["value"]) as readonly string[],

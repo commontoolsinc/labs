@@ -8,10 +8,11 @@ import { type RealmCodecValue, type RealmEncodedValue } from "./interface.ts";
 /**
  * Whole-value codec engine for the realm-crossing wire format: the form a
  * `FabricValue` takes when it is handed to `structuredClone()` or
- * `postMessage()` to reach another realm.
+ * `postMessage()` to reach another realm, or to a durable store that serializes
+ * the same way.
  *
- * The format is specified by `4-realm-encoding.md` of the formal spec, which
- * is the authority on the shape of an encoded value, the marker and its rules,
+ * The format is specified by `4-realm-encoding.md` of the formal spec, which is
+ * the authority on the shape of an encoded value, the marker and its rules,
  * what the walks refuse, and what each direction does with the memory it is
  * given. Two of its terms are worth naming here because they are what the
  * methods below are written in: the **outer envelope** is the two-element
@@ -26,18 +27,18 @@ import { type RealmCodecValue, type RealmEncodedValue } from "./interface.ts";
  *
  * **Cycles are refused and a shared reference survives exactly where nothing
  * beneath it needed encoding**, per Section 1.6 of the formal spec, which
- * requires an engine to say which of these it does. Section 4 of the realm
- * spec gives both, and the encode and decode sides of the ownership contract
- * are Section 5 -- the half a caller is likeliest to get wrong being that an
+ * requires an engine to say which of these it does. Section 4 of the realm spec
+ * gives both, and the encode and decode sides of the ownership contract are
+ * Section 5 -- the half a caller is likeliest to get wrong being that an
  * encoded tree shares structure with the value it came from and is not frozen.
  *
  * TODO(danfuzz): A memo from each visited object to its encoded counterpart
  * closes cycles and sharing at once: a repeat visit yields the node already
  * built for it, which preserves sharing through a rebuild and lets a back-edge
- * resolve instead of recursing. It belongs on `BaseEncodeAct` and `BaseDecodeAct`,
- * beside the in-progress set, since a cycle can run through
- * a codec-matched object as readily as through a container and both walks
- * need it.
+ * resolve instead of recursing. It belongs on `BaseEncodeAct` and
+ * `BaseDecodeAct`, beside the in-progress set, since a cycle can run through a
+ * codec-matched object as readily as through a container and both walks need
+ * it.
  */
 export class RealmCodecEngine extends BaseCodecEngine<
   RealmCodecValue,

@@ -1132,7 +1132,7 @@ describe("JsonCodecEngine", () => {
         expect(result["/x"]!["/y"]).toBe(123);
       });
 
-      it("boundary contrast: literal subtree uses `/quote`, Fabric type uses `/object`", () => {
+      it("uses `/quote` for a literal subtree and `/object` for a Fabric type", () => {
         // All-literal: single /quote wraps the whole structure.
         const literal = { "/x": { "/y": 123 } };
         expect(toEncodedFormat(literal)).toEqual({
@@ -1195,22 +1195,24 @@ describe("JsonCodecEngine", () => {
     });
 
     describe("general", () => {
-      it("malformed wire: multi-key object with `/`-prefixed key produces `ProblematicValue`", () => {
-        // Wire data without a `/quote` or `/object` wrapper: the decoder must
-        // not silently round-trip it as a plain object.
-        const data = { a: 1, "/b": 2 } as JsonCodecValue;
-        const result = fromEncodedFormat(data, true);
-        expect(result).toBeInstanceOf(ProblematicValue);
-      });
+      describe("malformed wire", () => {
+        it("produces `ProblematicValue` for a multi-key object with a `/`-prefixed key", () => {
+          // Wire data without a `/quote` or `/object` wrapper: the decoder must
+          // not silently round-trip it as a plain object.
+          const data = { a: 1, "/b": 2 } as JsonCodecValue;
+          const result = fromEncodedFormat(data, true);
+          expect(result).toBeInstanceOf(ProblematicValue);
+        });
 
-      it("malformed wire: bare `/`-keyed object produces `ProblematicValue`", () => {
-        // Per spec §9, a single-key object whose key is bare `/` (empty tag
-        // after stripping the leading slash) is an encoding error. Decoding
-        // must produce a `ProblematicValue`, not an `UnknownValue` with an
-        // empty tag.
-        const data = { "/": "x" } as JsonCodecValue;
-        const result = fromEncodedFormat(data, true);
-        expect(result).toBeInstanceOf(ProblematicValue);
+        it("produces `ProblematicValue` for a bare `/`-keyed object", () => {
+          // Per spec §9, a single-key object whose key is bare `/` (empty tag
+          // after stripping the leading slash) is an encoding error. Decoding
+          // must produce a `ProblematicValue`, not an `UnknownValue` with an
+          // empty tag.
+          const data = { "/": "x" } as JsonCodecValue;
+          const result = fromEncodedFormat(data, true);
+          expect(result).toBeInstanceOf(ProblematicValue);
+        });
       });
 
       it("does not wrap plain object with no `/`-prefixed keys", () => {
@@ -1234,7 +1236,7 @@ describe("JsonCodecEngine", () => {
         expect(result["outer"]!["/inner"]).toBe(1);
       });
 
-      it("single-key `/`-prefixed object still routes through `#unwrapTag()` (no regression)", () => {
+      it("still routes a single-key `/`-prefixed object through `#unwrapTag()` (no regression)", () => {
         // Single-key `/Tag@N` objects are handled by `#unwrapTag()` rather than
         // the plain-object path, so they produce an `UnknownValue` for the
         // unrecognized tag and never reach the multi-key guard's
@@ -1247,7 +1249,7 @@ describe("JsonCodecEngine", () => {
         );
       });
 
-      it("decoder strips exactly one `/quote` layer — inner `/quote` is preserved literally", () => {
+      it("strips exactly one `/quote` layer — inner `/quote` is preserved literally", () => {
         // The encoded form `{"/quote": {"/quote": "x"}}` is a `/quote`-wrapped
         // literal whose content happens to be `{"/quote": "x"}`. Decoding must
         // return that inner object as a frozen plain object, and must _not_
@@ -1588,7 +1590,7 @@ describe("JsonCodecEngine", () => {
       expect(result.error).toBe("boom");
     });
 
-    it("lenient mode wraps failed handler decoding", () => {
+    it("wraps failed handler decoding in lenient mode", () => {
       const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
       const runtime = new TestLiveEnvironment();
 
@@ -1649,7 +1651,7 @@ describe("JsonCodecEngine", () => {
       expect(isDeepFrozen(result)).toBe(true);
     });
 
-    it("lenient mode wraps failed class-registry decoding", () => {
+    it("wraps failed class-registry decoding in lenient mode", () => {
       const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
       const runtime = new TestLiveEnvironment();
 
@@ -1672,21 +1674,21 @@ describe("JsonCodecEngine", () => {
   });
 
   describe("freeze guarantees", () => {
-    it("decoded arrays are frozen", () => {
+    it("freezes decoded arrays", () => {
       const result = fromEncodedFormat(
         [1, 2, 3] as JsonCodecValue,
       );
       expect(Object.isFrozen(result)).toBe(true);
     });
 
-    it("decoded objects are frozen", () => {
+    it("freezes decoded objects", () => {
       const result = fromEncodedFormat(
         { a: 1 } as JsonCodecValue,
       ) as Record<string, FabricValue>;
       expect(Object.isFrozen(result)).toBe(true);
     });
 
-    it("mutation of a decoded array throws", () => {
+    it("throws on mutation of a decoded array", () => {
       const result = fromEncodedFormat(
         [1, 2, 3] as JsonCodecValue,
       );
@@ -1695,7 +1697,7 @@ describe("JsonCodecEngine", () => {
       }).toThrow();
     });
 
-    it("mutation of a decoded object throws", () => {
+    it("throws on mutation of a decoded object", () => {
       const result = fromEncodedFormat(
         { a: 1 } as JsonCodecValue,
       ) as Record<string, FabricValue>;
@@ -1704,7 +1706,7 @@ describe("JsonCodecEngine", () => {
       }).toThrow();
     });
 
-    it("nested decoded objects are frozen", () => {
+    it("freezes nested decoded objects", () => {
       const result = fromEncodedFormat(
         { inner: { val: 42 } } as JsonCodecValue,
       ) as Record<string, Record<string, FabricValue>>;
@@ -1712,7 +1714,7 @@ describe("JsonCodecEngine", () => {
       expect(Object.isFrozen(result.inner)).toBe(true);
     });
 
-    it("decoded `/object`-unwrapped objects are frozen", () => {
+    it("freezes decoded `/object`-unwrapped objects", () => {
       const data = { "/object": { "/myKey": "val" } } as JsonCodecValue;
       const result = fromEncodedFormat(data) as Record<
         string,
@@ -1726,7 +1728,7 @@ describe("JsonCodecEngine", () => {
     // `Object.isFrozen()`: an arm that froze only the value it built, and not
     // what it wrapped, would pass the shallow check.
 
-    it("an `UnknownValue` from an unrecognized tag is deep-frozen", () => {
+    it("deep-freezes an `UnknownValue` from an unrecognized tag", () => {
       const result = fromEncodedFormat(
         { "/Nope@1": { a: 1 } } as JsonCodecValue,
       );
@@ -1735,7 +1737,7 @@ describe("JsonCodecEngine", () => {
       expect(isDeepFrozen(result)).toBe(true);
     });
 
-    it("an `UnknownValue` is deep-frozen through its state", () => {
+    it("deep-freezes an `UnknownValue` through its state", () => {
       const result = fromEncodedFormat(
         { "/Nope@1": { inner: { deep: [1, 2] } } } as JsonCodecValue,
       ) as UnknownValue;
@@ -1746,7 +1748,7 @@ describe("JsonCodecEngine", () => {
       expect(Object.isFrozen(state.inner.deep)).toBe(true);
     });
 
-    it("a `ProblematicValue` from a malformed tag is deep-frozen", () => {
+    it("deep-freezes a `ProblematicValue` from a malformed tag", () => {
       // `malformed`, because the wrap helper validates with a strict decode
       // and would otherwise reject the very payload this case is made of.
       const result = fromEncodedFormat(
@@ -1765,7 +1767,7 @@ describe("JsonCodecEngine", () => {
     // freeze. That holds of every other arm too, the unknown-tag fallback
     // included; the cases just above cover those.
 
-    it("codec-produced value is deep-frozen at the boundary", () => {
+    it("deep-freezes a codec-produced value at the boundary", () => {
       // `/EpochNsec@1` dispatches through a registered codec; the
       // decoded FabricEpochNsec must be deep-frozen on return.
       const result = fromEncodedFormat(
@@ -1775,7 +1777,7 @@ describe("JsonCodecEngine", () => {
       expect(isDeepFrozen(result)).toBe(true);
     });
 
-    it("lenient-mode `ProblematicValue` from a codec is deep-frozen", () => {
+    it("deep-freezes a lenient-mode `ProblematicValue` from a codec", () => {
       // `/BigInt@1` with non-string state fails codec validation; the
       // lenient catch produces a ProblematicValue -- still a codec-arm return,
       // so the contract deep-freezes it (not a crash: it is the value
@@ -1793,7 +1795,7 @@ describe("JsonCodecEngine", () => {
       expect(isDeepFrozen(result)).toBe(true);
     });
 
-    it("codec round-trip yields a deep-frozen result", () => {
+    it("yields a deep-frozen result from a codec round-trip", () => {
       const result = roundTrip(
         new FabricEpochNsec(1704067200000000000n),
       );
@@ -1868,7 +1870,7 @@ describe("JsonCodecEngine", () => {
       }).toThrow();
     });
 
-    it("`encode()`→`/quote`→`decode()` round-trip is deep-frozen end-to-end", () => {
+    it("returns a deep-frozen value end-to-end from an `encode()`→`/quote`→`decode()` round-trip", () => {
       // An object whose keys are all /-prefixed but whose values are all
       // quote-safe routes through the encode-side /quote path, then back
       // through the decode /quote `return state` arm.
@@ -1883,27 +1885,43 @@ describe("JsonCodecEngine", () => {
   });
 
   describe("entry points", () => {
-    it("`encode()` returns a prefixed JSON string", () => {
-      const jsonCodecEngine = newDefaultJsonCodecEngine();
-      const result = jsonCodecEngine.encode(42);
-      expect(typeof result).toBe("string");
-      expect(JsonCodecEngine.seemsLikeEncoded(result)).toBe(true);
-      expect(
-        JSON.parse(JsonCodecEngine.unwrapEncodedValueForTesting(result)),
-      ).toBe(42);
+    describe("encode()", () => {
+      it("returns a prefixed JSON string", () => {
+        const jsonCodecEngine = newDefaultJsonCodecEngine();
+        const result = jsonCodecEngine.encode(42);
+        expect(typeof result).toBe("string");
+        expect(JsonCodecEngine.seemsLikeEncoded(result)).toBe(true);
+        expect(
+          JSON.parse(JsonCodecEngine.unwrapEncodedValueForTesting(result)),
+        ).toBe(42);
+      });
     });
 
-    it("`decode()` parses a prefixed JSON string back to a value", () => {
-      const jsonCodecEngine = newDefaultJsonCodecEngine();
-      const runtime = new TestLiveEnvironment();
-      const result = jsonCodecEngine.decode(
-        JsonCodecEngine.wrapEncodedValueForTesting("42"),
-        runtime,
-      );
-      expect(result).toBe(42);
+    describe("decode()", () => {
+      it("parses a prefixed JSON string back to a value", () => {
+        const jsonCodecEngine = newDefaultJsonCodecEngine();
+        const runtime = new TestLiveEnvironment();
+        const result = jsonCodecEngine.decode(
+          JsonCodecEngine.wrapEncodedValueForTesting("42"),
+          runtime,
+        );
+        expect(result).toBe(42);
+      });
     });
 
-    it("`encode()`/`decode()` round-trip for tagged types", () => {
+    describe(".lenient", () => {
+      it("defaults to `false`", () => {
+        const jsonCodecEngine = newDefaultJsonCodecEngine();
+        expect(jsonCodecEngine.lenient).toBe(false);
+      });
+
+      it("can be set to `true`", () => {
+        const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
+        expect(jsonCodecEngine.lenient).toBe(true);
+      });
+    });
+
+    it("round-trips tagged types through `encode()`/`decode()`", () => {
       const jsonCodecEngine = newDefaultJsonCodecEngine();
       const runtime = new TestLiveEnvironment();
       const se = FabricError.fromNativeError(new Error("test"));
@@ -1911,16 +1929,6 @@ describe("JsonCodecEngine", () => {
       const decoded = jsonCodecEngine.decode(encoded, runtime);
       expect(decoded).toBeInstanceOf(FabricError);
       expect((decoded as unknown as FabricError).message).toBe("test");
-    });
-
-    it("`.lenient` defaults to `false`", () => {
-      const jsonCodecEngine = newDefaultJsonCodecEngine();
-      expect(jsonCodecEngine.lenient).toBe(false);
-    });
-
-    it("`.lenient` can be set to `true`", () => {
-      const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
-      expect(jsonCodecEngine.lenient).toBe(true);
     });
   });
 
@@ -2031,7 +2039,7 @@ describe("JsonCodecEngine", () => {
     });
   });
 
-  describe("`seemsLikeEncoded()`", () => {
+  describe("seemsLikeEncoded()", () => {
     // Decides on the prefix alone and never parses, so these cases are about
     // where that suffices and where it would be too eager: the bare prefix
     // counts, a prefix that is partial or not at the front does not, and plain
@@ -2086,7 +2094,7 @@ describe("JsonCodecEngine", () => {
   });
 
   describe("test-only prefix helpers", () => {
-    describe("`unwrapEncodedValueForTesting()`", () => {
+    describe("unwrapEncodedValueForTesting()", () => {
       it("yields the JSON text under the tag", () => {
         const encoded = newDefaultJsonCodecEngine().encode(42);
         expect(JsonCodecEngine.unwrapEncodedValueForTesting(encoded))
@@ -2149,7 +2157,7 @@ describe("JsonCodecEngine", () => {
       });
     });
 
-    describe("`wrapEncodedValueForTesting()`", () => {
+    describe("wrapEncodedValueForTesting()", () => {
       it("produces something the codec accepts", () => {
         const { runtime } = makeTestCodec();
         const encoded = JsonCodecEngine.wrapEncodedValueForTesting(
@@ -2195,7 +2203,7 @@ describe("JsonCodecEngine", () => {
       });
     });
 
-    describe("`isMalformed`", () => {
+    describe("isMalformed", () => {
       // `Map@1`'s codec always throws on decode, so it stands in for any
       // payload the codec cannot decode. Reaching that codec takes a
       // registry that has it: against the format-only default, `Map@1` is

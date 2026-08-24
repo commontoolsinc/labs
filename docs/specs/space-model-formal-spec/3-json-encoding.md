@@ -2,8 +2,8 @@
 
 This document specifies the JSON-compatible wire format used to represent
 `FabricValue`s, including the `fvj1:` encoding prefix, the tagged-object
-convention, escaping mechanisms, codec engine responsibilities, and
-the reservation rules for `/`-prefixed keys.
+convention, escaping mechanisms, codec engine responsibilities, and the
+reservation rules for `/`-prefixed keys.
 
 ## Status
 
@@ -90,11 +90,11 @@ round-trip correctly.
 > **Base64url encoding convention.** All base64-encoded values in the JSON wire
 > format use the URL-safe base64url alphabet (`A-Za-z0-9-_`, per RFC 4648
 > Section 5). Encoders **must omit** trailing `=` padding characters. Decoders
-> **must accept** both padded and unpadded input for compatibility; standard-base64
-> characters (`+`, `/`) are still invalid and must be rejected. This convention
-> applies to `Bytes@1`, `BigInt@1`, `EpochNsec@1`, and `EpochDay@1` state
-> values, to the `hash` field of `Hash@1` state, and to the `publicKey` and
-> `privateKey` fields of `KeyPair@1` state.
+> **must accept** both padded and unpadded input for compatibility;
+> standard-base64 characters (`+`, `/`) are still invalid and must be rejected.
+> This convention applies to `Bytes@1`, `BigInt@1`, `EpochNsec@1`, and
+> `EpochDay@1` state values, to the `hash` field of `Hash@1` state, and to the
+> `publicKey` and `privateKey` fields of `KeyPair@1` state.
 
 The JSON key for a tagged value is the tag with `/` prepended, per Section 2:
 a value under `Link@1` is written `{ "/Link@1": <state> }`. What follows
@@ -240,35 +240,34 @@ See `1-fabric-values.md` Section 3.5.
 > Each codec must reject a state it did not write, rather than silently
 > producing garbage from one — wrong type, invalid format, or missing fields
 > alike. The rejection has two homes, and which one a check belongs in is
-> settled by what asking costs. `canDecode()` holds what is cheap to ask and
-> not already asked by the decoding: that the state is a `string`, that a
-> record carries the fields the decoding reads and that they are strings, that
-> a literal is one of a fixed set. `decode()` holds a check whose only
+> settled by what asking costs. `canDecode()` holds what is cheap to ask and not
+> already asked by the decoding: that the state is a `string`, that a record
+> carries the fields the decoding reads and that they are strings, that a
+> literal is one of a fixed set. `decode()` holds a check whose only
 > implementation is the decoding itself — that a base64url string (such as
-> `BigInt@1`, `EpochNsec@1`, `EpochDay@1`, or `Bytes@1`) is valid base64url
-> is answered by decoding it, so asking first costs that work twice.
+> `BigInt@1`, `EpochNsec@1`, `EpochDay@1`, or `Bytes@1`) is valid base64url is
+> answered by decoding it, so asking first costs that work twice.
 >
 > A codec may reject from `decode()` by throwing, or by returning a
-> `ProblematicValue` (see `1-fabric-values.md` Section 3.5); with a refusal
-> from `canDecode()` that makes three ways, and all three are equivalent,
-> because the engine settles them into one answer according to its own
-> `lenient` setting (see `1-fabric-values.md` Section 4.5). Which one a codec
-> uses is therefore a matter of what reads well where it is written, and
-> carries no meaning for a caller. This principle applies to all codecs. Wire
-> data is untrusted input. See `1-fabric-values.md` Section 7.4 for the
-> broader principle that applies to all code consuming decoded values.
+> `ProblematicValue` (see `1-fabric-values.md` Section 3.5); with a refusal from
+> `canDecode()` that makes three ways, and all three are equivalent, because the
+> engine settles them into one answer according to its own `lenient` setting
+> (see `1-fabric-values.md` Section 4.5). Which one a codec uses is therefore a
+> matter of what reads well where it is written, and carries no meaning for a
+> caller. This principle applies to all codecs. Wire data is untrusted input.
+> See `1-fabric-values.md` Section 7.4 for the broader principle that applies to
+> all code consuming decoded values.
 
 > **Sparse array encoding in JSON.** Even when an array contains holes, it is
-> encoded as a JSON array. Runs of consecutive holes are represented by
-> `hole` entries, each carrying the run length as a positive integer. This
-> preserves the array-as-array structure while efficiently encoding sparse
-> arrays:
+> encoded as a JSON array. Runs of consecutive holes are represented by `hole`
+> entries, each carrying the run length as a positive integer. This preserves
+> the array-as-array structure while efficiently encoding sparse arrays:
 >
-> - `[1, , undefined, 3]` encodes as
->   `[1, { "/hole": 1 }, { "/Undefined@1": null }, 3]`.
+> - `[1, , undefined, 3]` encodes as `[1, { "/hole": 1 }, { "/Undefined@1": null
+>   }, 3]`.
 > - `[1, , , , 5]` encodes as `[1, { "/hole": 3 }, 5]`.
-> - A very sparse array like `a = []; a[1000000] = 'x'` encodes as
->   `[{ "/hole": 1000000 }, "x"]`.
+> - A very sparse array like `a = []; a[1000000] = 'x'` encodes as `[{ "/hole":
+>   1000000 }, "x"]`.
 
 ## 4. Detection
 
@@ -278,18 +277,18 @@ built-in escape, or an encoding error.
 
 > **Data level vs. wire level.** User-data plain objects may carry any keys,
 > including `/`-prefixed ones. The `/object` and `/quote` escapes (Section 6)
-> exist precisely to represent such objects in encoded form without ambiguity.
-> A conforming encoder always wraps user-data objects that contain `/`-prefixed
-> keys via one of these escapes before they reach the wire, so bare
-> `/`-prefixed keys in the wire format are always encoding signals, never
-> literal user-data keys.
+> exist precisely to represent such objects in encoded form without ambiguity. A
+> conforming encoder always wraps user-data objects that contain `/`-prefixed
+> keys via one of these escapes before they reach the wire, so bare `/`-prefixed
+> keys in the wire format are always encoding signals, never literal user-data
+> keys.
 
 > **JS implementation note.** "Any keys" is the format's rule and this
 > implementation does not yet meet it: a plain object carrying `__proto__` or
-> `constructor` is refused rather than encoded, on both sides of the wire and
-> in the inert check that decides what a `FabricValue` is at all. Neither name
-> is reserved by the format, and neither is a limit of JavaScript. Both are
-> about copying: this implementation rebuilds a record by assignment, which for
+> `constructor` is refused rather than encoded, on both sides of the wire and in
+> the inert check that decides what a `FabricValue` is at all. Neither name is
+> reserved by the format, and neither is a limit of JavaScript. Both are about
+> copying: this implementation rebuilds a record by assignment, which for
 > `__proto__` reaches a prototype accessor instead of creating a property, and
 > other boundaries here already drop `constructor`. An implementation on a host
 > that does not route property assignment through a prototype chain reserves no
@@ -335,9 +334,8 @@ are still processed normally during decoding:
 { "/object": { "/myKey": { "/Link@1": { "id": "..." } } } }
 ```
 
-Decodes to: `{ "/myKey": <decoded Link> }`. The `/object` wrapper
-is stripped; inner keys are taken literally; inner values go through normal
-decoding.
+Decodes to: `{ "/myKey": <decoded Link> }`. The `/object` wrapper is stripped;
+inner keys are taken literally; inner values go through normal decoding.
 
 A state under this tag that is **not** a plain object is malformed wire data,
 and is refused rather than unwrapped — settled against `lenient` like any
@@ -353,23 +351,23 @@ makes the wire output most readable, not a correctness requirement.
 
 ### `/quote` — Fully Literal
 
-Wraps a value that should be returned exactly as-is, with no decoding
-of any nested special forms:
+Wraps a value that should be returned exactly as-is, with no decoding of any
+nested special forms:
 
 ```json
 { "/quote": { "/Link@1": { "id": "..." } } }
 ```
 
-Decodes to: `{ "/Link@1": { "id": "..." } }` — the inner structure is
-*not* decoded. It remains a plain object.
+Decodes to: `{ "/Link@1": { "id": "..." } }` — the inner structure is *not*
+decoded. It remains a plain object.
 
 **Freeze guarantee.** Although `/quote` skips type-tag interpretation, the
 result is still deep-frozen (arrays and plain objects within the quoted value
 are frozen via `Object.freeze()`). The immutability guarantee (see
-`1-fabric-values.md` Section 2.9) is a property of decoding output, not
-of whether decoding occurred. A caller receiving a value from the
-engine's `decode()` can always assume it is immutable, regardless of whether
-it came from a `/quote` path, a decoded type, or a plain literal.
+`1-fabric-values.md` Section 2.9) is a property of decoding output, not of
+whether decoding occurred. A caller receiving a value from the engine's
+`decode()` can always assume it is immutable, regardless of whether it came from
+a `/quote` path, a decoded type, or a plain literal.
 
 Use cases:
 - Storing schemas or examples that describe special types without instantiating
@@ -413,8 +411,8 @@ properties a decoder preserves regardless of which form it sees.
 The JSON engine generates and parses `/<Type>@<Version>` keys. It is also
 responsible for:
 
-- Owning recursion and tag-wrapping around the shallow per-type codecs
-  (see `1-fabric-values.md` Sections 2.4 and 4.5): tags come from
+- Owning recursion and tag-wrapping around the shallow per-type codecs (see
+  `1-fabric-values.md` Sections 2.4 and 4.5): tags come from
   `codec.tagForValue(value)` on encode, and decode routes each tag to its
   registered codec via the `CodecRegistry`.
 - Re-wrapping unknown types using the per-instance `wireTypeTag` preserved
@@ -515,20 +513,20 @@ including:
 > of the order in which their keys were inserted. This in turn lets two
 > independently-built encoders agree on a single byte-for-byte encoding for the
 > same logical value, which simplifies content addressing, deduplication, and
-> diffing. The sort key is the same UTF-8 byte order used by hashing, so the
-> two systems share one specification of "canonical key order."
+> diffing. The sort key is the same UTF-8 byte order used by hashing, so the two
+> systems share one specification of "canonical key order."
 >
 > The keys of a single-key tagged object (`/<Type>@<Version>`, `/object`,
-> `/quote`, `/hole`, etc.) are trivially "sorted" — there is only one key.
-> The requirement is meaningful only for plain objects with two or more keys,
-> and for the inner contents of `/object` and `/quote` wrappers.
+> `/quote`, `/hole`, etc.) are trivially "sorted" — there is only one key. The
+> requirement is meaningful only for plain objects with two or more keys, and
+> for the inner contents of `/object` and `/quote` wrappers.
 
 > **JS implementation note.** JavaScript's native string comparison (`<`, `>`,
 > `Array.prototype.sort` with no comparator) sorts by UTF-16 code units, which
 > differs from UTF-8 byte order when supplementary characters (U+10000 and
-> above) are present. An implementation must use a UTF-8-aware comparator
-> (or equivalently, sort by Unicode code point) when supplementary characters
-> may appear in keys. See `2-hash-byte-format.md` Section 5 for the detailed
+> above) are present. An implementation must use a UTF-8-aware comparator (or
+> equivalently, sort by Unicode code point) when supplementary characters may
+> appear in keys. See `2-hash-byte-format.md` Section 5 for the detailed
 > rationale and example.
 
 > **Decoder behavior.** A decoder is **not** required to validate that incoming

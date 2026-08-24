@@ -189,8 +189,8 @@ function feedLength(hasher: IncrementalHasher, value: number): void {
 }
 
 /**
- * Feeds a single `FabricValue` into the hasher, using the type-tagged
- * byte format from the byte-level spec.
+ * Feeds a single `FabricValue` into the hasher, using the type-tagged byte
+ * format from the byte-level spec.
  */
 function feedValue(hasher: IncrementalHasher, value: unknown): void {
   switch (typeof value) {

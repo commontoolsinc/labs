@@ -18,16 +18,16 @@ import { ProblematicStateError } from "./ProblematicStateError.ts";
 
 /**
  * Container for an unrecognized type's data, used for round-tripping. When the
- * codec system encounters a tag no codec claims during decoding,
- * it wraps the tag and state here; on re-encoding, the preserved pair
- * reproduces the original wire form. See Section 3.3 of the formal spec.
+ * codec system encounters a tag no codec claims during decoding, it wraps the
+ * tag and state here; on re-encoding, the preserved pair reproduces the
+ * original wire form. See Section 3.3 of the formal spec.
  *
- * The tag is a real tag, checked at construction. That is what makes the
- * round trip a promise rather than a hope: this class encodes back to
- * `<its tag>` over its state, so a tag a decoder would refuse would make an
- * instance that encodes and cannot be read back. A tag that is not a tag is
- * not an unknown type -- it names no type at all -- and belongs in a
- * `ProblematicValue`, which is built to carry one.
+ * The tag is a real tag, checked at construction. That is what makes the round
+ * trip a promise rather than a hope: this class encodes back to `<its tag>`
+ * over its state, so a tag a decoder would refuse would make an instance that
+ * encodes and cannot be read back. A tag that is not a tag is not an unknown
+ * type -- it names no type at all -- and belongs in a `ProblematicValue`, which
+ * is built to carry one.
  */
 export class UnknownValue extends BaseFabricInstance {
   /** The value of {@link #wireTypeTag}. */

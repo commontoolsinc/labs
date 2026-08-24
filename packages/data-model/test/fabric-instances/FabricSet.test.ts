@@ -71,35 +71,45 @@ describe("FabricSet", () => {
       });
     });
 
-    describe("`[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]`", () => {
-      it("via dispatch: `[DEEP_FREEZE]` throws not-yet-implemented", () => {
-        const fs = new FabricSet(new FrozenSet<FabricValue>([1, 2]));
-        expect(() => deepFreeze(fs)).toThrow(
-          "`FabricSet`: not yet implemented",
-        );
+    describe("[DEEP_FREEZE]", () => {
+      describe("via dispatch", () => {
+        it("throws not-yet-implemented", () => {
+          const fs = new FabricSet(new FrozenSet<FabricValue>([1, 2]));
+          expect(() => deepFreeze(fs)).toThrow(
+            "`FabricSet`: not yet implemented",
+          );
+        });
       });
 
-      it("via dispatch: `[IS_DEEP_FROZEN]` throws not-yet-implemented (via type guard)", () => {
-        const fs = new FabricSet(new FrozenSet<FabricValue>([1, 2]));
-        Object.freeze(fs);
-        expect(() => isValidDeepFrozenFabricValue(fs)).toThrow(
-          "`FabricSet`: not yet implemented",
-        );
+      describe("via direct member invocation", () => {
+        it("throws not-yet-implemented", () => {
+          const fs = new FabricSet(new FrozenSet<FabricValue>([1, 2]));
+          expect(() => fs[DEEP_FREEZE](subFreeze)).toThrow(
+            "`FabricSet`: not yet implemented",
+          );
+        });
+      });
+    });
+
+    describe("[IS_DEEP_FROZEN]", () => {
+      describe("via dispatch", () => {
+        it("throws not-yet-implemented (via type guard)", () => {
+          const fs = new FabricSet(new FrozenSet<FabricValue>([1, 2]));
+          Object.freeze(fs);
+          expect(() => isValidDeepFrozenFabricValue(fs)).toThrow(
+            "`FabricSet`: not yet implemented",
+          );
+        });
       });
 
-      it("via direct member invocation: `[DEEP_FREEZE]` throws not-yet-implemented", () => {
-        const fs = new FabricSet(new FrozenSet<FabricValue>([1, 2]));
-        expect(() => fs[DEEP_FREEZE](subFreeze)).toThrow(
-          "`FabricSet`: not yet implemented",
-        );
-      });
-
-      it("via direct member invocation: `[IS_DEEP_FROZEN]` throws not-yet-implemented", () => {
-        const fs = new FabricSet(new FrozenSet<FabricValue>([1, 2]));
-        Object.freeze(fs);
-        expect(() => fs[IS_DEEP_FROZEN](subIsDeepFrozen)).toThrow(
-          "`FabricSet`: not yet implemented",
-        );
+      describe("via direct member invocation", () => {
+        it("throws not-yet-implemented", () => {
+          const fs = new FabricSet(new FrozenSet<FabricValue>([1, 2]));
+          Object.freeze(fs);
+          expect(() => fs[IS_DEEP_FROZEN](subIsDeepFrozen)).toThrow(
+            "`FabricSet`: not yet implemented",
+          );
+        });
       });
     });
   });

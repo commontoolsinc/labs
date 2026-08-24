@@ -98,6 +98,32 @@ export type GraphQueryWalkOptions = {
    * never from ambient state (key-vocabulary.md §3).
    */
   identity: ScopeKeyIdentity;
+  /**
+   * Receives one call per SAME-SPACE document a value-link hop tried to
+   * read and found ABSENT: the miss's tracker-style key, the
+   * target-rooted selector the read needed, and the key of the REFERRER
+   * document whose link dead-ended. A value link the walk dead-ends on
+   * is a READ of that document, so the graph must stay reactive to it:
+   * the recorded miss is what lets the target's later CREATION re-fire
+   * the query — the session wake pass and the dirty refresh both consult
+   * it — and without one a quiet space never heals the miss (the OW45
+   * arm-B first-read lottery: first-hydration create-then-read ends with
+   * a write followed by pure reads, so no later commit exists to deliver
+   * through). The referrer key is the miss's lifecycle: a referrer that
+   * is re-walked and no longer dead-ends retires the misses it
+   * attributed. Deliberately SEPARATE from the schema tracker: tracker
+   * entries materialize as delivered entities — absence markers on the
+   * wire — while a miss is server-side reactivity only, and the client's
+   * view stays exactly as today until the document exists (the dedicated
+   * absence-confirmation flows depend on that). The meta-doc loader
+   * keeps tracking its absent targets in the tracker (delivered whole,
+   * marker included) — its narrower pre-existing contract.
+   */
+  onMissedDoc?: (
+    missKey: string,
+    selector: SchemaPathSelector,
+    referrerKey: string | undefined,
+  ) => void;
   /** Schema-traversal results reused across walks that share it. */
   memo?: SchemaMemo;
   /** Counters to add into. */
@@ -120,16 +146,47 @@ export class GraphQueryWalk {
   readonly #context: TraversalContext;
   readonly #memo: SchemaMemo;
   readonly stats: GraphQueryWalkStats;
+  /** identity-derived key → the caller-supplied key a visit recorded
+   * under (a query root naming an explicit scope INSTANCE — protocol.md
+   * §2's read row). Miss attribution consults this so a miss recorded
+   * from inside such a root attributes to the key the refresh will
+   * later release, not to a session-resolved key nothing ever walks. */
+  readonly #keyOverrides = new Map<string, string>();
 
   constructor(options: GraphQueryWalkOptions) {
     this.#manager = options.manager;
     this.#space = options.space;
     this.#identity = options.identity;
+    const { space, identity, onMissedDoc } = options;
     this.#context = createTraversalContext(
       new CompoundCycleTracker<FabricValue, JSONSchema | undefined>(),
       options.schemaTracker,
-      options.identity,
+      identity,
       true,
+      undefined,
+      // Record a value-link dead-end with the caller (see `onMissedDoc`
+      // above for the contract and why it is not the schema tracker).
+      // Same-space only: a foreign-space target can never ride this
+      // space's per-space watch, and the client's own cross-space load
+      // kick owns that case. The recorded selector is the target-rooted
+      // shape the read needed, so the arrival re-walk delivers the
+      // closure this read would have reached.
+      onMissedDoc === undefined ? undefined : (link, _sourceSpace, source) => {
+        if (link.space !== space) return;
+        const referrerKey = source === undefined
+          ? undefined
+          : schemaTrackerKey(space, source.id, source.scope, identity);
+        onMissedDoc(
+          schemaTrackerKey(space, link.id, link.scope, identity),
+          internPathSelector({
+            path: ["value", ...link.path],
+            schema: link.schema ?? false,
+          }),
+          referrerKey === undefined
+            ? undefined
+            : this.#keyOverrides.get(referrerKey) ?? referrerKey,
+        );
+      },
     );
     this.#memo = options.memo ?? createSchemaMemo();
     this.stats = options.stats ?? createGraphQueryWalkStats();
@@ -155,12 +212,16 @@ export class GraphQueryWalk {
       ? { ...selector, schema: false }
       : selector;
 
-    docKey ??= schemaTrackerKey(
+    const derivedKey = schemaTrackerKey(
       this.#space,
       document.address.id,
       document.address.scope,
       this.#identity,
     );
+    docKey ??= derivedKey;
+    if (docKey !== derivedKey) {
+      this.#keyOverrides.set(derivedKey, docKey);
+    }
     const internedSelector = internPathSelector(effectiveSelector);
     if (
       schemaTrackerCoversSelector(

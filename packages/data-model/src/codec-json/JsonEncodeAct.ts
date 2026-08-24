@@ -92,10 +92,10 @@ export class JsonEncodeAct extends BaseEncodeAct<JsonCodecValue, string> {
    * order. See `3-json-encoding.md` Section 10.
    *
    * A `/`-prefixed key collides with the tag form, so an object bearing one is
-   * escaped per `3-json-encoding.md` Section 6: all values are encoded first, and if every one is
-   * quote-safe the whole object is wrapped in `/quote` with any `/quote`
-   * children collapsed into it, and otherwise in `/object` so that the decoder
-   * walks the entries.
+   * escaped per `3-json-encoding.md` Section 6: all values are encoded first,
+   * and if every one is quote-safe the whole object is wrapped in `/quote` with
+   * any `/quote` children collapsed into it, and otherwise in `/object` so that
+   * the decoder walks the entries.
    */
   protected override encodePlainObject(
     value: Record<string, FabricValue>,

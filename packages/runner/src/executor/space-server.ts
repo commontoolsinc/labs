@@ -143,6 +143,17 @@ const timing = getLogger("executor", { enabled: false });
  * and logged only at debug level). */
 export const STRUCTURE_LOAD_STUCK_AFTER = 8;
 
+/** Consecutive pre-queue drain deferrals (the arrival-order barrier's
+ * view-lag, sidecar-sync-failure, and queue-time-throw arms) after
+ * which the blocking key counts as STUCK (`stats.events.preQueueDeferralStuck`, once per
+ * crossing) — the pre-queue mirror of `STRUCTURE_LOAD_STUCK_AFTER`.
+ * Neither arm reaches the queued class's `#eventDeferrals`, so the §5
+ * DROP hardening never applies before queueing; this counter is the
+ * detectability floor, and the order-preserving hardening (a persistent
+ * streak becomes a notice IN ARRIVAL POSITION) is the OW45 row's owed
+ * follow-up. */
+export const EVENT_PREQUEUE_STUCK_AFTER = 8;
+
 /** The sanctioned internal stamp kind's durable action id (serving-loop.md
  * §3d, RULED 2026-08-05: stage F names the kinds when it installs the
  * seal destination). */
@@ -608,6 +619,13 @@ export class SpaceServer implements TransactionSealDestination {
    * re-arms after a REAL wait even when no input ever arrives. Input
    * arriving first promotes the owed scan immediately (#drainFeed). */
   #deferredRescanTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Consecutive pre-queue barrier deferrals per blocking key (the
+   * view-lagged entry's eventId; the failing sidecar's doc id; a
+   * queue-time thrower's `queue\0`-prefixed eventId — its own namespace,
+   * because the view check clears the bare eventId before the queue
+   * attempt). Cleared when the key passes ITS arm's check; see
+   * EVENT_PREQUEUE_STUCK_AFTER. */
+  #preQueueDeferralStreaks = new Map<string, number>();
   /** Post-commit effects of sealed transactions, deferred per wave
    * (serving-loop.md §3: effects hand to the outbox POST-commit, never
    * at seal). Admitted to the outbox after the wave's commit step;
@@ -888,6 +906,9 @@ export class SpaceServer implements TransactionSealDestination {
     // per-stream eventWatermark — reprocess. The scan is the same
     // discovery the per-wave drain runs; activation only ARMS it.
     this.#eventDeferrals.clear();
+    // The pre-queue streaks reset with it: a stale streak from a prior
+    // tenure must not resume an obsolete count on a later re-block.
+    this.#preQueueDeferralStreaks.clear();
     const pendingEventDocs = Engine.selectPendingStreamEventDocs(engine);
     if (pendingEventDocs.length > 0) {
       this.#eventScanOwed = true;
@@ -2280,38 +2301,70 @@ export class SpaceServer implements TransactionSealDestination {
     const pendingDocs = Engine.selectPendingStreamEventDocs(engine);
     if (pendingDocs.length === 0) return 0;
     let queued = 0;
-    for (const doc of pendingDocs) {
-      // Materialize the sidecar into the SERVING replica before any
-      // index-addressed mark can be written against it: a cold view
-      // would materialize ghost entries (the engine's admission guard
-      // refuses the resulting wave — the failure mode this sync
-      // exists to prevent). The stream's own doc is synced too so the
-      // no-handler auto-load's meta chain reads a warm view.
-      try {
-        await runtime.getCellFromLink({
-          space,
-          id: doc.id as never,
-          scope: "space",
-          path: [],
-        }).sync();
-      } catch (error) {
-        logger.warn("event-sidecar-sync-failed", () => [
-          `sidecar sync for ${doc.id} failed; its events defer to the ` +
-          "next wave",
-          error,
-        ]);
-        this.#armDeferredRescan();
-        continue;
-      }
-      // The FULL stored log — mark indices address positions in it.
-      const stored = ((Engine.read(engine, { id: doc.id })?.value ??
-        {}) as StreamEventsDocValue).entries ?? [];
-      const runnable = [...doc.entries].sort(
-        (a, b) =>
-          (a.seq ?? Number.MAX_SAFE_INTEGER) -
-          (b.seq ?? Number.MAX_SAFE_INTEGER),
+    // Pending entries process ACROSS sidecars in append commit-seq
+    // order — events.md §2: per stream, commit-seq order; across streams
+    // in one space, arrival order. A deferral (a lagging sidecar view or
+    // a failed sidecar sync) is a BARRIER, not a skip: every entry at or
+    // behind the deferred entry's arrival position waits with it, so a
+    // later arrival's consequence can never land ahead of an earlier
+    // one. Seq-less legacy entries sort last; the sidecar-id tie-break
+    // keeps one wave's co-committed entries in a stable order.
+    const ordered = pendingDocs
+      .flatMap((doc) => doc.entries.map((entry) => ({ doc, entry })))
+      .sort((a, b) =>
+        ((a.entry.seq ?? Number.MAX_SAFE_INTEGER) -
+          (b.entry.seq ?? Number.MAX_SAFE_INTEGER)) ||
+        a.doc.id.localeCompare(b.doc.id)
       );
-      for (const entry of runnable) {
+    // Sidecars materialize into the SERVING replica on first touch, once
+    // per pass: a cold view would materialize ghost entries (the
+    // engine's admission guard refuses the resulting wave — the failure
+    // mode the sync exists to prevent). The stream's own doc is synced
+    // too so the no-handler auto-load's meta chain reads a warm view.
+    // The stored log is captured beside the sync — mark indices address
+    // positions in it.
+    const sidecars = new Map<
+      string,
+      { stored: StreamEventsDocValue["entries"] } | "sync-failed"
+    >();
+    for (const { doc, entry } of ordered) {
+      let sidecar = sidecars.get(doc.id);
+      if (sidecar === undefined) {
+        try {
+          await runtime.getCellFromLink({
+            space,
+            id: doc.id as never,
+            scope: "space",
+            path: [],
+          }).sync();
+          sidecar = {
+            stored: ((Engine.read(engine, { id: doc.id })?.value ??
+              {}) as StreamEventsDocValue).entries ?? [],
+          };
+          this.#preQueueDeferralStreaks.delete(doc.id);
+        } catch (error) {
+          logger.warn("event-sidecar-sync-failed", () => [
+            `sidecar sync for ${doc.id} failed; its events — and every ` +
+            "later-arrived event behind them — defer to the next wave",
+            error,
+          ]);
+          sidecar = "sync-failed";
+        }
+        sidecars.set(doc.id, sidecar);
+      }
+      if (sidecar === "sync-failed") {
+        // Deferral is a BARRIER, not a skip: everything at or behind
+        // this entry's arrival position waits with it, or a later
+        // arrival's consequence lands ahead of an earlier one.
+        this.#notePreQueueDeferral(
+          doc.id,
+          () => `sidecar ${doc.id} (sync failing)`,
+        );
+        this.#armDeferredRescan();
+        break;
+      }
+      const stored = sidecar.stored ?? [];
+      {
         const index = stored.findIndex((candidate) =>
           candidate?.eventId === entry.eventId &&
           candidate?.seq === entry.seq
@@ -2344,11 +2397,20 @@ export class SpaceServer implements TransactionSealDestination {
           if (viewEntry?.eventId !== entry.eventId) {
             logger.warn("event-view-lag", () => [
               `drain deferring ${entry.eventId}: replica view holds ` +
-              `${JSON.stringify(viewEntry)} at index ${index}`,
+              `${JSON.stringify(viewEntry)} at index ${index}; ` +
+              "later-arrived events wait behind it",
             ]);
+            // The same barrier as above: the deferred entry's
+            // still-catching-up view must not let later arrivals run
+            // ahead of it.
+            this.#notePreQueueDeferral(
+              entry.eventId,
+              () => `event ${entry.eventId} (replica view lagging)`,
+            );
             this.#armDeferredRescan();
-            continue;
+            break;
           }
+          this.#preQueueDeferralStreaks.delete(entry.eventId);
         }
         // Only a NUMERIC-seq consequenced twin skips this entry
         // (round-2 thread T12): a seq-less consequenced entry (the
@@ -2539,12 +2601,28 @@ export class SpaceServer implements TransactionSealDestination {
             },
           );
           queued += 1;
+          this.#preQueueDeferralStreaks.delete(`queue\0${entry.eventId}`);
         } catch (drainError) {
           // Nothing was queued: release the guard (a throw between the
           // add and the queue must not strand the entry until park).
           this.#drainInFlight.delete(entry.eventId);
           logger.warn("drain-debug", () => ["per-entry threw", drainError]);
+          // A queue-time throw is a deferral like the arms above, and
+          // the same BARRIER applies: letting later arrivals queue in
+          // this pass while an earlier arrival re-drains later is the
+          // ordering inversion this drain exists to prevent. The streak
+          // key carries its own namespace: the view check CLEARS the
+          // bare eventId key when it passes — before the queue attempt —
+          // so a shared key would oscillate 0→1 forever and the stuck
+          // crossing could never fire for exactly this arm. Each arm's
+          // streak clears when the key passes ITS OWN check: the queue
+          // arm's clears on a successful queue.
+          this.#notePreQueueDeferral(
+            `queue\0${entry.eventId}`,
+            () => `event ${entry.eventId} (queue-time throw)`,
+          );
           this.#armDeferredRescan();
+          break;
         }
       }
     }
@@ -3158,6 +3236,30 @@ export class SpaceServer implements TransactionSealDestination {
         "space serves nothing for it — a forever-park unless the " +
         "missing docs arrive (verification-coverage.md OW46; the " +
         "home-profile program-write-loss shape)",
+      ]);
+    }
+  }
+
+  /** Track one blocking key's consecutive PRE-QUEUE drain deferrals
+   * (the arrival-order barrier's arms) and surface the STUCK crossing:
+   * count `stats.events.preQueueDeferralStuck` once at
+   * `EVENT_PREQUEUE_STUCK_AFTER`, and WARN there and at each doubling of
+   * the streak — the same discipline as `#noteStructureLoadDeferral`.
+   * The streak clears when the key passes its arm's check. */
+  #notePreQueueDeferral(key: string, describe: () => string): void {
+    const streak = (this.#preQueueDeferralStreaks.get(key) ?? 0) + 1;
+    this.#preQueueDeferralStreaks.set(key, streak);
+    if (streak < EVENT_PREQUEUE_STUCK_AFTER) return;
+    if (streak === EVENT_PREQUEUE_STUCK_AFTER) {
+      this.#options.stats.events.preQueueDeferralStuck += 1;
+    }
+    if ((streak & (streak - 1)) === 0) {
+      logger.warn("event-prequeue-stuck", () => [
+        `${describe()} has deferred the drain's arrival-order barrier ` +
+        `${streak} consecutive passes in ${this.#options.space}: every ` +
+        "later-arrived event waits behind it (verification-coverage.md " +
+        "OW45 arm B; the order-preserving hardening — a notice in " +
+        "arrival position — is the row's owed follow-up)",
       ]);
     }
   }
