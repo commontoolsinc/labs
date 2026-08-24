@@ -34,16 +34,14 @@ If this document conflicts with code or passing tests, code/tests win.
 
 Before AST transforms, `transformCfDirective()`:
 
-1. Scans the first non-empty source line for transform directives.
-2. Unless that line is `/// <cf-disable-transform />`, injects:
-   - `import { __cfHelpers } from "commonfabric";` (a named import of the
-     internal helper binding, not a namespace import)
-   - a forwarding `h(...)` helper delegating to `__cfHelpers.h` (so authors
-     need not import the JSX factory manually, and so the helper module is not
-     tree-shaken before binding).
+1. Locates the first non-empty source line.
+2. Prepends `import { __cfHelpers } from "commonfabric";` ahead of it (a named
+   import of the internal helper binding, not a namespace import), and appends
+   after the source a forwarding `h(...)` helper delegating to
+   `__cfHelpers.h` — so authors need not import the JSX factory manually, and
+   the helper module is not tree-shaken before binding. §16.5 depends on that
+   split: exactly one line is prepended.
 3. Rejects sources that contain identifier `__cfHelpers` anywhere in the AST.
-4. Strips opt-out `/// <cf-disable-transform />` from the source before later
-   stages.
 
 These string-level steps run in `transformCfDirective()`
 (`src/core/cf-helpers.ts`) before any AST transformer, because symbol binding
@@ -66,17 +64,6 @@ Legacy stored-envelope compatibility is deliberately separate from
   unchanged because it already contains the injected helper envelope. Normal
   authoring paths never set that option, so authored `__cfHelpers` input still
   throws (`packages/runner/src/harness/pretransform.ts`).
-
-Opt-out note:
-
-- `/// <cf-disable-transform />` is the explicit opt-out. It is honored only
-  at **column zero** of the first content line (leading blank lines are fine;
-  leading whitespace on the directive line is not), mirroring TypeScript's
-  own triple-slash directives (CT-1815, #4618;
-  `src/core/runtime-contract.ts`). An indented lookalike is silently ignored
-  and the file transforms normally; `sourceHasIgnoredDisableDirective` is
-  exported so compile-time callers can warn the author (the runtime boot path
-  never consults it).
 
 ### 2.2 Pipeline object and cross-stage state
 
@@ -2173,12 +2160,8 @@ not override `filter()` (the default returns `true`;
 source file the pipeline visits receives the guards, including:
 
 - files with no Common Fabric imports or builders at all, and
-- files that opted out via `/// <cf-disable-transform />` — the opt-out only
-  suppresses the string-level helper injection (§2.1); the AST pipeline still
-  runs, and for a **function-free** opted-out file the guards are the only
-  synthetic addition; an opted-out file with top-level functions still gets
-  stage-26 hardening (§17), which has no helper gate (verified by direct
-  pipeline probe; no committed fixture pins the opt-out case).
+- **function-free** files, where the guards are the only synthetic addition; a
+  file with top-level functions also gets stage-26 hardening (§17).
 
 The stage reads no cross-stage state and never reports diagnostics: its
 `transform()` touches only `context.factory` and `context.sourceFile`.
@@ -2306,8 +2289,7 @@ corpus, not the verifier, is what pins them today.
   `imports → guards → … → __cfLift_N/__cfPattern_N consts before their owning
   statements` (§11.3 interplay).
 - **Not pinned by committed tests** (verified only by direct probe as of this
-  writing): guard insertion into `/// <cf-disable-transform />` files;
-  insertion after only the *first* contiguous import run when imports are
+  writing): insertion after only the *first* contiguous import run when imports are
   interleaved with statements; behavior when authored code already declares a
   guard name at module scope (no collision check exists in the transformer).
 
@@ -2335,10 +2317,8 @@ level the helper is an identity function (`CfDataFunction = <T>(value: T) =>
 T`, `packages/api/index.ts`), so wrapping does not perturb inference.
 
 The stage extends `HelpersOnlyTransformer` (`src/core/transformers.ts`), so it
-runs only when the injected `__cfHelpers` import is present — i.e. for every
-default-transformed source (§2.1) and never under
-`/// <cf-disable-transform />` (asserted by `test/transform.test.ts`, "skips
-snapshot wrapping when cf-disable-transform is present"). Introduced when SES
+runs when the injected `__cfHelpers` import is present, which §2.1 makes true
+of every source the pipeline compiles. Introduced when SES
 became the default runner sandbox (#3168, originally emitting `__ct_data`;
 renamed with the Common Tools compatibility-layer removal, #3252); the
 default-export callable rule below was added by the SES default-export
@@ -2731,9 +2711,10 @@ authored bytes. `injectCfHelpers` (`src/core/cf-helpers.ts`) builds
 appended after the source. The runner compensates in its `mapSpan`
 (`patternCoverageOptionsForCompile`, `packages/runner/src/harness/engine.ts`):
 
-- every span is shifted by `lineOffset: -1` — or `0` when the source disables
-  the transform (`sourceDisablesCfTransform`), since the opt-out path blanks
-  the directive line in place and injects nothing;
+- every span is shifted by `lineOffset: -1`, the single prepended line — or by
+  `0` for the two shapes that reach the compiler unchanged: a stored legacy
+  envelope whose bytes already carry the helper import, and a file with no
+  content line to inject ahead of;
 - spans falling outside `[1, authoredLineCount]` after the shift are vetoed
   (`mapSpan` returns `undefined`), which drops counters from injected helper
   code: the prepended import could never span (imports are excluded, §16.2),

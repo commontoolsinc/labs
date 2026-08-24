@@ -20,7 +20,6 @@ import {
   CF_HELPERS_IDENTIFIER,
   CFHelpers,
   injectCfHelpers,
-  sourceDisablesCfTransform,
   transformCfDirective,
 } from "../../src/core/cf-helpers.ts";
 
@@ -206,17 +205,6 @@ Deno.test("transformCfDirective injects the helpers import for an ordinary sourc
   assert(out.startsWith(`import { ${CF_HELPERS_IDENTIFIER} } from`));
   assert(out.includes(source));
   assert(out.includes(`${CF_HELPERS_IDENTIFIER}.h.apply`));
-});
-
-Deno.test("transformCfDirective blanks a leading cf-disable-transform directive", () => {
-  const source = `/// <cf-disable-transform />\nconst answer = 42;`;
-  assert(sourceDisablesCfTransform(source));
-  const out = transformCfDirective(source);
-  const lines = out.split("\n");
-  // The directive line is replaced by an empty line; no helper import is added.
-  assertEquals(lines[0], "");
-  assertEquals(lines[1], "const answer = 42;");
-  assertFalse(out.includes(CF_HELPERS_IDENTIFIER));
 });
 
 Deno.test("injectCfHelpers uses TypeScript helper-shim syntax by default", () => {

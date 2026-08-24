@@ -117,7 +117,7 @@ than guessing at unsupported internals.
 | Violation | Fix |
 |-----------|-----|
 | array schema at the root of `generateObject` | Wrap it in an object such as `{ items: T[] }` |
-| accidental `/// <cf-disable-transform />` in a file relying on CTS rewrites | Remove the opt-out or provide explicit runtime forms/schemas |
+| a pattern output field whose type is left to inference | Declare an explicit Output type, `pattern<Input, Output>(...)` |
 | prompt derived from agent-written cells | Split the source cells to avoid loops |
 | invalid model-name format | Use `vendor:model` |
 
