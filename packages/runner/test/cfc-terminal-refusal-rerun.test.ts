@@ -42,7 +42,11 @@ const seedStrict = async () => {
   const runtime = new Runtime({
     apiUrl: new URL("https://example.com"),
     storageManager,
-    cfcEnforcementMode: "enforce-strict",
+    // The shipped shell posture; the action's own transaction escalates to
+    // `enforce-strict` per-tx, the same seam cfc-writer-fit uses. Running the
+    // whole runtime strict would put the SEED under strict too, and seeding a
+    // label means writing the protected `cfc` path.
+    cfcEnforcementMode: "enforce-explicit",
     cfcFlowLabels: "persist",
   });
   const space = signer.did();
@@ -58,7 +62,9 @@ const seedStrict = async () => {
     value: { secret: "s3cr3t" },
     cfc: LABELLED,
   });
-  expect((await seed.commit()).ok).toBeDefined();
+  // Assert on the ERROR rather than on `ok`: a seed that cannot land says why
+  // in the failure message instead of reporting an undefined `ok`.
+  expect((await seed.commit()).error).toBeUndefined();
   return { storageManager, runtime, space, source, sourceId };
 };
 
@@ -76,6 +82,7 @@ describe("cfc terminal refusal re-run", () => {
       let runs = 0;
       const copy: Action = (tx) => {
         runs++;
+        tx.setCfcEnforcementMode("enforce-strict");
         const secret = source.withTx(tx).get()?.secret ?? "";
         out.withTx(tx).set({ copied: `${secret}!` });
       };
@@ -127,6 +134,7 @@ describe("cfc terminal refusal re-run", () => {
       let runs = 0;
       const copy: Action = (tx) => {
         runs++;
+        tx.setCfcEnforcementMode("enforce-strict");
         const secret = source.withTx(tx).get()?.secret ?? "";
         out.withTx(tx).set({ copied: `${secret}!` });
       };
