@@ -289,6 +289,14 @@ export async function ensureSpaceRootPattern(
   options: {
     isHomeSpace: boolean;
     stampCreationTx?: (tx: IExtendedStorageTransaction) => void;
+    /** Per-attempt hook for the freshness half's write arms (threaded
+     * into `checkDefaultPattern`): the serving seat passes its
+     * owner-snapshot setter so the reconcile's transactions — the
+     * update arm runs `runtime.setup` on the root, the label-minting
+     * class — carry the OWNER, matching the creation arm (F1 of this
+     * stage's adversarial review; without it the reconcile commits
+     * under the ambient SERVICE snapshot). */
+    stampReconcileTx?: (tx: IExtendedStorageTransaction) => void;
   },
 ): Promise<EnsureSpaceRootResult> {
   const officialSource = options.isHomeSpace
@@ -308,6 +316,7 @@ export async function ensureSpaceRootPattern(
         space,
         existing,
         officialSource,
+        options.stampReconcileTx,
       ),
     };
   }
@@ -356,7 +365,13 @@ export async function ensureSpaceRootPattern(
   }
   return {
     outcome: "raced-existing",
-    reconcile: await reconcileSpaceRoot(runtime, space, root, officialSource),
+    reconcile: await reconcileSpaceRoot(
+      runtime,
+      space,
+      root,
+      officialSource,
+      options.stampReconcileTx,
+    ),
   };
 }
 
@@ -368,16 +383,20 @@ async function reconcileSpaceRoot(
   space: MemorySpace,
   root: Cell<NameSchema>,
   officialSource: string,
+  stampTx?: (tx: IExtendedStorageTransaction) => void,
 ): Promise<PatternUpdateOutcome> {
   try {
     // Gated on `experimental.systemPatternAutoUpdate` inside
     // `checkDefaultPattern` (the serving-runtime factory enables it —
     // serving-loop.md §3e); its two `editWithRetry` writes stamp
     // themselves `bookkeeping` (pattern-updater.ts, the 2026-08-05
-    // ruling).
+    // ruling), and the caller's snapshot hook rides every attempt so
+    // the reconcile's writes carry the same acting snapshot as the
+    // creation arm.
     return await runtime.patternUpdater.checkDefaultPattern(
       root,
       officialSource,
+      stampTx !== undefined ? { stampTx } : undefined,
     );
   } catch (error) {
     logger.warn("space-root-reconcile-failed", () => [

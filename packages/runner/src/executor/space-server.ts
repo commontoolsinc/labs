@@ -3487,6 +3487,16 @@ export class SpaceServer implements TransactionSealDestination {
             runtime.trustSnapshotForPrincipal(owner),
           );
         },
+        // The FRESHNESS half's write arms carry the same owner
+        // snapshot (F1): the updater stamps its own actionIds
+        // (pattern-update/provenance|transition), so this hook sets
+        // ONLY the snapshot — a second stampServerRun here would
+        // overwrite those actionIds' wave context.
+        stampReconcileTx: (tx) => {
+          tx.setCfcTrustSnapshot(
+            runtime.trustSnapshotForPrincipal(owner),
+          );
+        },
       });
       stats.runs += 1;
       if (result.outcome === "created") stats.created += 1;

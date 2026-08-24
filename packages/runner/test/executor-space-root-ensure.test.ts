@@ -340,6 +340,27 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
         await new Promise((resolve) => setTimeout(resolve, 250));
       }
     }
+
+    // F1 (adversarial review of this PR): the FRESHNESS half's
+    // transactions must carry the resolved OWNER's snapshot too — the
+    // update arm runs `runtime.setup` on the root (the label-minting
+    // class), and a transaction's birth snapshot is the AMBIENT SERVICE
+    // one (`trustSnapshotProvider()`), which the updater's bookkeeping
+    // stamp deliberately leaves alone. Without the ensure's hook
+    // threaded through `checkDefaultPattern`, every stale space's next
+    // activation restages its root AS THE SERVICE — OW59's named
+    // restage shape. Asserted on the LIVE transactions the reconcile
+    // minted (watched RED before the hook existed: actingPrincipal was
+    // the service DID).
+    const reconcileTxs = mintedTxs.filter((tx) =>
+      waveRunContextOf(tx)?.actionId?.startsWith("pattern-update/") === true
+    );
+    expect(reconcileTxs.length).toBeGreaterThan(0);
+    for (const tx of reconcileTxs) {
+      const snapshot = tx.getCfcState().trustSnapshot;
+      expect(snapshot?.actingPrincipal).toBe(space);
+      expect(snapshot?.actingPrincipal).not.toBe(serviceSigner.did());
+    }
   });
 
   it("the ensure's creation tx carries the resolved OWNER's trust snapshot, never the service's (granted-owner space, default-app source)", async () => {
