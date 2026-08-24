@@ -32,14 +32,28 @@ Recorded here per the arc's flag-don't-fill rule. Each is the design's
 own recommendation (its §-references), adopted without a fresh ruling;
 any of them reverting is a bounded diff, not a redesign.
 
-1. **Attribution: owner-resolved, fail-closed (design §4 option (b);
-   open question 2).** The ensure resolves the space's ACL owner
-   through a thin public API over the memory server's
+1. **Attribution: owner-resolved, fail-closed (design §4 option (b)'s
+   SNAPSHOT half; open question 2).** The ensure resolves the space's
+   ACL owner through a thin public API over the memory server's
    `#resolveSpaceOwnerBinding` — the one ruled service-identity ACL
-   read (OW31, 2026-08-19) — and the creation transaction stamps
-   `bookkeeping` PLUS an owner-resolved per-run CFC trust snapshot
+   read (OW31, 2026-08-19) — and BOTH write halves carry the
+   owner-resolved per-run CFC trust snapshot
    (`trustSnapshotForPrincipal(owner)`), the exact follow-up OW59's Q3
-   caveat pre-named. A space whose ACL yields no concrete owner gets NO
+   caveat pre-named: the creation transaction (stamped `bookkeeping` +
+   snapshot) and, after the adversarial review's F1, the freshness
+   half's two write arms (the ensure's snapshot hook threads through
+   `checkDefaultPattern` — the update arm runs `runtime.setup` on the
+   root, the label-minting class, and shipped first under the ambient
+   SERVICE snapshot: OW59's named restage shape, caught by the
+   review's live probe, pinned red-first on the minted transactions).
+   PRECISION owed to the review's F3: design §4(b)'s ACTING-IDENTITY
+   carriage is NOT built — the stamp carries no `acting`, so
+   `homeSpacePrincipalFor(tx)`/`getHomeSpaceCell(tx)` would
+   fail-closed-throw if a served setup resolved a home space. Inert
+   today (the system root patterns resolve no home during setup) and
+   consistent with assumption 2's interim, but stage 2's owner-scoped
+   custom-URL read is exactly a home-space resolution and needs the
+   carriage built first. A space whose ACL yields no concrete owner gets NO
    ensure: skip, warn, count — never the service DID as fallback
    (`homeSpacePrincipalFor`'s posture; OW53's ruled shape). The retry
    cadence is measurement-amended: the design said "retry next tenure"
@@ -126,8 +140,16 @@ any of them reverting is a bounded diff, not a redesign.
   so a slow first compile costs the first wave only; the ensure's
   transactions resolve at seal-accept and their engine write rides that
   cycle's wave commit, so awaiting in-cycle cannot deadlock against the
-  wave. All three activation triggers ensure (sessionless included —
-  design open question 5's recommendation, recorded above).
+  wave. "Non-blocking" means at ACTIVATION (the step never runs inside
+  `activate()`); the awaited step itself is DEADLINE-BOUNDED (review
+  F2: `rootEnsureDeadlineMs`, default 30 s — the resolve path fetches
+  with no timeout of its own and can point at a remote host while the
+  renew timer keeps the lease, so an unbounded await was a wedged
+  tenure holding its lease with no failover and no loop-failed park;
+  the deadline lands in the counted-failure arm, the tenure proceeds
+  serving, and the detached work's eventual writes converge by
+  address). All three activation triggers ensure (sessionless included
+  — design open question 5's recommendation, recorded above).
 - **Single-flight is STRUCTURAL, not enforced** — the
   design-conformance fact this build verified rather than assumed: a
   SpaceServer is a single-tenure object (`#parkRequested` never resets;
@@ -169,7 +191,12 @@ any of them reverting is a bounded diff, not a redesign.
   `reconciled`, `skippedNoOwner`, `failures`. Failures are counted and
   cleared for the tenure (the next activation retries), so a
   deterministic failure cannot spin the loop; in stage 1 the client-era
-  creation path still covers the space regardless.
+  creation path still covers the space regardless. Counting caveat
+  (review F4, recorded): `created`/`reconciled` count at seal-accept,
+  so a wave dropped whole after admission leaves a count with no
+  durable write — stats-only, self-healing next tenure; triangulate
+  against `waves`/`lease.lost`. The no-owner WARN fires once per
+  tenure (review F6); re-skips count silently.
 
 ## Red-first evidence
 
@@ -198,6 +225,13 @@ Every behavior pin was watched failing before its seat/fix existed:
   the piece provenance suite red THROUGH the delegated controller
   (proving the controller runs the shared core); the ensure's reconcile
   dropped → the aged-root core pin red.
+- **The review-fix pins (F1, F2)**, both watched red at the reviewed
+  head: the reconcile-attribution pin (the `pattern-update/…`
+  transactions' `actingPrincipal` came back as the SERVICE DID before
+  the hook — the review's own live probe reproduced) and the wedged-
+  ensure deadline pin (a never-settling pattern fetch; before the
+  deadline existed the failure never counted and the pin timed out at
+  its 20 s net).
 - **The memory API pins**
   (`packages/memory/test/v2-server-space-owner.test.ts`), watched red as
   `TS2339: Property 'resolveSpaceOwner' does not exist on type 'Server'`
@@ -328,7 +362,9 @@ Counts at the final tree (one file per invocation):
 
 - `packages/memory` `v2-server-space-owner.test.ts` — 4/4.
 - `packages/runner` `ensure-space-root.test.ts` — 6/6 steps;
-  `executor-space-root-ensure.test.ts` — 5/5 steps (real-clock list).
+  `executor-space-root-ensure.test.ts` — 6/6 steps (real-clock list;
+  includes the review-fix pins F1 — reconcile attribution on the live
+  transactions — and F2 — the wedged-ensure deadline).
 - `packages/piece` `pattern-source-provenance.test.ts` 3/3 steps (the
   OFF-arm witness included), `ensure-default-pattern.test.ts` 16/16
   steps, `check-update-default-pattern.test.ts` 69/69 steps,

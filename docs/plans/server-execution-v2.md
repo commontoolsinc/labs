@@ -40,8 +40,11 @@ it in the PR that moves the state.
 
 **Delta 2026-08-23 (this PR): OW45 arm-B server-ensure STAGE 1 BUILT —
 the space-root ensure (existence + freshness, no start) runs at the
-SpaceServer's activation as a lease-guarded, single-flight,
-NON-BLOCKING owed step; the client is behaviorally UNCHANGED.** The
+SpaceServer's activation as a lease-guarded, single-flight owed step —
+non-blocking at activation, DEADLINE-BOUNDED in the first cycle
+(rootEnsureDeadlineMs, default 30 s: a wedged fetch must never hold a
+tenure's lease — the build review's F2); the client is behaviorally
+UNCHANGED.** The
 design of record is PR #6209
 (`docs/history/plans/server-execution-v2/optimize/ow45-armb-server-ensure-design.md`,
 owner-green-lit 2026-08-23); the build report with the four

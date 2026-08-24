@@ -5602,7 +5602,18 @@ supply; OW29/OW32/OW34 closed):
     path); attribution is owner-resolved fail-closed through the memory
     server's new `resolveSpaceOwner` (the OW31-ruled service-identity
     ACL read; the OW59 Q3 caveat's named follow-up — the creation tx
-    carries `trustSnapshotForPrincipal(owner)`, pinned live), with
+    AND the freshness half's write arms carry
+    `trustSnapshotForPrincipal(owner)`, both pinned live on the minted
+    transactions; the reconcile arm was the build review's F1 — it
+    shipped first under the ambient SERVICE snapshot, exactly OW59's
+    restage shape, caught by live probe and fixed red-first by
+    threading the ensure's snapshot hook through `checkDefaultPattern`'s
+    two default-root write arms). Design §4(b)'s ACTING-IDENTITY
+    carriage is NOT built (review F3, recorded): the stamp carries no
+    `acting`, so `homeSpacePrincipalFor`/`getHomeSpaceCell` would
+    fail-closed-throw if a served setup resolved home — inert today
+    and consistent with the custom-URL interim, but stage 2's
+    owner-scoped home read needs it built first. With
     no-owner spaces SKIPPED counted-and-warned (OW53's shape) — plus
     the measurement-driven SAME-TENURE retry: the live boot order has
     activation (session-open-triggered) PRECEDE the client bootstrap's
