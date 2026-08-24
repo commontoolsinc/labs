@@ -1135,6 +1135,13 @@ Two facts cannot be read off that tree and are carried explicitly in
 stripped from `argv` before Cliffy parses, in `lib/log-level.ts` and
 `lib/color-mode.ts`), and the provider table binding slots to live data.
 
+`deno task check-completion-slots` is what keeps the provider table from falling
+behind that tree. It walks the same commands and names every value-taking option
+and every positional with no provider, no enumerated set, and no recorded reason
+for having none — and the same subtraction the other way, so a provider entry
+matching no slot fails too. It cannot decide that a slot should complete; it
+requires that somebody decided.
+
 The tests divide the same way. `test/completion-*.test.ts` cover everything
 answerable without a fabric — line resolution, candidate shaping, and the
 degrade-to-empty path. Every provider that reads state — a fabric, the local

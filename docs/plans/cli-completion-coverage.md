@@ -95,10 +95,13 @@ read before picking one up; this table is the roll-up.
 | 16 | Two provider entries that can never fire | hygiene | done |
 | 17 | The README table omits the top-level spellings | hygiene | done |
 | 18 | A live-provider test seam | mechanism | done |
-| 19 | A gate that fails when a new slot has no decision | mechanism | not started |
+| 19 | A gate that fails when a new slot has no decision | mechanism | done |
 
-**What can be picked up today.** Item 19 is what remains: the other half of the
-mechanism item 18 landed.
+**What can be picked up today.** Nothing on this list. What is left is held
+rather than open: item 4's wiring waits on step 10 of
+[CLI surface shape](cli-surface-shape.md), item 6 waits on the same step, items
+8 and 11 hold decisions, item 12's remedy is disproven, and item 5's `wish`
+half needs a wish resolution that does not write.
 
 Item 4's candidates are built and its wiring waits: step 10 decides whether a
 verb's fields are written before the `--` marker or after it, and the position
@@ -120,13 +123,14 @@ Two of the four ways completion can be wrong are enumerated here exhaustively,
 and two are not. Knowing which is which is the difference between working the
 list and trusting it.
 
-**Enumerated exhaustively.** A slot with no provider entry: the keys of both
-provider tables are derivable from the same command tree the resolver walks, so
-walking the tree and subtracting the tables names every one. That is items 13
-to 16, and item 19 is the same walk made permanent.
+**Enumerated exhaustively, and now gated.** A slot with no provider entry: the
+keys of both provider tables are derivable from the same command tree the
+resolver walks, so walking the tree and subtracting the tables names every one.
+That is items 13 to 16, and `deno task check-completion-slots` is the same walk
+made permanent.
 
-**Enumerated exhaustively.** A provider entry with no slot: the same
-subtraction run the other way. That is item 16.
+**Enumerated exhaustively, and now gated.** A provider entry with no slot: the
+same subtraction run the other way. That is item 16, and the same gate.
 
 **Not enumerated.** A provider that returns the *wrong set* rather than an
 empty one. This is invisible at the prompt — plausible candidates look like
@@ -622,17 +626,21 @@ It is asserted there as what happens today.
 
 ### 19. A gate that fails when a new slot has no decision
 
-Completion falling behind the command surface is the mechanism this whole plan
-is a list of instances of. The tables are keyed by option long name and by
-`<command path>:<argument name>`, and both keys are derivable from the tree that
-`resolveCompletionLine` already walks, so the drift is machine-detectable: walk
-the tree, and name every value-taking option and every positional with no
-provider entry and no enumerated set.
+`deno task check-completion-slots` walks the same tree `resolveCompletionLine`
+walks and subtracts the two provider tables from it, in three directions:
 
-The check cannot decide that a slot *should* complete — plenty should not. It
-can require that every slot has been decided about, which is what an allowlist
-of deliberate omissions records. That turns the next command's completion from
-something remembered into something the gate asks for.
+- A slot with no provider, no enumerated set, and no allowlist entry.
+- A provider entry matching no slot — item 16's subtraction, made permanent.
+- An allowlist entry matching no slot, so the record of a decision cannot
+  outlive the thing it was about.
 
-Item 16 is what the same walk finds in the other direction, so both fall out of
-one implementation.
+It cannot decide that a slot *should* complete, and does not try. It requires
+that every slot has been decided about, and the allowlist is where a decision
+not to complete one is written down with its reason — what the candidates would
+have been, and why there are none.
+
+Its first run named thirty-six options and no positionals. Three of them turned
+out to be path-shaped and got directives rather than an allowance
+(`--pattern-coverage-dir`, `--timing-measures-out`, `--cfc-writeback-state`);
+the rest are counts, timestamps, pasted identifiers, coined words, and
+expressions with their own grammar.

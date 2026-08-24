@@ -950,6 +950,11 @@ const OPTION_VALUE_PROVIDERS: Readonly<
   // `cf inspect html --out` and `cf check --output` write a file.
   out: () => Promise.resolve(directive({ kind: "files" })),
   output: () => Promise.resolve(directive({ kind: "files" })),
+  // The remaining path-shaped values: two artifacts `cf test` writes, and the
+  // state file `cf fuse mount` passes to its child.
+  "pattern-coverage-dir": () => Promise.resolve(directive({ kind: "dirs" })),
+  "timing-measures-out": () => Promise.resolve(directive({ kind: "files" })),
+  "cfc-writeback-state": () => Promise.resolve(directive({ kind: "files" })),
   // A snapshot file on `space clone`, and a sequence number on `inspect diff`.
   from: onlyOn(
     ["space clone"],
@@ -1090,6 +1095,25 @@ function inspectEntityProviders(): Record<
     entries[`inspect ${command}:entity`] = entityCandidates;
   }
   return entries;
+}
+
+/**
+ * The keys of both provider tables.
+ *
+ * For the gate that asks whether every slot has been decided about. Both keys
+ * are derivable from the same command tree `resolveCompletionLine` walks, so
+ * the drift between the tree and these tables is machine-detectable — in both
+ * directions, since an entry matching no slot is the same subtraction run the
+ * other way.
+ */
+export function completionProviderKeys(): {
+  readonly options: ReadonlySet<string>;
+  readonly arguments: ReadonlySet<string>;
+} {
+  return {
+    options: new Set(Object.keys(OPTION_VALUE_PROVIDERS)),
+    arguments: new Set(Object.keys(ARGUMENT_PROVIDERS)),
+  };
 }
 
 /**

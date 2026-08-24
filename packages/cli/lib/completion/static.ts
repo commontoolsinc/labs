@@ -120,6 +120,16 @@ export function preParseGlobalValues(global: PreParseGlobal): Candidate[] {
 }
 
 /**
+ * The option long names carrying a statically known value set.
+ *
+ * For the gate that asks whether every slot has been decided about: an option
+ * answered from this table needs no provider entry.
+ */
+export function enumeratedOptionNames(): ReadonlySet<string> {
+  return new Set(Object.keys(ENUMERATED_OPTION_VALUES));
+}
+
+/**
  * Values for an option whose accepted set is known statically. Returns `null`
  * when the option has no such set, which tells the caller to try a live
  * provider instead.
