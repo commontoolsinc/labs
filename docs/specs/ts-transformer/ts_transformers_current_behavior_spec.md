@@ -1484,7 +1484,7 @@ adjustments:
   which disables shrinking for the whole parameter: its declared shape is
   emitted intact, without the capability wrappers a walked operand would derive
 - capability analysis reads through the operand recording an `assert(...)` body
-  wraps a method call's receiver in. `AssertDiagnosticsTransformer` (stage 10)
+  wraps a method call's receiver in. `AssertDiagnosticsTransformer` (stage 11)
   rewrites `event.details.includes(text)` so that `includes` is called on
   `__cfHelpers.assertCapture(parts, "event.details", event.details)` rather
   than on `event.details`. The recording hands its third argument straight
