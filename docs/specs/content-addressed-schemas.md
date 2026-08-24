@@ -406,26 +406,19 @@ exactly two guarantees, both about delivery rather than about values:
   nothing, since selecting by an uncollectable schema would produce a
   result whose shape the receiving client could never reproduce from
   what arrives.
-- **The per-frame guarantee** (OW61, RULED 2026-08-24). The delivered
-  SET spans frames, but arrival validates each FRAME against what the
-  replica then holds — so a frame's validity must not depend on the
-  fate or ordering of any earlier frame across channels
-  (subscription pushes, watch-add responses, resume catch-up). Every
-  sync frame is therefore closed at build time: after the
-  session-cache diff decides the frame's upserts, the builder re-scans
-  them and appends every referenced `cid:` document the frame does not
-  already carry — including an in-frame schema document's own refs —
-  verified through the same closure walk
-  (`closeFrameOverSchemaRefs`). Content-addressed documents are
-  immutable, so the re-ship is idempotent bytes; the appended entries
-  are frame-local freight, deliberately not recorded in the session
-  cache, and a later mention simply re-appends. Rollback of an
-  undelivered frame is fail-safe rather than exact: the freight rides
-  the frame's delivery record, so rolling the frame back also forgets
-  any session-cache entry an earlier real delivery made for the same
-  cid document — re-dirtied and re-delivered on the next pass.
-  Over-delivery, never under-delivery. A frame is independently valid
-  under any application order.
+- **Elision across frames is the design, not a hole** (OW61 reversal,
+  RULED 2026-08-24). The delivered SET spans frames: a session's later
+  frames deliberately elide `cid:` documents earlier frames already
+  delivered — not retransmitting schemas is why content addressing
+  exists. The client's obligation is the mirror of that: absorb every
+  frame the server sends, in order, retaining delivered `cid:`
+  documents for the session's life; a frame is validated against the
+  prospective frame PLUS the stored replica precisely because the
+  replica is expected to hold what earlier frames delivered. An
+  arrival whose ref cannot resolve therefore indicates a CLIENT-side
+  absorb/ordering defect (a dropped, reordered, or un-retained earlier
+  delivery) — the defect class OW61's investigation owns — never a
+  server obligation to re-ship.
 
 Arrival mirrors the assembly pass rather than trusting it: BEFORE a frame
 applies, every schema ref its documents embed — a registered `cid:`
@@ -446,15 +439,14 @@ unresolvable refs never applies; a forged replacement of a stored
 verified document is itself the quarantined copy), contained for the
 PROCESS: this validation runs on the background consume path, where a
 frame-wide throw was an unhandled rejection that killed the consuming
-worker wholesale on one bad document. A compliant server never produces
-such a frame (the per-frame guarantee above is enforced at emission);
-quarantine is the net under everything else, and a quarantined document
-heals on any later closed re-delivery. Against a server that still
-elides (a deployment predating the per-frame guarantee), an unchanged
-quarantined document may never be re-delivered mid-session — its
-session cache claims the client holds it — so the heal there waits for
-the next full evaluation (a watch.set, a reconnect), with the arrival
-diagnostic as the loud record meanwhile. The repair
+worker wholesale on one bad document. Quarantine is containment for a
+defect, not a protocol state: the elision design means an unchanged
+quarantined document may never be re-delivered mid-session (the
+server's session cache rightly claims the client holds its ref), so
+the heal waits for the next full evaluation — a watch.set, a
+reconnect — whose full frame carries the whole assembled closure; the
+arrival diagnostic is the loud record meanwhile, and the underlying
+absorb/ordering defect is the thing to find and fix (OW61). The repair
 paths that do exist serve callers, not arrival: the traversal loader's
 reads are tracked (arrival re-runs the reader), the missing-target kick
 requests the fetch, and any sync of a schema document delivers its

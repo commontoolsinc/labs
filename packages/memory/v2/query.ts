@@ -31,7 +31,6 @@ import {
   canResolveScopeKey,
   type CellScope,
   type CommitClass,
-  type EntityDocument,
   type EntitySnapshot,
   getServerExecutionConfig,
   type GraphQuery,
@@ -544,57 +543,6 @@ const assembleSchemaDocClosures = (
   trackerAdds: QueryDocKey[];
   additions: Map<QueryDocKey, EntitySnapshot>;
 } => {
-  const seeds = new Set<string>();
-  for (const [key, snapshot] of delivered) {
-    for (const hash of scanSnapshotSchemaRefs(engine, key, snapshot)) {
-      seeds.add(hash);
-    }
-  }
-  if (established !== undefined) {
-    for (const [key, snapshot] of established) {
-      if (delivered.has(key)) continue;
-      for (const hash of scanSnapshotSchemaRefs(engine, key, snapshot)) {
-        seeds.add(hash);
-      }
-    }
-  }
-  const closure = collectVerifiedSchemaDocClosure(
-    space,
-    engine,
-    manager,
-    branch,
-    seeds,
-  );
-  const trackerAdds: QueryDocKey[] = [];
-  const additions = new Map<QueryDocKey, EntitySnapshot>();
-  for (const { key, snapshot } of closure.values()) {
-    if (!tracker.has(key)) {
-      trackerAdds.push(key);
-      if (!delivered.has(key)) {
-        additions.set(key, snapshot);
-      }
-    }
-  }
-  return { trackerAdds, additions };
-};
-
-/**
- * The closure-walk core shared by graph-level result assembly and the
- * per-frame closure pass: verifies and collects the whole schema-document
- * closure reachable from `seedHashes` against THIS space's stored
- * content, following registered documents' own refs. The WHOLE closure
- * is verified — gating what to deliver is each caller's decision over the
- * returned map, never a reason to skip verification. Throws
- * {@link SchemaClosureError} on a missing or forged document, per the
- * result-assembly contract above.
- */
-const collectVerifiedSchemaDocClosure = (
-  space: string,
-  engine: Engine.Engine,
-  manager: EngineObjectManager,
-  branch: string,
-  seedHashes: Iterable<string>,
-): Map<string, { key: QueryDocKey; snapshot: EntitySnapshot }> => {
   const pending: string[] = [];
   const seen = new Set<string>();
   const enqueue = (hash: string) => {
@@ -603,16 +551,26 @@ const collectVerifiedSchemaDocClosure = (
       pending.push(hash);
     }
   };
-  for (const hash of seedHashes) enqueue(hash);
+  for (const [key, snapshot] of delivered) {
+    for (const hash of scanSnapshotSchemaRefs(engine, key, snapshot)) {
+      enqueue(hash);
+    }
+  }
+  if (established !== undefined) {
+    for (const [key, snapshot] of established) {
+      if (delivered.has(key)) continue;
+      for (const hash of scanSnapshotSchemaRefs(engine, key, snapshot)) {
+        enqueue(hash);
+      }
+    }
+  }
   let verified = verifiedSchemaDocCaches.get(engine);
   if (verified === undefined) {
     verified = new Map();
     verifiedSchemaDocCaches.set(engine, verified);
   }
-  const closure = new Map<
-    string,
-    { key: QueryDocKey; snapshot: EntitySnapshot }
-  >();
+  const trackerAdds: QueryDocKey[] = [];
+  const additions = new Map<QueryDocKey, EntitySnapshot>();
   while (pending.length > 0) {
     const hash = pending.pop()!;
     const id = `cid:${hash}`;
@@ -650,136 +608,14 @@ const collectVerifiedSchemaDocClosure = (
     for (const dep of collectExternalSchemaRefHashes(registered)) {
       enqueue(dep);
     }
-    closure.set(hash, { key, snapshot });
-  }
-  return closure;
-};
-
-/**
- * One frame-upsert-shaped entry the per-frame closure pass reads and
- * emits. Structural (the session layer's `SessionCacheEntry` conforms)
- * so this module does not depend on the session layer.
- */
-export type FrameUpsertEntry = {
-  branch: string;
-  id: string;
-  scope: CellScope;
-  scopeKey: ScopeKey;
-  seq: number;
-  deleted?: true;
-  doc?: EntityDocument;
-  coverClass?: CommitClass;
-};
-
-/**
- * Per-frame delivery closure over embedded schema refs
- * (verification-coverage.md OW61, RULED 2026-08-24): returns the `cid:`
- * schema-document entries a sync frame must APPEND so that every schema
- * ref mentioned by the frame's documents resolves within the frame
- * itself.
- *
- * Why the graph-level assembly is not enough: `assembleSchemaDocClosures`
- * stages a closure doc only while the tracked graph has never delivered
- * it, and the frame builders additionally elide entries the session
- * cache says were delivered before — so a RE-delivered mentioning doc
- * shipped in a frame without its cid: sibling. Such a frame is valid
- * only if the client durably applied every earlier frame in order, and
- * the arrival validator's guarantee is per-frame
- * (docs/specs/content-addressed-schemas.md): under delivery-window
- * reordering the replica saw the mention without the sibling and the
- * fail-closed throw killed the consumer (the OW61 board). cid documents
- * are content-addressed and immutable, so re-shipping them is
- * idempotent bytes — the frame becomes independently valid under ANY
- * cross-channel application order.
- *
- * The returned entries are frame-local freight: callers append them to
- * the wire frame WITHOUT recording them in the session cache — a later
- * mention simply re-appends them (idempotent bytes). Rollback of an
- * undelivered frame is fail-safe rather than exact: freight rides the
- * frame's delivery record, so rolling the frame back also deletes any
- * session-cache entry an EARLIER real delivery made for the same cid
- * doc — which re-dirties it and re-delivers on the next pass.
- * Over-delivery, never under-delivery. A cid doc loads and ships on
- * the branch of the entry that mentions it, mirroring the per-graph
- * assembly. Throws {@link SchemaClosureError} exactly as assembly does
- * when the store cannot produce a verified closure — and callers must
- * order that throw BEFORE committing any delivery state the frame
- * claims (review S4: a poisoned session cache elides the frame's
- * entries from every later diff).
- */
-export const closeFrameOverSchemaRefs = (
-  space: string,
-  engine: Engine.Engine,
-  identity: ScopeKeyIdentity,
-  upserts: readonly FrameUpsertEntry[],
-): FrameUpsertEntry[] => {
-  // `${branch}\0cid:${hash}` for every cid doc the frame already carries
-  // with content — those need no append (arrival re-verifies identity).
-  const inFrame = new Set<string>();
-  for (const entry of upserts) {
-    if (entry.deleted === true || entry.doc === undefined) continue;
-    if (entry.id.startsWith("cid:")) {
-      inFrame.add(`${entry.branch}\0${entry.id}`);
+    if (!tracker.has(key)) {
+      trackerAdds.push(key);
+      if (!delivered.has(key)) {
+        additions.set(key, snapshot);
+      }
     }
   }
-  let byBranch: Map<string, Set<string>> | undefined;
-  for (const entry of upserts) {
-    if (entry.deleted === true || entry.doc === undefined) continue;
-    const key: QueryDocKey = `${space}/${entry.scopeKey}/${entry.id}`;
-    const refs = scanSnapshotSchemaRefs(engine, key, {
-      branch: entry.branch,
-      id: entry.id,
-      scope: entry.scope,
-      seq: entry.seq,
-      document: entry.doc,
-    });
-    if (refs.size === 0) continue;
-    byBranch ??= new Map();
-    let hashes = byBranch.get(entry.branch);
-    if (hashes === undefined) {
-      hashes = new Set();
-      byBranch.set(entry.branch, hashes);
-    }
-    for (const hash of refs) hashes.add(hash);
-  }
-  if (byBranch === undefined) return [];
-  const appended: FrameUpsertEntry[] = [];
-  for (const [branch, hashes] of byBranch) {
-    // Seed UNFILTERED — an in-frame cid doc's own hash must still enter
-    // the walk so its registered form's DEPS are followed (a schema doc
-    // arriving in a frame whose deps rode an earlier frame would
-    // otherwise ship without them); only the APPEND below skips what
-    // the frame already holds.
-    const manager = new EngineObjectManager(
-      engine,
-      branch,
-      identity.principal,
-      identity.sessionId,
-    );
-    const closure = collectVerifiedSchemaDocClosure(
-      space,
-      engine,
-      manager,
-      branch,
-      hashes,
-    );
-    for (const [hash, { snapshot }] of closure) {
-      const frameKey = `${branch}\0cid:${hash}`;
-      if (inFrame.has(frameKey)) continue;
-      inFrame.add(frameKey);
-      appended.push({
-        branch,
-        id: `cid:${hash}`,
-        scope: DEFAULT_SCOPE,
-        scopeKey: resolveScopeKey(DEFAULT_SCOPE, identity),
-        seq: snapshot.seq,
-        // collectVerifiedSchemaDocClosure throws on a null/valueless
-        // document, so the snapshot carries content here.
-        doc: snapshot.document ?? undefined,
-      });
-    }
-  }
-  return appended;
+  return { trackerAdds, additions };
 };
 
 /**

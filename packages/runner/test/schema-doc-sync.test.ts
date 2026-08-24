@@ -590,7 +590,7 @@ describe("schema-doc-sync", () => {
     expect(replica.getDocument("of:frame-carrier")).toBeUndefined();
   });
 
-  it("heals a quarantined doc on a closed re-delivery (the cid sibling in the same frame)", () => {
+  it("heals a quarantined doc when a later frame carries the cid sibling (the full-evaluation shape)", () => {
     const depSchema = {
       type: "string",
       title: "heals-on-redelivery",
@@ -614,8 +614,11 @@ describe("schema-doc-sync", () => {
         },
       },
     };
-    // Frame 1: the mentioning doc WITHOUT its cid sibling — the delivery
-    // race's shape. Quarantined, replica untouched for it.
+    // Frame 1: the mentioning doc WITHOUT its cid sibling — what a
+    // replica that failed to absorb/retain the earlier cid delivery
+    // sees (the OW61 client-side defect class; the server's elision of
+    // already-delivered cid docs is the design). Quarantined, replica
+    // untouched for it.
     replica.applySessionSync({
       type: "sync",
       fromSeq: 700_000,
@@ -632,8 +635,10 @@ describe("schema-doc-sync", () => {
       removes: [],
     }, "integrate");
     expect(replica.getDocument("of:heal-carrier")).toBeUndefined();
-    // Frame 2: the CLOSED re-delivery (what the fixed server emits —
-    // per-frame closure): mention and sibling together. The doc applies.
+    // Frame 2: a frame carrying mention AND sibling together — the
+    // shape a FULL evaluation produces (watch.set / reconnect ship the
+    // whole assembled closure; per-frame resend was reversed, OW61
+    // RULED 2026-08-24). The doc applies: quarantine heals there.
     replica.applySessionSync({
       type: "sync",
       fromSeq: 700_001,

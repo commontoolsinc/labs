@@ -59,8 +59,6 @@ import {
   resolveEntryIdentity,
 } from "../src/index.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
-import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
-import { collectExternalSchemaRefHashes } from "../src/schema-decompose.ts";
 
 const spaceSigner = await Identity.fromPassphrase("space root ensure space");
 const space = spaceSigner.did() as MemorySpace;
@@ -387,117 +385,102 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     }
   });
 
-  it("a plain space-cell subscriber's frames stay closed over cid mentions through materialization AND re-delivery (OW61)", async () => {
-    // The OW61 delivery race, reproduced with its own producer: the
-    // ensure materializes content-addressed computed cells into a space
-    // whose subscriber holds a PLAIN space-cell subscription (the
-    // production shape — CLI, agents-host: no root-aware demand). The
-    // board's kill needed two ingredients: (1) the server re-delivering
-    // a cid-mentioning doc in a frame WITHOUT its cid: sibling (elided
-    // because an EARLIER frame carried it), and (2) any ordering that
-    // voids the client having durably applied that earlier frame. (2)
-    // is delivery-window timing CI hit and a fast local box does not;
-    // (1) is deterministic — the aged-space reconcile below re-delivers
-    // the root's computed cells after their cid docs rode the first
-    // tenure's frames. So this pin asserts the emission-side guarantee
-    // the fix establishes, per-frame SELF-closure: every cid ref a
-    // frame's documents mention resolves WITHIN that frame. Watched RED
-    // at base (the reconcile's push frame carried the computed doc
-    // alone); the per-frame closure pass makes it green. With frames
-    // self-closed, ingredient (2) has nothing to break.
+  it("a plain space-cell subscriber SURVIVES a replica that fails to absorb the cid schema docs (OW61 containment at the live producer)", async () => {
+    // OW61, reshaped after the owner's reversal ruling (2026-08-24):
+    // the server deliberately ELIDES cid docs a session already
+    // received — not retransmitting schemas is why content addressing
+    // exists — and the client's obligation is to absorb and retain
+    // every frame. The defect class under investigation is a CLIENT
+    // that fails that obligation (a dropped/reordered/un-retained cid
+    // delivery); this step simulates exactly that at the register's
+    // named deterministic producer (the ensure materializing
+    // content-addressed computed cells beside a PLAIN space-cell
+    // subscription) and pins the ACKed containment: the consumer
+    // SURVIVES — the mention-carrying doc quarantines loudly instead
+    // of killing the worker (the board's kill mode), sibling traffic
+    // keeps applying, and the replica keeps serving.
     await seedAcl({ [space]: "OWNER" });
     const created = newSpaceServer();
     expect(await created.activate()).toBe(true);
 
     const reader = clientRuntime(readerSigner);
-    // Record every frame the reader's replica consumes, BEFORE it
-    // applies (the suite's established instance-patch seam): collect
-    // per-frame self-closure violations and count computed-cell
-    // deliveries (the producer sanity — without them this pin is
-    // vacuously green).
+    // The simulated absorb defect: DROP every cid: upsert before the
+    // frame applies. Installed on the reader's replica before its
+    // space-cell subscription (the suite's established instance-patch
+    // seam).
     const replica = (reader.storageManager.open(space) as unknown as {
       replica: {
         applySessionSync(sync: unknown, type: string): void;
+        getDocument(uri: string): unknown;
       };
     }).replica;
-    const violations: string[] = [];
-    let computedDeliveries = 0;
+    let droppedCids = 0;
+    const computedSeen = new Set<string>();
     const originalApply = replica.applySessionSync.bind(replica);
     replica.applySessionSync = (sync: unknown, type: string) => {
-      const upserts = (sync as { upserts?: unknown[] })?.upserts;
-      const frame = Array.isArray(upserts)
-        ? upserts as Array<{
-          id?: unknown;
-          deleted?: unknown;
-          doc?: unknown;
-        }>
-        : [];
-      const inFrame = new Set<string>();
-      for (const upsert of frame) {
-        if (
-          typeof upsert?.id === "string" && upsert.deleted !== true &&
-          upsert.doc !== undefined
-        ) {
-          inFrame.add(upsert.id);
+      const frame = sync as { upserts?: Array<{ id?: unknown }> };
+      const upserts = Array.isArray(frame?.upserts) ? frame.upserts : [];
+      const kept = upserts.filter((upsert) => {
+        if (typeof upsert?.id !== "string") return true;
+        if (upsert.id.startsWith("computed:")) computedSeen.add(upsert.id);
+        if (upsert.id.startsWith("cid:")) {
+          droppedCids += 1;
+          return false;
         }
-      }
-      for (const upsert of frame) {
-        if (typeof upsert?.id !== "string" || upsert.deleted === true) {
-          continue;
-        }
-        const doc = upsert.doc;
-        if (doc === null || typeof doc !== "object") continue;
-        if (upsert.id.startsWith("computed:")) computedDeliveries++;
-        // A schema doc's own refs ride the registration path; the
-        // mention scan is for ordinary documents' link schemas — the
-        // same positions the arrival validator interprets.
-        if (upsert.id.startsWith("cid:")) continue;
-        mapLinkSchemas(doc as never, (schema) => {
-          for (
-            const hash of collectExternalSchemaRefHashes(schema as never)
-          ) {
-            const cid = `cid:${hash}`;
-            if (!inFrame.has(cid)) {
-              violations.push(
-                `${upsert.id} mentions ${cid}, absent from its frame`,
-              );
-            }
-          }
-          return schema;
-        });
-      }
-      return originalApply(sync, type);
+        return true;
+      });
+      return originalApply(
+        kept.length === upserts.length
+          ? sync
+          : { ...(sync as object), upserts: kept },
+        type,
+      );
     };
 
     const probe = reader.getSpaceCell(space).key("defaultPattern");
     await probe.sync();
-    await waitUntil(() => probe.get() !== undefined, "root linked");
-    await resolveRootEventually(reader);
+    // Producer sanity: the ensure's computed cells DID ride the plain
+    // subscription, and the simulated defect DID drop cid deliveries —
+    // without both, this pin is vacuously green.
     await waitUntil(
-      () => computedDeliveries > 0,
+      () => computedSeen.size > 0,
       "the ensured root's computed cell riding the plain subscription",
     );
-
-    // The RE-delivery: age the source while parked; the second tenure's
-    // reconcile rewrites the root's computed cells and the push frame
-    // re-delivers them — after their cid docs already rode tenure 1's
-    // frames, which is exactly the elision the race rode.
-    await created.park("test-age");
-    await created.whenParked;
-    files.set(HOME_PATH, rootSource("home-v2"));
-    const second = newSpaceServer();
-    expect(await second.activate()).toBe(true);
     await waitUntil(
-      () => stats.rootEnsure.reconciled === 1,
-      "second tenure's reconcile counted",
-    );
-    const deliveriesBeforeRedelivery = computedDeliveries;
-    await waitUntil(
-      () => computedDeliveries > deliveriesBeforeRedelivery,
-      "the reconciled computed cell re-delivered",
+      () => droppedCids > 0,
+      "the simulated absorb defect dropping a cid delivery",
     );
 
-    expect(violations).toEqual([]);
+    // THE PIN, half one — containment: the run reaching this line at
+    // all is the process-survival claim (pre-containment, the arrival
+    // validator's throw was an unhandled rejection in consumeUpdates —
+    // the OW61 board's kill mode). The mention-carrying computed doc
+    // must be QUARANTINED, not applied: fail-closed for the doc.
+    await waitUntil(
+      () =>
+        [...computedSeen].some((id) => replica.getDocument(id) === undefined),
+      "a cid-mentioning computed doc held in quarantine (not applied)",
+    );
+
+    // Half two — the replica keeps serving: an ordinary write/read
+    // round trip through the same reader runtime still works after the
+    // quarantine (the consumer loop is alive and applying frames).
+    const witness = reader.getCell<{ n?: number }>(
+      space,
+      "ow61-containment-witness",
+      undefined,
+    );
+    await witness.sync();
+    {
+      const tx = reader.edit();
+      witness.withTx(tx).set({ n: 1 });
+      expect((await tx.commit()).error).toBeUndefined();
+      await reader.storageManager.synced();
+    }
+    expect((witness.get() as { n?: number } | undefined)?.n).toBe(1);
+    // The ensure itself ran to completion beside the defective reader.
+    expect(stats.rootEnsure.created).toBe(1);
+    expect(stats.rootEnsure.failures).toBe(0);
   });
 
   it("the ensure's creation tx carries the resolved OWNER's trust snapshot, never the service's (granted-owner space, default-app source)", async () => {

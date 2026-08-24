@@ -6755,41 +6755,58 @@ supply; OW29/OW32/OW34 closed):
     before. So a RE-delivered cid-mentioning doc shipped in a frame
     WITHOUT its cid: sibling, and that frame's validity hung on the
     client having durably applied every earlier frame in order —
-    the ordering delivery-window timing broke. (1) Shipping (the
-    ruled fix): `closeFrameOverSchemaRefs` (memory/v2/query.ts)
-    closes every sync frame at build time — the diffed upserts'
-    mentioned cid docs are verified through the shared closure
-    walker and appended to the SAME frame unless already in it;
-    wired at the three diffed builders (watch.add, incremental push
-    refresh, full-evaluation diff via buildDiffSync's injected
-    closeOver); watch.set and graph.query ship the whole assembled
-    set and were already closed; appended entries are frame-local
-    freight (not session-cached; a rolled-back frame that carried
-    freight can forget an earlier real delivery of the same cid doc —
-    re-dirtied into OVER-delivery, never under), and the closure runs
-    BEFORE any session-cache commit at every builder (the review's
-    S4: watch.add committed first, so a closure throw poisoned the
-    diff base — pinned red-first, cache-vs-engine corruption
-    divergence as the reachable trigger). (2) Containment:
-    `#validateArrivedSchemaDocuments` returns a quarantine set
-    instead of throwing — the offending doc drops from the frame
-    with a loud per-doc diagnostic (fixpoint over in-frame schema
-    docs so dependents fail closed together), the replica keeps its
-    prior state for it, and a later closed re-delivery heals it;
+    the ordering delivery-window timing broke. (1) Shipping — BUILT
+    as a per-frame resend (`closeFrameOverSchemaRefs` at the three
+    diffed builders), then **REVERSED by the owner 2026-08-24
+    (verbatim)**:
+
+    > "this change undermines why we added cids in the first place,
+    > to not retransmit the schemas all the time"
+
+    > "the client should absorb all information sent from the server,
+    > it shouldn't ever dismiss a frame. i don't think it even does
+    > so."
+
+    > "So if we saw this in CI - earlier frame delivered cid doc,
+    > later frame didn't see it - then that's the actual bug."
+
+    The resend and its pins and spec text are REMOVED; the server's
+    cross-frame elision of already-delivered cid docs is
+    correct-by-design, and the ACTUAL bug is CLIENT-side — a replica
+    that failed to absorb/retain (or apply in order) an earlier cid
+    delivery. That investigation and fix run as a SEPARATE
+    owner-spawned session (its deliverable includes the
+    absorb-contract pin); its design is deliberately not scoped in
+    this row. (2) Containment — ACKed, KEPT, and what closes OW61's
+    crash class on its own: `#validateArrivedSchemaDocuments`
+    returns a quarantine set instead of throwing — the offending doc
+    drops from the frame with a loud per-doc diagnostic (fixpoint
+    over in-frame schema docs so dependents fail closed together),
+    the replica keeps its prior state for it, and the heal arrives
+    with the next FULL evaluation (watch.set/reconnect ship the
+    whole assembled closure — under the elision design an unchanged
+    quarantined doc is rightly never re-delivered mid-session);
     `consumeUpdates` additionally catches any residual per-frame
-    apply failure. (3) Pins, each watched red at base `2ea87cea9`:
-    `memory/test/v2-frame-schema-closure.test.ts` (the push frame
-    after re-touching the mentioning doc carried it ALONE, and the
-    watch.add response likewise); four steps in
-    `runner/test/schema-doc-sync.test.ts` (the exact uncaught
-    validator throws from the board, now quarantine + survive +
-    heal, plus the consumeUpdates belt); and the ensure-driven pin
-    in `runner/test/executor-space-root-ensure.test.ts` ("a plain
-    space-cell subscriber's frames stay closed over cid mentions
-    through materialization AND re-delivery") — the live ensure as
-    the register's named deterministic producer, red at base with
-    `computed:fid1:49QA… mentions cid:fid1:CzEh…, absent from its
-    frame` on the aged-reconcile re-delivery, no timing dependence.
+    apply failure. In the race window the computed doc now
+    quarantines-with-loud-log instead of killing the worker; the
+    correctness fix lands from the investigation session. Also kept:
+    the watch.add session-cache staging reorder (the delta review's
+    S4 — diff, build the frame, only then commit the cache; its
+    red-first pin died with the resend, whose closure pass was the
+    only reachable throw in that window, so the ordering is kept as
+    commented hygiene). (3) Pins standing: four steps in
+    `runner/test/schema-doc-sync.test.ts`, each watched red at base
+    `2ea87cea9` with the exact uncaught validator throws from the
+    board (quarantine + innocent-sibling survival + the
+    full-evaluation heal + the consumeUpdates belt); and the
+    ensure-driven containment pin in
+    `runner/test/executor-space-root-ensure.test.ts` ("a plain
+    space-cell subscriber SURVIVES a replica that fails to absorb
+    the cid schema docs") — the register's named deterministic
+    producer with a simulated absorb defect (cid upserts dropped at
+    the reader replica): the consumer survives, the
+    mention-carrying computed doc quarantines, sibling traffic and a
+    witness round-trip keep working, the ensure completes.
     Subscriber-shape finding (the owner's cf-harness question,
     verified): ALL THREE named production space-cell-only
     subscribers are ONE shape — `PiecesController`'s constructor
@@ -6798,10 +6815,12 @@ supply; OW29/OW32/OW34 closed):
     constructed by the CLI (`cli/lib/piece.ts`), agents-host
     (`agents-host/src/fabric-runtime.ts`), AND cf-harness's
     run_pattern session (`cf-harness/src/fabric-session.ts`), so
-    yes: cf-harness is also that shape, and one fix covers all
-    three. Residual trigger: before the flip PR's list-EMPTY bar,
-    re-read this row only if a NEW frame producer is added outside
-    the closed builders (the pins guard the existing three).
+    yes: cf-harness is also that shape, and the containment covers
+    all three. Residual trigger: the investigation session's
+    absorb-contract fix landing (which retires the quarantine to a
+    true never-fires net), and any live `schema-doc-quarantine` log
+    — each occurrence is evidence for that investigation, not a
+    server-side hole.
 
   - **OW62 — adopt-not-start: the piece-open seam is where the ON
     execution model's "one starter per piece" has to land. POST-FLIP
