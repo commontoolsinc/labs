@@ -1,8 +1,8 @@
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
@@ -16,6 +16,7 @@ import {
   UnknownCfcMetadataVersionError,
 } from "../src/cfc/metadata.ts";
 import { loadStoredCfcEnvelope } from "../src/cfc/prepare.ts";
+import { cfcLabelViewForDereference } from "../src/cfc/label-view-state.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-envelope-version");
 const space = signer.did();
@@ -157,6 +158,34 @@ describe("CFC envelope version guard", () => {
         path: [],
       })
     ).toThrow("torn read");
+  });
+
+  it("fails the dereference label view loudly instead of serving unlabeled", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      // The failure the guard exists to prevent: a SECRET-labeled envelope
+      // under a version this build postdates must never come back as "no
+      // stored labels" — that view feeds the flow join deciding what a
+      // write may carry.
+      const id = await seedWithVersion(runtime, "version-guard-deref", 3);
+      const tx = runtime.edit();
+      expect(() =>
+        cfcLabelViewForDereference(
+          tx,
+          { space, scope: "space", id, path: [] },
+          { space, scope: "space", id, path: [] },
+        )
+      ).toThrow(UnknownCfcMetadataVersionError);
+      tx.abort();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
   });
 
   it("keeps a link-write from an uninterpretable source CFC-relevant and refuses it", async () => {

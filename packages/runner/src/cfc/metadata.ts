@@ -39,10 +39,17 @@ export class UnknownCfcMetadataVersionError extends Error {
   }
 }
 
-const KNOWN_CFC_METADATA_VERSIONS: ReadonlySet<unknown> = new Set([1]);
+// Typed against the metadata's own version union, so growing the list
+// without growing `CfcMetadata["version"]` (or the reverse) is a compile
+// error — the predicate below narrows to `CfcMetadata` on the strength of
+// this list.
+const KNOWN_CFC_METADATA_VERSIONS: readonly CfcMetadata["version"][] = [1];
+
+const isKnownMetadataVersion = (value: unknown): boolean =>
+  KNOWN_CFC_METADATA_VERSIONS.some((version) => version === value);
 
 const isCfcMetadata = (value: unknown): value is CfcMetadata =>
-  isObjectNotArray(value) && KNOWN_CFC_METADATA_VERSIONS.has(value.version) &&
+  isObjectNotArray(value) && isKnownMetadataVersion(value.version) &&
   isObjectNotArray(value.labelMap) &&
   Array.isArray(value.labelMap.entries);
 
@@ -54,7 +61,7 @@ const isCfcMetadata = (value: unknown): value is CfcMetadata =>
 const refuseUnknownMetadataVersion = (value: unknown): void => {
   if (
     isObjectNotArray(value) && "version" in value &&
-    !KNOWN_CFC_METADATA_VERSIONS.has(value.version) &&
+    !isKnownMetadataVersion(value.version) &&
     ("schemaHash" in value || "labelMap" in value)
   ) {
     throw new UnknownCfcMetadataVersionError(value.version);

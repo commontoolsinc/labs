@@ -1371,7 +1371,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * Optional the way the other staging seams are; a caller without it
    * falls back to writing the document itself.
    */
-  stageSchemaDocClosure?(space: MemorySpace, rootHash: string): void;
+  stageSchemaDocClosure(space: MemorySpace, rootHash: string): void;
   tx: IStorageTransaction;
 
   /**

@@ -1,7 +1,3 @@
-import {
-  SEED_ENVELOPE_SCHEMA_HASH,
-  writeSeedEnvelopeDoc,
-} from "./cfc-seed-envelope.ts";
 import { expect } from "@std/expect";
 import { afterEach, describe, it } from "@std/testing/bdd";
 
@@ -11,6 +7,10 @@ import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { Identity } from "@commonfabric/identity";
 
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { canonicalizeCfcMetadata } from "../src/cfc/canonical.ts";
 import type { CfcConfClause } from "../src/cfc/clause.ts";

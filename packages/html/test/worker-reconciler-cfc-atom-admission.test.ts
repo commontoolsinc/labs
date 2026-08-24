@@ -1,12 +1,12 @@
-import {
-  SEED_ENVELOPE_SCHEMA_HASH,
-  writeSeedEnvelopeDoc,
-} from "../../runner/test/cfc-seed-envelope.ts";
 import { assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CFC_LABEL_READ_FAILED_ATOM } from "@commonfabric/runner/cfc";
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "../../runner/test/cfc-seed-envelope.ts";
 import { WorkerReconciler } from "../src/worker/reconciler.ts";
 import type { RenderPolicy } from "../src/worker/types.ts";
 

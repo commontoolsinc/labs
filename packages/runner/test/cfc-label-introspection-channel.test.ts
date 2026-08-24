@@ -1,7 +1,3 @@
-import {
-  SEED_ENVELOPE_SCHEMA_HASH,
-  writeSeedEnvelopeDoc,
-} from "./cfc-seed-envelope.ts";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
@@ -13,6 +9,10 @@ import {
   canonicalizePreparedDigestInput,
   preparedDigestFor,
 } from "../src/cfc/canonical.ts";
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { inspectStoredConfLabel } from "../src/cfc/label-introspection.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import { deriveFlowJoin } from "../src/cfc/prepare.ts";

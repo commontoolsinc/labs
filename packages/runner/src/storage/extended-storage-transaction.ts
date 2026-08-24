@@ -2711,6 +2711,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     this.wrapped.setCfcDecomposedEnvelopes(enabled);
   }
 
+  stageSchemaDocClosure(space: MemorySpace, rootHash: string): void {
+    this.wrapped.stageSchemaDocClosure(space, rootHash);
+  }
+
   setCfcPolicyEvaluationMode(mode: CfcPolicyEvaluationMode): void {
     this.wrapped.setCfcPolicyEvaluationMode(mode);
   }

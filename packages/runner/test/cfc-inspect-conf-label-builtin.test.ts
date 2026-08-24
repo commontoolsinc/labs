@@ -1,7 +1,3 @@
-import {
-  SEED_ENVELOPE_SCHEMA_HASH,
-  writeSeedEnvelopeDoc,
-} from "./cfc-seed-envelope.ts";
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
@@ -10,6 +6,10 @@ import { Identity } from "@commonfabric/identity";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import type { URI } from "@commonfabric/memory/interface";
 
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import type { Cell } from "../src/cell.ts";
 import type { InspectConfLabelResult } from "../src/cfc/label-introspection.ts";
 import {

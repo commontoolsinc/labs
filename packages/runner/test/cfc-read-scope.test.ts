@@ -1,10 +1,10 @@
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
-import { describe, it } from "@std/testing/bdd";
-import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 

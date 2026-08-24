@@ -1,7 +1,3 @@
-import {
-  SEED_ENVELOPE_SCHEMA_HASH,
-  writeSeedEnvelopeDoc,
-} from "../../runner/test/cfc-seed-envelope.ts";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
@@ -24,6 +20,10 @@ import {
   schemaRootKind,
   selectSourceSchema,
 } from "../lib/cell-selection.ts";
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "../../runner/test/cfc-seed-envelope.ts";
 
 const signer = await Identity.fromPassphrase("cf-piece-get-transform");
 const space = signer.did();

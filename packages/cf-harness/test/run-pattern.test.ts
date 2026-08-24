@@ -1,8 +1,8 @@
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
   writeSeedEnvelopeDoc,
 } from "../../runner/test/cfc-seed-envelope.ts";
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { isSealedOpaqueLinkObject } from "../src/structured-result.ts";
 import { expect } from "@std/expect";
 import { normalize } from "@std/path/posix";

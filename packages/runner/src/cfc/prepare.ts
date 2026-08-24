@@ -4566,25 +4566,7 @@ export const ensureSchemaDocument = (
   // side stays space-FIRST with verification: the registry supplies only
   // what the space does not hold, never replaces what it does.
   registerSchemaDocument(schemaHash, schema);
-  if (tx.stageSchemaDocClosure !== undefined) {
-    tx.stageSchemaDocClosure(space, schemaHash);
-    return;
-  }
-
-  const id = `cid:${schemaHash}`;
-  // Do not pre-read the content-addressed schema document here. A read-before-
-  // write can make otherwise idempotent schema persistence fail with stale-read
-  // conflicts when another transaction already installed the same CID.
-  tx.writeOrThrow({
-    space,
-    id: id as URI,
-    type: "application/json",
-    path: [],
-  }, {
-    // System-owned canonical schema document. This is intentionally outside the
-    // phase-1 value-surface attempted-target model.
-    value: schema,
-  });
+  tx.stageSchemaDocClosure(space, schemaHash);
 };
 
 // Exported for unit testing of the read-side content-address verification (S5).
@@ -4640,10 +4622,11 @@ export const loadSchemaDocument = (
  * carrying `$ref: cid:` members — a decomposed write, or the root a
  * reference-form declared schema left behind — is recomposed: one read
  * policy, every member resolved or the envelope is unreadable (fail
- * closed). Members are read from the SPACE and content-verified through
- * `loadSchemaDocument`, never taken from the registry alone, so a
- * registry hit cannot mask a document the space does not hold; each
- * verified member is then registered, so in-session resolvers (the
+ * closed). Members resolve through `loadSchemaDocument`: space-FIRST
+ * with content verification, the registry supplying only what the space
+ * does not hold — a registered copy was itself hash-verified at
+ * registration, so content addressing makes it the stored document.
+ * Each verified member is then registered, so in-session resolvers (the
  * decompose-root equality below among them) can supply the closure.
  */
 const loadEnvelopeSchema = (

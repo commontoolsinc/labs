@@ -674,15 +674,16 @@ the per-epic implementation notes).
 
 - **Toggle via.** `RuntimeOptions.cfcDecomposedEnvelopes` (a plain boolean).
 - **Added by.** Robin McCollum, in the CFC envelope → cid-system convergence
-  (CT-2062, 2026-08-22; rung 3 after PR #6199's rungs 1–2).
+  (CT-2062, 2026-08-22; PR #6199 rung 3).
 - **Purpose.** When on, the envelope persist path stores the DECOMPOSED
   spelling: the metadata's `schemaHash` names a root document whose
   `$defs` members are separate content-addressed documents, shared with
   the link-schema document family and elided once the space's server
   confirms them. Off stores the self-contained inline form. Reading is
   the same either way — every `$ref: cid:` member a stored root carries
-  resolves (space-read, content-verified) or the envelope is unreadable
-  (fail closed) — and the storage commit boundary validates the whole
+  resolves (space-first, content-verified, with the hash-verified realm
+  registry supplying what the space does not hold) or the envelope is
+  unreadable (fail closed) — and the storage commit boundary validates the whole
   closure at write time. Delivery to remote readers rides the
   result-assembly guarantee: a delivered schema document's own refs join
   the delivered set and watch set

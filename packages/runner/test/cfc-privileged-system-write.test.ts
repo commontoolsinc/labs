@@ -1,7 +1,3 @@
-import {
-  SEED_ENVELOPE_SCHEMA_HASH,
-  writeSeedEnvelopeDoc,
-} from "./cfc-seed-envelope.ts";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
@@ -9,6 +5,10 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { Identity } from "@commonfabric/identity";
 import type { URI } from "@commonfabric/memory/interface";
 
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -67,10 +67,13 @@ describe("CFC privileged system write (S18)", () => {
         path: ["cfc"],
       }, forgedMetadata);
 
+      // Prepared, so the commit's rejection carries the S18 reason itself
+      // rather than the generic relevant-but-unprepared guard.
+      tx.prepareCfc();
       const result = await tx.commit();
       expect(result.error).toBeDefined();
-      expect(String((result.error as Error).message).toLowerCase()).toContain(
-        "cfc",
+      expect(String((result.error as Error).message)).toContain(
+        "unprivileged write to protected cfc path",
       );
     } finally {
       await runtime.dispose();
@@ -215,10 +218,11 @@ describe("CFC privileged system write (S18)", () => {
       expect(tx.getCfcState().unprivilegedSystemWrites.length).toBe(1);
 
       tx.setCfcEnforcementMode("enforce-explicit");
+      tx.prepareCfc();
       const result = await tx.commit();
       expect(result.error).toBeDefined();
-      expect(String((result.error as Error).message).toLowerCase()).toContain(
-        "cfc",
+      expect(String((result.error as Error).message)).toContain(
+        "unprivileged write to protected cfc path",
       );
     } finally {
       await runtime.dispose();
