@@ -197,6 +197,14 @@ Here no 50-op wave preceded it, the client's commit landed, and the serving side
 then did smaller follow-up waves *over the client's writes* instead of
 materializing the piece itself.
 
+**And it never re-materialized them.** Checking every one of the 100+ wave
+commits that followed, the largest overlap any of them has with the client's
+50-document set is **16 of 50** (wave localSeq 34, a 23-document derivation
+pass); every other later wave touches 1–5 of them. There is no second
+50-document write. So the work is genuinely **either/or** — exactly one side
+materializes the piece, and the other's identical attempt is either refused or
+never issued. This is a duplicated-effort race, not a double-write.
+
 (The two sessions' commit-5 document sets overlap in 23 of 50 — same shape, and
 the same four piece roots' worth of work, but the notebook has acquired content
 between them, so they are not the same bytes. What repeats exactly is the
