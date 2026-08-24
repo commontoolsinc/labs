@@ -228,6 +228,10 @@ class DebugConverter {
     this.#replacer = replacer;
   }
 
+  //
+  // Instance members
+  //
+
   /**
    * Converts the configured value. This method is meant to be called no more
    * than once per instance of this class. In particular, it doesn't cache the
@@ -237,16 +241,11 @@ class DebugConverter {
     try {
       return this.#convertSubvalue(this.#value, 0);
     } catch (e) {
-      const message = (() => {
-        if (e instanceof Error) {
-          const msg = e.message;
-          if (typeof msg === "string") {
-            return msg;
-          }
-        }
-        return String(e);
-      })();
-      return { "/unconvertible": message };
+      // There is an inner `try-catch` which should catch most conversion errors
+      // close to where they're thrown. This `catch` is a prophylactic "just
+      // in case" to help nail down the intention of really really trying not to
+      // `throw` out of this method.
+      return DebugConverter.#makeErrorResult(e);
     }
   }
 
@@ -270,10 +269,13 @@ class DebugConverter {
     const tag = `/${className}`;
 
     const stringForm = value.toString();
-    if (typeof stringForm === 'string') {
-      const matchedGenericName: string | undefined =
-        stringForm.match(/^\[object (?<name>[a-zA-Z0-9_$]+)\]$/)?.groups?.name;
-      if ((matchedGenericName !== "Object") && (matchedGenericName !== className)) {
+    if (typeof stringForm === "string") {
+      const matchedGenericName: string | undefined = stringForm.match(
+        /^\[object (?<name>[a-zA-Z0-9_$]+)\]$/,
+      )?.groups?.name;
+      if (
+        (matchedGenericName !== "Object") && (matchedGenericName !== className)
+      ) {
         return { [tag]: stringForm };
       }
     }
@@ -291,7 +293,7 @@ class DebugConverter {
    */
   #convertPlainObject(value: any, depth: number): FabricValue {
     const mapper = ([key, value]: [string, any]): [string, FabricValue] => {
-      if (isUnsafeObjectKey(key) || (key[0] === '/')){
+      if (isUnsafeObjectKey(key) || (key[0] === "/")) {
         key = `/${key}`;
       }
       return [key, this.#convertSubvalue(value, depth + 1)];
@@ -307,9 +309,7 @@ class DebugConverter {
   #convertSubvalue(value: any, depth: number): FabricValue {
     try {
       // Give the `replacer` (if supplied) an opportunity to perform replacement.
-      value = this.#replacer
-        ? this.#replacer(value)
-        : value;
+      value = this.#replacer ? this.#replacer(value) : value;
     } catch {
       // Fall through: Treat `replacer` failure as refusal to replace and not an
       // actual error.
@@ -338,9 +338,7 @@ class DebugConverter {
 
       case "function": {
         const name = value.name;
-        const content = (name != "")
-          ? `${name}(...)`
-          : "<anonymous>(...)";
+        const content = (name != "") ? `${name}(...)` : "<anonymous>(...)";
         return { "/function": content };
       }
 
@@ -390,9 +388,33 @@ class DebugConverter {
       } else {
         return this.#convertInstance(value, depth);
       }
+    } catch (e) {
+      return DebugConverter.#makeErrorResult(e);
     } finally {
       this.#nestingStack.delete(value);
     }
+  }
+
+  //
+  // Static members
+  //
+
+  /**
+   * Produces the appropriate error-bearing result form, for an error thrown
+   * during processing.
+   */
+  static #makeErrorResult(error: any) {
+    const message = (() => {
+      if (error instanceof Error) {
+        const msg = error.message;
+        if (typeof msg === "string") {
+          return msg;
+        }
+      }
+      return String(error);
+    })();
+
+    return { "/unconvertible": message };
   }
 }
 
