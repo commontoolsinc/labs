@@ -1,0 +1,739 @@
+[0m[38;5;245mrunning 1 test from ./integration/topics-journey-bench.scratch.test.ts[0m
+Topics journey benchmark (scratch instrument) ...
+[0m[38;5;245m------- output -------[0m
+Experimental flag overrides: serverExecution=false
+[0m[38;5;245m----- output end -----[0m
+  measures the topics journey ON-vs-OFF stimuli ...[0m[1m[33m'Topics journey benchmark (scratch instrument)' has been running for over [0m[38;5;245m(1m0s)[0m[0m
+
+[0m[38;5;245m------- output -------[0m
+[WARN][cell::20:37:48.435] get >50ms get() took 53ms {
+  id: "of:fid1:H0PkV_T4pt697kJTMX2VMZr9lpVk0fhZiq0HqI2B3pY",
+  path: [],
+  space: "did:key:z6Mkqh2jbu5m3BsHWQUTuadH8QCzSoyZoHptyy2vVPCXiwNS",
+  scope: "space",
+  schema: {
+    "$defs": {
+      AddCommentEvent: {
+        properties: { agentName: [Object], body: [Object] },
+        required: [ "body" ],
+        type: "object"
+      },
+      AddLinkEvent: {
+        properties: {
+          agentName: [Object],
+          kind: [Object],
+          label: [Object],
+          url: [Object]
+        },
+        required: [ "kind", "url", "label" ],
+        type: "object"
+      },
+      AddTopicEvent: {
+        properties: { agentName: [Object], body: [Object], title: [Object] },
+        required: [ "title" ],
+        type: "object"
+      },
+      MentionEvent: {
+        properties: { topic: [Object] },
+        required: [ "topic" ],
+        type: "object"
+      },
+      SetBodyEvent: {
+        properties: { agentName: [Object], body: [Object] },
+        required: [ "body" ],
+        type: "object"
+      },
+      TopicAuthor: {
+        properties: { avatar: [Object], kind: [Object], name: [Object] },
+        required: [ "kind", "name" ],
+        type: "object"
+      },
+      TopicComment: {
+        properties: {
+          author: [Object],
+          authorName: [Object],
+          body: [Object],
+          sentAt: [Object]
+        },
+        required: [ "authorName", "body", "sentAt" ],
+        type: "object"
+      },
+      TopicCrossrefRow: {
+        properties: { mentionedBy: [Object], topic: [Object] },
+        required: [ "topic", "mentionedBy" ],
+        type: "object"
+      },
+      TopicIndexRow: {
+        properties: {
+          commentCount: [Object],
+          createdAt: [Object],
+          createdBy: [Object],
+          lastActivityAt: [Object],
+          title: [Object]
+        },
+        required: [ "title", "createdAt", "commentCount", "lastActivityAt" ],
+        type: "object"
+      },
+      TopicLink: {
+        properties: {
+          addedAt: [Object],
+          addedBy: [Object],
+          kind: [Object],
+          label: [Object],
+          url: [Object]
+        },
+        required: [ "kind", "url", "label" ],
+        type: "object"
+      },
+      TopicLinkKind: { enum: [ "session", "topic", "pr", "web" ] },
+      TopicMentionRef: {
+        properties: { destination: [Object], modifiedTitle: [Object] },
+        required: [ "destination", "modifiedTitle" ],
+        type: "object"
+      },
+      TopicMentionRefMap: {
+        additionalProperties: { "$ref": "#/$defs/TopicMentionRef" },
+        properties: {},
+        type: "object"
+      },
+      TopicPiece: {
+        properties: {
+          "$NAME": [Object],
+          addComment: [Object],
+          addLink: [Object],
+          body: [Object],
+          bodyUpdatedAt: [Object],
+          bodyUpdatedBy: [Object],
+          commentCount: [Object],
+          comments: [Object],
+          createdAt: [Object],
+          createdBy: [Object],
+          createdByName: [Object],
+          lastActivityAt: [Object],
+          links: [Object],
+          mention: [Object],
+          mentioned: [Object],
+          mentions: [Object],
+          referencedBy: [Object],
+          references: [Object],
+          setBody: [Object],
+          title: [Object],
+          unmention: [Object]
+        },
+        required: [
+          "createdByName", "body",
+          "comments",      "links",
+          "mentions",      "references",
+          "mentioned",     "referencedBy",
+          "addComment",    "addLink",
+          "setBody",       "$NAME",
+          "title",         "createdAt",
+          "commentCount",  "lastActivityAt"
+        ],
+        type: "object"
+      },
+      TopicSummary: {
+        properties: {
+          commentCount: [Object],
+          createdAt: [Object],
+          createdBy: [Object],
+          lastActivityAt: [Object],
+          title: [Object]
+        },
+        required: [ "title", "createdAt", "commentCount", "lastActivityAt" ],
+        type: "object"
+      },
+      UnmentionEvent: {
+        properties: { topic: [Object] },
+        required: [ "topic" ],
+        type: "object"
+      }
+    },
+    description: "Topics — a tracker over #topic pieces: durable units of shared attention\n" +
+      "(CT-1878). Deliberately minimal: no statuses, labels, or assignees; topics\n" +
+      "sort by last activity. Replaces Linear / GitHub issues / loose process docs\n" +
+      "for the team; PR workflows stay in GitHub and arrive here as links.\n" +
+      "\n" +
+      "Headless use: survey the whole board with one bounded read of `index` — a\n" +
+      "row IS its topic, so a row's own address (`--select index[].@`) is what\n" +
+      "that topic's reads and verbs take as the piece. File with `addTopic`,\n" +
+      "title and optional initial body in one call, then work on the topic\n" +
+      "directly: the body is its living document, the thread its append-only\n" +
+      "deliberation. Sign every mutation with `agentName` — Fabric records the\n" +
+      "human principal behind the key; the name says which agent acted under it.",
+    properties: {
+      "$NAME": { type: "string" },
+      "$UI": { "$ref": "https://commonfabric.org/schemas/vnode.json" },
+      addTopic: {
+        "$ref": "#/$defs/AddTopicEvent",
+        asCell: [ "stream" ],
+        description: "File a topic. The atomic unit takes the initial body with the title, so\n" +
+          "no reader observes a title-only halfway state and no follow-up `setBody`\n" +
+          "finishes a create. Returns the created topic as its survey row — the\n" +
+          "reference plus the write-time facts the pattern resolved."
+      },
+      crossrefs: {
+        default: [],
+        description: "The board's mention pivot, one row per topic: the topic, and the topics\n" +
+          "that mention it. Published so a topic composed outside `addTopic` can be\n" +
+          "wired to the same table the board's own children read — the graph is\n" +
+          "derived once, here, and never per topic.",
+        items: { "$ref": "#/$defs/TopicCrossrefRow" },
+        type: "array"
+      },
+      index: {
+        default: [],
+        description: "The full-board survey surface: one bounded row per topic, carrying the\n" +
+          "scalars a survey reads. A row IS its topic, so a row's own address is the\n" +
+          "topic's — `--select index[].@` reads it, and an index into this array is\n" +
+          "not a stable address.",
+        items: { "$ref": "#/$defs/TopicIndexRow" },
+        type: "array"
+      },
+      mentionable: {
+        default: [],
+        description: "The same list, under the name the topic pattern's editor autocompletes\n" +
+          "over — what `addTopic` wires into each child as its mention universe.",
+        items: { "$ref": "#/$defs/TopicPiece" },
+        type: "array"
+      },
+      myName: { type: "string" },
+      newTitle: {
+        description: "Session-local draft for the footer composer (exposed for embedding and\n" +
+          "headless driving, like the chat exemplar's drafts).",
+        type: "string"
+      },
+      setMyName: {
+        asCell: [ "stream" ],
+        deprecated: true,
+        properties: { name: [Object] },
+        required: [ "name" ],
+        type: "object"
+      },
+      submitTopic: {
+        asCell: [ "stream", "opaque" ],
+        description: "Submit the footer composer as the current viewer's canonical Profile.",
+        tier: "wrapper"
+      },
+      topicCount: {
+        description: "How many topics the board holds, nulls included.",
+        type: "number"
+      },
+      topics: {
+        description: "The board's topics, in filing order, as complete pieces — bodies,\n" +
+          "threads, and verbs included. Survey through `index` instead; read this\n" +
+          "when you already know which topic you are expanding.",
+        items: { "$ref": "#/$defs/TopicPiece" },
+        type: "array"
+      }
+    },
+    required: [
+      "topics",      "mentionable",
+      "topicCount",  "crossrefs",
+      "index",       "addTopic",
+      "myName",      "setMyName",
+      "submitTopic", "$NAME",
+      "$UI"
+    ],
+    tags: [ "topic" ],
+    type: "object"
+  },
+  overwrite: "redirect",
+  viaLinkHop: true
+}
+[WARN][cell::20:37:52.262] get >50ms get() took 52ms {
+  id: "of:fid1:H0PkV_T4pt697kJTMX2VMZr9lpVk0fhZiq0HqI2B3pY",
+  path: [],
+  space: "did:key:z6Mkqh2jbu5m3BsHWQUTuadH8QCzSoyZoHptyy2vVPCXiwNS",
+  scope: "space",
+  schema: {
+    "$defs": {
+      AddCommentEvent: {
+        properties: { agentName: [Object], body: [Object] },
+        required: [ "body" ],
+        type: "object"
+      },
+      AddLinkEvent: {
+        properties: {
+          agentName: [Object],
+          kind: [Object],
+          label: [Object],
+          url: [Object]
+        },
+        required: [ "kind", "url", "label" ],
+        type: "object"
+      },
+      AddTopicEvent: {
+        properties: { agentName: [Object], body: [Object], title: [Object] },
+        required: [ "title" ],
+        type: "object"
+      },
+      MentionEvent: {
+        properties: { topic: [Object] },
+        required: [ "topic" ],
+        type: "object"
+      },
+      SetBodyEvent: {
+        properties: { agentName: [Object], body: [Object] },
+        required: [ "body" ],
+        type: "object"
+      },
+      TopicAuthor: {
+        properties: { avatar: [Object], kind: [Object], name: [Object] },
+        required: [ "kind", "name" ],
+        type: "object"
+      },
+      TopicComment: {
+        properties: {
+          author: [Object],
+          authorName: [Object],
+          body: [Object],
+          sentAt: [Object]
+        },
+        required: [ "authorName", "body", "sentAt" ],
+        type: "object"
+      },
+      TopicCrossrefRow: {
+        properties: { mentionedBy: [Object], topic: [Object] },
+        required: [ "topic", "mentionedBy" ],
+        type: "object"
+      },
+      TopicIndexRow: {
+        properties: {
+          commentCount: [Object],
+          createdAt: [Object],
+          createdBy: [Object],
+          lastActivityAt: [Object],
+          title: [Object]
+        },
+        required: [ "title", "createdAt", "commentCount", "lastActivityAt" ],
+        type: "object"
+      },
+      TopicLink: {
+        properties: {
+          addedAt: [Object],
+          addedBy: [Object],
+          kind: [Object],
+          label: [Object],
+          url: [Object]
+        },
+        required: [ "kind", "url", "label" ],
+        type: "object"
+      },
+      TopicLinkKind: { enum: [ "session", "topic", "pr", "web" ] },
+      TopicMentionRef: {
+        properties: { destination: [Object], modifiedTitle: [Object] },
+        required: [ "destination", "modifiedTitle" ],
+        type: "object"
+      },
+      TopicMentionRefMap: {
+        additionalProperties: { "$ref": "#/$defs/TopicMentionRef" },
+        properties: {},
+        type: "object"
+      },
+      TopicPiece: {
+        properties: {
+          "$NAME": [Object],
+          addComment: [Object],
+          addLink: [Object],
+          body: [Object],
+          bodyUpdatedAt: [Object],
+          bodyUpdatedBy: [Object],
+          commentCount: [Object],
+          comments: [Object],
+          createdAt: [Object],
+          createdBy: [Object],
+          createdByName: [Object],
+          lastActivityAt: [Object],
+          links: [Object],
+          mention: [Object],
+          mentioned: [Object],
+          mentions: [Object],
+          referencedBy: [Object],
+          references: [Object],
+          setBody: [Object],
+          title: [Object],
+          unmention: [Object]
+        },
+        required: [
+          "createdByName", "body",
+          "comments",      "links",
+          "mentions",      "references",
+          "mentioned",     "referencedBy",
+          "addComment",    "addLink",
+          "setBody",       "$NAME",
+          "title",         "createdAt",
+          "commentCount",  "lastActivityAt"
+        ],
+        type: "object"
+      },
+      TopicSummary: {
+        properties: {
+          commentCount: [Object],
+          createdAt: [Object],
+          createdBy: [Object],
+          lastActivityAt: [Object],
+          title: [Object]
+        },
+        required: [ "title", "createdAt", "commentCount", "lastActivityAt" ],
+        type: "object"
+      },
+      UnmentionEvent: {
+        properties: { topic: [Object] },
+        required: [ "topic" ],
+        type: "object"
+      }
+    },
+    description: "Topics — a tracker over #topic pieces: durable units of shared attention\n" +
+      "(CT-1878). Deliberately minimal: no statuses, labels, or assignees; topics\n" +
+      "sort by last activity. Replaces Linear / GitHub issues / loose process docs\n" +
+      "for the team; PR workflows stay in GitHub and arrive here as links.\n" +
+      "\n" +
+      "Headless use: survey the whole board with one bounded read of `index` — a\n" +
+      "row IS its topic, so a row's own address (`--select index[].@`) is what\n" +
+      "that topic's reads and verbs take as the piece. File with `addTopic`,\n" +
+      "title and optional initial body in one call, then work on the topic\n" +
+      "directly: the body is its living document, the thread its append-only\n" +
+      "deliberation. Sign every mutation with `agentName` — Fabric records the\n" +
+      "human principal behind the key; the name says which agent acted under it.",
+    properties: {
+      "$NAME": { type: "string" },
+      "$UI": { "$ref": "https://commonfabric.org/schemas/vnode.json" },
+      addTopic: {
+        "$ref": "#/$defs/AddTopicEvent",
+        asCell: [ "stream" ],
+        description: "File a topic. The atomic unit takes the initial body with the title, so\n" +
+          "no reader observes a title-only halfway state and no follow-up `setBody`\n" +
+          "finishes a create. Returns the created topic as its survey row — the\n" +
+          "reference plus the write-time facts the pattern resolved."
+      },
+      crossrefs: {
+        default: [],
+        description: "The board's mention pivot, one row per topic: the topic, and the topics\n" +
+          "that mention it. Published so a topic composed outside `addTopic` can be\n" +
+          "wired to the same table the board's own children read — the graph is\n" +
+          "derived once, here, and never per topic.",
+        items: { "$ref": "#/$defs/TopicCrossrefRow" },
+        type: "array"
+      },
+      index: {
+        default: [],
+        description: "The full-board survey surface: one bounded row per topic, carrying the\n" +
+          "scalars a survey reads. A row IS its topic, so a row's own address is the\n" +
+          "topic's — `--select index[].@` reads it, and an index into this array is\n" +
+          "not a stable address.",
+        items: { "$ref": "#/$defs/TopicIndexRow" },
+        type: "array"
+      },
+      mentionable: {
+        default: [],
+        description: "The same list, under the name the topic pattern's editor autocompletes\n" +
+          "over — what `addTopic` wires into each child as its mention universe.",
+        items: { "$ref": "#/$defs/TopicPiece" },
+        type: "array"
+      },
+      myName: { type: "string" },
+      newTitle: {
+        description: "Session-local draft for the footer composer (exposed for embedding and\n" +
+          "headless driving, like the chat exemplar's drafts).",
+        type: "string"
+      },
+      setMyName: {
+        asCell: [ "stream" ],
+        deprecated: true,
+        properties: { name: [Object] },
+        required: [ "name" ],
+        type: "object"
+      },
+      submitTopic: {
+        asCell: [ "stream", "opaque" ],
+        description: "Submit the footer composer as the current viewer's canonical Profile.",
+        tier: "wrapper"
+      },
+      topicCount: {
+        description: "How many topics the board holds, nulls included.",
+        type: "number"
+      },
+      topics: {
+        description: "The board's topics, in filing order, as complete pieces — bodies,\n" +
+          "threads, and verbs included. Survey through `index` instead; read this\n" +
+          "when you already know which topic you are expanding.",
+        items: { "$ref": "#/$defs/TopicPiece" },
+        type: "array"
+      }
+    },
+    required: [
+      "topics",      "mentionable",
+      "topicCount",  "crossrefs",
+      "index",       "addTopic",
+      "myName",      "setMyName",
+      "submitTopic", "$NAME",
+      "$UI"
+    ],
+    tags: [ "topic" ],
+    type: "object"
+  },
+  overwrite: "redirect",
+  viaLinkHop: true
+}
+[WARN][cell::20:37:56.073] get >50ms get() took 56ms {
+  id: "of:fid1:H0PkV_T4pt697kJTMX2VMZr9lpVk0fhZiq0HqI2B3pY",
+  path: [],
+  space: "did:key:z6Mkqh2jbu5m3BsHWQUTuadH8QCzSoyZoHptyy2vVPCXiwNS",
+  scope: "space",
+  schema: {
+    "$defs": {
+      AddCommentEvent: {
+        properties: { agentName: [Object], body: [Object] },
+        required: [ "body" ],
+        type: "object"
+      },
+      AddLinkEvent: {
+        properties: {
+          agentName: [Object],
+          kind: [Object],
+          label: [Object],
+          url: [Object]
+        },
+        required: [ "kind", "url", "label" ],
+        type: "object"
+      },
+      AddTopicEvent: {
+        properties: { agentName: [Object], body: [Object], title: [Object] },
+        required: [ "title" ],
+        type: "object"
+      },
+      MentionEvent: {
+        properties: { topic: [Object] },
+        required: [ "topic" ],
+        type: "object"
+      },
+      SetBodyEvent: {
+        properties: { agentName: [Object], body: [Object] },
+        required: [ "body" ],
+        type: "object"
+      },
+      TopicAuthor: {
+        properties: { avatar: [Object], kind: [Object], name: [Object] },
+        required: [ "kind", "name" ],
+        type: "object"
+      },
+      TopicComment: {
+        properties: {
+          author: [Object],
+          authorName: [Object],
+          body: [Object],
+          sentAt: [Object]
+        },
+        required: [ "authorName", "body", "sentAt" ],
+        type: "object"
+      },
+      TopicCrossrefRow: {
+        properties: { mentionedBy: [Object], topic: [Object] },
+        required: [ "topic", "mentionedBy" ],
+        type: "object"
+      },
+      TopicIndexRow: {
+        properties: {
+          commentCount: [Object],
+          createdAt: [Object],
+          createdBy: [Object],
+          lastActivityAt: [Object],
+          title: [Object]
+        },
+        required: [ "title", "createdAt", "commentCount", "lastActivityAt" ],
+        type: "object"
+      },
+      TopicLink: {
+        properties: {
+          addedAt: [Object],
+          addedBy: [Object],
+          kind: [Object],
+          label: [Object],
+          url: [Object]
+        },
+        required: [ "kind", "url", "label" ],
+        type: "object"
+      },
+      TopicLinkKind: { enum: [ "session", "topic", "pr", "web" ] },
+      TopicMentionRef: {
+        properties: { destination: [Object], modifiedTitle: [Object] },
+        required: [ "destination", "modifiedTitle" ],
+        type: "object"
+      },
+      TopicMentionRefMap: {
+        additionalProperties: { "$ref": "#/$defs/TopicMentionRef" },
+        properties: {},
+        type: "object"
+      },
+      TopicPiece: {
+        properties: {
+          "$NAME": [Object],
+          addComment: [Object],
+          addLink: [Object],
+          body: [Object],
+          bodyUpdatedAt: [Object],
+          bodyUpdatedBy: [Object],
+          commentCount: [Object],
+          comments: [Object],
+          createdAt: [Object],
+          createdBy: [Object],
+          createdByName: [Object],
+          lastActivityAt: [Object],
+          links: [Object],
+          mention: [Object],
+          mentioned: [Object],
+          mentions: [Object],
+          referencedBy: [Object],
+          references: [Object],
+          setBody: [Object],
+          title: [Object],
+          unmention: [Object]
+        },
+        required: [
+          "createdByName", "body",
+          "comments",      "links",
+          "mentions",      "references",
+          "mentioned",     "referencedBy",
+          "addComment",    "addLink",
+          "setBody",       "$NAME",
+          "title",         "createdAt",
+          "commentCount",  "lastActivityAt"
+        ],
+        type: "object"
+      },
+      TopicSummary: {
+        properties: {
+          commentCount: [Object],
+          createdAt: [Object],
+          createdBy: [Object],
+          lastActivityAt: [Object],
+          title: [Object]
+        },
+        required: [ "title", "createdAt", "commentCount", "lastActivityAt" ],
+        type: "object"
+      },
+      UnmentionEvent: {
+        properties: { topic: [Object] },
+        required: [ "topic" ],
+        type: "object"
+      }
+    },
+    description: "Topics — a tracker over #topic pieces: durable units of shared attention\n" +
+      "(CT-1878). Deliberately minimal: no statuses, labels, or assignees; topics\n" +
+      "sort by last activity. Replaces Linear / GitHub issues / loose process docs\n" +
+      "for the team; PR workflows stay in GitHub and arrive here as links.\n" +
+      "\n" +
+      "Headless use: survey the whole board with one bounded read of `index` — a\n" +
+      "row IS its topic, so a row's own address (`--select index[].@`) is what\n" +
+      "that topic's reads and verbs take as the piece. File with `addTopic`,\n" +
+      "title and optional initial body in one call, then work on the topic\n" +
+      "directly: the body is its living document, the thread its append-only\n" +
+      "deliberation. Sign every mutation with `agentName` — Fabric records the\n" +
+      "human principal behind the key; the name says which agent acted under it.",
+    properties: {
+      "$NAME": { type: "string" },
+      "$UI": { "$ref": "https://commonfabric.org/schemas/vnode.json" },
+      addTopic: {
+        "$ref": "#/$defs/AddTopicEvent",
+        asCell: [ "stream" ],
+        description: "File a topic. The atomic unit takes the initial body with the title, so\n" +
+          "no reader observes a title-only halfway state and no follow-up `setBody`\n" +
+          "finishes a create. Returns the created topic as its survey row — the\n" +
+          "reference plus the write-time facts the pattern resolved."
+      },
+      crossrefs: {
+        default: [],
+        description: "The board's mention pivot, one row per topic: the topic, and the topics\n" +
+          "that mention it. Published so a topic composed outside `addTopic` can be\n" +
+          "wired to the same table the board's own children read — the graph is\n" +
+          "derived once, here, and never per topic.",
+        items: { "$ref": "#/$defs/TopicCrossrefRow" },
+        type: "array"
+      },
+      index: {
+        default: [],
+        description: "The full-board survey surface: one bounded row per topic, carrying the\n" +
+          "scalars a survey reads. A row IS its topic, so a row's own address is the\n" +
+          "topic's — `--select index[].@` reads it, and an index into this array is\n" +
+          "not a stable address.",
+        items: { "$ref": "#/$defs/TopicIndexRow" },
+        type: "array"
+      },
+      mentionable: {
+        default: [],
+        description: "The same list, under the name the topic pattern's editor autocompletes\n" +
+          "over — what `addTopic` wires into each child as its mention universe.",
+        items: { "$ref": "#/$defs/TopicPiece" },
+        type: "array"
+      },
+      myName: { type: "string" },
+      newTitle: {
+        description: "Session-local draft for the footer composer (exposed for embedding and\n" +
+          "headless driving, like the chat exemplar's drafts).",
+        type: "string"
+      },
+      setMyName: {
+        asCell: [ "stream" ],
+        deprecated: true,
+        properties: { name: [Object] },
+        required: [ "name" ],
+        type: "object"
+      },
+      submitTopic: {
+        asCell: [ "stream", "opaque" ],
+        description: "Submit the footer composer as the current viewer's canonical Profile.",
+        tier: "wrapper"
+      },
+      topicCount: {
+        description: "How many topics the board holds, nulls included.",
+        type: "number"
+      },
+      topics: {
+        description: "The board's topics, in filing order, as complete pieces — bodies,\n" +
+          "threads, and verbs included. Survey through `index` instead; read this\n" +
+          "when you already know which topic you are expanding.",
+        items: { "$ref": "#/$defs/TopicPiece" },
+        type: "array"
+      }
+    },
+    required: [
+      "topics",      "mentionable",
+      "topicCount",  "crossrefs",
+      "index",       "addTopic",
+      "myName",      "setMyName",
+      "submitTopic", "$NAME",
+      "$UI"
+    ],
+    tags: [ "topic" ],
+    type: "object"
+  },
+  overwrite: "redirect",
+  viaLinkHop: true
+}
+
+[topics-journey] arm=OFF seed echo ms: 702 411
+[topics-series] arm=OFF n=20 delay=2000ms load1/5/15=4.69/4.81/5.33
+[topics-series] echo    median=689ms q1=466ms q3=948ms p95=1676ms min=292ms max=1676ms
+[topics-series] arrival median=930ms q1=697ms q3=1437ms p95=2210ms min=376ms max=2210ms
+[topics-series] gap     median=291ms q1=129ms q3=483ms p95=646ms min=27ms max=646ms
+[topics-series] per-event echo ms: 762 388 292 399 416 341 466 476 639 591 689 728 827 680 835 948 1103 1181 1676 1579
+[topics-series] per-event arrival ms: 801 416 422 428 619 376 707 697 930 896 756 1136 1277 1137 1318 1437 1678 1827 1805 2210
+[topics-series] per-event gap ms: 39 27 131 29 203 35 241 221 291 305 67 408 450 457 483 489 576 646 129 630
+
+[topics-journey OFF] step timings (total 7491ms):
+      3706ms  board create + start (controller)
+       702ms  addTopic seed 1 echo (controller)
+       411ms  addTopic seed 2 echo (controller)
+        42ms  fid capture (result.pull + resolveAsCell x2)
+       676ms  browser cold load: goto + login
+        16ms  browser runtime idle
+      1850ms  browser renders both seed titles
+        45ms  navigate-to-topic: click Open -> piece view
+        43ms  post-navigation runtime idle
+[0m[38;5;245m----- output end -----[0m
+  measures the topics journey ON-vs-OFF stimuli ... [0m[32mok[0m [0m[38;5;245m(1m8s)[0m
+Topics journey benchmark (scratch instrument) ... [0m[32mok[0m [0m[38;5;245m(1m13s)[0m
+
+[0m[32mok[0m | 1 passed (1 step) | 0 failed [0m[38;5;245m(1m13s)[0m
+

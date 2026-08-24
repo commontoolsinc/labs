@@ -74,3 +74,15 @@ load-high 19.15 (poll 16/20, threshold 6)
 load-high 161.61 (poll 17/20, threshold 6)
 load-high 78.77 (poll 18/20, threshold 6)
 load-ok 4.26 (threshold 6)
+RUN_DONE j7-off rc=0 wall=70s drops=0
+RUN_DONE j7-on rc=0 wall=81s drops=0
+load-ok 5.31 (threshold 6)
+RUN_DONE j8-on rc=0 wall=92s drops=0
+RUN_DONE j8-off rc=0 wall=74s drops=0
+load-ok 4.46 (threshold 6)
+RUN_DONE j9-off rc=0 wall=74s drops=0
+RUN_DONE j9-on rc=0 wall=79s drops=0
+load-ok 4.98 (threshold 6)
+RUN_DONE j10-on rc=0 wall=75s drops=0
+RUN_DONE j10-off rc=0 wall=65s drops=0
+ALL_DONE

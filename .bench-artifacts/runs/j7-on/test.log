@@ -1,0 +1,608 @@
+[0m[38;5;245mrunning 1 test from ./integration/topics-journey-bench.scratch.test.ts[0m
+Topics journey benchmark (scratch instrument) ...
+[0m[38;5;245m------- output -------[0m
+Experimental flag overrides: serverExecution=true
+[ERROR][runner::20:32:29.529] piece-start-commit-failed piece-start commit piece-instantiate/of:fid1:rszomt4Ti8MwDNpMJLZCjcENRtAH6MFBxgf0wYVNCs8 failed; the started graph's setup writes did not land (stage P2-F, F1) {
+  name: "ConflictError",
+  message: "stale confirmed read: computed:fid1:0blHWi_dayxZBjRKc1nAJWZaM0GeRj63NYzhyTCZoQw at seq 2 conflicted with seq 6",
+  transaction: {
+    localSeq: 1,
+    reads: {
+      confirmed: [
+        {
+          id: "computed:fid1:0blHWi_dayxZBjRKc1nAJWZaM0GeRj63NYzhyTCZoQw",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:1cBApT_oqbGenQxIfXLsXzYtEZEpiw-TQZ8IrHJOkG8",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:6TLvHM2HzXFnvq2CCAcAche2UzUR4Yn172WoUvRKrCk",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:7BycCyHc2yDDzr17jnXayWZMxpweSGk2JcGKILKguvo",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "computed:fid1:84YHWJkYlPXiQFXSvsnG8Ne6ijVYaMReVSb9qxHm9oM",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:ALBhCEgNO50bs4oBMltz7pZFcQY1DN9hkJQGC9f8mEI",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:BwUlxKKCzU2_GMzHjgyN5nDi72JSr-aJLSBOFyMVIws",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:Djt2mteUsPM7xYqzyAbcQZEwUhUFRtNcUu_dL2GyxUs",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "computed:fid1:G8X9gfQd1ZfX2vaMDqWVDhFrarUPAkIcp69xODNvx3c",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "computed:fid1:GGng7yFyEwfHiE0Bo1yAmcbu9pj_8qy_iSpXAlwxDmQ",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:MQosvg4bzbXKQRoxT4XAtqQvmLbGW342-KCapYr2qLc",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:Q9c1xCLYxqKafO1CK84VQetjU3dEKeeuU96zs79aP7g",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "computed:fid1:X1hM_BkQv0y0CISJQQIEEFCEJ0I0gOL4cEHDyTCCHKU",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:XWdSTeGDphZjqFmcbAQEuPlSZ21rjCGGO_OLIl8ukOY",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:YVjYrLbQAQKcj1RBiaWtPRwFiTO2o5lMfYyLo5CY2cw",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "computed:fid1:_RHS0e-1sLoHtqOHyp5J-RACfTxJiuia7ZWJnfDNasA",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:dAyGC_puouoSf6UMaFTkpOAms87oN0Pl0homS538G3k",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:gaCaVS-c7UAgxJhY1DBuQ-5NGojPTXnxuioJherRl0A",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:govJkFEkvnCTfL4Pul_AEFqcLoxrPpJM20gTo_X1T14",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:lAgyop4YC1nbrNmKcRMFHwIBQQB3vyl_Ou8MUircYKM",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:qaSUNVSVtppTG0pY2eS7l0tT65rkimOuRFEQucsrUfQ",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "computed:fid1:tYiQG3sJUOHh2qON9n1rSQ119v_J06MRueZPoe1OXEE",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:xmFo54xGBOVszWTJVqTwyx7kux94-oIWSi-C4bCt2K8",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "computed:fid1:ya0xn1GFQU4eU-XpQKIMCYMtZLHlUCBVIjp3Eb3bUwY",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:-Cl3XnGLsdTrHsdAQ-9R6m4foFt431o10d9fhW_y084",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:0z5O-xqwc_MNnL6HA7_m69srSbwfCeKLGGxlpZtkf2A",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:6k8TEe2tEQ3azu3bTjph6u67BXPZ0YEPlQG39YGrTvg",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:84YHWJkYlPXiQFXSvsnG8Ne6ijVYaMReVSb9qxHm9oM",
+          scope: "space",
+          path: [Array],
+          seq: 0
+        },
+        {
+          id: "of:fid1:92RhnBwvx2ky9zMAv5WEh0K2jAfwcLVi51QmTYcMYn8",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:AUrx2JXW32qcXHdvDLCaLkXmOJJqVsZAygfyhhBsYd0",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:BwUlxKKCzU2_GMzHjgyN5nDi72JSr-aJLSBOFyMVIws",
+          scope: "space",
+          path: [Array],
+          seq: 0
+        },
+        {
+          id: "of:fid1:GGng7yFyEwfHiE0Bo1yAmcbu9pj_8qy_iSpXAlwxDmQ",
+          scope: "space",
+          path: [Array],
+          seq: 0
+        },
+        {
+          id: "of:fid1:GXIYHEGvwhFF8u9ND079POSQZ5---7hM4C_aIfQOJvw",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:IqxqggwTYl-SyxBeYWCKFrnrEMBc9kT9G9n393F6zwg",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:IqxqggwTYl-SyxBeYWCKFrnrEMBc9kT9G9n393F6zwg",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:IwRfAPQQolqW7O7mAIXpGApIpFFZKU3NsWQxHm7zaZw",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:IwRfAPQQolqW7O7mAIXpGApIpFFZKU3NsWQxHm7zaZw",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:IwRfAPQQolqW7O7mAIXpGApIpFFZKU3NsWQxHm7zaZw",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:IwRfAPQQolqW7O7mAIXpGApIpFFZKU3NsWQxHm7zaZw",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:IwRfAPQQolqW7O7mAIXpGApIpFFZKU3NsWQxHm7zaZw",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:IwRfAPQQolqW7O7mAIXpGApIpFFZKU3NsWQxHm7zaZw",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:IwRfAPQQolqW7O7mAIXpGApIpFFZKU3NsWQxHm7zaZw",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:IwRfAPQQolqW7O7mAIXpGApIpFFZKU3NsWQxHm7zaZw",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:KNJsmOYDAZAB93fpv-If8tovanZZsSG1F9JWWceHMCg",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:KNJsmOYDAZAB93fpv-If8tovanZZsSG1F9JWWceHMCg",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:LaFtomRzChrcyFJg156LkWLHrOAFm7cADdbMT1Uj-O8",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:NDwX9hSzBSo83tXIo8x9iScJvWqP-c0pjYPmnRLx16g",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:OPzwBCSdVikdS60gtui3hVEgUocODqOUx469ZRXrjdc",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:QLh8w00cgI93VdYWYRLY5GJpIK-IuHKbX7EmmQ0-6Sc",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:R77wU4WDIXo-vj2cu7aJM3gj3r2vliA8ss4tDLVl7_g",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:R77wU4WDIXo-vj2cu7aJM3gj3r2vliA8ss4tDLVl7_g",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:TJo5R9v_tvjgA5RSv4csSEDYNGakFrI1D0EZa-ngaTM",
+          scope: "space",
+          path: [Array],
+          seq: 3
+        },
+        {
+          id: "of:fid1:TJo5R9v_tvjgA5RSv4csSEDYNGakFrI1D0EZa-ngaTM",
+          scope: "space",
+          path: [Array],
+          seq: 3
+        },
+        {
+          id: "of:fid1:TJo5R9v_tvjgA5RSv4csSEDYNGakFrI1D0EZa-ngaTM",
+          scope: "space",
+          path: [Array],
+          seq: 3
+        },
+        {
+          id: "of:fid1:TJo5R9v_tvjgA5RSv4csSEDYNGakFrI1D0EZa-ngaTM",
+          scope: "space",
+          path: [Array],
+          seq: 3
+        },
+        {
+          id: "of:fid1:TJo5R9v_tvjgA5RSv4csSEDYNGakFrI1D0EZa-ngaTM",
+          scope: "space",
+          path: [Array],
+          seq: 3
+        },
+        {
+          id: "of:fid1:TJo5R9v_tvjgA5RSv4csSEDYNGakFrI1D0EZa-ngaTM",
+          scope: "space",
+          path: [Array],
+          seq: 3
+        },
+        {
+          id: "of:fid1:TJo5R9v_tvjgA5RSv4csSEDYNGakFrI1D0EZa-ngaTM",
+          scope: "space",
+          path: [Array],
+          seq: 3
+        },
+        {
+          id: "of:fid1:TJo5R9v_tvjgA5RSv4csSEDYNGakFrI1D0EZa-ngaTM",
+          scope: "space",
+          path: [Array],
+          seq: 3
+        },
+        {
+          id: "of:fid1:X2SpwThABkVkMgwcDC9cWZFP5z509BtEBezyLHAV93M",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:X2SpwThABkVkMgwcDC9cWZFP5z509BtEBezyLHAV93M",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:X2SpwThABkVkMgwcDC9cWZFP5z509BtEBezyLHAV93M",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:X2SpwThABkVkMgwcDC9cWZFP5z509BtEBezyLHAV93M",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:X2SpwThABkVkMgwcDC9cWZFP5z509BtEBezyLHAV93M",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:X2SpwThABkVkMgwcDC9cWZFP5z509BtEBezyLHAV93M",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:X2SpwThABkVkMgwcDC9cWZFP5z509BtEBezyLHAV93M",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:X2SpwThABkVkMgwcDC9cWZFP5z509BtEBezyLHAV93M",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:X2SpwThABkVkMgwcDC9cWZFP5z509BtEBezyLHAV93M",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:Xg_L4qpXUQisS_-Xj1B8ZtavpmvPo2O7I-sn__oe3gs",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:ZhetCAxfdR51JonfYZff2jAK86ARDwgTb-Ra47HS1hg",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:_RHS0e-1sLoHtqOHyp5J-RACfTxJiuia7ZWJnfDNasA",
+          scope: "space",
+          path: [Array],
+          seq: 0
+        },
+        {
+          id: "of:fid1:gdlUyLJ5u1M3GQZ4K4V0zYBsEH0teACQ-TsEU1u4hR8",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:jUjsDyZxJeu4ZPU9stPSbflpVNGrpIouo7oT5ZMbnNU",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:kYB4idP83M_NX0kNmCHIvVUJBM6GmcOJRBeOC0IWJ4E",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:kYB4idP83M_NX0kNmCHIvVUJBM6GmcOJRBeOC0IWJ4E",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:kYB4idP83M_NX0kNmCHIvVUJBM6GmcOJRBeOC0IWJ4E",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:kYB4idP83M_NX0kNmCHIvVUJBM6GmcOJRBeOC0IWJ4E",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:kYB4idP83M_NX0kNmCHIvVUJBM6GmcOJRBeOC0IWJ4E",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:kYB4idP83M_NX0kNmCHIvVUJBM6GmcOJRBeOC0IWJ4E",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:kYB4idP83M_NX0kNmCHIvVUJBM6GmcOJRBeOC0IWJ4E",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:kYB4idP83M_NX0kNmCHIvVUJBM6GmcOJRBeOC0IWJ4E",
+          scope: "space",
+          path: [Array],
+          seq: 4
+        },
+        {
+          id: "of:fid1:nCG97mOZjJ51VxHb-wKIVTWcjQxspOsZ8Q8ZhHb2Jhc",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:rszomt4Ti8MwDNpMJLZCjcENRtAH6MFBxgf0wYVNCs8",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:rszomt4Ti8MwDNpMJLZCjcENRtAH6MFBxgf0wYVNCs8",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:rszomt4Ti8MwDNpMJLZCjcENRtAH6MFBxgf0wYVNCs8",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:s9w_jRT7u8ckDdwVXpzMrfgrXghXdUuu2ttkWp67R5o",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:tyChdgfVIHDHPe_fuy8AHtA2Z6ELXJM3kNnVIF2hM5Y",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:vudiMmdFMORO8JhNfvC-70MYP3fYjqRiojn4nznrh70",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:zKHunl-1SV9PvYBz0u0lwuyaCIPmjxYsPVerECHgOVw",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:zsKyi_3QVRkFAgJXjfp5f3b5IKAaAm-OV4v5LSM2O_g",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        },
+        {
+          id: "of:fid1:zsKyi_3QVRkFAgJXjfp5f3b5IKAaAm-OV4v5LSM2O_g",
+          scope: "space",
+          path: [Array],
+          seq: 2
+        }
+      ],
+      pending: []
+    },
+    operations: [
+      {
+        op: "patch",
+        id: "of:fid1:X2SpwThABkVkMgwcDC9cWZFP5z509BtEBezyLHAV93M",
+        scope: "space",
+        patches: [ [Object] ]
+      }
+    ]
+  },
+  conflict: {
+    space: "did:key:z6MkuYk84cRQxFfhNWoDAbmpfbiMK9VPfAfRSiZm1GhZbzpC",
+    the: "application/json",
+    of: "computed:fid1:0blHWi_dayxZBjRKc1nAJWZaM0GeRj63NYzhyTCZoQw"
+  },
+  retryAfterSeq: 7,
+  readyToRetry: [AsyncFunction (anonymous)]
+}
+[0m[38;5;245m----- output end -----[0m
+  measures the topics journey ON-vs-OFF stimuli ...
+[0m[38;5;245m------- output -------[0m
+[WARN][traverse::20:33:11.611] slow-traverse 115ms doc=of:fid1:lAk5oBxM0MvYKajijR2lzklEhswAEQkpPEvmG5Z4eUc/undefined trackerKeys=415 trackerVals=1163 traverseSchema=3371 traversePtr=742 traverseArr=195 traverseObj=433 traverseDAG=0 anyOfBranches=4834 anyOfFastRejects=3457 anyOfPropertyMerges=0 getDocAtPath=1440 dagMemo=0 uniqueDocs=0 uniquePaths=0 maxDepth=33 schemaMemo=3196 schemaMemoHits=175 topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)
+[0m[1m[33m'Topics journey benchmark (scratch instrument)' has been running for over [0m[38;5;245m(1m0s)[0m[0m
+
+[topics-journey] arm=ON seed echo ms: 1482 610
+[topics-series] arm=ON n=20 delay=2000ms load1/5/15=5.33/4.48/5.41
+[topics-series] echo    median=1348ms q1=1094ms q3=1699ms p95=2484ms min=580ms max=2484ms
+[topics-series] arrival median=1406ms q1=1131ms q3=1759ms p95=2578ms min=599ms max=2578ms
+[topics-series] gap     median=58ms q1=37ms q3=63ms p95=107ms min=19ms max=107ms
+[topics-series] per-event echo ms: 890 580 595 1094 1016 1063 1346 1314 1363 1950 1775 1699 1446 1421 1322 1317 1348 1488 1892 2484
+[topics-series] per-event arrival ms: 909 599 627 1131 1052 1101 1405 1359 1414 2009 1883 1759 1513 1473 1381 1372 1406 1551 1982 2578
+[topics-series] per-event gap ms: 20 19 31 37 36 37 59 45 51 59 107 60 67 52 59 54 58 63 90 94
+
+[topics-journey ON] step timings (total 5581ms):
+      1613ms  board create + start (controller)
+      1482ms  addTopic seed 1 echo (controller)
+       610ms  addTopic seed 2 echo (controller)
+        34ms  fid capture (result.pull + resolveAsCell x2)
+       578ms  browser cold load: goto + login
+         3ms  browser runtime idle
+      1190ms  browser renders both seed titles
+        37ms  navigate-to-topic: click Open -> piece view
+        34ms  post-navigation runtime idle
+[0m[38;5;245m----- output end -----[0m
+  measures the topics journey ON-vs-OFF stimuli ... [0m[32mok[0m [0m[38;5;245m(1m14s)[0m
+Topics journey benchmark (scratch instrument) ... [0m[32mok[0m [0m[38;5;245m(1m20s)[0m
+
+[0m[32mok[0m | 1 passed (1 step) | 0 failed [0m[38;5;245m(1m20s)[0m
+
