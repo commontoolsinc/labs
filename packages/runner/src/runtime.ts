@@ -90,6 +90,7 @@ import {
   buildCfcPolicySnapshot,
   buildCfcTrustConfig,
   type CfcDeclaredMonotonicityMode,
+  type CfcDecomposedEnvelopes,
   type CfcEnforcementMode,
   type CfcFlowLabelsMode,
   type CfcLabelMetadataProtectionMode,
@@ -519,6 +520,16 @@ export interface RuntimeOptions {
    */
   cfcTriggerReadGating?: CfcTriggerReadGating;
   /**
+   * Defaults to `false`. When true, the envelope persist path stores the
+   * decomposed spelling: the metadata's `schemaHash` names a root document
+   * whose `$defs` members are separate content-addressed documents, shared
+   * with the link-schema family. Off preserves the merged schema's
+   * interned spelling, which may itself carry references. Reading
+   * resolves references whenever the stored root carries them, in either
+   * setting.
+   */
+  cfcDecomposedEnvelopes?: CfcDecomposedEnvelopes;
+  /**
    * Exchange-rule policy evaluation dial (Epic B5, spec §4.4.5). Defaults to
    * `off` (gates decide on raw labels, byte-identical to before the dial).
    * `observe` evaluates gated labels to fixpoint and emits diagnostics while
@@ -794,6 +805,7 @@ export class Runtime {
   readonly cfcFlowLabels: CfcFlowLabelsMode;
   readonly cfcWriteFloor: CfcWriteFloorMode;
   readonly cfcTriggerReadGating: CfcTriggerReadGating;
+  readonly cfcDecomposedEnvelopes: CfcDecomposedEnvelopes;
   readonly cfcPolicyEvaluation: CfcPolicyEvaluationMode;
   readonly cfcLabelMetadataProtection: CfcLabelMetadataProtectionMode;
   readonly cfcDeclaredMonotonicity: CfcDeclaredMonotonicityMode;
@@ -1361,6 +1373,7 @@ export class Runtime {
       this.cfcFlowLabels = options.cfcFlowLabels ?? "off";
       this.cfcWriteFloor = options.cfcWriteFloor ?? "off";
       this.cfcTriggerReadGating = options.cfcTriggerReadGating ?? false;
+      this.cfcDecomposedEnvelopes = options.cfcDecomposedEnvelopes ?? false;
       this.cfcPolicyEvaluation = options.cfcPolicyEvaluation ?? "off";
       this.cfcLabelMetadataProtection = options.cfcLabelMetadataProtection ??
         "off";
@@ -1961,6 +1974,7 @@ export class Runtime {
     wrapped.setCfcFlowLabelsMode(this.cfcFlowLabels);
     wrapped.setCfcWriteFloorMode(this.cfcWriteFloor);
     wrapped.setCfcTriggerReadGating(this.cfcTriggerReadGating);
+    wrapped.setCfcDecomposedEnvelopes(this.cfcDecomposedEnvelopes);
     wrapped.setCfcPolicyEvaluationMode(this.cfcPolicyEvaluation);
     wrapped.setCfcLabelMetadataProtectionMode(this.cfcLabelMetadataProtection);
     wrapped.setCfcDeclaredMonotonicityMode(this.cfcDeclaredMonotonicity);

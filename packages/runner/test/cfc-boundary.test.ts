@@ -7,6 +7,10 @@ import type { MemorySpace } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import type { JSONSchema, Pattern } from "../src/builder/types.ts";
 import { createCell } from "../src/cell.ts";
 import {
@@ -1517,6 +1521,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -1526,7 +1531,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "seed" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -1592,6 +1597,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       ).id!;
 
       const seed = runtime.edit();
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -1601,7 +1607,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "seed" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -1639,6 +1645,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     try {
       const seed = runtime.edit();
       const targetId = "of:cfc-internal-source-traversal-target";
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow(
         {
           space: signer.did(),
@@ -1660,7 +1667,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         },
         {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -1747,6 +1754,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         },
         { auditedField: "seed" },
       );
+      writeSeedEnvelopeDoc(seed, signer.did());
       seedPrivilegedCfc(
         seed,
         {
@@ -1757,7 +1765,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         },
         {
           version: 1,
-          schemaHash: "claim-only-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -1826,6 +1834,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       ).id!;
 
       const seed = runtime.edit();
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -1835,7 +1844,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "seed" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -1887,6 +1896,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       const seed = runtime.edit();
       seed.setCfcEnforcementMode("enforce-explicit");
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -1896,7 +1906,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "seed", pending: false },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -3929,6 +3939,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const seed = runtime.edit();
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -3938,7 +3949,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "seed" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -4523,7 +4534,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
-  it("rejects later writes when stored schemaHash documents are missing", async () => {
+  it("refuses the seeding commit when its schemaHash names no backing document", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const seed = runtime.edit();
@@ -4558,31 +4569,15 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         },
       });
+      // The commit boundary polices backing: metadata naming a schema
+      // document that is neither in the commit nor stored refuses at seed
+      // time, so the bad state a later write would trip over cannot land.
+      // (The runner-side load guard keeps its own coverage in
+      // cfc-cid-schema-verify.test.ts.)
       const seedResult = await seed.commit();
-      expect(seedResult.ok).toBeDefined();
-
-      const tx = runtime.edit();
-      tx.setCfcEnforcementMode("enforce-explicit");
-      const cell = runtime.getCell(
-        signer.did(),
-        "cfc-missing-schema-doc",
-        {
-          type: "object",
-          properties: {
-            secret: {
-              type: "string",
-              ifc: { confidentiality: ["secret"] },
-            },
-          },
-          required: ["secret"],
-        },
-        tx,
+      expect(seedResult.error?.message).toContain(
+        "neither included in the commit nor stored in the space",
       );
-      cell.set({ secret: "updated" });
-
-      tx.prepareCfc();
-      const result = await tx.commit();
-      expect(result.error?.message).toContain("missing or unreadable");
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -4605,6 +4600,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -4614,7 +4610,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "seed" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -4726,6 +4722,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -4735,7 +4732,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "untrusted" },
         cfc: {
           version: 1,
-          schemaHash: "optional-removal-source-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -4821,6 +4818,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -4830,7 +4828,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "untrusted" },
         cfc: {
           version: 1,
-          schemaHash: "null-write-source-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -4906,6 +4904,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -4915,7 +4914,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "trusted" },
         cfc: {
           version: 1,
-          schemaHash: "trusted-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -4937,6 +4936,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -4946,7 +4946,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "untrusted" },
         cfc: {
           version: 1,
-          schemaHash: "untrusted-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -5027,6 +5027,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -5036,7 +5037,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "seed" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -5106,6 +5107,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -5115,7 +5117,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "seed" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -5284,6 +5286,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -5293,7 +5296,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "seed" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{

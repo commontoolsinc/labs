@@ -15,6 +15,10 @@ import {
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "../../runner/test/cfc-seed-envelope.ts";
 import type { VDomOp } from "../src/vdom-ops.ts";
 import { WorkerReconciler } from "../src/worker/reconciler.ts";
 import type { WorkerVNode } from "../src/worker/types.ts";
@@ -84,6 +88,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       tx,
     );
     const secretLink = secret.getAsNormalizedFullLink();
+    writeSeedEnvelopeDoc(tx, signer.did());
     tx.writeOrThrow({
       space: signer.did(),
       id: secretLink.id!,
@@ -93,7 +98,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       value: "Sensitive diagnosis: migraine",
       cfc: {
         version: 1,
-        schemaHash: "test-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{
@@ -110,6 +115,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       tx,
     );
     const structuredSecretLink = structuredSecret.getAsNormalizedFullLink();
+    writeSeedEnvelopeDoc(tx, signer.did());
     tx.writeOrThrow({
       space: signer.did(),
       id: structuredSecretLink.id!,
@@ -119,7 +125,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       value: "Structured atom record",
       cfc: {
         version: 1,
-        schemaHash: "test-structured-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{
@@ -136,6 +142,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       tx,
     );
     const signedReleaseTextLink = signedReleaseText.getAsNormalizedFullLink();
+    writeSeedEnvelopeDoc(tx, signer.did());
     tx.writeOrThrow({
       space: signer.did(),
       id: signedReleaseTextLink.id!,
@@ -145,7 +152,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       value: "Verified release note",
       cfc: {
         version: 1,
-        schemaHash: "test-signed-release-text-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{
@@ -171,6 +178,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       tx,
     );
     const representedProfileLink = representedProfile.getAsNormalizedFullLink();
+    writeSeedEnvelopeDoc(tx, signer.did());
     tx.writeOrThrow({
       space: signer.did(),
       id: representedProfileLink.id!,
@@ -180,7 +188,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       value: { name: "Alice" },
       cfc: {
         version: 1,
-        schemaHash: "test-represented-profile-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{
@@ -200,6 +208,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
     const authoredByProfileTextLink = authoredByProfileText
       .getAsNormalizedFullLink();
+    writeSeedEnvelopeDoc(tx, signer.did());
     tx.writeOrThrow({
       space: signer.did(),
       id: authoredByProfileTextLink.id!,
@@ -209,7 +218,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       value: "Profile-authored note",
       cfc: {
         version: 1,
-        schemaHash: "test-authored-by-profile-text-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{
@@ -1974,6 +1983,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           tx,
         );
         const messageLink = message.getAsNormalizedFullLink();
+        writeSeedEnvelopeDoc(tx, signer.did());
         tx.writeOrThrow({
           space: signer.did(),
           id: messageLink.id!,
@@ -1985,7 +1995,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           },
           cfc: {
             version: 1,
-            schemaHash: "test-linked-message-schema",
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
             labelMap: {
               version: 1,
               entries: [{
@@ -2071,6 +2081,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           tx,
         );
         const messageLink = message.getAsNormalizedFullLink();
+        writeSeedEnvelopeDoc(tx, signer.did());
         tx.writeOrThrow({
           space: signer.did(),
           id: messageLink.id!,
@@ -2082,7 +2093,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           },
           cfc: {
             version: 1,
-            schemaHash: "test-aliased-message-schema",
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
             labelMap: {
               version: 1,
               entries: [{
@@ -2198,6 +2209,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           tx,
         );
         const messagesLink = messages.getAsNormalizedFullLink();
+        writeSeedEnvelopeDoc(tx, signer.did());
         tx.writeOrThrow({
           space: signer.did(),
           id: messagesLink.id!,
@@ -2210,7 +2222,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           ],
           cfc: {
             version: 1,
-            schemaHash: "test-sibling-label-message-schema",
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
             labelMap: {
               version: 1,
               entries: [{
@@ -2675,6 +2687,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       caveatTx,
     );
     const influencedLink = influenced.getAsNormalizedFullLink();
+    writeSeedEnvelopeDoc(caveatTx, signer.did());
     caveatTx.writeOrThrow({
       space: signer.did(),
       id: influencedLink.id!,
@@ -2684,7 +2697,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       value: "Influenced draft text",
       cfc: {
         version: 1,
-        schemaHash: "test-influence-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{
@@ -2911,6 +2924,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             seedTx,
           );
           const link = cell.getAsNormalizedFullLink();
+          writeSeedEnvelopeDoc(seedTx, signer.did());
           seedTx.writeOrThrow({
             space: signer.did(),
             id: link.id!,
@@ -2920,7 +2934,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             value,
             cfc: {
               version: 1,
-              schemaHash: "test-user-scoped-schema",
+              schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
               labelMap: {
                 version: 1,
                 entries: [{
@@ -2994,6 +3008,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             seedTx,
           );
           const link = cell.getAsNormalizedFullLink();
+          writeSeedEnvelopeDoc(seedTx, signer.did());
           seedTx.writeOrThrow({
             space: signer.did(),
             id: link.id!,
@@ -3003,7 +3018,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             value,
             cfc: {
               version: 1,
-              schemaHash: "test-h3b-schema",
+              schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
               labelMap: {
                 version: 1,
                 entries: [{ path: [], label: { confidentiality: [atom] } }],
@@ -3104,6 +3119,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             seedTx,
           );
           const link = cell.getAsNormalizedFullLink();
+          writeSeedEnvelopeDoc(seedTx, signer.did());
           seedTx.writeOrThrow({
             space: signer.did(),
             id: link.id!,
@@ -3113,7 +3129,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             value,
             cfc: {
               version: 1,
-              schemaHash: "test-h3b-branch-schema",
+              schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
               labelMap: {
                 version: 1,
                 entries: [{ path: [], label: { confidentiality: [atom] } }],
@@ -3257,6 +3273,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           seedTx,
         );
         const markerLink = markerCellSeed.getAsNormalizedFullLink();
+        writeSeedEnvelopeDoc(seedTx, signer.did());
         seedTx.writeOrThrow({
           space: signer.did(),
           id: markerLink.id!,
@@ -3266,7 +3283,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           value: "Label-read-failed content",
           cfc: {
             version: 1,
-            schemaHash: "test-schema",
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
             labelMap: {
               version: 1,
               entries: [{
@@ -3382,6 +3399,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           seedTx,
         );
         const teamLink = teamCell.getAsNormalizedFullLink();
+        writeSeedEnvelopeDoc(seedTx, signer.did());
         seedTx.writeOrThrow({
           space: signer.did(),
           id: teamLink.id!,
@@ -3391,7 +3409,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           value: "Team note",
           cfc: {
             version: 1,
-            schemaHash: "test-stage4-schema",
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
             labelMap: {
               version: 1,
               entries: [{
@@ -3537,6 +3555,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           seedTx,
         );
         const teamLink = teamCell.getAsNormalizedFullLink();
+        writeSeedEnvelopeDoc(seedTx, signer.did());
         seedTx.writeOrThrow({
           space: signer.did(),
           id: teamLink.id!,
@@ -3546,7 +3565,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           value: "Root team note",
           cfc: {
             version: 1,
-            schemaHash: "test-stage4-root-schema",
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
             labelMap: {
               version: 1,
               entries: [{

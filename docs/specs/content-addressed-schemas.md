@@ -63,10 +63,12 @@ across sessions. The system already has the pieces:
   (`packages/data-model/src/schema-hash.ts`) produces a key-order-independent
   `fid1:` tagged hash; the intern table already gives structurally equal
   schemas one identity per process.
-- **Content-addressed schema documents** — CFC already persists schemas as
+- **Content-addressed schema documents** — CFC persists schemas as
   `cid:<taggedHash>` documents (`ensureSchemaDocument`,
-  `packages/runner/src/cfc/prepare.ts`) with idempotent blind writes,
-  client-side hash verification on read, and traversal support: the server's
+  `packages/runner/src/cfc/prepare.ts`) through the shared
+  schema-document staging (registration, per-transaction dedupe,
+  confirmed-persistence elision), with client-side hash verification on
+  read and traversal support: the server's
   graph traversal synthesizes a link from the `cfc.schemaHash` field and
   includes the schema document in query results and watch sets
   (`cfcMetaToSigilLink`, `packages/runner/src/traverse.ts`).
@@ -331,7 +333,12 @@ not deletions.
 
 The commit boundary also validates the closure a commit's content
 references: every schema ref introduced by a set's document, a patch's
-own values, or an installed schema document's own refs must be backed —
+own values, an installed schema document's own refs, or the
+`cfc.schemaHash` a document's stored CFC envelope names (in a
+non-`cid:` set's value, or in the post-patch document of any patch
+sequence whose pointers can reach the reserved `cfc` member — a `cid:`
+document's own `cfc` member is deliberately not a metadata position and
+is never collected) must be backed —
 in the same commit or already stored in the space — by a document whose
 content verifies against its id, transitively through the closure. A
 commit that references what it does not supply, or supplies content

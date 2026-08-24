@@ -21,10 +21,54 @@ const isPrefix = (
   left.length <= right.length &&
   left.every((segment, index) => segment === right[index]);
 
+/**
+ * A stored envelope whose `version` this build does not understand. The
+ * labels cannot be interpreted, so every consumer fails CLOSED on this
+ * error — treating the envelope as absent would read a labeled document
+ * as unlabeled, which is exactly the failure a format version exists to
+ * prevent.
+ */
+export class UnknownCfcMetadataVersionError extends Error {
+  constructor(version: unknown) {
+    super(
+      `stored CFC metadata version ${
+        JSON.stringify(version)
+      } is not one this build interprets`,
+    );
+    this.name = "UnknownCfcMetadataVersionError";
+  }
+}
+
+// Typed against the metadata's own version union, so growing the list
+// without growing `CfcMetadata["version"]` (or the reverse) is a compile
+// error — the predicate below narrows to `CfcMetadata` on the strength of
+// this list.
+const KNOWN_CFC_METADATA_VERSIONS: readonly CfcMetadata["version"][] = [1];
+
+const isKnownMetadataVersion = (value: unknown): boolean =>
+  KNOWN_CFC_METADATA_VERSIONS.some((version) => version === value);
+
 const isCfcMetadata = (value: unknown): value is CfcMetadata =>
-  isObjectNotArray(value) && value.version === 1 &&
+  isObjectNotArray(value) && isKnownMetadataVersion(value.version) &&
   isObjectNotArray(value.labelMap) &&
   Array.isArray(value.labelMap.entries);
+
+/**
+ * Throws for a record at the reserved metadata position carrying a
+ * `version` outside {@link KNOWN_CFC_METADATA_VERSIONS}. The position is
+ * what qualifies the record, never its field names — a future format may
+ * rename every field except the version, and requiring today's members
+ * would read exactly those envelopes as unlabeled. A record with no
+ * `version` at all is not an envelope and stays invisible, as before.
+ */
+const refuseUnknownMetadataVersion = (value: unknown): void => {
+  if (
+    isObjectNotArray(value) && "version" in value &&
+    !isKnownMetadataVersion(value.version)
+  ) {
+    throw new UnknownCfcMetadataVersionError(value.version);
+  }
+};
 
 export const readStoredCfcMetadata = (
   tx: IExtendedStorageTransaction,
@@ -46,16 +90,30 @@ export const readStoredCfcMetadata = (
   if (isCfcMetadata(document)) {
     return document;
   }
-  return isObjectOrArray(document) && isCfcMetadata(document.cfc)
-    ? document.cfc
-    : undefined;
+  refuseUnknownMetadataVersion(document);
+  if (isObjectOrArray(document) && isCfcMetadata(document.cfc)) {
+    return document.cfc;
+  }
+  if (isObjectOrArray(document)) {
+    refuseUnknownMetadataVersion(document.cfc);
+  }
+  return undefined;
 };
 
 export const storedCfcMetadataAppliesToPath = (
   tx: IExtendedStorageTransaction,
   target: Pick<NormalizedFullLink, "space" | "id" | "scope" | "path">,
 ): boolean => {
-  const metadata = readStoredCfcMetadata(tx, target);
+  let metadata: CfcMetadata | undefined;
+  try {
+    metadata = readStoredCfcMetadata(tx, target);
+  } catch (error) {
+    // An envelope this build cannot interpret still marks the document as
+    // policy-carrying: "applies" is the fail-closed answer, and the write
+    // it gates then meets the same unreadable envelope at prepare time.
+    if (error instanceof UnknownCfcMetadataVersionError) return true;
+    throw error;
+  }
   if (metadata === undefined) {
     return false;
   }
