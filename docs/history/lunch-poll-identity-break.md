@@ -4,16 +4,16 @@ created: 2026-08-19
 archived: 2026-08-19
 reason: "Decision record for the lunch-poll identity contract break:
   display-name identity replaced by profile cells, approved in person
-  2026-08-18."
+  2026-08-18; the second accepted break in the pattern-update registries."
 ---
 
 # Lunch-poll identity contract break
 
 The lunch poll's identity moved from display names to the viewer's shared
 profile cell, compared with `equals()` — agreed in Discord and approved in
-person on 2026-08-18. The checker exemptions are recorded in
-`tasks/pattern-compat-accepted-breaks.ts`; this file records why those precise
-paths were accepted.
+person on 2026-08-18. This is the second accepted break in the pattern-update
+registries (`tasks/pattern-compat-accepted-breaks.ts`), after the topics
+reference-graph break it follows procedurally.
 
 ## The decision
 
@@ -29,21 +29,12 @@ path is gone, and a rejected join says why (`joinMessage`).
 
 ## What broke, on purpose
 
-The compatibility checker reports three paths across two pattern/baseline
-pairs:
-
-- `lunch-poll/main.tsx` removes the published name-keyed admin result
-  (`result.adminName`).
-- The same contract changes the visit array's nested defaults while replacing
-  legacy roster links with optional profile links. The proof summarizes that
-  change at `argument.visits[]` and cannot prove it stable under default
-  insertion.
-- `participant-identity-card.tsx` removes the published viewer-name identity
-  (`result.me`).
-
-Other name-keyed inputs also disappear, but removing optional inputs is
-compatible and needs no exemption. The registry deliberately names only the
-paths the checker actually reports.
+The name-keyed admin surface, in all three contracts that carried it:
+`adminName` (main's argument and result, and the join card's argument),
+the card's published viewer-name identity (`result.me`), and the option
+card's viewer-name input (`argument.me`, replaced by the `viewerProfile`
+cell). No shape keeps a name-keyed surface while removing name-keyed
+identity.
 
 ## What deliberately did NOT break
 
@@ -64,10 +55,10 @@ after its capture day. The stored votes themselves survive whole.
 
 ## Disposition of deployed pieces
 
-A fresh piece is required, not merely preferred. The checker reports three
-paths across two accepted pair entries. The load-bearing one is
-`argument.visits[]`, whose nested defaults are not stable under default
-insertion; the root argument is exactly what `setPattern` checks, so `cf piece
+A fresh piece is required, not merely preferred. Two paths are accepted
+breaks against the epoch-1 contract — the removed `result.adminName`, and
+`argument.visits[]`, whose defaults are not stable under default insertion —
+and the root argument is exactly what `setPattern` checks, so `cf piece
 setsrc` refuses the swap on a populated piece. Only
 `--dangerously-allow-incompatible-schema` overrides that, which is not a step
 this change asks anyone to take.
@@ -77,7 +68,7 @@ stored state under this source and the visit log reads back whole; a piece
 that could be updated would keep its history. The refusal is a schema
 judgment made before any of that is consulted.
 
-So the team's populated poll moves to a fresh piece, carrying its state across
-with the identity-migration copy procedure in `DEPLOY-AND-SHARE.md`. Legacy
-name-keyed roster and vote rows survive as display-only history; participants
-create or pick a shared profile and re-join as themselves.
+So the team's populated poll moves to a fresh piece, carrying its state
+across with the copy procedure in `DEPLOY-AND-SHARE.md`, and participants
+create or pick a shared profile once (the join card's empty state is that
+surface).

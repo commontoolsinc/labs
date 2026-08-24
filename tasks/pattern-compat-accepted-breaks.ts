@@ -184,34 +184,35 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
   },
   {
     // The lunch poll's identity moved from display names to profile cells
-    // (see docs/history/lunch-poll-identity-break.md). The proof reports two
-    // paths here: the published name-keyed admin result went away, and the
-    // visit array's nested defaults changed when legacy roster links were
-    // replaced by optional profile links. The latter cannot be proven stable
-    // under default insertion even though the vintage replay preserves the
-    // stored visit rows.
+    // (see docs/history/lunch-poll-identity-break.md). `adminName` published
+    // and accepted the host's display name as the admin key; the host is now
+    // a profile-cell pointer with `hostName` derived from the roster, and
+    // there is no shape that keeps a name-keyed admin surface while removing
+    // name-keyed identity. Everything else the change needed is compatible:
+    // the new identity fields are optional (rows the pattern writes always
+    // carry them; rows stored by the name-keyed predecessor are display
+    // ghosts) and the legacy display fields carry defaults.
     pattern: "lunch-poll/main.tsx",
     baselines: ["20260729T022742Z-5bjUubcOZ-gpvz7F"],
     paths: ["argument.visits[]", "result.adminName"],
     reason: "Lunch-poll identity moved from display names to profile cells. " +
-      "The published `adminName` result cannot survive the removal of " +
-      "name-keyed identity; `argument.visits[]` is the proof's summary path " +
-      "for nested default changes introduced while legacy roster links became " +
-      "optional profile links. The vintage replay preserves those rows, but " +
-      "the root argument contract cannot be updated in place.",
+      "`adminName` was the name-keyed admin surface — argument input and " +
+      "published result — and cannot survive the removal of name-keyed " +
+      "identity. The host is a profile-cell pointer now, with `hostName` " +
+      "derived from the roster.",
     record: "docs/history/lunch-poll-identity-break.md",
   },
   {
-    // Same decision, seen from the join card. The removed optional admin input
-    // is compatible; the checker exemption is only for `me`, which published
-    // the viewer's display name as identity. Joined-ness and host status are
-    // now derived from profile-cell comparison.
+    // Same decision, seen from the join card: `adminName` was its name-keyed
+    // admin input, and `me` published the viewer's name as identity. Both
+    // surfaces are gone; joined-ness and host status are derived from
+    // profile-cell comparison.
     pattern: "lunch-poll/participant-identity-card.tsx",
     baselines: ["20260729T022742Z-KMaq_J9475tWtRxW"],
     paths: ["result.me"],
     reason: "Lunch-poll identity moved from display names to profile cells. " +
-      "The card's published `me` result treated the viewer's display name as " +
-      "identity, so it goes with the model it keyed.",
+      "The card's name-keyed admin input and its published viewer-name " +
+      "identity go with the model they keyed.",
     record: "docs/history/lunch-poll-identity-break.md",
   },
 ];

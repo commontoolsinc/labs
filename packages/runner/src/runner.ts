@@ -118,6 +118,7 @@ import {
 } from "./storage/rejection.ts";
 
 import "./builtins/index.ts";
+
 import { runInActionExecution } from "./builder/action-context.ts";
 import {
   getArtifactEntryRef,
@@ -167,8 +168,6 @@ export {
   schemaHasDefaultValue,
 } from "./runner-utils.ts";
 export { validateAndCheckReactives } from "./sandbox/result-normalization.ts";
-
-const MAX_PIECE_INSTANTIATION_CONFLICT_RETRIES = 5;
 
 const logger = getLogger("runner", { enabled: true, level: "warn" });
 const triggerFlowLogger = getLogger("runner.trigger-flow", {
@@ -2492,16 +2491,13 @@ export class Runner {
     let runningRef: { identity: string; symbol: string } | undefined;
     let cancelNodes: Cancel | undefined;
     let initialSchedulerRehydrationAvailable = true;
-    let instantiationGeneration = 0;
 
     // Helper to instantiate nodes for a pattern
     const instantiatePattern = (
       pattern: Pattern,
       useTx?: IExtendedStorageTransaction,
-      conflictRetries = 0,
     ) => {
       if (!active || startLifecycleEpoch !== this.lifecycleEpoch) return;
-      const generation = ++instantiationGeneration;
       // Create new cancel group for nodes
       const [nodeCancel, addNodeCancel] = useCancelGroup();
       cancelNodes = nodeCancel;
@@ -2569,85 +2565,21 @@ export class Runner {
       } finally {
         if (shouldCommit) {
           this.runtime.prepareTxForCommit(actualTx);
-          // Fire-and-forget by design (start() resolves before the commit
-          // settles), but NEVER swallowed: a failed instantiation attempt is
-          // reported in every runtime. Conflicts then replay the graph against
-          // caught-up state; other failures remain terminal for this start.
+          // Fire-and-forget by design (start() resolves before the
+          // commit settles), but NEVER swallowed (stage P2-F, the F1
+          // fold-in — RULED 2026-08-13): a refused or failed
+          // instantiation commit means the piece is running against
+          // writes that never landed, so the failure surfaces loudly
+          // and, on a serving runtime, counted.
           const instantiateActionId =
             `piece-instantiate/${resultCell.sourceURI}`;
-          const handleCommitFailure = (error: unknown) => {
-            this.reportPieceStartCommitFailure(instantiateActionId, error);
-            if (
-              !isConflictRejection(
-                error as { name?: string } | null | undefined,
-              )
-            ) {
-              return;
-            }
-            // The commit may settle after a hot-swap, explicit stop, or a
-            // replacement start took ownership. A stale attempt still reports
-            // its failure above, but must not spend retries or tear down the
-            // graph that superseded it.
-            if (
-              !active ||
-              startLifecycleEpoch !== this.lifecycleEpoch ||
-              generation !== instantiationGeneration ||
-              this.cancels.get(key) !== cancel
-            ) {
-              return;
-            }
-            if (
-              conflictRetries >= MAX_PIECE_INSTANTIATION_CONFLICT_RETRIES
-            ) {
-              cleanup();
-              logger.error(
-                "runner-start",
-                "Piece instantiation conflict retry budget exhausted",
-                error,
-              );
-              return;
-            }
-
-            void this.preparePieceStartConflictRetry(error).then(
-              () => {
-                // A newer instantiation, stop, or runtime teardown owns this
-                // result now. Replaying this attempt would replace its nodes
-                // with a stale graph.
-                if (
-                  !active ||
-                  startLifecycleEpoch !== this.lifecycleEpoch ||
-                  generation !== instantiationGeneration ||
-                  this.cancels.get(key) !== cancel
-                ) {
-                  return;
-                }
-
-                // Keep the start's outer cancel registration stable: its
-                // parent owns that exact function. Only replace the nodes
-                // whose setup transaction conflicted, then replay their setup
-                // against the caught-up replica.
-                cancelNodes?.();
-                instantiatePattern(pattern, undefined, conflictRetries + 1);
-              },
-            ).catch((retryError) => {
-              if (
-                !active ||
-                startLifecycleEpoch !== this.lifecycleEpoch ||
-                this.cancels.get(key) !== cancel
-              ) {
-                return;
-              }
-              cleanup();
-              logger.error(
-                "runner-start",
-                "Piece instantiation conflict retry failed",
-                retryError,
-              );
-            });
-          };
           actualTx.commit().then(({ error }) => {
-            if (error !== undefined) handleCommitFailure(error);
-          }).catch(handleCommitFailure);
+            if (error !== undefined) {
+              this.reportPieceStartCommitFailure(instantiateActionId, error);
+            }
+          }).catch((error) => {
+            this.reportPieceStartCommitFailure(instantiateActionId, error);
+          });
         }
       }
     };
@@ -3976,46 +3908,20 @@ export class Runner {
     }/${id}`;
   }
 
-  /**
-   * Waits until a conflicted piece-start transaction can be replayed against
-   * current replica state.
-   */
-  private async preparePieceStartConflictRetry(error: unknown): Promise<void> {
-    const readyToRetry = (error as { readyToRetry?: () => unknown })
-      ?.readyToRetry;
-    if (typeof readyToRetry === "function") {
-      try {
-        await readyToRetry();
-      } catch {
-        // A replaced session aborts the readiness gate. The replay's commit
-        // produces the definitive outcome against whichever session is live.
-      }
-    }
-
-    // Catch-up advances the replica through the conflicting commit, but a
-    // document this runtime only wrote may still be absent locally. Pull the
-    // named document so the replay does not assert the same stale version.
-    const conflict = (error as {
-      conflict?: { space?: MemorySpace; of?: string };
-    })?.conflict;
-    if (
-      conflict?.space === undefined ||
-      typeof conflict.of !== "string" ||
-      conflict.of === "of:unknown"
-    ) {
-      return;
-    }
-    try {
-      await this.runtime.storageManager.open(conflict.space).sync(
-        conflict.of as URI,
-        { path: [], schema: false },
-      );
-    } catch {
-      // A failed pull does not establish a terminal outcome. The replay's
-      // commit retains the authoritative rejection and reporting path.
-    }
-  }
-
+  // The scheduler observation identity (pieceId + owning space) for a piece's
+  // result cell. Pattern readers subscribe with this so the timing shapers can
+  // group and rate-cap a pattern's wakes; without it, cell-flip shaping (plan B)
+  // silently does not apply to the piece. It is derived purely from the result
+  // cell, so it is available even when scheduler state is not rehydrated.
+  // The pieceId bucket is per scope INSTANCE (key-vocabulary.md §5's
+  // stage-F serving-hazard list): name-keyed buckets collapse shaper
+  // groups and rate caps across principals — cross-principal budget
+  // consumption, and a timing channel correlating one principal's
+  // activity with another's wakes. Resolved against the runtime's own
+  // identity; partition-unchanged at cardinality 1 (key-vocabulary.md
+  // §2 — the resolver also normalizes the raw `undefined:` form the
+  // previous string interpolation produced for scope-less links, which
+  // merges with `space:`, the same instance by definition).
   /** Stage P2-F (the F1 fold-in, RULED 2026-08-13): a piece-start
    * setup/instantiation commit failure is fire-and-forget by design but
    * NEVER silent — loud in every arm, and handed to the serving
@@ -4069,20 +3975,6 @@ export class Runner {
     return chain;
   }
 
-  // The scheduler observation identity (pieceId + owning space) for a piece's
-  // result cell. Pattern readers subscribe with this so the timing shapers can
-  // group and rate-cap a pattern's wakes; without it, cell-flip shaping (plan B)
-  // silently does not apply to the piece. It is derived purely from the result
-  // cell, so it is available even when scheduler state is not rehydrated.
-  // The pieceId bucket is per scope INSTANCE (key-vocabulary.md §5's
-  // stage-F serving-hazard list): name-keyed buckets collapse shaper
-  // groups and rate caps across principals — cross-principal budget
-  // consumption, and a timing channel correlating one principal's
-  // activity with another's wakes. Resolved against the runtime's own
-  // identity; partition-unchanged at cardinality 1 (key-vocabulary.md
-  // §2 — the resolver also normalizes the raw `undefined:` form the
-  // previous string interpolation produced for scope-less links, which
-  // merges with `space:`, the same instance by definition).
   private schedulerObservationIdentity(
     resultCell: Cell<any>,
     parentPieceRootId?: string,
