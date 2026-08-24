@@ -81,10 +81,23 @@ describe("start()", () => {
     expect(resultCell.key("doubled").getAsQueryResult()).toBe(6);
   });
 
-  it("returns true from a start issued after the previous attempt settled", async () => {
+  it("retires the join entry when the attempt settles: a start after a later stop runs fresh", async () => {
     const resultCell = await stoppedPiece("single flight sequential");
+    const first = runtime.runner.start(resultCell);
+    expect(await first).toBe(true);
+    // While the piece runs, a repeat start reports true from the registration
+    // guard; whether it joined is unobservable and harmless here.
     expect(await runtime.runner.start(resultCell)).toBe(true);
-    expect(await runtime.runner.start(resultCell)).toBe(true);
+    // The distinguishing sequence: with the settled attempt's entry left in
+    // the index, this start would join its stale resolved promise and report
+    // true while the piece stayed stopped.
+    runtime.runner.stop(resultCell);
+    const afterStop = runtime.runner.start(resultCell);
+    expect(afterStop).not.toBe(first);
+    expect(await afterStop).toBe(true);
+    await resultCell.pull();
+    await runtime.idle();
+    expect(resultCell.key("doubled").getAsQueryResult()).toBe(6);
   });
 
   it("shares a rejection with the joined start", async () => {
