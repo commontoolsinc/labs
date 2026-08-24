@@ -7,11 +7,14 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 // start() is single-flight per doc: concurrent calls for the same doc share
-// one resolution pipeline and its outcome, while a stop between two calls
-// separates them into distinct attempts. These tests drive the runner
-// directly through the restart path — a piece that ran, stopped, and is
-// started again — because that is the state where start() owns the whole
-// pipeline (a fresh run() instantiates without it).
+// one attempt and its outcome, while a stop between two calls separates them
+// into distinct attempts. These tests drive the runner through the restart
+// path — a piece that ran, stopped, and is started again — which exercises
+// the join, the stop and epoch boundaries, and rejection sharing. That path
+// restarts from locally assembled cells, so the cold-resume dependency
+// pre-sync stays out of frame here; that the pre-sync runs once for a
+// concurrent pair is pinned by "does not register duplicate handlers while
+// resumed dependencies sync" in runner.test.ts.
 
 const signer = await Identity.fromPassphrase("start single flight");
 const space = signer.did();
