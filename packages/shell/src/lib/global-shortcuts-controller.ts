@@ -11,19 +11,14 @@ type ReactiveAppHost = ReactiveControllerHost & BaseView & { app: AppState };
 /**
  * The shell's global keyboard shortcuts:
  *
- * - Cmd/Ctrl+Shift+O opens the quick jump view.
  * - Alt+W navigates to the space the current view addresses.
  *
- * Both are ignored while the key event is aimed at a text-entry element, while
- * the key is auto-repeating, and once something upstream has called
+ * Shortcuts are ignored while the key event is aimed at a text-entry element,
+ * while the key is auto-repeating, and once something upstream has called
  * `preventDefault()`.
  */
 export class GlobalShortcutsController implements ReactiveController {
   private host: ReactiveAppHost;
-
-  // Whether the platform's primary shortcut modifier is Command rather than
-  // Control. Read when the host connects, since it depends on `navigator`.
-  #usesCommandKey = false;
 
   constructor(host: ReactiveAppHost) {
     this.host = host;
@@ -31,7 +26,6 @@ export class GlobalShortcutsController implements ReactiveController {
   }
 
   hostConnected() {
-    this.#usesCommandKey = navigator.platform.toLowerCase().includes("mac");
     document.addEventListener("keydown", this.#onKeyDown);
   }
 
@@ -43,20 +37,6 @@ export class GlobalShortcutsController implements ReactiveController {
     if (e.defaultPrevented) return;
     if (e.repeat) return;
     if (targetsTextEntry(e)) return;
-
-    const mod = this.#usesCommandKey
-      ? e.metaKey && !e.ctrlKey
-      : e.ctrlKey && !e.metaKey;
-
-    if (e.code === "KeyO" && mod && e.shiftKey && !e.altKey) {
-      e.preventDefault();
-      this.host.command({
-        type: "set-config",
-        key: "showQuickJumpView",
-        value: true,
-      });
-      return;
-    }
 
     if (
       e.code === "KeyW" && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey

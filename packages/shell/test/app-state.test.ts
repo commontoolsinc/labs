@@ -34,11 +34,11 @@ describe("AppState", () => {
     assertIdentityChangeAllowed(first, first);
   });
 
-  it("accepts only the four display toggles as config keys", () => {
+  it("accepts only the three display toggles as config keys", () => {
     assert(isAppStateConfigKey("showShellPieceListView"));
     assert(isAppStateConfigKey("showDebuggerView"));
-    assert(isAppStateConfigKey("showQuickJumpView"));
     assert(isAppStateConfigKey("showSidebar"));
+    assert(!isAppStateConfigKey("showQuickJumpView"));
     assert(!isAppStateConfigKey("identity"));
     assert(!isAppStateConfigKey("__proto__"));
     assert(!isAppStateConfigKey(""));
