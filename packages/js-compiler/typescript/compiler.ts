@@ -553,12 +553,13 @@ export class TypeScriptCompiler {
       const stem = outName.replace(/\.js$/, "");
       const sourceName = sourceByStem.get(stem);
       if (sourceName === undefined) continue;
+      const sourceSites = builderSourceSites?.get(sourceName);
       result.set(sourceName, {
         js: contents,
         sourceMap: parseSourceMap(writes[`${outName}.map`]),
-        ...(builderSourceSites?.get(sourceName) === undefined
+        ...(sourceSites === undefined
           ? {}
-          : { builderSourceSites: builderSourceSites.get(sourceName) }),
+          : { builderSourceSites: sourceSites }),
         ...(policyManifests?.get(sourceName)?.length
           ? { policyManifests: policyManifests.get(sourceName) }
           : {}),
@@ -680,12 +681,13 @@ export class TypeScriptCompiler {
       if (!outName.endsWith(".js")) continue;
       const sourceName = sourceByStem.get(outName.replace(/\.js$/, ""));
       if (sourceName === undefined) continue;
+      const sourceSites = builderSourceSites?.get(sourceName);
       modules.set(sourceName, {
         js: contents,
         sourceMap: parseSourceMap(writes[`${outName}.map`]),
-        ...(builderSourceSites?.get(sourceName) === undefined
+        ...(sourceSites === undefined
           ? {}
-          : { builderSourceSites: builderSourceSites.get(sourceName) }),
+          : { builderSourceSites: sourceSites }),
         ...(policyManifests?.get(sourceName)?.length
           ? { policyManifests: policyManifests.get(sourceName) }
           : {}),

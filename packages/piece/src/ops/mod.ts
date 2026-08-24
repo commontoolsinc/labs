@@ -1,3 +1,41 @@
+export {
+  canonicalPieceAddress,
+  decodePlan,
+  deriveRollbackPlan,
+  encodePlan,
+  type PieceExpect,
+  type PieceOp,
+  type PiecePlan,
+  type PiecePlanHeader,
+  type PiecePlanRow,
+  type PlanEnumeration,
+  type RegisteredOutside,
+  type RestoreOp,
+  type RetargetOp,
+  type RetargetSource,
+  type SurveyProblem,
+} from "./bulk-plan.ts";
+export {
+  diffPlan,
+  type PatternRef,
+  type PieceDiffRow,
+  type PieceDiffStatus,
+  type PlanDiff,
+} from "./bulk-diff.ts";
+export {
+  HOLDER_PHASE,
+  LIST_PHASE,
+  type PiecePin,
+  type PieceSelector,
+  type PlannedRetarget,
+  readPiecePin,
+  type SelectedPiece,
+  selectPieces,
+  type SurveyOptions,
+  surveyPieces,
+  type SurveyResult,
+  type TallyEntry,
+} from "./bulk-survey.ts";
 export { PiecesController } from "./pieces-controller.ts";
 export {
   type PatternCompatibilityReport,

@@ -1014,6 +1014,25 @@ without major compile-time regression.
 
 **Exit criteria:** new path is default, old path removed or hard-deprecated.
 
+## Indirect Builder Callbacks Are Rejected At Compile Time
+
+`IndirectBuilderCallbackValidationTransformer` (stage 7) rejects a trusted
+builder whose callback arrives through a property access or an imported
+binding, matching `verifyTrustedBuilderCall`'s admitted spellings.
+
+The lowering stages continue to RECOGNIZE those spellings — schema injection
+still resolves such a callback semantically and leaves it in the position the
+runtime dispatch reads (`test/schema-first-imported-callback.test.ts`). That is
+deliberate: recognition is what lets the compiler describe the form accurately
+instead of garbling it first, and it is what would make the form work
+immediately were the verifier's rule ever widened. Only the language boundary
+moved; the lowering did not.
+
+The alternative — widening the verifier to admit a binding imported from
+another verified module — is a sandbox-contract decision rather than a
+transformer one, since it rests on whether one module's verification may vouch
+for a callable another module calls.
+
 ## Remaining Hardening Follow-Ups
 
 Normative language decisions now live in the target-language spec and lowering

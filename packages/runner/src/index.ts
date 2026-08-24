@@ -97,6 +97,7 @@ export {
   type ConsoleEvent,
   ConsoleMethod,
   Engine,
+  type EntryIdentityOptions,
   resolveEntryIdentity,
   type RuntimeProgram,
   type TypeScriptHarnessProcessOptions,
@@ -305,6 +306,7 @@ export type { ModuleByteCache } from "./runtime.ts";
 export type { CompiledModuleArtifact } from "./harness/types.ts";
 export {
   getCompileCacheRuntimeVersion,
+  sourceDocKey,
 } from "./compilation-cache/cell-cache.ts";
 export {
   isSlugAddress,

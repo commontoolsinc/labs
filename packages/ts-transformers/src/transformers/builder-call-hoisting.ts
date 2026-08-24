@@ -210,7 +210,7 @@ function hoistBuilderCalls(
   context: TransformationContext,
 ): ts.SourceFile {
   const factory = context.factory;
-  const authoredSourceFile = context.program.getSourceFile(sourceFile.fileName);
+  const inputSourceFile = context.program.getSourceFile(sourceFile.fileName);
   const builderSourceSites = Object.create(null) as Record<
     string,
     BuilderSourceSite
@@ -227,8 +227,9 @@ function hoistBuilderCalls(
     ) {
       return;
     }
-    const site = resolveAuthoredSite(artifact, authoredSourceFile);
+    const site = resolveCompilerInputSite(artifact, inputSourceFile);
     if (site === undefined) return;
+    // `mapSite` is what turns compiler-input coordinates into authored ones.
     const mapped = mapSite(sourceFile.fileName, site);
     if (mapped !== undefined) builderSourceSites[symbol] = mapped;
   };
@@ -579,21 +580,26 @@ function resolveSameFileFunctionDeclaration(
     : undefined;
 }
 
-/** Resolves one artifact's authored coordinates and declaration name. */
-function resolveAuthoredSite(
+/**
+ * Resolves one artifact's position and declaration name in COMPILER-INPUT
+ * coordinates. The input carries the helper prelude the compiler injects, so
+ * these line numbers are authored only once `mapSite` has normalized them; the
+ * transformer records nothing without a mapper for exactly that reason.
+ */
+function resolveCompilerInputSite(
   artifact: BuilderArtifact,
-  authoredSourceFile: ts.SourceFile | undefined,
+  inputSourceFile: ts.SourceFile | undefined,
 ): BuilderSourceSite | undefined {
-  if (!authoredSourceFile) return undefined;
+  if (!inputSourceFile) return undefined;
   const candidates = artifact.fn
     ? [artifact.fn, artifact.call]
     : [artifact.call];
   for (const candidate of candidates) {
     const range = recoverAuthoredPosition(candidate);
     if (!range) continue;
-    const enclosing = findAuthoredNodeAt(authoredSourceFile, range.pos);
-    const start = enclosing?.node.getStart(authoredSourceFile) ?? range.pos;
-    const position = authoredSourceFile.getLineAndCharacterOfPosition(
+    const enclosing = findAuthoredNodeAt(inputSourceFile, range.pos);
+    const start = enclosing?.node.getStart(inputSourceFile) ?? range.pos;
+    const position = inputSourceFile.getLineAndCharacterOfPosition(
       start >= range.pos && start < range.end ? start : range.pos,
     );
     return {
