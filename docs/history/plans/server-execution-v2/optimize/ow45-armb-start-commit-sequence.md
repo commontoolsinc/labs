@@ -81,7 +81,7 @@ each contributes two captures of the start sequence.
 | s03 | `ignored` | 0 | 9 s | 2.33 | — | — | — |
 | s04 | `ignored` | 0 | 14 s | 3.21 | — | — | — |
 | s05 | ran | 1 (RED) | 327 s | 3.48 | 9/23/28/46/50 | REFUSED | 50/50 (wave localSeq 6) |
-| s06 | ran | 1 (RED) | — | — | 9/23/28/46/50 | REFUSED | 50/50 (wave localSeq 7) |
+| s06 | ran | 1 (RED) | 324 s | 3.2 | 9/23/28/46/50 | REFUSED | 50/50 (wave localSeq 7) |
 
 s03 and s04 are not informative — reverting the scratch edit between run batches
 re-enabled the step's ON skip. In every informative run the reload session ran
@@ -350,13 +350,13 @@ the measured run it wrote all 50 first.**
 | class | ops | serving side writes it? | evidence |
 |---|---|---|---|
 | (i) child-piece setup (piece roots) | 4 | **YES** | all 4 in the preceding wave; first revision at the wave's seq |
-| (ii) `of:` structure/wiring | 11 | **YES** | all 11 in the preceding wave, both runs |
+| (ii) `of:` structure/wiring | 11 | **YES** | all 11 in the preceding wave, every informative run |
 | (iii) `computed:` wiring cells | 16 | **YES** | all 16 in the preceding wave, same verbs |
 | (iv) `cid:` schema docs | 19 | **YES** | all 19 in the preceding wave; first revision at the wave's seq |
 
 Stated as one number: **0 of the refused commit's 50 operations are absent from
-the wave the serving side issued immediately before it** — in both measured
-refusals.
+the wave the serving side issued immediately before it** — in every informative
+run measured (4/4; see the run ledger).
 
 Note that class (i) is a genuine refinement of "the server never writes setup".
 That statement is true of the **top-level** piece: the serving loop's only
