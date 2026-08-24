@@ -12,13 +12,16 @@
 # the transcript is the artifact. Its companion `bulk-survey-drill.sh` asserts
 # the same surface as pass/fail in CI and is what keeps this one honest.
 #
-# Every command in the transcript is one array of words, printed and then run.
-# There is no second, prettier spelling of it anywhere in this file: `run`
-# displays `"$@"` and executes `"$@"`, so a line that reads well and a line
-# that ran cannot drift apart. What a reader sees is what they can retype,
-# given the environment variables the header names. Unlike the verb-session
-# demo this one carries no `broken` helper: nothing in the running surface
-# is defective, and that helper arrives when an act needs its claim.
+# Every command that runs is one array of words, printed and then run. There
+# is no second, prettier spelling of it anywhere in this file: `run` displays
+# `"$@"` and executes `"$@"`, and every act re-parses its own displayed line
+# and compares the words against the argv that ran, so a line a reader
+# retypes is the line that executed — checked, not asserted. The PENDING
+# lines at the end are the one exception, and they look like one: prefixed
+# `»` rather than `$`, they are hypothetical spellings of unbuilt stages and
+# nothing executes them. Unlike the verb-session demo this one carries no
+# `broken` helper: nothing in the running surface is defective, and that
+# helper arrives when an act needs its claim.
 #
 #   API_URL=http://localhost:8000 packages/cli/integration/bulk-ops-demo.sh
 set -uo pipefail
@@ -59,6 +62,7 @@ R=$'\033[31m'
 # got either wrong cannot exit 0 and read as a clean session.
 UNEXPECTED=0
 UNREFUSED=0
+MISRENDERED=0
 # stderr is read back rather than shown as it arrives, so a failure can be
 # printed under the act it belongs to. mktemp rather than a name built from
 # the pid: this runs in a shared directory, and a predictable path is one an
@@ -68,17 +72,43 @@ trap 'rm -f "$ERR"' EXIT
 act() { printf '\n%s━━ %s %s\n' "$B" "$1" "$N"; }
 say() { printf '%s   %s%s\n' "$D" "$1" "$N"; }
 
-# Render argv the way a person would have typed it, quoting only the words
-# that need it. Display only — the same array is what runs.
+# Render one word the way a person would have typed it: bare when every
+# character is shell-inert, single-quoted otherwise, and an embedded single
+# quote spelled '\'' — close, escaped quote, reopen — the one spelling a
+# POSIX shell reparses to the original word.
+q_word() {
+  case $1 in
+    *\'*) printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")" ;;
+    ''|*[![:alnum:]./=@:,_+-]*) printf "'%s'" "$1" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# Render argv the way a person would have typed it. Display only — the same
+# array is what runs — and `retypable` holds the two to each other.
 shown() {
   local line="" word
   for word in "$@"; do
-    case $word in
-      *[[:space:]\'\"]*) line="$line '$word'" ;;
-      *) line="$line $word" ;;
-    esac
+    line="$line $(q_word "$word")"
   done
   printf '%s' "${line# }"
+}
+
+# The transcript's central invariant, checked on every act: the displayed
+# line, re-parsed by the shell, is the argv that ran. The re-parse is an
+# eval into an array — safe here because the line is this script's own
+# rendering of its own argv, and quoting keeps every expansion inert — and
+# a mismatch counts against the transcript like any other broken claim.
+retypable() {
+  local line=$1
+  shift
+  local -a reparsed=()
+  eval "reparsed=($line)" 2>/dev/null
+  if [ "$(printf '%s\037' "${reparsed[@]}")" != "$(printf '%s\037' "$@")" ]; then
+    printf '%s     MISRENDERED — retyping the line above would not run this act%s\n' \
+      "$R" "$N"
+    MISRENDERED=$((MISRENDERED + 1))
+  fi
 }
 
 # Print a command and run it. Its output is shown and also kept in $OUT, so an
@@ -88,7 +118,10 @@ shown() {
 # surface and has to be as visible as the transcript it would otherwise sit
 # inside quietly.
 run() {
-  printf '\n%s   $ %s%s\n' "$C" "$(shown "$@")" "$N"
+  local line
+  line=$(shown "$@")
+  printf '\n%s   $ %s%s\n' "$C" "$line" "$N"
+  retypable "$line" "$@"
   OUT=$("$@" 2>"$ERR")
   local rc=$?
   printf '%s\n' "$OUT" | sed 's/^/     /'
@@ -121,7 +154,10 @@ run_loud() {
 refused() {
   local why=$1 signature=$2
   shift 2
-  printf '\n%s   $ %s%s\n' "$C" "$(shown "$@")" "$N"
+  local line
+  line=$(shown "$@")
+  printf '\n%s   $ %s%s\n' "$C" "$line" "$N"
+  retypable "$line" "$@"
   printf '%s     REFUSED — %s%s\n' "$D" "$why" "$N"
   CF_SKIP_VERSION_CHECK=1 "$@" >/dev/null 2>"$ERR"
   local rc=$?
@@ -147,7 +183,7 @@ refused() {
 # that converts its act here from pending to run, the same per-change tick
 # discipline stage 1 used.
 pending() {
-  printf '\n%s   $ %s%s\n' "$Y" "$1" "$N"
+  printf '\n%s   » %s%s\n' "$Y" "$1" "$N"
   printf '%s     PENDING — %s%s\n' "$Y" "$2" "$N"
   printf '%s     will print:%s\n' "$D" "$N"
   printf '%s\n' "$3" | sed 's/^/       /'
@@ -237,29 +273,32 @@ run sh -c "head -1 '$WORK/list.jsonl' | jq -c '{selector, enumerated}'"
 
 act "9 · The rest of the mechanism, by what it waits on"
 say "The plan files this transcript produced are the input to every later"
-say "stage; nothing below needs a different artifact. Each act shows the"
-say "command a stage adds and what it will print — spelled provisionally,"
-say "since decision 1 of the plan owns where bulk writes live. A stage that"
-say "lands converts its act from PENDING to run; the plan's checklist for"
-say "that stage says so, the way stage 1's did."
+say "stage; nothing below needs a different artifact — the paths are the"
+say "ones written above. Each act shows the command a stage adds and what"
+say "it will print — spelled provisionally, since decision 1 of the plan"
+say "owns where bulk writes live, and prefixed » because nothing runs it."
+say "A stage that lands converts its act from PENDING to run; the plan's"
+say "checklist for that stage says so, the way stage 1's did."
 
-pending "cf piece repair -s $SPACE --plan plan.jsonl --fixer fix-titles.ts" \
+pending "cf piece repair -s $SPACE --plan $WORK/plan.jsonl --fixer fix-titles.ts" \
   "stage 2: a caller-supplied fixer, iterated by the spine, dry by default" \
 "fid1:cey7Ro... title: 'seed-0' -> 'Seed 0'
-112 more would change, 2 already conform; --apply writes them in plan order"
+112 more member rows would change; the holder already conforms.
+--apply writes the 113 in plan order"
 
-pending "cf piece apply -s $SPACE retarget.jsonl" \
+pending "cf piece apply -s $SPACE $WORK/retarget.jsonl" \
   "stage 3: the retarget apply — serial, precondition-checked, resumable" \
 "row 1/114 fid1:cey7Ro... I9aHKe...#Member -> WPK2FB...#Member landed
 stopped at row 57: the piece moved since the survey; 57 unattempted, named"
 
-pending "cf piece survey -s $SPACE --piece board --path items --diff retarget.jsonl" \
+pending "cf piece survey -s $SPACE --piece board --path items --diff $WORK/retarget.jsonl" \
   "stage 3: verification is a second survey against the plan, never the apply's exit code — the diff itself is stage-1 library code waiting on a spelling" \
-"moved as planned: 56 . still outstanding: 57 . moved off-plan: 1, named"
+"moved as planned: 56 . still outstanding: 57 planned rows . 1 unplanned piece, named"
 
-pending "cf piece rollback -s $SPACE retarget.jsonl" \
+pending "cf piece rollback -s $SPACE $WORK/retarget.jsonl" \
   "stage 4: the plan derived in the other direction, restoring each row's recorded revision" \
-"114 rollback rows derived; every prior source retained; restores in plan order"
+"113 rollback rows derived, one per retarget row; every prior source
+retained; restores in plan order"
 
 printf '\n%s━━ The shape of it %s\n' "$B" "$N"
 say "One process surveyed a board-sized collection and emitted the plan the"
@@ -283,4 +322,11 @@ if [ "$UNREFUSED" != "0" ]; then
   say "either way the act's claim about the surface did not hold."
 fi
 
-[ "$UNEXPECTED" = "0" ] && [ "$UNREFUSED" = "0" ]
+if [ "$MISRENDERED" != "0" ]; then
+  printf '\n%s━━ %d displayed line(s) would not run their act if retyped%s\n' \
+    "$R" "$MISRENDERED" "$N"
+  say "The transcript's one invariant is that a shown line re-parses to the"
+  say "argv that ran. One did not, so this transcript is not retypable."
+fi
+
+[ "$UNEXPECTED" = "0" ] && [ "$UNREFUSED" = "0" ] && [ "$MISRENDERED" = "0" ]
