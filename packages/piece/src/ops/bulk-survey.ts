@@ -334,7 +334,7 @@ function tallyRows(rows: readonly PiecePlanRow[]): TallyEntry[] {
   const counts = new Map<string, TallyEntry>();
   for (const row of rows) {
     const phase = row.phase ?? "";
-    const key = `${phase} ${row.expect.patternIdentity}`;
+    const key = `${phase}\x00${row.expect.patternIdentity}`;
     const entry = counts.get(key);
     if (entry === undefined) {
       counts.set(key, {
