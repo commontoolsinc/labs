@@ -1,6 +1,6 @@
 import ts from "typescript";
 import type { SchemaHint, TransformationContext } from "../core/mod.ts";
-import { visitEachChildWithJsx } from "../ast/mod.ts";
+import { preserveSourceMapRange, visitEachChildWithJsx } from "../ast/mod.ts";
 
 type UiHelperName = "UiAction" | "UiPromptSlot" | "UiDisclosure";
 
@@ -82,10 +82,13 @@ export function rewriteUiHelperElement(
 
   if (ts.isJsxSelfClosingElement(visited) && !hasJsxChildren(node)) {
     return {
-      node: context.factory.createJsxSelfClosingElement(
-        context.factory.createIdentifier(tagName),
-        visited.typeArguments,
-        nextAttributes,
+      node: preserveSourceMapRange(
+        context.factory.createJsxSelfClosingElement(
+          context.factory.createIdentifier(tagName),
+          visited.typeArguments,
+          nextAttributes,
+        ),
+        visited,
       ),
       hint,
     };
@@ -93,16 +96,19 @@ export function rewriteUiHelperElement(
 
   if (ts.isJsxElement(visited)) {
     return {
-      node: context.factory.createJsxElement(
-        context.factory.createJsxOpeningElement(
-          context.factory.createIdentifier(tagName),
-          visited.openingElement.typeArguments,
-          nextAttributes,
+      node: preserveSourceMapRange(
+        context.factory.createJsxElement(
+          context.factory.createJsxOpeningElement(
+            context.factory.createIdentifier(tagName),
+            visited.openingElement.typeArguments,
+            nextAttributes,
+          ),
+          visited.children,
+          context.factory.createJsxClosingElement(
+            context.factory.createIdentifier(tagName),
+          ),
         ),
-        visited.children,
-        context.factory.createJsxClosingElement(
-          context.factory.createIdentifier(tagName),
-        ),
+        visited,
       ),
       hint,
     };

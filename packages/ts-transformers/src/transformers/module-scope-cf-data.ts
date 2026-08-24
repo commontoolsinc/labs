@@ -3,6 +3,7 @@ import {
   isTrustedBuilder,
   isTrustedDataHelper,
 } from "@commonfabric/utils/sandbox-contract";
+import { preserveSourceMapRange } from "../ast/mod.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 
@@ -122,10 +123,13 @@ function wrapWithCfData(
 ): ts.CallExpression {
   // The HelpersOnlyTransformer filter guarantees the helpers import is
   // present; getHelperExpr throws if that invariant is ever violated.
-  return context.factory.createCallExpression(
-    context.cfHelpers.getHelperExpr("__cf_data"),
-    undefined,
-    [expression],
+  return preserveSourceMapRange(
+    context.factory.createCallExpression(
+      context.cfHelpers.getHelperExpr("__cf_data"),
+      undefined,
+      [expression],
+    ),
+    expression,
   );
 }
 

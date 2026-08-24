@@ -7,6 +7,7 @@ import {
   isSyntheticNode,
   isWildcardTraversalCall,
   type NormalizedDataFlow,
+  preserveSourceMapRange,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import { TransformationContext } from "../core/mod.ts";
@@ -122,11 +123,13 @@ function isSelfPathSegment(
     isCommonFabricKeyExpression(segment, context, "SELF");
 }
 
+/** Carries the source-map range and inferred type to a semantic replacement. */
 function registerReplacementType(
   replacement: ts.Node,
   original: ts.Node,
   context: TransformationContext,
 ): void {
+  preserveSourceMapRange(replacement, original);
   const typeRegistry = context.state.typeRegistry;
   const originalType = getTypeAtLocationWithFallback(
     original,

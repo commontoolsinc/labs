@@ -1715,6 +1715,16 @@ for transform-time source annotation (A′, CT-1870), and the same fallback
 family §16.2's coverage spans use. Rationale, per-site table, and the probe
 rig: `packages/ts-transformers/APRIME-LINEAGE-HANDOFF.md`.
 
+The same source-map-range-only rule applies to semantic replacement boundaries
+outside the builder-artifact path. Pattern-body reactive-root replacements,
+lowered UI-helper elements, rebuilt JSX expression containers, rewritten
+handler attributes and initializers, nested reactive-array receiver keys, and
+module-scope `__cf_data` wrappers all carry the range of the authored node they
+replace or wrap. They deliberately do not acquire that node's text range or
+original-node identity. `test/replacement-source-map-range.test.ts` runs
+fixtures through the owning pipeline stage and content-binds every recovered
+range; it also directly pins the non-input-bound reactive-wrapper helper branch.
+
 ### 11.6 Builder source-site sidecar
 
 The hoisting stage consumes that lineage to produce `BuilderSourceSitesV1`, a
