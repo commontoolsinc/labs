@@ -59,6 +59,7 @@ import {
   type CfcAddress,
   type CfcDeclaredMonotonicityMode,
   type CfcDeclaredWideningExemption,
+  type CfcDecomposedEnvelopes,
   type CfcDereferenceTrace,
   cfcDereferenceTracesEqual,
   type CfcEnforcementMode,
@@ -77,6 +78,7 @@ import {
   type ConsultedPolicyManifest,
   type ConsumedRead,
   DEFAULT_CFC_DECLARED_MONOTONICITY_MODE,
+  DEFAULT_CFC_DECOMPOSED_ENVELOPES,
   DEFAULT_CFC_ENFORCEMENT_MODE,
   DEFAULT_CFC_FLOW_LABELS_MODE,
   DEFAULT_CFC_LABEL_METADATA_PROTECTION_MODE,
@@ -329,6 +331,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     flowLabelsMode: DEFAULT_CFC_FLOW_LABELS_MODE,
     writeFloorMode: DEFAULT_CFC_WRITE_FLOOR_MODE,
     triggerReadGating: DEFAULT_CFC_TRIGGER_READ_GATING,
+    decomposedEnvelopes: DEFAULT_CFC_DECOMPOSED_ENVELOPES,
     policyEvaluationMode: DEFAULT_CFC_POLICY_EVALUATION_MODE,
     labelMetadataProtectionMode: DEFAULT_CFC_LABEL_METADATA_PROTECTION_MODE,
     declaredMonotonicityMode: DEFAULT_CFC_DECLARED_MONOTONICITY_MODE,
@@ -654,6 +657,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (enabled) {
       this.#cfcTriggerReadGatingPinned = true;
     }
+  }
+
+  setCfcDecomposedEnvelopes(enabled: CfcDecomposedEnvelopes): void {
+    // A spelling dial, not an enforcement dial: either setting writes a
+    // sound envelope and no gate consumes the value, so there is no pin
+    // and no prepared-state invalidation to protect.
+    this.#cfcState.decomposedEnvelopes = enabled;
   }
 
   setCfcPolicyEvaluationMode(mode: CfcPolicyEvaluationMode): void {
@@ -1700,26 +1710,42 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       }
       return schema;
     });
-    const pending = [...hashes];
+    for (const hash of hashes) {
+      this.stageSchemaDocClosure(space, hash);
+    }
+  }
+
+  /**
+   * Stages `cid:<hash>` and every document its closure references into
+   * this transaction, from the realm registry: per-transaction dedupe,
+   * then the confirmed-persistence elision — a document the space's
+   * server already holds needs no re-delivery, and content addressing
+   * makes the confirmed copy immutable, so the skip cannot race a
+   * change. Server-CONFIRMED only: a pending local write is no evidence
+   * the server holds it, and the dedupe set stays per-transaction on
+   * purpose (sibling transactions never carry ordering dependencies on
+   * each other's uncommitted writes). A hash the registry cannot supply
+   * warns and is skipped; the commit boundary has the last word.
+   *
+   * Deliberately NOT gated on `contentAddressedSchemas`: the link scan
+   * above is the flag's surface, while direct callers — the CFC envelope
+   * store — need their documents delivered whatever the flag says.
+   */
+  stageSchemaDocClosure(space: MemorySpace, rootHash: string): void {
+    const pending = [rootHash];
     while (pending.length > 0) {
       const hash = pending.pop()!;
       const key = `${space}|${hash}`;
       if (this.#ensuredSchemaDocs.has(key)) continue;
       this.#ensuredSchemaDocs.add(key);
-      // Confirmed-persistence elision: a document the space's server
-      // already holds needs no re-delivery, and content addressing makes
-      // the confirmed copy immutable, so the skip cannot race a change.
-      // Server-CONFIRMED only — a pending local write is no evidence the
-      // server holds it — and per-space: the dedupe set above stays
-      // per-transaction on purpose (sibling transactions never carry
-      // ordering dependencies on each other's uncommitted writes).
       if (this.tx.isSchemaDocPersisted?.(space, hash) === true) continue;
       const document = lookupSchemaDocument(hash);
       if (document === undefined) {
-        logger.warn("schema-doc-materialize", () => [
-          "A written link references a schema document the registry cannot supply:",
+        logger.warn(
+          "schema-doc-materialize",
+          "A staged reference names a schema document the registry cannot supply:",
           `cid:${hash}`,
-        ]);
+        );
         continue;
       }
       this.#runPrivilegedSystemWrite(() => {
@@ -2679,6 +2705,14 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   setCfcTriggerReadGating(enabled: CfcTriggerReadGating): void {
     this.wrapped.setCfcTriggerReadGating(enabled);
+  }
+
+  setCfcDecomposedEnvelopes(enabled: CfcDecomposedEnvelopes): void {
+    this.wrapped.setCfcDecomposedEnvelopes(enabled);
+  }
+
+  stageSchemaDocClosure(space: MemorySpace, rootHash: string): void {
+    this.wrapped.stageSchemaDocClosure(space, rootHash);
   }
 
   setCfcPolicyEvaluationMode(mode: CfcPolicyEvaluationMode): void {

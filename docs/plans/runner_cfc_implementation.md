@@ -364,6 +364,18 @@ its argument and will freeze it directly.
 merged schema envelope for the entity, not the hash of any one effective
 selector schema seen during prepare.
 
+The root document `schemaHash` names may be self-contained or carry
+`$ref: cid:` members — a decomposed write
+(`RuntimeOptions.cfcDecomposedEnvelopes`), or the root a reference-form
+declared schema leaves behind. One read policy covers both: every external
+reference a stored root carries resolves (space-first with content
+verification, the hash-verified realm registry supplying what the space
+does not hold) or the envelope is unreadable (fail closed), and the
+storage commit boundary validates the whole closure at write time. A
+`version` outside the declared union is an envelope the build cannot
+interpret, and every reader fails closed on it rather than treating the
+document as unlabeled.
+
 The corresponding deep-frozen canonical schema object is also persisted as a
 regular memory-v2 entity whose id is `cid:<hash>`. The canonical schema payload
 lives under that entity document's `value`; any sibling fields are reserved for

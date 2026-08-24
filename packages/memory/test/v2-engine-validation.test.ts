@@ -626,3 +626,403 @@ Deno.test("a replayed eliding commit reports its elision again", async () => {
     assertEquals(replayed.revisions, []);
   });
 });
+
+Deno.test("validates the schema document a CFC envelope's schemaHash references", async () => {
+  await withEngine((engine) => {
+    const envelopeSchema = {
+      type: "object",
+      properties: { field: { type: "string" } },
+      ifc: { confidentiality: ["secret"] },
+    } as const;
+    const envelopeHash = internSchemaAsTaggedHashString(envelopeSchema);
+    const docWithMetadata = (schemaHash: string) =>
+      ({
+        op: "set",
+        id: "of:envelope-carrier",
+        value: {
+          value: { field: "v" },
+          cfc: {
+            version: 1,
+            schemaHash,
+            labelMap: { version: 1, entries: [] },
+          },
+        },
+      }) as never;
+
+    // Metadata naming a document nothing backs is rejected — the same
+    // broken closure a dangling link `$ref` would create, spelled as a
+    // bare hash at the reserved `cfc` position.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(1, {
+            operations: [docWithMetadata(envelopeHash)],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+
+    // The document included in the SAME commit is accepted...
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(2, {
+        operations: [
+          docWithMetadata(envelopeHash),
+          setOp(`cid:${envelopeHash}`, envelopeSchema),
+        ],
+      }),
+    });
+
+    // ...and once stored, it satisfies later metadata by itself.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(3, {
+        operations: [docWithMetadata(envelopeHash)],
+      }),
+    });
+
+    // The boundary polices backing, not spelling: a `schemaHash` in any
+    // format is the reference, and one no content can verify against is
+    // permanently unbackable — refused here rather than reading as
+    // unreadable later.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(4, {
+            operations: [
+              {
+                op: "set",
+                id: "of:junk-envelope-carrier",
+                value: {
+                  value: { field: "v" },
+                  cfc: {
+                    version: 1,
+                    schemaHash: "seed-schema",
+                    labelMap: { version: 1, entries: [] },
+                  },
+                },
+              } as never,
+            ],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+
+    // The patch spelling of the same landing is validated too.
+    const missingSchema = {
+      type: "object",
+      properties: { other: { type: "number" } },
+    } as const;
+    const missingHash = internSchemaAsTaggedHashString(missingSchema);
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(5, {
+            operations: [
+              {
+                op: "patch",
+                id: "of:envelope-carrier",
+                patches: [{
+                  op: "replace",
+                  path: "/cfc",
+                  value: {
+                    version: 1,
+                    schemaHash: missingHash,
+                    labelMap: { version: 1, entries: [] },
+                  },
+                }],
+              } as never,
+            ],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+
+    // A ROOT-level replace smuggles the same landing inside a whole
+    // document value.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(6, {
+            operations: [
+              {
+                op: "patch",
+                id: "of:envelope-carrier",
+                patches: [{
+                  op: "replace",
+                  path: "",
+                  value: {
+                    value: { field: "v" },
+                    cfc: {
+                      version: 1,
+                      schemaHash: missingHash,
+                      labelMap: { version: 1, entries: [] },
+                    },
+                  },
+                }],
+              } as never,
+            ],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+
+    // A MOVE converts plain document data into a metadata reference: the
+    // installed value exists only post-patch, so only the post-patch scan
+    // sees it.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(7, {
+        operations: [{
+          op: "set",
+          id: "of:move-carrier",
+          value: { value: { hoard: missingHash } },
+        } as never],
+      }),
+    });
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(8, {
+            operations: [
+              {
+                op: "patch",
+                id: "of:move-carrier",
+                patches: [{
+                  op: "add",
+                  path: "/cfc",
+                  value: { version: 1, labelMap: { version: 1, entries: [] } },
+                }, {
+                  op: "move",
+                  from: "/value/hoard",
+                  path: "/cfc/schemaHash",
+                }],
+              } as never,
+            ],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+
+    // The same move with the document backing it lands.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(9, {
+        operations: [
+          setOp(`cid:${missingHash}`, missingSchema),
+          {
+            op: "patch",
+            id: "of:move-carrier",
+            patches: [{
+              op: "add",
+              path: "/cfc",
+              value: { version: 1, labelMap: { version: 1, entries: [] } },
+            }, {
+              op: "move",
+              from: "/value/hoard",
+              path: "/cfc/schemaHash",
+            }],
+          } as never,
+        ],
+      }),
+    });
+
+    // A cfc-touching sequence that cannot APPLY is not the validator's to
+    // judge: the closure scan skips it, and the commit's own application
+    // refuses it on its own terms.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(10, {
+            operations: [
+              {
+                op: "patch",
+                id: "of:move-carrier",
+                patches: [{ op: "replace", path: "", value: 42 }],
+              } as never,
+            ],
+          }),
+        }),
+      Error,
+      "entity document",
+    );
+
+    // A SCOPED patch replays over the document at its OWN scope — the
+    // space-scoped instance (absent here) is not the document a
+    // user-scoped patch lands on, and validating against it would let a
+    // scoped envelope be re-pointed at an unbacked hash.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      principal: "did:key:scoped-author",
+      commit: commit(11, {
+        operations: [{
+          op: "set",
+          id: "of:scoped-envelope-carrier",
+          scope: "user",
+          value: {
+            value: { field: "v" },
+            cfc: {
+              version: 1,
+              schemaHash: envelopeHash,
+              labelMap: { version: 1, entries: [] },
+            },
+          },
+        } as never],
+      }),
+    });
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          principal: "did:key:scoped-author",
+          commit: commit(12, {
+            operations: [{
+              op: "patch",
+              id: "of:scoped-envelope-carrier",
+              scope: "user",
+              patches: [{
+                op: "replace",
+                path: "/cfc/schemaHash",
+                value: "fid1:scoped-unbacked-hash",
+              }],
+            } as never],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+
+    // A delete between them clears the staged base: the patch that
+    // follows replays over an absent document, and the envelope it adds
+    // there is validated like any other landing.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(14, {
+            operations: [{
+              op: "set",
+              id: "of:delete-then-patch-carrier",
+              value: { value: { field: "v" } },
+            } as never, {
+              op: "delete",
+              id: "of:delete-then-patch-carrier",
+            } as never, {
+              op: "patch",
+              id: "of:delete-then-patch-carrier",
+              patches: [{
+                op: "add",
+                path: "/cfc",
+                value: {
+                  version: 1,
+                  schemaHash: "fid1:post-delete-unbacked",
+                  labelMap: { version: 1, entries: [] },
+                },
+              }],
+            } as never],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+
+    // Operations in ONE commit compose: a set stages the base a later
+    // patch rewrites, so the patch validates against what THIS commit
+    // leaves, never against durable pre-commit state alone.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(13, {
+            operations: [{
+              op: "set",
+              id: "of:intra-commit-carrier",
+              value: {
+                value: { field: "v" },
+                cfc: {
+                  version: 1,
+                  schemaHash: "",
+                  labelMap: { version: 1, entries: [] },
+                },
+              },
+            } as never, {
+              op: "patch",
+              id: "of:intra-commit-carrier",
+              patches: [{
+                op: "replace",
+                path: "/cfc/schemaHash",
+                value: "fid1:intra-commit-unbacked",
+              }],
+            } as never],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+  });
+});
+
+Deno.test("walks a CFC envelope's schema-document closure transitively", async () => {
+  await withEngine((engine) => {
+    // A decomposed envelope root references its definitions as
+    // `$ref: cid:` members. The closure walk must follow those
+    // references — a root without its definition is the same broken
+    // closure as missing the root itself.
+    const childSchema = {
+      type: "string",
+      ifc: { confidentiality: ["decomposed"] },
+    } as const;
+    const childHash = internSchemaAsTaggedHashString(childSchema);
+    const rootSchema = {
+      type: "object",
+      properties: { secret: { $ref: `cid:${childHash}` } },
+    } as never;
+    const rootHash = internSchemaAsTaggedHashString(rootSchema);
+    const carrier = {
+      op: "set",
+      id: "of:decomposed-envelope-carrier",
+      value: {
+        value: { secret: "v" },
+        cfc: {
+          version: 1,
+          schemaHash: rootHash,
+          labelMap: { version: 1, entries: [] },
+        },
+      },
+    } as never;
+
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(30, {
+            operations: [carrier, setOp(`cid:${rootHash}`, rootSchema)],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(31, {
+        operations: [
+          carrier,
+          setOp(`cid:${rootHash}`, rootSchema),
+          setOp(`cid:${childHash}`, childSchema),
+        ],
+      }),
+    });
+  });
+});

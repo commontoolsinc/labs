@@ -38,7 +38,69 @@ The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
-**Delta 2026-08-22 (this PR): the arrival-witness fork RULED (candidate
+**Delta 2026-08-23 (this PR): OW45 arm-B server-ensure STAGE 1 BUILT —
+the space-root ensure (existence + freshness, no start) runs at the
+SpaceServer's activation as a lease-guarded, single-flight owed step —
+non-blocking at activation, DEADLINE-BOUNDED in the first cycle
+(rootEnsureDeadlineMs, default 30 s: a wedged fetch must never hold a
+tenure's lease — the build review's F2); the client is behaviorally
+UNCHANGED.** The
+design of record is PR #6209
+(`docs/history/plans/server-execution-v2/optimize/ow45-armb-server-ensure-design.md`,
+owner-green-lit 2026-08-23); the build report with the four
+owner-may-veto operating assumptions (owner-resolved fail-closed
+attribution via the memory server's new `resolveSpaceOwner`;
+custom-`defaultAppUrl` log-and-use-system-default interim; the
+runnability-repair pair NOT moved — recorded as a STAGE-2 GATE: the ON
+client's creation retirement must not ship before the pair moves;
+ARM-B out of scope) is
+`ow45-armb-server-ensure-stage1-report.md` beside it. The ensure core
+is EXTRACTED into the runner (`ensure-space-root.ts`, beside
+pattern-updater/ensure-piece-running) and the client controller's
+creation arm now delegates to it, so OFF stays one code path; OFF
+witnesses: the toolshed bootstrap pin (flag off → no host, the seat's
+only reachability chain severed at its first link) and the piece-side
+OFF-arm creation pin, both mutation-checked. The ARM-A refusal class
+does NOT close in stage 1 (the ON client still creates; the server now
+wins most races) and the reload step's ON skip STAYS — the measurement
+section of the build report carries the before/after numbers.
+
+**Delta 2026-08-22: OW45 arm B triaged on an instrumented
+client — the starvation family is THREE defects: two FIXED red-first,
+one isolated live and FORKED to the owner; the last skip entry STAYS.**
+The instrumented bench (worker console forwarded, fresh store per run,
+merged-main ON binary) caught two reds in four runs, each a different
+member. FIXED: (1) the event drain's deferral arm let a later-arrived
+event overtake a deferred earlier one — run b01's store-verified
+cross-stream inversion of one user's last two clicks, against
+events.md §2's stated arrival order; the drain now processes across
+sidecars in append commit-seq order with deferral as a BARRIER
+(red-first pin `executor-events-down.test.ts` "arrival order across
+streams", watched `A,B,A` → `A,A,B`). (2) The graph walk's
+absent-hop-target demand hole — a link-hop target absent at
+evaluation was tracked NOWHERE server-side, so its birth never passed
+the session wake pass's touched check and the watch never delivered
+it, while the client's selector tracker answered every re-read
+locally: the row's "first-read lottery", permanent on a quiet space;
+the walk now records the dead-end in a MISS SET on the graph state —
+wake-reactivity only, never delivered — so the birth re-evaluates and
+delivers the real document while the wire stays byte-identical until
+then (red-first pin `v2-watch-absent-arrival.test.ts`, the hop pin
+watched starving at its net). FORKED (the remaining charge): run b04 caught the
+whole-piece shape live — the flag-ON client's navigate-deferred piece
+start dies terminally on a `ConflictError` whose basis read the
+served piece's computed docs at seq 0, PRE-BIRTH (the first-hydration
+race), and the deferred-start error arm has no retry; the piece never
+starts client-side and every dependent read is undefined for the
+session. Dispositions + recommendation ((a) retry-on-conflict now,
+(b) adopt-not-start under ON as the destination):
+[`optimize/ow45-armb-client-start-fork.md`](../history/plans/server-execution-v2/optimize/ow45-armb-client-start-fork.md).
+The ON skip list still holds exactly ONE entry (the reload step, its
+reason updated to the refined map); the flip's list-EMPTY bar hangs on
+the client-start close. Full evidence: verification-coverage.md OW45
+(the ARM-B TRIAGE block).
+
+**Delta 2026-08-22 (#6197): the arrival-witness fork RULED (candidate
 (B)) and BUILT — the runner `pattern-and-data-persistence` skip LIFTED,
 the LAST file-level ON skip.** The overlay's arrival gate now witnesses
 a cover AT an entry's floor only when the covering commit is

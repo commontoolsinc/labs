@@ -1,8 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type { Server as MemoryServer } from "@commonfabric/memory/v2/server";
+import type { Identity } from "@commonfabric/identity";
 import {
   DEFAULT_MAX_OUTSTANDING_EFFECTS,
+  ensureSpaceRootsFromEnv,
   serverExecutionPolicyFromEnv,
+  startServerExecutionHost,
 } from "@/lib/server-execution.ts";
 
 // The Phase-6 env knobs (serving-loop.md §5) are the production
@@ -91,5 +95,95 @@ describe("serverExecutionPolicyFromEnv", () => {
     expect(warnings.length).toBe(2);
     expect(warnings[0]).toContain("SERVER_EXECUTION_FLUSH_DEADLINE_MS");
     expect(warnings[1]).toContain("SERVER_EXECUTION_EGRESS_RATE_PER_S");
+  });
+});
+
+// The OFF witness for the serving-loop bootstrap (OW45 arm-B
+// server-ensure stage 1's explicit pin; the arc's OFF byte-identity
+// bar): with the flag OFF — unset (the first-party default is OFF until
+// the flip PR) or explicitly "false" — `startServerExecutionHost`
+// returns undefined, so NO ExecutorHost exists, NO SpaceServer is ever
+// built, and the server-side space-root ensure path added by stage 1
+// (the SpaceServer activation owed-step) structurally does not exist
+// OFF. The seat's only reachability chain is toolshed bootstrap →
+// ExecutorHost → SpaceServer.activate, and it severs at its first link.
+//
+// The options are untouchable fakes on purpose: the flag check is the
+// function's FIRST act, so the OFF arm must touch neither the server
+// nor the identity — any use throws and fails the pin.
+describe("startServerExecutionHost OFF witness", () => {
+  const untouchable = <T extends object>(label: string): T =>
+    new Proxy({} as T, {
+      get(_target, property) {
+        throw new Error(
+          `${label}.${String(property)} touched on the OFF arm — the ` +
+            "flag check must precede any use",
+        );
+      },
+    });
+
+  it("is inert with the flag unset (the first-party default: OFF until the flip PR)", () => {
+    const host = startServerExecutionHost({
+      server: untouchable<MemoryServer>("server"),
+      identity: untouchable<Identity>("identity"),
+      apiUrl: new URL("http://toolshed.test"),
+      envGet: () => undefined,
+    });
+    expect(host).toBeUndefined();
+  });
+
+  it("is inert with the flag explicitly false", () => {
+    const host = startServerExecutionHost({
+      server: untouchable<MemoryServer>("server"),
+      identity: untouchable<Identity>("identity"),
+      apiUrl: new URL("http://toolshed.test"),
+      envGet: (name) =>
+        name === "EXPERIMENTAL_SERVER_EXECUTION" ? "false" : undefined,
+    });
+    expect(host).toBeUndefined();
+  });
+});
+
+// The RULED test switch's env parsing (OW45 arm-B stage 1, RULED
+// 2026-08-24): unset and "true" are the production posture (ensure ON);
+// only the literal "false" switches the space-root ensure off; garbage
+// FAILS TO PRODUCTION (ON, with a warning) — a typo must never silently
+// strip production spaces of their roots.
+describe("ensureSpaceRootsFromEnv", () => {
+  const envOf2 =
+    (values: Record<string, string | undefined>) => (name: string) =>
+      values[name];
+
+  it("defaults ON, honors true, and only the literal false disables", () => {
+    const warnings: string[] = [];
+    const warn = (m: string) => warnings.push(m);
+    expect(ensureSpaceRootsFromEnv(envOf2({}), warn)).toBe(true);
+    expect(
+      ensureSpaceRootsFromEnv(
+        envOf2({ SERVER_EXECUTION_ENSURE_SPACE_ROOTS: "true" }),
+        warn,
+      ),
+    ).toBe(true);
+    expect(
+      ensureSpaceRootsFromEnv(
+        envOf2({ SERVER_EXECUTION_ENSURE_SPACE_ROOTS: "false" }),
+        warn,
+      ),
+    ).toBe(false);
+    expect(warnings).toEqual([]);
+  });
+
+  it("FAILS TO PRODUCTION on garbage: ensure stays ON, loudly", () => {
+    for (const raw of ["off", "0", "FALSE", " false", "no"]) {
+      const warnings: string[] = [];
+      expect(
+        ensureSpaceRootsFromEnv(
+          envOf2({ SERVER_EXECUTION_ENSURE_SPACE_ROOTS: raw }),
+          (m) => warnings.push(m),
+        ),
+      ).toBe(true);
+      expect(warnings.length).toBe(1);
+      expect(warnings[0]).toContain("SERVER_EXECUTION_ENSURE_SPACE_ROOTS");
+    }
   });
 });

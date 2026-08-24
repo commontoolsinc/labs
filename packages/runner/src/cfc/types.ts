@@ -263,6 +263,18 @@ export type LabelMapEntry = {
   observes?: LabelObservationClass | LabelMetadataObservationClass;
 };
 
+/**
+ * `schemaHash` names the envelope's ROOT schema document. The root may be
+ * self-contained (the inline form) or reference further documents through
+ * `$ref: cid:` members (the decomposed form) — one read policy covers
+ * both: every external reference must resolve, verified against its own
+ * address, and a member that cannot is an unreadable envelope (fail
+ * closed). The storage commit boundary validates the whole closure at
+ * write time, so a committed envelope's references are always backed. A
+ * `version` outside this union is an envelope the build cannot
+ * interpret, and every reader fails closed on it rather than treating
+ * the document as unlabeled.
+ */
 export type CfcMetadata = {
   version: 1;
   schemaHash: string;
@@ -572,6 +584,23 @@ export type CfcTriggerReadGating = boolean;
 export const DEFAULT_CFC_TRIGGER_READ_GATING: CfcTriggerReadGating = false;
 
 /**
+ * Whether the envelope persist path stores the DECOMPOSED spelling: the
+ * metadata's `schemaHash` names a root document whose `$defs` members are
+ * separate content-addressed documents (see {@link CfcMetadata}). Off
+ * preserves the merged schema's interned spelling — which may itself
+ * carry references a reference-form declared schema left. Reading
+ * resolves references whenever the stored root carries them, in either
+ * setting. Ships behind
+ * a flag because a runner that predates reference resolution walks a
+ * decomposed root's `$ref: cid:` members as inert schema content and
+ * silently under-labels: every deployed reader must resolve (or fail
+ * closed) before any space sees a decomposed write.
+ */
+export type CfcDecomposedEnvelopes = boolean;
+
+export const DEFAULT_CFC_DECOMPOSED_ENVELOPES: CfcDecomposedEnvelopes = false;
+
+/**
  * Exchange-rule policy evaluation dial (Epic B5, spec §4.4.5/§5.3),
  * orthogonal to the enforcement ladder: `off` = the gates decide on raw
  * labels exactly as before this dial existed; `observe` = evaluate every
@@ -651,6 +680,7 @@ export type CfcTxState = {
   flowLabelsMode: CfcFlowLabelsMode;
   writeFloorMode: CfcWriteFloorMode;
   triggerReadGating: CfcTriggerReadGating;
+  decomposedEnvelopes: CfcDecomposedEnvelopes;
   policyEvaluationMode: CfcPolicyEvaluationMode;
   labelMetadataProtectionMode: CfcLabelMetadataProtectionMode;
   declaredMonotonicityMode: CfcDeclaredMonotonicityMode;

@@ -10,6 +10,7 @@ import { applySqliteCommitWrite } from "./sqlite/commit-eval.ts";
 import {
   applyPatchToDocument,
   emptyEntityDocument,
+  PatchApplyError,
   patchOpChangesParentKeySet,
   touchedPointerPaths,
 } from "./patch.ts";
@@ -3593,6 +3594,69 @@ const applyCommitTransaction = (
       return schema;
     });
   };
+  // A stored CFC envelope's `schemaHash` is a schema-document reference in
+  // everything but spelling: the read side assembles the label envelope
+  // through `cid:<schemaHash>`, so a commit that lands metadata without
+  // its document creates the same broken closure a dangling link `$ref`
+  // would. Only the reserved root `cfc` member is a metadata position —
+  // user data lives under `value` — and ANY non-empty string there is
+  // the reference: which spellings a runner mints is not this boundary's
+  // domain, so it polices backing, not format. A spelling no content can
+  // verify against is simply unbackable, and a commit naming it refuses
+  // here rather than reading as unreadable later.
+  const collectCfcEnvelopeRef = (metadata: unknown): void => {
+    if (metadata === null || typeof metadata !== "object") return;
+    const schemaHash = (metadata as { schemaHash?: unknown }).schemaHash;
+    if (typeof schemaHash !== "string" || schemaHash.length === 0) return;
+    requiredSchemaRefs.add(schemaHash);
+  };
+  // The envelope position a patch sequence can land metadata at —
+  // directly (`/cfc`, `/cfc/schemaHash`), through a root-level value, or
+  // by MOVING document content into the reserved member. The forms
+  // compose in sequence AND across a commit's operations, so the only
+  // complete answer is the post-patch document at the operation's own
+  // address: replayed over what earlier operations in this commit left
+  // (a set can stage the base a later patch rewrites), else over the
+  // STORED document at the operation's own scope — a scoped patch never
+  // lands on the space-scoped instance. Only documents some patch can
+  // reach `cfc` on carry staged state, so a commit without such patches
+  // pays nothing. A sequence that cannot apply is skipped here — the
+  // commit's own application refuses it.
+  const cfcPointer = (pointer: string | undefined): boolean =>
+    pointer !== undefined &&
+    (pointer === "" || pointer === "/cfc" || pointer.startsWith("/cfc/"));
+  const patchTouchesCfc = (patches: PatchOp[] | undefined): boolean =>
+    (patches ?? []).some((patch) =>
+      cfcPointer(patch.path) ||
+      cfcPointer("from" in patch ? patch.from : undefined)
+    );
+  // Scoped rows key exactly as the write loop below keys them: a
+  // delegated commit's scoped writes carry the validated acting identity,
+  // and a derived commit's annotation supplies the row key outright.
+  const scanPrincipal = delegated?.actingPrincipal ?? principal;
+  const scanSession = delegated?.actingSession ?? sessionId;
+  const opDocKey = (
+    opIndex: number,
+    operation: { id: string; scope?: unknown },
+  ): string =>
+    `${operation.id}|${
+      scopeKeyByOpIndex.get(opIndex) ??
+        resolveScopeKey(
+          operation.scope as Parameters<typeof resolveScopeKey>[0],
+          {
+            principal: scanPrincipal,
+            sessionId: scanSession,
+          },
+        )
+    }`;
+  const cfcPatchDocKeys = new Set<string>();
+  for (const [opIndex, operation] of commit.operations.entries()) {
+    if (operation.op !== "patch" || operation.id.startsWith("cid:")) continue;
+    if (patchTouchesCfc(operation.patches)) {
+      cfcPatchDocKeys.add(opDocKey(opIndex, operation));
+    }
+  }
+  const stagedCfcDocs = new Map<string, unknown>();
   for (const [opIndex, operation] of commit.operations.entries()) {
     if (operation.op === "sqlite") continue;
     if (operation.op === "patch") {
@@ -3601,9 +3665,55 @@ const applyCommitTransaction = (
         if ("add" in patch) collectLinkSchemaRefs(patch.add);
         if ("values" in patch) collectLinkSchemaRefs(patch.values);
       }
+      if (cfcPatchDocKeys.size > 0) {
+        const docKey = opDocKey(opIndex, operation);
+        if (cfcPatchDocKeys.has(docKey)) {
+          const base = stagedCfcDocs.has(docKey)
+            ? stagedCfcDocs.get(docKey)
+            : readState(engine, {
+              id: operation.id,
+              branch,
+              scope: operation.scope as Parameters<
+                typeof readState
+              >[1]["scope"],
+              principal: scanPrincipal,
+              sessionId: scanSession,
+              scopeKey: scopeKeyByOpIndex.get(opIndex),
+            })?.document ?? undefined;
+          try {
+            const patched = applyPatchToDocument(
+              base as Parameters<typeof applyPatchToDocument>[0] | undefined,
+              operation.patches ?? [],
+            );
+            stagedCfcDocs.set(docKey, patched);
+            if (patchTouchesCfc(operation.patches)) {
+              collectCfcEnvelopeRef((patched as { cfc?: unknown }).cfc);
+            }
+          } catch (error) {
+            if (!(error instanceof PatchApplyError)) throw error;
+          }
+        }
+      }
     }
     if (!operation.id.startsWith("cid:")) {
-      if (operation.op === "set") collectLinkSchemaRefs(operation.value);
+      if (operation.op === "set") {
+        collectLinkSchemaRefs(operation.value);
+        collectCfcEnvelopeRef(
+          (operation.value as { cfc?: unknown } | null)?.cfc,
+        );
+        if (cfcPatchDocKeys.size > 0) {
+          const docKey = opDocKey(opIndex, operation);
+          if (cfcPatchDocKeys.has(docKey)) {
+            stagedCfcDocs.set(docKey, operation.value);
+          }
+        }
+      }
+      if (operation.op === "delete" && cfcPatchDocKeys.size > 0) {
+        const docKey = opDocKey(opIndex, operation);
+        if (cfcPatchDocKeys.has(docKey)) {
+          stagedCfcDocs.set(docKey, undefined);
+        }
+      }
       continue;
     }
     if (operation.op === "delete" || operation.op === "patch") {

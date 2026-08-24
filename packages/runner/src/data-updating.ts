@@ -40,6 +40,7 @@ import {
 import {
   readStoredCfcMetadata,
   storedCfcMetadataAppliesToPath,
+  UnknownCfcMetadataVersionError,
 } from "./cfc/metadata.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
@@ -235,9 +236,20 @@ const recordLinkWritePolicyInput = (
     return;
   }
   const carriedCfcLabelView = cloneCfcLabelView(cfcLabelView);
-  const sourceMetadata = readStoredCfcMetadata(tx, source);
+  let sourceMetadata: ReturnType<typeof readStoredCfcMetadata>;
+  let sourceEnvelopeUninterpretable = false;
+  try {
+    sourceMetadata = readStoredCfcMetadata(tx, source);
+  } catch (error) {
+    // A source envelope this build cannot interpret still makes the link
+    // CFC-relevant (fail closed): recording the policy input routes the
+    // write to prepare, where the unreadable envelope rejects it in
+    // enforcing modes instead of the labels silently not carrying.
+    if (!(error instanceof UnknownCfcMetadataVersionError)) throw error;
+    sourceEnvelopeUninterpretable = true;
+  }
   const sourceRelevant = schemaIfcOverlapsPath(source.schema, [], []) ||
-    sourceMetadata !== undefined ||
+    sourceMetadata !== undefined || sourceEnvelopeUninterpretable ||
     hasPendingSchemaPolicyInput(tx, source) ||
     cfcLabelViewHasValues(carriedCfcLabelView);
   const targetRelevant = storedCfcMetadataAppliesToPath(tx, target) ||

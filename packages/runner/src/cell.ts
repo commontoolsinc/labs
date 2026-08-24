@@ -192,8 +192,8 @@ export type RawCellReadOptions = IReadOptions & {
   /**
    * Controls whether `getRaw()` follows a final link at the cell's target.
    *
-   * Defaults to `"value"`, which preserves the historical raw-read behavior:
-   * resolve links on the way to the target, but return a final link as data.
+   * Defaults to `"top"`: links on the way to the target are resolved, and a
+   * final link is returned as data rather than followed.
    */
   lastNode?: LastNode;
 };
@@ -254,6 +254,9 @@ const storedSchemaForWritePolicyInput = (
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
 ): JSONSchema | undefined => {
+  // An UnknownCfcMetadataVersionError propagates, deliberately: a stored
+  // envelope this build cannot interpret fails the read loudly rather
+  // than serving the document schemaless.
   const metadata = readStoredCfcMetadata(tx, link);
   if (metadata === undefined) {
     return undefined;

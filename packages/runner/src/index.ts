@@ -141,6 +141,18 @@ export {
 } from "./link-utils.ts";
 export * from "./pattern-manager.ts";
 export {
+  createSpaceRootIfAbsent,
+  DEFAULT_APP_PATTERN_SOURCE,
+  DEFAULT_ROOT_RUN_OPTIONS,
+  ensureSpaceRootPattern,
+  type EnsureSpaceRootResult,
+  HOME_PATTERN_SOURCE,
+  patternSourceUrl,
+  resolveSpaceRootPattern,
+  type SpaceRootCreationHooks,
+  spaceRootPatternConfig,
+} from "./ensure-space-root.ts";
+export {
   normalizePatternSource,
   PATTERNS_ROUTE_PREFIX,
   resolveSystemPatternSource,

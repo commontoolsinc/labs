@@ -16,6 +16,68 @@ For a concise status and lifecycle-aware documentation map, start with
 claim is in [docs/IMPLEMENTATION_PROFILE.md](docs/IMPLEMENTATION_PROFILE.md);
 remaining work is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
+## The model: handles and patterns
+
+Two ideas carry this package, and nearly everything else in this document is one
+of them wearing different clothes.
+
+**An agent here works in handles, and a schema decides what becomes a value.** A
+handle names something in a Fabric space without carrying it; the model composes
+work out of these names, passing one to a tool, handing one to a subagent,
+publishing one under a slug, asking what shape it has. What crosses as a value
+is not whatever the agent asked for — it is what a declared schema admits.
+`run_pattern` returns the fields its `resultSchema` models as inert (a number, a
+boolean, an enum or const string) as themselves, and everything else as a
+reference token addressing that position. So a total comes back as `42` and a
+free-text description comes back as something to point at.
+
+That is the useful shape of it: the declaration is the boundary, and it is a
+narrow one by construction. A field typed as one of three enum values can carry
+no more than those three values, whatever the data behind it turned out to be.
+Widening what crosses means widening a schema on purpose, in the open, rather
+than a value slipping through because nobody said it should not.
+
+**Work happens by running patterns over those handles.** When an agent needs
+something computed, it does not fetch the data and compute in its own context;
+it writes a pattern, runs it in the space against references it holds, and
+receives a handle to the result. The computation goes to the data. This is why
+`run_pattern` is the central tool rather than one of many, and why a result is a
+piece a person can open rather than a paragraph in a transcript.
+
+Read the rest of this document through those two. Delegation gives a child a
+fresh context seeded with handles. `describe_handle` answers what a reference is
+shaped like without reading it. `assign_slug` names a piece the caller holds a
+handle to. Sealed positions in a structured result cross as their own addresses.
+The browser's `valueHandle` lets an action spend a value the model never held —
+though a page that receives one can hand it back to whatever reads that page
+next, which the browser section covers. None of these is a separate mechanism;
+each is the same two ideas reaching a new surface.
+
+**This is not a confidentiality feature.** It would be a mistake to read the
+handle machinery as special handling for secrets, switched on when data is
+sensitive. It is how everything works here. Confidentiality is one thing that
+partly falls out of it — an agent cannot leak what it never held, though what a
+schema admits it does hold — but so do the properties that matter when nothing
+is secret at all: a transcript that stays small because it carries names rather
+than payloads, results that are durable objects instead of prose, work that
+composes because every step produces something the next step can refer to.
+Treating it as a special case for sensitive values is the surest way to write a
+tool that quietly breaks the model for everything else.
+
+**What this asks of you when extending the harness.** A new tool that accepts a
+reference should accept a handle. A new tool that produces something should
+produce a handle to it rather than its contents. A new field that takes a value
+should ask whether it also wants a handle sibling. The question to hold onto is
+not "is this data sensitive" but "does this make the agent hold something it
+could have merely named".
+
+The place the model is not yet fully realized is delegation: `delegate_task`
+passes its goal and context as free text, so what a parent tells a child is
+prose rather than bound references, and a parent can put in it anything it
+happens to know. Handles cross that boundary — a child resolves tokens its
+parent minted — but the brief around them does not. Closing that is live work,
+not a settled part of the design.
+
 ## Why This Exists
 
 Common Fabric needs an agent harness that can become CFC-aware without
@@ -581,11 +643,15 @@ report instead of being denied for missing trusted mediation metadata.
 
 ### Session-local address handles
 
+This is the mechanism behind the first half of
+[the model](#the-model-handles-and-patterns): how a reference is rendered so
+that naming something never means carrying it.
+
 Every run keeps a session-local handle table: short opaque tokens that stand in
 for cell addresses in model-visible text, so a transcript never has to carry a
 full LLM-friendly link. This is how the harness renders references — there is no
-flag or environment variable governing it. Artifacts retain the raw bytes for
-operators, and the table itself is run state.
+flag or environment variable governing it, because it is not a mode. Artifacts
+retain the raw bytes for operators, and the table itself is run state.
 
 An address token is `cfh:a:<suffix>`, where the suffix is exactly five
 characters drawn from a 30-character alphabet — the digits `2`–`9` and the
@@ -811,6 +877,10 @@ than present-but-failing. The `browser`, `web_fetch`, and `web_search` profiles
 do not offer it.
 
 ### Running patterns against a Fabric space
+
+This is the second half of [the model](#the-model-handles-and-patterns): the
+agent sends a computation to the data rather than pulling the data into its own
+context, and gets a handle to the result.
 
 Three flags configure one trusted Fabric session, and all of them go together:
 
@@ -1146,6 +1216,41 @@ malformed — the CDP endpoint never crosses the model boundary in either
 direction, so the child can neither point the browser elsewhere nor learn the
 host's topology, and a bare browser launch that would race the host's live
 browser profile has no verb to arrive through.
+
+The browser is where [the model](#the-model-handles-and-patterns) meets a
+surface that genuinely needs a value: a form field has to receive text. So a
+field that takes a value has a sibling that takes a handle: `valueHandle` for
+`fill`, `type`, and `select`, and `urlHandle` for `open`. The handle is resolved
+trusted-side at the moment of use, so the model composes the action while
+holding only a reference and the value never enters the conversation. A
+value-bearing field and its handle sibling are alternatives — set together, the
+call is refused rather than one winning silently.
+
+Two checks stand between a handle and a materialized value, and both refuse by
+default. The reference must be one the run actually holds: the inbound swap
+rewrites a handle token into an address before a tool sees it, so an expanded
+token and an address the model composed are indistinguishable by then, and only
+membership in the run's handle table tells them apart. And the destination must
+be allowlisted: `--handle-value-origin` names the origins where a value may be
+spent, the page's own origin is read immediately before a `fill`, `type`, or
+`select`, and a `urlHandle` is checked against the origin it resolves to. A run
+with no allowlist cannot materialize a handle at all.
+
+That destination check is a policy control, not a race-free guarantee, and the
+distinction matters. The origin is read and then the value is typed; a page that
+navigates in between — a redirect, or another child driving the same leased
+browser — is not caught. The allowlist is also per-run rather than per-handle,
+so any allowlisted origin can receive any handle the run holds: allowing a mail
+origin for a mail credential does not stop a banking credential going there too.
+Binding permitted destinations to the handle itself, at mint time, is the shape
+that closes both, and it is not what this does.
+
+A materialized value can come back. The page holds what was typed into it, so a
+later snapshot, a read of the filled field, or a skill script driving the same
+browser will carry it into model context. Nothing here prevents that: what a
+handle buys is that the model never held the value beforehand and could only
+spend it at an operator-named origin, not that the value stays unseen
+afterwards. Governing the read is the labels' job, and it is not yet wired.
 
 Host-target skill scripts run with a cleared subprocess environment plus a
 controlled `PATH` and explicit `CF_HARNESS_*` / `SKILL_*` variables. They do not

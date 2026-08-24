@@ -19,6 +19,8 @@ import {
   applyPieceSourceTransition,
   type Cell,
   Console as RuntimeConsole,
+  createSpaceRootIfAbsent,
+  DEFAULT_ROOT_RUN_OPTIONS,
   EntityId,
   entityIdFrom,
   type EntityIdListOptions,
@@ -108,7 +110,9 @@ const PRIVILEGED_PIECE_LIST_SCHEMA = internSchema({
 // existing root is reconciled before start, while a new root is compiled from
 // the current source immediately before creation. Keep the runner's watcher,
 // but do not schedule its duplicate fire-and-forget source check.
-const DEFAULT_ROOT_RUN_OPTIONS = { schedulePatternUpdate: false } as const;
+// DEFAULT_ROOT_RUN_OPTIONS moved to the runner's ensure-space-root.ts
+// (OW45 arm-B stage 1): the space-root creation is shared with the
+// SpaceServer's ensure, and the run options ride with it.
 
 // Timing stats record even while the logger is disabled, so every phase is
 // visible in the load summaries (browser worker included, where the
@@ -1723,81 +1727,23 @@ export class PiecesController<T = unknown> {
       };
     }
 
-    const patternUrl = patternSourceUrl(
-      patternConfig.source,
-      this.runtime.apiUrl,
+    // The creation half is the SHARED core (the runner's
+    // ensure-space-root.ts, OW45 arm-B stage 1): resolve + compile the
+    // source (into the space's compile cache, CT-1623), then the
+    // creation editWithRetry — the OCC re-check, the piece cell under
+    // the identity-bearing cause, run setup, stamp provenance, link
+    // defaultPattern. The SpaceServer's activation ensure runs the SAME
+    // function, so OFF stays one code path instead of a fork; this
+    // client call passes no stamp hook and no fetch, which keeps the
+    // transaction and the resolver byte-identical to the pre-extraction
+    // controller. A commit error is swallowed exactly as before: the
+    // resolution below fails if nothing won the race.
+    const { createdByThisCall } = await createSpaceRootIfAbsent(
+      this.runtime,
+      this.getSpace(),
+      patternConfig,
+      { timePhase: timePiecePhase, spaceCell: this.getSpaceCellContents() },
     );
-
-    // Load and compile the pattern (async work outside transaction)
-    const program = await timePiecePhase(
-      "ensureDefaultPattern.resolveProgram",
-      () =>
-        this.runtime.harness.resolve(
-          new HttpProgramResolver(patternUrl.href),
-        ),
-    );
-    const pattern = await timePiecePhase(
-      "ensureDefaultPattern.compilePattern",
-      () =>
-        this.runtime.patternManager.compilePattern(
-          program,
-          // Route the space-root compile through the content-addressed cell
-          // cache so the reload (fresh worker) reuses the compiled module set
-          // instead of cold-compiling the home/default-app pattern (CT-1623).
-          { space: this.getSpace() },
-        ),
-    );
-
-    // Atomic creation with automatic retry on conflicts.
-    // The transaction system provides optimistic concurrency control:
-    // - Reading defaultPattern inside the transaction creates an invariant
-    // - If another process creates it first, the commit fails and retries
-    // - On retry, we'll see the existing pattern and return early
-    const creationResult = await timePiecePhase(
-      "ensureDefaultPattern.editWithRetry",
-      () =>
-        this.runtime.editWithRetry((tx) => {
-          // Double-check pattern doesn't exist (read establishes invariant)
-          const spaceCellWithTx = this.getSpaceCellContents().withTx(
-            tx,
-          );
-          const defaultPatternCell = spaceCellWithTx.key("defaultPattern");
-          const existingDefault = defaultPatternCell.get();
-
-          if (existingDefault?.get()) {
-            // Pattern was created by another process - we're done
-            // The editWithRetry will complete successfully, and we'll
-            // fetch the existing pattern below
-            return false;
-          }
-
-          // Create piece cell within this transaction
-          const pieceCell = this.runtime.getCell<NameSchema>(
-            this.getSpace(),
-            patternConfig.cause,
-            nameSchema,
-            tx,
-          );
-
-          // Run pattern setup within same transaction
-          this.runtime.run(
-            tx,
-            pattern,
-            {},
-            pieceCell,
-            DEFAULT_ROOT_RUN_OPTIONS,
-          );
-
-          // Stamp the provenance the piece tracks for updates (the source it
-          // was born from) — the same transaction, one extra meta write.
-          setPatternSource(pieceCell, tx, patternConfig.source);
-
-          // Link as default pattern within same transaction
-          defaultPatternCell.set(pieceCell.withTx(tx));
-          return true;
-        }),
-    );
-    const createdByThisCall = creationResult.ok === true;
 
     // After transaction commits, fetch the final result
     // (either we created it, or another process did)

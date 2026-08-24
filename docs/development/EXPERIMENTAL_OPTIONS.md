@@ -40,6 +40,7 @@ was last checked against the code.
 | [`cfcFlowLabels`](#cfcflowlabels)                                           | `RuntimeOptions.cfcFlowLabels`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4011)                              | move toward `persist`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
 | [`cfcWriteFloor`](#cfcwritefloor)                                           | `RuntimeOptions.cfcWriteFloor`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4479)                              | move toward `enforce`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
 | [`cfcTriggerReadGating`](#cfctriggerreadgating)                             | `RuntimeOptions.cfcTriggerReadGating`                                                                                                           | `false`                                                                              | Bernhard Seefeld (#4488)                              | move toward `true`                                                                                                                                                                                                                | implemented, staged rollout                                                     |
+| [`cfcDecomposedEnvelopes`](#cfcdecomposedenvelopes)                         | `RuntimeOptions.cfcDecomposedEnvelopes`                                                                                                         | `false`                                                                              | Robin McCollum (CT-2062)                              | move toward `true` once every deployed reader resolves the references a stored root carries                                                                                                                                      | implemented, off by default                                                     |
 | [`cfcPolicyEvaluation`](#cfcpolicyevaluation)                               | `RuntimeOptions.cfcPolicyEvaluation`                                                                                                            | `off`                                                                                | Bernhard Seefeld (#4566)                              | move toward `enforce`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
 | [`cfcDeclaredMonotonicity`](#cfcdeclaredmonotonicity)                       | `RuntimeOptions.cfcDeclaredMonotonicity`                                                                                                        | `off`                                                                                | Bernhard Seefeld (#4647)                              | `observe` first, then `enforce` (must soak before the §8.12.7 route 2b event ships)                                                                                                                                               | implemented, off by default                                                     |
 | [`cfcPrefixProvenanceStats`](#cfcprefixprovenancestats)                     | `RuntimeOptions.cfcPrefixProvenanceStats` (per-deployment; not env-wired)                                                                       | `false`                                                                              | Bernhard Seefeld (#4623)                              | stays a measurement opt-in; fold in or remove after Stage 0                                                                                                                                                                       | implemented, off by default, measurement only                                   |
@@ -668,6 +669,40 @@ the per-epic implementation notes).
 - **Path to removal.** Once the cost is acceptable (or metadata caching removes
   it), the default could flip to `true` and the gating could become
   unconditional, retiring the dial.
+
+### `cfcDecomposedEnvelopes`
+
+- **Toggle via.** `RuntimeOptions.cfcDecomposedEnvelopes` (a plain boolean).
+- **Added by.** Robin McCollum, in the CFC envelope → cid-system convergence
+  (CT-2062, 2026-08-22; PR #6199 rung 3).
+- **Purpose.** When on, the envelope persist path stores the DECOMPOSED
+  spelling: the metadata's `schemaHash` names a root document whose
+  `$defs` members are separate content-addressed documents, shared with
+  the link-schema document family and elided once the space's server
+  confirms them. Off preserves the merged schema's interned spelling —
+  which may itself carry references a reference-form declared schema
+  left, as the same section notes. Reading is
+  the same either way — every `$ref: cid:` member a stored root carries
+  resolves (space-first, content-verified, with the hash-verified realm
+  registry supplying what the space does not hold) or the envelope is
+  unreadable (fail closed) — and the storage commit boundary validates the whole
+  closure at write time. Delivery to remote readers rides the
+  result-assembly guarantee: a delivered schema document's own refs join
+  the delivered set and watch set
+  (`docs/specs/content-addressed-schemas.md`), so the traversal's cfc
+  seam only ever needs the root.
+- **Current default and planned end state.** `false` by default. The
+  target is `true`; inline envelopes remain readable indefinitely.
+- **Status on 2026-08-22.** Implemented, off by default. The flip is
+  gated on deployment reach, not on code here: a runner that predates
+  reference resolution walks a decomposed root's `$ref: cid:` members as
+  inert schema content and silently under-labels, so every deployed
+  reader must resolve (or fail closed) before decomposed writes become
+  the default. Reference-form declared schemas already leave
+  reference-carrying roots behind in narrower cases, which is what bounds
+  how old a reader can be either way.
+- **Path to removal.** Once the default flips, the dial retires and the
+  decomposed spelling becomes the only one the persist path emits.
 
 ### `cfcPolicyEvaluation`
 

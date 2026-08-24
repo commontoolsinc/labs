@@ -188,47 +188,46 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
   // verification-coverage.md OW60, not as a flaky test.
   patterns: [
     {
-      // The step's own trap is FIXED, and the fix UNCOVERED the real
-      // charge. The 2026-08-22 test-side pass bound the step's assertions
-      // to the summary its waitForCondition predicate approves and hands
-      // back (taken at the instant the condition held, re-approved after
-      // the sync barrier), absorbing the OW51-ruled
-      // interim-undefined-then-retrigger disposition the old post-wait
-      // single-shot read kept racing (that race was the load-sensitive
-      // flake population: 1/10 quiet, 5/10 under load on main). On the
-      // FIXED step the residue is not a test artifact: at the true ON
-      // topology the value-wait itself starves on FIRST-HYDRATION reads
-      // of freshly created served state — no reload sits between the
-      // creates and the reads (the step's only navigation precedes the
-      // notebook's existence) — the client's readCell of the notebook
-      // argument's notes (a redirect-linked doc) stays `undefined` for
-      // the full 5-minute net at a 500ms re-read cadence (run h01,
-      // ambient load), or every client read of the piece returns nothing
-      // mid-session while the view id still points at it (run h04, load
-      // ~20; the rf2 shape) — while the server-side store holds every
-      // one of the 7 note appends and the page's own reactive render
-      // path serves the same notes. Zero data loss, sticky client-side
-      // unresolved reads: the verification-coverage.md OW45 row's arm-B
-      // starvation, now isolated and store-verified (repro is
-      // create-then-read under serving, NOT reload-then-read). Lifts
-      // when that client first-hydration/readCell starvation closes and
-      // the FIXED step greens ON 10/10 quiet-and-loaded; the flip PR
-      // needs this list EMPTY.
+      // The arm-B starvation is now a MAPPED FAMILY (the 2026-08-22
+      // evening triage on an instrumented client, verification-coverage.md
+      // OW45's ARM-B TRIAGE block): of its three members, TWO are fixed
+      // red-first in that pass — the event drain's deferral arm let a
+      // later-arrived event overtake a deferred earlier one (run b01's
+      // store-verified inversion of one user's last two clicks; the drain
+      // now processes across sidecars in append order with deferral as a
+      // barrier), and the graph walk's absent link-hop targets were
+      // tracked nowhere server-side so their birth never re-fired the
+      // watch (the first-read lottery on a quiet space; the walk now
+      // registers the miss and the birth delivers). The REMAINING member
+      // keeps this entry: run b04 caught the whole-piece shape live —
+      // the flag-ON client's navigate-deferred piece start dies
+      // terminally on a ConflictError whose basis read the served
+      // piece's computed docs at seq 0 (pre-birth, the first-hydration
+      // race) and the deferred-start error arm has no retry, so the
+      // piece never starts client-side and every dependent readCell
+      // stays undefined for the session while the store holds all 7
+      // appends (fork memo with dispositions:
+      // docs/history/plans/server-execution-v2/optimize/
+      // ow45-armb-client-start-fork.md). Lifts when the client-start
+      // class closes and the FIXED step greens ON 10/10
+      // quiet-and-loaded; the flip PR needs this list EMPTY.
       file: "integration/default-app.test.ts",
       step: "should persist and reload every rapidly created notebook note",
       phase: "phase-7",
-      reason: "Real ON-regime client defect, isolated by the 2026-08-22 " +
-        "test-side fix (assertions bind to the wait's approved summary; " +
-        "the old single-shot interim race is closed). On first hydration " +
-        "of freshly created served state — no reload between the creates " +
-        "and the reads — the client's readCell of the notebook argument's " +
-        "notes stays undefined for the full stuck-condition net at 500ms " +
-        "re-read cadence, or every client read of the piece returns " +
-        "nothing mid-session, while the store holds all 7 appends and " +
-        "the reactive render path serves the same notes. Sticky " +
-        "unresolved client reads, no data loss (verification-coverage.md " +
-        "OW45, arm B; repro: create-then-read under serving). Lifts when " +
-        "the starvation closes and the fixed step greens ON 10/10.",
+      reason: "Real ON-regime client defect (verification-coverage.md " +
+        "OW45 arm B, triaged 2026-08-22 on an instrumented client): the " +
+        "flag-ON client's navigate-deferred piece start dies terminally " +
+        "on a stale-confirmed-read ConflictError against the serving " +
+        "side's own materialization of the freshly created piece (the " +
+        "first-hydration race; no retry arm), so the piece never starts " +
+        "client-side and every dependent readCell stays undefined for " +
+        "the session — while the store holds all 7 appends: no data " +
+        "loss. The family's two sibling defects (the event drain's " +
+        "deferral reordering one user's clicks; the graph walk's absent " +
+        "hop targets never re-firing the watch on birth) are FIXED " +
+        "red-first in the same pass. Fork memo: " +
+        "optimize/ow45-armb-client-start-fork.md. Lifts when the " +
+        "client-start class closes and the fixed step greens ON 10/10.",
     },
     // The sqlite identity pair's two FILE entries were LIFTED (OW53
     // CLOSED, 2026-08-22): the sqlite builtins consumed the RUNTIME's

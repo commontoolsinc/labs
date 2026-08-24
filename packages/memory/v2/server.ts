@@ -1324,6 +1324,29 @@ export class Server {
     return owners[0];
   }
 
+  /**
+   * The space's resolved ACL OWNER, for the executor's server-side
+   * space-root ensure (OW45 arm-B server-ensure stage 1, design PR
+   * #6209 §4 option (b)): the ensure's creation run carries an
+   * owner-resolved per-run CFC trust snapshot — the follow-up OW59's
+   * Q3 caveat pre-named — and derives its home-space predicate from
+   * the ACL (self-owned = home), because a serving runtime's
+   * `userIdentityDID` is the SERVICE DID. This is the same resolution
+   * the delegated READ binding uses ({@link #resolveSpaceOwnerBinding}),
+   * exposed as a first-class read: it IS the ruled "ACL can be read
+   * with service identity" (OW31, RULED 2026-08-19). `undefined` means
+   * no valid concrete-owner ACL resolves (missing, invalid, retracted,
+   * or ANYONE-only) — callers fail closed, never substitute the
+   * service DID (OW53's ruled shape; `homeSpacePrincipalFor`'s
+   * posture).
+   */
+  resolveSpaceOwner(
+    engine: Engine.Engine,
+    space: string,
+  ): string | undefined {
+    return this.#resolveSpaceOwnerBinding(engine, space);
+  }
+
   #invalidateAclCapabilities(space: string): void {
     this.#aclCapabilities.delete(space);
   }
@@ -3419,6 +3442,7 @@ export class Server {
       session.graphs = graphs;
       session.entities = entities;
       session.trackedIds = trackedIdsFromEntries(entities.values());
+      this.#addMissedToTrackedIds(session.trackedIds, graphs.values());
       session.lastSyncedSeq = serverSeq;
       this.#notifyDemandChanged(message.space, "watch", session.principal);
       return {
@@ -3621,6 +3645,7 @@ export class Server {
       const fromSeq = session.lastSyncedSeq;
       session.graphs = graphs;
       session.watches = nextWatches;
+      this.#addMissedToTrackedIds(session.trackedIds, graphs.values());
       session.lastSyncedSeq = serverSeq;
       this.#notifyDemandChanged(message.space, "watch", session.principal);
       recordSlowQueryDuration(
@@ -3883,6 +3908,31 @@ export class Server {
     );
   }
 
+  /** Union a session's graph MISS keys into a tracked-id set (the
+   * dead-end reads its walks found absent — TrackedGraphState.missed):
+   * the wake pass must treat a commit to a missed doc as touching the
+   * session, or the doc's CREATION never re-fires the query and a quiet
+   * space starves every read that dead-ended on it (OW45 arm B). Misses
+   * are wake-reactivity only — they are never delivered, so they flow
+   * into `trackedIds` beside the delivered entities at every site that
+   * rebuilds or folds that set. */
+  #addMissedToTrackedIds(
+    trackedIds: Set<string>,
+    graphs: Iterable<TrackedGraphState>,
+  ): void {
+    for (const graph of graphs) {
+      for (const [key] of graph.missed) {
+        let parsed: { id: string; scopeKey: ScopeKey };
+        try {
+          parsed = fromDocKey(key as QueryDocKey);
+        } catch {
+          continue;
+        }
+        trackedIds.add(toDirtyKey(parsed.id, parsed.scopeKey));
+      }
+    }
+  }
+
   syncSessionForConnection(
     space: string,
     sessionId: string,
@@ -4133,6 +4183,12 @@ export class Server {
                 session.entities.set(key, entry);
                 session.trackedIds.add(toDirtyKey(entry.id, entry.scopeKey));
               }
+              // A refresh's re-walk can DEAD-END on new absent targets;
+              // their misses are wake-reactivity the next commit needs.
+              this.#addMissedToTrackedIds(
+                session.trackedIds,
+                session.graphs.values(),
+              );
               if (session.trackedIds.size > sizeBefore) {
                 this.#notifyDemandChanged(
                   space,
@@ -4239,6 +4295,7 @@ export class Server {
           // the space is offered every batch — so no tracked key is
           // needed to bring the withheld instances back.)
           const evaluatedTrackedIds = trackedIdsFromEntries(entities.values());
+          this.#addMissedToTrackedIds(evaluatedTrackedIds, graphs.values());
           const commitWatchState = () => {
             // (d′) — flag 2, the full-evaluation branch: the
             // set is REPLACED (this is where it can shrink — R-D's coarse

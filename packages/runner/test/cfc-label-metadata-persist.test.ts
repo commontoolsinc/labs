@@ -4,6 +4,10 @@ import { describe, it } from "@std/testing/bdd";
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import { Identity } from "@commonfabric/identity";
 
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import type { CfcConfClause } from "../src/cfc/clause.ts";
 import { parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -50,6 +54,7 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
     ).id!;
     const fullCaveat = cfcAtom.caveat("derived-from", "did:key:alice");
     const seed = runtime.edit();
+    writeSeedEnvelopeDoc(seed, signer.did());
     seed.writeOrThrow({
       space: signer.did(),
       scope: "space",
@@ -59,7 +64,7 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
       value: { secret: "classified", plain: "public" },
       cfc: {
         version: 1,
-        schemaHash: "seed-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [
@@ -253,6 +258,7 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
           .getAsLink(),
       ).id!;
       const seed = runtime.edit();
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -262,7 +268,7 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
         value: { attested: "x" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{

@@ -47,6 +47,7 @@ import type {
   CfcAddress,
   CfcDeclaredMonotonicityMode,
   CfcDeclaredWideningExemption,
+  CfcDecomposedEnvelopes,
   CfcDereferenceTrace,
   CfcEnforcementMode,
   CfcFlowLabelsMode,
@@ -1363,6 +1364,15 @@ export interface TransactionSealDestination {
 }
 
 export interface IExtendedStorageTransaction extends IStorageTransaction {
+  /**
+   * Stages `cid:<rootHash>` and its referenced closure into this
+   * transaction from the realm registry, with per-transaction dedupe and
+   * the confirmed-persistence elision (see ExtendedStorageTransaction).
+   * Required: every schema-document write rides this seam, so the
+   * dedupe, the elision, and the closure recursion cannot be bypassed by
+   * a caller writing documents itself.
+   */
+  stageSchemaDocClosure(space: MemorySpace, rootHash: string): void;
   tx: IStorageTransaction;
 
   /**
@@ -1449,6 +1459,8 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * Anti-downgrade pinned: once enabled, disabling throws.
    */
   setCfcTriggerReadGating(enabled: CfcTriggerReadGating): void;
+
+  setCfcDecomposedEnvelopes(enabled: CfcDecomposedEnvelopes): void;
   /**
    * Set the exchange-rule policy evaluation dial (Epic B5, spec §4.4.5).
    * Anti-downgrade pinned: once `enforce`, weakening throws.

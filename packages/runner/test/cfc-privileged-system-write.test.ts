@@ -5,6 +5,10 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { Identity } from "@commonfabric/identity";
 import type { URI } from "@commonfabric/memory/interface";
 
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -18,10 +22,13 @@ const signer = await Identity.fromPassphrase(
 // bypassing the commit-boundary derivation + mint-gating (S4) entirely. Only the
 // runtime's own persistence (inside prepareBoundaryCommit's privileged scope)
 // may write there; a non-privileged ["cfc"] write must fail closed in enforce
-// mode and surface a diagnostic in observe.
+// mode and surface a diagnostic in observe. The forgery is the write PATH, not
+// the hash: it names the backed seed document so the observe/disabled arms
+// reach their commit outcome instead of refusing at the storage boundary for
+// an unbacked schema reference.
 const forgedMetadata = {
   version: 1,
-  schemaHash: "forged",
+  schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
   labelMap: {
     version: 1,
     entries: [{
@@ -49,6 +56,9 @@ describe("CFC privileged system write (S18)", () => {
         tx,
       );
       const id = target.getAsNormalizedFullLink().id as URI;
+      // Backed here too: the S18 gate must be the ONLY thing that can
+      // reject this transaction, never the storage boundary's closure check.
+      writeSeedEnvelopeDoc(tx, signer.did());
       // Forge the label map directly at the document's ["cfc"] path.
       tx.writeOrThrow({
         space: signer.did(),
@@ -57,10 +67,13 @@ describe("CFC privileged system write (S18)", () => {
         path: ["cfc"],
       }, forgedMetadata);
 
+      // Prepared, so the commit's rejection carries the S18 reason itself
+      // rather than the generic relevant-but-unprepared guard.
+      tx.prepareCfc();
       const result = await tx.commit();
       expect(result.error).toBeDefined();
-      expect(String((result.error as Error).message).toLowerCase()).toContain(
-        "cfc",
+      expect(String((result.error as Error).message)).toContain(
+        "unprivileged write to protected cfc path",
       );
     } finally {
       await runtime.dispose();
@@ -84,6 +97,7 @@ describe("CFC privileged system write (S18)", () => {
         tx,
       );
       const id = target.getAsNormalizedFullLink().id as URI;
+      writeSeedEnvelopeDoc(tx, signer.did());
       tx.writeOrThrow({
         space: signer.did(),
         id,
@@ -190,6 +204,9 @@ describe("CFC privileged system write (S18)", () => {
         tx,
       );
       const id = target.getAsNormalizedFullLink().id as URI;
+      // Backed here too: the S18 gate must be the ONLY thing that can
+      // reject this transaction, never the storage boundary's closure check.
+      writeSeedEnvelopeDoc(tx, signer.did());
       // Forge the label map while the transaction is still disabled.
       tx.writeOrThrow({
         space: signer.did(),
@@ -201,10 +218,11 @@ describe("CFC privileged system write (S18)", () => {
       expect(tx.getCfcState().unprivilegedSystemWrites.length).toBe(1);
 
       tx.setCfcEnforcementMode("enforce-explicit");
+      tx.prepareCfc();
       const result = await tx.commit();
       expect(result.error).toBeDefined();
-      expect(String((result.error as Error).message).toLowerCase()).toContain(
-        "cfc",
+      expect(String((result.error as Error).message)).toContain(
+        "unprivileged write to protected cfc path",
       );
     } finally {
       await runtime.dispose();
@@ -232,6 +250,7 @@ describe("CFC privileged system write (S18)", () => {
         tx,
       );
       const id = target.getAsNormalizedFullLink().id as URI;
+      writeSeedEnvelopeDoc(tx, signer.did());
       tx.writeOrThrow({
         space: signer.did(),
         id,
@@ -298,6 +317,7 @@ describe("CFC privileged system write (S18)", () => {
         tx,
       );
       const id = target.getAsNormalizedFullLink().id as URI;
+      writeSeedEnvelopeDoc(tx, signer.did());
       // Mirror seedPrivilegedCfc: read the current doc, then write the whole
       // envelope at path [] with the cfc record embedded.
       const docAddress = {
