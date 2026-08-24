@@ -13,6 +13,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./ops": "./src/ops/mod.ts",
+    // Deno-only (reads the local filesystem); kept out of the ops barrel so
+    // browser-hosted importers of "./ops" never load it.
+    "./ops/bulk-local": "./src/ops/bulk-local.deno.ts",
     "./schema-compatibility": "./src/schema-compatibility.ts"
   }
 }
