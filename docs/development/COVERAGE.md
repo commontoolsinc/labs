@@ -369,6 +369,35 @@ had never been covered on any run.
 follows the five lines from the group-level `+3` down to the single artifact
 that covered them.
 
+The fetch builtins' completion writeback is the same shape with nothing to
+extract. `tryWriteResult()` already takes the runtime it commits through, and
+so does `startFetch()`, so a test that hands either one a runtime whose commits
+are refused reaches both the arm that carries the refusal back and the throw
+that converts it. `packages/runner/test/fetch-writeback.test.ts` states the
+function's three outcomes, because the two that do not write are distinct for
+the caller — inputs that moved mean the request was superseded and is done,
+while a refused commit means the claim is still pending and only this response
+could have completed it — and then drives `fetchJson` end to end against a held
+response with the writeback's commit refused.
+
+Refusing ONE commit inside a real run takes a way to say which one, and
+position is the wrong way to say it: what sits between the response and the
+writeback is scheduling, which is the thing being taken out of the answer.
+Name the transaction by what it writes instead. The completion writeback is the
+transaction that carries the response into the builtin's result document, which
+`getTransactionWriteAttempts()` reports at commit time; the error writeback that
+follows it only clears a result that is already absent, which records no write
+of that document at all. Asking for the one commit that writes it therefore
+lands the refusal on the completion write and on nothing else, however the run
+is scheduled. A case that
+wants both refused asks for every commit from the response onward, and pins the
+count it refused so that a stray transaction shows up as a wrong count rather
+than as a silent miss.
+[The investigation record](../history/development/coverage-flake-fetch-writeback-refusal-2026-08-24.md)
+follows those five lines from the group-level `+5` down to the single artifact
+that covered them, and to the sibling rethrow that no artifact in either run
+covered.
+
 ### Checks the layer below already makes
 
 Not every line that moves deserves a test. Sometimes a line decides nothing:
