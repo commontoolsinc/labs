@@ -5589,6 +5589,45 @@ supply; OW29/OW32/OW34 closed):
     old-shape stall is the die-off at the front; b01's shape hid
     inside the population as "the product not answering" with the
     client blameless.
+    **SERVER-ENSURE STAGE 1 BUILT 2026-08-23 (design PR #6209,
+    owner-green-lit; build report
+    `../../history/plans/server-execution-v2/optimize/ow45-armb-server-ensure-stage1-report.md`).**
+    The space-root ensure — existence + freshness, the START not moved —
+    runs at the SpaceServer's activation as a lease-guarded owed step,
+    single-flight STRUCTURALLY (a SpaceServer is single-tenure:
+    `#parkRequested` never resets and the host builds a replacement per
+    re-activation, so the guard's lifetime is the tenure's). The ensure
+    core is extracted into the runner (`ensure-space-root.ts`) and the
+    client controller's creation arm delegates to it (OFF one code
+    path); attribution is owner-resolved fail-closed through the memory
+    server's new `resolveSpaceOwner` (the OW31-ruled service-identity
+    ACL read; the OW59 Q3 caveat's named follow-up — the creation tx
+    carries `trustSnapshotForPrincipal(owner)`, pinned live), with
+    no-owner spaces SKIPPED counted-and-warned (OW53's shape). The
+    custom-`defaultAppUrl` fork stays UNRULED: stage 1
+    logs-and-uses-the-system-default on fresh non-home creations.
+    Recorded STAGE-2 GATE: the runnability-repair pair (cold-start
+    setup repair + roll-forward heal) did NOT move — the ON client's
+    creation retirement must not ship before it does, or aged spaces
+    brick under ON. What stage 1 changes live: the server wins most
+    creation races from activation onward; the ARM-A refusal class does
+    NOT close (the ON client still creates on the slow path and still
+    deferred-starts on the fast path), so THE STEP'S SKIP STAYS and the
+    lift bar is unchanged. Pins: fresh-space materialization at
+    activation (watched red pre-seat), park/re-activate convergence on
+    ONE root + aged-identity reconcile-before-load across tenures
+    (which also live-caught a FIXTURE class worth naming: a per-tenure
+    localSeqRef re-mints (session, localSeq) pairs and engine replay
+    detection kills the second tenure's waves — the host's shared
+    counter contract, now stated in the suite), the owner-snapshot pin,
+    the fail-closed skip pin (service-DID-fallback mutation killed),
+    the toolshed OFF bootstrap pin (gate-bypass mutation killed), and
+    the piece OFF-arm creation pin (provenance-stamp mutation killed
+    through the delegated controller). Named residual (flagged, not
+    filled): the deferred-start transaction the ensure's creation arms
+    still stamps actor-less bookkeeping — ambient SERVICE snapshot on
+    the child-materialization docs, OW59 Q3's arm — threading the owner
+    through the shared arming machinery is OW59-ruling territory.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
@@ -6351,7 +6390,12 @@ supply; OW29/OW32/OW34 closed):
     local-repro runbook note (API_URL/MEMORY_URL must be set
     explicitly when the default port is occupied). Follow-up class
     (flip-follow-up family): no lift trigger; close with the ruled
-    posture landed.
+    posture landed. CONSUMER ADDED 2026-08-23: the stage-1 server-side
+    space-root ensure's creation fetch rides the same
+    `apiUrl`-over-self-HTTP loop (deliberately — design #6209 open
+    question 9's self-pin recommendation is flagged, not filled, in the
+    stage-1 report; the ruled posture, when it lands, covers this
+    consumer with the updater's).
   - **OW56 — FUTURE (optimize-phase-future) — the server owns program
     materialization AND compilation; clients wait (minted 2026-08-21
     with the S-C ruling).** The owner's stated ideal, verbatim:

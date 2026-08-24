@@ -108,14 +108,109 @@ any of them reverting is a bounded diff, not a redesign.
 
 ## The seat as built
 
-_TO BE FILLED with the landed shape (owed-step flag, single-flight,
-counters, failure arms) once the code is pushed — this skeleton records
-the assumptions first so the branch carries them from its first push._
+- **The owed step (design §1, sub-option A2).** `SpaceServer.activate()`
+  arms `#rootEnsureOwed`; the wave loop's first cycle consumes it as its
+  FIRST serialized step — fully awaited like the event drain, before the
+  drain (an event may target the root's `addPiece` stream) and before
+  any demand pass loads what the ensure materializes. Once per tenure,
+  so a slow first compile costs the first wave only; the ensure's
+  transactions resolve at seal-accept and their engine write rides that
+  cycle's wave commit, so awaiting in-cycle cannot deadlock against the
+  wave. All three activation triggers ensure (sessionless included —
+  design open question 5's recommendation, recorded above).
+- **Single-flight is STRUCTURAL, not enforced** — the
+  design-conformance fact this build verified rather than assumed: a
+  SpaceServer is a single-tenure object (`#parkRequested` never resets;
+  the host constructs a REPLACEMENT SpaceServer per re-activation —
+  `host.ts` `#activateInner`, chained behind `whenParked` by
+  `#reactivateAfterPark`), so the owed flag's lifetime is the tenure's
+  and there is no re-arm bookkeeping to get wrong. The design asked for
+  "a lease-guarded, single-flight, non-blocking tenure step"; tenure-
+  scoped instance state is how that lands.
+- **The ensure core, extracted into the runner**
+  (`packages/runner/src/ensure-space-root.ts`, beside
+  `pattern-updater.ts` / `ensure-piece-running.ts`, per the design's §1
+  implementation note): `createSpaceRootIfAbsent` (resolve + compile
+  into the space's compile cache, then the creation `editWithRetry` —
+  OCC re-check, identity-bearing cause, `runtime.run` setup, provenance
+  stamp, `defaultPattern` link), `resolveSpaceRootPattern` (resolution
+  without start), `ensureSpaceRootPattern` (the server flow: resolve →
+  create-if-absent → the awaited default-root reconcile, skipped for a
+  root this call compiled from the current source). The system source
+  refs and `patternSourceUrl` moved here from piece (re-exported), so
+  the two creators cannot drift on the identity-bearing cause/source.
+  The client controller's creation arm DELEGATES to the same core
+  (phase labels preserved through its `timePiecePhase` hook; the
+  re-check reads through the controller's own synced space cell via the
+  `spaceCell` hook) — OFF stays one code path, the design's stated
+  reason for the extraction over an injected hook.
+- **Attribution.** The seat resolves the space's ACL owner through the
+  memory server's new `resolveSpaceOwner(engine, space)` (a thin public
+  API over `#resolveSpaceOwnerBinding` — the OW31-ruled
+  service-identity ACL read), derives home-ness as self-owned = home
+  (never `userIdentityDID`, which is the service DID on a serving
+  runtime), and its creation transaction stamps
+  `bookkeeping` + `tx.setCfcTrustSnapshot(trustSnapshotForPrincipal(owner))`
+  per attempt, before the first read. No owner → skip, warn,
+  `rootEnsure.skippedNoOwner`, retry next tenure — never the service
+  DID.
+- **Counters** (`ServingLoopStats.rootEnsure`): `runs`, `created`,
+  `reconciled`, `skippedNoOwner`, `failures`. Failures are counted and
+  cleared for the tenure (the next activation retries), so a
+  deterministic failure cannot spin the loop; in stage 1 the client-era
+  creation path still covers the space regardless.
 
 ## Red-first evidence
 
-_TO BE FILLED per pin: the watched failure text before the seat/fix
-exists, including the OFF witness._
+Every behavior pin was watched failing before its seat/fix existed:
+
+- **The seat pins** (`packages/runner/test/executor-space-root-ensure.test.ts`),
+  watched red at `adeb15dd9`'s parent (no seat): pin 1/2/3 failed with
+  the root never materializing and pin 4 with
+  `TypeError: Cannot read properties of undefined (reading 'skippedNoOwner')`
+  (the counters did not exist); after the seat, 4/4 green. Two
+  fixture-reality reds along the way are recorded because each names a
+  real contract: (i) the suite runs on the REAL clock
+  (`clock-preload`'s guard: "clock auto-advance runaway: 2000
+  production timers fired … armed at SpaceServer.activate" — the renew
+  cadence is wall-clock policy, like every executor suite); (ii) the
+  aged-reconcile pin initially red with the second tenure's wave killed
+  as `commit replay mismatch … localSeq 1` — a FIXTURE bug violating
+  the host's documented contract (ONE process-lifetime `localSeqRef`
+  across tenures; a fresh counter re-mints consumed (session, localSeq)
+  pairs), now stated in the suite.
+- **Mutation kills** (the vacuity check): the no-owner arm mutated to a
+  service-DID fallback → the fail-closed pin red (20 s timeout — the
+  root got created, which is exactly the bug the pin guards); the
+  toolshed OFF gate bypassed → both OFF pins red on the untouchable
+  proxies; the core's provenance stamp dropped → the core pin red AND
+  the piece provenance suite red THROUGH the delegated controller
+  (proving the controller runs the shared core); the ensure's reconcile
+  dropped → the aged-root core pin red.
+- **The memory API pins**
+  (`packages/memory/test/v2-server-space-owner.test.ts`), watched red as
+  `TS2339: Property 'resolveSpaceOwner' does not exist on type 'Server'`
+  before the method existed; 4/4 green after (self-owned → space DID;
+  multi-owner → lexicographically first; missing ACL → undefined;
+  granted owner → that owner, never the service).
+- **The OFF witnesses** (the arc's bar, and this build's explicit
+  proof that the server-side path does not exist OFF):
+  `packages/toolshed/lib/server-execution.test.ts` — flag unset (the
+  first-party default) and flag `"false"` both leave
+  `startServerExecutionHost` inert, on untouchable proxy fakes so any
+  pre-gate use throws; the seat's only reachability chain (toolshed
+  bootstrap → ExecutorHost → SpaceServer.activate) severs at its first
+  link. Client arm: the named OFF-arm pin in
+  `packages/piece/test/pattern-source-provenance.test.ts` (creation
+  still runs on a plain client — root created, linked, idempotent
+  re-ensure) plus the pre-existing net green through the delegated
+  path: check-update-default-pattern (69 steps — one of which,
+  "reconciles a persisted root discovered after a creation race",
+  initially red because the delegation bypassed the controller's
+  `getSpaceCellContents` seam its stub models; the core now reads
+  through the controller-passed `spaceCell` hook, which is also the
+  byte-identity-faithful shape), ensure-default-pattern, piece-origin,
+  and the home/default-app golden replays.
 
 ## Measurement — before/after at the true ON topology, ambient load only
 
