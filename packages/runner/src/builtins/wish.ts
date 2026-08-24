@@ -2344,27 +2344,22 @@ export function wish(
     inputForTx: (tx: IExtendedStorageTransaction) => unknown,
   ): Promise<void> {
     try {
-      // A deferred sidecar launch has no scheduler action around it to re-run
-      // a stale setup transaction. Use the runtime's bounded retry path so a
-      // conflict or same-replica inconsistency re-derives setup on a fresh
-      // transaction instead of becoming a permanent error surface.
-      // editWithRetry also commit-gates runner startup: no node graph is left
-      // running over setup writes from a rejected attempt.
-      const { error } = await runtime.editWithRetry((runTx) => {
-        // Sidecar run from a cache-fetch continuation — no scheduler run
-        // stamps it; bookkeeping per serving-loop.md §3d, on every retry.
-        runtime.stampServerRun(runTx, {
-          actionId: `wish/sidecar-run/${resultCell.sourceURI}`,
-          kind: "bookkeeping",
-        });
-        runtime.runner.run(
-          runTx,
-          pattern,
-          inputForTx(runTx),
-          resultCell.withTx(runTx),
-          sidecarRunOptions,
-        );
+      const runTx = runtime.edit();
+      // Sidecar run from a cache-fetch continuation — no scheduler run
+      // stamps it; bookkeeping per serving-loop.md §3d.
+      runtime.stampServerRun(runTx, {
+        actionId: `wish/sidecar-run/${resultCell.sourceURI}`,
+        kind: "bookkeeping",
       });
+      runtime.runner.run(
+        runTx,
+        pattern,
+        inputForTx(runTx),
+        resultCell.withTx(runTx),
+        sidecarRunOptions,
+      );
+      runtime.prepareTxForCommit(runTx);
+      const { error } = await runTx.commit();
       if (error) {
         await commitPatternErrorUI(resultCell, toCompactDebugString(error));
       }

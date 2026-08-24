@@ -182,13 +182,7 @@ stream is passed to other spaces, which then append intents to it.
   (cause-derived, so both sides name one doc) and never fetches,
   instantiates or writes it (pre-Phase-7 a flag-ON client's
   bookkeeping-stamped instantiation raced the server's on the same
-  docs). The OFF arm and the serving runtime are unchanged.* A
-  deferred sidecar launch that resumes after fetch/compile performs
-  its setup in a bounded-retrying, commit-gated transaction: a
-  stale-basis conflict or local inconsistency re-derives the setup on
-  a fresh transaction, and the sidecar nodes start only after that
-  transaction commits. Only a terminal or retry-exhausted failure is
-  materialized as the sidecar error UI.
+  docs). The OFF arm and the serving runtime are unchanged.*
   *Read authority for the demanding user's home space (OW31, READ
   side RULED 2026-08-19; BUILT — supersedes the Phase-7 OWNER
   posture): the served wish's foreign reads ride the serving
