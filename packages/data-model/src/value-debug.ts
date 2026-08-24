@@ -263,21 +263,17 @@ class DebugConverter {
     // `Object.keys()` yields are used as they come.
     const byName = result as unknown as Record<string, FabricValue>;
 
-    // Only the indices actually present are visited, which costs a sparse
-    // array its element count and not its `length`, and leaves its holes as
-    // holes.
     result.length = value.length;
     for (const key of Object.keys(value)) {
       if (!isArrayIndexPropertyName(key)) {
-        // A named property, which an array's rendering doesn't carry.
+        // It's a named property. Intentionally skipped as part of conforming to
+        // `FabricValue`.
         continue;
       }
+
       try {
         byName[key] = this.#convertSubvalue(value[key], depth + 1);
       } catch (e) {
-        // The element read is inside the `try` along with its conversion, so
-        // that an element whose read throws costs just its own index instead
-        // of every element of the array.
         byName[key] = DebugConverter.#makeErrorResult(e);
       }
     }
@@ -331,9 +327,6 @@ class DebugConverter {
       try {
         result[resultKey] = this.#convertSubvalue(value[key], depth + 1);
       } catch (e) {
-        // The property read is inside the `try` along with its conversion, so
-        // that a property whose getter throws costs just itself instead of
-        // every property of the object.
         result[resultKey] = DebugConverter.#makeErrorResult(e);
       }
     }
