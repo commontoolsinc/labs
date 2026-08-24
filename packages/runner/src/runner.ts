@@ -56,6 +56,7 @@ import { refuseFabricInstance } from "./fabric-special-object.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
   areNormalizedLinksSame,
+  type CellLink,
   createSigilLinkFromParsedLink,
   getDerivedInternalCell,
   getDerivedInternalCellLink,
@@ -104,6 +105,7 @@ import { TransactionWrapper } from "./storage/extended-storage-transaction.ts";
 import type {
   DID,
   IExtendedStorageTransaction,
+  IReadOptions,
   IStorageSubscription,
   MemorySpace,
   URI,
@@ -1080,43 +1082,138 @@ function closedWorldEventRejection(
     `never ignored): ${failure}`;
 }
 
+/** How {@link readStoredLinkChainRaw} answered for one stored link. */
+export type StoredLinkChainReading =
+  // A doc on the chain is provably absent from this replica (or a read
+  // failed outright): nothing about the value is knowable here.
+  | { unreadable: true }
+  // The chain was walked over present docs. `value` may be `undefined` —
+  // a genuinely stored absence, which the caller judges strictly — or the
+  // raw tree at the endpoint, with `base` naming the doc it lives in.
+  | { unreadable?: undefined; value: unknown; base: NormalizedFullLink };
+
+const READ_NON_RECURSIVE: IReadOptions = { nonRecursive: true };
+
 /**
- * Rebuild `materialized` so every slot whose STORED value routes through a
- * link that cannot be read in this transaction carries
- * {@link UNRESOLVED_LINK_PLACEHOLDER} instead of `undefined`. Slots that DID
- * materialize keep their materialized value (and full strict validation);
- * a literal `undefined` stored where no link is involved also keeps it, so a
- * doc that genuinely holds nothing still fails a required check.
+ * Follow one stored link — and any links it chains through — over RAW doc
+ * bytes via `tx`, distinguishing "a doc this replica cannot serve" from "a
+ * value that is genuinely absent in a doc it can". The distinction rides the
+ * transaction's own contract: every read here goes under the doc's "value"
+ * segment, so an absent DOCUMENT fails with `NotFoundError` naming the
+ * document (empty error path), while a present doc's missing slot reads as
+ * a successful `undefined`.
  *
- * The walk mirrors the materialization it repairs: it starts from the
- * argument doc's raw bytes and follows every link — across docs and spaces,
- * to any depth — reading each target's RAW value through `tx`. It steps hop
- * by hop rather than calling link-resolution's resolver because it needs
- * every INTERMEDIATE doc's raw tree to recurse into, not the chain's
- * endpoint. A link chain that dead-ends at a doc the local replica cannot
- * serve is exactly the case the placeholder exists for: the slot has a
- * value, this context just cannot read it yet (the same verdict
- * link-resolution's `pendingHopDoc` renders for lazy reads). The fleet incident this generalizes from: a profile's
- * `name` cell stores a link to its seed value's doc, cold-start sync
- * delivers the cell doc but not the seed doc, and the one-hop overlay this
- * walk replaced could not see past the first resolution — so every home
- * bricked with `profiles: 0: name: value does not match type string` on the
- * first pattern-identity move after the profile was written.
+ * Steps hop by hop rather than calling link-resolution's resolver because
+ * the caller needs every intermediate doc's raw tree, not the chain's
+ * endpoint — and because a raw read of a path that crosses a mid-doc link
+ * would descend into the link sigil's own JSON, so path segments are walked
+ * in memory and links met along the way are followed by recursion.
  *
  * `chain` carries the link addresses of the CURRENT descent only
- * (backtracked on return), so a doc reachable from two sibling slots — one
- * profile linked from `profiles`, `mru`, and `defaultProfile` at once — is
- * repaired at every position, while a genuine cycle terminates.
+ * (backtracked by the caller), so a genuine cycle terminates as "read
+ * nothing new" while the same doc reached from sibling slots is walked at
+ * every position.
+ */
+export function readStoredLinkChainRaw(
+  tx: IExtendedStorageTransaction,
+  startLink: NormalizedFullLink,
+  chain: Set<string>,
+): StoredLinkChainReading {
+  // Every key this walk adds is removed on the way out, whichever exit is
+  // taken: the chain must describe the caller's descent, not this walk's —
+  // sibling slots routinely share targets (one profile linked from
+  // `profiles`, `mru`, and `defaultProfile` at once), and a leftover key
+  // would misread the second sibling as a cycle.
+  const added: string[] = [];
+  // Follow a link met at `rest` segments from the end of the current path.
+  // A repeat address is a stored cycle — a dead end the docs genuinely hold,
+  // reported as a judged absence, never as unreadable.
+  const follow = (
+    value: CellLink,
+    base: NormalizedFullLink,
+    rest: string[],
+  ) => {
+    const next = parseLink(value, base);
+    const path = [...next.path, ...rest];
+    const key = JSON.stringify([next.space, next.id, next.scope, path]);
+    if (chain.has(key)) return undefined;
+    chain.add(key);
+    added.push(key);
+    return { ...next, path };
+  };
+  try {
+    let link = startLink;
+    while (true) {
+      const { ok, error } = tx.read(
+        {
+          space: link.space,
+          id: link.id,
+          scope: link.scope,
+          type: "application/json",
+          path: ["value"],
+        },
+        READ_NON_RECURSIVE,
+      );
+      if (error !== undefined) {
+        // An absent document — and any read failure this walk cannot
+        // classify — is an unreadable target, never a judged value.
+        return { unreadable: true };
+      }
+      let value: unknown = ok.value;
+      const path = [...link.path] as string[];
+      let followed: NormalizedFullLink | undefined;
+      while (path.length > 0) {
+        if (isCellLink(value)) {
+          // A link met mid-path: the rest of the path applies at its target.
+          followed = follow(value, link, path);
+          if (followed === undefined) return { value: undefined, base: link };
+          break;
+        }
+        if (!isObjectOrArray(value)) {
+          // Reading through a primitive (or a stored absence): the doc is
+          // present and simply does not hold this path.
+          return { value: undefined, base: link };
+        }
+        value = (value as Record<string, unknown>)[path.shift()!];
+      }
+      if (followed === undefined && isCellLink(value)) {
+        followed = follow(value, link, []);
+        if (followed === undefined) return { value: undefined, base: link };
+      }
+      if (followed !== undefined) {
+        link = followed;
+        continue;
+      }
+      return { value, base: link };
+    }
+  } finally {
+    for (const key of added) chain.delete(key);
+  }
+}
+
+/**
+ * Rebuild `materialized` so every slot whose STORED value routes through a
+ * link chain that dead-ends at a doc this replica cannot serve carries
+ * {@link UNRESOLVED_LINK_PLACEHOLDER} instead of `undefined`. Slots that DID
+ * materialize keep their materialized value (and full strict validation),
+ * and so does a genuinely stored absence — a present doc holding `undefined`
+ * (or nothing) at the slot — so a doc that really holds nothing still fails
+ * a required check. Deferral is for what this context cannot read, never for
+ * what it read and judged; a deferred slot's check still happens, at
+ * instantiation-time reactive reads (the same verdict link-resolution's
+ * `pendingHopDoc` renders for lazy reads).
  *
- * The error direction is deferral, never false refusal. A raw read cannot
- * distinguish every "absent because unreplicated" from "absent in a readable
- * doc" — a link whose in-doc path crosses another link is the corner — so a
- * slot that is undefined on BOTH sides defers. A deferred slot's check still
- * happens, at instantiation-time reads; a slot the materialization DID
- * produce a value for is never touched at all.
+ * The walk mirrors the materialization it repairs: from the argument doc's
+ * raw bytes, following every link — across docs and spaces, to any depth —
+ * via {@link readStoredLinkChainRaw}. The fleet incident this generalizes
+ * from: a profile's `name` cell stores a link to its seed value's doc,
+ * cold-start sync delivers the cell doc but not the seed doc, and the
+ * one-hop overlay this walk replaced could not see past the first
+ * resolution — so every home bricked with `profiles: 0: name: value does
+ * not match type string` on the first pattern-identity move after the
+ * profile was written.
  */
 function overlayUnreadableLinkPlaceholders(
-  runtime: Runtime,
   tx: IExtendedStorageTransaction,
   base: NormalizedFullLink,
   raw: unknown,
@@ -1125,37 +1222,35 @@ function overlayUnreadableLinkPlaceholders(
 ): unknown {
   if (isCellLink(raw)) {
     const link = parseLink(raw, base);
-    if (link === undefined || link.space === undefined) return materialized;
-    const key = JSON.stringify([link.space, link.id, link.path]);
+    const key = JSON.stringify([link.space, link.id, link.scope, link.path]);
     if (chain.has(key)) return materialized;
-    const targetRaw = runtime.getCellFromLink(
-      link as NormalizedFullLink,
-      undefined,
-      tx,
-    ).getRaw({ meta: ignoreReadForScheduling });
-    if (targetRaw === undefined) {
-      return materialized === undefined
+    chain.add(key);
+    const reading = readStoredLinkChainRaw(tx, link, chain);
+    let result: unknown;
+    if (reading.unreadable === true) {
+      result = materialized === undefined
         ? UNRESOLVED_LINK_PLACEHOLDER
         : materialized;
+    } else if (reading.value === undefined) {
+      // Present doc, genuinely absent value: keep the materialized
+      // `undefined` and let validation judge it.
+      result = materialized;
+    } else {
+      result = overlayUnreadableLinkPlaceholders(
+        tx,
+        reading.base,
+        reading.value,
+        materialized,
+        chain,
+      );
     }
-    chain.add(key);
-    const result = overlayUnreadableLinkPlaceholders(
-      runtime,
-      tx,
-      link as NormalizedFullLink,
-      targetRaw,
-      materialized,
-      chain,
-    );
     chain.delete(key);
     return result;
   }
-  if (Array.isArray(raw)) {
-    if (!Array.isArray(materialized)) return materialized;
+  if (Array.isArray(raw) && Array.isArray(materialized)) {
     let result: unknown[] | undefined;
     for (let i = 0; i < raw.length; i++) {
       const child = overlayUnreadableLinkPlaceholders(
-        runtime,
         tx,
         base,
         raw[i],
@@ -1173,7 +1268,6 @@ function overlayUnreadableLinkPlaceholders(
     let result: Record<string, unknown> | undefined;
     for (const [key, rawChild] of Object.entries(raw)) {
       const child = overlayUnreadableLinkPlaceholders(
-        runtime,
         tx,
         base,
         rawChild,
@@ -1732,7 +1826,6 @@ export class Runner {
       validationFailure = validateSchemaValue(
         argumentSchema,
         overlayUnreadableLinkPlaceholders(
-          this.runtime,
           tx,
           argumentLink,
           argumentCell.withTx(tx).getRaw({ meta: ignoreReadForScheduling }),
