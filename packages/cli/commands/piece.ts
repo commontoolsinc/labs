@@ -2269,14 +2269,14 @@ export const piece = targetOptions(
   )
   .option(
     "--pattern-identity",
-    "Print only the piece's source pin — pattern identity, export symbol, current source revision, and whether the identity's source is retained — without pulling the input, result, or link graph",
+    "Print the piece's source pin and nothing else — pattern identity, export symbol, current source revision, and whether the reference's source is verifiably retained — without running the piece or pulling its input, result, or link graph",
     { conflicts: ["summary"] },
   )
   .action(inspectPieceFromCommand)
   /* piece survey */
   .command(
     "survey",
-    "Survey a holder's collection into a plan: one cheap read per piece, cross-checked against the piece registry. Read-only. Provisional spelling — the bulk entry point may move when the write operations get a home (docs/plans/piece-bulk-operations.md, decision 1).",
+    "Survey a holder's collection into a plan: one cheap read per piece, cross-checked against the piece registry (a --list survey claims no containment and is not cross-checked). Read-only. Provisional spelling — the bulk entry point may move when the write operations get a home (docs/plans/piece-bulk-operations.md, decision 1).",
   )
   .usage(pieceUsage)
   .example(
@@ -2287,7 +2287,7 @@ export const piece = targetOptions(
   )
   .option(
     "-c,--piece <piece:string>",
-    "The holder piece whose collection is surveyed.",
+    `${PIECE_OPTION_HELP} The holder whose collection is surveyed.`,
   )
   .option(
     "--path <path:string>",
@@ -2337,6 +2337,7 @@ export const piece = targetOptions(
   .option(
     "--json",
     "Write the full survey result as JSON to stdout instead of the plan.",
+    { conflicts: ["out"] },
   )
   .action(surveyFromCommand)
   /* piece view */
@@ -3135,9 +3136,12 @@ export function parseRetargetFlag(spec: string): PhaseRetarget {
   }
   const phase = spec.slice(0, eq);
   const rest = spec.slice(eq + 1);
+  // Only an `@` after the last path separator is a rev label — paths with
+  // `@`-named directories (scoped packages, vendor trees) stay whole.
   const at = rest.lastIndexOf("@");
-  const main = at > 0 ? rest.slice(0, at) : rest;
-  const rev = at > 0 ? rest.slice(at + 1) : undefined;
+  const usable = at > 0 && at > rest.lastIndexOf("/");
+  const main = usable ? rest.slice(0, at) : rest;
+  const rev = usable ? rest.slice(at + 1) : undefined;
   return {
     phase,
     source: { main: absPath(main) },
@@ -3171,10 +3175,29 @@ export async function surveyFromCommand(
   let spaceConfig;
   if (options.list !== undefined && options.list.length > 0) {
     spaceConfig = parseSpaceOptions(options);
-    selector = { kind: "list", pieces: options.list };
+    const entries = options.list.map((entry) => {
+      if (entry.includes("@")) {
+        throw new ValidationError(
+          `A scoped piece cannot be surveyed; drop the @scope suffix on ` +
+            `${JSON.stringify(entry)}.`,
+          { exitCode: 1 },
+        );
+      }
+      // The canonical reference form leads with a slash; the selector takes
+      // the address itself.
+      return entry.startsWith("/") ? entry.slice(1) : entry;
+    });
+    selector = { kind: "list", pieces: entries };
   } else {
     const pieceConfig = parsePieceOptions(options);
     spaceConfig = pieceConfig;
+    if (pieceConfig.pieceScope !== undefined) {
+      throw new ValidationError(
+        "A scoped piece cannot hold the surveyed collection; drop the " +
+          "@scope suffix.",
+        { exitCode: 1 },
+      );
+    }
     const path = (options.path ?? "").split("/").filter((s) => s !== "");
     if (path.length === 0) {
       throw new ValidationError(
@@ -3242,7 +3265,10 @@ export async function surveyFromCommand(
     }
   }
   for (const entry of result.tally) {
-    printHint(`${entry.phase}: ${entry.count} on ${entry.patternIdentity}`);
+    printHint(
+      `${entry.phase}: ${entry.count} on ` +
+        `${entry.patternIdentity}#${entry.symbol}`,
+    );
   }
   for (const failure of result.validatorFailures) {
     printHint(`validator: ${failure.piece} ${failure.problem}`);
@@ -3257,7 +3283,8 @@ export async function surveyFromCommand(
           ),
           ...result.outside.map(
             (outside) =>
-              `  registered outside the selection: ${outside.piece} on ${outside.patternIdentity}`,
+              `  registered outside the selection: ${outside.piece} on ` +
+              `${outside.patternIdentity}#${outside.symbol}`,
           ),
         ].join("\n"),
       },

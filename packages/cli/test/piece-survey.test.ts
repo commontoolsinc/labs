@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import type { PiecePlan, SurveyResult } from "@commonfabric/piece/ops";
 import { decode } from "@commonfabric/utils/encoding";
 
-import type { SurveyRunRequest } from "../lib/bulk.ts";
+import { runSurvey, type SurveyRunRequest } from "../lib/bulk.ts";
 import {
   inspectPieceFromCommand,
   parseRetargetFlag,
@@ -39,6 +39,7 @@ const PLAN: PiecePlan = {
     v: 1,
     space: "did:key:test",
     takenAt: "2026-08-24T00:00:00.000Z",
+    selector: "collection" as const,
     enumerated: { collection: 1, registry: 0, registeredOutside: 0 },
   },
   rows: [{
@@ -78,6 +79,15 @@ describe("piece-survey", () => {
       expect(() => parseRetargetFlag("=main.tsx")).toThrow("--retarget");
       expect(() => parseRetargetFlag("topics=")).toThrow("--retarget");
     });
+
+    it("keeps an @-named directory whole and takes only a trailing rev", () => {
+      const scoped = parseRetargetFlag("topics=/repo/@scope/member.tsx");
+      expect(scoped.source.main).toBe("/repo/@scope/member.tsx");
+      expect(scoped.rev).toBeUndefined();
+      const both = parseRetargetFlag("topics=/repo/@scope/member.tsx@v2");
+      expect(both.source.main).toBe("/repo/@scope/member.tsx");
+      expect(both.rev).toBe("v2");
+    });
   });
 
   describe("surveyFromCommand()", () => {
@@ -102,7 +112,7 @@ describe("piece-survey", () => {
         holder: "board",
         path: ["topics"],
       });
-      expect(hints).toEqual(["members: 1 on idA"]);
+      expect(hints).toEqual(["members: 1 on idA#default"]);
     });
 
     it("writes the plan to --out instead of stdout", async () => {
@@ -186,6 +196,41 @@ describe("piece-survey", () => {
       expect(request?.validatorPath?.endsWith("/demand.json")).toBe(true);
     });
 
+    it("throws for a scoped holder or a scoped list entry", async () => {
+      await expect(
+        surveyFromCommand(
+          { ...OPTIONS, piece: "board@user", path: "topics" },
+          { runSurvey: () => Promise.resolve(COMPLETE) },
+        ),
+      ).rejects.toThrow("scope");
+      await expect(
+        surveyFromCommand(
+          { ...OPTIONS, piece: undefined, list: ["fid1:x@user"] },
+          { runSurvey: () => Promise.resolve(COMPLETE) },
+        ),
+      ).rejects.toThrow("scope");
+    });
+
+    it("strips the canonical form's leading slash from a list entry", async () => {
+      let request: SurveyRunRequest | undefined;
+      await captureStdout(() =>
+        surveyFromCommand(
+          { ...OPTIONS, piece: undefined, list: ["/of:fid1:x"] },
+          {
+            runSurvey: (_config, req) => {
+              request = req;
+              return Promise.resolve(COMPLETE);
+            },
+            printHint: () => {},
+          },
+        )
+      );
+      expect(request?.selector).toEqual({
+        kind: "list",
+        pieces: ["of:fid1:x"],
+      });
+    });
+
     it("throws for a collection survey without --path", async () => {
       await expect(
         surveyFromCommand({ ...OPTIONS }, {
@@ -225,11 +270,29 @@ describe("piece-survey", () => {
       expect(errors.join("\n")).toContain("of:fid1:orphan");
     });
 
-    it("is the action the piece command registers for survey", () => {
+    it("routes cf piece survey to surveyFromCommand", () => {
       const registered = piece.getCommand("survey") as unknown as {
         actionHandler: unknown;
       };
       expect(registered.actionHandler).toBe(surveyFromCommand);
+    });
+  });
+
+  describe("runSurvey()", () => {
+    it("refuses two retargets naming one phase before loading anything", async () => {
+      await expect(
+        runSurvey({} as never, {
+          selector: { kind: "list", pieces: ["fid1:x"] },
+          retargets: [
+            { phase: "items", source: { main: "a.tsx" } },
+            { phase: "items", source: { main: "b.tsx" } },
+          ],
+        }, {
+          loadPieces: () => {
+            throw new Error("must not load");
+          },
+        }),
+      ).rejects.toThrow("name the phase items");
     });
   });
 
@@ -278,7 +341,7 @@ describe("piece-survey", () => {
       expect(exitCode).toBe(1);
     });
 
-    it("is the action the piece command registers for inspect", () => {
+    it("routes cf piece inspect to inspectPieceFromCommand", () => {
       const registered = piece.getCommand("inspect") as unknown as {
         actionHandler: unknown;
       };
