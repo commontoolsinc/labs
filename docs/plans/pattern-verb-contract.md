@@ -785,7 +785,7 @@ contract.
 # so a run mints one session and every call of that run shares it.
 $ export CF_INVOCATION_SESSION="$(cf invocation-session new)"
 
-$ cf piece call --url "$TOPICS_BOARD_URL" addTopic \
+$ cf call --url "$TOPICS_BOARD_URL" addTopic \
     --title "Verb contract" --body @body.md
 { "invocation": "inv_7f3a", "status": "settled",
   "result": { "topic": "fid1:abc" } }
@@ -794,7 +794,7 @@ $ cf piece call --url "$TOPICS_BOARD_URL" addTopic \
 # even when its wait times out. Retrying the pair returns the original
 # outcome: the body re-runs and loses the create-only receipt race, so
 # nothing commits twice. An --invocation named without a session is refused.
-$ cf piece call --url "$TOPICS_BOARD_URL" addTopic \
+$ cf call --url "$TOPICS_BOARD_URL" addTopic \
     --title "Verb contract" --invocation inv_7f3a
 { "invocation": "inv_7f3a", "status": "settled",
   "result": { "topic": "fid1:abc" } }
@@ -802,11 +802,11 @@ $ cf piece call --url "$TOPICS_BOARD_URL" addTopic \
 # The caller chooses whether to wait: a detached call exits at the commit
 # acknowledgment with the receipt's address, and collecting the outcome
 # later is an ordinary read of that address.
-$ cf piece call --url "$TOPICS_BOARD_URL" summarize \
+$ cf call --url "$TOPICS_BOARD_URL" summarize \
     --topic fid1:abc --no-wait
 { "invocation": "inv_9c1b", "status": "committed",
   "receipt": "/of:fid1:…" }
-$ cf piece get --piece /of:fid1:… summary
+$ cf get --piece /of:fid1:… summary
 "..."
 ```
 

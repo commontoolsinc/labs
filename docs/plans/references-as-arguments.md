@@ -125,7 +125,7 @@ the class of operation that must name something that already exists. The
 sharpest is the root pattern's, since every space has one:
 
 ```bash
-$ cf piece call --piece <root> addPiece '{"piece":"/of:fid1:…"}'
+$ cf call --piece <root> addPiece '{"piece":"/of:fid1:…"}'
 ```
 
 `pieces.add` sends to that exact stream from inside the runtime. An LLM can

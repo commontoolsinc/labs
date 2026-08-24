@@ -13,7 +13,7 @@ first — this one uses its vocabulary. The third concern, the command surface, 
 Ask a piece for one of its fields and you get back the data at that path:
 
 ```bash
-cf piece get --piece <board> label
+cf get --piece <board> label
 → "My board"
 ```
 

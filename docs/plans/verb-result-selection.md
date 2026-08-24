@@ -49,7 +49,7 @@ Calling a verb with an id the caller chose, so the outcome stays recoverable:
 
 ```bash
 export CF_INVOCATION_SESSION="$(cf invocation-session new)"
-cf piece call --piece <board> --invocation create-note-7 \
+cf call --piece <board> --invocation create-note-7 \
   createNote '{"title":"Notes"}'
 ```
 
@@ -67,7 +67,7 @@ Keeping that address means the result can be re-read later without running the
 verb again — an ordinary read, since a receipt is an ordinary cell:
 
 ```bash
-cf piece get --piece of:fid1:...
+cf get --piece of:fid1:...
 ```
 
 Losing that address is the case these notes do not solve; see
