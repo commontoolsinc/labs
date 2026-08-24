@@ -793,6 +793,7 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
         pullOnceAfterStart?: boolean,
         markCreateOnlyResult?: boolean,
       ): () => void;
+      catchUpAndStartOnStaleRead(...args: unknown[]): boolean;
     };
     const tx = runtime.edit();
     const receipt = runtime.getCell<Record<string, unknown>>(
@@ -801,11 +802,70 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       undefined,
       tx,
     );
-    const injector = refuseDeferredStartCommits(
-      runtime,
-      staleConfirmedReadOf(receipt),
-      Number.MAX_SAFE_INTEGER,
-    );
+    // THIS pin refuses at the STORE DOOR (replica.commitNative), not at
+    // the tx seam: the cross-space arm's startTx carries the SETUP (this
+    // arm's defining difference), so runWithStartOwnership attached a
+    // failure-compensation commit callback to it — and the tx-seam
+    // injector's abort() settles that callback with an ABORT-shaped
+    // error, which releases the install BEFORE the error arm (an injector
+    // artifact: a real wire refusal settles the callbacks with the
+    // ConflictError itself, whose compensation exception keeps the
+    // install). Because this startTx carries operations, it genuinely
+    // reaches the store door — the primary arm's op-less startTx cannot —
+    // so here the refusal can ride the REAL commit machinery end to end.
+    const error = staleConfirmedReadOf(receipt);
+    const runnerForMark = runtime.runner as unknown as {
+      startWithTx: (...args: unknown[]) => (() => void) | undefined;
+    };
+    const originalStartWithTx = runnerForMark.startWithTx;
+    const startTransactions = new WeakSet<object>();
+    runnerForMark.startWithTx = (...args: unknown[]) => {
+      startTransactions.add(
+        (args[0] as { tx?: object }).tx ?? (args[0] as object),
+      );
+      return Reflect.apply(originalStartWithTx, runtime.runner, args) as
+        | (() => void)
+        | undefined;
+    };
+    const replica = storageManager.open(space).replica as unknown as {
+      commitNative: (...args: unknown[]) => unknown;
+    };
+    const originalCommitNative = replica.commitNative;
+    const refusalWaiter = Promise.withResolvers<void>();
+    let refusals = 0;
+    replica.commitNative = function (...args: unknown[]) {
+      const candidate = args[1] as { tx?: object } | object;
+      const inner = (candidate as { tx?: object }).tx ?? candidate;
+      if (startTransactions.has(candidate as object) ||
+        startTransactions.has(inner as object)) {
+        refusals++;
+        refusalWaiter.resolve();
+        return Promise.resolve({ error });
+      }
+      return Reflect.apply(originalCommitNative, this, args);
+    };
+    // The ROUTING witness (review F13 / Cubic P2): the old terminal path
+    // also produces one refusal, no registration, and a settled idle, so
+    // those observables alone cannot tell recovery from terminal death.
+    // Instrument the recovery entry point for this receipt: the pin
+    // demands the error arm actually ROUTED here and the recovery was
+    // SCHEDULED — deleting the call site from
+    // runPatternAfterSuccessfulCommit reds this, where it used to pass.
+    const originalEntry = harness.catchUpAndStartOnStaleRead;
+    let routed = 0;
+    let scheduled = 0;
+    harness.catchUpAndStartOnStaleRead = function (...args: unknown[]) {
+      const took = Reflect.apply(
+        originalEntry,
+        runtime.runner,
+        args,
+      ) as boolean;
+      if (key(args[1] as Cell<unknown>) === key(receipt)) {
+        routed++;
+        if (took) scheduled++;
+      }
+      return took;
+    };
     try {
       harness.runPatternAfterSuccessfulCommit(
         tx,
@@ -818,19 +878,25 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       expect((await tx.commit()).error).toBeUndefined();
 
       await waitForSignal(
-        injector.refusalsReach(1),
-        "the cross-space start's transaction being refused",
+        refusalWaiter.promise,
+        "the cross-space start's transaction being refused at the store",
       );
       await runtime.runner.idleDeferredStartCatchUps();
       await runtime.idle();
 
-      // Exactly one refusal (the recovery never re-committed a start
-      // transaction — this arm's walk never reaches a second commit), and
-      // the failed recovery left nothing behind.
-      expect(injector.refusals()).toBe(1);
+      // The refusal ROUTED into the recovery and the recovery was
+      // scheduled — the discriminating assertions…
+      expect(routed).toBe(1);
+      expect(scheduled).toBe(1);
+      // …and exactly one refusal (the recovery never re-committed a start
+      // transaction — its walk failed before any second commit), the
+      // failed recovery leaving nothing behind.
+      expect(refusals).toBe(1);
       expect(runtime.runner.cancels.has(key(receipt))).toBe(false);
     } finally {
-      injector.restore();
+      harness.catchUpAndStartOnStaleRead = originalEntry;
+      replica.commitNative = originalCommitNative;
+      runnerForMark.startWithTx = originalStartWithTx;
     }
   });
 

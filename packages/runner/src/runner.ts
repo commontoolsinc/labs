@@ -3446,23 +3446,19 @@ export class Runner {
         startTx,
       );
       try {
-        if (
-          ownership.markInstalled(
-            this.startWithTx(
-              startTx,
-              committedResultCell,
-              givenPattern,
-              options,
-            ),
-          )
-        ) {
+        const installedRegistration = this.startWithTx(
+          startTx,
+          committedResultCell,
+          givenPattern,
+          options,
+        );
+        if (ownership.markInstalled(installedRegistration)) {
           startTx.abort("Deferred runner start was cancelled");
           return;
         }
         this.runtime.prepareTxForCommit(startTx);
         startTx.commit().then(({ error }) => {
           if (error) {
-            ownership.cancel();
             if (
               this.catchUpAndStartOnStaleRead(
                 error,
@@ -3470,10 +3466,13 @@ export class Runner {
                 "start",
                 startLifecycleEpoch,
                 pullOnceAfterStart,
+                ownership,
+                installedRegistration,
               )
             ) {
               return;
             }
+            ownership.cancel();
             logger.error(
               "tx-commit-error",
               "Error committing deferred start transaction",
@@ -3552,16 +3551,31 @@ export class Runner {
    * authorization denial, a precondition failure, a row-label violation —
    * none of them describe a basis the served documents repair.
    *
-   * RE-ENTRANCY. The recovery registers a FRESH ownership token under the
-   * result's key BEFORE the readiness gate is awaited, so a stop, a
-   * release, or a navigation away during that window tombstones it
-   * through the same path that already tombstones a pending first attempt
-   * (`cancelPendingDeferredStarts`); the load walk that follows runs
-   * under the runner's ordinary start-attempt tracking, which a stop
-   * invalidates like any other start. The lifecycle epoch covers the
-   * teardown window a token cannot: `stopAll()` cancels the tokens it can
-   * SEE and clears the index, so a teardown landing before this
-   * continuation runs leaves nothing to cancel a token minted afterwards.
+   * CANCELLATION AUTHORITY (review F1 + Cubic P1 — both faces of one
+   * root). The recovery RIDES THE ORIGINAL ATTEMPT'S OWNERSHIP TOKEN —
+   * the one Cancel handle the parent holds (its cancel group and lineage
+   * piece-stop) — and recovers only an attempt whose install is STILL THE
+   * CURRENT REGISTRATION when the refusal lands. Concretely: (1) at
+   * entry, a stop or supersede that landed during the commit round trip
+   * (which removed the install, could cancel no pending token — the
+   * ownership unregistered at markInstalled — and bumps no epoch) makes
+   * the recovery DECLINE, so the stop wins exactly as it does on the
+   * terminal path; (2) the refused install is torn down with the same
+   * registry-guarded stop the token's own cancel performs, WITHOUT
+   * spending the token; (3) the token re-enters the pending index for
+   * the readiness wait, so a stop, a release, or `stopAll()` during that
+   * window tombstones the recovery through the same path that tombstones
+   * a pending first attempt; (4) when the walk leaves the piece running,
+   * the token is markInstalled with the CURRENT registration, so a
+   * parent cancel from then on stops the recovered run — and one that
+   * landed mid-walk stops it in the same breath (markInstalled finishes
+   * a pending cancellation synchronously). If another start took the key
+   * while the recovery waited, the recovery yields exactly as
+   * `startWithTx` yields on an owned key: the piece has a context under
+   * someone else's authority, and the token settles without touching it.
+   * The lifecycle epoch still covers the one window no token can: a
+   * teardown that ran before the refusal's continuation, whose sweep
+   * could not see this scheduling.
    */
   private catchUpAndStartOnStaleRead<T>(
     error: { name?: string; message?: string },
@@ -3569,46 +3583,95 @@ export class Runner {
     label: string,
     scheduledLifecycleEpoch: number,
     pullOnceAfterStart: boolean,
+    ownership: DeferredCancelOwnership,
+    installedRegistration: Cancel | undefined,
   ): boolean {
     if (this.runtime.experimental.serverExecution !== true) return false;
     if (!isStaleConfirmedReadConflict(error)) return false;
     if (scheduledLifecycleEpoch !== this.lifecycleEpoch) return false;
+    if (ownership.isCancelled()) return false;
+    const key = this.getDocKey(resultCell);
+    // The cancellation-authority gate: recover only an attempt whose
+    // install is still the current registration as the refusal lands. A
+    // stop or release during the commit round trip removed it; a
+    // replacement start superseded it. Either way the authority over this
+    // key has moved on, and the recovery must not override it — the
+    // caller's terminal arm runs as before (which no-op-cancels the spent
+    // registration exactly like today).
+    if (
+      installedRegistration === undefined ||
+      this.cancels.get(key) !== installedRegistration
+    ) {
+      return false;
+    }
     logger.warn(
       "deferred-start-catchup",
       `Deferred ${label} transaction lost its first-hydration basis to ` +
         "the serving side; starting from the served documents instead",
       error,
     );
-    // Registered BEFORE the readiness gate is awaited: this token is what
-    // a concurrent stop or teardown cancels to keep the recovery from
-    // firing into a piece that is no longer wanted.
-    const recoveryOwnership = this.createDeferredStartOwnership(resultCell);
+    // Tear the refused install down exactly as the token's own cancel
+    // would — the registry-guarded stop — WITHOUT spending the token: the
+    // token is the parent's one handle to this start, and it now carries
+    // the recovery.
+    this.stop(resultCell);
+    // Back into the pending index under the SAME token, so a stop or a
+    // release during the readiness wait tombstones the recovery through
+    // the same path that tombstones a pending first attempt.
+    let pending = this.pendingDeferredStarts.get(key);
+    if (pending === undefined) {
+      pending = new Set();
+      this.pendingDeferredStarts.set(key, pending);
+    }
+    pending.add(ownership);
     const recovery = this.runtime.awaitCommitRetryReadiness(error)
       .then(async () => {
         // Paired guards, each the other's backstop (the mutation pins kill
         // them jointly): the token covers a stop or a stopAll that ran
-        // while the readiness gate was awaited (the token was registered
-        // before the await, so the sweep sees it), and the epoch covers a
-        // teardown that ran before this recovery was even scheduled, when
-        // the sweep could not have seen a token that did not exist yet.
+        // while the readiness gate was awaited (the token re-entered the
+        // pending index before the await, so the sweep sees it), and the
+        // epoch covers a teardown that ran before this recovery was even
+        // scheduled, when the sweep could not have seen it.
         if (
-          recoveryOwnership.isCancelled() ||
+          ownership.isCancelled() ||
           scheduledLifecycleEpoch !== this.lifecycleEpoch
         ) {
           return;
         }
+        if (this.cancels.has(key)) {
+          // Another start took the key while the recovery waited — the
+          // same yield startWithTx makes on an owned key. The piece HAS a
+          // context under someone else's authority; the recovery's purpose
+          // is met and its claim dissolves. Settling the token touches no
+          // live registration (its stale install no longer matches).
+          ownership.cancel();
+          return;
+        }
         try {
           const started = await this.startFromServedState(resultCell);
-          if (
-            started && pullOnceAfterStart && !recoveryOwnership.isCancelled()
-          ) {
-            this.pullCellOnceInPullMode(
-              this.runtime.getCellFromLink<T>(
-                resultCell.getAsNormalizedFullLink(),
-              ),
-            );
+          if (started) {
+            const current = this.cancels.get(key);
+            if (current !== undefined) {
+              // Hand the recovered registration to the SAME token the
+              // parent holds: a parent cancel from here on stops the
+              // recovered run, and one that landed mid-walk stops it now.
+              if (ownership.markInstalled(current)) return;
+            } else {
+              // Claimed running, no registration: a stop landed between
+              // the walk's claim and here — nothing to own.
+              ownership.cancel();
+              return;
+            }
+            if (pullOnceAfterStart && !ownership.isCancelled()) {
+              this.pullCellOnceInPullMode(
+                this.runtime.getCellFromLink<T>(
+                  resultCell.getAsNormalizedFullLink(),
+                ),
+              );
+            }
+            return;
           }
-          if (!started && !recoveryOwnership.isCancelled()) {
+          if (!ownership.isCancelled()) {
             // A recovery that resolves without leaving the piece running,
             // with nobody having stopped it, is the silent no-context
             // state this arm exists to prevent — surface it loudly (the
@@ -3620,13 +3683,13 @@ export class Runner {
               `Deferred ${label} catch-up start resolved without the ` +
                 "piece running (superseded or stopped mid-walk)",
             );
+            ownership.cancel();
           }
-        } finally {
-          // The token exists to cover the WAIT; the load walk installs
-          // (or declines) its own registration. Settling the token here
-          // only drops the pending-index entry — it was never
-          // markInstalled, so this cancel touches no live registration.
-          recoveryOwnership.cancel();
+        } catch (cause) {
+          // Settle the token before surfacing: its stale install matches
+          // no live registration, so this cancel only unregisters.
+          ownership.cancel();
+          throw cause;
         }
       })
       .catch((cause) => {
@@ -3734,16 +3797,13 @@ export class Runner {
         startTx,
       );
       try {
-        if (
-          ownership.markInstalled(
-            this.runWithStartOwnership(
-              startTx,
-              pattern,
-              inputs,
-              committedResultCell,
-            ).installedCancel,
-          )
-        ) {
+        const installedRegistration = this.runWithStartOwnership(
+          startTx,
+          pattern,
+          inputs,
+          committedResultCell,
+        ).installedCancel;
+        if (ownership.markInstalled(installedRegistration)) {
           startTx.abort("Deferred runner start was cancelled");
           return;
         }
@@ -3755,7 +3815,6 @@ export class Runner {
         this.runtime.prepareTxForCommit(startTx);
         startTx.commit().then(({ error }) => {
           if (error) {
-            ownership.cancel();
             if (
               this.catchUpAndStartOnStaleRead(
                 error,
@@ -3763,10 +3822,13 @@ export class Runner {
                 "cross-space pattern",
                 startLifecycleEpoch,
                 pullOnceAfterStart,
+                ownership,
+                installedRegistration,
               )
             ) {
               return;
             }
+            ownership.cancel();
             logger.error(
               "tx-commit-error",
               "Error committing deferred cross-space pattern transaction",
