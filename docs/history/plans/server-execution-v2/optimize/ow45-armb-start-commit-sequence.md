@@ -2,7 +2,7 @@
 status: historical
 created: 2026-08-23
 archived: 2026-08-23
-reason: "Measurement answering the owner's OW45 arm-B question: is the refused 50-op deferred-start commit the piece's initial MATERIALIZATION, or a FOLLOW-UP first wave the client runs after a smaller materialization already landed? VERDICT — MATERIALIZATION, specifically the node-INSTANTIATION half of it, and it is the 5th and last of five client start commits (9, 23, 28, 46, 50 ops) of which the first four land successfully. So the owner is right that a smaller commit already lands first, but wrong that the 50-op commit is a derivation wave: no first-run output is in it (every `computed:` op it writes holds a wiring LINK, not a derived value; the scheduler's first run is a later macrotask in its own transactions). The decisive new fact is redundancy, not ordering: the SERVING side's own derived wave commit writes EVERY ONE of the same 50 operations — tuple for tuple in run s01, as a strict superset in run s02 — so client-only operations are 0 of 50 in both measured refusals, and whichever side arrives second is refused as stale. Measured both directions in ONE run: session A's client lost to wave localSeq 7 and was REFUSED; session B's client won and the byte-identical commit was ACCEPTED, after which the server did smaller follow-up waves over the client's writes instead. On the shrink question the answer has a measured size: 4 of the 50 ops are piece ROOTS carrying the full setup state (patternIdentity, patternSetupIdentity, argument, internal, schema) — that is 'the pattern + the result cell'; the other 46 are structure, wiring and content-addressed schema the server writes anyway. Those 4 are in the START commit rather than the originating one because `instantiatePatternNode` runs `setupInternal` for CHILD pattern nodes inside the start tx — which also refines 'the server never writes setup': true of the top-level piece (the loop calls `start()`, never `run()`), false of children, and the wave wrote all four of these roots first."
+reason: "Measurement answering the owner's OW45 arm-B question: is the refused 50-op deferred-start commit the piece's initial MATERIALIZATION, or a FOLLOW-UP first wave the client runs after a smaller materialization already landed? VERDICT — MATERIALIZATION, specifically the node-INSTANTIATION half of it, and it is the 5th and last of five client start commits (9, 23, 28, 46, 50 ops) of which the first four land successfully. So the owner is right that a smaller commit already lands first, but wrong that the 50-op commit is a derivation wave: no first-run output is in it (every `computed:` op it writes holds a wiring LINK, not a derived value; the scheduler's first run is a later macrotask in its own transactions). The decisive new fact is redundancy, not ordering: the SERVING side's own derived wave commit writes EVERY ONE of the same 50 operations — tuple for tuple in run s01, as a strict superset in run s02 — so client-only operations are 0 of 50 in both measured refusals, and whichever side arrives second is refused as stale. Measured both directions in ONE run: session A's client lost to wave localSeq 7 and was REFUSED; session B's client won and a commit of the same shape was ACCEPTED, after which the server did smaller follow-up waves over the client's writes instead. On the shrink question the answer has a measured size: 4 of the 50 ops are piece ROOTS carrying the full setup state (patternIdentity, patternSetupIdentity, argument, internal, schema) — that is 'the pattern + the result cell'; the other 46 are structure, wiring and content-addressed schema the server writes anyway. Those 4 are in the START commit rather than the originating one because `instantiatePatternNode` runs `setupInternal` for CHILD pattern nodes inside the start tx — which also refines 'the server never writes setup': true of the top-level piece (the loop calls `start()`, never `run()`), false of children, and the wave wrote all four of these roots first."
 ---
 
 # The OW45 arm-B start commit sequence — materialization, or follow-up wave?
@@ -25,7 +25,7 @@ tuple, in run s01; as a strict superset in run s02 — and whichever side arrive
 second is refused as stale. **Client-only operations: 0 of 50, in both measured
 refusals.** That the two sides are doing the same work was measured in both
 directions inside a single run: where the wave got there first the client's copy
-was REFUSED; where the client got there first the byte-identical commit was
+was REFUSED; where the client got there first a commit of the same shape was
 ACCEPTED and the server then did smaller follow-up waves over the client's
 writes instead.
 
@@ -182,7 +182,9 @@ measured refusals.
 
 ### The same commit is ACCEPTED when the client wins the race
 
-The reload session in the *same run* ran the identical five-commit sequence:
+The reload session in the *same run* ran the same five-commit sequence, with the
+same composition at every step (9, 23, 28, 46, 50 ops; commit 5 again
+16/15/19, `patch=4 set=46`, 143 confirmed reads):
 
 | # | class | localSeq | ops | verdict |
 |---|---|---|---|---|
@@ -195,11 +197,16 @@ Here no 50-op wave preceded it, the client's commit landed, and the serving side
 then did smaller follow-up waves *over the client's writes* instead of
 materializing the piece itself.
 
+(The two sessions' commit-5 document sets overlap in 23 of 50 — same shape, and
+the same four piece roots' worth of work, but the notebook has acquired content
+between them, so they are not the same bytes. What repeats exactly is the
+*sequence and composition*, not the payload.)
+
 This is the cleanest available statement of the defect: **the accept/refuse
-outcome is decided entirely by which of two sides doing identical work arrives
-first.** It also explains the census's otherwise puzzling result that the
-refused commit is doc-for-doc identical on greens and reds — it is literally the
-same commit; only the race outcome differs.
+outcome is decided entirely by which of two sides doing the same work arrives
+first.** It also fits the census's finding that the refusal carries no signal
+about whether the run will red — losing this race is the normal case, not the
+failure, and the census measured refusals on 15 captures from runs that passed.
 
 ## 3. The 50 operations, classified
 
@@ -255,6 +262,12 @@ the four roots above.
 The revision history of one such document over the whole run is two rows: `set`
 at seq 9, `patch` at seq 11. Nothing else ever writes it. **These are
 instantiation-time derived-internal cells, not first-run output.**
+
+The same holds for every `value` payload in the commit's `of:` documents,
+checked one by one: they are either static result projections carrying links
+(`{"$NAME":"BacklinksIndex","$UI":{…}}`, `{"pieces":{…link@1…}}`) or bare
+argument-schema **defaults** seeded create-only — `""`, `[]`, `{}`. Not one
+derived value appears anywhere in the 50 operations.
 
 That is corroborated by the code: after `instantiatePattern` wires the nodes,
 each action is only *registered* with the scheduler
