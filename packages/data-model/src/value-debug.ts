@@ -207,9 +207,9 @@ class DebugStringifier {
  * representations.
  */
 class DebugConverter {
-  #value: any;
-  #maxDepth: number;
-  #nestingStack = new Map<object, number>();
+  readonly #value: any;
+  readonly #maxDepth: number;
+  readonly #nestingStack = new Map<object, number>();
 
   /**
    * Constructs an instance.
@@ -217,7 +217,7 @@ class DebugConverter {
   constructor(
     /** Value to convert. */
     value: unknown,
-    /** Maxiumum nesting depth. */
+    /** Maximum nesting depth. */
     maxDepth: number,
   ) {
     this.#value = value;
@@ -225,8 +225,9 @@ class DebugConverter {
   }
 
   /**
-   * Converts the configured value. This method must never be called more than
-   * once per instance of this class.
+   * Converts the configured value. This method is meant to be called no more
+   * than once per instance of this class. In particular, it doesn't cache the
+   * result, so a second call repeats the conversion.
    */
   convert(): FabricValue {
     try {
@@ -321,7 +322,7 @@ class DebugConverter {
 
       case "function": {
         const name = value.name;
-        const content = (name && (name !== undefined))
+        const content = (name != "")
           ? `${name}(...)`
           : "<anonymous>(...)";
         return { "/function": content };
