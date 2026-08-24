@@ -74,29 +74,37 @@ commit could instead be *shrunk*:
 Each run drives two browser sessions (the step creates notes, then reloads), so
 each contributes two captures of the start sequence.
 
-| run | step | exit | wall | load before | 5-commit sequence | commit 5, session 1 | wave covers its 50 ops |
+| run | step | exit | wall | load | commit 5, session 1 | commit 5, session 2 | its 50 ops covered by prior waves |
 |---|---|---|---|---|---|---|---|
-| s01 | ran | 1 (RED) | 329 s | 5.32 | 9/23/28/46/50 | REFUSED | 50/50 (wave localSeq 7, exact) |
-| s02 | ran | 1 (RED) | 330 s | 3.70 | 9/23/28/46/50 | REFUSED | 50/50 (wave localSeq 30, superset of 63) |
+| s01 | ran | 1 (RED) | 329 s | 5.32 | REFUSED | ACCEPTED | 50/50 |
+| s02 | ran | 1 (RED) | 330 s | 3.70 | REFUSED | **REFUSED** | 50/50 (both sessions) |
 | s03 | `ignored` | 0 | 9 s | 2.33 | — | — | — |
 | s04 | `ignored` | 0 | 14 s | 3.21 | — | — | — |
-| s05 | ran | 1 (RED) | 327 s | 3.48 | 9/23/28/46/50 | REFUSED | 50/50 (wave localSeq 6) |
-| s06 | ran | 1 (RED) | 324 s | 4.26 | 9/23/28/46/50 | REFUSED | 50/50 (wave localSeq 7) |
-| **s07** | **ran** | **0 (GREEN)** | **28 s** | **4.79** | **9/23/28/46/50** | **REFUSED** | **50/50 (wave localSeq 7)** |
+| s05 | ran | 1 (RED) | 327 s | 3.48 | REFUSED | ACCEPTED | 50/50 |
+| s06 | ran | 1 (RED) | 324 s | 4.26 | REFUSED | ACCEPTED | 50/50 |
+| **s07** | **ran** | **0 (GREEN)** | **28 s** | **4.79** | **REFUSED** | **ACCEPTED** | **50/50** |
 
 s03 and s04 are not informative — reverting the scratch edit between run batches
-re-enabled the step's ON skip. In every informative run the reload session ran
-the same five-commit sequence and its commit 5 was **ACCEPTED**, no 50-op wave
-having preceded it.
+re-enabled the step's ON skip.
 
-**s07 is the load-bearing row.** It is GREEN — the step ran and PASSED in 17 s —
-and its first session's commit 5 was refused all the same, by a wave covering
-50/50 of its operations, exactly like the four reds. So the duplicated
-materialization and the refusal that follows it are the **normal steady state**
-of a flag-ON client start, not the arm-B defect. This independently reproduces
-on this bench what the census found from the other direction (15 of its 18
-captured refusals came from runs that passed), and it bounds every inference
-below: see §6.
+Three things this table says, and one it does not:
+
+- **The first session's commit 5 is refused 5/5**, in every informative run.
+- **Its 50 operations are covered 50/50 by waves that preceded it, 5/5.**
+  Usually by the single immediately-preceding wave; in s02's first session the
+  immediately-preceding wave carried only 12 operations and the coverage is
+  cumulative across earlier waves. The invariant is coverage, not adjacency.
+- **s07 is the load-bearing row.** It is GREEN — the step ran and PASSED in
+  17 s — and its first session's commit 5 was refused all the same. So the
+  duplicated materialization and the refusal that follows it are the **normal
+  steady state** of a flag-ON client start, not the arm-B defect. This
+  reproduces on this bench what the census found from the other direction (15
+  of its 18 captured refusals came from runs that passed), and it bounds every
+  inference below: see §6.
+- What it does **not** say is that the reload session always wins. It usually
+  does (4 of 5), but s02 lost both — and s02 is a red while s01, s05 and s06
+  are reds whose reload session won. So neither the refusal nor its repetition
+  tracks the verdict.
 
 ### The instrument
 
@@ -189,9 +197,12 @@ from the seq-9 world, the wave moved those documents to seq 11/12 underneath it,
 and the client's identical copy arrived stale.
 
 Run s02 reproduced the same defeat with the wave as a **superset** rather than
-an exact match — the immediately preceding wave (localSeq 30) carried 63
-operations over 61 documents, and **all 50** of the client's `(verb, id)` tuples
-were among them, with **zero** client-only operations:
+an exact match. (s02 lost the race in BOTH its browser sessions; the capture
+below is its second, where the immediately-preceding wave is the single
+covering one. In s02's first session the coverage is cumulative across earlier
+waves instead.) That wave, localSeq 30, carried 63 operations over 61
+documents, and **all 50** of the client's `(verb, id)` tuples were among them,
+with **zero** client-only operations:
 
 | # | class | localSeq | ops | shape | verdict |
 |---|---|---|---|---|---|
@@ -206,13 +217,13 @@ census had already explained as an array-order artifact.
 
 So the invariant is not "the wave writes exactly the same commit" but the
 weaker, sufficient one: **the client's deferred-start operations are a subset of
-what the serving side writes anyway.** Client-only operations: 0 of 50, in both
-measured refusals.
+what the serving side writes anyway.** Client-only operations: 0 of 50, in all
+six measured refusals of a commit 5 (five first sessions plus s02's second).
 
 ### The same commit is ACCEPTED when the client wins the race
 
-The reload session in the *same run* ran the same five-commit sequence, with the
-same composition at every step (9, 23, 28, 46, 50 ops; commit 5 again
+In four of the five informative runs the reload session won. Taking s01's, it
+ran the same five-commit sequence, with the same composition at every step (9, 23, 28, 46, 50 ops; commit 5 again
 16/15/19, `patch=4 set=46`, 143 confirmed reads):
 
 | # | class | localSeq | ops | verdict |
