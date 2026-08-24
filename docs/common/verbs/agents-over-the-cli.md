@@ -207,18 +207,18 @@ implement, a link that has not synced.
 
 Two cases keep the older reading, and `{}` covers a typo in both. A JSON
 `--schema` names a shape of its own rather than the source's fields and is held
-to no vocabulary at all. And a field list meets positions the source schema
+to no vocabulary at all. And a field list visits positions the source schema
 settles nothing about — an open `additionalProperties`, a `patternProperties`
 map that names a pattern, a disjunction, an untyped source, a position that
-only may hold an array, a reference site declaring fields of its own, a name
-several `allOf` members declare — where no refusal is available. Read a `{}`
-from either against `cf piece describe` rather than as an answer about the
-data.
+only may hold an array, a tuple-shaped one, a reference site declaring fields
+of its own, a name several `allOf` members declare — where no refusal is
+available. Read a `{}` from either against `cf piece describe` rather than as a
+fact about the data.
 
-One of those positions goes further. A field declared ONLY through an `allOf`
+One of those positions goes further. A field declared only through an `allOf`
 member is named by the schema and refused by nothing, and no spelling on this
-surface returns it: a field list answers `{}`, a JSON `--schema` naming it
-answers `{}`, and `cf piece describe` does not list it among the fields. So
+surface returns it: a field list returns `{}`, a JSON `--schema` naming it
+returns `{}`, and `cf piece describe` does not list it among the fields. So
 `{}` there is neither absence nor a typo, and nothing the CLI offers separates
 it from either — the pattern's own source is what settles it.
 

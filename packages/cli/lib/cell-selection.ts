@@ -1795,9 +1795,9 @@ interface UnheldSelectionField {
  * The first field a concise list names that the source schema proves cannot be
  * there — a typo, or a name the source has since stopped declaring.
  *
- * A projection that matches nothing legitimately answers nothing: an optional
- * field is absent, a link that has not synced is unresolvable, and both are
- * real answers a read must be able to give. What this separates out is the
+ * A projection that matches nothing legitimately returns nothing: an optional
+ * field is absent, a link that has not synced is unresolvable, and a read has
+ * to be able to return both. What this separates out is the
  * case where no value could ever appear at the path, which the schema settles
  * before the read runs and which is never anything but a mistake.
  *
@@ -1829,7 +1829,7 @@ function firstUnheldSelectionField(
   }
   // A reference site that declares fields of its own is passed over. The
   // site's keywords and the definition's are two accounts of one position, and
-  // a read answers from both — it reads whatever is stored at a name neither
+  // a read draws on both — it returns whatever is stored at a name neither
   // account declares — so which of them governs a name is not a question this
   // gate settles.
   if (
@@ -1858,13 +1858,23 @@ function firstUnheldSelectionField(
   // of its elements — the traversal `alignConciseProjectionMask` applies to
   // the mask beside this.
   //
-  // Crossed only where the position MUST hold an array, which is the question
-  // {@link sourceProvesContainer} exists to answer. A position that merely may
+  // Crossed only where the position must hold an array, which is the question
+  // {@link sourceProvesContainer} exists to settle. A position that merely may
   // hold one — untyped beside an `items`, or a union naming both containers —
   // settles neither depth: the name belongs to an element where the value is
   // an array and to the position itself where it is not, and judging it at one
   // of them refuses a read that works at the other.
   if (sourceProvesContainer("array", target, targetRoot)) {
+    // A tuple declares a different shape per index, so its elements have no
+    // one vocabulary: `items` describes the positions past the prefix and says
+    // nothing about the prefix itself. An empty list declares no position and
+    // leaves `items` describing every element.
+    const prefix = target.prefixItems;
+    if (
+      prefix !== undefined && !(Array.isArray(prefix) && prefix.length === 0)
+    ) {
+      return undefined;
+    }
     return firstUnheldSelectionField(
       sourceItemSchema(target),
       targetRoot,
@@ -1897,7 +1907,7 @@ function firstUnheldSelectionField(
     return undefined;
   }
   const declared = declaredFieldsAt(target, targetRoot);
-  // A position with no property map states no vocabulary, and answers with
+  // A position with no property map states no vocabulary, and returns
   // whatever the value holds there.
   if (declared.sources.length === 0) return undefined;
   const declaringSources = (key: string) =>
@@ -2505,8 +2515,8 @@ function resolveProjection(
   if (projection === undefined) return undefined;
   if (projection.kind === "concise") {
     // A field list names positions of the source, so the source is what says
-    // whether a name can be there at all. A path it cannot hold answers
-    // nothing however the read is run, and answering nothing is what a read
+    // whether a name can be there at all. A path it cannot hold returns
+    // nothing however the read is run, and returning nothing is what a read
     // legitimately does for a field that is merely absent — so the two are
     // separated here, before the read, where the schema still distinguishes
     // them.

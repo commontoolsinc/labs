@@ -132,23 +132,23 @@ caller cannot do is introduce its own. A disjunction has no single answer to
 caller's behalf.
 
 **A field list names positions of the source, so the source's schema decides
-whether a name can be there at all.** A projection that matches nothing is a
-real answer — an optional field is absent, a link has not synced — so a read
-cannot refuse on absence. What it can refuse on is a path no value could ever
-appear at, which the schema settles before the read runs: a field a position
-neither declares nor admits, a field named below a scalar, a field named below
+whether a name can be there at all.** A projection that matches nothing
+returns a real result — an optional field is absent, a link has not synced — so
+a read cannot refuse on absence. What it can refuse on is a path no value
+could ever appear at, which the schema settles before the read runs: a field a
+position neither declares nor admits, a field named below a scalar, one below
 a verb, which dispatches rather than holding a value. The refusal names the
 position, the vocabulary that position declares, and — where the vocabulary has
 a name close enough — the one the path is a typo of, the wording every other
 misspelled name gets (`packages/cli/lib/refusal.ts`). Everything the
 schema leaves open passes: an open `additionalProperties`, a `patternProperties`
 map that names a pattern, a disjunction, an untyped position, a position that
-only MAY hold an array rather than proving it, a reference site declaring
-fields of its own, and a name several `allOf` members declare. A
-reference that does not resolve passes the gate as well, though the read behind
-it then reports the reference rather than answering. Refusing at any of them
-would take away a read that works, and the direction to be wrong in is the
-permissive one. The full form is held to none
+only may hold an array rather than proving it, a tuple-shaped array, a
+reference site declaring fields of its own, and a name several `allOf` members
+declare. A reference that does not resolve passes the gate as well, though the
+read behind it then reports the reference rather than returning a value.
+Refusing at any of them would take away a read that works, and the direction to
+be wrong in is the permissive one. The full form is held to none
 of it, since a JSON Schema states a shape of its own rather than naming the
 source's fields — which leaves it the spelling for reading a position the
 source does not declare.

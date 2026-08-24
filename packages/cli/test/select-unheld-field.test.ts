@@ -2,7 +2,7 @@
  * Pins the refusal a `--select`/`--schema` field list gets when it names a
  * field the source schema proves cannot be there: which positions it fires at,
  * the wording a caller reads, and — in equal measure — the positions it passes
- * over, each asserted as the read still answering.
+ * over, each asserted as the read still returning a value.
  *
  * The gate is `firstUnheldSelectionField` (../lib/cell-selection.ts), reached
  * through `deriveSelectedValue`, which is the path every read flag takes. The
@@ -10,7 +10,7 @@
  * piece is read through is one the transformer emits and a hand-built schema
  * could only assert back what this file assumed. The shapes the transformer
  * does not emit — an open position, a disjunction, a union of scalars — are
- * written out, since a caller meets them through `handler` schemas and
+ * written out, since a caller reaches them through `handler` schemas and
  * hand-written cells.
  */
 
@@ -268,6 +268,25 @@ describe("select-unheld-field", () => {
     });
   });
 
+  it("reads a field only a tuple's prefix element declares", async () => {
+    const source = await sourceCell(
+      "unheld-tuple",
+      {
+        type: "array",
+        prefixItems: [{
+          type: "object",
+          properties: { title: { type: "string" } },
+        }],
+        items: { type: "object", properties: { count: { type: "number" } } },
+      },
+      [{ title: "First" }, { count: 2 }],
+    );
+    // `items` describes the elements past the prefix, so it is the vocabulary
+    // of some elements rather than of all of them.
+    expect(await selected(source, "title")).toEqual([{ title: "First" }, {}]);
+    expect(await selected(source, "count")).toEqual([{}, { count: 2 }]);
+  });
+
   it("reads a field named at an untyped position beside an `items` schema", async () => {
     const source = await sourceCell(
       "unheld-untyped-items",
@@ -276,7 +295,7 @@ describe("select-unheld-field", () => {
     );
     // The position may hold an array and holds an object, so the name belongs
     // to the position itself rather than to an element, and the element
-    // schema's vocabulary says nothing about it. The empty answer is the
+    // schema's vocabulary says nothing about it. The empty result is the
     // concise read applying its field mask, not a refusal — the JSON spelling
     // of the same request reaches the value.
     expect(await selected(source, "extra")).toEqual({});
@@ -432,7 +451,7 @@ describe("select-unheld-field", () => {
       },
       { holder: { title: "First", extra: "beside" } },
     );
-    // The read answers from both accounts of the position, so neither is the
+    // The read draws on both accounts of the position, so neither is the
     // vocabulary a refusal could name.
     expect(await selected(source, "holder.title")).toEqual({
       holder: { title: "First" },

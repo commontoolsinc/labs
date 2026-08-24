@@ -331,16 +331,16 @@ A field list is held to the source's own vocabulary. A path the schema proves
 nothing can appear at — a field the position neither declares nor admits, a
 field named below a scalar, a field named below a verb — is refused before the
 read, naming the position, what it declares, and, where one is close enough, the
-declared name the path is a typo of. A field that is merely absent still answers
-with nothing at exit 0, so a `{}` from a field list reads as "nothing here"
-rather than "you may have mistyped". Where the source schema settles nothing —
-an open `additionalProperties`, a `patternProperties` map that names a pattern,
-a disjunction, an untyped position, a position that only may hold an array, a
-reference site declaring fields of its own, a name several `allOf` members
-declare — no refusal is available. An unresolvable reference is passed over too,
-and the read reports the reference itself. A JSON `--schema` states a shape of
-its own rather than naming the source's fields, and is not held to that
-vocabulary.
+declared name the path is a typo of. A field that is merely absent still returns
+nothing at exit 0, so a `{}` from a field list reads as "nothing here" rather
+than "you may have mistyped". Where the source schema settles nothing — an open
+`additionalProperties`, a `patternProperties` map that names a pattern, a
+disjunction, an untyped position, a position that only may hold an array, a
+tuple-shaped array, a reference site declaring fields of its own, a name several
+`allOf` members declare — no refusal is available. An unresolvable reference is
+passed over too, and the read reports the reference itself. A JSON `--schema`
+states a shape of its own rather than naming the source's fields, and is not
+held to that vocabulary.
 
 `piece call` takes the same three flags, before the callable name, with the same
 grammar, the same `--select`/`--schema` conflict, and the same error messages.

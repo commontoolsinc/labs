@@ -4,12 +4,12 @@
  * Two doors ask this question of two different schemas. The call door asks a
  * verb's event schema which fields a payload may carry; the read door asks a
  * source cell's schema which fields a `--select` path may name. A name neither
- * declares is the same mistake either way, so both are answered here rather
+ * declares is the same mistake either way, so both are settled here rather
  * than twice — the vocabulary a refusal prints, and the rule deciding whether
  * a position judges undeclared names at all, are one implementation.
  *
- * Every answer here fails open: where the schema stops proving what sits under
- * a position, the position declares nothing and judges nothing. A refusal
+ * Every reading here fails open: where the schema stops proving what sits
+ * under a position, the position declares nothing and judges nothing. A refusal
  * spends nothing and can be retried, while a wrongly refused call cannot be
  * made and a wrongly refused read cannot be taken.
  */
@@ -58,7 +58,7 @@ export function schemaIsObjectShaped(
 /**
  * Whether a position describes an array.
  *
- * The array counterpart of {@link schemaIsObjectShaped}, and it answers the
+ * The array counterpart of {@link schemaIsObjectShaped}, and it settles the
  * question the same way: a stated `type` says so, and otherwise the container
  * keyword being present does. An untyped position naming `items` is an array
  * to everything except schema traversal's own descent, which requires the
@@ -136,7 +136,7 @@ export function declaredFieldsAt(
   // the schema saying no extra field is permitted. Reading mere presence as
   // permission inverts the strictest spelling into the most permissive one,
   // and the name is then dropped by the runtime — a field a call never
-  // delivers, a path a read never answers — which is the silent loss the
+  // delivers, a path a read never returns — which is the silent loss the
   // refusals built on this exist to prevent.
   if (
     node.additionalProperties !== undefined &&

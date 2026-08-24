@@ -394,13 +394,14 @@ position declares, and — where the vocabulary holds a name close enough — th
 one the path is a typo of. Three shapes are proven: a field a position neither
 declares nor admits, a field named below a scalar, and a field named below a
 verb, which dispatches rather than holding a value. A field that is merely
-ABSENT is a different fact and still answers with nothing at exit 0 — an
-optional field nobody has written, an interface an item does not implement, a
-link that has not synced. The refusal therefore fires only where the schema
-settles the question, and a position it does not settle reads as it always did:
-an open `additionalProperties`, a `patternProperties` map that names a pattern,
-a disjunction, an untyped position, a position that only MAY hold an array
+absent is a different fact and still returns nothing at exit 0 — an optional
+field nobody has written, an interface an item does not implement, a link that
+has not synced. The refusal therefore fires only where the schema settles the
+question, and a position it does not settle reads as it always did: an open
+`additionalProperties`, a `patternProperties` map that names a pattern, a
+disjunction, an untyped position, a position that only may hold an array
 (untyped beside an `items`, or typed as both an array and an object), a
+tuple-shaped array, whose `prefixItems` give its elements no one vocabulary, a
 reference site that declares fields of its own, and a name several `allOf`
 members declare. A reference that does not resolve is passed over as well, and
 what the caller then reads is the read's own report of the reference rather than

@@ -231,8 +231,8 @@ projection leaves every surviving path where it was; it does not compose with
 declared result proves cannot be there — one the position neither declares nor
 admits, one below a scalar, one below a verb — is refused before the read and
 names the vocabulary that position takes. A name it declares that simply holds
-nothing answers with nothing, which is the answer an optional field is entitled
-to. Where the result carries no declared shape, nothing holds the list and
+nothing returns nothing, which is what an optional field is entitled to. Where
+the result carries no declared shape, nothing holds the list and
 every name is read as written. A JSON `--schema` states a shape of its own and
 is held to none of this.
 
