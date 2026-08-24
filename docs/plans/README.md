@@ -103,3 +103,9 @@ a record: archive it to `docs/history/plans/` following the procedure in
   do one job under two names. Separate from the read-layer plan because it
   renames rather than adds, so its risk is what breaks for a caller who already
   learned the current spelling.
+- [Shell completion coverage](cli-completion-coverage.md) sequences the work
+  that makes `cf completion` answer correctly across the surface it claims and
+  reach the verb surface it does not: the slots that offer a wrong candidate,
+  the verb flags and result shapes that offer none, the source `--space` needs
+  before any of it is reachable by name, and the gate that keeps completion
+  from falling behind the command tree again.
