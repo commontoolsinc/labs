@@ -597,7 +597,7 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
     harness.syncCellsForRunningPattern = async function (...args: unknown[]) {
       if (
         !competitorRan &&
-        key((args[0] as Cell<unknown>)) === key(result)
+        key(args[0] as Cell<unknown>) === key(result)
       ) {
         competitorRan = true;
         // The entry-stop cleared these too late for the injector hook
