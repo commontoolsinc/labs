@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  getEntityId,
   getPatternIdentityRef,
   getPatternSource,
   resolveSystemPatternSource,
@@ -105,6 +106,23 @@ describe("ensureDefaultPattern stamps patternSource", () => {
     } catch { /* already disposed */ }
     await storageManager?.close();
     restoreFetch();
+  });
+
+  it("OFF-arm witness (OW45 arm-B stage 1): the creation arm still runs on a plain client — root created, linked, and re-ensured", async () => {
+    // No serverExecution flag anywhere in this fixture: this is the OFF
+    // client, and its creation editWithRetry must still run — now
+    // through the runner's shared ensure core (createSpaceRootIfAbsent),
+    // which the stage-1 delegation must not have forked or gated. The
+    // server half does not exist OFF (the toolshed OFF pin severs the
+    // bootstrap), so a root appearing HERE is the client arm working.
+    const piece = await controller.ensureDefaultPattern();
+    expect(getPatternSource(piece.getCell())).toBe(DEFAULT_APP_PATTERN_SOURCE);
+    const linked = await controller.getDefaultPattern(false);
+    expect(getEntityId(linked!)).toEqual(getEntityId(piece.getCell()));
+    // Idempotent: a second ensure resolves the SAME root (no second
+    // creation, no re-link churn).
+    const again = await controller.ensureDefaultPattern();
+    expect(getEntityId(again.getCell())).toEqual(getEntityId(piece.getCell()));
   });
 
   it("stamps the default-app source ref on a non-home root", async () => {

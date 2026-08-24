@@ -40,6 +40,11 @@ installFakeClock({
     // interval and flush deadline), one level down: the stage-G
     // recovery-seam tests drive a real SpaceServer directly.
     "executor-space-server",
+    // The OW45 arm-B stage-1 space-root ensure suite drives a real
+    // SpaceServer directly under the same wall-clock policies (renew
+    // interval, flush deadline); auto-advance turns the renew cadence
+    // into a runaway (the guard names SpaceServer.activate's timers).
+    "executor-space-root-ensure",
     // Stage C tuning T3: the cooperative-yield suite drives a live
     // ExecutorHost with a real flush deadline and a (short) real lease
     // TTL — the yield's `setTimeout(0)` turns and the deadline/renew

@@ -5589,6 +5589,90 @@ supply; OW29/OW32/OW34 closed):
     old-shape stall is the die-off at the front; b01's shape hid
     inside the population as "the product not answering" with the
     client blameless.
+    **SERVER-ENSURE STAGE 1 BUILT 2026-08-23 (design PR #6209,
+    owner-green-lit; build report
+    `../../history/plans/server-execution-v2/optimize/ow45-armb-server-ensure-stage1-report.md`).**
+    The space-root ensure — existence + freshness, the START not moved —
+    runs at the SpaceServer's activation as a lease-guarded owed step,
+    single-flight STRUCTURALLY (a SpaceServer is single-tenure:
+    `#parkRequested` never resets and the host builds a replacement per
+    re-activation, so the guard's lifetime is the tenure's). The ensure
+    core is extracted into the runner (`ensure-space-root.ts`) and the
+    client controller's creation arm delegates to it (OFF one code
+    path); attribution is owner-resolved fail-closed through the memory
+    server's new `resolveSpaceOwner` (the OW31-ruled service-identity
+    ACL read; the OW59 Q3 caveat's named follow-up — the creation tx
+    AND the freshness half's write arms carry
+    `trustSnapshotForPrincipal(owner)`, both pinned live on the minted
+    transactions; the reconcile arm was the build review's F1 — it
+    shipped first under the ambient SERVICE snapshot, exactly OW59's
+    restage shape, caught by live probe and fixed red-first by
+    threading the ensure's snapshot hook through `checkDefaultPattern`'s
+    two default-root write arms). Design §4(b)'s ACTING-IDENTITY
+    carriage is NOT built (review F3, recorded): the stamp carries no
+    `acting`, so `homeSpacePrincipalFor`/`getHomeSpaceCell` would
+    fail-closed-throw if a served setup resolved home — inert today
+    and consistent with the custom-URL interim, but stage 2's
+    owner-scoped home read needs it built first. With
+    no-owner spaces SKIPPED counted-and-warned (OW53's shape) — plus
+    the measurement-driven SAME-TENURE retry: the live boot order has
+    activation (session-open-triggered) PRECEDE the client bootstrap's
+    genesis ACL commit, so a fresh space's first ensure always finds no
+    owner; the skip therefore latches awaiting-owner and an admitted
+    commit touching the ACL doc re-arms the owed ensure — identity
+    posture unchanged, only the retry cadence moved from next-tenure to
+    owner-became-resolvable (without it, r01 measured the ensure INERT
+    on 4/4 gate spaces; with it, r02 measured the server creating 4/4).
+    The
+    custom-`defaultAppUrl` fork stays UNRULED: stage 1
+    logs-and-uses-the-system-default on fresh non-home creations.
+    Recorded STAGE-2 GATE: the runnability-repair pair (cold-start
+    setup repair + roll-forward heal) did NOT move — the ON client's
+    creation retirement must not ship before it does, or aged spaces
+    brick under ON. What stage 1 changes live: the server wins most
+    creation races from activation onward; the ARM-A refusal class does
+    NOT close (the ON client still creates on the slow path and still
+    deferred-starts on the fast path), so THE STEP'S SKIP STAYS and the
+    lift bar is unchanged. Pins: fresh-space materialization at
+    activation (watched red pre-seat), park/re-activate convergence on
+    ONE root + aged-identity reconcile-before-load across tenures
+    (which also live-caught a FIXTURE class worth naming: a per-tenure
+    localSeqRef re-mints (session, localSeq) pairs and engine replay
+    detection kills the second tenure's waves — the host's shared
+    counter contract, now stated in the suite), the owner-snapshot pin,
+    the fail-closed skip pin (service-DID-fallback mutation killed),
+    the toolshed OFF bootstrap pin (gate-bypass mutation killed), and
+    the piece OFF-arm creation pin (provenance-stamp mutation killed
+    through the delegated controller). Named residual (flagged, not
+    filled): the deferred-start transaction the ensure's creation arms
+    still stamps actor-less bookkeeping — ambient SERVICE snapshot on
+    the child-materialization docs, OW59 Q3's arm — threading the owner
+    through the shared arming machinery is OW59-ruling territory; the
+    same family's second, pre-existing member is `PatternManager`'s
+    compile-cache write-backs minted inside `compilePattern` (escape
+    the stamp hook; enumerated with the flag in the stage-1 report).
+    **SCOPE RULED 2026-08-24 (the owner; verbatim in the stage-1
+    report): production ensures a root for EVERY activated space —
+    per-space discrimination is DEFERRED to its own design work — and
+    tests get an off switch**: `ensureSpaceRoots` on
+    SpaceServer/ExecutorHost options (the ruled in-memory setting) and
+    the toolshed's `SERVER_EXECUTION_ENSURE_SPACE_ROOTS` (literal
+    `"false"` only; garbage fails to production), off = fully inert,
+    pinned both ways. The ruling followed the stage-1 CI board going
+    red across the ON lanes: the ensured root's content-addressed
+    computed cells landed in every fixture space's plain space-cell
+    subscriptions with the root's `cid:` schema docs not
+    delivered-and-verified — an UNCAUGHT client-replica throw
+    (`#validateArrivedSchemaDocuments`) that failed files wholesale
+    (all red lanes real-toolshed; in-process harnesses unaffected;
+    main green at the identical base). The CI ON lanes now run
+    ensure-off (`cf test` needs nothing: no serving host exists in
+    `packages/cli` — the ruled opt-in is its status quo). Flagged, not
+    filled: the exposed delivery gap (computed delivered without its
+    verified `cid:` ref) is PRE-EXISTING machinery, latent again with
+    the lanes off; and no CI lane now exercises the production ensure
+    at the true topology — unit pins and the measurement harness carry
+    it until a lane opts in.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
@@ -6351,7 +6435,12 @@ supply; OW29/OW32/OW34 closed):
     local-repro runbook note (API_URL/MEMORY_URL must be set
     explicitly when the default port is occupied). Follow-up class
     (flip-follow-up family): no lift trigger; close with the ruled
-    posture landed.
+    posture landed. CONSUMER ADDED 2026-08-23: the stage-1 server-side
+    space-root ensure's creation fetch rides the same
+    `apiUrl`-over-self-HTTP loop (deliberately — design #6209 open
+    question 9's self-pin recommendation is flagged, not filled, in the
+    stage-1 report; the ruled posture, when it lands, covers this
+    consumer with the updater's).
   - **OW56 — FUTURE (optimize-phase-future) — the server owns program
     materialization AND compilation; clients wait (minted 2026-08-21
     with the S-C ruling).** The owner's stated ideal, verbatim:
@@ -6605,6 +6694,111 @@ supply; OW29/OW32/OW34 closed):
     dropped echo's missing cover is user-visible (the OW33
     arrival-witness fork's fix would NOT close this — a dropped
     run seals no overlay entry at all).**
+
+  - **OW61 — delivery of content-addressed computed cells to a
+    replica without their verified `cid:` schema docs: an UNCAUGHT
+    fail-closed throw in every space-cell-only subscriber (minted
+    2026-08-24 from PR #6210's first red board; pre-existing
+    delivery-machinery defect, NOT the ensure seat's).** Mechanism:
+    when a subscription delivers a `computed:` doc whose schema ref
+    (`cid:…`) is "not delivered and verified in this replica",
+    `SpaceReplica.#validateArrivedSchemaDocuments`
+    (`packages/runner/src/storage/v2.ts`) THROWS on the background
+    consume path (`applySessionSync` → `consumeUpdates`) — uncaught,
+    outside any caller's try, killing the consuming worker/test file
+    wholesale. Evidence: CI run 32742547103 at `7d97a80aa` — 13
+    file-level failures sharing exactly this class across the runner,
+    runtime-client, and shell ON lanes and 9/10 pattern ON shards; the
+    broken doc in the runtime-client lane
+    (`computed:fid1:7BycCyHc2yDDzr17jnXayWZMxpweSGk2JcGKILKguvo`) is
+    byte-for-byte the default-app root's computed cell (content-
+    addressed ids are space-independent), delivered through the
+    fixtures' plain space-cell subscriptions after the stage-1 server
+    ensure materialized roots in their spaces. TRIGGER: any server-side
+    materialization into a space with a subscriber that did not demand
+    the docs root-aware — today that is the stage-1 ensure wherever it
+    runs ON; the affected subscriber shape is the SPACE-CELL-ONLY
+    subscriber (no root-aware schema walk), which exists in PRODUCTION
+    (CLI, agents-host), so any real deployment with such a subscriber
+    re-surfaces this the moment the ensure runs there. Timing-
+    dependent: whether the computed doc's frame lands before its
+    `cid:` sibling is delivery-window timing (CI hit it consistently;
+    one local run at the same head did not). With the test lanes'
+    ensure opt-out (the RULED switch) the defect is LATENT again, not
+    fixed. SURFACED TO THE OWNER 2026-08-24 (the coordinator is
+    carrying it). Owed: a ruling on the delivery side — deliver the
+    schema closure with the computed doc, or make the arrival
+    validator's failure a deferred re-fetch instead of an uncaught
+    throw — and a pin reproducing the delivery race directly (the
+    ensure gives it a deterministic producer). Trigger: before any
+    production deployment that runs the ensure ON beside space-cell-
+    only subscribers, and before the flip PR's list-EMPTY bar
+    (an ON fleet re-reaches it by construction).
+
+  - **OW62 — adopt-not-start: the piece-open seam is where the ON
+    execution model's "one starter per piece" has to land. POST-FLIP
+    (RULED 2026-08-22, owner: "ok, let's do (a) and record (b) as a
+    post-flip task").** LIFT NOTE (2026-08-24): this row was minted as
+    "OW61" on PR #6208's branch (`claude/server-exec-v2-client-start-retry`,
+    unmerged) and is lifted here essentially verbatim under the next
+    free number, because it records an OWNER RULING that must not live
+    only on a branch that may never land; the parallel-mint collision
+    (both branches picked OW61 — the OW56/OW57 hazard again) is
+    resolved first-come: OW61 on main is the delivery-defect row
+    above. CONSEQUENCE FOR #6208 IF IT LANDS: its own OW61 row is
+    SUPERSEDED by this OW62 and must be dropped, and its
+    cross-reference to it (its `verification-coverage.md` ~:5596,
+    "model's destination in OW61 below") must re-point to OW62 —
+    otherwise the union-merge mints the silent duplicate this note
+    exists to prevent. The "(a)" retry this row's landing duty retires
+    is #6208's own unmerged build; the duty binds whenever both land.
+    The destination the OW45 arm-B fork named (b),
+    recorded rather than built: a flag-ON client whose navigate lands
+    on a piece the SERVER materialized does not run a deferred start
+    of its own at all — it ADOPTS the served instance (sync the root,
+    register demand through the served closure) and starts nothing.
+    That DISSOLVES the first-hydration race instead of re-attempting
+    it, and it is the posture canon already states rather than a new
+    mechanism: runtime-mapping.md's N62 row deleted the old
+    observation-adoption feature precisely BECAUSE under the flag
+    "clients no longer run committed derivations at all (reload is
+    read-and-render, §3b)", and serving-loop.md §3b states that
+    posture. The client-side deferred start is the remnant still
+    running against it at the navigate/piece-open seam. Design seed:
+    `../../history/plans/server-execution-v2/optimize/ow45-armb-client-start-fork.md`
+    (disposition (b), with the instrumented catch that motivates it).
+    WHY POST-FLIP: it touches the piece-open path for every ON
+    navigate. (This row first said the flip's empty-skip-list bar was
+    reached by (a) without moving that path. The live gate DISPROVED
+    that — see the arm-B gate evidence in OW45 — so which arm reaches
+    the bar is an OPEN question, not a settled one, and (b)'s
+    scheduling is the only claim this row still makes.) **The five
+    pieces it still needs, none of them settled by this row:**
+    (i) how the ADOPTED context is constructed client-side — what a
+    client holds for a piece it did not start, and which of today's
+    start-walk products (node wiring, the cancel registration, the
+    demand registration) it keeps; (ii) the BIRTH-adoption flow — a
+    navigate that arrives BEFORE the server has materialized the
+    piece has nothing to adopt, so the seam needs a defined wait or a
+    defined fallback; (iii) whether §3d's speculative-consequence
+    stamp SURVIVES at all once no client start transaction exists —
+    §3d's sanction is written for the deferred start, and adoption
+    deletes the thing it sanctions, so that sentence needs
+    restatement, not inference; (iv) the UNMATERIALIZED-piece
+    fallback, i.e. whether the OFF-arm start path is retained as a
+    fallback under ON and under exactly which predicate; (v) the
+    first-hydration UX gates — what the user sees between navigate
+    and adoption, which is today covered by the client's own start
+    rendering immediately. **Its landing DUTY: retire (a)'s retry.**
+    With no client start transaction there is no start commit to be
+    refused, so `reattemptDeferredStartOnStaleRead` and the
+    `isStaleConfirmedReadConflict` predicate become dead code on the
+    ON arm and must be removed with it (the OFF arm keeps them while
+    the OFF path exists — see #6208's OW45-row disclosed ripple: that
+    fix is deliberately not flag-gated). Trigger: the post-flip soak,
+    or any ON surface where a re-attempted start is observed
+    exhausting its budget in real usage
+    (`deferred-start-conflict-exhausted`), whichever comes first.**
 
 ## 4. Standing rule
 
