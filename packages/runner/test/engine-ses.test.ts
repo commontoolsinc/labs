@@ -556,8 +556,8 @@ describe("Engine in SES mode", () => {
         engine,
         program,
         [
-          'const { toSchema } = require("commonfabric");',
-          "exports.default = toSchema({ default: { count: 0 } });",
+          'const commonfabric = require("commonfabric");',
+          "exports.default = commonfabric.toSchema({ default: { count: 0 } });",
         ].join("\n"),
       ),
     ).rejects.toThrow("Only trusted builder calls");

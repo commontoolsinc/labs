@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertRejects } from "@std/assert";
+import { assert, assertEquals, assertMatch, assertRejects } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 
 import ts from "typescript";
@@ -707,6 +707,25 @@ export { value };
     const root = parseModule(transformed["/main.ts"]!);
     assert(callsNamed(root, "lift").length >= 1);
     assertEquals(callsNamed(root, "computed").length, 0);
+  });
+
+  it("transforms a file carrying the retired opt-out marker like any other", async () => {
+    // `/// <cf-disable-transform />` once suppressed the transform for the file
+    // that carried it. It is an ordinary comment now, and a source still
+    // carrying it is compiled the same as one that never did.
+    const transformed = await transformFiles({
+      "/main.ts": `/// <cf-disable-transform />
+import { computed } from "commonfabric";
+
+const value = computed(() => 1);
+export { value };
+`,
+    });
+    const output = transformed["/main.ts"]!;
+    const root = parseModule(output);
+    assert(callsNamed(root, "lift").length >= 1);
+    assertEquals(callsNamed(root, "computed").length, 0);
+    assertMatch(output, /import \{ __cfHelpers \} from "commonfabric";/);
   });
 
   it("wraps top-level data candidates with __cfHelpers.__cf_data", async () => {
