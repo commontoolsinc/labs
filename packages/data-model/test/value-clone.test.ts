@@ -13,7 +13,10 @@
  * index-like name that is not canonical all count as absent -- and absent
  * means nothing shifts.
  *
- * Neither one descends into a `FabricInstance` on its way through a path.
+ * Neither one descends into a `FabricInstance`, which holds its state privately
+ * and so has nothing a path key addresses. They part on what that means:
+ * writing refuses it, while removal reads it as absent and leaves the root
+ * alone.
  */
 
 import { describe, it } from "@std/testing/bdd";
@@ -200,12 +203,26 @@ describe("value-clone", () => {
       expect(result).toEqual(root); // same content
     });
 
-    it("does not descend into a FabricInstance/FabricPrimitive in the path", () => {
+    it("returns the root unchanged for a path under a `FabricPrimitive`", () => {
       const hash = FabricHash.fromString("sha256:abcd");
       const root = deepFreeze({ value: { wrapper: hash } });
 
       // There is nothing path-addressable under an opaque wrapper, so removal
       // is a no-op rather than an attempt to clone or mutate the wrapper.
+      expect(cloneWithoutValueAtPath(root, ["value", "wrapper", "x"])).toBe(
+        root,
+      );
+    });
+
+    it("returns the root unchanged for a path under a `FabricInstance`", () => {
+      // The same answer for the other non-addressable arm, which the primitive
+      // case above does not reach: a `FabricPrimitive` is refused by the
+      // descent itself, while an instance is a container the descent admits.
+      // Removal parts from `cloneWithValueAtPath()` here -- absent is absent,
+      // so there is nothing to refuse.
+      const err = FabricError.fromNativeError(new Error("boom"));
+      const root = deepFreeze({ value: { wrapper: err } });
+
       expect(cloneWithoutValueAtPath(root, ["value", "wrapper", "x"])).toBe(
         root,
       );
