@@ -10,6 +10,7 @@
 // base class.
 export {
   type FabricArray,
+  type FabricContainerValue,
   type FabricConvertibleValue,
   FabricInstance,
   type FabricNativeObject,

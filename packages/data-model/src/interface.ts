@@ -164,20 +164,25 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
  * violates it can corrupt data-model invariants, as any broken contract can.
  */
 export type FabricValue =
-  // -- Primitives --
-  | null
+  | bigint
   | boolean
+  | null
   | number
   | string
-  | bigint
   | symbol
-  // -- Fabric special objects --
-  | FabricSpecialObject
-  // -- Containers --
+  | undefined
   | FabricArray
   | FabricPlainObject
-  // -- undefined --
-  | undefined;
+  | FabricSpecialObject;
+
+/**
+ * The container types that are part of `FabricValue`. Note that
+ * `FabricSpecialObject` is a combination of container and non-container.
+ */
+export type FabricContainerValue =
+  | FabricArray
+  | FabricInstance // One of the two direct subclasses of `FabricSpecialObject`.
+  | FabricPlainObject;
 
 /** A `FabricValue` other than `null` or `undefined`. */
 export type NonNullableFabricValue = NonNullable<FabricValue>;
