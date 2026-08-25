@@ -547,3 +547,55 @@ function positionalSlot(
 
 /** Exported for `providers.ts`, which keys context lookups by long name. */
 export { longName, takesValue };
+
+/** One positional a command tree declares, and where it sits. */
+export interface DeclaredPositional {
+  /** `<command path>:<argument name>`, the key its provider carries. */
+  readonly key: string;
+  /** The command path, or `<root>` for the root command's own. */
+  readonly where: string;
+  /** Its place in that command's argument order, so a line can reach it. */
+  readonly index: number;
+}
+
+/** Every value-taking option and every positional a command tree declares. */
+export interface DeclaredSlots {
+  /** Option long name -> the command paths declaring it. */
+  readonly options: ReadonlyMap<string, readonly string[]>;
+  readonly positionals: readonly DeclaredPositional[];
+}
+
+/**
+ * Every slot the tree offers a value at, walked the way `resolveCompletionLine`
+ * walks it: `realSubcommands` decides which children are commands, and
+ * `takesValue` decides which options have a value to complete.
+ *
+ * Both keys the provider tables use fall out of this walk, which is what lets
+ * a check subtract the tables from the tree — in either direction — rather
+ * than remembering what was added.
+ */
+export function declaredSlots(root: AnyCommand): DeclaredSlots {
+  const options = new Map<string, string[]>();
+  const positionals: DeclaredPositional[] = [];
+  const walk = (command: AnyCommand, path: readonly string[]): void => {
+    const where = path.join(" ") || "<root>";
+    for (const option of command.getOptions(false)) {
+      if (!takesValue(option)) continue;
+      const seen = options.get(longName(option)) ?? [];
+      if (!seen.includes(where)) seen.push(where);
+      options.set(longName(option), seen);
+    }
+    command.getArguments().forEach((argument: Argument, index: number) => {
+      positionals.push({
+        key: `${path.join(" ")}:${argument.name}`,
+        where,
+        index,
+      });
+    });
+    for (const child of realSubcommands(command)) {
+      walk(child, [...path, child.getName()]);
+    }
+  };
+  walk(root, []);
+  return { options, positionals };
+}

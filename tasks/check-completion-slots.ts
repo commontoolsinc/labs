@@ -35,8 +35,12 @@
  *        deno task check-completion-slots --list   # every undecided slot
  */
 
-import type { Command } from "@cliffy/command";
 import { main as cliRoot } from "../packages/cli/commands/main.ts";
+import {
+  type AnyCommand,
+  type DeclaredSlots,
+  declaredSlots,
+} from "../packages/cli/lib/completion/line.ts";
 import { enumeratedOptionNames } from "../packages/cli/lib/completion/static.ts";
 import { completionProviderKeys } from "../packages/cli/lib/completion/providers.ts";
 
@@ -161,19 +165,6 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
   ["wish:schema", "the same"],
 ]);
 
-/** One positional the tree declares, and where it was found. */
-export interface PositionalSlot {
-  readonly key: string;
-  readonly where: string;
-}
-
-/** Every value-taking option and every positional a command tree declares. */
-export interface DeclaredSlots {
-  /** Option long name -> the command paths declaring it. */
-  readonly options: Map<string, string[]>;
-  readonly positionals: PositionalSlot[];
-}
-
 /** What the check found, in the three directions it looks. */
 export interface SlotReport {
   /**
@@ -187,45 +178,6 @@ export interface SlotReport {
   readonly unreachableProviders: string[];
   /** Allowlist entries that decide no slot on the tree. */
   readonly staleAllowlist: string[];
-}
-
-/** Long name of an option, without leading dashes. */
-function longName(option: { flags: string[] }): string {
-  const long = option.flags.find((flag) => flag.startsWith("--"));
-  return (long ?? option.flags[0] ?? "").replace(/^-+/, "");
-}
-
-/**
- * Walk a command tree the way `resolveCompletionLine` walks it: Cliffy's
- * generated `help` is skipped, because it is propagated to every descendant
- * and is nobody's slot.
- */
-export function collectSlots(
-  // deno-lint-ignore no-explicit-any
-  root: Command<any>,
-): DeclaredSlots {
-  const options = new Map<string, string[]>();
-  const positionals: PositionalSlot[] = [];
-  // deno-lint-ignore no-explicit-any
-  const walk = (command: Command<any>, path: readonly string[]): void => {
-    const where = path.join(" ") || "<root>";
-    for (const option of command.getOptions(false)) {
-      if ((option.args?.length ?? 0) === 0) continue;
-      const name = longName(option);
-      const seen = options.get(name) ?? [];
-      if (!seen.includes(where)) seen.push(where);
-      options.set(name, seen);
-    }
-    for (const argument of command.getArguments()) {
-      positionals.push({ key: `${path.join(" ")}:${argument.name}`, where });
-    }
-    for (const child of command.getCommands(false)) {
-      if (child.getName() === "help") continue;
-      walk(child, [...path, child.getName()]);
-    }
-  };
-  walk(root, []);
-  return { options, positionals };
 }
 
 /** An option slot as a failure line reads it: the flag, and where it is. */
@@ -371,9 +323,15 @@ export function describeFailures(report: SlotReport): string[] {
   return failures;
 }
 
-/** Run the check against the real CLI tree. Returns the process exit code. */
-export function main(args: readonly string[] = []): number {
-  const declared = collectSlots(cliRoot);
+/**
+ * Run the check against a command tree — the CLI's own unless another is given
+ * — and return the process exit code.
+ */
+export function main(
+  args: readonly string[] = [],
+  root: AnyCommand = cliRoot,
+): number {
+  const declared = declaredSlots(root);
   const providers = completionProviderKeys();
   const report = reportSlots(declared, {
     providerOptions: providers.options,

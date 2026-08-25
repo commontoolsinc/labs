@@ -1148,13 +1148,19 @@ The tests divide the same way. `test/completion-*.test.ts` cover everything
 answerable without a fabric — line resolution, candidate shaping, and the
 degrade-to-empty path. Every provider that reads state — a fabric, the local
 memory-v2 stores, or the environment — is exercised by
-`integration/completion-over-the-cli.sh`, which deploys a fixture and asserts
-what a Tab offers at each slot of the chain. The remaining table entries hand
-the shell a constant `files` or `dirs` directive, which a fabric cannot change:
-those are asserted one by one, kind and glob, in
-`test/completion-providers.test.ts`; `deno task check-completion-slots` is what
-catches an entry naming a slot that does not exist, or a slot with no entry at
-all.
+`integration/completion-over-the-cli.sh` at one of the slots it answers: it
+deploys a fixture and asserts what a Tab offers at each slot of the chain. Two
+slots sharing a provider are covered by that one step, since `piece survey`'s
+and `piece repair`'s `--list` take exactly what `--piece` takes. Which slots a
+provider is keyed to is the other question, and
+`deno task check-completion-slots` is what asks it, per command.
+
+The remaining table entries hand the shell a constant `files` or `dirs`
+directive, which a fabric cannot change: those are asserted one by one, kind and
+glob, in `test/completion-providers.test.ts`. The set that has to be asserted is
+derived there rather than remembered — every slot the tree declares is probed
+with no fabric configured, and one that hands the shell a directive no case pins
+fails the test.
 
 That split is not tidiness: a provider that reaches a fabric and comes back with
 the wrong set is invisible to a unit test and invisible at the prompt, because

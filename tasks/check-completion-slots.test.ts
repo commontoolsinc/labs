@@ -1,8 +1,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Command } from "@cliffy/command";
+import { declaredSlots } from "../packages/cli/lib/completion/line.ts";
 import {
-  collectSlots,
   describeFailures,
   main,
   NO_CANDIDATES,
@@ -57,7 +57,7 @@ function reportFor(known: {
   allowedPositionals?: string[];
   // deno-lint-ignore no-explicit-any
 }, tree: Command<any> = fixtureTree()): SlotReport {
-  return reportSlots(collectSlots(tree), {
+  return reportSlots(declaredSlots(tree), {
     providerOptions: new Map(Object.entries(known.providerOptions ?? {})),
     providerArguments: new Set(known.providerArguments ?? []),
     enumerated: new Set(known.enumerated ?? []),
@@ -66,31 +66,46 @@ function reportFor(known: {
   });
 }
 
+/**
+ * A tree whose slots the real provider tables have never heard of, which is
+ * what a command looks like the day it lands.
+ */
+function unknownTree() {
+  return new Command()
+    .name("cf")
+    .command(
+      "fixture",
+      new Command()
+        .description("a command no provider table names")
+        .option("--fixture-flag <value:string>", "a value nothing provides")
+        .arguments("<fixtureArg:string>"),
+    );
+}
+
+/** Run `body` with console output captured, as the other task tests do. */
+function captureConsole(
+  body: () => number,
+): { code: number; out: string; err: string } {
+  const out: string[] = [];
+  const err: string[] = [];
+  const origLog = console.log;
+  const origError = console.error;
+  console.log = (...args) => out.push(args.map(String).join(" "));
+  console.error = (...args) => err.push(args.map(String).join(" "));
+  try {
+    return { code: body(), out: out.join("\n"), err: err.join("\n") };
+  } finally {
+    console.log = origLog;
+    console.error = origError;
+  }
+}
+
 /** `providerOptions` for names whose provider answers on every command. */
 function everywhere(...names: string[]): Record<string, null> {
   return Object.fromEntries(names.map((name) => [name, null]));
 }
 
 describe("check-completion-slots", () => {
-  describe("collectSlots()", () => {
-    it("names a value-taking option by its long name and where it was found", () => {
-      const { options } = collectSlots(fixtureTree());
-      expect(options.get("space")).toEqual(["<root>"]);
-      expect(options.get("select")).toEqual(["get"]);
-    });
-
-    it("returns no entry for an option that takes no value", () => {
-      // A flag has nothing to complete, so it is not a slot.
-      expect(collectSlots(fixtureTree()).options.has("quiet")).toBe(false);
-    });
-
-    it("keys a positional by its command path and argument name", () => {
-      expect(collectSlots(fixtureTree()).positionals).toEqual([
-        { key: "get:path", where: "get" },
-      ]);
-    });
-  });
-
   describe("reportSlots()", () => {
     it("names an option with no provider, no enumerated set and no allowance", () => {
       const report = reportFor({});
@@ -223,6 +238,20 @@ describe("check-completion-slots", () => {
       expect(text).toContain("NO_OPTION_CANDIDATES");
       expect(text).toContain("NO_CANDIDATES");
     });
+
+    it("names the entry to delete when one reaches nothing", () => {
+      // The subtraction run the other way has its own paragraph, and it has to
+      // name the dead entry: the fix is to delete that line, not to add a slot.
+      const text = describeFailures(reportFor({
+        providerOptions: everywhere("space", "select", "log-file"),
+        providerArguments: ["get:path"],
+        allowedOptions: ["gone"],
+      })).join("\n");
+      expect(text).toContain("provider entr(ies) match no slot");
+      expect(text).toContain("--log-file");
+      expect(text).toContain("allowlist entr(ies) decide no slot");
+      expect(text).toContain("--gone");
+    });
   });
 
   describe("main()", () => {
@@ -230,6 +259,30 @@ describe("check-completion-slots", () => {
       // The gate itself. Every slot the CLI declares is answered by a provider,
       // by an enumerated set, or by an allowlist entry carrying its reason.
       expect(main()).toBe(0);
+    });
+
+    it("fails a slot no table names, printing the finding and the remedy", () => {
+      const { code, err } = captureConsole(() => main([], unknownTree()));
+      expect(code).toBe(1);
+      expect(err).toContain("--fixture-flag  (fixture)");
+      expect(err).toContain("fixture:fixtureArg");
+      expect(err).toContain("Either give the slot candidates");
+      // Nothing the tables name is on this tree, so the subtraction the other
+      // way reports every entry at once.
+      expect(err).toContain("provider entr(ies) match no slot");
+    });
+
+    it("lists the undecided slots and succeeds when asked for the list", () => {
+      // `--list` is the working view: it answers what is undecided without
+      // failing, so the list can be read while it is worked through.
+      const { code, out } = captureConsole(() =>
+        main(["--list"], unknownTree())
+      );
+      expect(code).toBe(0);
+      expect(out).toContain("Undecided options:");
+      expect(out).toContain("--fixture-flag  (fixture)");
+      expect(out).toContain("Undecided positionals:");
+      expect(out).toContain("fixture:fixtureArg");
     });
 
     it("records a reason for every allowance, so none is a bare exemption", () => {

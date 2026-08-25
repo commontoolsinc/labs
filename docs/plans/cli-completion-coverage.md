@@ -590,9 +590,11 @@ lands, which is the obligation rather than the one edit.
 `packages/cli/integration/completion-over-the-cli.sh` is where every provider
 that reads state is exercised — the four that reach a fabric, the one that
 reads local stores, the one that reads the environment, and the pattern-file
-glob. The rest of the table hands the shell a constant directive that a fabric
-cannot change, and those are asserted one by one — kind and glob — in
-`test/completion-providers.test.ts`. Item 19 adds the other half: whether a
+glob — at one of the slots it answers. The rest of the table hands the shell a
+constant directive that a fabric cannot change, and those are asserted one by
+one — kind and glob — in `test/completion-providers.test.ts`, over a set that
+file derives from the tree rather than remembers: a slot handing the shell a
+directive that no case pins fails there. Item 19 adds the other half: whether a
 slot has an entry at all.
 
 `--space` is the one whose candidates depend on the machine, since it reads

@@ -1,10 +1,31 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertFalse } from "@std/assert";
+import { Command } from "@cliffy/command";
 import {
+  declaredSlots,
   resolveCompletionLine,
   stripInvocationPrefix,
 } from "../lib/completion/line.ts";
 import { tokenizeLine } from "../lib/completion/mod.ts";
 import { main } from "../commands/main.ts";
+
+/**
+ * A small tree in the shape the CLI's own is: nested commands, each with its
+ * own options and positionals.
+ */
+function fixtureTree() {
+  return new Command()
+    .name("cf")
+    .option("--space <space:string>", "a space")
+    .option("--quiet", "no value, so not a slot")
+    .command("piece", new Command().description("piece things"))
+    .command(
+      "get",
+      new Command()
+        .description("read")
+        .option("--select <fields:string>", "a projection")
+        .arguments("<path:string>"),
+    );
+}
 
 /** Resolve the line the way the shell would, from a raw buffer. */
 function resolve(line: string, point = line.length) {
@@ -275,4 +296,37 @@ Deno.test("resolve: a deno task cf line resolves like a cf line", () => {
   assert(line.slot?.kind === "argument");
   assertEquals(line.slot.argument.name, "callable");
   assertEquals(line.options.get("piece"), "x");
+});
+
+Deno.test("declaredSlots names a value-taking option by long name and command", () => {
+  const { options } = declaredSlots(fixtureTree());
+  assertEquals(options.get("space"), ["<root>"]);
+  assertEquals(options.get("select"), ["get"]);
+});
+
+Deno.test("declaredSlots returns no entry for an option that takes no value", () => {
+  // A flag has nothing to complete, so it is not a slot.
+  assertFalse(declaredSlots(fixtureTree()).options.has("quiet"));
+});
+
+Deno.test("declaredSlots keys a positional by command path, name and order", () => {
+  assertEquals(declaredSlots(fixtureTree()).positionals, [
+    { key: "get:path", where: "get", index: 0 },
+  ]);
+});
+
+Deno.test("declaredSlots skips the help Cliffy propagates to every command", () => {
+  // `help` reaches every descendant as a global, and its own arguments are
+  // nobody's slot: taking them at face value would put a `command` positional
+  // on every leaf of the tree.
+  const slots = declaredSlots(main);
+  assertFalse(
+    slots.positionals.some((slot) => slot.key.endsWith("help:command")),
+  );
+  assertEquals(
+    slots.positionals.filter((slot) => slot.where === "piece call").map((s) =>
+      s.key
+    ),
+    ["piece call:callable", "piece call:tail"],
+  );
 });
