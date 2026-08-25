@@ -245,6 +245,14 @@ type StartAttempt = {
   settled?: Promise<boolean>;
 };
 
+// One root of the argument link-target scan: an argument document plus the
+// schema declaring what the resumed runs read from it. A root without a
+// schema is scanned in full.
+type ArgumentLinkRoot = {
+  cell: Cell<any>;
+  schema?: JSONSchema;
+};
+
 // The debug-name builders reuse the action's already-computed
 // `schedulerActionInstanceKey` as their uniquifying suffix instead of hashing
 // the same links a second time (one hashOf per action creation, not two). The
@@ -5014,8 +5022,10 @@ export class Runner {
     const argumentCell = this.runtime.getCellFromLink(argumentLink);
     await argumentCell.sync();
     const argumentValue = argumentCell.getRawUntyped();
+    // No declared schema here: the setup path scans the stored argument in
+    // full, the undeclared-root form of the method below.
     await this.#syncArgumentLinkTargets(
-      [argumentCell],
+      [{ cell: argumentCell }],
       "setupArgumentLinkTargetSync",
       [argumentValue],
     );
@@ -5094,8 +5104,10 @@ export class Runner {
     const cells: Cell<any>[] = [];
     // Argument documents (node inputs + the pattern's own argument meta doc)
     // whose VALUES may hold links to documents nothing in this tree owns —
-    // scanned after the main sync wave (see below).
-    const argumentCells: Cell<any>[] = [];
+    // scanned after the main sync wave (see below). Each root carries the
+    // schema declaring what the resumed runs read from it, which is what
+    // bounds that scan; a root without one is scanned in full.
+    const argumentRoots: ArgumentLinkRoot[] = [];
 
     // Sync all the inputs and outputs of the pattern nodes. Bindings are
     // unwrapped (bound to the argument/result documents) first, so named-cell
@@ -5152,16 +5164,23 @@ export class Runner {
           continue;
         }
 
-        // TODO(seefeld): This ignores schemas provided by modules, so it might
-        // still fetch a lot.
         [...inputs, ...outputs].forEach((link) => {
           cells.push(this.runtime.getCellFromLink(link));
         });
+        // Each input link carries the schema its binding declared, which is
+        // the read surface the node's first run holds to — the bound the
+        // link-target scan follows.
         inputs.forEach((link) => {
-          argumentCells.push(this.runtime.getCellFromLink(link));
+          argumentRoots.push({
+            cell: this.runtime.getCellFromLink(link),
+            schema: link.schema,
+          });
         });
       }
-      argumentCells.push(this.runtime.getCellFromLink(argumentMetaLink));
+      argumentRoots.push({
+        cell: this.runtime.getCellFromLink(argumentMetaLink),
+        schema: pattern.argumentSchema,
+      });
     }
 
     // Sync the owned (derived internal) cells of this pattern and every nested
@@ -5222,13 +5241,10 @@ export class Runner {
     // basis at seq 0 — a guaranteed ConflictError against the durable server
     // state (the home-rehydration reload-churn regression; v1's populate
     // pass subscribed such targets in aborted transactions before any
-    // commit). Two levels deep — argument value → container doc → target doc
-    // is the measured chain (defaultProfile → container → per-user profile
-    // doc); deeper or wider walks were measured to add loads without
-    // removing further conflicts. Deduped, values only, schema-less doc
-    // syncs; an unloadable target is skipped rather than failing the resume.
+    // commit). Each root's declared schema bounds its scan — see the method
+    // for the exact rules and the fallback where a declaration runs out.
     await this.#syncArgumentLinkTargets(
-      argumentCells,
+      argumentRoots,
       "resumeArgumentLinkTargetSync",
     );
 
@@ -5236,59 +5252,147 @@ export class Runner {
   }
 
   /**
-   * Load two levels of documents linked from stored arguments. This covers the
-   * measured defaultProfile container chain without loading an unbounded graph.
+   * Pre-sync the documents linked from stored arguments that a resumed
+   * pattern's first runs read through.
+   *
+   * Collection follows each root's declared schema, walking value and schema
+   * in lockstep: a link on a schema-named path has its target synced, and
+   * the walk continues INTO that target under the same path schema — a
+   * declared read through a link reaches the linked document's fields, so
+   * the pre-sync does too, as deep as the declaration goes. A path whose
+   * schema carries `asCell` is handed to the run as a reference, so its
+   * target document is synced and its contents are not walked. A property a
+   * `properties`-bearing schema does not select is invisible to the run and
+   * is not walked at all.
+   *
+   * Where a declaration runs out — a `true` schema, an object schema with no
+   * `properties`, a root with no schema — the walk falls back to the
+   * undeclared form: every link in the raw value, two link hops deep from
+   * that point, which covers the measured defaultProfile container chain and
+   * any read the transformer could not see. Deduped, values only; an
+   * unloadable target is skipped rather than failing the resume.
    */
   async #syncArgumentLinkTargets(
-    argumentCells: Cell<any>[],
+    roots: readonly ArgumentLinkRoot[],
     timingLabel: "resumeArgumentLinkTargetSync" | "setupArgumentLinkTargetSync",
     initialValues?: readonly (FabricValue | undefined)[],
   ): Promise<void> {
+    // Link-hop budgets: how many further documents a walk may step INTO from
+    // a synced target. The undeclared budget preserves the two-hop reach the
+    // defaultProfile regression fixed; the declared budget only bounds a
+    // pathological declaration, since schemas end on their own.
+    const UNDECLARED_LINK_HOPS = 2;
+    const DECLARED_LINK_HOPS = 8;
     const seenTargets = new Set<string>();
-    let frontier: Cell<any>[] = argumentCells;
-    for (let depth = 0; depth < 2 && frontier.length > 0; depth++) {
-      const targets: Cell<any>[] = [];
+    type PendingTarget = {
+      cell: Cell<any>;
+      schema: JSONSchema | undefined;
+      hopsLeft: number;
+    };
+    let frontier: PendingTarget[] = roots.map((root) => ({
+      cell: root.cell,
+      schema: root.schema,
+      hopsLeft: root.schema !== undefined
+        ? DECLARED_LINK_HOPS
+        : UNDECLARED_LINK_HOPS,
+    }));
+    let wave = 0;
+    while (frontier.length > 0) {
+      const targets: PendingTarget[] = [];
       const targetPromises: Promise<any>[] = [];
-      const collectLinkTargets = (value: any, base: Cell<any>) => {
+      const enqueue = (
+        link: NormalizedFullLink,
+        schema: JSONSchema | undefined,
+        hopsLeft: number,
+      ) => {
+        const key = `${link.space}\0${link.id}\0${link.scope ?? "space"}`;
+        if (seenTargets.has(key)) return;
+        seenTargets.add(key);
+        const target = this.runtime.getCellFromLink(link);
+        const targetSyncStart = performance.now();
+        targetPromises.push(
+          Promise.resolve(target.sync())
+            .catch((error) => {
+              logger.warn("resume-argument-link-targets", () => [
+                "argument link target sync failed; resuming without it",
+                error,
+              ]);
+            })
+            .finally(() =>
+              logger.time(
+                targetSyncStart,
+                "start",
+                timingLabel,
+              )
+            ),
+        );
+        if (hopsLeft > 0) targets.push({ cell: target, schema, hopsLeft });
+      };
+      const collect = (
+        value: any,
+        base: Cell<any>,
+        schema: JSONSchema | undefined,
+        hopsLeft: number,
+      ) => {
+        if (schema === false) return;
+        // A `true` or absent schema is where the declaration ran out; scan
+        // from here in the undeclared form with a fresh two-hop budget.
+        const declared = schema !== undefined && schema !== true;
         const link = parseLink(value, base);
         if (link) {
-          const key = `${link.space}\0${link.id}\0${link.scope ?? "space"}`;
-          if (seenTargets.has(key)) return;
-          seenTargets.add(key);
-          const target = this.runtime.getCellFromLink(link);
-          targets.push(target);
-          const targetSyncStart = performance.now();
-          targetPromises.push(
-            Promise.resolve(target.sync())
-              .catch((error) => {
-                logger.warn("resume-argument-link-targets", () => [
-                  "argument link target sync failed; resuming without it",
-                  error,
-                ]);
-              })
-              .finally(() =>
-                logger.time(
-                  targetSyncStart,
-                  "start",
-                  timingLabel,
-                )
-              ),
+          // `asCell` marks a reference the run holds rather than reads
+          // through: sync the target document, walk no further. The marker
+          // rides the declared property schema itself, beside any `$ref`.
+          const reference = declared &&
+            isObjectOrArray(schema) && schema.asCell !== undefined;
+          enqueue(
+            link,
+            declared ? schema : undefined,
+            reference ? 0 : Math.min(
+              hopsLeft - 1,
+              declared ? DECLARED_LINK_HOPS : UNDECLARED_LINK_HOPS,
+            ),
           );
-        } else if (isObjectOrArray(value)) {
-          // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, and
-          // `for..in` sees none of its state, so a link inside a
+          return;
+        }
+        if (!isObjectOrArray(value)) return;
+        if (!declared) {
+          // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`,
+          // and `for..in` sees none of its state, so a link inside a
           // `FabricInstance` held in a raw argument value is never pre-synced
           // — a cold target can then enter the commit basis, the exact
           // failure this walk exists to prevent.
-          for (const key in value) collectLinkTargets(value[key], base);
+          for (const key in value) {
+            collect(value[key], base, undefined, hopsLeft);
+          }
+          return;
+        }
+        // Structural descent: narrow the declared schema one segment at a
+        // time. `defaultMissingProperty: false` makes an unselected property
+        // invisible, matching what the run can see; `defaultEmptyProperties:
+        // true` makes an unstructured object read fall back to the
+        // undeclared scan above, since such a read is unbounded.
+        for (const key in value) {
+          collect(
+            value[key],
+            base,
+            ContextualFlowControl.schemaAtPath(
+              schema,
+              [key],
+              undefined,
+              true,
+              false,
+            ),
+            hopsLeft,
+          );
         }
       };
-      for (const [index, cell] of frontier.entries()) {
+      for (const [index, entry] of frontier.entries()) {
         try {
-          const value = depth === 0 && initialValues !== undefined
+          const value = wave === 0 && initialValues !== undefined
             ? initialValues[index]
-            : cell.getRawUntyped();
-          collectLinkTargets(value, cell);
+            : entry.cell.getRawUntyped();
+          collect(value, entry.cell, entry.schema, entry.hopsLeft);
         } catch (error) {
           // A shape the raw read cannot resolve contributes nothing rather
           // than breaking the resume; log so a skipped target is diagnosable.
@@ -5300,6 +5404,7 @@ export class Runner {
       }
       await Promise.all(targetPromises);
       frontier = targets;
+      wave++;
     }
   }
 
