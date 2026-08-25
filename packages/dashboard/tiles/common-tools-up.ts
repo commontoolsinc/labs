@@ -7,6 +7,7 @@
  * the www host when the apex redirects.
  */
 
+import { confirmDashboardConnectivity } from "../connectivity.ts";
 import type { Status, Tile, TileView } from "../types.ts";
 
 const FAIL_THRESHOLD = 3; // consecutive unreachable checks before declaring "down"
@@ -22,6 +23,7 @@ export const commonToolsUp: Tile = {
     try {
       const t0 = Date.now();
       const res = await fetch(url, { signal: AbortSignal.timeout(8000), redirect: "manual" });
+      confirmDashboardConnectivity();
       const ms = Date.now() - t0;
       try {
         await res.body?.cancel();
