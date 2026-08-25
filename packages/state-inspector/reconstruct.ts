@@ -109,12 +109,20 @@ const MAX_SEQ = Number.MAX_SAFE_INTEGER;
  */
 function decodeStoredDocument(data: string | null): EntityDocument {
   const parsed = decodeStored(data ?? "null");
-  if (!isEntityDocument(parsed)) {
-    throw new TypeError(
-      "memory v2 stored documents must be plain object roots",
-    );
-  }
+  if (!isEntityDocument(parsed)) throw notADocument(parsed);
   return parsed as EntityDocument;
+}
+
+/** The error for a payload that decoded into something other than a document. */
+function notADocument(decoded: unknown): TypeError {
+  const shape = decoded === null
+    ? "null"
+    : Array.isArray(decoded)
+    ? "an array"
+    : `a ${typeof decoded}`;
+  return new TypeError(
+    `memory v2 stored documents must be plain object roots; got ${shape}`,
+  );
 }
 
 /**
@@ -498,14 +506,7 @@ export function reconstructOutcome(
     // an array, a scalar — is malformed, and calling it present hands every
     // reader a value they will dereference as a document.
     if (!isEntityDocument(decoded)) {
-      return {
-        status: "undecodable",
-        error: new TypeError(
-          `document is ${
-            decoded === null ? "null" : typeof decoded
-          }, not an object`,
-        ),
-      };
+      return { status: "undecodable", error: notADocument(decoded) };
     }
     return { status: "present", document: decoded as EntityDocument };
   } catch (error) {
