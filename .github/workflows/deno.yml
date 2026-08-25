@@ -78,7 +78,28 @@ jobs:
 
       - name: 🧹 Lint codebase
         timeout-minutes: *work-timeout
-        run: deno task run-recorded lint repo deno-lint -- deno lint
+        run: |
+          ulimit -c unlimited
+          sudo sysctl -w kernel.core_pattern="$GITHUB_WORKSPACE/deno-core.%p"
+          deno task run-recorded lint repo deno-lint -- deno lint
+
+      - name: 📋 Describe Deno lint core dump
+        if: ${{ failure() }}
+        run: |
+          shopt -s nullglob
+          cores=(deno-core.*)
+          for core in "${cores[@]}"; do
+            file "$core"
+          done
+
+      - name: 📤 Upload Deno lint core dump
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: deno-lint-core-a${{ github.run_attempt }}
+          path: deno-core.*
+          if-no-files-found: ignore
+          retention-days: 14
 
       # This is the only type check for the paths listed in
       # tasks/typecheck.ts: the test jobs in this workflow and the package
