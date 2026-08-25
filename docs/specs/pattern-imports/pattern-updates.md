@@ -324,7 +324,9 @@ Setup re-points the piece's stored argument at the incoming argument schema and
 validates it in the same transaction, so an apply whose durable argument the new
 schema cannot read is refused rather than committed. The verdict is tri-state,
 and it is only ever minted over a fully-read value: a validation whose
-materialization crossed a link target the local replica has never pulled yields
+transaction crossed a link target the local replica has never pulled — by the
+validating materialization itself, or by any earlier read in the same
+transaction, so read order cannot change the verdict — yields
 no verdict at all — the update postpones (`StoredArgumentValidationPendingError`,
 never classified as a refusal), the missing targets' loads are already kicked,
 and the attempt repeats on storage settlement until the missing set stops

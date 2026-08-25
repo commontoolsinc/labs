@@ -709,7 +709,19 @@ export function resolveLinkTracingDereferences(
         link.scope === "space"
       ) {
         pendingDeadEnd = true;
-        if (lastHopPullKicked) noteMissingLinkTargetTx(tx, link);
+        // A first-probe dead end (a data-derived handle whose own doc is
+        // missing — no hop followed in THIS walk, so `lastHopPullKicked`
+        // never got to answer) asks the runtime instead: seen means a
+        // judged absence and no note, never-seen kicks the load that makes
+        // the pending state healable at all, in flight keeps the note. The
+        // ordinary first-write idiom never reaches this branch — a plain
+        // handle has neither `followedHop` nor `viaLinkHop`.
+        if (
+          lastHopPullKicked ||
+          (!followedHop && runtime.ensureLinkedDocLoaded(link, link.space))
+        ) {
+          noteMissingLinkTargetTx(tx, link);
+        }
       }
       break;
     }

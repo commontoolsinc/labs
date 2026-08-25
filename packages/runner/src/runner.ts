@@ -1637,12 +1637,16 @@ export class Runner {
     // yields no verdict at all, whichever way the readable subset leaned.
     const missed = missingLinkTargetsTx(tx);
     if (missed.length > 0) {
+      // Sorted, so the same missing SET always renders the same key list:
+      // `runSynced`'s no-progress check compares whole lists, and an
+      // encounter-order difference between two attempts must not read as
+      // progress.
       const keys = [
         ...new Set(missed.map((link) => {
           const { space, id, scope } = link as NormalizedFullLink;
           return `${space}/${String(scope ?? "space")}/${id}`;
         })),
-      ];
+      ].sort();
       throw new StoredArgumentValidationPendingError(
         keys,
         validationFailure ??
