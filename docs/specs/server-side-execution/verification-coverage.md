@@ -6052,7 +6052,7 @@ supply; OW29/OW32/OW34 closed):
     entry's own gate evidence at the merged head, 10/10, never by
     inference from the default-app gate.**
     **THE ENSURE-ON PROFILE-SURFACE MEMBER ROOT-CAUSED AND FIXED
-    2026-08-25 — the n=3 side probe's "create surface never renders"
+    2026-08-25 (PR #6312) — the n=3 side probe's "create surface never renders"
     shape and the #6248 board's profile-shard family, reproduced
     locally: a WRITE-side SELF-CLOBBER of the wish's create-surface
     sidecar — neither recorded read-side member, and not a
