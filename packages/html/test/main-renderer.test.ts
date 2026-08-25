@@ -237,6 +237,56 @@ Deno.test("VDomRenderer - acknowledges applied batches", async () => {
   await renderer.dispose();
 });
 
+Deno.test("VDomRenderer - a batch's null rootId clears the tracked root", async () => {
+  const connection = new MockConnection();
+  const mock = new MockDoc(
+    '<!DOCTYPE html><html><body><div id="root"></div></body></html>',
+  );
+  const renderer = new VDomRenderer({
+    runtimeClient: {} as any,
+    connection: connection as any,
+    document: mock.document,
+  });
+
+  const cellRef = {
+    space: "did:key:test",
+    id: "cell-id",
+    path: [],
+    type: "application/json",
+  } as unknown as CellRef;
+
+  const container = mock.document.getElementById("root")!;
+  await renderer.render(container as unknown as HTMLElement, cellRef);
+  const mountId = renderer.getMountId();
+  if (mountId === null) {
+    throw new Error("expected renderer to have an active mount");
+  }
+
+  const batch = (batchId: number, rootId: number | null | undefined) => ({
+    type: "vdom:batch",
+    batchId,
+    mountId,
+    ops: batchId === 1
+      ? [{ op: "create-element", nodeId: 1, tagName: "button" }]
+      : [],
+    ...(rootId === undefined ? {} : { rootId }),
+  });
+
+  connection.emit("vdombatch", batch(1, 1));
+  assertEquals(renderer.getRootNode() !== null, true);
+
+  // Absent says nothing about the root, so the tracked one stands.
+  connection.emit("vdombatch", batch(2, undefined));
+  assertEquals(renderer.getRootNode() !== null, true);
+
+  // `null` is what the reconciler reports for a tree with no root child, and
+  // it is a statement rather than a silence: the tracked root goes away.
+  connection.emit("vdombatch", batch(3, null));
+  assertEquals(renderer.getRootNode(), null);
+
+  await renderer.dispose();
+});
+
 Deno.test("VDomRenderer - constructs without throwing against an already-disposed connection", async () => {
   const connection = new MockConnection();
   // Dispose before the renderer attaches: attachVDom runs the teardown

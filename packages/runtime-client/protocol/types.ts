@@ -125,10 +125,12 @@ export enum NotificationType {
   PendingWritesChanged = "callback:pending-writes",
 }
 
-// Worker -> main-thread signals the transport acts on itself, rather than
-// forwarding to the connection. Their own enum because they are the channel's
-// traffic rather than the runtime's: one settles the channel and one annotates
-// it, and no `RuntimeConnection` ever sees either.
+/**
+ * Worker-to-main-thread signals the transport acts on itself, rather than
+ * forwarding to the connection. Their own enum because they are the channel's
+ * traffic rather than the runtime's: one settles the channel and one annotates
+ * it, and no `RuntimeConnection` ever sees either.
+ */
 export enum TransportNotificationType {
   WorkerReady = "worker:ready",
   WorkerConsole = "worker:console",

@@ -171,6 +171,10 @@ export function isVDomBatchNotification(
   );
 }
 
+/**
+ * Is `value` a {@link WorkerReadyNotification}? This is the post the transport
+ * settles `ready()` on, and the only message it treats that way.
+ */
 export function isWorkerReadyNotification(
   value: unknown,
 ): value is WorkerReadyNotification {
@@ -180,6 +184,12 @@ export function isWorkerReadyNotification(
   );
 }
 
+/**
+ * Is `value` a {@link WorkerConsoleNotification}? A `level` outside
+ * {@link WORKER_CONSOLE_LEVELS} is not one, which bounds what this recognizes
+ * to what the worker's console bridge produces: the bridge posts from that
+ * same roster, so nothing it sends is excluded here.
+ */
 export function isWorkerConsoleNotification(
   value: unknown,
 ): value is WorkerConsoleNotification {
