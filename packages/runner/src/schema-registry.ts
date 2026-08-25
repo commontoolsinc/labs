@@ -39,6 +39,21 @@ export class SchemaDocumentHashMismatchError extends Error {
 
 const documentsByHash = new Map<string, JSONSchema>();
 
+// Hashes whose documents were MINTED here: produced by decomposing an
+// inline schema this process held (`externalizeSchema`), rather than
+// learned from a session's sync. They survive the lease-clear transition,
+// because the mint's other output — the ref-form schema object — outlives
+// the session that minted it: the intern table and the content-keyed memos
+// derived from it hand the SAME `{$ref: "cid:…"}` object to later
+// sessions, and a ref whose document is gone is unusable everywhere while
+// no longer being recomputable from anything (the inline form it replaced
+// is exactly what was thrown away). Session-learned documents keep
+// clearing: their retention rationale is the availability the session
+// proved, which ends with it. A minted document is a pure function of
+// content this process produced, so pinning it can never hold a wrong or
+// stale value — only bytes the process already paid for.
+const pinnedHashes = new Set<string>();
+
 // Listeners invoked when the registry clears (last lease out). Modules that
 // memoize resolution SUCCESSES by schema identity register here to drop
 // those caches in the same moment: a success cached in one lease epoch
@@ -74,7 +89,13 @@ export function acquireSchemaRegistryLease(): () => void {
     released = true;
     activeLeases--;
     if (activeLeases === 0) {
-      documentsByHash.clear();
+      // Session-learned entries only; minted documents stay (see
+      // `pinnedHashes`). Closure-completeness verdicts are cleared whole —
+      // one computed over a mix of minted and session-learned documents no
+      // longer holds, and recomputing over the survivors is cheap.
+      for (const hash of documentsByHash.keys()) {
+        if (!pinnedHashes.has(hash)) documentsByHash.delete(hash);
+      }
       completeClosures.clear();
       for (const listener of clearListeners) listener();
     }
@@ -109,6 +130,22 @@ export function registerSchemaDocument(
   if (existing !== undefined) return existing;
   const interned = sah.schemaOrUndefined as JSONSchema;
   documentsByHash.set(taggedHash, interned);
+  return interned;
+}
+
+/**
+ * {@link registerSchemaDocument}, for a document MINTED in this process by
+ * decomposing an inline schema (`externalizeSchema`): the entry additionally
+ * survives lease-clear transitions, for the reason `pinnedHashes` gives —
+ * the ref-form schema objects the mint hands out outlive the session, and
+ * the document is their only road back to a usable schema.
+ */
+export function registerMintedSchemaDocument(
+  taggedHash: string,
+  schema: JSONSchema,
+): JSONSchema {
+  const interned = registerSchemaDocument(taggedHash, schema);
+  pinnedHashes.add(taggedHash);
   return interned;
 }
 

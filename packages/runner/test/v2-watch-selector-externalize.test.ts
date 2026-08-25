@@ -5,12 +5,19 @@ import type { JSONSchemaObj } from "@commonfabric/api";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 
 import { decomposeSchema } from "../src/schema-decompose.ts";
-import { registerSchemaDocument } from "../src/schema-registry.ts";
+import {
+  acquireSchemaRegistryLease,
+  registerSchemaDocument,
+} from "../src/schema-registry.ts";
+import { externalizeSchema } from "../src/link-utils.ts";
 import {
   resetContentAddressedSchemasConfig,
   setContentAddressedSchemasConfig,
 } from "../src/schema-doc-config.ts";
-import { externalizeSyncSelector } from "../src/storage/v2-watch.ts";
+import {
+  externalizeSyncSelector,
+  SelectorClosureUnavailableError,
+} from "../src/storage/v2-watch.ts";
 
 describe("v2-watch", () => {
   describe("externalizeSyncSelector()", () => {
@@ -128,6 +135,50 @@ describe("v2-watch", () => {
       expect(externalizeSyncSelector(refused as never, () => true)).toBe(
         refused as never,
       );
+    });
+
+    it("throws rather than emitting a reference the registry cannot back", () => {
+      // The client's send-only-what-you-can-back obligation, enforced at
+      // the emission gate: forwarding the ref would only move this failure
+      // to the server's loud refusal, one round trip later. A reference
+      // with no registered document reaches here only from another
+      // process without its closure — minted references are pinned for
+      // the process lifetime — so this is an invariant violation to
+      // surface at its source.
+      setContentAddressedSchemasConfig(true);
+      const orphanRef = {
+        path: [],
+        schema: {
+          $ref: "cid:fid1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        },
+      };
+      expect(() => externalizeSyncSelector(orphanRef, () => false)).toThrow(
+        SelectorClosureUnavailableError,
+      );
+    });
+
+    it("recomposes a MINTED reference across a registry lease epoch", () => {
+      // The vintage gate's failing shape, healed: `externalizeSchema`'s
+      // ref-form object survives the epoch through the intern table and
+      // content-keyed memos, and before minted documents were pinned, the
+      // epoch clear left that reference unresolvable — undecomposable at
+      // the emission gate, refused by the server. The mint now outlives
+      // the clear, so a later session's selector recomposes inline.
+      setContentAddressedSchemasConfig(true);
+      const release = acquireSchemaRegistryLease();
+      const inline: JSONSchemaObj = {
+        type: "array",
+        items: { type: "object", properties: { label: { type: "string" } } },
+      };
+      const refForm = externalizeSchema(inline) as JSONSchemaObj;
+      expect(typeof refForm.$ref).toBe("string");
+      release();
+
+      const emitted = externalizeSyncSelector(
+        { path: [], schema: refForm },
+        () => false,
+      );
+      expect(emitted.schema).toEqual(inline);
     });
   });
 });

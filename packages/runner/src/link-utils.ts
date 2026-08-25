@@ -16,7 +16,7 @@ import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import {
   lookupSchemaDocument,
   onSchemaRegistryClear,
-  registerSchemaDocument,
+  registerMintedSchemaDocument,
 } from "./schema-registry.ts";
 import { getContentAddressedSchemasConfig } from "./schema-doc-config.ts";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
@@ -234,7 +234,11 @@ export function externalizeSchema(schema: JSONSchemaObj): JSONSchema {
       resolveDocument: lookupSchemaDocument,
     });
     for (const [hash, document] of documents) {
-      registerSchemaDocument(hash, document);
+      // Minted, not session-learned: the ref-form object returned below
+      // outlives any one session (the intern table and its derived memos
+      // hand it across lease epochs), so the documents that make it usable
+      // must too — see `registerMintedSchemaDocument`.
+      registerMintedSchemaDocument(hash, document);
     }
     return internSchema({ $ref: rootRef });
   } catch (error) {

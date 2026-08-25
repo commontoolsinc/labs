@@ -16,6 +16,7 @@ import type { JSONSchemaObj } from "@commonfabric/api";
 
 import { pruneCfcSchemaDefinitions } from "../cfc/schema-refs.ts";
 import {
+  collectExternalSchemaRefHashes,
   containsExternalSchemaRef,
   decomposeSchema,
   recomposeSchema,
@@ -73,11 +74,34 @@ export const normalizeSyncSelector = (
  *   recomposes to the fully inline form through the realm registry, which
  *   holds every document behind a locally created reference.
  *
- * A decomposition refusal keeps the selector exactly as given; so does a
- * ref-bearing schema whose documents the registry cannot supply — that
- * reference was unresolvable locally too, and the server's diagnostic is
- * the loudest signal available.
+ * A decomposition refusal keeps the selector exactly as given when the
+ * schema carries no references — inline is inline, and the server accepts
+ * it. A REF-BEARING schema whose documents the registry cannot supply
+ * throws {@link SelectorClosureUnavailableError} instead: emitting it
+ * would violate the client's send-only-what-you-can-back obligation and
+ * spend a round trip on the server's refusal, while the local registry is
+ * where the miss actually is. Locally minted references are pinned for the
+ * process lifetime (`registerMintedSchemaDocument`), so reaching this
+ * throw means a reference crossed from another process without its
+ * closure — a bug to surface at its source, not to forward.
  */
+/**
+ * Thrown instead of emitting a selector whose schema carries `cid:` refs
+ * the realm registry cannot back — see {@link externalizeSyncSelector}.
+ */
+export class SelectorClosureUnavailableError extends Error {
+  constructor(readonly refs: readonly string[], cause: unknown) {
+    super(
+      `Selector schema references ${refs.length} schema document(s) the ` +
+        `realm registry cannot supply [${refs.slice(0, 3).join(", ")}${
+          refs.length > 3 ? ", …" : ""
+        }]; emitting the reference form would only move this failure to ` +
+        `the server. ${cause instanceof Error ? cause.message : ""}`,
+    );
+    this.name = "SelectorClosureUnavailableError";
+  }
+}
+
 export const externalizeSyncSelector = (
   selector: SchemaPathSelector,
   isSchemaDocPersisted: (hash: string) => boolean,
@@ -111,7 +135,13 @@ export const externalizeSyncSelector = (
       ),
     });
   } catch (error) {
-    if (error instanceof SchemaNotDecomposableError) return selector;
+    if (error instanceof SchemaNotDecomposableError) {
+      if (!carriesRefs) return selector;
+      throw new SelectorClosureUnavailableError(
+        [...collectExternalSchemaRefHashes(schema as JSONSchemaObj)],
+        error,
+      );
+    }
     throw error;
   }
 };
