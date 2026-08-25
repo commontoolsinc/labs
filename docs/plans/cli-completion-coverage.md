@@ -81,7 +81,7 @@ read before picking one up; this table is the roll-up.
 | 2 | Flags offered past a `stopEarly()` boundary | correctness | done |
 | 3 | Target resolution lags the reference grammar | correctness | done |
 | 4 | Verb flags do not complete | pattern vocabulary | shaper done, wiring after step 10 |
-| 5 | Result field paths for `get` and `wish` | pattern vocabulary | `get` done, `wish` refused |
+| 5 | Result field paths for `get` and `wish` | pattern vocabulary | `get` done, `wish` declined |
 | 6 | Result field paths for `call` and `exec` | pattern vocabulary | needs step 10 |
 | 7 | Slugs never complete | pattern vocabulary | done |
 | 8 | `--space` has no source a caller recognizes | first link | partly settled |
@@ -97,11 +97,18 @@ read before picking one up; this table is the roll-up.
 | 18 | A live-provider test seam | mechanism | done |
 | 19 | A gate that fails when a new slot has no decision | mechanism | done |
 
-**What can be picked up today.** Nothing on this list. What is left is held
-rather than open: item 4's wiring waits on step 10 of
-[CLI surface shape](cli-surface-shape.md), item 6 waits on the same step, items
-8 and 11 hold decisions, item 12's remedy is disproven, and item 5's `wish`
-half needs a wish resolution that does not write.
+**What can be picked up today.** Nothing on this list. What is left is held or
+settled rather than open: item 4's wiring waits on step 10 of
+[CLI surface shape](cli-surface-shape.md) and item 6 waits on the same step;
+items 8 and 11 hold decisions; and item 5's `wish` half is declined, because
+resolving a wish writes.
+
+One defect this list does not enumerate is open and unranked: the cell-path slot
+offers a piece's callables, which `cf get` refuses and redirects to `cf call`.
+It is asserted in `completion-over-the-cli.sh` as what happens today. Telling a
+callable from a value at a path needs the verbs listing, which that provider
+does not fetch — so it is a round trip rather than a filter, and that is the
+decision it waits on.
 
 Item 4's candidates are built and its wiring waits: step 10 decides whether a
 verb's fields are written before the `--` marker or after it, and the position
@@ -313,9 +320,11 @@ query adds nothing, because the cell is keyed by the query; a caller editing a
 query writes once per spelling they pass through.
 
 That is a keystroke with a side effect, which is the bar this item said to clear
-before building it, and it is not cleared. Completing `wish --select` needs a
-resolution that reads without committing, which is a change to `resolveWish`
-rather than to completion.
+before building it. **It is not cleared, and that is decided rather than
+deferred: a durable write per distinct query is not acceptable at a keystroke.**
+The slot stays empty. Completing it would need a resolution that reads without
+committing — a change to `resolveWish`, and a question for whoever owns the
+wish builtin rather than for this plan.
 
 `call` and `exec` are the other two commands carrying these flags, and their
 projection names positions in a verb's result rather than in the piece's root.
