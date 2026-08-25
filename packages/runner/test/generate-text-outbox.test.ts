@@ -183,7 +183,6 @@ describe("generateText outbox mechanism", () => {
 
     try {
       const rejectedTx = runtime.edit();
-      rejectedTx.setCfcEnforcementMode("enforce-explicit");
       rejectedTx.markCfcRelevant("generateText retry regression");
       action(rejectedTx);
       const rejectedResult = await rejectedTx.commit();
@@ -260,7 +259,6 @@ describe("generateText outbox mechanism", () => {
 
     try {
       const rejectedTx = runtime.edit();
-      rejectedTx.setCfcEnforcementMode("enforce-explicit");
       rejectedTx.markCfcRelevant("llm retry regression");
       action(rejectedTx);
       const rejectedResult = await rejectedTx.commit();

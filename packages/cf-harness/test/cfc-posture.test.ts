@@ -33,9 +33,12 @@ describe("cfc-posture", () => {
 
     it("resolves the fleet posture when the session states no dials", () => {
       const record = harnessFabricSessionPosture(SESSION);
-      expect(record.enforcementMode.rung).toBe("enforce-explicit");
-      expect(record.flowLabels.rung).toBe("off");
-      expect(record.flowLabels.diagnosticOnly).toBe(true);
+      expect(record.enforcementMode.rung).toBe("enforce-strict");
+      expect(record.flowLabels.rung).toBe("persist");
+      expect(record.flowLabels.diagnosticOnly).toBe(false);
+      // The policy RECORDS are the bundle's, not the fleet pin's: the pins
+      // set the dials, and the deployment configuration comes with the
+      // named posture.
       expect(record.policyDigest).toBe(null);
     });
 
@@ -92,7 +95,10 @@ describe("cfc-posture", () => {
     });
 
     it("marks a diagnostic rung as deciding nothing", () => {
-      expect(rendered(SESSION)).toContain("off (diagnostic only) — decides on");
+      // Declared monotonicity is the fleet posture's one diagnostic rung.
+      expect(rendered(SESSION)).toContain(
+        "observe (diagnostic only) — decides on",
+      );
     });
 
     it("prints every ungated sink with the reason it releases ungated", () => {

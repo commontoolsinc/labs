@@ -463,7 +463,7 @@ describe("RuntimeInternals", () => {
       experimental,
     });
 
-    expect(options.cfcEnforcementMode).toBe("enforce-explicit");
+    expect(options.cfcEnforcementMode).toBe("enforce-strict");
     // Epic H2: shell hosts run the flow-label dial at "persist" by default —
     // derived label components are written on every value write, activating
     // inv-9. H1 shipped "observe" (measurement); H2 flips to "persist" now that
@@ -476,11 +476,12 @@ describe("RuntimeInternals", () => {
     expect(options.spaceDid).toBe(session.space);
     expect(options.spaceName).toBe(session.spaceName);
     expect(options.experimental).toBe(experimental);
-    // Epic H3a: the render ceiling is a dogfood flag, default OFF — absent
-    // fields keep today's unbounded rendering (no ceiling, author
-    // declassification honored).
-    expect(options.renderDeclassificationPolicy).toBeUndefined();
-    expect(options.renderConfidentialityCeiling).toBeUndefined();
+    // Epic H3a/H3b: the render ceiling is on by default — display sinks gate
+    // against the §8.10.6 profile and author declassification is denied.
+    expect(options.renderDeclassificationPolicy).toBe("deny");
+    expect(options.renderConfidentialityCeiling).toEqual(
+      defaultRenderConfidentialityCeiling(session.as.did()),
+    );
   });
 
   it("populates the §8.10.6 render ceiling when cfcRenderCeiling is on", async () => {
@@ -535,6 +536,39 @@ describe("RuntimeInternals", () => {
     });
     expect(off.renderDeclassificationPolicy).toBeUndefined();
     expect(off.renderConfidentialityCeiling).toBeUndefined();
+  });
+
+  it("builds the render ceiling for a host-supplied acting principal", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    const delegate = await Identity.generate({ implementation: "noble" });
+    const session = await createSession({
+      identity,
+      spaceName: "lib-shell-cfc-render-ceiling-delegated",
+    });
+
+    const options = createRuntimeClientOptions({
+      session,
+      apiUrl: new URL("http://shell.test/"),
+      trustSnapshot: {
+        id: `principal:${delegate.did()}`,
+        actingPrincipal: delegate.did(),
+      },
+    });
+
+    // A display sink's audience is whoever the runtime renders as, which a
+    // delegated host names in its own trust snapshot rather than in the
+    // session identity.
+    expect(options.renderConfidentialityCeiling).toEqual(
+      defaultRenderConfidentialityCeiling(delegate.did()),
+    );
+    expect(options.renderConfidentialityCeiling?.atoms).toContainEqual({
+      type: "https://commonfabric.org/cfc/atom/User",
+      subject: delegate.did(),
+    });
+    expect(options.renderConfidentialityCeiling?.atoms).not.toContainEqual({
+      type: "https://commonfabric.org/cfc/atom/User",
+      subject: session.as.did(),
+    });
   });
 
   it("allows hosts to override CFC policy and trust snapshot", async () => {
@@ -1013,7 +1047,7 @@ describe("RuntimeInternals", () => {
         expect(transport.sent[0].data?.identity).toBe(identity.did());
         expect(transport.sent[0].data?.spaceDid).toBe(identity.did());
         expect(transport.sent[0].data?.cfcEnforcementMode).toBe(
-          "enforce-explicit",
+          "enforce-strict",
         );
         // The backend is posture, not routing: a document believing it reads
         // from somewhere else is as wrong about what it joined as one

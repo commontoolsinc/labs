@@ -3115,7 +3115,7 @@ describe("runtime-processor", () => {
           rootSchema,
         );
         const tx = runtime.edit() as any;
-        tx.setCfcEnforcementMode("enforce-explicit");
+        tx.setCfcEnforcementMode("enforce-strict");
         (root.withTx(tx) as any).set({
           messages: [{ piece: { id: "alice", body: "hello" } }],
         });
@@ -3260,13 +3260,13 @@ describe("runtime-processor", () => {
         );
 
         const seed = runtime.edit();
-        seed.setCfcEnforcementMode("enforce-explicit");
+        seed.setCfcEnforcementMode("enforce-strict");
         root.withTx(seed).set({ messages: [] });
         seed.prepareCfc();
         expect((await seed.commit()).ok).toBeDefined();
 
         const tx = runtime.edit();
-        tx.setCfcEnforcementMode("enforce-explicit");
+        tx.setCfcEnforcementMode("enforce-strict");
         root.withTx(tx).key("messages").push({
           piece: {
             id: "alice-message",
@@ -4914,8 +4914,8 @@ describe("runtime-processor", () => {
           >[2],
         ),
       );
-      expect(options.cfcEnforcementMode).toBe("enforce-explicit");
-      expect(options.cfcFlowLabels).toBeUndefined();
+      expect(options.cfcEnforcementMode).toBe("enforce-strict");
+      expect(options.cfcFlowLabels).toBe("persist");
     });
 
     it("threads the host-decided space-host map through to the runtime options", () => {

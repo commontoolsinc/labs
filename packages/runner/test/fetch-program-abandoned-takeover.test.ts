@@ -101,6 +101,10 @@ describe("a refused fetchProgram takeover", () => {
     holder = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: holderStorage,
+      // The holder is the replica that does NOT enforce, which is what leaves
+      // the taker as the only commit that can be refused. Labels still flow
+      // and are still measured; nothing acts on the measurement.
+      cfcEnforcementMode: "observe",
     });
     taker = new Runtime({
       apiUrl: new URL(import.meta.url),

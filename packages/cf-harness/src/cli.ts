@@ -540,8 +540,9 @@ Options:
   --fabric-space <space>        Target space (name or did:key) for the fabric-session tools;
                                 all three --fabric-* session flags go together
   --fabric-cfc-enforcement-mode <mode> enforce-explicit | enforce-strict for the fabric
-                                session's runtime (raise-only; distinct from
-                                --cfc-enforcement-mode, which governs the harness)
+                                session's runtime (enforcing rungs only; distinct
+                                from --cfc-enforcement-mode, which governs the
+                                harness)
   --fabric-cfc-flow-labels <mode> off | observe | persist flow-label propagation on
                                 the fabric session's runtime
   --fabric-cfc-posture <name>   max-enforcement: opt the fabric session's runtime
@@ -1673,8 +1674,9 @@ export const parseCfHarnessCliArgs = async (
     fabricCfcEnforcementMode !== "enforce-explicit" &&
     fabricCfcEnforcementMode !== "enforce-strict"
   ) {
-    // Raise-only: the fabric session's preset already pins enforce-explicit,
-    // so the dial admits that pin or a raise to strict, never a relaxation.
+    // Enforcing rungs only: the fabric session is a trusted write path into
+    // a real space, so the dial selects between enforce-explicit and the
+    // enforce-strict preset pin, never a non-enforcing mode.
     throw new Error(
       `--fabric-cfc-enforcement-mode must be enforce-explicit or enforce-strict: ${fabricCfcEnforcementMode}`,
     );

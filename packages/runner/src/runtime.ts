@@ -539,7 +539,7 @@ export interface RuntimeOptions {
    */
   servingPosture?: boolean;
 
-  /** Rollout mode for commit-boundary CFC enforcement. Defaults to `enforce-explicit`. */
+  /** Rollout mode for commit-boundary CFC enforcement. Defaults to `enforce-strict`. */
   cfcEnforcementMode?: CfcEnforcementMode;
 
   /**
@@ -561,24 +561,25 @@ export interface RuntimeOptions {
   onPatternInstantiated?: PatternInstantiationObserver;
 
   /**
-   * Flow-label propagation dial (S16 default transition). Defaults to `off`.
-   * Propagation requires enforcement mode ≥ `observe` to run at the commit
-   * boundary; it derives and persists labels but never rejects by itself.
+   * Flow-label propagation dial (S16 default transition). Defaults to
+   * `persist`. Propagation requires enforcement mode ≥ `observe` to run at
+   * the commit boundary; it derives and persists labels but never rejects by
+   * itself.
    */
   cfcFlowLabels?: CfcFlowLabelsMode;
 
   /**
    * Write-side `requiredIntegrity` floor dial (§8.12.4.1 / SC-18, Epic D3).
-   * Defaults to `off`. `observe` evaluates the floor and emits diagnostics;
-   * `enforce` records a prepare reason on a floor miss (rejecting the commit
-   * under the enforcing enforcement modes). The floor tests the written
-   * value's integrity, never the consumed-read set.
+   * Defaults to `enforce`. `observe` evaluates the floor and emits
+   * diagnostics; `enforce` records a prepare reason on a floor miss
+   * (rejecting the commit under the enforcing enforcement modes). The floor
+   * tests the written value's integrity, never the consumed-read set.
    */
   cfcWriteFloor?: CfcWriteFloorMode;
 
   /**
    * Trigger-read gating on the enforcement side (§8.9.2 / SC-3, Epic H5).
-   * Defaults to `false`. When true, the addresses whose invalidating writes
+   * Defaults to `true`. When true, the addresses whose invalidating writes
    * scheduled a reactive rerun join the consumed set the sink-request egress
    * ceiling and input-requirement gates quantify over (fail-closed; extra
    * metadata resolution per prepare).
@@ -598,35 +599,38 @@ export interface RuntimeOptions {
 
   /**
    * Exchange-rule policy evaluation dial (Epic B5, spec §4.4.5). Defaults to
-   * `off` (gates decide on raw labels, byte-identical to before the dial).
-   * `observe` evaluates gated labels to fixpoint and emits diagnostics while
-   * still deciding on the un-rewritten label; `enforce` decides on the
-   * rewritten label and fails closed on fuel exhaustion.
+   * `enforce`. `off` decides gates on raw labels, byte-identical to before
+   * the dial existed; `observe` evaluates gated labels to fixpoint and emits
+   * diagnostics while still deciding on the un-rewritten label; `enforce`
+   * decides on the rewritten label and fails closed on fuel exhaustion.
    */
   cfcPolicyEvaluation?: CfcPolicyEvaluationMode;
 
   /**
    * Cross-space label-metadata representation dial (inv-12 Stage 1 / SC-25,
    * spec §4.6.4.1; docs/specs/cfc-label-metadata-confidentiality.md §2/§5).
-   * Defaults to `off` (persisted label bytes identical to before the dial).
-   * `observe` computes the classification-governed transformed form for
-   * cross-space entries and emits a structured divergence diagnostic while
-   * persisting verbatim; `enforce` persists the transformed form (commitment
-   * fields as `{digestOf: <hash>}` markers). Representation only — never
-   * rejects a commit by itself.
+   * Defaults to `enforce`. `off` persists label bytes identical to before
+   * the dial existed; `observe` computes the classification-governed
+   * transformed form for cross-space entries and emits a structured
+   * divergence diagnostic while persisting verbatim; `enforce` persists the
+   * transformed form (commitment fields as `{digestOf: <hash>}` markers).
+   * Representation only — never rejects a commit by itself.
    */
   cfcLabelMetadataProtection?: CfcLabelMetadataProtectionMode;
 
   /**
    * Declared-component monotonicity gate dial (WP5, spec §8.12.1/§8.12.8;
    * docs/specs/cfc-persisted-declassification.md §4 item 3). Defaults to
-   * `off` (the declared re-mint persists exactly what it does today).
-   * `observe` compares each re-minted declared labelMap entry against the
-   * stored declared entry at the same path and emits a structured diagnostic
-   * on a non-monotone re-mint while persisting today's bytes; `enforce`
-   * records a fail-closed prepare reason (rejecting the commit under the
-   * enforcing enforcement modes). Governs ONLY the `declared` component —
-   * derived/link/structure components keep their §8.12.8 disciplines.
+   * `observe`. `off` persists the declared re-mint unchecked; `observe`
+   * compares each re-minted declared labelMap entry against the stored
+   * declared entry at the same path and emits a structured diagnostic on a
+   * non-monotone re-mint while persisting those bytes; `enforce` records a
+   * fail-closed prepare reason (rejecting the commit under the enforcing
+   * enforcement modes). Governs ONLY the `declared` component —
+   * derived/link/structure components keep their §8.12.8 disciplines. The
+   * default settles at `enforce` once per-principal `addIntegrity` mints —
+   * non-monotone declared updates by construction — migrate to the
+   * `derived` component.
    */
   cfcDeclaredMonotonicity?: CfcDeclaredMonotonicityMode;
 
@@ -2925,7 +2929,7 @@ export class Runtime {
       // A vouched ingest still needs its provenance mark minted even where CFC
       // enforcement is disabled (an explicit `cfcEnforcementMode: "disabled"`
       // opt-in — no shipped host today; toolshed passes no CFC options and so
-      // runs the enforce-explicit default). The mint
+      // runs the enforce-strict default). The mint
       // is a builtin-authored boundary-commit step that never rejects, so run
       // prepare for it explicitly rather than forcing the enforcement dial up
       // (which would desync ingest txs from the runtime's real mode). The

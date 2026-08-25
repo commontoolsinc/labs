@@ -118,7 +118,8 @@ export const isCfcEnforcementMode = (
   typeof input === "string" &&
   CFC_ENFORCEMENT_MODES.includes(input as CfcEnforcementMode);
 
-export const DEFAULT_CFC_ENFORCEMENT_MODE: CfcEnforcementMode = "disabled";
+export const DEFAULT_CFC_ENFORCEMENT_MODE: CfcEnforcementMode =
+  "enforce-strict";
 
 /**
  * Strictness ranking used to forbid weakening a transaction's enforcement mode
@@ -641,7 +642,7 @@ export type CfcPrepareState =
  */
 export type CfcFlowLabelsMode = "off" | "observe" | "persist";
 
-export const DEFAULT_CFC_FLOW_LABELS_MODE: CfcFlowLabelsMode = "off";
+export const DEFAULT_CFC_FLOW_LABELS_MODE: CfcFlowLabelsMode = "persist";
 
 /**
  * Write-side `requiredIntegrity` floor dial (§8.12.4.1 / SC-18, Epic D3),
@@ -655,7 +656,7 @@ export const DEFAULT_CFC_FLOW_LABELS_MODE: CfcFlowLabelsMode = "off";
  */
 export type CfcWriteFloorMode = "off" | "observe" | "enforce";
 
-export const DEFAULT_CFC_WRITE_FLOOR_MODE: CfcWriteFloorMode = "off";
+export const DEFAULT_CFC_WRITE_FLOOR_MODE: CfcWriteFloorMode = "enforce";
 
 /**
  * Trigger-read gating (§8.9.2 / SC-3, Epic H5). When ON, the addresses whose
@@ -665,11 +666,11 @@ export const DEFAULT_CFC_WRITE_FLOOR_MODE: CfcWriteFloorMode = "off";
  * derivation. Closes the residual "dep changed" channel (~1 bit/change event)
  * where a handler scheduled by a secret write egresses without re-reading the
  * secret. Adds reads to the gate (fail-closed direction) at the cost of extra
- * metadata resolution per prepare, so it ships behind a flag (default OFF).
+ * metadata resolution per prepare.
  */
 export type CfcTriggerReadGating = boolean;
 
-export const DEFAULT_CFC_TRIGGER_READ_GATING: CfcTriggerReadGating = false;
+export const DEFAULT_CFC_TRIGGER_READ_GATING: CfcTriggerReadGating = true;
 
 /**
  * Whether the envelope persist path stores the DECOMPOSED spelling: the
@@ -701,7 +702,7 @@ export const DEFAULT_CFC_DECOMPOSED_ENVELOPES: CfcDecomposedEnvelopes = false;
 export type CfcPolicyEvaluationMode = "off" | "observe" | "enforce";
 
 export const DEFAULT_CFC_POLICY_EVALUATION_MODE: CfcPolicyEvaluationMode =
-  "off";
+  "enforce";
 
 /**
  * Cross-space label-metadata representation dial (inv-12 Stage 1 / SC-25,
@@ -718,7 +719,7 @@ export const DEFAULT_CFC_POLICY_EVALUATION_MODE: CfcPolicyEvaluationMode =
 export type CfcLabelMetadataProtectionMode = "off" | "observe" | "enforce";
 
 export const DEFAULT_CFC_LABEL_METADATA_PROTECTION_MODE:
-  CfcLabelMetadataProtectionMode = "off";
+  CfcLabelMetadataProtectionMode = "enforce";
 
 /**
  * Declared-component monotonicity gate dial (WP5; spec §8.12.1/§8.12.8;
@@ -741,7 +742,7 @@ export const DEFAULT_CFC_LABEL_METADATA_PROTECTION_MODE:
 export type CfcDeclaredMonotonicityMode = "off" | "observe" | "enforce";
 
 export const DEFAULT_CFC_DECLARED_MONOTONICITY_MODE:
-  CfcDeclaredMonotonicityMode = "off";
+  CfcDeclaredMonotonicityMode = "observe";
 
 /**
  * Per-transaction privileged marker exempting exactly ONE (doc, path,

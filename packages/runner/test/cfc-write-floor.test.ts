@@ -20,7 +20,8 @@ const signer = await Identity.fromPassphrase("runner-cfc-write-floor");
 // read-side gate (verifyInputRequirements) quantifies over consumed reads; the
 // floor tests the WRITTEN VALUE's integrity — schema `addIntegrity` mints,
 // carried link-view integrity, the flow hereditary meet — against the declared
-// floor. Dial `cfcWriteFloor: off | observe | enforce`, default off.
+// floor. Dial `cfcWriteFloor: off | observe | enforce`, default enforce; a
+// case below that names `off` is opting out of the floor it is characterizing.
 const ADMIN_ATOM = "admin-approved";
 const LLM_DERIVED_ATOM = {
   type: "https://commonfabric.org/cfc/atom/LlmDerived",
@@ -151,9 +152,9 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
     }
   });
 
-  it("dial off (the default): the same write commits — byte-compat", async () => {
+  it("dial off: the same write commits — byte-compat", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
-    const runtime = makeRuntime({ storageManager });
+    const runtime = makeRuntime({ storageManager, cfcWriteFloor: "off" });
     try {
       const tx = runtime.edit();
       const sink = runtime.getCell(

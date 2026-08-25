@@ -335,6 +335,12 @@ describe("wish commit-prep failure surfacing (OW50 seat S-J)", () => {
         const runtime = new Runtime({
           apiUrl: new URL("https://example.com"),
           storageManager: manager,
+          // The subject is how a REFUSED commit surfaces through the wish.
+          // Seeding carries a labeled value into an undeclared container,
+          // which writer-fit refuses only at enforce-strict; the explicit
+          // rung persists-and-flags that measurement, so the refusals this
+          // suite pins are the ones its own fixtures stage.
+          cfcEnforcementMode: "enforce-explicit",
         });
         return {
           manager,

@@ -335,6 +335,12 @@ export async function openFileBackedRuntime(
   const runtime = new Runtime({
     apiUrl: new URL("http://toolshed.test"),
     storageManager,
+    // A vintage is replayed under the posture it was captured in, one rung
+    // below the fleet's strict writer-fit: a fixture's argument document
+    // declares no ceiling for a field the gate adds, so a strict replay
+    // measures the pattern's own labeled reads against an empty ceiling and
+    // refuses the write the gate exists to compare.
+    cfcEnforcementMode: "enforce-explicit",
   });
 
   return {

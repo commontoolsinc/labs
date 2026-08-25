@@ -76,6 +76,8 @@ describe("profile-home bio (owner-protected free-text field)", () => {
       result.withTx(tx2).key("setBio").send({
         bio: "Mathematician & first programmer.",
       });
+      // A manual test tx must prepare (the runtime's own commit paths do).
+      rt.prepareTxForCommit(tx2);
       const commit2 = await tx2.commit();
       expect(commit2.error).toBeUndefined();
       await result.pull();
@@ -88,6 +90,7 @@ describe("profile-home bio (owner-protected free-text field)", () => {
       result.withTx(tx3).key("setBio").send({
         bio: "  Countess of Lovelace.  ",
       });
+      rt.prepareTxForCommit(tx3);
       const commit3 = await tx3.commit();
       expect(commit3.error).toBeUndefined();
       await result.pull();

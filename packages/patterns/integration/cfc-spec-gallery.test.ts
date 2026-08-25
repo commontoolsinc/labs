@@ -69,6 +69,13 @@ describe("cfc spec gallery integration test", () => {
         pieceId: piece.id,
       },
       identity,
+      // The gallery exists to show a label, and the §8.10.6 display ceiling
+      // admits only the acting user's own identity atoms and the
+      // influence-class caveat kinds. A node carrying `SourceProvenance` or
+      // `fact-check-required` fails closed, taking the `cf-cfc-label` that
+      // names it with it, so this page names the weaker posture it
+      // demonstrates.
+      renderCeiling: false,
     });
 
     await clickTrustedActionAndWaitForText(
@@ -140,6 +147,13 @@ describe("cfc spec gallery integration test", () => {
         pieceId: piece.id,
       },
       identity,
+      // The gallery exists to show a label, and the §8.10.6 display ceiling
+      // admits only the acting user's own identity atoms and the
+      // influence-class caveat kinds. A node carrying `SourceProvenance` or
+      // `fact-check-required` fails closed, taking the `cf-cfc-label` that
+      // names it with it, so this page names the weaker posture it
+      // demonstrates.
+      renderCeiling: false,
     });
 
     await waitForCfcLabelText(page, [

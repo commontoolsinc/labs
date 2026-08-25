@@ -412,12 +412,12 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
     });
 
     it("with flow labels off, the Wave-2 grow-only ratchet folds the stronger stored entry back in", async () => {
-      // The dual pin: under the default cfcFlowLabels:"off" the legacy
-      // ratchet merges prior confidentiality into the fresh entry, so the
-      // confidentiality half of §8.12.1 cannot regress on this path — which
-      // is why the gate's confidentiality tests run under flow persist.
+      // The dual pin: under cfcFlowLabels:"off" the legacy ratchet merges
+      // prior confidentiality into the fresh entry, so the confidentiality
+      // half of §8.12.1 cannot regress on this path — which is why the
+      // gate's confidentiality tests run under flow persist.
       const storageManager = StorageManager.emulate({ as: signer });
-      const runtime = makeRuntime({ storageManager });
+      const runtime = makeRuntime({ storageManager, cfcFlowLabels: "off" });
       const seeder = makeRuntime({
         storageManager,
         cfcEnforcementMode: "disabled",
@@ -497,7 +497,10 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
 
     it("a real mode change after prepare invalidates the prepared decision", async () => {
       const storageManager = StorageManager.emulate({ as: signer });
-      const runtime = makeRuntime({ storageManager });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcDeclaredMonotonicity: "off",
+      });
       try {
         const tx = runtime.edit();
         const cell = runtime.getCell(

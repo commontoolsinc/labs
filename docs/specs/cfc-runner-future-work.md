@@ -38,18 +38,16 @@ facet of that one representational distance. Most of the flat model's narrowness
 *fail-closed* (it over-restricts — safe), but a few edges are genuine soundness
 holes, called out explicitly.
 
-**Default posture.** The commit gate is on by default: the Runtime constructor
-defaults `cfcEnforcementMode` to `enforce-explicit`
-([`runtime.ts:495`](../../packages/runner/src/runtime.ts)), as does lib-shell's
-`createRuntimeClientOptions` — the types-level
-`DEFAULT_CFC_ENFORCEMENT_MODE = "disabled"`
-([`types.ts:42`](../../packages/runner/src/cfc/types.ts)) is only the
-bare-transaction fallback. What *is* dormant: flow-labels are `persist` in the
-shell and `off` in every other host, the render confidentiality ceiling is wired
-end-to-end but the shell builds one only behind a flag that defaults off, and no
-host runs at `enforce-strict`, leaving the one reject that rung adds — the
-writer-fit misfit — unexercised in deployment. So the flow-taint and display
-protections below are *built but dormant* until a host turns them on — see Epic H.
+**Default posture.** Every dial rests at its strictest sound rung. The Runtime
+constructor and the type-level
+`DEFAULT_CFC_ENFORCEMENT_MODE`
+([`types.ts`](../../packages/runner/src/cfc/types.ts)) both name
+`enforce-strict`, as does lib-shell's `createRuntimeClientOptions`; flow labels
+persist, the shell builds the render confidentiality ceiling, and the write
+floor, trigger read gating, policy evaluation and label-metadata protection all
+enforce. Declared monotonicity stops at `observe`, which is its strictest sound
+rung while per-principal mints remain non-monotone. A deployment sits at a
+weaker rung only by naming that rung explicitly.
 
 ---
 

@@ -36,21 +36,21 @@ was last checked against the code.
 | [`lazyMaterialization`](#lazymaterialization)                               | `EXPERIMENTAL_LAZY_MATERIALIZATION` env, or `RuntimeOptions.experimental`                                                                       | on                                                                                   | Bernhard Seefeld                                      | fold into base read semantics, then delete flag                                                             | implemented, on by default                                         |
 | [`readerSchemaPrecedence`](#readerschemaprecedence)                         | `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` env, or `RuntimeOptions.experimental`                                                                   | on                                                                                   | Robin McCollum (#6338)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | **off** (`SERVER_EXECUTION_DEFAULT_ENABLED = false`; explicit `true` selects the other arm) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | soak on main at the ON default, then delete the flag and OFF path | Phases 1–7 landed; the section's dated entries carry each flip; stable `default`/`opposite` CI roles keep both postures guarded and make a default flip data-only |
-| [`cfcEnforcementMode`](#cfcenforcementmode)                                 | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse)                                                                    | `enforce-explicit`                                                                   | Bernhard Seefeld (#3263)                              | tighten default toward `enforce-strict`                                                                                                                                                                                           | active; ladder is permanent                                                     |
-| [`cfcFlowLabels`](#cfcflowlabels)                                           | `RuntimeOptions.cfcFlowLabels`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4011)                              | move toward `persist`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
-| [`cfcWriteFloor`](#cfcwritefloor)                                           | `RuntimeOptions.cfcWriteFloor`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4479)                              | move toward `enforce`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
-| [`cfcTriggerReadGating`](#cfctriggerreadgating)                             | `RuntimeOptions.cfcTriggerReadGating`                                                                                                           | `false`                                                                              | Bernhard Seefeld (#4488)                              | move toward `true`                                                                                                                                                                                                                | implemented, staged rollout                                                     |
+| [`cfcEnforcementMode`](#cfcenforcementmode)                                 | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse)                                                                    | `enforce-strict` (`observe` for cf-harness Loom runs)                                | Bernhard Seefeld (#3263)                              | settled at `enforce-strict`; lower rungs stay for diagnostics                                                                                                                                                                     | active; ladder is permanent                                                     |
+| [`cfcFlowLabels`](#cfcflowlabels)                                           | `RuntimeOptions.cfcFlowLabels`                                                                                                                  | `persist`                                                                            | Bernhard Seefeld (#4011)                              | settled at `persist`                                                                                                                                                                                                              | active, default on                                                              |
+| [`cfcWriteFloor`](#cfcwritefloor)                                           | `RuntimeOptions.cfcWriteFloor`                                                                                                                  | `enforce`                                                                            | Bernhard Seefeld (#4479)                              | settled at `enforce`; could fold into the base enforcement ladder                                                                                                                                                                 | active, default on                                                              |
+| [`cfcTriggerReadGating`](#cfctriggerreadgating)                             | `RuntimeOptions.cfcTriggerReadGating`                                                                                                           | `true`                                                                               | Bernhard Seefeld (#4488)                              | could become unconditional, retiring the dial                                                                                                                                                                                     | active, default on                                                              |
 | [`cfcDecomposedEnvelopes`](#cfcdecomposedenvelopes)                         | `RuntimeOptions.cfcDecomposedEnvelopes`                                                                                                         | `false`                                                                              | Robin McCollum (CT-2062)                              | move toward `true` once every deployed reader resolves the references a stored root carries                                                                                                                                      | implemented, off by default                                                     |
-| [`cfcPolicyEvaluation`](#cfcpolicyevaluation)                               | `RuntimeOptions.cfcPolicyEvaluation`                                                                                                            | `off`                                                                                | Bernhard Seefeld (#4566)                              | move toward `enforce`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
-| [`cfcDeclaredMonotonicity`](#cfcdeclaredmonotonicity)                       | `RuntimeOptions.cfcDeclaredMonotonicity`                                                                                                        | `off`                                                                                | Bernhard Seefeld (#4647)                              | `observe` first, then `enforce` (must soak before the §8.12.7 route 2b event ships)                                                                                                                                               | implemented, off by default                                                     |
+| [`cfcPolicyEvaluation`](#cfcpolicyevaluation)                               | `RuntimeOptions.cfcPolicyEvaluation`                                                                                                            | `enforce`                                                                            | Bernhard Seefeld (#4566)                              | settled at `enforce`; could retire once policy sets stabilize                                                                                                                                                                     | active, default on                                                              |
+| [`cfcDeclaredMonotonicity`](#cfcdeclaredmonotonicity)                       | `RuntimeOptions.cfcDeclaredMonotonicity`                                                                                                        | `observe`                                                                            | Bernhard Seefeld (#4647)                              | `enforce` once per-principal `addIntegrity` mints migrate to the `derived` component (must soak before the §8.12.7 route 2b event ships)                                                                                          | active, default on at `observe`                                                 |
 | [`cfcPrefixProvenanceStats`](#cfcprefixprovenancestats)                     | `RuntimeOptions.cfcPrefixProvenanceStats` (per-deployment; not env-wired)                                                                       | `false`                                                                              | Bernhard Seefeld (#4623)                              | stays a measurement opt-in; fold in or remove after Stage 0                                                                                                                                                                       | implemented, off by default, measurement only                                   |
-| [`cfcLabelMetadataProtection`](#cfclabelmetadataprotection)                 | `RuntimeOptions.cfcLabelMetadataProtection`                                                                                                     | `off`                                                                                | Bernhard Seefeld (#4638)                              | `observe` (divergence counting) first, then `enforce`                                                                                                                                                                             | implemented, staged rollout                                                     |
+| [`cfcLabelMetadataProtection`](#cfclabelmetadataprotection)                 | `RuntimeOptions.cfcLabelMetadataProtection`                                                                                                     | `enforce`                                                                            | Bernhard Seefeld (#4638)                              | settled at `enforce`; lower rungs stay for diagnostics                                                                                                                                                                            | active, default on                                                              |
 | [`conflictAdmissionMode`](#conflictadmissionmode)                           | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()`                                                                                    | `off`                                                                                | William Kelly (#4237); `hold` removed CT-1925 (#5110) | keep `preempt` as a tuning dial or remove after re-measurement                                                                                                                                                                    | implemented, off by default, measured net-negative                              |
 | [`syncSchemaTableV2`](#syncschematablev2)                                   | `setSyncSchemaTableConfig()` (negotiated per connection)                                                                                        | on                                                                                   | Ben Follington (#4292)                                | retire the negotiation once every peer speaks v2                                                                                                                                                                                  | implemented, on by default                                                      |
 | [`messageCompressionV1`](#messagecompressionv1)                             | `setMessageCompressionConfig()` (negotiated per connection)                                                                                     | on                                                                                   | PR #6474                                             | retire the rollback switch after the binary WebSocket envelope has field-soaked                                                                                                                                                   | implemented, on by default                                                      |
 | [`ownWriteEcho`](#ownwriteecho)                                             | `setOwnWriteEchoConfig()` (server-side only, not negotiated)                                                                                    | on                                                                                   | Robin McCollum (CT-1965)                              | remove the switch once the echo has field-soaked                                                                                                                                                                                  | implemented, on by default                                                      |
 | [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings`; in the shell, the `commonfabric.concurrentWatchRefresh()` console command (localStorage, per browser profile) | off                                                                                  | Ben Follington (#4937; shell toggle #4974)            | graduate to always-on after live measurement, or remove if superseded                                                                                                                                                             | implemented behind the flag, off by default, not yet measured over real latency |
-| [`cfcRenderCeiling`](#cfcrenderceiling)                                     | `commonfabric.cfcRenderCeiling()` in the browser (localStorage)                                                                                 | off                                                                                  | Bernhard Seefeld (#4550)                              | graduate once exchange resolution lands                                                                                                                                                                                           | implemented, off by default, dogfood only                                       |
+| [`cfcRenderCeiling`](#cfcrenderceiling)                                     | `commonfabric.cfcRenderCeiling()` in the browser (localStorage)                                                                                 | on                                                                                   | Bernhard Seefeld (#4550)                              | retire the per-profile opt-out once the ceiling has field-soaked                                                                                                                                                                  | active, default on, per-profile opt-out                                         |
 | [`INGEST_SELF_SERVE_ENABLED`](#ingest_self_serve_enabled) | `INGEST_SELF_SERVE_ENABLED` env on toolshed | off | Alex Komoroske (self-serve ingest channels) | graduate on once named-space keys stop deriving from a public passphrase | implemented, off by default |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning)                                 | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache`                                                             | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts                          | Ian Hickson                                           | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked                                                                                                                                      | implemented, on by default for FUSE-T, soak-validated                           |
 
@@ -598,18 +598,23 @@ They are not wired to environment variables. Instead, the first-party posture is
 set once in `coreOptions`, the shared core that every construction preset
 composes, in
 [`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts).
-`coreOptions` pins `cfcEnforcementMode` to `enforce-explicit`; the other CFC
-dials are deliberately left on their constructor defaults (`off` or none) there,
-with a comment marking `coreOptions` as the one place to flip a dial when a
-first-party rollout begins. So the place to advance a CFC rollout across the
-whole fleet is that one function, not each call site. A few presets accept
-per-environment overrides: `patternTest` and `unitTest` take a laxer
-`cfcEnforcementMode`, and `browserWorker` and `remoteClient` take
-host-controlled `cfcEnforcementMode` and `cfcFlowLabels` — the shell supplies
-the former's from its initialization data, and cf-harness supplies the
-latter's for its fabric session from `--fabric-cfc-enforcement-mode`
-(raise-only: `enforce-explicit` or `enforce-strict`) and
-`--fabric-cfc-flow-labels`, with `CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE` and
+`coreOptions` pins every enforcement dial at the strict end state of the
+deployment-mode matrix
+([`docs/specs/cfc-enforcement-matrix.md`](../specs/cfc-enforcement-matrix.md)
+§3): `cfcEnforcementMode: enforce-strict`, `cfcFlowLabels: persist`,
+`cfcWriteFloor: enforce`, `cfcTriggerReadGating: true`,
+`cfcPolicyEvaluation: enforce`, `cfcLabelMetadataProtection: enforce`, and
+`cfcDeclaredMonotonicity: observe` — the same values the `Runtime` constructor
+defaults to, pinned so a changed constructor default cannot silently relax
+first-party processes. So the place to move a CFC dial across the whole fleet
+is that one function, not each call site. A few presets accept per-environment
+overrides: `patternTest` and `unitTest` take a laxer `cfcEnforcementMode`, and
+`browserWorker` and `remoteClient` take host-controlled `cfcEnforcementMode`
+and `cfcFlowLabels` — the shell supplies the former's from its initialization
+data, and cf-harness supplies the latter's for its fabric session from
+`--fabric-cfc-enforcement-mode` (enforcing rungs only: `enforce-explicit` or
+`enforce-strict`) and `--fabric-cfc-flow-labels`, with
+`CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE` and
 `CF_HARNESS_FABRIC_CFC_FLOW_LABELS` as their environment defaults.
 `remoteClient` takes a host-controlled `cfcWriteFloor` on top of those two,
 which `PiecesController.initialize` forwards and the pattern multi-runtime
@@ -637,9 +642,9 @@ mechanism, since an exact-match ceiling cannot admit the source-varying
 material-risk caveats an llm sink exists to process. Building that mechanism
 is planned in
 [`docs/plans/cfc-llm-sink-admission.md`](../plans/cfc-llm-sink-admission.md).
-The bundle deliberately leaves the
-enforcement-mode pin at `enforce-explicit` (strict stays a per-session host
-raise), and leaves `cfcDecomposedEnvelopes`, `cfcTrustConfig`, and
+The bundle names no enforcement mode, so a runtime taking it keeps
+whatever mode it already has — the preset's `enforce-strict` pin, or a host
+raise over it — and it leaves `cfcDecomposedEnvelopes`, `cfcTrustConfig`, and
 `cfcPrefixProvenanceStats` alone. It is opt-in per runtime, never a fleet
 flip: cf-harness exposes it for its fabric session as `--fabric-cfc-posture`
 (`CF_HARNESS_FABRIC_CFC_POSTURE`); toolshed publishes whatever CFC posture its
@@ -688,8 +693,8 @@ the per-epic implementation notes).
 
 - **Toggle via.** `RuntimeOptions.cfcEnforcementMode`, pinned for first-party
   processes in `coreOptions` (see the category note). The cf-harness and fuse
-  read `CF_CFC_MODE` as an override, and cf-harness's fabric session can raise
-  its own runtime to `enforce-strict` through
+  read `CF_CFC_MODE` as an override, and cf-harness's fabric session selects
+  between the enforcing rungs through
   `--fabric-cfc-enforcement-mode` / `CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE`.
 - **Added by.** Bernhard Seefeld, in "Implement runner commit-boundary" (#3263,
   2026-04-14).
@@ -699,21 +704,22 @@ the per-epic implementation notes).
   diagnostics without rejecting; `enforce-explicit` rejects writes that violate
   explicit labels; `enforce-strict` also rejects violations that come from
   inferred taint.
-- **Current default and planned end state.** The type-level default constant
-  (`DEFAULT_CFC_ENFORCEMENT_MODE`) is `disabled`, but both the `Runtime`
-  constructor and the shared `coreOptions` preset set `enforce-explicit`, so
-  boundary enforcement is on by default in the product. (The preset pins the
-  same value the constructor would default to, so that a future change to the
-  constructor default cannot silently relax first-party processes.) The
-  content-addressed compilation cache is also gated on this being anything other
-  than `disabled`. Over time the default is expected to tighten toward
-  `enforce-strict`.
-- **Status on 2026-07-08.** Active. All four rungs of the ladder are
-  implemented; the ladder itself is a permanent part of the system rather than a
-  temporary flag.
-- **Path to removal.** The dial is not planned for removal. What changes over
-  time is the default rung; the `disabled` and `observe` rungs stay available
-  for local development and diagnostics.
+- **Current default and planned end state.** `enforce-strict` everywhere: the
+  type-level default constant (`DEFAULT_CFC_ENFORCEMENT_MODE`), the `Runtime`
+  constructor, and the shared `coreOptions` preset all name it. (The preset
+  pins the same value the constructor would default to, so that a future
+  change to the constructor default cannot silently relax first-party
+  processes.) cf-harness defaults its own dial to `observe` for a run carrying
+  a Loom run manifest that names no mode itself; every other cf-harness run
+  follows the platform default. The content-addressed compilation cache is
+  also gated on this being anything other than `disabled`. This is the ladder's
+  intended end state.
+- **Status on 2026-08-18.** Active at the `enforce-strict` end state. All four
+  rungs of the ladder are implemented; the ladder itself is a permanent part
+  of the system rather than a temporary flag.
+- **Path to removal.** The dial is not planned for removal. The `disabled`,
+  `observe`, and `enforce-explicit` rungs stay available for local development
+  and diagnostics.
 
 ### `cfcFlowLabels`
 
@@ -735,14 +741,13 @@ the per-epic implementation notes).
   labeled collection an attributed writer maintains still grows per element.
   Propagation runs only when the enforcement mode is at least `observe`; it
   derives and stores labels but never rejects on its own.
-- **Current default and planned end state.** `off` by default. The target is to
-  move toward `persist` as the downstream egress gates (render ceiling, sink
-  ceilings, and the LLM path) come online.
-- **Status on 2026-07-08.** Implemented and in staged rollout; the core
-  propagation work is done and further stages are tracked in the S16 design doc.
+- **Current default and planned end state.** `persist` by default — the steady
+  state, with the downstream egress gates (render ceiling, sink ceilings, and
+  the LLM path) consuming the persisted derived components.
+- **Status on 2026-09-01.** Active at the `persist` end state.
 - **Path to removal.** Flow-label propagation is load-bearing for the S16 audit
-  transition, so the dial is not expected to be removed; it will settle on
-  `persist` as its steady state.
+  transition, so the dial is not expected to be removed; the `off` and
+  `observe` rungs stay available for diagnostics.
 
 ### `cfcWriteFloor`
 
@@ -758,13 +763,11 @@ the per-epic implementation notes).
   `enforce` records a rejection reason when a write's integrity falls below the
   floor. The floor tests the integrity of the written value, not of the reads
   that produced it.
-- **Current default and planned end state.** `off` by default. The target is to
-  move toward `enforce` once field testing confirms the floor does not
-  over-reject legitimate writes.
-- **Status on 2026-08-19.** Implemented and in staged rollout.
-- **Path to removal.** Once integrity propagation is complete and the floor is
-  proven safe, the check could fold into the base enforcement ladder and the
-  separate dial could be retired.
+- **Current default and planned end state.** `enforce` by default — the end
+  state.
+- **Status on 2026-09-04.** Active at the `enforce` end state.
+- **Path to removal.** The check could fold into the base enforcement ladder
+  and the separate dial could be retired once the floor has field-soaked.
 
 ### `cfcTriggerReadGating`
 
@@ -777,13 +780,12 @@ the per-epic implementation notes).
   and the input-requirement gates quantify over, so the rerun cannot leak
   information through the mere fact that it was triggered. It fails closed and
   costs extra metadata resolution per commit prepare.
-- **Current default and planned end state.** `false` by default. The target is
-  to move toward `true` once the per-commit metadata resolution cost is
-  acceptable.
-- **Status on 2026-07-08.** Implemented and in staged rollout.
-- **Path to removal.** Once the cost is acceptable (or metadata caching removes
-  it), the default could flip to `true` and the gating could become
-  unconditional, retiring the dial.
+- **Current default and planned end state.** `true` by default — the end
+  state.
+- **Status on 2026-08-18.** Active, on by default.
+- **Path to removal.** The gating could become unconditional, retiring the
+  dial, once the per-commit metadata resolution cost has proven acceptable in
+  the field.
 
 ### `cfcDecomposedEnvelopes`
 
@@ -830,12 +832,13 @@ the per-epic implementation notes).
   labels to a fixpoint and emits diagnostics while still deciding on the
   un-rewritten label; `enforce` decides on the rewritten label and fails closed
   when the evaluation runs out of fuel.
-- **Current default and planned end state.** `off` by default. The target is to
-  move toward `enforce` once the policy rule sets and deployment policies are
-  stable.
-- **Status on 2026-07-08.** Implemented and in staged rollout.
-- **Path to removal.** Once policy evaluation is the norm, the dial could settle
-  on `enforce` and be retired.
+- **Current default and planned end state.** `enforce` by default — the end
+  state. Evaluation is a no-op until a deployment configures
+  `cfcPolicyRecords`, so the default costs nothing where no policy set is
+  declared.
+- **Status on 2026-08-18.** Active at the `enforce` end state.
+- **Path to removal.** The dial could be retired once the policy rule sets and
+  deployment policies have stabilized.
 
 ### `cfcDeclaredMonotonicity`
 
@@ -854,23 +857,27 @@ the per-epic implementation notes).
   replace disciplines. The per-transaction privileged widening exemption
   (`setCfcDeclaredWideningExemption`, trusted-builtin only) is the seam for the
   future §8.12.7 route 2b declassification event.
-- **Current default and planned end state.** `off` by default. The target is
-  `observe`, then `enforce` after soak — the route 2b rewrite event must not
-  ship before this gate is enforced
+- **Current default and planned end state.** `observe` by default — the
+  strictest rung that is sound today. Per-principal `addIntegrity` mints (an
+  `AuthoredByCurrentUser` claim resolving to a different acting principal on
+  each write) are non-monotone declared updates by construction, so `enforce`
+  waits for those mints to migrate to the `derived` component; it must then
+  soak before the §8.12.7 route 2b rewrite event ships
   (`docs/specs/cfc-persisted-declassification.md` §4–§5).
-- **Status on 2026-07-09.** Implemented, off by default.
+- **Status on 2026-08-18.** Active, default on at `observe`.
 - **Path to removal.** Not planned for removal: monotonicity is a permanent
-  store invariant. Once `enforce` has soaked, the dial could settle there and
-  the `off`/`observe` rungs remain for diagnostics, mirroring the enforcement
-  ladder.
+  store invariant. Once the per-principal mints migrate and `enforce` soaks,
+  the dial settles there; the lower rungs remain for diagnostics, mirroring
+  the enforcement ladder.
 
 ### `cfcPrefixProvenanceStats`
 
 - **Toggle via.** `RuntimeOptions.cfcPrefixProvenanceStats` (a plain boolean),
-  not env-wired. The presets do not pin it: like every CFC dial except the
-  enforcement mode, it is left out of the shared `coreOptions` and rides the
-  `Runtime` constructor default of `false` until a deployment sets it. The
-  preset classification table marks it `core-default (off)`.
+  not env-wired. The presets do not pin it: `coreOptions` pins the dials that
+  decide what a commit is allowed to do, and this one measures rather than
+  decides, so it is left out and rides the `Runtime` constructor default of
+  `false` until a deployment sets it. The preset classification table marks it
+  `core-default (off)`.
 - **Added by.** Bernhard Seefeld, in "D4 write-prefix precision counters
   (value-level provenance stage 0, SC-24)" (#4623, 2026-07-09).
 - **Purpose.** Measurement only, and the one dial here that does not affect
@@ -914,13 +921,12 @@ the per-epic implementation notes).
   digests the candidate; exchange patterns digest-match concrete values and
   refuse to bind variables over committed fields). Same-space-only labels always
   persist verbatim.
-- **Current default and planned end state.** `off` by default. Target is
-  `observe` to count divergences, then `enforce`
-  (`docs/specs/cfc-label-metadata-confidentiality.md` §5, SC-25).
-- **Status on 2026-07-09.** Implemented, staged rollout.
+- **Current default and planned end state.** `enforce` by default — the end
+  state (`docs/specs/cfc-label-metadata-confidentiality.md` §5, SC-25).
+- **Status on 2026-08-18.** Active at the `enforce` end state.
 - **Path to removal.** Not planned for removal: the representation rule is a
-  permanent inv-12 obligation; once `enforce` soaks the dial settles there with
-  the lower rungs kept for diagnostics, like the other CFC ladders.
+  permanent inv-12 obligation; the lower rungs are kept for diagnostics, like
+  the other CFC ladders.
 
 > The related `RuntimeOptions` fields `cfcSinkMaxConfidentiality`,
 > `cfcPolicyRecords`, and `cfcTrustConfig` are CFC _configuration inputs_ (the
@@ -1167,15 +1173,14 @@ the per-epic implementation notes).
   plus allow-listed influence-class caveat kinds; everything else fails closed
   and renders as a blocked placeholder, and author-supplied render-boundary
   declassification is denied.
-- **Current default and planned end state.** Off by default. It changes what the
-  shell renders and is expected to over-block until exchange resolution (a later
-  CFC stage, Epic H3b) lands, so it is enabled deliberately per browser profile
-  for dogfooding. The end state is to graduate the ceiling on once exchange
-  resolution makes the blocking precise.
-- **Status on 2026-07-08.** Implemented, off by default, dogfood only.
-- **Path to removal.** Land exchange resolution so the ceiling stops
-  over-blocking, turn it on by default, and then remove the localStorage toggle
-  and make the ceiling unconditional.
+- **Current default and planned end state.** On by default: exchange
+  resolution (Epic H3b) resolves shared `Space(...)` principals through the
+  verified `HasRole` rules at the render boundary, so the ceiling blocks
+  precisely rather than over-blocking. `commonfabric.cfcRenderCeiling(false)`
+  opts a browser profile out for diagnostics.
+- **Status on 2026-08-18.** Active, on by default, per-profile opt-out.
+- **Path to removal.** Remove the localStorage toggle and make the ceiling
+  unconditional once the default-on posture has field-soaked.
 
 ## Category 5: Fuse mount cache tuning
 

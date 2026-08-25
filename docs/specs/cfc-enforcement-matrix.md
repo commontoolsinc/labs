@@ -5,9 +5,9 @@ _Epic H, stage H4 (first sub-step), of
 Spec residual: SC-13 in [`cfc-spec-changes.md`](./cfc-spec-changes.md) (§18) and
 the `enforce-strict` differentiation (SC-13 / §18.6.3). This section settles
 **which combinations of the five CFC dials are conforming deployment states and
-in what order a deployment may advance them**, before H4 lands `enforce-strict`
-behavior and before H3a flips any shipped host — so the rollout ordering is
-written down first._
+in what order a deployment may advance them**. H4's `enforce-strict` behavior
+and H3a's shipped-host posture have both landed, so the states below describe
+where a deployment can sit rather than where it is going._
 
 ## 1. The five dials (all runtime-configured, all orthogonal)
 
@@ -16,11 +16,11 @@ subsumes another. Their current homes and defaults:
 
 | Dial | Values (weak → strict) | `Runtime` default | Governs |
 |---|---|---|---|
-| `cfcEnforcementMode` | `disabled` · `observe` · `enforce-explicit` · `enforce-strict` | `enforce-explicit` | whether a boundary **reason rejects** the commit ([types.ts](../../packages/runner/src/cfc/types.ts) `cfcEnforcementStrictness`) |
-| `cfcFlowLabels` | `off` · `observe` · `persist` | `off` | whether the per-tx **flow join is derived and persisted** as `derived` label components (S16) |
-| `cfcWriteFloor` | `off` · `observe` · `enforce` | `off` | whether the **write-side `requiredIntegrity` floor** (SC-18, Epic D3) is checked against the written value's integrity |
-| `cfcTriggerReadGating` | `false` · `true` | `false` | whether the **§8.9.2 trigger reads** — the addresses whose invalidating writes scheduled this run — join the enforcement consumed sets: the sink-request ceiling and the `requiredIntegrity` input gate (SC-3 / H5; [runtime.ts](../../packages/runner/src/runtime.ts) `cfcTriggerReadGating`, [types.ts](../../packages/runner/src/cfc/types.ts) `CfcTriggerReadGating`, consumed in [prepare.ts](../../packages/runner/src/cfc/prepare.ts) `triggerReadSources`) |
-| `cfcPolicyEvaluation` | `off` · `observe` · `enforce` | `off` | whether the **exchange-rule evaluator** (spec §4.4.5, Epic B5) rewrites gated labels to a fueled fixpoint before the sink-request ceiling and `requiredIntegrity` input gates fit them. `observe` evaluates + diagnoses divergence but decides on the *un-rewritten* label; `enforce` decides on the *rewritten* label and **fails closed on fuel exhaustion or policy-lookup failure**. ([runtime.ts](../../packages/runner/src/runtime.ts) `cfcPolicyEvaluation` + `cfcPolicyRecords`, consumed in [prepare.ts](../../packages/runner/src/cfc/prepare.ts) `evaluateGatedConfidentiality`) |
+| `cfcEnforcementMode` | `disabled` · `observe` · `enforce-explicit` · `enforce-strict` | `enforce-strict` | whether a boundary **reason rejects** the commit ([types.ts](../../packages/runner/src/cfc/types.ts) `cfcEnforcementStrictness`) |
+| `cfcFlowLabels` | `off` · `observe` · `persist` | `persist` | whether the per-tx **flow join is derived and persisted** as `derived` label components (S16) |
+| `cfcWriteFloor` | `off` · `observe` · `enforce` | `enforce` | whether the **write-side `requiredIntegrity` floor** (SC-18, Epic D3) is checked against the written value's integrity |
+| `cfcTriggerReadGating` | `false` · `true` | `true` | whether the **§8.9.2 trigger reads** — the addresses whose invalidating writes scheduled this run — join the enforcement consumed sets: the sink-request ceiling and the `requiredIntegrity` input gate (SC-3 / H5; [runtime.ts](../../packages/runner/src/runtime.ts) `cfcTriggerReadGating`, [types.ts](../../packages/runner/src/cfc/types.ts) `CfcTriggerReadGating`, consumed in [prepare.ts](../../packages/runner/src/cfc/prepare.ts) `triggerReadSources`) |
+| `cfcPolicyEvaluation` | `off` · `observe` · `enforce` | `enforce` | whether the **exchange-rule evaluator** (spec §4.4.5, Epic B5) rewrites gated labels to a fueled fixpoint before the sink-request ceiling and `requiredIntegrity` input gates fit them. `observe` evaluates + diagnoses divergence but decides on the *un-rewritten* label; `enforce` decides on the *rewritten* label and **fails closed on fuel exhaustion or policy-lookup failure**. ([runtime.ts](../../packages/runner/src/runtime.ts) `cfcPolicyEvaluation` + `cfcPolicyRecords`, consumed in [prepare.ts](../../packages/runner/src/cfc/prepare.ts) `evaluateGatedConfidentiality`) |
 
 They are orthogonal because they gate different things: the **enforcement mode**
 decides what happens to a recorded reason (ignore / diagnose / reject); the
@@ -41,8 +41,8 @@ conforming, and the conforming ones are reachable only along a partial order.
   provenance mints still run (e.g. the external-ingest mark), but no reason ever
   rejects. CFC is descriptive only. This posture exists only by **explicitly
   passing** `cfcEnforcementMode: "disabled"` — no shipped host does today
-  (toolshed constructs its `Runtime` with no CFC options and therefore runs the
-  `enforce-explicit` default; see §3).
+  (toolshed constructs its `Runtime` through the preset core and therefore runs
+  the `enforce-strict` default; see §3).
 - **`observe`** — the boundary pass runs and records reasons as **diagnostics**;
   the commit still succeeds. Used to measure reason volume before enforcing.
 - **`enforce-explicit`** — a recorded reason **rejects** the commit, and that
@@ -90,10 +90,14 @@ adds:
 3. **`cfcWriteFloor`: `observe` before `enforce`** (the D3 analog of #1). The
    floor is a new reason-source; observe its miss volume on real schemas before
    it rejects. Independent of the flow dial — the floor credits the flow meet
-   only when `cfcFlowLabels: persist` (else it credits nothing, fail-closed), so
-   `cfcWriteFloor: enforce` is *sound* at any flow setting but is only
-   *complete* (does not over-reject a legitimately flow-endorsed write) once
-   flow persists.
+   only when `cfcFlowLabels: persist` (else it credits nothing, fail-closed).
+   The meet credits only atoms of propagation class `hereditary`; plain string
+   atoms — the pattern-authoring vocabulary — are value-bound, so a string-atom
+   floor is satisfied only by a same-path `addIntegrity` mint or a link-carried
+   source label, never by consumed reads. The authoring rule that follows: a
+   pattern mints where it floors (`RequiresIntegrity` wrapping an
+   `AddIntegrity` of the same atom), with the mint's soundness resting on the
+   path's `writeAuthorizedBy`/`uiContract` binding.
 
 4. **`cfcTriggerReadGating` is one-hop only until flow persists.** The gate may
    flip on at any point — it only *adds* consumed labels, so it is sound at any
@@ -143,26 +147,30 @@ cfcPolicyEvaluation: off ──▶ observe ──▶ enforce  (independent; only
 A **conforming state** is one where no enforcement consumes a label the flow
 dial is not yet producing. The states a deployment is expected to pass through:
 
+Every dial defaults to the strict row, so a deployment sits in one of the
+weaker rows only by pinning each of that row's four dials explicitly. Naming
+`cfcEnforcementMode` alone leaves flow labels persisting, the floor
+enforcing, and trigger gating on.
+
 | State | enforcement | flow | write-floor | trigger | Meaning |
 |---|---|---|---|---|---|
 | **Operator (explicitly disabled)** | `disabled` | `off` | `off` | `false` | CFC descriptive only; provenance mints run, nothing rejects. Requires explicitly passing `cfcEnforcementMode: "disabled"` — no shipped host does today. |
-| **Server hosts today (toolshed, background-piece-service)** | `enforce-explicit` | `off` | `off` | `false` | Neither host passes any CFC option ([toolshed/index.ts](../../packages/toolshed/index.ts), [background-piece-service main.ts](../../packages/background-piece-service/src/main.ts)), so both inherit the `Runtime` defaults. Conforming: explicit checks consume no derived labels. |
-| **Shell today** | `enforce-explicit` | `persist` | `off` | `false` | Explicit checks enforce; flow labels persisted (H2, inv-9 active); floor not yet dialed. |
-| **Shell + floor observe** | `enforce-explicit` | `persist` | `observe` | `false` | Add the write floor as diagnostics (D3 dial-up step). |
-| **Shell + floor enforce** | `enforce-explicit` | `persist` | `enforce` | `false` | Floor rejects; complete on flow-endorsed writes (flow persists). |
-| **Strict** | `enforce-strict` | `persist` | `enforce` | `true` | Writer-fit fail-closed (H4); render ceiling consumes derived labels (H3b); trigger reads gated, multi-hop complete since flow persists. The end state. |
+| **Explicit + flow off** | `enforce-explicit` | `off` | `off` | `false` | Conforming: explicit checks consume no derived labels. A rollback posture; no shipped host sits here today. |
+| **Explicit + flow persist** | `enforce-explicit` | `persist` | `off` | `false` | Explicit checks enforce; flow labels persisted (H2, inv-9 active); floor not yet dialed. |
+| **Explicit + floor observe** | `enforce-explicit` | `persist` | `observe` | `false` | Add the write floor as diagnostics (D3 dial-up step). |
+| **Explicit + floor enforce** | `enforce-explicit` | `persist` | `enforce` | `false` | Floor rejects; complete on flow-endorsed writes (flow persists). |
+| **Strict (every shipped host today)** | `enforce-strict` | `persist` | `enforce` | `true` | Writer-fit fail-closed (H4); render ceiling consumes derived labels (H3b); trigger reads gated, multi-hop complete since flow persists. The end state, and the `Runtime` default every first-party preset pins (`coreOptions` in [runtime-presets.ts](../../packages/runner/src/runtime-presets.ts)). |
 
 Trigger gating may flip to `true` at any of these states (ordering constraint
 #4: it is sound anywhere) — the table shows it flipping at the end state
 because before `cfcFlowLabels: persist` it closes only the one-hop channel.
 
-`cfcPolicyEvaluation` is omitted from the state columns above because it is
-`off` in every shipped host today (no host passes `cfcPolicyRecords`, so the
-evaluator has no rules to run). It advances on its own schedule (ordering
-constraint #5: sound anywhere, only loosening save fail-closed exhaustion), so
-a deployment adds `observe` then `enforce` alongside whichever of the states
-above it is in, once it configures a policy set (e.g. the §10.1 standard
-prompt-caveat profile).
+`cfcPolicyEvaluation` is omitted from the state columns above because no
+shipped host configures `cfcPolicyRecords`, so the evaluator has no rules to
+run at any setting. Its dial nonetheless defaults to `enforce` alongside the
+strict end state (ordering constraint #5: sound anywhere, only loosening save
+fail-closed exhaustion), so configuring a policy set (e.g. the §10.1 standard
+prompt-caveat profile) makes it live without a further dial move.
 
 **Non-conforming** examples (a linter/deploy-check should reject): any
 `enforce-strict` with `cfcFlowLabels ≠ persist` (strict consumes derived labels
@@ -170,12 +178,12 @@ the dial isn't producing); `cfcFlowLabels: persist` with `cfcEnforcementMode:
 disabled` is *permitted but pointless* (labels written, never consulted) — a
 warning, not an error.
 
-## 4. What `enforce-strict` adds (the H4 implementation contract)
+## 4. What `enforce-strict` adds
 
-H4's code step (separate PR) implements the strict-only rejects at the
-enforcement ladder
+The strict-only rejects sit at the enforcement ladder
 ([extended-storage-transaction.ts](../../packages/runner/src/storage/extended-storage-transaction.ts)),
-each gated so `enforce-explicit` keeps today's behavior.
+each gated so `enforce-explicit` raises a persist-and-flag diagnostic where
+strict rejects.
 
 **Not part of the delta: missing-policy.** A write touching a labeled document
 with no resolvable schema/policy input **already rejects under
@@ -640,8 +648,8 @@ meaningful once strict carries distinct behavior.
 
 A spec PR to `commontoolsinc/specs` records the §18.6.3 conformance text: the
 four-dial matrix, the "no consuming enforcement ahead of its producing dial"
-ordering constraint, and the `enforce-strict` reject set. File it once H4's code
-step lands and the strict rejects have concrete reason contracts to cite.
+ordering constraint, and the `enforce-strict` reject set. The strict rejects
+carry concrete reason contracts now, so the PR is writable and outstanding.
 Tracked in [`cfc-spec-changes.md`](./cfc-spec-changes.md) SC-13.
 
 The residency half of the writer-fit ceiling is owed to the spec as well:
@@ -658,8 +666,8 @@ Grounded in the four implemented dials — `cfcEnforcementMode`
 ([types.ts](../../packages/runner/src/cfc/types.ts)), `cfcFlowLabels` (H1),
 `cfcWriteFloor` (D3, #4479), and `cfcTriggerReadGating` (H5, #4488) — plus the
 SC-13 rollout constraint in `cfc-spec-changes.md` and the current host
-postures: shell
-([lib-shell/src/runtime.ts](../../packages/lib-shell/src/runtime.ts):
-`enforce-explicit` + flow `persist`, H2); toolshed and
-background-piece-service (no CFC options passed → `Runtime` defaults,
-`enforce-explicit` + flow `off`).
+postures: every first-party preset composes `coreOptions`
+([runtime-presets.ts](../../packages/runner/src/runtime-presets.ts)), which
+pins the strict end state; the shell host default
+([lib-shell/src/runtime.ts](../../packages/lib-shell/src/runtime.ts)) names
+the same `enforce-strict` + flow `persist` posture.

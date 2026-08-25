@@ -19,9 +19,11 @@ import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
 // provenance: setup rewrites the complete generated result, while ordinary
 // document paths must still preserve older values.
 //
-// These tests run with CFC enforcement ON (the runtime default,
-// "enforce-explicit"); the piece cold-start harness runs with enforcement
-// disabled, which is why #4926/#4933's tests were blind to this layer.
+// These tests run with CFC enforcement ON, pinned to "enforce-explicit"
+// because the runtime default is "enforce-strict" and the layer under test
+// is what the explicit rung checks; the piece cold-start harness runs with
+// enforcement disabled, which is why #4926/#4933's tests were blind to
+// this layer.
 
 const alice = await Identity.fromPassphrase(
   "cfc-additive-default-preserves-old-doc-alice",
@@ -140,6 +142,7 @@ describe("CFC additive-required default preserves old documents", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      cfcEnforcementMode: "enforce-explicit",
     });
     const space = alice.did();
     const ROOT = "legacy-home-root";
@@ -186,7 +189,7 @@ describe("CFC additive-required default preserves old documents", () => {
       }
 
       // 2. Materialize the real home pattern over the SAME root cell
-      //    (enforce-explicit is the runtime default).
+      //    (the runtime pins enforce-explicit).
       const homePattern = await compileHomePattern(runtime, space);
       const resultCell = runtime.getCell(space, ROOT);
       const home = await runtime.runSynced(resultCell, homePattern, {});
@@ -220,6 +223,7 @@ describe("CFC additive-required default preserves old documents", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      cfcEnforcementMode: "enforce-explicit",
     });
     const space = alice.did();
     const ROOT = "legacy-home-root-reject";

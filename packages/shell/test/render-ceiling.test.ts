@@ -92,24 +92,24 @@ function command(): (enabled?: boolean) => void {
 }
 
 describe("isCfcRenderCeilingEnabled", () => {
-  it('is false when the key is absent and true when set to "true"', () => {
+  it('is true when the key is absent and false only when set to "false"', () => {
     const h = setup();
     try {
-      expect(isCfcRenderCeilingEnabled()).toBe(false);
-      h.storage.map.set(STORAGE_KEY, "true");
       expect(isCfcRenderCeilingEnabled()).toBe(true);
-      h.storage.map.set(STORAGE_KEY, "yes");
+      h.storage.map.set(STORAGE_KEY, "false");
       expect(isCfcRenderCeilingEnabled()).toBe(false);
+      h.storage.map.set(STORAGE_KEY, "yes");
+      expect(isCfcRenderCeilingEnabled()).toBe(true);
     } finally {
       h.restore();
     }
   });
 
-  it("is false when reading localStorage throws", () => {
+  it("is true when reading localStorage throws", () => {
     const h = setup();
     try {
       h.storage.throwOnRead = true;
-      expect(isCfcRenderCeilingEnabled()).toBe(false);
+      expect(isCfcRenderCeilingEnabled()).toBe(true);
     } finally {
       h.restore();
     }
@@ -117,7 +117,7 @@ describe("isCfcRenderCeilingEnabled", () => {
 });
 
 describe("setupCfcRenderCeilingToggle", () => {
-  it("installs the command and stays silent while disabled (default posture)", () => {
+  it("installs the command and stays silent while enabled (default posture)", () => {
     const h = setup();
     try {
       setupCfcRenderCeilingToggle();
@@ -128,12 +128,12 @@ describe("setupCfcRenderCeilingToggle", () => {
     }
   });
 
-  it("prints the ON hint when already enabled", () => {
+  it("prints the OFF hint when the profile opted out", () => {
     const h = setup();
     try {
-      h.storage.map.set(STORAGE_KEY, "true");
+      h.storage.map.set(STORAGE_KEY, "false");
       setupCfcRenderCeilingToggle();
-      expect(h.info.join("\n")).toContain("is ON");
+      expect(h.info.join("\n")).toContain("is OFF");
     } finally {
       h.restore();
     }
@@ -141,29 +141,29 @@ describe("setupCfcRenderCeilingToggle", () => {
 });
 
 describe("commonfabric.cfcRenderCeiling", () => {
-  it("persists and notes the reload requirement when enabling", () => {
+  it("persists and notes the reload requirement when disabling", () => {
     const h = setup();
     try {
       setupCfcRenderCeilingToggle();
-      command()(); // default argument enables
-      expect(h.storage.map.get(STORAGE_KEY)).toBe("true");
+      command()(false);
+      expect(h.storage.map.get(STORAGE_KEY)).toBe("false");
       // The ceiling is fixed at runtime initialization — the toggle cannot
       // live-apply, so the confirmation must say when it takes effect.
-      expect(h.info.join("\n")).toContain("enabled");
+      expect(h.info.join("\n")).toContain("disabled");
       expect(h.info.join("\n")).toContain("next runtime");
     } finally {
       h.restore();
     }
   });
 
-  it("clears the key when disabling", () => {
+  it("clears the key when re-enabling", () => {
     const h = setup();
     try {
-      h.storage.map.set(STORAGE_KEY, "true");
+      h.storage.map.set(STORAGE_KEY, "false");
       setupCfcRenderCeilingToggle();
-      command()(false);
+      command()(); // default argument enables
       expect(h.storage.map.has(STORAGE_KEY)).toBe(false);
-      expect(h.info.join("\n")).toContain("disabled");
+      expect(h.info.join("\n")).toContain("enabled");
     } finally {
       h.restore();
     }
@@ -174,10 +174,10 @@ describe("commonfabric.cfcRenderCeiling", () => {
     try {
       setupCfcRenderCeilingToggle();
       h.storage.throwOnWrite = true;
-      command()(true);
+      command()(false);
       expect(h.errors.join("\n")).toContain("Could not persist");
       // The "enabled"/"disabled" confirmation is not logged on failure.
-      expect(h.info.join("\n")).not.toContain("enabled");
+      expect(h.info.join("\n")).not.toContain("disabled");
     } finally {
       h.restore();
     }

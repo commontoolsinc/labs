@@ -175,7 +175,7 @@ describe("RuntimeInternals navigation", () => {
       apiUrl: new URL("http://shell.test/"),
     });
 
-    expect(options.cfcEnforcementMode).toBe("enforce-explicit");
+    expect(options.cfcEnforcementMode).toBe("enforce-strict");
     expect(options.trustSnapshot).toEqual({
       id: `principal:${session.as.did()}`,
       actingPrincipal: session.as.did(),

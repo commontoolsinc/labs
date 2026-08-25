@@ -15,6 +15,10 @@ describe("CFC tx state contracts", () => {
   // seams. All are part of the audit-S3 posture the read-only state view
   // (#4517) completes.
 
+  // The flow-labels and write-floor dials are pinned lax here so the
+  // strengthen and anti-downgrade tests exercise real transitions from the
+  // weak end.
+
   const withTx = async (
     fn: (runtime: Runtime, tx: ExtendedStorageTransaction) => Promise<void>,
   ) => {
@@ -23,6 +27,8 @@ describe("CFC tx state contracts", () => {
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
+      cfcWriteFloor: "off",
     });
     try {
       await fn(runtime, runtime.edit() as ExtendedStorageTransaction);
@@ -116,7 +122,7 @@ describe("CFC tx state contracts", () => {
       });
       tx.prepareCfc();
       expect(tx.getCfcState().prepare.status).toBe("prepared");
-      tx.setCfcFlowLabelsMode("off"); // no change from default off → no-op
+      tx.setCfcFlowLabelsMode("off"); // no change from the pinned off → no-op
       expect(tx.getCfcState().prepare.status).toBe("prepared");
       tx.setCfcFlowLabelsMode("observe"); // real change → invalidate
       const flow = tx.getCfcState().prepare;

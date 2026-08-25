@@ -13,6 +13,10 @@ import {
 import type { JSONSchema } from "../src/builder/types.ts";
 import { type CfcConfClause, clausesEqual } from "../src/cfc/clause.ts";
 import { evaluateExchangeRules } from "../src/cfc/exchange-eval.ts";
+import {
+  commitmentAwareEquals,
+  isCfcFieldCommitment,
+} from "../src/cfc/label-representation.ts";
 import type { IFCLabel } from "../src/cfc/mod.ts";
 import {
   buildCfcPolicySnapshot,
@@ -77,6 +81,20 @@ const entriesFor = (doc: PersistedDoc, path: string[]): LabelMapEntry[] =>
   );
 
 const makeRuntime = (
+  storageManager: ReturnType<typeof StorageManager.emulate>,
+) =>
+  // The subject here is which integrity a cross-space link carries; the
+  // scenarios assert the verbatim source fields, so the inv-12
+  // representation transform stays off.
+  new Runtime({
+    apiUrl: new URL("https://example.com"),
+    storageManager,
+    cfcEnforcementMode: "enforce-explicit",
+    cfcLabelMetadataProtection: "off",
+  });
+
+/** The same runtime with the label-metadata dial left at its default. */
+const makeProtectedRuntime = (
   storageManager: ReturnType<typeof StorageManager.emulate>,
 ) =>
   new Runtime({
@@ -263,6 +281,100 @@ describe("CFC cross-space integrity", () => {
       expect(linkRef!.source.space).toBe(spaceA);
       expect(linkRef!.target.space).toBe(spaceB);
       // Source confidentiality carried across the space boundary.
+      expect(entry.label.confidentiality).toContain("space-a-secret");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("scenario 1c under the default label-metadata dial — the endorsement lands in committed form", async () => {
+    // The same edge as 1c, with `cfcLabelMetadataProtection` left at its
+    // default. `LinkReference.source` and `.target` are commitment-classified,
+    // so they persist as `{digestOf}` markers rather than verbatim records —
+    // which is why the scenarios above name `off`. What has to survive the
+    // transform is the mechanism: the source integrity is still carried, the
+    // endorsement is still there, its committed fields still digest the real
+    // edge, and the source confidentiality still crosses.
+
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeProtectedRuntime(storageManager);
+    try {
+      const srcDocId = await seedLabeledDoc(
+        runtime,
+        spaceA,
+        "s1c-protected-src",
+        "37.77,-122.41",
+        [{
+          path: [],
+          label: {
+            integrity: ["gps-reading"],
+            confidentiality: ["space-a-secret"],
+          },
+        }],
+      );
+
+      const tx = runtime.edit();
+      const src = runtime.getCell(spaceA, "s1c-protected-src", undefined, tx);
+      const sink = runtime.getCell(
+        spaceB,
+        "s1c-protected-sink",
+        {
+          type: "object",
+          properties: { ref: { type: "string" } },
+          required: ["ref"],
+        } as const satisfies JSONSchema,
+        tx,
+      );
+      sink.set({ ref: src as unknown as string });
+      tx.prepareCfc();
+      expect((await tx.commit()).error).toBeUndefined();
+
+      const sinkDocId = parseLink(sink.getAsLink()).id!;
+      const doc = readDoc(storageManager, spaceB, sinkDocId);
+      const entries = entriesFor(doc, ["ref"]);
+      expect(entries).toHaveLength(1);
+      const entry = entries[0];
+      expect(entry.origin).toBe("link");
+      expect(entry.label.integrity).toContain("gps-reading");
+
+      // Matched on `type` alone rather than through `isLinkReference`: that
+      // guard narrows `source` and `target` to the plaintext `{space, id,
+      // path}` record, and under this dial they are `{digestOf}` markers, so
+      // the narrowed type would describe a shape this atom does not have.
+      const linkRef = (entry.label.integrity ?? []).find((atom) =>
+        typeof atom === "object" && atom !== null &&
+        (atom as { type?: unknown }).type ===
+          "https://commonfabric.org/cfc/atom/LinkReference"
+      ) as { source: unknown; target: unknown } | undefined;
+      expect(linkRef).toBeDefined();
+      // Both endorsement endpoints persisted as digest markers…
+      expect(isCfcFieldCommitment(linkRef!.source)).toBe(true);
+      expect(isCfcFieldCommitment(linkRef!.target)).toBe(true);
+      // …and each digest is of the edge that was actually written.
+      expect(
+        commitmentAwareEquals(linkRef!.source, {
+          space: spaceA,
+          id: srcDocId,
+          path: [],
+        }),
+      ).toBe(true);
+      expect(
+        commitmentAwareEquals(linkRef!.target, {
+          space: spaceB,
+          id: sinkDocId,
+          path: ["ref"],
+        }),
+      ).toBe(true);
+      // A digest of a different edge does not match, so the check above is
+      // testing the digest rather than the marker shape.
+      expect(
+        commitmentAwareEquals(linkRef!.source, {
+          space: spaceB,
+          id: srcDocId,
+          path: [],
+        }),
+      ).toBe(false);
       expect(entry.label.confidentiality).toContain("space-a-secret");
     } finally {
       await runtime.dispose();

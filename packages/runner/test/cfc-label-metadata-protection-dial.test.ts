@@ -12,7 +12,7 @@ const signer = await Identity.fromPassphrase(
 
 describe("CFC label-metadata protection dial (inv-12 Stage 1)", () => {
   // Inv-12 Stage 1 (SC-25): the `cfcLabelMetadataProtection` dial —
-  // `off | observe | enforce`, default `off` — following the established dial
+  // `off | observe | enforce`, default `enforce` — following the established
   // plumbing (cfcWriteFloor / cfcPolicyEvaluation): RuntimeOptions → per-tx
   // threading at edit() → CfcTxState, with the anti-downgrade pin (once
   // `enforce`, weakening throws) and prepared-state invalidation on a real
@@ -28,18 +28,18 @@ describe("CFC label-metadata protection dial (inv-12 Stage 1)", () => {
     });
   };
 
-  it("defaults to off and threads the option onto each transaction", () => {
-    const offRuntime = makeRuntime();
+  it("defaults to enforce and threads the option onto each transaction", () => {
+    const defaultRuntime = makeRuntime();
+    const defaultTx = defaultRuntime.edit();
+    expect(defaultTx.getCfcState().labelMetadataProtectionMode).toBe(
+      "enforce",
+    );
+    defaultTx.abort();
+
+    const offRuntime = makeRuntime("off");
     const offTx = offRuntime.edit();
     expect(offTx.getCfcState().labelMetadataProtectionMode).toBe("off");
     offTx.abort();
-
-    const enforceRuntime = makeRuntime("enforce");
-    const enforceTx = enforceRuntime.edit();
-    expect(enforceTx.getCfcState().labelMetadataProtectionMode).toBe(
-      "enforce",
-    );
-    enforceTx.abort();
 
     const observeRuntime = makeRuntime("observe");
     const observeTx = observeRuntime.edit();
@@ -65,7 +65,7 @@ describe("CFC label-metadata protection dial (inv-12 Stage 1)", () => {
   });
 
   it("allows raising below the pin and pins at the first enforce", () => {
-    const runtime = makeRuntime();
+    const runtime = makeRuntime("off");
     const tx = runtime.edit();
     // off → observe → off: no pin yet, juggling allowed.
     tx.setCfcLabelMetadataProtectionMode("observe");
@@ -80,7 +80,7 @@ describe("CFC label-metadata protection dial (inv-12 Stage 1)", () => {
   it("delegates through TransactionWrapper to the wrapped transaction", () => {
     // The wrapper forwards every dial setter; the new one must reach the
     // wrapped tx (and its pin) identically.
-    const runtime = makeRuntime();
+    const runtime = makeRuntime("off");
     const tx = runtime.edit();
     const wrapper = new TransactionWrapper(tx);
     wrapper.setCfcLabelMetadataProtectionMode("enforce");
@@ -92,7 +92,7 @@ describe("CFC label-metadata protection dial (inv-12 Stage 1)", () => {
   });
 
   it("invalidates a prepared transaction on a real mode change", () => {
-    const runtime = makeRuntime();
+    const runtime = makeRuntime("off");
     const tx = runtime.edit();
     tx.markCfcRelevant("test");
     tx.prepareCfc();

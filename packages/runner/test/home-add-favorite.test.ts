@@ -143,7 +143,9 @@ describe("home favorites handlers", () => {
       tags: [],
       userTags: [],
     });
-    await tx.commit();
+    // A manual test tx must prepare (the runtime's own commit paths do).
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit()).error).toBeUndefined();
     tx = runtime.edit();
     await runtime.idle();
     const seeded =

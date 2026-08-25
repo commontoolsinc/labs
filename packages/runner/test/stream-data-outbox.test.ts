@@ -217,7 +217,6 @@ describe("stream-data outbox mechanism", () => {
     );
 
     const rejectedTx = runtime.edit();
-    rejectedTx.setCfcEnforcementMode("enforce-explicit");
     rejectedTx.markCfcRelevant("streamData retry regression");
     action(rejectedTx);
     const rejectedResult = await rejectedTx.commit();

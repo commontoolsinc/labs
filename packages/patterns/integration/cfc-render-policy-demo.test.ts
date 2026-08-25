@@ -75,6 +75,13 @@ describe("cfc render policy demo integration test", () => {
         pieceId: piece.id,
       },
       identity,
+      // The demo's subject is author-declared render declassification: a
+      // trusted surface names the health label and the boundary lets it
+      // through. The §8.10.6 display ceiling denies author declassification
+      // and narrows any node carrying an unadmitted atom, which takes the
+      // untrusted card and the trusted reveal together. This page is what
+      // the weaker posture looks like, so it names it.
+      renderCeiling: false,
     });
     await waitForRuntimeIdle(page);
 

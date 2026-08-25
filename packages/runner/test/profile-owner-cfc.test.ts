@@ -70,11 +70,15 @@ const profileSchema = (ownerDid: string): JSONSchema => ({
   required: ["name", "avatar", "elements"],
 });
 
+// Characterization posture: this suite drives the enforce-explicit era's
+// trusted-writer flow, so the runtime pins that enforcement mode and the
+// per-transaction raises to enforce-explicit stay no-ops.
 const createRuntime = () => {
   const storageManager = StorageManager.emulate({ as: alice });
   const runtime = new Runtime({
     apiUrl: new URL("https://example.com"),
     storageManager,
+    cfcEnforcementMode: "enforce-explicit",
   });
   return { runtime, storageManager };
 };

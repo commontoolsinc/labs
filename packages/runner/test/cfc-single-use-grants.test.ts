@@ -982,6 +982,10 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
         // create-only mark, exactly the shape flushCfcGrantConsumptionClaims
         // stages — against a replica that has not observed any receipt.
         const remoteTx = new ExtendedStorageTransaction(remote.edit());
+        // The hand-staged claim must reach the server so the create-only
+        // precondition produces the permanent rejection; a raw transaction
+        // rides the strict defaults, which would reject it unprepared.
+        remoteTx.setCfcEnforcementMode("observe");
         remoteTx.writeOrThrow({
           space: signer.did(),
           id: receiptId,

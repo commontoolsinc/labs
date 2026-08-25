@@ -88,9 +88,9 @@ const makeRuntime = (options: {
     ...(options.cfcTriggerReadGating !== undefined
       ? { cfcTriggerReadGating: options.cfcTriggerReadGating }
       : {}),
-    ...(options.cfcWriteFloor !== undefined
-      ? { cfcWriteFloor: options.cfcWriteFloor }
-      : {}),
+    // The subject here is prefix-provenance measurement; unless an arm
+    // dials the floor itself, the value-side write floor stays off.
+    cfcWriteFloor: options.cfcWriteFloor ?? "off",
   });
 
 // Seed a doc's stored CFC metadata directly via an ungated path-[]

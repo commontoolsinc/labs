@@ -78,10 +78,13 @@ const SINK_SCHEMA = {
 describe("CFC requiredIntegrity provenance scoping (S7)", () => {
   it("a provenance-only read does not gate a requiredIntegrity write", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
+    // The subject here is the read-side gate's S7 scoping; the value-side
+    // write floor (which the mint-less sink would fail) observes only.
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcWriteFloor: "observe",
     });
     try {
       // A lookup doc whose stored label is entirely provenance: a link
@@ -121,10 +124,13 @@ describe("CFC requiredIntegrity provenance scoping (S7)", () => {
     // (cfc-group-chat-demo multi-runtime: reading adminRegistry/everyoneIsAdmin
     // with label {} false-rejected the rooms-list admin write).
     const storageManager = StorageManager.emulate({ as: signer });
+    // The subject here is the read-side gate's S7 scoping; the value-side
+    // write floor (which the mint-less sink would fail) observes only.
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcWriteFloor: "observe",
     });
     try {
       await seedLabeledDoc(runtime, "ri-empty-lookup", "lookup", {});
@@ -154,10 +160,13 @@ describe("CFC requiredIntegrity provenance scoping (S7)", () => {
     // it is a genuine data input, not provenance. This is what keeps the
     // cross-cell prompt-injection screen sound under the fix.
     const storageManager = StorageManager.emulate({ as: signer });
+    // The subject here is the read-side gate's S7 scoping; the value-side
+    // write floor (which the mint-less sink would fail) observes only.
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcWriteFloor: "observe",
     });
     try {
       await seedLabeledDoc(runtime, "ri-conf-src", "briefing", {
@@ -190,10 +199,13 @@ describe("CFC requiredIntegrity provenance scoping (S7)", () => {
     // (non-provenance) integrity atom that isn't the required one must still
     // fail — provenance riding alongside real data must not launder it.
     const storageManager = StorageManager.emulate({ as: signer });
+    // The subject here is the read-side gate's S7 scoping; the value-side
+    // write floor (which the mint-less sink would fail) observes only.
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcWriteFloor: "observe",
     });
     try {
       await seedLabeledDoc(runtime, "ri-mixed-src", "data", {
@@ -234,10 +246,13 @@ describe("CFC requiredIntegrity provenance scoping (S7)", () => {
     // bypassed, the forged atom would persist AND satisfy that gate (the
     // commit below would succeed) — both assertions catch it.
     const storageManager = StorageManager.emulate({ as: signer });
+    // The subject here is the read-side gate's S7 scoping; the value-side
+    // write floor (which the mint-less sink would fail) observes only.
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcWriteFloor: "observe",
     });
     try {
       const seed = runtime.edit();

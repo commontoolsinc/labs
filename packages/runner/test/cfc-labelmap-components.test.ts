@@ -78,10 +78,14 @@ describe("CFC labelMap component origins", () => {
 
   it("skips the labelMap write when recomputed metadata is unchanged", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
+    // The subject here is the no-op envelope elision over declared entries;
+    // flow persist would mint derived stamps beside them and rewrite the
+    // envelope, so the flow dial stays off.
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
     });
     try {
       const guarded = internSchema(

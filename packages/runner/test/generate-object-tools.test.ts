@@ -69,9 +69,15 @@ describe("generateObject with tools", () => {
   beforeEach(() => {
     clearMockResponses(); // Clear mocks from previous tests
     storageManager = StorageManager.emulate({ as: signer });
+    // The suite characterizes the generateObject tool loop at the
+    // enforce-explicit, flow-off posture its recorded mocks were captured
+    // against; flow-derived labels change the redaction inputs and with
+    // them the request the mocks match on.
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
     });
     tx = runtime.edit();
 

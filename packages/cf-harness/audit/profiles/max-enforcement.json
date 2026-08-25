@@ -1,6 +1,6 @@
 {
   "label": "max-enforcement",
-  "enforcementMode": "enforce-explicit",
+  "enforcementMode": "enforce-strict",
   "flowLabels": "persist",
   "writeFloor": "enforce",
   "policyEvaluation": "enforce",
@@ -15,6 +15,11 @@
     "fetchProgram",
     "streamData"
   ],
-  "ungatedSinks": ["llm", "llmDialog", "generateText", "generateObject"],
+  "ungatedSinks": [
+    "llm",
+    "llmDialog",
+    "generateText",
+    "generateObject"
+  ],
   "requireDeviationsPublished": true
 }

@@ -605,6 +605,12 @@ export class CfHarnessEngine {
       ...(options.runState !== undefined && recordedAuthSource !== undefined
         ? { modelAuthSource: recordedAuthSource }
         : {}),
+      // A resumed run keeps the mode it recorded, and the snapshot says so:
+      // without this the resolution falls through to a default the run is
+      // not actually using.
+      ...(options.runState !== undefined
+        ? { inheritedCfcEnforcementMode: options.runState.cfcEnforcementMode }
+        : {}),
     });
     const runId = options.runState?.runId ?? options.runId ??
       crypto.randomUUID();
@@ -760,9 +766,7 @@ export class CfHarnessEngine {
             ? "configured" as const
             : "preset-pin" as const,
         flowLabels: this.config.fabricSession.cfcFlowLabels ??
-          (this.config.fabricSession.cfcPosture === "max-enforcement"
-            ? "persist" as const
-            : "off" as const),
+          "persist" as const,
         flowLabelsSource: this.config.fabricSession.cfcFlowLabels !== undefined
           ? "configured" as const
           : this.config.fabricSession.cfcPosture === "max-enforcement"
@@ -781,9 +785,12 @@ export class CfHarnessEngine {
     // record as history (no runtime exists for it to contradict). A LEGACY
     // record — one that never captured a posture — stays absent rather than
     // being backfilled, and stays frozen as history: resuming such a run
-    // with plain session dials is allowed (the flags may simply restate the
-    // original invocation, which the record predates), but resuming it under
-    // the named posture bundle is refused — no legacy run can have run the
+    // is refused unless the session configuration names the dials itself,
+    // because a configuration that names none resolves to the fleet pin,
+    // which is a posture the record cannot attest. Naming them is the
+    // operator stating what the run was, which the record predates.
+    // Resuming under the named posture bundle is refused outright — no
+    // legacy run can have run the
     // bundle, so that resume would execute enforcement the artifacts cannot
     // attest.
     if (options.runState !== undefined && fabricSessionCfc !== undefined) {
@@ -795,6 +802,20 @@ export class CfHarnessEngine {
               `records no fabric-session posture, so it cannot attest the ` +
               `${fabricSessionCfc.posture} bundle the session ` +
               `configuration resolves`,
+          );
+        }
+        if (
+          fabricSessionCfc.enforcementModeSource !== "configured" ||
+          fabricSessionCfc.flowLabelsSource !== "configured"
+        ) {
+          throw new Error(
+            `fabric session CFC posture mismatch on resume: run state ` +
+              `records no fabric-session posture, and the session ` +
+              `configuration names none either, so this run would execute ` +
+              `at ${fabricSessionCfc.enforcementMode} with flow labels ` +
+              `${fabricSessionCfc.flowLabels} under artifacts that cannot ` +
+              `attest it; pass --fabric-cfc-enforcement-mode and ` +
+              `--fabric-cfc-flow-labels to state the posture it ran at`,
           );
         }
       } else if (

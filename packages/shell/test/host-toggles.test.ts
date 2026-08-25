@@ -106,12 +106,12 @@ describe("isPatternCoverageEnabled", () => {
 });
 
 describe("runtimeHostFlags", () => {
-  it("defaults every flag to false", () => {
+  it("defaults every flag off except the default-on render ceiling", () => {
     const h = setup();
     try {
       expect(runtimeHostFlags()).toEqual({
         forwardWorkerConsole: false,
-        cfcRenderCeiling: false,
+        cfcRenderCeiling: true,
         patternCoverage: false,
         concurrentWatchRefresh: false,
       });
@@ -124,6 +124,7 @@ describe("runtimeHostFlags", () => {
     const h = setup();
     try {
       h.storage.map.set("forwardWorkerConsole", "true");
+      h.storage.map.set("cfcRenderCeiling", "false");
       expect(runtimeHostFlags()).toEqual({
         forwardWorkerConsole: true,
         cfcRenderCeiling: false,

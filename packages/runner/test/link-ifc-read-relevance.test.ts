@@ -59,7 +59,14 @@ describe("link-ifc-read-relevance", () => {
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({ apiUrl: new URL(import.meta.url), storageManager });
+    // The crossing seam is what this suite measures, so the flow-label
+    // machinery that marks relevance off persisted metadata is pinned off:
+    // a relevance mark here came from the crossing and nothing else.
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcFlowLabels: "off",
+    });
     tx = runtime.edit();
     seq++;
   });
@@ -186,8 +193,8 @@ describe("link-ifc-read-relevance", () => {
     // The seam's non-redundant case. The target document carries no
     // stored cfc metadata and no label view — the ifc exists only as the
     // stored link schema's declaration — and the flow-label machinery
-    // that marks relevance off persisted metadata is at its default
-    // (off). Without the crossing seam, this read's transaction would
+    // that marks relevance off persisted metadata is pinned off.
+    // Without the crossing seam, this read's transaction would
     // stay non-relevant and enforcement would never engage for it.
     const holder = holderOverLinkCarrying(labeledLinkSchema);
 
@@ -219,7 +226,14 @@ describe("link-ifc-read-relevance at resolution and handle hops", () => {
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({ apiUrl: new URL(import.meta.url), storageManager });
+    // The crossing seam is what this suite measures, so the flow-label
+    // machinery that marks relevance off persisted metadata is pinned off:
+    // a relevance mark here came from the crossing and nothing else.
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcFlowLabels: "off",
+    });
     tx = runtime.edit();
     seq++;
   });
@@ -331,7 +345,14 @@ describe("link-ifc-read-relevance closure, narrowing, and raw readers", () => {
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({ apiUrl: new URL(import.meta.url), storageManager });
+    // The crossing seam is what this suite measures, so the flow-label
+    // machinery that marks relevance off persisted metadata is pinned off:
+    // a relevance mark here came from the crossing and nothing else.
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcFlowLabels: "off",
+    });
     tx = runtime.edit();
     seq++;
   });

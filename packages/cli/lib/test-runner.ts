@@ -1120,10 +1120,7 @@ export async function runTestPattern(
     ["runTestPattern", "runtime"],
     () =>
       // `runtimePresets.patternTest` carries the shared first-party posture
-      // (CT-1814): the enforce-explicit CFC pin lives in the preset core, so
-      // pattern tests act as a regression net for CFC without this site
-      // restating the production default. Params below are this harness's
-      // declared deltas.
+      // (CT-1814). Params below are this harness's declared deltas.
       new Runtime(runtimePresets.patternTest({
         apiUrl: new URL(import.meta.url),
         storageManager,
@@ -1133,7 +1130,8 @@ export async function runTestPattern(
         // Inject a fetch that honors test-declared `fetchMocks` (scoped to this
         // runtime; no process-global mutation).
         fetch: mockFetch,
-        // Tests that need a laxer mode than the shared pin opt out per test.
+        // Tests that need a different mode than the harness posture opt in
+        // per test.
         ...(options.cfcEnforcementMode !== undefined
           ? { cfcEnforcementMode: options.cfcEnforcementMode }
           : {}),
