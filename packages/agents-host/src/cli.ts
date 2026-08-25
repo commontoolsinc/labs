@@ -91,6 +91,7 @@ export async function runAgentsHostCli(
         identityPath: options.identityPath,
         space: options.space,
         sources: config.sources,
+        checkoutRoots: config.checkoutRoots,
         debugView: options.debugView,
         acceptCommands: !options.once,
         signal: startupAbort.signal,

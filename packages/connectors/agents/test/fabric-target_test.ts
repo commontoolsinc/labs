@@ -1,4 +1,9 @@
-import { assertEquals, assertFalse, assertRejects } from "@std/assert";
+import {
+  assertEquals,
+  assertFalse,
+  assertRejects,
+  assertStrictEquals,
+} from "@std/assert";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import { Identity } from "@commonfabric/identity";
 import { Runtime } from "@commonfabric/runner";
@@ -19,6 +24,57 @@ import type {
   SourceDescriptor,
 } from "../src/types.ts";
 import { commandReceiptCause, sessionCause } from "../src/session-contract.ts";
+import {
+  type GitCommandRunner,
+  GitContextResolver,
+} from "../src/git-context.ts";
+
+Deno.test("Fabric target validates a discovered checkout", async () => {
+  const signer = await Identity.fromPassphrase(
+    "agent connector checkout validation test",
+  );
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const connection = { runtime, spaceDid: signer.did() };
+  const calls: string[][] = [];
+  let receivedSignal: AbortSignal | undefined;
+  const gitContext = new GitContextResolver(
+    (args, signal) => {
+      calls.push(args);
+      receivedSignal = signal;
+      return Promise.resolve({
+        code: 0,
+        stdout: "/requested-checkout\n",
+      });
+    },
+    () => new Date("2026-08-21T00:00:00.000Z"),
+    (path) => Promise.resolve(path),
+  );
+  const controller = new AbortController();
+  try {
+    const target = await AgentFabricTarget.open(connection, gitContext);
+    assertEquals(
+      await target.validateCheckout(
+        "/requested-checkout",
+        controller.signal,
+      ),
+      true,
+    );
+    assertEquals(calls, [[
+      "-C",
+      "/requested-checkout",
+      "rev-parse",
+      "--show-toplevel",
+    ]]);
+    assertStrictEquals(receivedSignal, controller.signal);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
 
 Deno.test("Fabric target publishes sessions and command receipts", async () => {
   const signer = await Identity.fromPassphrase("agent connector target test");
@@ -443,6 +499,324 @@ Deno.test("Fabric target publishes sessions and command receipts", async () => {
       Error,
       "agent session index row 0 has an invalid formatVersion",
     );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("checkout publication preserves partial-refresh inventory", async () => {
+  const signer = await Identity.fromPassphrase(
+    "agent connector checkout publication test",
+  );
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const connection = { runtime, spaceDid: signer.did() };
+  let observedAt = "2026-08-21T00:00:00.000Z";
+  let failExtraHead = false;
+  let failSessionHead = false;
+  let failSessionRoot = false;
+  let sessionHead = "head-session-1";
+  let cancelSessionLookup: AbortController | undefined;
+  const runner: GitCommandRunner = (args, signal) => {
+    const root = args[1];
+    const command = args.slice(2).join(" ");
+    if (command === "rev-parse --show-toplevel") {
+      if (root === "/session-repo" && failSessionRoot) {
+        return Promise.reject(new Deno.errors.NotFound("git"));
+      }
+      if (root === "/session-repo" && cancelSessionLookup) {
+        assertEquals(signal, cancelSessionLookup.signal);
+        const reason = new Error("session Git lookup cancelled");
+        cancelSessionLookup.abort(reason);
+        return Promise.reject(reason);
+      }
+      return Promise.resolve({ code: 0, stdout: `${root}\n` });
+    }
+    if (command === "branch --show-current") {
+      return Promise.resolve({ code: 0, stdout: "main\n" });
+    }
+    if (command === "remote get-url upstream") {
+      return Promise.resolve({
+        code: 0,
+        stdout: `git@github.com:common${root}.git\n`,
+      });
+    }
+    if (command === "rev-parse HEAD") {
+      const failed = failExtraHead && root === "/extra" ||
+        failSessionHead && root === "/session-repo";
+      return Promise.resolve({
+        code: failed ? 128 : 0,
+        stdout: root === "/session-repo" ? `${sessionHead}\n` : "head-extra\n",
+      });
+    }
+    if (command === "remote -v") {
+      return Promise.resolve({
+        code: 0,
+        stdout: `upstream\tgit@github.com:common${root}.git (fetch)\n`,
+      });
+    }
+    return Promise.resolve({ code: 1, stdout: "" });
+  };
+  const gitContext = new GitContextResolver(
+    runner,
+    () => new Date(observedAt),
+  );
+  const source: SourceDescriptor = {
+    id: "codex:test",
+    driver: "codex-app-server",
+    capabilities: {
+      inventory: true,
+      read: true,
+      prompt: false,
+      cancel: false,
+      rename: false,
+      setMode: false,
+      setConfigOption: false,
+    },
+  };
+  const snapshot: NativeSessionSnapshot = {
+    summary: {
+      nativeSessionId: "session-1",
+      title: "Checkout session",
+      cwd: "/session-repo",
+      createdAt: "2026-08-21T00:00:00.000Z",
+      updatedAt: "2026-08-21T00:00:00.000Z",
+      archived: false,
+      active: false,
+      raw: { id: "session-1" },
+    },
+    events: [],
+    normalizedMessages: [],
+    complete: true,
+  };
+  const collected = [{
+    source,
+    sessions: [snapshot],
+    errors: [],
+    complete: true,
+  }];
+  const readIndex = () =>
+    readStableCellGraphValue(
+      connection,
+      target.cells.allIndex,
+    ) as Promise<Record<string, unknown>>;
+  let target: AgentFabricTarget;
+  try {
+    target = await AgentFabricTarget.open(connection, gitContext);
+    await target.publish(collected, { checkoutDirectories: ["/extra"] });
+    const first = await readIndex();
+    const firstSession = (first.sessions as Array<Record<string, unknown>>)[0];
+    assertEquals(
+      (first.checkouts as Array<Record<string, unknown>>).map((checkout) =>
+        checkout.root
+      ),
+      ["/extra", "/session-repo"],
+    );
+
+    observedAt = "2026-08-22T00:00:00.000Z";
+    await target.publish(collected, { preserveUntouchedStatus: true });
+    const refreshed = await readIndex();
+    const refreshedSession =
+      (refreshed.sessions as Array<Record<string, unknown>>)[0];
+    assertEquals(refreshedSession.contentHash, firstSession.contentHash);
+    assertEquals(
+      (refreshed.checkouts as Array<Record<string, unknown>>).map((checkout) =>
+        checkout.root
+      ),
+      ["/extra", "/session-repo"],
+    );
+
+    sessionHead = "head-session-2";
+    observedAt = "2026-08-23T00:00:00.000Z";
+    await target.publish(collected, { preserveUntouchedStatus: true });
+    const changedHead = await readIndex();
+    assertEquals(
+      (changedHead.sessions as Array<Record<string, unknown>>)[0].contentHash,
+      firstSession.contentHash,
+    );
+    const changedHeadCheckouts = changedHead.checkouts as Array<
+      Record<string, unknown>
+    >;
+    assertEquals(
+      changedHeadCheckouts.find((checkout) => checkout.root === "/session-repo")
+        ?.gitHeadSha,
+      "head-session-2",
+    );
+
+    failSessionHead = true;
+    observedAt = "2026-08-24T00:00:00.000Z";
+    await target.publish(collected, { preserveUntouchedStatus: true });
+    const partialGit = await readIndex();
+    assertEquals(partialGit.checkouts, changedHead.checkouts);
+    failSessionHead = false;
+
+    failSessionRoot = true;
+    await target.publish(collected, { preserveUntouchedStatus: true });
+    const failedRootLookup = await readIndex();
+    assertEquals(failedRootLookup.checkouts, changedHead.checkouts);
+    failSessionRoot = false;
+
+    await target.publish(collected, { checkoutDirectories: [] });
+    const authoritative = await readIndex();
+    assertEquals(
+      (authoritative.checkouts as Array<Record<string, unknown>>).map(
+        (checkout) => checkout.root,
+      ),
+      ["/session-repo"],
+    );
+
+    cancelSessionLookup = new AbortController();
+    const generationBeforeCancellation = authoritative.generation;
+    await assertRejects(
+      () =>
+        target.publish(collected, {
+          checkoutDirectories: [],
+          signal: cancelSessionLookup?.signal,
+        }),
+      Error,
+      "session Git lookup cancelled",
+    );
+    cancelSessionLookup = undefined;
+    const afterCancellation = await readIndex();
+    assertEquals(afterCancellation.generation, generationBeforeCancellation);
+    assertEquals(afterCancellation.sessions, authoritative.sessions);
+
+    failExtraHead = true;
+    const generation = authoritative.generation;
+    const changedSnapshot = {
+      ...snapshot,
+      summary: {
+        ...snapshot.summary,
+        title: "Changed during failed checkout collection",
+        raw: {
+          ...snapshot.summary.raw,
+          title: "Changed during failed checkout collection",
+        },
+      },
+    };
+    await assertRejects(
+      () =>
+        target.publish([{
+          ...collected[0],
+          sessions: [changedSnapshot],
+        }], { checkoutDirectories: ["/extra"] }),
+      Error,
+      "Git command failed while observing checkout: rev-parse HEAD",
+    );
+    const afterFailure = await readIndex();
+    assertEquals(afterFailure.generation, generation);
+    assertEquals(afterFailure.checkouts, authoritative.checkouts);
+    assertEquals(afterFailure.sessions, authoritative.sessions);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("publication finishes after its first graph commit", async () => {
+  const signer = await Identity.fromPassphrase(
+    "agent connector publication commit boundary test",
+  );
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const space = signer.did();
+  const connection = { runtime, spaceDid: space };
+  const source: SourceDescriptor = {
+    id: "codex:test",
+    driver: "codex-app-server",
+    capabilities: {
+      inventory: true,
+      read: true,
+      prompt: false,
+      cancel: false,
+      rename: false,
+      setMode: false,
+      setConfigOption: false,
+    },
+  };
+  const snapshot = (title: string): NativeSessionSnapshot => ({
+    summary: {
+      nativeSessionId: "session-1",
+      title,
+      cwd: null,
+      createdAt: "2026-08-21T00:00:00.000Z",
+      updatedAt: "2026-08-21T00:01:00.000Z",
+      archived: false,
+      active: false,
+      raw: { id: "session-1", title },
+    },
+    events: [],
+    normalizedMessages: [],
+    complete: true,
+  });
+  const collected = (title: string) => [{
+    source,
+    sessions: [snapshot(title)],
+    errors: [],
+    complete: true,
+  }];
+  try {
+    const target = await AgentFabricTarget.open(connection);
+    await target.publish(collected("Before"));
+    const manifest = runtime.getCell(
+      space,
+      sessionCause(space, source.id, "session-1"),
+    );
+    const manifestId = manifest.getAsNormalizedFullLink().id;
+    const controller = new AbortController();
+    const originalEdit = runtime.edit;
+    let manifestCommitObserved = false;
+    runtime.edit = function () {
+      const tx = originalEdit.call(this);
+      let writesManifest = false;
+      const originalWrite = tx.writeOrThrow.bind(tx);
+      tx.writeOrThrow = (...args) => {
+        if (args[0].id === manifestId) writesManifest = true;
+        return originalWrite(...args);
+      };
+      const originalCommit = tx.commit.bind(tx);
+      tx.commit = async () => {
+        const result = await originalCommit();
+        if (writesManifest && !result.error) {
+          manifestCommitObserved = true;
+          controller.abort(new Error("cancelled after manifest commit"));
+        }
+        return result;
+      };
+      return tx;
+    };
+    try {
+      await target.publish(collected("After"), {
+        signal: controller.signal,
+      });
+    } finally {
+      runtime.edit = originalEdit;
+    }
+
+    assertEquals(manifestCommitObserved, true);
+    assertEquals(controller.signal.aborted, true);
+    const index = await readStableCellGraphValue(
+      connection,
+      target.cells.allIndex,
+    ) as Record<string, unknown>;
+    const session = (index.sessions as Array<Record<string, unknown>>)[0];
+    const publishedManifest = await readStableCellGraphValue(
+      connection,
+      manifest,
+    ) as Record<string, unknown>;
+    assertEquals(session.title, "After");
+    assertEquals(
+      (publishedManifest.summary as Record<string, unknown>).title,
+      "After",
+    );
+    assertEquals(session.contentHash, publishedManifest.snapshotHash);
   } finally {
     await runtime.dispose();
     await storageManager.close();

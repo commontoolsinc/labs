@@ -89,13 +89,14 @@ failure.
 
 ## Configuration file
 
-The configuration format is current-only and strict. Unknown fields are errors
-so misspelled options do not silently change provider behavior.
+The configuration format is strict. Unknown fields are errors so misspelled
+options do not silently change provider behavior.
 
 ```jsonc
 {
   "schema": "commonfabric.agents-host.config.v1",
   "collectionIntervalMs": 900000,
+  "checkoutRoots": ["/workspace/checkouts"],
   "sources": [
     {
       "id": "codex",
@@ -117,6 +118,12 @@ session keys and command routing. Duplicate IDs are rejected.
 
 `collectionIntervalMs` must be an integer from `0` through `2147483647`. It
 controls complete collection in long-running mode and is ignored by `--once`.
+
+`checkoutRoots` is an optional array of absolute directories. Every complete
+collection finds Git checkouts below those roots and publishes their current
+branch, commit, and remotes in the session indexes. Discovery stops descending
+when it finds a checkout. A failed or cancelled discovery leaves the previous
+session and checkout indexes unchanged.
 
 The source fields are the connector's `AgentSourceConfig` contract:
 

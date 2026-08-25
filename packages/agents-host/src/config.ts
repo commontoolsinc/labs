@@ -5,6 +5,7 @@ import type {
 } from "@commonfabric/agents-connector/types";
 import { normalizeSourceId } from "@commonfabric/agents-connector";
 import { parse as parseJsonc } from "@std/jsonc";
+import { isAbsolute } from "@std/path";
 
 export const AGENTS_HOST_CONFIG_SCHEMA = "commonfabric.agents-host.config.v1";
 export const DEFAULT_COLLECTION_INTERVAL_MS = 15 * 60 * 1_000;
@@ -13,6 +14,7 @@ export const MAX_COLLECTION_INTERVAL_MS = 2_147_483_647;
 export interface AgentsHostConfig {
   schema: typeof AGENTS_HOST_CONFIG_SCHEMA;
   collectionIntervalMs: number;
+  checkoutRoots?: string[];
   sources: AgentSourceConfig[];
 }
 
@@ -175,9 +177,9 @@ function parseSource(value: unknown, index: number): AgentSourceConfig {
 export function parseAgentsHostConfig(value: unknown): AgentsHostConfig {
   const config = record(value, "configuration");
   for (const key of Object.keys(config)) {
-    if (
-      key !== "schema" && key !== "collectionIntervalMs" && key !== "sources"
-    ) {
+    const allowed = key === "schema" || key === "collectionIntervalMs" ||
+      key === "sources" || key === "checkoutRoots";
+    if (!allowed) {
       throw new Error(`configuration has an unknown field: ${key}`);
     }
   }
@@ -204,6 +206,27 @@ export function parseAgentsHostConfig(value: unknown): AgentsHostConfig {
   }
 
   const sources = config.sources.map(parseSource);
+  let checkoutRoots: string[] = [];
+  if (config.checkoutRoots !== undefined) {
+    if (!Array.isArray(config.checkoutRoots)) {
+      throw new Error("configuration.checkoutRoots must be a string array");
+    }
+    checkoutRoots = config.checkoutRoots.map((root, index) => {
+      const path = nonEmptyString(
+        root,
+        `configuration.checkoutRoots[${index}]`,
+      );
+      if (!isAbsolute(path)) {
+        throw new Error(
+          `configuration.checkoutRoots[${index}] must be an absolute path`,
+        );
+      }
+      return path;
+    });
+    if (new Set(checkoutRoots).size !== checkoutRoots.length) {
+      throw new Error("configuration.checkoutRoots contains a duplicate path");
+    }
+  }
   const ids = new Set<string>();
   for (const source of sources) {
     if (ids.has(source.id)) {
@@ -217,6 +240,7 @@ export function parseAgentsHostConfig(value: unknown): AgentsHostConfig {
   return {
     schema: AGENTS_HOST_CONFIG_SCHEMA,
     collectionIntervalMs,
+    ...(checkoutRoots.length > 0 ? { checkoutRoots } : {}),
     sources,
   };
 }
