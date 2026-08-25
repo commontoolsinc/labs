@@ -990,12 +990,13 @@ its value. A path below an array names a field of each element, however many
 array layers deep it sits, because that is what the projection does with one.
 
 `--select` alone accepts a bare `@`, which asks the read for its own address, at
-any element of the list. `--schema` reads two other things recognized by their
-first character — a JSON Schema opens with `{`, and `@` opens a file path — so
-it takes no bare `@` and completion offers none there. `cf call`'s and
-`cf exec`'s projections shape a verb's result rather than the piece's root, and
-are not completed from it; `cf wish`'s resolution writes to the space, and a Tab
-must not.
+any element of the list. `--schema` reads two other things by their first
+character — `@` opens a file path, and a JSON Schema opens with `{` or is one of
+the boolean schemas `true` and `false` — so it takes no bare `@`, and no field
+named `true` or `false` is offered there because those spell a whole-value
+schema instead. `cf call`'s and `cf exec`'s projections shape a verb's result
+rather than the piece's root, and are not completed from it; `cf wish`'s
+resolution writes to the space, and a Tab must not.
 
 An option's value completes the same whether it is written after a space or
 after `=`, and every spelling of a target reaches the same slots behind it: the

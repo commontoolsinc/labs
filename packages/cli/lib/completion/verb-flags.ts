@@ -59,10 +59,6 @@ export function shapeVerbFlagCandidates(
 ): Candidate[] {
   const candidates: Candidate[] = [];
   const seen = new Set<string>();
-  // Nothing reserves a field name, so a verb may declare `json`, `json-file`
-  // or `help` — the spellings the command itself owns. A declared field wins
-  // the slot and the generic flag is not repeated, because two candidates of
-  // one value are a menu entry that means two things.
   const add = (value: string, description: string) => {
     if (seen.has(value)) return;
     seen.add(value);
@@ -72,12 +68,18 @@ export function shapeVerbFlagCandidates(
   for (const flag of declaredVerbFlags(verb.inputSchema)) {
     const description = fieldDescription(flag.schema) ??
       (flag.required ? "required" : "optional");
-    // Bare `--help` opens the verb's own page whatever a field of that name
-    // says, so a declared boolean `help` is set by the two spellings that
-    // cannot be mistaken for it — which is what its help page prints too.
-    if (flag.name === "help" && flag.negatable) {
-      add("--help=true", description);
-      add("--no-help", `${description} (false)`);
+    // Nothing reserves a field name, so a verb may declare `json`,
+    // `json-file` or `help` — names the command already owns as bare tokens.
+    // The parser reads the bare token as ITS meaning and never reaches the
+    // field, so the field is offered in the one spelling that does reach it.
+    if (RESERVED_BARE_SPELLINGS.has(flag.name)) {
+      // A boolean carries its value in the spelling; anything else is
+      // completed up to the `=` and the caller writes the value.
+      add(
+        flag.negatable ? `--${flag.name}=true` : `--${flag.name}=`,
+        `${description} (the declared field)`,
+      );
+      if (flag.negatable) add(`--no-${flag.name}`, `${description} (false)`);
       continue;
     }
     add(`--${flag.name}`, description);
@@ -89,6 +91,18 @@ export function shapeVerbFlagCandidates(
   }
   return candidates;
 }
+
+/**
+ * Flag names the command consumes as bare tokens before a declared field is
+ * ever consulted: `--json` and `--json-file` select an input mode, and
+ * `--help` opens the verb's page. A field of one of those names is reachable
+ * only as `--name=value`, which those doors do not match.
+ */
+const RESERVED_BARE_SPELLINGS: ReadonlySet<string> = new Set([
+  "json",
+  "json-file",
+  "help",
+]);
 
 /** The author's doc comment on the field, where the schema carries one. */
 function fieldDescription(schema: JSONSchema | undefined): string | undefined {

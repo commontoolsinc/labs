@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { shapeVerbFlagCandidates } from "../lib/completion/verb-flags.ts";
+import { type ExecCommandSpec, parseExecArgs } from "../lib/exec-schema.ts";
 
 /**
  * The `inputSchema` of one verb, in the shape `cf piece verbs --json` reports
@@ -63,11 +64,23 @@ describe("shapeVerbFlagCandidates()", () => {
     expect(values.slice(-3)).toEqual(["--json", "--json-file", "--help"]);
   });
 
-  it("returns the generic flags alone for a verb declaring no input", () => {
-    // The schema-less shape: nothing was declared, so nothing is derived, and
-    // the flags every verb accepts are still the honest candidate set.
+  it("names the value flags for a verb declaring no input", () => {
+    // A schema-less input declares no fields, but the parser takes `--value`
+    // for it and the usage lines advertise it — so the candidate set says so
+    // too. The cross-check below is what proves it rather than this list.
     expect(shapeVerbFlagCandidates({ inputSchema: true }).map((c) => c.value))
-      .toEqual(["--json", "--json-file", "--help"]);
+      .toEqual(["--value", "--value-file", "--json", "--json-file", "--help"]);
+  });
+
+  it("offers a colliding field the one spelling that reaches it", () => {
+    // `parseExecArgs` reads a bare `--json` as the generic input mode and
+    // never consults a declared field of that name, so offering the bare
+    // token would name a flag that does something else.
+    const values = shapeVerbFlagCandidates({
+      inputSchema: { type: "object", properties: { json: { type: "string" } } },
+    }).map((candidate) => candidate.value);
+    expect(values).toContain("--json=");
+    expect(values.filter((v) => v === "--json").length).toBe(1);
   });
 
   it("names the value flags for an input that is not an object", () => {
@@ -85,6 +98,62 @@ describe("shapeVerbFlagCandidates()", () => {
     ]);
   });
 
+  it("offers one candidate per value where a field collides with a generic flag", () => {
+    // Two menu entries of one value would mean two different things.
+    const values = shapeVerbFlagCandidates({
+      inputSchema: {
+        type: "object",
+        properties: { json: { type: "string" }, jsonFile: { type: "string" } },
+      },
+    }).map((candidate) => candidate.value);
+    expect(values).toEqual([...new Set(values)]);
+  });
+
+  it("offers only candidates the schema-derived parser accepts", () => {
+    // The one assertion that cannot drift from the parser: every candidate is
+    // completed the way a caller would and put back through `parseExecArgs`.
+    // A list that agreed with itself and not with the parser is exactly the
+    // defect this slot is for.
+    const booleanNames = new Set(["pinned", "help"]);
+    const argsFor = (value: string): string[] => {
+      if (value.includes("=") || value.startsWith("--no-")) return [value];
+      if (value === "--help") return [value];
+      if (value === "--json") return [value, "{}"];
+      if (value === "--json-file" || value === "--value-file") {
+        return [value, "-"];
+      }
+      return booleanNames.has(value.replace(/^--/, ""))
+        ? [value]
+        : [value, "x"];
+    };
+    const schemas: unknown[] = [
+      true,
+      { type: "object", properties: { json: { type: "string" } } },
+      { type: "object", properties: { help: { type: "boolean" } } },
+      {
+        type: "object",
+        properties: { title: { type: "string" }, pinned: { type: "boolean" } },
+      },
+    ];
+    for (const inputSchema of schemas) {
+      const spec = {
+        callableKind: "handler",
+        defaultVerb: "invoke",
+        inputSchema,
+      } as ExecCommandSpec;
+      for (
+        const candidate of shapeVerbFlagCandidates({
+          inputSchema: inputSchema as ExecCommandSpec["inputSchema"],
+        })
+      ) {
+        expect(
+          () => parseExecArgs(spec, argsFor(candidate.value)),
+          `${candidate.value} against ${JSON.stringify(inputSchema)}`,
+        ).not.toThrow();
+      }
+    }
+  });
+
   it("sets a declared boolean `help` by the spellings that are not the help page", () => {
     // Bare `--help` opens the verb's own page whatever a field of that name
     // says, so offering it as the way to set the field names a flag that does
@@ -98,19 +167,6 @@ describe("shapeVerbFlagCandidates()", () => {
     expect(values).toContain("--help=true");
     expect(values).toContain("--no-help");
     expect(values.filter((v) => v === "--help").length).toBe(1);
-  });
-
-  it("offers one candidate per value where a field collides with a generic flag", () => {
-    // Nothing reserves a field name, so a verb may declare `json`. Two menu
-    // entries of one value would mean two different things.
-    const values = shapeVerbFlagCandidates({
-      inputSchema: {
-        type: "object",
-        properties: { json: { type: "string" }, jsonFile: { type: "string" } },
-      },
-    }).map((candidate) => candidate.value);
-    expect(values).toEqual([...new Set(values)]);
-    expect(values.filter((v) => v === "--json").length).toBe(1);
   });
 
   it("reads fields an `allOf` contributes, which the payload door judges", () => {

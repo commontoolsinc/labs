@@ -881,8 +881,10 @@ export interface DeclaredVerbFlag {
  * accepted by the parser and named by neither, or the reverse.
  */
 export function declaredVerbFlags(inputSchema: JSONSchema): DeclaredVerbFlag[] {
-  if (isSchemaLessHandlerInput(inputSchema)) return [];
-
+  // A schema-less input declares no fields, but the parser still takes the
+  // value flags for it and the usage lines still advertise them — so they are
+  // reported here, which is what keeps the parser, the help page's flag list
+  // and completion naming one vocabulary.
   const properties = objectProperties(inputSchema);
   if (!properties) {
     // A non-object input is written whole, so its flags name the value rather
@@ -891,7 +893,9 @@ export function declaredVerbFlags(inputSchema: JSONSchema): DeclaredVerbFlag[] {
       {
         name: "value",
         schema: inputSchema,
-        required: true,
+        // A declared non-object input owes a value; a schema-less one does
+        // not, because invoking it with no input at all is legal.
+        required: !isSchemaLessHandlerInput(inputSchema),
         negatable: false,
       },
       { name: "value-file", required: false, negatable: false },
@@ -916,7 +920,9 @@ function specificFlagLines(schema: JSONSchema): string[] {
   // rather than any field, and their padding is fixed rather than fitted.
   if (flags[0].key === undefined) {
     return [
-      `  ${`--value ${valuePlaceholder(schema)}`.padEnd(20)}  Required.`,
+      `  ${`--value ${valuePlaceholder(schema)}`.padEnd(20)}  ${
+        flags[0].required ? "Required." : "Optional."
+      }`,
       `  ${
         "--value-file <path>".padEnd(20)
       }  Read the value from a UTF-8 file. Use - for stdin.`,

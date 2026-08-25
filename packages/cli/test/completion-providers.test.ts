@@ -477,6 +477,35 @@ Deno.test("shaping: the bare address suffix is offered only where it is asked fo
   );
 });
 
+Deno.test("shaping: an address-marked segment keeps completing below it", () => {
+  // `topic@.title` marks `topic` and projects `title`, so the walk reads the
+  // field the segment NAMES while the candidate carries the marker back.
+  assertEquals(splitSelectPrefix("topic@.").path, ["topic"]);
+  assertEquals(splitSelectPrefix("topic@.").prefix, "topic@.");
+  assertEquals(
+    projectionKeys(descendProjection({ topic: { title: 1 } }, ["topic"])),
+    ["title"],
+  );
+  // An escaped `@` is part of the name, not the marker.
+  assertEquals(splitSelectPrefix("a\\@.").path, ["a@"]);
+});
+
+Deno.test("shaping: --schema is offered no field named for a whole-value schema", () => {
+  // `--schema true` IS a JSON Schema and `--schema false` is refused as one,
+  // so neither can name a field there however the source spells its keys.
+  // `--select` reads them as ordinary names.
+  const keys = { "true": 1, "false": 2, "ok": 3 };
+  assertEquals(
+    shapeProjectionCandidates(keys, "", { reserved: ["true", "false"] })
+      .map((candidate) => candidate.value),
+    ["ok", "ok@"],
+  );
+  assertEquals(
+    shapeProjectionCandidates(keys, "").map((candidate) => candidate.value),
+    ["true", "true@", "false", "false@", "ok", "ok@"],
+  );
+});
+
 Deno.test("shaping: a key the concise grammar cannot carry is not offered", () => {
   // `parseConciseSegment` holds a segment to an identifier grammar, and a
   // trailing `@` in a name reads as the address suffix. Offering either would

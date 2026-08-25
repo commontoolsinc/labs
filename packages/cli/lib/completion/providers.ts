@@ -417,12 +417,20 @@ function projectionFieldCandidates(
     const candidates = shapeProjectionCandidates(
       descendProjection(value, path),
       `${list}${prefix}`,
-      // A path that is only the suffix names the position the read is already
-      // at, which no field path reaches. It is legal as any element of the
-      // list — `revision,@` parses — so it is offered at every element start,
-      // carrying the elements already closed. `--schema` does not accept it:
-      // a leading `@` there names a file.
-      { self: flag === "select" && atElementStart },
+      // `--schema true` is a JSON Schema in its own right and `--schema false`
+      // is refused as one, so neither can name a field there however the
+      // source spells its keys. `--select` reads them as ordinary names.
+      {
+        // A path that is only the suffix names the position the read is
+        // already at, which no field path reaches. It is legal as any element
+        // of the list — `revision,@` parses — so it is offered at every
+        // element start. `--schema` does not accept it: a leading `@` there
+        // names a file.
+        self: flag === "select" && atElementStart,
+        ...(flag === "schema" && list === "" && prefix === ""
+          ? { reserved: ["true", "false"] }
+          : {}),
+      },
     );
     if (candidates.length === 0) return NOTHING;
     // A field path continues with `.` or `,`, so hold the cursor in place the
@@ -456,10 +464,25 @@ export function splitSelectPrefix(typed: string): {
   const prefix = dot === -1 ? "" : element.slice(0, dot + 1);
   return {
     list,
-    path: prefix ? prefix.slice(0, -1).split(".") : [],
+    // A closed segment may carry the address marker — `topic@.title` marks
+    // `topic` and projects `title` — so the marker is stripped for the walk
+    // and kept in the prefix the candidate carries back. Descending a literal
+    // `topic@` would find no such property and offer nothing.
+    path: prefix ? prefix.slice(0, -1).split(".").map(segmentName) : [],
     prefix,
     atElementStart: element.length === 0,
   };
+}
+
+/**
+ * The field a written segment names: the trailing address marker is not part
+ * of it, and `\@` is an escaped `@` that is. Mirrors `parseConciseSegment`,
+ * which is what the command reads a segment with.
+ */
+function segmentName(segment: string): string {
+  const escaped = "\\@";
+  const marked = segment.endsWith("@") && !segment.endsWith(escaped);
+  return (marked ? segment.slice(0, -1) : segment).replaceAll(escaped, "@");
 }
 
 /**
@@ -528,7 +551,7 @@ export function projectionKeys(value: unknown): string[] {
 export function shapeProjectionCandidates(
   value: unknown,
   prefix: string,
-  options: { self?: boolean } = {},
+  options: { self?: boolean; reserved?: readonly string[] } = {},
 ): Candidate[] {
   const candidates: Candidate[] = [];
   if (options.self) {
@@ -537,7 +560,12 @@ export function shapeProjectionCandidates(
       description: "the read source's address",
     });
   }
-  for (const key of projectionKeys(value).filter(isWritableFieldName)) {
+  const reserved = new Set(options.reserved ?? []);
+  for (
+    const key of projectionKeys(value)
+      .filter(isWritableFieldName)
+      .filter((key) => !reserved.has(key))
+  ) {
     candidates.push({ value: `${prefix}${key}` });
     candidates.push({
       value: `${prefix}${key}@`,
