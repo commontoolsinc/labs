@@ -359,10 +359,12 @@ describe("pattern-user-post-bash", () => {
         .toBe(nested);
     });
 
-    it("still ignores a bare cf whose next word names no data command", () => {
-      // The widened match must not swallow every `cf` invocation.
+    it("still ignores a bare cf whose next word carries no guidance", () => {
+      // The widened match must not swallow every `cf` invocation, and must not
+      // claim a verb this hook has nothing to say about.
       expect(suggestionForPatternUserCommand("cf test")).toBe("");
       expect(suggestionForPatternUserCommand("cf wish '#topic'")).toBe("");
+      expect(suggestionForPatternUserCommand("cf get --piece ID title")).toBe("");
     });
 
     it("returns no suggestion for unrelated commands", () => {

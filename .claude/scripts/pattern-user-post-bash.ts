@@ -618,13 +618,15 @@ function suggestionForCommandSegment(words: string[]): string {
   const normalizedWords = words.map((word) =>
     word.replace(/^\(+/, "").replace(/\)+$/, "")
   );
-  // The data commands are spelled either way: `cf get` and `cf piece get` name
-  // one command. Every other verb is reached only through `piece`.
-  const TOP_LEVEL_DATA_COMMANDS = new Set(["get", "set", "call"]);
+  // Verbs this hook advises on that are also reachable without `piece`. `get`
+  // and `call` are spelled both ways too, but carry no guidance here, so
+  // matching them would widen what the hook accepts without changing what it
+  // answers. A verb joins this set when it gains a branch below.
+  const GUIDED_TOP_LEVEL_COMMANDS = new Set(["set"]);
   const cfIndex = normalizedWords.findIndex((word, index) =>
     word === "cf" &&
     (normalizedWords[index + 1] === "piece" ||
-      TOP_LEVEL_DATA_COMMANDS.has(normalizedWords[index + 1] ?? ""))
+      GUIDED_TOP_LEVEL_COMMANDS.has(normalizedWords[index + 1] ?? ""))
   );
   if (cfIndex < 0) return "";
 
