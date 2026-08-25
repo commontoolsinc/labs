@@ -334,6 +334,24 @@ describe("symbolDeclaresCommonFabricDefault", () => {
         "Optional property with user-defined Default must NOT be treated as Common Fabric Default",
       );
     });
+
+    it("returns false for a cycle of referenced types", () => {
+      const { program, checker } = createProgram({
+        "/test.ts": `
+          type First = Second;
+          type Second = First;
+
+          interface Config {
+            theme: First;
+          }
+        `,
+      });
+
+      const sf = program.getSourceFile("/test.ts")!;
+      const themeSymbol = getPropertySymbol(checker, sf, "Config", "theme");
+
+      assertFalse(symbolDeclaresCommonFabricDefault(themeSymbol, checker));
+    });
   });
 
   describe("Common Fabric Default from commonfabric.d.ts (should return true)", () => {

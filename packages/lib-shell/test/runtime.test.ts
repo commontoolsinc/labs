@@ -121,6 +121,49 @@ type NavigationDetail = {
 };
 
 describe("RuntimeInternals", () => {
+  describe("getSpaceRootPattern", () => {
+    it("caches a successful root-pattern lookup", async () => {
+      const client = new MockRuntimeClient();
+      const rootPattern = { id: "root-pattern" };
+      client.getSpaceRootPattern = (space: DID) => {
+        client.spaceRootCalls.push(space);
+        return Promise.resolve(rootPattern as never);
+      };
+      const runtime = new RuntimeInternals(client as any);
+      const space = "did:key:z6Mk-root-cache" as DID;
+
+      try {
+        await expect(runtime.getSpaceRootPattern(space)).resolves.toBe(
+          rootPattern,
+        );
+        await expect(runtime.getSpaceRootPattern(space)).resolves.toBe(
+          rootPattern,
+        );
+        expect(client.spaceRootCalls).toEqual([space]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("retries a root-pattern lookup after rejection", async () => {
+      const client = new MockRuntimeClient();
+      const runtime = new RuntimeInternals(client as any);
+      const space = "did:key:z6Mk-root-retry" as DID;
+
+      try {
+        await expect(runtime.getSpaceRootPattern(space)).rejects.toThrow(
+          "no root pattern in mock",
+        );
+        await expect(runtime.getSpaceRootPattern(space)).rejects.toThrow(
+          "no root pattern in mock",
+        );
+        expect(client.spaceRootCalls).toEqual([space, space]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+  });
+
   it("reads a piece's source state through the client", async () => {
     const client = new MockRuntimeClient();
     const runtime = new RuntimeInternals(client as any);
@@ -183,6 +226,21 @@ describe("RuntimeInternals", () => {
   it("uses the default navigation event when no navigation callback is injected", async () => {
     const spaceDid = "did:key:z6Mk-lib-shell-runtime-did-nav-current" as DID;
     const client = new MockRuntimeClient();
+    let registryWrites = 0;
+    client.getSpaceRootPattern = (space: DID) => {
+      client.spaceRootCalls.push(space);
+      return Promise.resolve({
+        cell: () => ({
+          key: () => ({
+            send: () => {
+              registryWrites += 1;
+              return Promise.resolve();
+            },
+          }),
+          sync: () => Promise.resolve(),
+        }),
+      } as never);
+    };
     const runtime = new RuntimeInternals(client as any);
 
     let navigation: NavigationDetail | undefined;
@@ -209,6 +267,7 @@ describe("RuntimeInternals", () => {
         pieceId: "piece-123",
       });
       expect(client.spaceRootCalls).toEqual([]);
+      expect(registryWrites).toBe(0);
     } finally {
       globalThis.removeEventListener("cf-navigate", onNavigate);
       await runtime.dispose();
