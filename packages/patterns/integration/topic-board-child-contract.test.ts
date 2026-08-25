@@ -125,3 +125,103 @@ describe("topic-board-child-contract", () => {
       .toBe((before as number) + 1);
   });
 });
+
+/**
+ * The board's mention pivot, exercised where it is still reachable.
+ *
+ * `crossrefTable` derives the whole reference graph once on the board, and each
+ * topic reads its own row out of it. Testing that needs two things at the same
+ * time: topics that are ON a board, so the pivot sees them, and `mention` /
+ * `unmention` / `referencedBy` on those same topics. A pattern test can no
+ * longer have both — the board's demand carries no verbs, and a topic
+ * constructed in a pattern body cannot be placed on a board either (pushing one
+ * in reports a schema mismatch and the action never runs; seeding the array at
+ * construction fails because `Cell.of()` takes static data only).
+ *
+ * Here both hold, because a caller files through the board and then addresses
+ * the created topic by its own fid.
+ */
+describe("topic-board-pivot-contract", () => {
+  let cc: PiecesController;
+  let board: PieceController;
+  let releaseBoard: (() => void) | undefined;
+  let target: PieceController;
+  let source: PieceController;
+  let third: PieceController;
+
+  beforeAll(async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    cc = await initializePiecesController({
+      space: SPACE_NAME,
+      apiUrl: new URL(API_URL),
+      identity,
+    });
+    await cc.ensureDefaultPattern();
+    const program = await resolveLocalProgram(
+      (resolver) => cc.runtime.harness.resolve(resolver),
+      {
+        main: join(import.meta.dirname!, "..", "topics", "main.tsx"),
+        root: join(import.meta.dirname!, ".."),
+      },
+    );
+    board = await cc.create(program, { start: true });
+    releaseBoard = cc.getResult(board.getCell()).sink(() => {});
+
+    for (const title of ["Graph target", "Graph source", "Graph third"]) {
+      await board.result.set({ title, agentName: "Sol" }, ["addTopic"]);
+    }
+    target = await topicAt(board, 0);
+    source = await topicAt(board, 1);
+    third = await topicAt(board, 2);
+  });
+
+  afterAll(async () => {
+    releaseBoard?.();
+    await cc?.dispose();
+  });
+
+  const inbound = async (t: PieceController) =>
+    (await t.result.get(["referencedBy"])) as { title: string }[];
+  const outbound = async (t: PieceController) =>
+    (await t.result.get(["mentions"])) as unknown[];
+
+  it("builds one pivot row per topic, claiming no edges before any mention", async () => {
+    expect(((await board.result.get(["crossrefs"])) as unknown[]).length)
+      .toBe(3);
+    expect((await inbound(target)).length).toBe(0);
+    expect((await outbound(target)).length).toBe(0);
+  });
+
+  it("records a self-mention without earning the topic an inbound edge", async () => {
+    // Referencing yourself is not being referenced from somewhere else. The
+    // rule is asked of the topic's identity rather than its array position.
+    await target.result.set({ topic: target.getCell() }, ["mention"]);
+    expect((await outbound(target)).length).toBe(1);
+    expect((await inbound(target)).length).toBe(0);
+  });
+
+  it("gives each mentioned topic its own inbound edge, and is not symmetric", async () => {
+    await source.result.set({ topic: target.getCell() }, ["mention"]);
+    await source.result.set({ topic: third.getCell() }, ["mention"]);
+
+    expect((await outbound(source)).length).toBe(2);
+    const intoTarget = await inbound(target);
+    expect(intoTarget.length).toBe(1);
+    expect(intoTarget[0].title).toBe("Graph source");
+    expect((await inbound(third)).length).toBe(1);
+    // Mentioning is not mutual.
+    expect((await inbound(source)).length).toBe(0);
+  });
+
+  it("drops only the retracted edge on unmention, leaving the other standing", async () => {
+    await source.result.set({ topic: target.getCell() }, ["unmention"]);
+
+    expect((await outbound(source)).length).toBe(1);
+    expect((await inbound(target)).length).toBe(0);
+    // The edge that was not retracted survives as a reference, not a
+    // flattened copy of the piece it names.
+    const intoThird = await inbound(third);
+    expect(intoThird.length).toBe(1);
+    expect(intoThird[0].title).toBe("Graph source");
+  });
+});
