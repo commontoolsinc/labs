@@ -193,7 +193,7 @@ function topicBody(
  * whose rows are piece-valued and expand through each topic's view of every
  * sibling; pulling the whole result grows without bound as the board fills.
  */
-async function topicAt(
+export async function topicAt(
   board: PieceController,
   index: number,
 ): Promise<PieceController> {
