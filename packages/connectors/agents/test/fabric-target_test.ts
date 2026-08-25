@@ -4,6 +4,7 @@ import {
   assertNotEquals,
   assertRejects,
   assertStrictEquals,
+  assertThrows,
 } from "@std/assert";
 import {
   isLinkRef,
@@ -665,6 +666,12 @@ Deno.test("Fabric target publishes sessions and command receipts", async () => {
       Error,
       "agent session index row 0 has no driver",
     );
+    await writeInvalidIndex([] as unknown as Record<string, unknown>);
+    await assertRejects(
+      () => target.publish(collected),
+      Error,
+      "agent session index row 0 has an invalid shape",
+    );
     await writeInvalidIndex({
       ...publishedSession,
       ownerDid: "did:key:another-owner",
@@ -1094,9 +1101,31 @@ Deno.test("Fabric target can defer its storage claim", async () => {
       spaceDid: owner.did(),
       ownerDid: owner.did(),
     };
-    const target = await AgentFabricTarget.connect(connection);
-    assertEquals(target.cells.index.getRaw(), undefined);
-    assertEquals(target.cells.commands.getRaw(), undefined);
+    let gitContextCalls = 0;
+    const target = await AgentFabricTarget.connect(connection, {
+      beginObservation: () => {
+        gitContextCalls++;
+        throw new Error("git context must not be used before storage claim");
+      },
+      validateCheckout: () => {
+        gitContextCalls++;
+        throw new Error("git context must not be used before storage claim");
+      },
+    } as never);
+    const rootValues = () => [
+      target.cells.index.getRaw(),
+      target.cells.allIndex.getRaw(),
+      target.cells.health.getRaw(),
+      target.cells.commands.getRaw(),
+      target.cells.receipts.getRaw(),
+    ];
+    assertEquals(rootValues(), [
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
     await assertRejects(
       () => target.publish([]),
       Error,
@@ -1107,8 +1136,97 @@ Deno.test("Fabric target can defer its storage claim", async () => {
       Error,
       "agent connector storage has not been claimed",
     );
+    assertThrows(
+      () => target.beginSessionObservation(),
+      Error,
+      "agent connector storage has not been claimed",
+    );
+    await assertRejects(
+      () => target.validateCheckout("/repo"),
+      Error,
+      "agent connector storage has not been claimed",
+    );
+    assertThrows(
+      () => target.commandCellId(),
+      Error,
+      "agent connector storage has not been claimed",
+    );
+    assertThrows(
+      () => target.receiptCellId(),
+      Error,
+      "agent connector storage has not been claimed",
+    );
+    await assertRejects(
+      () => target.bindCommandCell(target.cells.commands, {}),
+      Error,
+      "agent connector storage has not been claimed",
+    );
+    assertThrows(
+      () => target.commandsAreBound(),
+      Error,
+      "agent connector storage has not been claimed",
+    );
+    await assertRejects(
+      () => target.readReceipt("command"),
+      Error,
+      "agent connector storage has not been claimed",
+    );
+    await assertRejects(
+      () => target.subscribeCommands(() => {}),
+      Error,
+      "agent connector storage has not been claimed",
+    );
+    await assertRejects(
+      () => target.pollCommands(),
+      Error,
+      "agent connector storage has not been claimed",
+    );
+    await assertRejects(
+      () => target.publishReceipt({} as never),
+      Error,
+      "agent connector storage has not been claimed",
+    );
+    await assertRejects(
+      () => target.refreshSession({} as AgentDriver, "session"),
+      Error,
+      "agent connector storage has not been claimed",
+    );
 
+    assertEquals(rootValues(), [
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    assertEquals(gitContextCalls, 0);
     await target.claimStorage();
+    const claimedRootValues = rootValues();
+    await target.claimStorage();
+    assertEquals(rootValues(), claimedRootValues);
+    await assertRejects(
+      () => target.publish([], { observationSequence: 0 }),
+      Error,
+      "observationSequence must be a positive safe integer",
+    );
+    await assertRejects(
+      () => target.bindCommandCell(target.cells.commands, {}),
+      Error,
+      "command writer authorization is invalid",
+    );
+    await assertRejects(
+      () =>
+        target.publishReceipt({
+          schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+          ownerDid: "did:key:another-owner",
+          commandId: "wrong-owner-command",
+          sourceId: "codex:test",
+          nativeSessionId: "session",
+          status: "succeeded",
+        }),
+      Error,
+      "command receipt belongs to another owner",
+    );
 
     assertEquals(
       cellHasOwnerProtection(

@@ -3,8 +3,10 @@
 
 import type { Cell } from "../../runner/src/builder/types.ts";
 import {
+  debugCommandWriterAuthorization,
   defaultDebugPatternLocation,
   deployAgentSessionsDebugView,
+  describeAgentFabricTarget,
 } from "../src/debug-view.ts";
 import { AgentFabricTarget } from "@commonfabric/agents-connector/fabric";
 import {
@@ -32,6 +34,25 @@ import {
   sourceDescriptor,
 } from "./debug_view_support.ts";
 
+Deno.test("debug command authorization resolves local schema definitions", () => {
+  assertEquals(
+    debugCommandWriterAuthorization({
+      resultSchema: {
+        type: "object",
+        properties: {
+          commandAuthorization: { $ref: "#/$defs/CommandAuthorization" },
+        },
+        $defs: {
+          CommandAuthorization: {
+            ifc: { writeAuthorizedBy: ["verified-writer"] },
+          },
+        },
+      },
+    } as never),
+    ["verified-writer"],
+  );
+});
+
 Deno.test("debug deployment requires verified command authorization", async () => {
   const session = await createSession({
     identity,
@@ -51,6 +72,10 @@ Deno.test("debug deployment requires verified command authorization", async () =
       spaceDid: session.space,
       ownerDid: session.as.did(),
     });
+    assertEquals(
+      describeAgentFabricTarget(target, session.space).ownerDid,
+      session.as.did(),
+    );
     const defaultLocation = defaultDebugPatternLocation();
     await assertRejects(
       () =>
@@ -411,6 +436,11 @@ Deno.test("debug deployment rolls back an aborted registration", async () => {
       manager,
       target,
     );
+    const registration = runtime.getCell(
+      session.space,
+      `agent-sessions-debug-registration:${session.as.did()}`,
+    );
+    const originalRegistration = registration.getRaw();
     const defaultLocation = defaultDebugPatternLocation();
     const alternateLocation = {
       rootPath: defaultLocation.rootPath,
@@ -425,16 +455,18 @@ Deno.test("debug deployment rolls back an aborted registration", async () => {
       location: ReturnType<typeof defaultDebugPatternLocation>,
       options: {
         addCandidateToRecent?: boolean;
-        commitNumber?: number;
         abortAfterCommit?: boolean;
+        interceptPrivateRegistration?: boolean;
       } = {},
-    ): Promise<void> => {
+    ): Promise<{ candidateWasStopped: boolean }> => {
       const commitEntered = Promise.withResolvers<void>();
       const releaseCommit = Promise.withResolvers<void>();
       const controller = new AbortController();
       const originalStartPiece = manager.startPiece;
       const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+      const originalStop = runtime.runner.stop.bind(runtime.runner);
       let candidatePiece: Cell<unknown> | undefined;
+      let candidateWasStopped = false;
       let interceptRegistrationCommit = false;
       let commitCount = 0;
       manager.startPiece = (async (piece, options) => {
@@ -442,11 +474,27 @@ Deno.test("debug deployment rolls back an aborted registration", async () => {
         if (typeof piece !== "string") candidatePiece = piece;
         interceptRegistrationCommit = true;
       }) as typeof manager.startPiece;
+      runtime.runner.stop = ((piece) => {
+        if (piece === candidatePiece) candidateWasStopped = true;
+        return originalStop(piece);
+      }) as typeof runtime.runner.stop;
       runtime.editWithRetry = (async (action, maxRetries) => {
         if (interceptRegistrationCommit) commitCount++;
-        const shouldIntercept = commitCount === (options.commitNumber ?? 1);
+        let shouldIntercept = false;
         const result = await originalEditWithRetry((transaction) => {
+          const registrationBefore = transaction.readValueOrThrow(
+            registration.getAsNormalizedFullLink(),
+          );
           const result = action(transaction);
+          const registrationAfter = transaction.readValueOrThrow(
+            registration.getAsNormalizedFullLink(),
+          );
+          const registrationChanged = JSON.stringify(registrationBefore) !==
+            JSON.stringify(registrationAfter);
+          shouldIntercept = interceptRegistrationCommit &&
+            (options.interceptPrivateRegistration
+              ? registrationChanged
+              : commitCount === 1);
           if (shouldIntercept) {
             const originalCommit = transaction.commit.bind(transaction);
             transaction.commit = async () => {
@@ -503,8 +551,10 @@ Deno.test("debug deployment rolls back an aborted registration", async () => {
       } finally {
         releaseCommit.resolve();
         manager.startPiece = originalStartPiece;
+        runtime.runner.stop = originalStop;
         runtime.editWithRetry = originalEditWithRetry;
       }
+      return { candidateWasStopped };
     };
 
     const originalPiece = await manager.get(originalPieceId, false);
@@ -527,6 +577,32 @@ Deno.test("debug deployment rolls back an aborted registration", async () => {
       [],
     );
     assertEquals(await originalPiece.result.get(["sessionCount"]), 1);
+
+    const abortedPrivateRegistration = await abortRegistration(
+      alternateLocation,
+      {
+        abortAfterCommit: true,
+        interceptPrivateRegistration: true,
+      },
+    );
+    assertEquals(abortedPrivateRegistration.candidateWasStopped, true);
+    assertEquals(registration.getRaw(), originalRegistration);
+    assertEquals(
+      await registeredPieceIds(defaultPattern, "pieceRegistry"),
+      [],
+    );
+    assertEquals(
+      await registeredPieceIds(defaultPattern, "recentPieces"),
+      [],
+    );
+    await target.publish([{
+      source: sourceDescriptor(),
+      sessions: [sessionSnapshot(1), sessionSnapshot(2)],
+      errors: [],
+      complete: true,
+    }]);
+    await runtime.settled();
+    assertEquals(await originalPiece.result.get(["sessionCount"]), 2);
 
     const addRecentResult = await runtime.editWithRetry((transaction) => {
       const list = recentPieces.withTx(transaction);
@@ -772,6 +848,97 @@ Deno.test("debug deployment refuses a pre-created unprotected piece", async () =
   }
 });
 
+Deno.test("debug deployment refuses an unprotected registration", async () => {
+  const session = await createSession({
+    identity,
+    spaceName: `debug-registration-squatting-${crypto.randomUUID()}`,
+  });
+  const storageManager = StorageManager.emulate({ as: session.as });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  try {
+    const manager = new PiecesController(session, runtime);
+    await manager.synced();
+    await installDefaultPattern(manager);
+    const target = await AgentFabricTarget.open({
+      runtime,
+      spaceDid: session.space,
+      ownerDid: session.as.did(),
+    });
+    const registration = runtime.getCell(
+      session.space,
+      `agent-sessions-debug-registration:${session.as.did()}`,
+    );
+    const squattedRegistration = {
+      cause: "agent-sessions-debug:squatted",
+      pieceId: "fid1:squatted-debug-piece",
+      patternIdentity: "fid1:squatted-debug-pattern",
+      patternSymbol: "default",
+      retiredCauses: [],
+    };
+    const seed = runtime.edit();
+    registration.withTx(seed).setRawUntyped(squattedRegistration);
+    const seeded = await seed.commit();
+    if (seeded.error) throw seeded.error;
+
+    await assertRejects(
+      () => deployAgentSessionsDebugView(manager, target),
+      Error,
+      "refusing to adopt an unprotected debug registration",
+    );
+    assertEquals(registration.getRaw(), squattedRegistration);
+    assertEquals(
+      cellHasOwnerProtection(
+        runtime.readTx(),
+        registration,
+        session.as.did(),
+      ),
+      false,
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("debug deployment requires the public piece registry", async () => {
+  const session = await createSession({
+    identity,
+    spaceName: `debug-missing-registry-${crypto.randomUUID()}`,
+  });
+  const storageManager = StorageManager.emulate({ as: session.as });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  try {
+    const manager = new PiecesController(session, runtime);
+    await manager.synced();
+    const defaultPattern = await installDefaultPattern(manager);
+    const target = await AgentFabricTarget.open({
+      runtime,
+      spaceDid: session.space,
+      ownerDid: session.as.did(),
+    });
+    const removed = await runtime.editWithRetry((tx) => {
+      defaultPattern.withTx(tx).asSchema(undefined).key("pieceRegistry")
+        .setRawUntyped(undefined);
+    });
+    if (removed.error) throw removed.error;
+
+    await assertRejects(
+      () => deployAgentSessionsDebugView(manager, target),
+      Error,
+      "default pattern does not expose pieceRegistry",
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
 Deno.test("debug registration rejects writes from another owner", async () => {
   const server = newSharedServer();
   const spaceName = `debug-registration-owner-${crypto.randomUUID()}`;
@@ -802,6 +969,7 @@ Deno.test("debug registration rejects writes from another owner", async () => {
       readerSession.space,
       `agent-sessions-debug-registration:${readerSession.as.did()}`,
     );
+    const originalRegistration = registration.getRaw();
     assertEquals(
       cellHasOwnerConfidentiality(
         readerRuntime.readTx(),
@@ -835,6 +1003,7 @@ Deno.test("debug registration rejects writes from another owner", async () => {
       false,
       SHALLOW_PIECE_SCHEMA,
     );
+    const runningPiece = await readerManager.get(debugPieceId, false);
     const argument = readerManager.getArgument(debugPiece);
     await argument.sync();
     assertEquals(
@@ -845,6 +1014,7 @@ Deno.test("debug registration rejects writes from another owner", async () => {
       ),
       true,
     );
+    const originalArgument = argument.getRaw();
     const argumentAttack = readerRuntime.edit();
     argumentAttack.setCfcTrustSnapshot({
       id: "principal:did:key:other-owner",
@@ -861,6 +1031,35 @@ Deno.test("debug registration rejects writes from another owner", async () => {
     argumentAttack.prepareCfc();
     const argumentAttackResult = await argumentAttack.commit();
     assertEquals(argumentAttackResult.error !== undefined, true);
+    assertEquals(argument.getRaw(), originalArgument);
+
+    const ownerUpdate = readerRuntime.edit();
+    ownerUpdate.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: AGENT_CONNECTOR_WRITER_ID,
+    });
+    argument.withTx(ownerUpdate).setRawUntyped({
+      ...(argument.getRaw() as Record<string, unknown>),
+      ownerDid: "did:key:other-owner",
+    });
+    ownerUpdate.prepareCfc();
+    const ownerUpdateResult = await ownerUpdate.commit();
+    if (ownerUpdateResult.error) throw ownerUpdateResult.error;
+    await assertRejects(
+      () => deployAgentSessionsDebugView(readerManager, target),
+      Error,
+      "contains different owner inputs",
+    );
+    assertEquals(registration.getRaw(), originalRegistration);
+    assertNotEquals(debugPiece.getRaw(), undefined);
+    await target.publish([{
+      source: sourceDescriptor(),
+      sessions: [sessionSnapshot(1)],
+      errors: [],
+      complete: true,
+    }]);
+    await readerRuntime.settled();
+    assertEquals(await runningPiece.result.get(["sessionCount"]), 1);
   } finally {
     await readerRuntime.dispose();
     await readerStorage.close();

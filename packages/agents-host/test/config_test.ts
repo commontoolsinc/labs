@@ -48,6 +48,7 @@ Deno.test("parseAgentsHostConfig validates and preserves provider options", () =
     ],
   });
 
+  assertEquals(config.ownerDid, "did:key:test-owner");
   assertEquals(config.collectionIntervalMs, 1_234);
   assertEquals(config.checkoutRoots, ["/workspace/checkouts"]);
   assertEquals(config.sources, [
@@ -82,6 +83,7 @@ Deno.test("parseAgentsHostConfig validates checkout search roots", () => {
       () =>
         parseAgentsHostConfig({
           schema: AGENTS_HOST_CONFIG_SCHEMA,
+          ownerDid: "did:key:test-owner",
           checkoutRoots,
           sources: [{
             id: "codex",
@@ -91,6 +93,87 @@ Deno.test("parseAgentsHostConfig validates checkout search roots", () => {
         }),
       Error,
     );
+  }
+});
+
+Deno.test("parseAgentsHostConfig rejects a non-DID owner", () => {
+  assertThrows(
+    () =>
+      parseAgentsHostConfig({
+        schema: AGENTS_HOST_CONFIG_SCHEMA,
+        ownerDid: "not-a-did",
+        sources: [{
+          id: "codex",
+          driver: "codex-app-server",
+          enabled: true,
+        }],
+      }),
+    Error,
+    "configuration.ownerDid must be a DID",
+  );
+});
+
+Deno.test("parseAgentsHostConfig rejects malformed boundary fields", () => {
+  const source = {
+    id: "codex",
+    driver: "codex-app-server",
+    enabled: true,
+  };
+  const config = {
+    schema: AGENTS_HOST_CONFIG_SCHEMA,
+    ownerDid: "did:key:test-owner",
+    sources: [source],
+  };
+  const cases: Array<[unknown, string]> = [
+    [null, "configuration must be an object"],
+    [{ ...config, extra: true }, "configuration has an unknown field"],
+    [{ ...config, schema: "wrong" }, "configuration.schema must be"],
+    [{ ...config, sources: [] }, "sources must be a non-empty array"],
+    [{ ...config, sources: [null] }, "sources[0] must be an object"],
+    [
+      { ...config, sources: [{ ...source, command: [] }] },
+      "command must be a non-empty string array",
+    ],
+    [
+      { ...config, sources: [{ ...source, env: { BAD: 1 } }] },
+      "env.BAD must be a string",
+    ],
+    [
+      { ...config, sources: [{ ...source, extra: true }] },
+      "sources[0] has an unknown field",
+    ],
+    [
+      { ...config, sources: [{ ...source, driver: "unknown" }] },
+      "driver is not supported",
+    ],
+    [
+      { ...config, sources: [{ ...source, enabled: "yes" }] },
+      "enabled must be a boolean",
+    ],
+    [
+      { ...config, sources: [{ ...source, codexTransport: "unknown" }] },
+      "codexTransport is not supported",
+    ],
+    [
+      { ...config, sources: [{ ...source, allowDangerFullAccess: "yes" }] },
+      "allowDangerFullAccess must be a boolean",
+    ],
+    [
+      { ...config, checkoutRoots: "/workspace" },
+      "checkoutRoots must be a string array",
+    ],
+    [
+      { ...config, checkoutRoots: ["/workspace", "/workspace"] },
+      "checkoutRoots contains a duplicate path",
+    ],
+    [{ ...config, sources: [source, source] }, "duplicate source id"],
+    [
+      { ...config, sources: [{ ...source, enabled: false }] },
+      "must enable at least one source",
+    ],
+  ];
+  for (const [value, message] of cases) {
+    assertThrows(() => parseAgentsHostConfig(value), Error, message);
   }
 });
 
