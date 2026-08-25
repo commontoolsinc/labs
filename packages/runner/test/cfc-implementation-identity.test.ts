@@ -116,6 +116,47 @@ describe("CFC builtin implementation identity", () => {
     tx.abort("test-complete");
   });
 
+  it("keeps the name off the serialized key set of a module that carried one", () => {
+    storageManager = StorageManager.emulate({
+      as: signer,
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "observe",
+    });
+
+    // The name is what the policy identity is read from, and it stays out of
+    // `moduleToEncodableForm`'s key set — which is `...rest`, so the name must
+    // be non-enumerable wherever it is set. A module arriving with an ordinary
+    // `debugName` of its own is the case that tests it: `defineProperty`
+    // carries forward an existing property's attributes, so anything that
+    // leaves `enumerable` to default would keep this one enumerable and put
+    // the name into every content-derived id built from the module.
+    const carriesItsOwn = Object.assign(
+      raw(() => () => undefined),
+      { debugName: "stale" },
+    );
+    runtime.moduleRegistry.addModuleByRef("named-test-builtin", carriesItsOwn);
+
+    const plain = runtime.moduleRegistry.getModule("named-test-builtin");
+    const scoped = runtime.moduleRegistry.getModule(
+      "named-test-builtin",
+      "user",
+    );
+
+    for (const module of [plain, scoped]) {
+      expect(Object.keys(module)).not.toContain("debugName");
+      expect(
+        Object.getOwnPropertyDescriptor(module, "debugName")?.enumerable,
+      ).toBe(false);
+      expect(resolvePolicyFacingImplementationIdentity(module)).toEqual({
+        kind: "builtin",
+        builtinId: "named-test-builtin",
+      });
+    }
+  });
+
   it("threads builtin implementation identity through the active execution frame", async () => {
     storageManager = StorageManager.emulate({
       as: signer,
