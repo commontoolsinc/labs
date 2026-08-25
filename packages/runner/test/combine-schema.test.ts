@@ -505,13 +505,15 @@ describe("combineSchema additionalProperties handling", () => {
   }
 });
 
-// combineSchemaForLink combines a reader's schema with the schema carried by
-// a link the traversal follows. The link routinely describes more of its
-// target than the reader asked for; the reader's schema projects the link
-// schema, so link-only properties — and the link's `required` demands for
-// them — stay out of the combined schema unless the reader's shape admits
-// extra keys.
-describe("combineSchemaForLink reader projection", () => {
+// combineSchemaForLink decides the schema a traversal continues with after
+// crossing a link. The reader's schema takes precedence: a link routinely
+// describes more of its target than the reader asked for, and none of that —
+// extra properties, extra required entries, a different shape — reaches the
+// combined schema. The link schema is adopted only where the reader is
+// agnostic: a true or empty reader takes the link schema (keeping its own
+// asCell wrapper), and a false reader stays false, so a link's false schema
+// attenuates only readers that brought no shape of their own.
+describe("combineSchemaForLink reader precedence", () => {
   const readerSchema = {
     type: "object",
     properties: { name: { type: "string" } },
@@ -526,7 +528,7 @@ describe("combineSchemaForLink reader projection", () => {
     required: ["name", "phoneNumber"],
   } as const satisfies JSONSchema;
 
-  it("excludes a link property and its required entry outside the reader's shape", () => {
+  it("returns a shaped reader's schema over a link naming and requiring more", () => {
     expect(combineSchemaForLink(readerSchema, linkContactSchema)).toEqual({
       type: "object",
       properties: { name: { type: "string" } },
@@ -545,125 +547,54 @@ describe("combineSchemaForLink reader projection", () => {
     });
   });
 
-  it("adopts link properties and requirements when the reader admits extra keys", () => {
+  it("returns the reader's schema even when it admits extra keys", () => {
     const openReader = {
       ...readerSchema,
       additionalProperties: true,
     } as const satisfies JSONSchema;
 
-    expect(combineSchemaForLink(openReader, linkContactSchema)).toEqual({
-      type: "object",
-      properties: {
-        name: { type: "string" },
-        phoneNumber: { type: "string" },
-      },
-      additionalProperties: true,
-      required: ["name", "phoneNumber"],
-    });
+    expect(combineSchemaForLink(openReader, linkContactSchema)).toEqual(
+      openReader,
+    );
   });
 
-  it("passes the link schema through for a reader without properties", () => {
+  it("returns a bare object reader's schema without adopting the link's shape", () => {
     expect(combineSchemaForLink({ type: "object" }, linkContactSchema))
+      .toEqual({ type: "object" });
+  });
+
+  it("adopts the link schema for a true reader", () => {
+    expect(combineSchemaForLink(true, linkContactSchema)).toEqual(
+      linkContactSchema,
+    );
+  });
+
+  it("adopts the link schema for an empty reader", () => {
+    expect(combineSchemaForLink({}, linkContactSchema)).toEqual(
+      linkContactSchema,
+    );
+  });
+
+  it("adopts the link schema under a flag-only reader's asCell wrapper", () => {
+    expect(combineSchemaForLink({ asCell: ["cell"] }, linkContactSchema))
       .toEqual({
-        type: "object",
-        properties: {
-          name: { type: "string" },
-          phoneNumber: { type: "string" },
-        },
-        additionalProperties: true,
-        required: ["name", "phoneNumber"],
+        ...linkContactSchema,
+        asCell: ["cell"],
       });
   });
 
-  it("drops a link required entry for a key the reader names with a false schema", () => {
-    const excludingReader = {
-      type: "object",
-      properties: {
-        name: { type: "string" },
-        phoneNumber: false,
-      },
-      required: ["name"],
-    } as const satisfies JSONSchema;
-
-    expect(combineSchemaForLink(excludingReader, linkContactSchema)).toEqual({
-      type: "object",
-      properties: {
-        name: { type: "string" },
-        phoneNumber: false,
-      },
-      required: ["name"],
+  it("stays false for a false reader", () => {
+    expect(combineSchemaForLink(false, linkContactSchema)).toBe(false);
+    expect(combineSchemaForLink({ not: true }, linkContactSchema)).toEqual({
+      not: true,
     });
   });
 
-  it("projects the link schema below shared keys", () => {
-    const nestedReader = {
-      type: "object",
-      properties: { contact: readerSchema },
-      required: ["contact"],
-    } as const satisfies JSONSchema;
-    const nestedLink = {
-      type: "object",
-      properties: { contact: linkContactSchema },
-      required: ["contact"],
-    } as const satisfies JSONSchema;
-
-    expect(combineSchemaForLink(nestedReader, nestedLink)).toEqual({
-      type: "object",
-      properties: {
-        contact: {
-          type: "object",
-          properties: { name: { type: "string" } },
-          required: ["name"],
-        },
-      },
-      required: ["contact"],
-    });
+  it("ignores a false link schema for a reader with its own shape", () => {
+    expect(combineSchemaForLink(readerSchema, false)).toEqual(readerSchema);
   });
 
-  it("projects the link's items schema across an array hop", () => {
-    const readerListSchema = {
-      type: "array",
-      items: readerSchema,
-    } as const satisfies JSONSchema;
-    const linkListSchema = {
-      type: "array",
-      items: linkContactSchema,
-    } as const satisfies JSONSchema;
-
-    expect(combineSchemaForLink(readerListSchema, linkListSchema)).toEqual({
-      type: "array",
-      items: {
-        type: "object",
-        properties: { name: { type: "string" } },
-        required: ["name"],
-      },
-    });
-  });
-
-  it("keeps a reader property the link schema does not name", () => {
-    const titleReader = {
-      type: "object",
-      properties: { title: { type: "string" } },
-      required: ["title"],
-    } as const satisfies JSONSchema;
-
-    expect(combineSchemaForLink(titleReader, linkContactSchema)).toEqual({
-      type: "object",
-      properties: { title: { type: "string" } },
-      required: ["title"],
-    });
-  });
-
-  it("does not let the link's additionalProperties reopen a closed reader", () => {
-    const openLink = {
-      ...linkContactSchema,
-      additionalProperties: true,
-    } as const satisfies JSONSchema;
-
-    expect(combineSchemaForLink(readerSchema, openLink)).toEqual({
-      type: "object",
-      properties: { name: { type: "string" } },
-      required: ["name"],
-    });
+  it("adopts a false link schema for a true reader", () => {
+    expect(combineSchemaForLink(true, false)).toBe(false);
   });
 });

@@ -160,9 +160,6 @@ export type IMemorySpaceValueAttestation = IMemorySpaceAttestation & {
 const INTERN_CACHE_MAX = 10_000;
 const _mergeSchemaOptionCache = new Map<string, JSONSchema>();
 const _combineSchemaCache = new Map<string, JSONSchema>();
-// Separate cache for combineSchemaForLink: same key space as
-// _combineSchemaCache, different combination semantics.
-const _combineLinkSchemaCache = new Map<string, JSONSchema>();
 const _mergeSchemaFlagsCache = new Map<string, JSONSchema>();
 const _mergeAnyOfBranchCache = new Map<string, JSONSchema | null>();
 
@@ -298,8 +295,9 @@ function schemaMemoLinkKey(link: NormalizedFullLink | undefined): string {
  * Memoized `narrowSchema()` + `combineOptionalSchema()` for link hops
  * (`followPointer` / `isLinkedDocumentCovered`).
  *
- * Without this, every pointer follow mints a fresh selector (and often a
- * fresh combined schema), so each downstream structural hash — the
+ * Without this, every pointer follow mints a fresh selector (and, for a
+ * hop whose reader schema is agnostic, a fresh flag-merged schema), so
+ * each downstream structural hash — the
  * schemaTracker `MapSet` add, coverage checks, `traverseWithSchema` memo
  * keys — re-walks a brand-new object. Memoizing returns one canonical
  * `internPathSelector`-interned (deep-frozen) selector per repeat hop, so
@@ -1999,9 +1997,9 @@ export abstract class BaseObjectTraverser {
    * `internPathSelector()`. A schema-less (`undefined`) selector is treated as
    * `false` ("reject").
    *
-   * The memo matters: `combineOptionalSchema()` mints a new un-interned schema
-   * on every call, so without it each repeated coverage check would
-   * re-deep-freeze, re-clone, and re-hash that schema — measurably (~2x) slower
+   * The memo matters: `narrowAndCombineSelectorForLink()` mints a fresh
+   * selector per call, so without it each repeated coverage check would
+   * re-deep-freeze, re-clone, and re-hash its schema — measurably (~2x) slower
    * on link-heavy refreshes. The cache key joins the path with a single schema
    * hash rather than hashing the whole selector: hashing the path array (vs a
    * string join) is pure added cost on the hot cache-hit path.
@@ -2864,10 +2862,6 @@ export function combineOptionalSchema(
     return linkSchema;
   } else if (linkSchema === undefined) {
     return parentSchema;
-  } else if (ContextualFlowControl.isTrueSchema(parentSchema)) {
-    return combineSchemaForLink(parentSchema, linkSchema);
-  } else if (ContextualFlowControl.isTrueSchema(linkSchema)) {
-    return parentSchema;
   }
   return combineSchemaForLink(parentSchema, linkSchema);
 }
@@ -2929,65 +2923,44 @@ export function combineSchema(
   const key = internSchemaPairAsKey(parentSchema, linkSchema);
   const cached = _combineSchemaCache.get(key);
   if (cached !== undefined) return cached;
-  const result = _combineSchemaUncached(parentSchema, linkSchema, false);
+  const result = _combineSchemaUncached(parentSchema, linkSchema);
   return internSet(_combineSchemaCache, key, result);
 }
 
 /**
- * Combine the schema a traversal entered a doc with (`parentSchema`, the
- * reader's schema) with a schema encountered on a link in the doc
- * (`linkSchema`).
+ * The schema a traversal continues with after crossing a link: the reader's
+ * schema (`parentSchema`) takes precedence over the schema stored on the
+ * link (`linkSchema`).
  *
- * Unlike {@link combineSchema}, the reader's schema PROJECTS the link
- * schema rather than strictly intersecting with it. A link routinely
- * carries a full description of its target — more than the reader asked
- * for — and that description must not widen what the read loads or demand
- * more than the reader requires. Concretely, when the reader's object
- * schema names `properties` and does not admit extra keys (no
- * `additionalProperties`, or a false one):
+ * Unlike {@link combineSchema}, nothing is intersected. A link routinely
+ * describes more of its target than the reader asked for, and that
+ * description must not widen what the read loads, demand more than the
+ * reader requires, or reshape what the reader declared. The link schema is
+ * consulted only where the reader is agnostic:
  *
- * - a link property outside the reader's shape is excluded from the
- *   combined schema instead of intersected in, and
- * - a link `required` entry survives only for keys the reader's shape
- *   selects (named with a non-false schema, or admitted through a
- *   non-false `additionalProperties`), so a link that requires a field
- *   the reader never asked for cannot void the reader's narrower view.
- *
- * A reader that admits extra keys (no `properties`, or a non-false
- * `additionalProperties`) opts into the link's fuller shape, and the link
- * schema passes through as before — that is what lets a schemaless or
- * open query pick up types from the links it crosses. Within the shared
- * shape both schemas still intersect: types narrow, false absorbs, and
- * flags merge exactly as in {@link combineSchema}.
+ * - A `false` reader schema stays `false`: the reader selected nothing,
+ *   and the link cannot widen that.
+ * - A true or empty reader schema (`true`, `{}`, or flag-only wrappers
+ *   such as `{asCell: [...]}`) adopts the link schema, keeping the
+ *   reader's own `asCell` wrapper. This is what types a schemaless or
+ *   handle-only read by the link it crossed — a piece typed by its own
+ *   registration — and what lets a link's `false` schema attenuate an
+ *   open read to nothing.
+ * - Any other reader schema is used as it stands, and the link schema is
+ *   ignored — including a `false` link schema, which blocks only readers
+ *   that brought no shape of their own.
  */
 export function combineSchemaForLink(
   parentSchema: JSONSchema,
   linkSchema: JSONSchema,
 ): JSONSchema {
-  const key = internSchemaPairAsKey(parentSchema, linkSchema);
-  const cached = _combineLinkSchemaCache.get(key);
-  if (cached !== undefined) return cached;
-  const result = _combineSchemaUncached(parentSchema, linkSchema, true);
-  return internSet(_combineLinkSchemaCache, key, result);
-}
-
-/**
- * Whether the reader's (parent) object schema selects `key` at all: named
- * in `properties` with a non-false schema, admitted by a non-false
- * `additionalProperties`, or unconstrained because the schema declares no
- * properties.
- */
-function parentSchemaAdmitsKey(
-  parentSchema: JSONSchemaObj,
-  key: string,
-): boolean {
-  if (parentSchema.properties === undefined) return true;
-  const named = parentSchema.properties[key];
-  if (named !== undefined) {
-    return !ContextualFlowControl.isFalseSchema(named);
+  if (ContextualFlowControl.isFalseSchema(parentSchema)) {
+    return parentSchema;
   }
-  return parentSchema.additionalProperties !== undefined &&
-    !ContextualFlowControl.isFalseSchema(parentSchema.additionalProperties);
+  if (ContextualFlowControl.isTrueSchema(parentSchema)) {
+    return mergeSchemaFlags(parentSchema, linkSchema);
+  }
+  return parentSchema;
 }
 
 function schemaTypesAreDisjoint(
@@ -3076,12 +3049,7 @@ function narrowSubtypeIntersection(
 function _combineSchemaUncached(
   parentSchema: JSONSchema,
   linkSchema: JSONSchema,
-  forLink: boolean,
 ): JSONSchema {
-  // Recursive combinations keep the semantics of the entry point: a link
-  // schema's nested properties are still link-provided when reached through
-  // a link combination.
-  const combine = forLink ? combineSchemaForLink : combineSchema;
   if (ContextualFlowControl.isFalseSchema(parentSchema)) {
     return parentSchema;
   } else if (ContextualFlowControl.isFalseSchema(linkSchema)) {
@@ -3099,12 +3067,7 @@ function _combineSchemaUncached(
       linkSchema.type,
     );
     if (linkSchema.type === "object" && parentSchema.type === "object") {
-      // A property required by either intersected schema remains required —
-      // except on a link hop, where the reader's schema projects the link
-      // schema: the link may describe (and require) more of its target than
-      // the reader asked for, and those demands must not void the reader's
-      // narrower view. A link `required` entry survives only for keys the
-      // reader's shape selects (see `parentSchemaAdmitsKey`).
+      // A property required by either intersected schema remains required.
       const {
         required: parentRequired,
         $defs: parentDefs,
@@ -3112,16 +3075,8 @@ function _combineSchemaUncached(
       } = parentSchema;
       const { required: linkRequired, $defs: linkDefs, ...linkSchemaRest } =
         linkSchema;
-      const effectiveLinkRequired = forLink && linkRequired !== undefined
-        ? linkRequired.filter((key) => parentSchemaAdmitsKey(parentSchema, key))
-        : linkRequired;
-      const required = parentRequired || effectiveLinkRequired
-        ? [
-          ...new Set([
-            ...(parentRequired ?? []),
-            ...(effectiveLinkRequired ?? []),
-          ]),
-        ]
+      const required = parentRequired || linkRequired
+        ? [...new Set([...(parentRequired ?? []), ...(linkRequired ?? [])])]
         : undefined;
       const mergedDefs = { ...linkDefs, ...parentDefs };
       // When combining these object types, if they both have properties,
@@ -3193,21 +3148,16 @@ function _combineSchemaUncached(
             parentSchema.properties !== undefined &&
             parentSchema.properties[key] !== undefined
           ) {
-            mergedSchemaProperties[key] = combine(
+            mergedSchemaProperties[key] = combineSchema(
               parentSchema.properties[key],
               value,
             );
           } else if (parentAdditionalProperties === undefined) {
-            // we have parentSchema.properties, but nothing for this property.
-            // For the strict intersection, use the linkSchema's value. On a
-            // link hop the reader's shape wins: a key the reader neither
-            // names nor admits through additionalProperties stays out of the
-            // combined schema, even though the link describes it.
-            if (!forLink) {
-              mergedSchemaProperties[key] = value;
-            }
+            // we have parentSchema.properties, but nothing for this property
+            // so just use the linkSchema's value
+            mergedSchemaProperties[key] = value;
           } else {
-            mergedSchemaProperties[key] = combine(
+            mergedSchemaProperties[key] = combineSchema(
               parentAdditionalProperties!,
               value,
             );
@@ -3226,27 +3176,16 @@ function _combineSchemaUncached(
             // so just use the parentSchema's value
             mergedSchemaProperties[key] = value;
           } else {
-            mergedSchemaProperties[key] = combine(
+            mergedSchemaProperties[key] = combineSchema(
               value,
               linkAdditionalProperties,
             );
           }
         }
       }
-      // A reader that names properties without declaring
-      // additionalProperties reads as a closed shape (the selection default
-      // this module uses), so on a link hop the link's additionalProperties
-      // must not reopen it through the spread below.
-      const { additionalProperties: _linkAdditionalProperties, ...linkOpen } =
-        linkSchema;
-      const linkSpread = forLink &&
-          parentSchema.properties !== undefined &&
-          parentSchema.additionalProperties === undefined
-        ? linkOpen
-        : linkSchema;
       return {
         type: "object",
-        ...linkSpread,
+        ...linkSchema,
         ...parentSchema,
         properties: mergedSchemaProperties,
         ...(required && { required }),
@@ -3266,7 +3205,7 @@ function _combineSchemaUncached(
         ? linkSchema.items
         : linkSchema.items === undefined
         ? parentSchema.items
-        : combine(parentSchema.items, linkSchema.items);
+        : combineSchema(parentSchema.items, linkSchema.items);
       const prefixItemCount = Math.max(
         parentPrefixItems?.length ?? 0,
         linkPrefixItems?.length ?? 0,
@@ -3280,7 +3219,7 @@ function _combineSchemaUncached(
             ? linkItem ?? true
             : linkItem === undefined
             ? parentItem
-            : combine(parentItem, linkItem);
+            : combineSchema(parentItem, linkItem);
         },
       );
       return {

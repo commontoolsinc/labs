@@ -214,10 +214,10 @@ For `CompoundCycleTracker`, disposal removes empty per-key entries.
 Traversal is intentionally not a full JSON-Schema validator. Notable differences:
 
 - Branch result merging (`anyOf`/`allOf`) is runtime-specific
-- Parent/link schema composition on reference hops (`combineSchemaForLink`) is a
-  best-effort pseudo-intersection projected onto the reader's shape: link-schema
-  properties (and their `required` entries) the reader's schema does not select
-  are excluded rather than intersected in
+- Parent/link schema composition on reference hops (`combineSchemaForLink`) is
+  precedence, not intersection: the reader's schema is used as it stands, and
+  the link's schema is adopted only when the reader's is true or empty (a
+  false reader schema stays false)
 - Narrowing across path boundaries may be more permissive than strict JSON-Schema semantics
 
 ---

@@ -344,39 +344,39 @@ type PointerCycleTracker = CompoundCycleTracker<
 
 ### 5.3.4 Schema Narrowing
 
-When following a reference from entity A to entity B, the schema applicable to B
-combines:
+When following a reference from entity A to entity B, the schema applicable to
+B is decided by precedence, not by intersection. The schema context from A's
+traversal (what A expects B to look like) governs whenever it says anything at
+all; the schema embedded in the reference itself (what the reference declares
+B to contain) fills in only where the traversal is agnostic.
 
-1. The schema context from A's traversal (what A expects B to look like).
-2. Any schema embedded in the reference itself (what the reference declares B to
-   contain).
+`combineSchemaForLink` implements the rule. A reference routinely describes
+more of its target than the traversal asked for, and none of that description
+— extra properties, extra `required` entries, a different shape — reaches the
+combined schema:
 
-`combineSchemaForLink` computes this combination, with the traversal's schema
-projecting the reference's. A reference routinely describes more of its target
-than the traversal asked for, so when the traversal's object schema names
-`properties` and does not admit extra keys, a reference property outside that
-shape is excluded rather than adopted, the reference's `required` entries
-survive only for keys the traversal's shape selects, and the reference's
-`additionalProperties` cannot reopen the closed shape. A traversal schema that
-admits extra keys (no `properties`, or a non-false `additionalProperties`)
-adopts the reference's fuller shape, including its `required` entries.
+- A `false` traversal schema stays `false`: the traversal selected nothing,
+  and the reference cannot widen that.
+- A true or empty traversal schema (`true`, `{}`, or a flag-only wrapper such
+  as `{asCell: [...]}`) adopts the reference's schema, keeping its own
+  `asCell` wrapper. This is what types a schemaless read by the references it
+  crosses, and what lets a reference's `false` schema attenuate an open read
+  to nothing.
+- Any other traversal schema is used as it stands and the reference's schema
+  is ignored — a `false` reference schema blocks only traversals that brought
+  no shape of their own.
 
-Within the shared shape the two schemas intersect best-effort. False schemas
-and disjoint types produce a false schema, while an unconstrained schema yields
-to the other input. Integer is treated as a subtype of number. For combinations
-that do not receive more specific handling, the parent schema takes precedence
-while retaining relevant flags from the link schema.
-
-Object schemas combine shared properties recursively. Array schemas combine
-their `items` schemas recursively. Their positional `prefixItems` extend to the
-longer input prefix: each position combines the two positional schemas, falling
-back to that input's `items` schema after its prefix ends. The result omits
-`prefixItems` when the merged prefix is empty.
-
-The sibling `combineSchema` keeps the strict pseudo-intersection — retaining
-properties allowed by only one side and preserving every property required by
-either input — and merges a compound schema's base keywords with its own
-`anyOf`/`oneOf` branches, where both parts were authored as one constraint.
+The sibling `combineSchema` is the strict best-effort pseudo-intersection,
+used to merge a compound schema's base keywords with its own `anyOf`/`oneOf`
+branches, where both parts were authored as one constraint. Object schemas
+combine shared properties recursively, retain properties allowed by only one
+side, and preserve every property required by either input. False schemas and
+disjoint types produce a false schema, while an unconstrained schema yields to
+the other input, and integer is treated as a subtype of number. Array schemas
+combine their `items` schemas recursively; their positional `prefixItems`
+extend to the longer input prefix, each position combining the two positional
+schemas and falling back to that input's `items` schema after its prefix ends,
+with `prefixItems` omitted when the merged prefix is empty.
 
 Neither operation is a complete JSON Schema intersection, and neither resolves
 `$ref` values. See `combineSchemaForLink`, `combineSchema`, and `narrowSchema`

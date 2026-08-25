@@ -2750,13 +2750,25 @@ describe("link schema path narrowing", () => {
       expected: 2,
     },
     {
-      name: "preserves a false link schema at the exact link path",
+      name: "ignores a false link schema when the reader has its own schema",
       targetPath: [],
       targetValue: "Rejected",
       selectorPath: [],
       selectorSchema: { type: "string" },
       linkSchema: false,
-      expected: undefined,
+      expected: "Rejected",
+    },
+    {
+      // The permissive traversal's placeholder for a link it will not
+      // descend into is null, so the false link schema withholds the target
+      // value without voiding the read.
+      name: "adopts a false link schema for a permissive reader",
+      targetPath: [],
+      targetValue: "Rejected",
+      selectorPath: [],
+      selectorSchema: true,
+      linkSchema: false,
+      expected: null,
     },
   ];
 
@@ -2792,10 +2804,9 @@ describe("link schema path narrowing", () => {
   }
 
   // The link describes more of its target than the reader asked for. The
-  // reader's schema projects the link schema at the hop
-  // (`combineSchemaForLink`), so the link's extra `required` entry must not
-  // void the reader's narrower view of a target that satisfies everything
-  // the reader itself demanded.
+  // reader's schema takes precedence at the hop (`combineSchemaForLink`), so
+  // the link's extra `required` entry must not void the reader's narrower
+  // view of a target that satisfies everything the reader itself demanded.
   it("returns a linked object missing a field required only by the link schema", () => {
     const store = new Map<string, Revision<State>>();
     const rootUri = "of:link-schema-required-union-root" as URI;
@@ -2843,7 +2854,7 @@ describe("link schema path narrowing", () => {
     expect(ok).toEqual({ item: { a: "present" } });
   });
 
-  // The reader's projection keeps the unselected key out of the combined
+  // The reader's schema keeps the unselected key out of the combined
   // schema's `properties`, so the traversal treats it like any other key the
   // reader did not ask for: the query system carries the raw value through
   // without descending, and the link under it is neither followed nor
