@@ -5930,12 +5930,13 @@ supply; OW29/OW32/OW34 closed):
     600 s harness bound, which was never raised); reds r02 (loaded),
     r05 and r09 (quiet), plus the quiet smoke — NOT load-driven
     (loads 1.7-15.5 with no relation to the verdict; if anything the
-    quiet arm fared worse). Report and per-run evidence are UNTRACKED
-    and outside any checkout, on the measuring box:
-    `lunch-lift-report.md` and `lunch-lift-evidence/` beside the
-    worktrees (`runs/r00…r10/` each with its ledger, test and
-    toolshed logs, meta+stats JSON and its own `memory/` store;
-    `probes/p1…p3/`, `final-ledger.txt`, and the harness).
+    quiet arm fared worse). The report is ARCHIVED at
+    `../../history/plans/server-execution-v2/optimize/lunch-gate-evidence-2026-08-24.md`;
+    its per-run evidence is NOT in the repo and stays on the measuring
+    box at `/Users/berni/labs-worktrees/lunch-lift-evidence/`
+    (`runs/r00…r10/` each with its ledger, test and toolshed logs,
+    meta+stats JSON and its own `memory/` store; `probes/p1…p3/`,
+    `final-ledger.txt`, and the harness).
     **b04 CLOSED at this head:** `deferred-start-catchup` fired in
     EVERY run (10 activations over the 10 counted, 11 with the
     smoke), `deferred-start-catchup-failed` **0**, terminal `Error
@@ -7109,9 +7110,10 @@ supply; OW29/OW32/OW34 closed):
     `topics-benchmark`, branch
     `claude/server-exec-v2-topics-benchmark` — park checkpoint
     `97f0745e5` plus evidence commits, the harness and per-run
-    artifacts committed under `.bench-artifacts/`; report
-    `topics-measure-report-2026-08-24.md` §2b/§5.3, untracked
-    beside the worktrees) at tip `2ea87cea9` — #6199's CFC
+    artifacts committed under `.bench-artifacts/` and NOT archived
+    here; report ARCHIVED at
+    `../../history/plans/server-execution-v2/optimize/topics-measure-report-2026-08-24.md`
+    §2b/§5.3) at tip `2ea87cea9` — #6199's CFC
     envelope/cid convergence, with OW45 arm-B stage 1 (#6210) in
     tree. The guard fired **0 times across the campaign's 20 journey
     runs** (400 series events: 20 `addTopic` events × 20 runs), and
