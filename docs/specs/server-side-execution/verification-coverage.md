@@ -7469,8 +7469,12 @@ supply; OW29/OW32/OW34 closed):
     residue was a second blast radius, and part of it — shard 7's —
     was this fix's own.
     THE FLOOR UNDER THE FLOOR, and OW61's last delivery-side
-    mechanism: `session.entities` records what the server SENT, not
-    what the client HOLDS, and it commits when a frame is BUILT. A
+    mechanism: `session.entities` is the server's MODEL OF WHAT THE
+    CLIENT HOLDS — not a transmission log (a refresh pass caches
+    every entry it recomputes, including ones the wire frame omits
+    precisely because the model already claims them) — and it
+    advances when a frame is BUILT, on the assumption that the frame
+    arrives. Nothing validated that assumption. A
     socket that dies mid-flight loses frames the server counts as
     delivered — `rollbackUndeliveredSync` repairs only a
     locally-throwing send, as its own comment concedes — so the cache
@@ -7490,10 +7494,14 @@ supply; OW29/OW32/OW34 closed):
     retransmission to a client that holds the data, and the elision
     the reversal ruling protects is untouched — a caught-up resume
     takes the incremental path exactly as before. Pinned both
-    directions and mutation-checked
-    (`memory/test/v2-session-resume-watermark.test.ts`): with the
-    flag unset the behind-resume step fails while the caught-up step
-    still passes. BOARD 4: NINE of ten pattern shards green, 3/3
+    registry cases
+    (`memory/test/v2-session-resume-watermark.test.ts`: a resume
+    BEHIND its last synced seq arms the flag, a caught-up resume does
+    not — the pair guards against a blanket always-true). The
+    discrimination itself was established by a manual mutation of the
+    flag assignment, which reds the behind case and leaves the
+    caught-up case green; that check is not itself recorded
+    coverage. BOARD 4: NINE of ten pattern shards green, 3/3
     package lanes. Shard 6 — the residual board 3 could not explain,
     the same cid unhealed with the escalation firing and reporting no
     error — went GREEN, which settles what it was: reconnects were
@@ -7509,6 +7517,23 @@ supply; OW29/OW32/OW34 closed):
     path, with `Failed to create or find default pattern` and `No
     data at cell` both at ZERO across every lane. It is #6248's own
     scope decision, not OW61's.
+    ABLATION, run because four cumulative boards prove only that
+    each fix helped GIVEN the ones before it — never that the earlier
+    ones are still load-bearing once the last lands (the coordinator
+    was asked "why do we still need this approach" and could not
+    answer from the boards it had). PR #6262 = main + the
+    resume-watermark fix ALONE + the lane flip, with no park, no
+    pull and no escalation in the tree. Result: FIVE pattern shards
+    red (1, 2, 6, 9, 10) and package runtime-client red — against
+    board 4's single red shard and 3/3 package lanes. So the two
+    halves are COMPLEMENTARY, not redundant, and the client-side
+    absorb machinery stays: the server fix stops the delivery model
+    from lying about what a resumed client holds, and the client fix
+    is what survives the window before a reconnect (and covers
+    runtime-client, which board 1 had already shown the absorb fix
+    alone takes from red to green). A shrink of this row's PR to the
+    one-line server change was the alternative on the table; the
+    ablation is the evidence against it.
 
   - **OW62 — adopt-not-start: the piece-open seam is where the ON
     execution model's "one starter per piece" has to land. POST-FLIP
