@@ -241,46 +241,61 @@ check "Completion fixture" \
   "the slug is a --piece value the command accepts"
 gap "cf call $LINE_ARGS --piece bo" "a slug in the --piece slot"
 
-step "4. The inline spelling of an option drops every live candidate"
-# `--piece=<TAB>` and `--piece <TAB>` are the same slot. Only the second works,
-# and the first is the spelling `tokenizeLine` exists to serve.
+step "4. Both spellings of an option complete the same values"
+# `--piece=<TAB>` and `--piece <TAB>` are one slot. The inline spelling is the
+# one `tokenizeLine` exists to serve, and its candidates carry the `--piece=`
+# back so the shell replaces the whole token.
 check "$BOARD" "$(complete_at "cf call $LINE_ARGS --piece ")" \
   "the spaced spelling completes"
-gap "cf call $LINE_ARGS --piece=" "the inline --piece= spelling"
-# The directive half of the same slot: the glob reaches the shell attached to a
-# word that still carries `--identity=`, so nothing can match it.
+check "--piece=$BOARD" "$(complete_at "cf call $LINE_ARGS --piece=")" \
+  "the inline spelling completes the same value, prefix attached"
+# The directive half of the same slot reaches the shell either way.
 check ":cf:files *.key" "$(directives_at "cf call $LINE_ARGS --identity ")" \
   "the spaced --identity spelling emits its files directive"
+check ":cf:files *.key" "$(directives_at "cf call $LINE_ARGS --identity=")" \
+  "and so does the inline one"
 
-step "5. Three documented ways to name a target complete nothing"
+step "5. Every documented way to name a target reaches the same slots"
 CANONICAL="/of:$BOARD"
 QUALIFIED="/@$SPACE_DID/of:$BOARD"
+VERBS="addItem,legacyAdd,noteAll,renameItem,sweep"
 check "Completion fixture" \
   "$($CF get --quiet --piece "$CANONICAL" $ARGS '$NAME' 2>/dev/null | tr -d '"')" \
   "the canonical reference is a --piece value the command accepts"
-gap "cf call $LINE_ARGS --piece $CANONICAL " \
-  "the verb slot behind a canonical --piece reference"
+check "$VERBS" "$(candidates_at "cf call $LINE_ARGS --piece $CANONICAL ")" \
+  "and the verb slot behind it offers the same verbs"
+
 check "Completion fixture" \
   "$($CF get --quiet --piece "$QUALIFIED" $ARGS '$NAME' 2>/dev/null | tr -d '"')" \
-  "and so is its space-qualified spelling"
-gap "cf call $LINE_ARGS --piece $QUALIFIED " \
-  "the verb slot behind a space-qualified reference"
+  "its space-qualified spelling is accepted too"
+check "$VERBS" "$(candidates_at "cf call $LINE_ARGS --piece $QUALIFIED ")" \
+  "and completes the same"
+# The embedded space is enough on its own: the DID is in the reference, so a
+# line that names no --space still resolves one.
+check "$VERBS" "$(candidates_at \
+  "cf call --api-url $API_URL --identity $CF_IDENTITY --piece $QUALIFIED ")" \
+  "and supplies the space when the line names none"
 
 check "Completion fixture" \
   "$($CF get --quiet $ARGS "$CANONICAL" '$NAME' 2>/dev/null | tr -d '"')" \
   "a positional canonical address is a target the command accepts"
-gap "cf call $LINE_ARGS $CANONICAL " \
-  "the verb slot behind a positional address"
+check "$VERBS" "$(candidates_at "cf call $LINE_ARGS $CANONICAL ")" \
+  "and the callable after it completes, index shifted the way the command shifts it"
 
 check "1" "$(succeeds $CF get --quiet --piece "$CANONICAL#argument" $ARGS)" \
   "the #argument suffix is a --piece value the command accepts"
-gap "cf get $LINE_ARGS --piece $CANONICAL#argument " \
-  "the cell path behind an #argument reference"
-# The flag spelling of the same selection does complete, which is what makes
-# the suffix read as random rather than as a missing capability.
-check "1" "$(complete_at "cf get $LINE_ARGS --piece board --input " |
-  grep -c '^settings$')" \
-  "--input, which selects the same cell, completes it"
+ARGUMENT_KEYS=$(candidates_at "cf get $LINE_ARGS --piece $CANONICAL#argument ")
+check "$ARGUMENT_KEYS" \
+  "$(candidates_at "cf get $LINE_ARGS --piece board --input ")" \
+  "and completes the arguments cell, the same keys --input does"
+check "1" "$(printf '%s' "$ARGUMENT_KEYS" | grep -c 'settings')" \
+  "which is a key the arguments cell actually holds"
+
+# A path embedded in the reference is where the walk starts, the way
+# `mergePiecePath` puts it in front of the positional path.
+check "density,theme" \
+  "$(candidates_at "cf get $LINE_ARGS --piece $CANONICAL/settings ")" \
+  "an embedded path is what the cell-path slot completes below"
 
 step "6. The verb slot"
 check "addItem,legacyAdd,noteAll,renameItem,sweep" \
@@ -303,14 +318,18 @@ check "Add one item to the board, and report the new total." \
 check "handler" "$(annotation_at "cf call $LINE_ARGS --piece board " addItem)" \
   "and the candidate is annotated with its kind instead"
 
-step "7. Past the callable name, cf's own flags are offered and refused"
+step "7. Past the callable name, cf's own flags are not offered"
 # `piece call` is stopEarly(), so the first positional ends option parsing and
-# every later word belongs to the callable's schema-derived parser.
-check "1" "$(complete_at "cf call $LINE_ARGS --piece board addItem --" |
-  grep -c '^--invocation$')" \
-  "--invocation is offered after the callable name"
+# every later word belongs to the callable's schema-derived parser. A flag the
+# command refuses there is a candidate that teaches a caller something false.
 check "0" "$(succeeds $CF call --quiet --piece board $ARGS addItem \
-  --invocation late)" "and the command refuses it there"
+  --invocation late)" "the command refuses a cf flag after the callable name"
+check "" "$(complete_at "cf call $LINE_ARGS --piece board addItem --")" \
+  "and nothing is offered there"
+# Before the callable name the same flag is accepted and offered.
+check "1" "$(complete_at "cf call $LINE_ARGS --piece board --" |
+  grep -c '^--invocation$')" \
+  "--invocation is still offered before the callable name"
 
 step "8. The verb's own fields do not complete"
 # The position where a caller has least to go on: these names are the pattern

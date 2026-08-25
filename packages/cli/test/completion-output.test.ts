@@ -87,6 +87,21 @@ Deno.test("--log-level=<value> keeps the inline prefix on candidates", async () 
   assertEquals(await completeFor("cf --log-level=de"), ["--log-level=debug"]);
 });
 
+Deno.test("the inline prefix is attached after the candidates are gathered", () => {
+  // `staticCandidates` returns bare values and `complete` attaches the prefix,
+  // so one rule covers the static half and the live half alike. Attaching it in
+  // the static half alone is what dropped every live candidate for this
+  // spelling: the word under the cursor is `--piece=`, and a bare value cannot
+  // start with it.
+  assertEquals(staticFor("cf --log-level=de"), [
+    "debug",
+    "info",
+    "warn",
+    "error",
+    "silent",
+  ]);
+});
+
 Deno.test("cf view --language completes its accepted names", async () => {
   assertEquals(await completeFor("cf view --language "), languageNames());
 });
@@ -223,6 +238,36 @@ Deno.test("generated scripts capture the previous deno completion before rebindi
   );
   const zsh = zshCompletionScript("cf");
   assert(zsh.indexOf("_comps[deno]") < zsh.indexOf("compdef _cf deno"));
+});
+
+Deno.test("generated bash script globs the fragment the shell replaces", () => {
+  // `$cur` is the whole word (`--identity=~/keys/a`), while readline replaces
+  // only what follows the last word-break character. A glob applied to the
+  // whole word matches no file at all, which is how `--identity=<TAB>` came to
+  // offer nothing while `--identity <TAB>` worked.
+  const code = bashCompletionScript("cf").split("\n")
+    .filter((line) => !line.trim().startsWith("#"));
+  const globbing = code.filter((line) => line.includes("compgen -f -X"));
+  assert(globbing.length > 0, "expected a glob-filtered compgen");
+  for (const line of globbing) {
+    assert(
+      line.includes('"${frag}"') && !line.includes('"${cur}"'),
+      `glob applied to the whole word: ${line}`,
+    );
+  }
+});
+
+Deno.test("generated zsh script moves an inline flag prefix out of the way", () => {
+  // zsh's `_path_files` completes against `$PREFIX`, which for `--identity=`
+  // is the whole word. `compset -P` moves the flag into `IPREFIX` so the path
+  // is what gets completed.
+  // Comments stripped first: they name both, and in the other order.
+  const code = zshCompletionScript("cf").split("\n")
+    .filter((line) => !line.trim().startsWith("#")).join("\n");
+  const compset = code.indexOf("compset -P");
+  const pathFiles = code.indexOf("_path_files");
+  assert(compset !== -1, "expected the inline prefix to be compset away");
+  assert(compset < pathFiles, "compset must precede the file completion");
 });
 
 Deno.test("generated bash script avoids bash 4 builtins", () => {

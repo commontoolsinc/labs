@@ -982,13 +982,25 @@ such as `--log-level` — plus live values read from the fabric:
 | `--identity`, pattern arguments | `*.key` / `*.tsx` files, via the shell      |
 | `--datafile`                    | any file, via the shell                     |
 
+An option's value completes the same whether it is written after a space or
+after `=`, and every spelling of a target reaches the same slots behind it: the
+bare id, the canonical reference (space-qualified or not, with an `@scope`
+suffix, an embedded path, or the `#argument` suffix), and a canonical reference
+written positionally in place of `--piece`.
+
+Past a `stopEarly()` boundary — after `cf call`'s callable name, after
+`cf exec`'s mounted file — nothing is offered. The CLI's own flags are refused
+there, so offering them would name something the command rejects; the words that
+do belong there are the callable's, and completing those is not yet built.
+
 Live values need an identity and an api-url. Both are read from the line being
 typed (`-i`, `-a`, `-u`) before falling back to `CF_IDENTITY`/`CF_API_URL`, so
 `cf call -s other-space --piece <TAB>` lists that space's pieces rather than the
-environment's. When neither is resolvable, or the server is unreachable,
-completion yields nothing — it never prints an error into the command line. Each
-request costs one CLI invocation plus one round trip, so value completion is as
-fast as the fabric it queries.
+environment's. A space DID embedded in a reference supplies one the line did not
+name. When nothing is resolvable, or the server is unreachable, completion
+yields nothing — it never prints an error into the command line. Each request
+costs one CLI invocation plus one round trip, so value completion is as fast as
+the fabric it queries.
 
 ### `deno task cf` and other invocations
 
