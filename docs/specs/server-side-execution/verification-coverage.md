@@ -7232,11 +7232,10 @@ supply; OW29/OW32/OW34 closed):
     cross-frame elision of already-delivered cid docs is
     correct-by-design, and the ACTUAL bug is CLIENT-side — a replica
     that failed to absorb/retain (or apply in order) an earlier cid
-    delivery. That investigation and fix run as a SEPARATE
-    owner-spawned session (its deliverable includes the
-    absorb-contract pin); its design is deliberately not scoped in
-    this row. (2) Containment — ACKed, KEPT, and what closes OW61's
-    crash class on its own: `#validateArrivedSchemaDocuments`
+    delivery. The client absorb handoff that closes that defect is
+    recorded at the end of this row. (2) Containment — ACKed, KEPT,
+    and what closes OW61's crash class on its own:
+    `#validateArrivedSchemaDocuments`
     returns a quarantine set instead of throwing — the offending doc
     drops from the frame with a loud per-doc diagnostic (fixpoint
     over in-frame schema docs so dependents fail closed together),
@@ -7282,11 +7281,9 @@ supply; OW29/OW32/OW34 closed):
     (`agents-host/src/fabric-runtime.ts`), AND cf-harness's
     run_pattern session (`cf-harness/src/fabric-session.ts`), so
     yes: cf-harness is also that shape, and the containment covers
-    all three. Residual trigger: the investigation session's
-    absorb-contract fix landing (which retires the quarantine to a
-    true never-fires net), and any live `schema-doc-quarantine` log
-    — each occurrence is evidence for that investigation, not a
-    server-side hole.
+    all three. Residual trigger: any live `schema-doc-quarantine` log
+    — each occurrence is evidence that another client absorb/ordering
+    defect remains, not a server-side hole.
     SHIPPING SIDE, current state: the closure pass stages what a
     delivered document's refs name, and the memory package now PINS both
     halves of that guarantee —
@@ -7318,6 +7315,31 @@ supply; OW29/OW32/OW34 closed):
     localization and the correction to this row's own claim that
     Cz/Nz/xz reference g2, are in
     [`ow61-shipping-side-reexamination-2026-08-25.md`](../../history/plans/server-execution-v2/optimize/ow61-shipping-side-reexamination-2026-08-25.md).
+    CLIENT ABSORB SIDE, current state: FIXED. A `session/effect` could
+    arrive before the first watch response; `SpaceSession.handleEffect`
+    created a `WatchView` with the frame in its aggregate snapshot but
+    did not enqueue the raw sync, the first watch response returned only
+    its own sync to `SpaceReplica`, and the runner subscribed afterward.
+    The replica therefore never applied the earlier frame even though the
+    server session had delivered and cached it. `SpaceSession` now returns
+    those pre-response effects in wire order as
+    `WatchMutationResult.precedingSyncs`, and `SpaceReplica` applies that
+    prefix before the response sync. The buffer belongs to the session's
+    delivery epoch: a successful resume retains it, while a replaced
+    session clears it before re-establishing watches. No server
+    retransmission changes.
+    The runner pin sends a valid schema document before the first
+    `watch.add` response and a referrer in that response; it quarantines
+    before the fix, stores both afterward, and reds again when only the
+    prefix apply is removed. A per-session ensure-ON CI probe removed the
+    earlier realm-global ambiguity: before the fix all 7 pre-watch
+    `cid:` effects (raw-complete and carrying `ayhc5ov`) lacked a
+    same-session/same-sequence replica apply and the lane emitted 118
+    quarantines; after the fix all 6 pre-watch effects reached the
+    ordered-prefix apply, quarantine count was 0, and shard 1 passed.
+    The complete mechanism, layer boundary, mutation check, and run/job
+    ids are in
+    [`ow61-client-absorb-root-cause-2026-08-25.md`](../../history/plans/server-execution-v2/optimize/ow61-client-absorb-root-cause-2026-08-25.md).
 
   - **OW62 — adopt-not-start: the piece-open seam is where the ON
     execution model's "one starter per piece" has to land. POST-FLIP
