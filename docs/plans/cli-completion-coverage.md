@@ -375,6 +375,12 @@ The listing is bounded by the space's index, which names slugs assigned since it
 existed — so an older slug still resolves and is not offered. Nothing can
 enumerate what it was never told the name of.
 
+The slot asks for both listings, so `loadPieces` is called twice. Measured
+against a local server across cold processes, one listing takes 333–347 ms and
+both together 345–439 ms: the second rides the session the first opened, and
+its cost sits under the run-to-run noise. A combined listing would be a new API
+for no measured gain, so the two calls stay.
+
 ## The first link
 
 ### 8. `--space` has no source a caller recognizes
