@@ -7360,6 +7360,38 @@ supply; OW29/OW32/OW34 closed):
     because `runner/test/schema-doc-sync.test.ts`'s "closes the
     staged watch view when a frame fails validation" pins the current
     behavior on purpose.
+    REPRODUCTION, at the true topology: PR #6248's ensure-ON board is
+    the defect's best evidence and supersedes the original 13-file
+    crash board for this purpose — 1069 `schema-doc-quarantine` lines
+    across TEN lanes (pattern shards 1/2/4/6/7/8/9/10, package
+    runtime-client 249, package shell 13), ZERO worker kills, and the
+    quarantined pair byte-for-byte the board's original
+    (`computed:fid1:7BycCyHc…` / `cid:fid1:zgJY1m9lR0…`). Every
+    failure signature there is DOWNSTREAM of a doc that never applied:
+    `Failed to create or find default pattern`
+    (`piece/src/ops/pieces-controller.ts` :1762), `[alice] No data at
+    cell`, the `/sourceMap` CFC prepare abort, and the shell lane's
+    30-minute hang. That board is the containment working exactly as
+    shipped AND the dismissal costing the lanes their data — the two
+    halves of OW61 separated cleanly. Modeling its shape as a pin (the
+    cid installed in the space, elided for the session, the mentioning
+    doc unrecoverable) caught TWO defects in this fix, either of which
+    would have left that board red: (a) the release never ran after a
+    PULL, because `pull()` installs its documents directly rather than
+    through `applySessionSync`, so the frame-end hook never saw the
+    delivery the park was waiting for — the pull now releases on
+    completion, and its residency check, not its result, decides
+    whether to re-arm (a pull can report a connection error and still
+    have delivered); (b) the supersede rule discarded LIVE parks,
+    because a seq-0 absent-doc marker — the "no confirmed version"
+    answer to a pull, not a newer version — counted as a newer
+    arrival, so a sink's own pull for the not-yet-applied doc evicted
+    the park waiting to supply it; superseding now happens only where
+    a real delivery lands (seq > 0), plus on a remove. NOTE for
+    anyone reading a future ON board: with this fix a
+    `schema-doc-quarantine` line no longer means the doc was dropped —
+    it is held and healing, so the line is expected and the lane's
+    colour, not the quarantine count, is the health metric.
 
   - **OW62 — adopt-not-start: the piece-open seam is where the ON
     execution model's "one starter per piece" has to land. POST-FLIP
