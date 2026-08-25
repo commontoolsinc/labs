@@ -366,6 +366,14 @@ combined schema:
   is ignored — a `false` reference schema blocks only traversals that brought
   no shape of their own.
 
+A discarded reference schema's `ifc` does not ride onto the result: write
+policy consumes declared schemas verbatim, so transplanting flow-control
+clauses between schemas would corrupt the declaration they came from. Instead
+the read entry point marks its transaction cfc-relevant when either the
+traversal's schema or the reference's schema carries `ifc` (`schemaHasIfc`),
+and enforcement reads stored cfc metadata and label views rather than
+combined schemas.
+
 The sibling `combineSchema` is the strict best-effort pseudo-intersection,
 used to merge a compound schema's base keywords with its own `anyOf`/`oneOf`
 branches, where both parts were authored as one constraint. Object schemas

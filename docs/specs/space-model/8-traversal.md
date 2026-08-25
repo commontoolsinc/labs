@@ -217,7 +217,9 @@ Traversal is intentionally not a full JSON-Schema validator. Notable differences
 - Parent/link schema composition on reference hops (`combineSchemaForLink`) is
   precedence, not intersection: the reader's schema is used as it stands, and
   the link's schema is adopted only when the reader's is true or empty (a
-  false reader schema stays false)
+  false reader schema stays false); a discarded link schema's `ifc` does not
+  ride onto the result — the read entry point marks cfc relevance off the
+  link schema directly instead
 - Narrowing across path boundaries may be more permissive than strict JSON-Schema semantics
 
 ---

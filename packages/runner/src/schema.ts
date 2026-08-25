@@ -1219,10 +1219,14 @@ export function validateAndTransform(
   // here for every property it resolves, so without this gate it probes every
   // linked document too — reads outside any declared scope envelope, which
   // drops the action's execution-context floor to `session` and stops its
-  // observations being adopted across users. The schema check costs no read
-  // and stays.
+  // observations being adopted across users. The schema checks cost no read
+  // and stay. The link schema is consulted on its own because reader
+  // precedence (`combineSchemaForLink`) keeps a shaped reader's combined
+  // schema free of the link's `ifc` — the marking must not depend on which
+  // side won the combination.
   if (
     schemaHasIfc(effectiveSchema) ||
+    schemaHasIfc(resolvedLinkSchema) ||
     (options?.viewChild !== true &&
       storedCfcMetadataAppliesToPath(tx, resolvedLink))
   ) {

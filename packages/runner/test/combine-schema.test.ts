@@ -597,4 +597,29 @@ describe("combineSchemaForLink reader precedence", () => {
   it("adopts a false link schema for a true reader", () => {
     expect(combineSchemaForLink(true, false)).toBe(false);
   });
+
+  // `ifc` deliberately does not ride the combination: write policy consumes
+  // declared schemas verbatim (`recordSchemaWritePolicyInput`), so a clause
+  // grafted onto the reader's schema would read as a declaration nobody
+  // authored. The read entry point marks cfc relevance off the link schema
+  // directly instead (`validateAndTransform`'s `schemaHasIfc` gate).
+  it("leaves a discarded link schema's ifc off a shaped reader", () => {
+    const labeledLink = {
+      ...linkContactSchema,
+      ifc: { confidentiality: ["confidential"] },
+    } as const satisfies JSONSchema;
+
+    expect(combineSchemaForLink(readerSchema, labeledLink)).toEqual(
+      readerSchema,
+    );
+  });
+
+  it("keeps an adopted link schema's own ifc for a true reader", () => {
+    const labeledLink = {
+      ...linkContactSchema,
+      ifc: { confidentiality: ["confidential"] },
+    } as const satisfies JSONSchema;
+
+    expect(combineSchemaForLink(true, labeledLink)).toEqual(labeledLink);
+  });
 });

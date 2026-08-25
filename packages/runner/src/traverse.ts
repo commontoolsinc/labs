@@ -2949,6 +2949,16 @@ export function combineSchema(
  * - Any other reader schema is used as it stands, and the link schema is
  *   ignored — including a `false` link schema, which blocks only readers
  *   that brought no shape of their own.
+ *
+ * A discarded link schema's `ifc` does NOT ride onto the result. Write
+ * policy consumes declared schemas verbatim (`recordSchemaWritePolicyInput`),
+ * so transplanting flow-control clauses between schemas corrupts the
+ * declaration they came from — an `ownerPrincipal` clause grafted onto a
+ * reader's schema reads as a different declaration than the one the owner
+ * authored. The read entry point instead marks its transaction
+ * cfc-relevant off the link schema directly (`validateAndTransform`'s
+ * `schemaHasIfc` gate), and enforcement reads stored cfc metadata and
+ * label views rather than combined schemas.
  */
 export function combineSchemaForLink(
   parentSchema: JSONSchema,
