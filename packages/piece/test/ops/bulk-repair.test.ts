@@ -7,6 +7,7 @@ import { createBuilder } from "@commonfabric/runner";
 
 import type { Cell as BuilderCell } from "../../../runner/src/builder/types.ts";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 
 import {
   collectLinkPaths,
@@ -452,8 +453,10 @@ describe("bulk-repair", () => {
         { kind: "repair", fixer: "upper-seed.ts" },
         { kind: "repair", fixer: "upper-seed.ts" },
       ]);
+      // Computed independently from the stored document, so a wrong hash
+      // cannot certify itself.
       expect(report.plan.rows[0].expect.documentHash)
-        .toBe(report.rows[0].documentHash);
+        .toBe(hashStringOf(await rawInput(a)));
       expect(decodePlan(encodePlan(report.plan))).toEqual(report.plan);
     });
 
@@ -476,6 +479,7 @@ describe("bulk-repair", () => {
       const report = await repairPieces(pieces, {
         selector: collectionOf(holder),
         fixer: upperSeed,
+        fixerName: "upper-seed.ts",
         plan: dry.plan,
         apply: true,
       });
@@ -598,6 +602,7 @@ describe("bulk-repair", () => {
       const report = await repairPieces(racing as never, {
         selector: collectionOf(holder),
         fixer: upperSeed,
+        fixerName: "upper-seed.ts",
         plan: dry.plan,
         apply: true,
       });
@@ -622,6 +627,7 @@ describe("bulk-repair", () => {
       const first = await repairPieces(pieces, {
         selector: collectionOf(holder),
         fixer: upperSeed,
+        fixerName: "upper-seed.ts",
         plan: dry.plan,
         apply: true,
       });
@@ -633,6 +639,7 @@ describe("bulk-repair", () => {
       const again = await repairPieces(pieces, {
         selector: collectionOf(holder),
         fixer: upperSeed,
+        fixerName: "upper-seed.ts",
         plan: dry.plan,
         apply: true,
       });
@@ -661,6 +668,7 @@ describe("bulk-repair", () => {
       const report = await repairPieces(pieces, {
         selector: collectionOf(holder),
         fixer: upperSeed,
+        fixerName: "upper-seed.ts",
         plan: reversed,
         apply: true,
       });
@@ -674,10 +682,118 @@ describe("bulk-repair", () => {
         repairPieces(pieces, {
           selector: collectionOf(holder),
           fixer: upperSeed,
+          fixerName: "upper-seed.ts",
           plan: truncated,
           apply: true,
         }),
       ).rejects.toThrow("the selection holds pieces the plan does not name");
+    });
+
+    it("holds an in-memory plan to the codec's invariants", async () => {
+      const a = await member("alpha");
+      const b = await member("bravo");
+      const holder = await seedHolder([a, b]);
+      const dry = await repairPieces(pieces, {
+        selector: collectionOf(holder),
+        fixer: upperSeed,
+        fixerName: "upper-seed.ts",
+      });
+
+      // A repair row stripped of its document hash: the codec would refuse
+      // this at decode, and the executor must refuse it the same way
+      // rather than writing unconditionally.
+      const hashless = {
+        header: dry.plan.header,
+        rows: dry.plan.rows.map((row) => ({
+          ...row,
+          expect: { ...row.expect, documentHash: undefined },
+        })),
+      };
+      await expect(
+        repairPieces(pieces, {
+          selector: collectionOf(holder),
+          fixer: upperSeed,
+          fixerName: "upper-seed.ts",
+          plan: hashless as never,
+          apply: true,
+        }),
+      ).rejects.toThrow("row 1");
+      expect((await rawInput(a)).seed).toBe("alpha");
+
+      // A duplicated row would execute its piece twice.
+      const doubled = {
+        header: dry.plan.header,
+        rows: [dry.plan.rows[0], ...dry.plan.rows],
+      };
+      await expect(
+        repairPieces(pieces, {
+          selector: collectionOf(holder),
+          fixer: upperSeed,
+          fixerName: "upper-seed.ts",
+          plan: doubled,
+          apply: true,
+        }),
+      ).rejects.toThrow("more than once");
+
+      // A plan without the run's fixerName cannot be held against the
+      // fixer actually run.
+      await expect(
+        repairPieces(pieces, {
+          selector: collectionOf(holder),
+          fixer: upperSeed,
+          plan: dry.plan,
+          apply: true,
+        }),
+      ).rejects.toThrow("needs the run's fixerName");
+    });
+
+    it("emits an artifact a stopped run can be resumed from", async () => {
+      const a = await member("alpha");
+      const b = await member("bravo");
+      const holder = await seedHolder([a, b]);
+      const dry = await repairPieces(pieces, {
+        selector: collectionOf(holder),
+        fixer: upperSeed,
+        fixerName: "upper-seed.ts",
+      });
+
+      // Move the second piece so the plan-driven apply blocks at preflight.
+      const original = (await rawInput(b)).seed;
+      await b.input.set("shifted", ["seed"]);
+      await pieces.runtime.idle();
+      const blocked = await repairPieces(pieces, {
+        selector: collectionOf(holder),
+        fixer: upperSeed,
+        fixerName: "upper-seed.ts",
+        plan: dry.plan,
+        apply: true,
+      });
+      expect(blocked.applied).toBe(0);
+      // Every artifact row still carries its precondition and operation —
+      // the blocked run's plan is suppliable straight back.
+      expect(
+        blocked.plan.rows.every((row) =>
+          row.op?.kind === "repair" &&
+          row.expect.documentHash !== undefined
+        ),
+      ).toBe(true);
+
+      // The operator puts the moved piece back; the blocked artifact then
+      // completes the run it recorded.
+      await b.input.set(original, ["seed"]);
+      await pieces.runtime.idle();
+      const resumed = await repairPieces(pieces, {
+        selector: collectionOf(holder),
+        fixer: upperSeed,
+        fixerName: "upper-seed.ts",
+        plan: blocked.plan,
+        apply: true,
+      });
+      expect(resumed.rows.map((row) => row.verdict)).toEqual([
+        "repaired",
+        "repaired",
+      ]);
+      expect(resumed.complete).toBe(true);
     });
 
     it("refuses a plan that disagrees with the run", async () => {
@@ -693,6 +809,7 @@ describe("bulk-repair", () => {
         repairPieces(pieces, {
           selector: collectionOf(holder),
           fixer: upperSeed,
+          fixerName: "upper-seed.ts",
           plan: {
             header: { ...dry.plan.header, space: "did:key:somewhere-else" },
             rows: dry.plan.rows,
@@ -723,6 +840,7 @@ describe("bulk-repair", () => {
         repairPieces(pieces, {
           selector: collectionOf(holder),
           fixer: upperSeed,
+          fixerName: "upper-seed.ts",
           plan: opless,
           apply: true,
         }),

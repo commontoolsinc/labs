@@ -12,7 +12,10 @@
  * like). Rows without an op are a pre-state record and diff to
  * `unchanged`/`changed`. Every comparison is on the full executable pointer,
  * `{identity, symbol}` — an identity alone conflates two patterns one module
- * exports.
+ * exports. A plan carrying repair rows is refused outright: a repair moves
+ * the document and not the reference, so a reference diff would answer
+ * `unchanged` about work it cannot see — re-running the fixer is that
+ * verification, and it lives with the repair.
  */
 
 import { canonicalPieceAddress, type PiecePlan } from "./bulk-plan.ts";
@@ -65,6 +68,16 @@ export interface PlanDiff {
  * otherwise silently collapse.
  */
 export function diffPlan(plan: PiecePlan, after: PiecePlan): PlanDiff {
+  const repairs = plan.rows.filter((row) => row.op?.kind === "repair");
+  if (repairs.length > 0) {
+    // A repair moves the document, not the reference, so this diff would
+    // answer `unchanged` about work it cannot see; re-running the fixer is
+    // the repair's verification, and it lives with the repair.
+    throw new Error(
+      "A reference diff cannot verify a document repair: " +
+        repairs.map((row) => row.piece).join(", ") + ".",
+    );
+  }
   if (plan.header.space !== after.header.space) {
     throw new Error(
       `Plans are from different spaces: ${plan.header.space} and ` +
@@ -93,9 +106,8 @@ export function diffPlan(plan: PiecePlan, after: PiecePlan): PlanDiff {
       patternIdentity: row.expect.patternIdentity,
       symbol: row.expect.symbol,
     };
-    // A repair op carries no target reference: it moves the document, not
-    // the pattern, and its verification is the fixer's no-op rather than a
-    // reference comparison — so a reference diff reads it as op-less.
+    // The repair arm is unreachable behind the refusal above; the check is
+    // what narrows the op union to the reference-carrying kinds.
     const target: PatternRef | undefined =
       row.op === undefined || row.op.kind === "repair"
         ? undefined

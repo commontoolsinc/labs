@@ -39,7 +39,7 @@ import { isLink } from "@commonfabric/runner";
 import { isPlainObject } from "@commonfabric/utils/types";
 
 import {
-  canonicalPieceAddress,
+  normalizePlan,
   type PiecePlan,
   type PiecePlanRow,
 } from "./bulk-plan.ts";
@@ -473,6 +473,10 @@ export async function repairPieces(
     phase?: string;
     expect: PiecePlanRow["expect"];
     expectedHash?: string;
+    /** The plan row this one executes, carried into the emitted artifact
+     * for every verdict short of landed, so a stopped run's artifact can
+     * be supplied straight back. */
+    supplied?: PiecePlanRow;
   }[];
   if (options.plan === undefined) {
     executionRows = members.map((row) => ({
@@ -481,15 +485,24 @@ export async function repairPieces(
       expect: row.expect,
     }));
   } else {
-    if (options.plan.header.space !== survey.plan.header.space) {
+    // The executor holds an in-memory plan to every invariant the codec
+    // holds a decoded one to — the same validator — so a shape the codec
+    // would refuse cannot reach a write by skipping the file: a repair row
+    // without its document hash, a duplicate piece, an invalid row.
+    const plan = normalizePlan(options.plan);
+    if (options.fixerName === undefined) {
       throw new Error(
-        `The plan names space ${options.plan.header.space}; this run ` +
+        "A supplied plan needs the run's fixerName: without it the plan's " +
+          "recorded fixer cannot be held against the fixer actually run.",
+      );
+    }
+    if (plan.header.space !== survey.plan.header.space) {
+      throw new Error(
+        `The plan names space ${plan.header.space}; this run ` +
           `targets ${survey.plan.header.space}.`,
       );
     }
-    const unrunnable = options.plan.rows.filter((row) =>
-      row.op?.kind !== "repair"
-    );
+    const unrunnable = plan.rows.filter((row) => row.op?.kind !== "repair");
     if (unrunnable.length > 0) {
       throw new Error(
         "The plan carries rows with no repair operation, which cannot be " +
@@ -497,26 +510,20 @@ export async function repairPieces(
           unrunnable.map((row) => row.piece).join(", ") + ".",
       );
     }
-    if (options.fixerName !== undefined) {
-      const disagreeing = options.plan.rows.filter((row) =>
-        row.op?.kind === "repair" && row.op.fixer !== options.fixerName
+    const disagreeing = plan.rows.filter((row) =>
+      row.op?.kind === "repair" && row.op.fixer !== options.fixerName
+    );
+    if (disagreeing.length > 0) {
+      throw new Error(
+        `The plan records a different fixer than this run supplies ` +
+          `(${options.fixerName}) on: ` +
+          disagreeing.map((row) => row.piece).join(", ") + ".",
       );
-      if (disagreeing.length > 0) {
-        throw new Error(
-          `The plan records a different fixer than this run supplies ` +
-            `(${options.fixerName}) on: ` +
-            disagreeing.map((row) => row.piece).join(", ") + ".",
-        );
-      }
     }
     const surveyByPiece = new Map(members.map((row) => [row.piece, row]));
-    const planPieces = new Set(
-      options.plan.rows.map((row) => canonicalPieceAddress(row.piece)),
-    );
+    const planPieces = new Set(plan.rows.map((row) => row.piece));
     const missing = members.filter((row) => !planPieces.has(row.piece));
-    const extra = options.plan.rows.filter((row) =>
-      !surveyByPiece.has(canonicalPieceAddress(row.piece))
-    );
+    const extra = plan.rows.filter((row) => !surveyByPiece.has(row.piece));
     if (missing.length > 0 || extra.length > 0) {
       throw new Error(
         "The plan and the selection disagree" +
@@ -531,15 +538,14 @@ export async function repairPieces(
           ". A stale plan is regenerated, never reconciled silently.",
       );
     }
-    executionRows = options.plan.rows.map((planRow) => {
-      const surveyRow = surveyByPiece.get(
-        canonicalPieceAddress(planRow.piece),
-      )!;
+    executionRows = plan.rows.map((planRow) => {
+      const surveyRow = surveyByPiece.get(planRow.piece)!;
       return {
         piece: surveyRow.piece,
         ...(planRow.phase === undefined ? {} : { phase: planRow.phase }),
         expect: surveyRow.expect,
         expectedHash: planRow.expect.documentHash,
+        supplied: planRow,
       };
     });
   }
@@ -601,11 +607,43 @@ export async function repairPieces(
       ...phase,
       expect: row.expect,
     };
+    // The artifact row this piece contributes. A landed row records the
+    // hash its verdict was computed from; any other verdict carries the
+    // supplied plan row through unchanged, so a stopped run's artifact can
+    // be supplied straight back; and a fresh run's row falls back to its
+    // decision's hash when one exists, or to the pre-state record.
+    const emitRow = (
+      decision:
+        | RowDecision
+        | { kind: "read-failed"; problem: string }
+        | undefined,
+      landed: boolean,
+    ) => {
+      if (!landed && row.supplied !== undefined) {
+        planRows.push(row.supplied);
+        return;
+      }
+      if (
+        decision !== undefined && decision.kind !== "read-failed" &&
+        decision.kind !== "not-document"
+      ) {
+        planRows.push({
+          piece: row.piece,
+          ...phase,
+          expect: { ...row.expect, documentHash: decision.documentHash },
+          ...(options.fixerName === undefined ? {} : {
+            op: { kind: "repair", fixer: options.fixerName },
+          }),
+        });
+        return;
+      }
+      planRows.push(preStateRow);
+    };
     if (startBlocked) {
       // The run did not start: every row reports its preflight
       // classification, and nothing was written.
       const decision = preflight.get(row.piece);
-      planRows.push(preStateRow);
+      emitRow(decision, decision?.kind === "conforms");
       if (decision === undefined || decision.kind === "read-failed") {
         rows.push({
           piece: row.piece,
@@ -659,7 +697,7 @@ export async function repairPieces(
     }
     if (stopped) {
       rows.push({ piece: row.piece, ...phase, verdict: "unattempted" });
-      planRows.push(preStateRow);
+      emitRow(preflight.get(row.piece), false);
       continue;
     }
     const expected = row.expectedHash;
@@ -709,24 +747,10 @@ export async function repairPieces(
       } else {
         decision = decide(cell.getRaw({ lastNode: "value" }));
       }
-      if (decision.kind === "not-document" || decision.kind === "moved") {
-        planRows.push(preStateRow);
-      } else {
-        // The evaluated row, as the artifact records it: the survey's
-        // expectation plus the document hash the verdict was computed
-        // from, and the repair operation when the run has a name for it.
-        planRows.push({
-          piece: row.piece,
-          ...phase,
-          expect: {
-            ...row.expect,
-            documentHash: decision.documentHash,
-          },
-          ...(options.fixerName === undefined ? {} : {
-            op: { kind: "repair", fixer: options.fixerName },
-          }),
-        });
-      }
+      emitRow(
+        decision,
+        decision.kind === "conforms" || decision.kind === "change",
+      );
       if (decision.kind === "not-document") {
         rows.push({
           piece: row.piece,
@@ -834,7 +858,7 @@ export async function repairPieces(
         verdict: "failed",
         problem: problem + state,
       });
-      planRows.push(preStateRow);
+      emitRow(preflight.get(row.piece), false);
       stopped = options.apply === true;
     }
   }

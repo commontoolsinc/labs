@@ -243,14 +243,30 @@ export function encodePlan(plan: PiecePlan): string {
 export function decodePlan(text: string): PiecePlan {
   const lines = text.split("\n").filter((line) => line.trim() !== "");
   if (lines.length === 0) throw new Error("Plan is empty.");
-  const header = JSON.parse(lines[0]) as unknown;
-  if (!isPlanHeader(header)) {
+  return normalizePlan({
+    header: JSON.parse(lines[0]),
+    rows: lines.slice(1).map((line) => JSON.parse(line)),
+  });
+}
+
+/**
+ * Validate an assembled plan against every invariant the codec holds, and
+ * return it with each row's piece address canonical. This is the one
+ * validator the decoder and the executors share: an in-memory plan handed
+ * straight to a run gets exactly the scrutiny a decoded file gets, so no
+ * caller can slip a shape past execution that the codec would have refused
+ * — a repair row without its document hash, a duplicate piece, an invalid
+ * row.
+ */
+export function normalizePlan(
+  plan: { header: unknown; rows: readonly unknown[] },
+): PiecePlan {
+  if (!isPlanHeader(plan.header)) {
     throw new Error(
       'Plan does not start with a "piece-plan" v1 header line.',
     );
   }
-  const rows = lines.slice(1).map((line, index) => {
-    const row = JSON.parse(line) as unknown;
+  const rows = plan.rows.map((row, index) => {
     if (!isPlanRow(row)) {
       throw new Error(`Plan row ${index + 1} is not a valid row object.`);
     }
@@ -263,7 +279,7 @@ export function decodePlan(text: string): PiecePlan {
     }
     seen.add(row.piece);
   }
-  return { header, rows };
+  return { header: plan.header, rows };
 }
 
 /**
@@ -271,10 +287,11 @@ export function decodePlan(text: string): PiecePlan {
  * becomes the reference the retarget produced, and the operation restores the
  * retained revision carrying the reference the row recorded. Nothing is
  * re-surveyed or re-supplied. A plan whose header names pieces the survey
- * could not account for is refused before any row is read. Rows without a
- * retarget op have nothing to roll
- * back and are left out; a plan with no retarget rows at all is refused,
- * because deriving an empty rollback would read as having one.
+ * could not account for is refused before any row is read. Survey-only and
+ * restore rows have nothing to roll back and are left out; a repair row is
+ * refused by name, its reversal being an inverse fixer nothing can derive;
+ * and a plan with no retarget rows at all is refused, because deriving an
+ * empty rollback would read as having one.
  *
  * A retarget row whose prior source is not retained is refused by name
  * before any rollback row is produced: a restore of an unretained source is
