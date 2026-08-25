@@ -259,52 +259,6 @@ describe("wish built-in", () => {
     expect(result.key("firstMentionable").get()?.result).toEqual("Alpha");
   });
 
-  it("resolves recent pieces via #recent", async () => {
-    const spaceCell = runtime.getCell(space, space).withTx(tx);
-    const recentPiecesCell = runtime.getCell(space, "recent-pieces", {
-      type: "array",
-      items: { type: "object" },
-    }).withTx(tx);
-    const recentData = [{ name: "Piece A" }, { name: "Piece B" }];
-    recentPiecesCell.set(recentData);
-
-    // Set up defaultPattern to own recentPieces
-    const defaultPatternCell = runtime.getCell(space, "default-pattern").withTx(
-      tx,
-    );
-    (defaultPatternCell as any).key("recentPieces").set(recentPiecesCell);
-    (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
-
-    await tx.commit();
-    await runtime.idle();
-    tx = runtime.edit();
-
-    const wishPattern = pattern(() => {
-      return {
-        recent: wish({ query: "#recent" }),
-        recentFirst: wish({ query: "#recent/0/name" }),
-      };
-    });
-
-    const resultCell = runtime.getCell<{
-      recent?: { result?: unknown[] };
-      recentFirst?: { result?: string };
-    }>(
-      space,
-      "wish recent pieces result",
-      undefined,
-      tx,
-    );
-    const result = runtime.run(tx, wishPattern, {}, resultCell);
-    await tx.commit();
-    tx = runtime.edit();
-
-    await result.pull();
-
-    expect(result.key("recent").get()?.result).toEqual(recentData);
-    expect(result.key("recentFirst").get()?.result).toEqual("Piece A");
-  });
-
   it("returns current timestamp via #now", async () => {
     const wishPattern = pattern(() => {
       return { nowValue: wish({ query: "#now" }) };

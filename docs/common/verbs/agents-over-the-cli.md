@@ -53,10 +53,10 @@ board deployed at the top level is listed, the item its handler created is not,
 and that unlisted item reads on its own address regardless.
 
 `cf wish` reaches collections a pattern publishes by convention rather than the
-registry: `#pieceRegistry` resolves the registry itself, `#mentionable`,
-`#favorites`, and `#recent` resolve the collections of those names, and the
-`#profile` family resolves against the identity's home space. It takes the same
-projection flags as `cf get`, so a survey can be narrowed on the way out.
+registry: `#pieceRegistry` resolves the registry itself, while `#mentionable`
+and `#favorites` resolve the collections of those names. The `#profile` family
+resolves against the identity's home space. It takes the same projection flags
+as `cf get`, so a survey can be narrowed on the way out.
 
 ## Orienting on one piece
 

@@ -392,7 +392,6 @@ describe("load-errors", () => {
                 calls.push(args);
                 return Promise.resolve({ id: () => "fid1:slug-target" });
               },
-              trackRecentPiece: () => {},
             } as never;
 
             view._selectedPattern.run();

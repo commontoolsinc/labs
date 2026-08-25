@@ -160,9 +160,6 @@ export class XAppView extends BaseView {
           if (signal.aborted) return;
           this.selectedPatternTargetId = target.id();
           const pattern = await rt.getPattern(space, pieceId);
-          // Track as recently visited (fire-and-forget) — but not after
-          // the view moved on, or the write lands in the wrong space.
-          if (!signal.aborted) rt.trackRecentPiece(space, pieceId);
           if (!signal.aborted) this.#maybeDeliverOpenPath(pattern);
           return pattern;
         }
@@ -177,8 +174,6 @@ export class XAppView extends BaseView {
           if (!signal.aborted && slug) {
             this.#replacePieceUrlWithSlug(app.view, slug);
           }
-          // Track as recently visited (fire-and-forget)
-          if (!signal.aborted) rt.trackRecentPiece(space, app.view.pieceId);
           if (!signal.aborted) this.#maybeDeliverOpenPath(pattern);
           return pattern;
         }

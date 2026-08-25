@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
-import { Runtime } from "@commonfabric/runner";
+import { type Cell, Runtime } from "@commonfabric/runner";
 import { loadPieces } from "../lib/piece.ts";
 import { withEnv } from "./utils.ts";
 
@@ -32,89 +32,31 @@ describe("CLI runtime creation", () => {
         })).rejects.toThrow("Could not connect");
         expect(created?.apiUrl.href).toBe("https://toolshed.test/");
         expect(created?.experimental.systemPatternAutoUpdate).toBe(true);
+
+        let storageSyncCalls = 0;
+        Reflect.set(created!.storageManager, "synced", () => {
+          storageSyncCalls++;
+          return Promise.resolve();
+        });
+        const output: unknown[][] = [];
+        const originalLog = console.log;
+        console.log = (...args: unknown[]) => output.push(args);
+        try {
+          created!.navigateCallback!({
+            entityId: { "/": "fid1:cli-navigation-target" },
+          } as unknown as Cell<unknown>);
+        } finally {
+          console.log = originalLog;
+        }
+        expect(output).toEqual([
+          ["navigateTo new piece id fid1:cli-navigation-target"],
+        ]);
+        expect(storageSyncCalls).toBe(0);
       } finally {
         Runtime.prototype.healthCheck = originalHealthCheck;
         await Deno.remove(keyPath);
       }
     });
-  });
-
-  it("registers navigation targets through the piece registry", async () => {
-    const identity = await Identity.fromPassphrase(
-      "piece navigation registration test",
-      { implementation: "noble" },
-    );
-    const keyPath = await Deno.makeTempFile();
-    await Deno.writeFile(keyPath, identity.toPkcs8());
-    const originalHealthCheck = Runtime.prototype.healthCheck;
-    const originalGetSpaceCell = Runtime.prototype.getSpaceCell;
-    const originalSynced = PiecesController.prototype.synced;
-    let created: Runtime | undefined;
-    let manager: PiecesController | undefined;
-    Runtime.prototype.healthCheck = function () {
-      created = this;
-      return Promise.resolve(true);
-    };
-    Runtime.prototype.getSpaceCell = function (
-      this: Runtime,
-      ...args: unknown[]
-    ) {
-      const cell = Reflect.apply(originalGetSpaceCell, this, args);
-      Reflect.set(cell, "sync", () => Promise.resolve());
-      return cell;
-    } as typeof Runtime.prototype.getSpaceCell;
-    PiecesController.prototype.synced = () => Promise.resolve();
-
-    try {
-      manager = await loadPieces({
-        apiUrl: "https://toolshed.test",
-        identity: keyPath,
-        space: "piece-navigation-registration",
-      });
-      expect(created).toBe(manager.runtime);
-
-      const target = created!.getCell(
-        manager.getSpace(),
-        "piece-navigation-target",
-      );
-      let navigationTask: Promise<unknown> | undefined;
-      let registryReads = 0;
-      let registeredTargets: unknown[] | undefined;
-      Reflect.set(created!.storageManager, "synced", () => ({
-        then: (onFulfilled: () => unknown) => {
-          navigationTask = Promise.resolve().then(onFulfilled);
-          return navigationTask;
-        },
-      }));
-      manager.getPieceRegistry = (() => {
-        registryReads++;
-        return Promise.resolve({
-          get: () => [],
-        });
-      }) as unknown as typeof manager.getPieceRegistry;
-      manager.add = ((targets) => {
-        registeredTargets = targets;
-        return Promise.resolve();
-      }) as typeof manager.add;
-
-      created!.navigateCallback!(target);
-      expect(navigationTask).toBeDefined();
-      await navigationTask;
-
-      expect(registryReads).toBe(1);
-      expect(registeredTargets).toEqual([target]);
-    } finally {
-      Runtime.prototype.healthCheck = originalHealthCheck;
-      Runtime.prototype.getSpaceCell = originalGetSpaceCell;
-      PiecesController.prototype.synced = originalSynced;
-      if (created) {
-        await (created.storageManager as unknown as {
-          closeNow(): Promise<void>;
-        }).closeNow();
-        await created.dispose();
-      }
-      await Deno.remove(keyPath);
-    }
   });
 
   it("authenticates a deferred manager without syncing its space cell", async () => {

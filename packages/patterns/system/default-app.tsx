@@ -1,6 +1,5 @@
 import {
   computed,
-  equals,
   handler,
   NAME,
   navigateTo,
@@ -12,9 +11,6 @@ import {
 } from "commonfabric";
 
 import { default as Note, type NotePiece } from "../notes/note.tsx";
-
-// Maximum number of recent pieces to track
-const MAX_RECENT_PIECES = 10;
 
 import BacklinksIndex, { type MentionablePiece } from "./backlinks-index.tsx";
 import SummaryIndex from "./summary-index.tsx";
@@ -135,18 +131,10 @@ const addPiece = handler<
   pieceRegistry.addUnique(piece);
 });
 
-// Handler: Track piece as recently used (add to front, maintain max)
-const trackRecent = handler<
+const retiredAction = handler<
   { piece: unknown },
-  { recentPieces: Writable<unknown[]> }
->(({ piece }, { recentPieces }) => {
-  const current = recentPieces.get();
-  // Remove if already present
-  const filtered = current.filter((c) => !equals(c as any, piece as any));
-  // Add to front and limit to max
-  const updated = [piece, ...filtered].slice(0, MAX_RECENT_PIECES);
-  recentPieces.set(updated);
-});
+  Record<string, never>
+>(() => {});
 
 export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   // OWN the data cells (not from wish)
@@ -172,7 +160,6 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   const summaryIdx = SummaryIndex({});
 
   const gridView = PieceGrid({ pieces: visiblePieces });
-  const recentGridView = PieceGrid({ pieces: recentPieces });
 
   return {
     backlinksIndex: index,
@@ -277,28 +264,6 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
 
         <cf-vscroll flex showScrollbar>
           <cf-vstack gap="6" padding="6">
-            {computed(() => recentPieces.get().length > 0)
-              ? (
-                <cf-vstack gap="4" style={{ marginBottom: "16px" }}>
-                  <cf-hstack gap="2" align="center">
-                    <h3 style={{ margin: "0", fontSize: "16px" }}>Recent</h3>
-                    <cf-cell-link $cell={recentGridView} />
-                  </cf-hstack>
-                  <cf-table full-width hover>
-                    <tbody>
-                      {recentPieces.map((piece: any) => (
-                        <tr>
-                          <td>
-                            <cf-render variant="chip" $cell={piece} />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </cf-table>
-                </cf-vstack>
-              )
-              : undefined}
-
             <cf-vstack gap="4">
               <cf-hstack gap="2" align="center">
                 <h3 style={{ margin: "0", fontSize: "16px" }}>Pieces</h3>
@@ -358,9 +323,11 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     ),
     // Exported data
     pieceRegistry,
+    // Preserve stored state while the retired surface ages out of deployments.
     recentPieces,
     // Exported handlers (bound to state cells for external callers)
     addPiece: addPiece({ pieceRegistry }),
-    trackRecent: trackRecent({ recentPieces }),
+    // Keep the retired action slot non-empty while older roots update.
+    trackRecent: retiredAction({}),
   };
 });
