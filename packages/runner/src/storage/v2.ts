@@ -4120,6 +4120,18 @@ class SpaceReplica implements ISpaceReplica {
 
       this.#watchView = view;
       try {
+        const ow61Cids = sync.upserts.flatMap((upsert) =>
+          typeof upsert.id === "string" && upsert.id.startsWith("cid:")
+            ? [upsert.id.slice(9, 16)]
+            : []
+        );
+        if (ow61Cids.length > 0) {
+          console.error(
+            `[ow61-S2-replica] session=${session.sessionId}` +
+              ` space=${this.#space} type=${type} toSeq=${sync.toSeq}` +
+              ` cids=${ow61Cids.join(",")}`,
+          );
+        }
         this.applySessionSync(sync, type);
       } catch (error) {
         // The frame failed validation, so this refresh's view never gets a

@@ -455,6 +455,7 @@ export class Client {
           session.sessionId === message.sessionId &&
           session.space === message.space
         ) {
+          session.ow61NoteSocketEffect(payload, message.effect);
           session.handleEffect(message.effect);
         }
       }
@@ -933,6 +934,27 @@ export class SpaceSession {
     }
     this.scheduleAck(effect.toSeq);
     this.noteCaughtUpLocalSeq(effect.caughtUpLocalSeq);
+  }
+
+  // OW61 TEMPORARY DIAGNOSTIC: this is session-local by construction. It
+  // records the raw socket frame beside the exact SpaceSession that receives
+  // it, avoiding the shared-browser-realm ambiguity of the earlier probe.
+  ow61NoteSocketEffect(payload: string, effect: SessionSync): void {
+    const decodedCids = effect.upserts.flatMap((upsert) =>
+      typeof upsert.id === "string" && upsert.id.startsWith("cid:")
+        ? [upsert.id]
+        : []
+    );
+    if (decodedCids.length === 0) return;
+    const rawCids = decodedCids.filter((id) =>
+      payload.includes(`"id":"${id}"`)
+    );
+    console.error(
+      `[ow61-S1-session] session=${this.#sessionId} space=${this.space}` +
+        ` toSeq=${effect.toSeq} beforeWatch=${this.#watchView === null}` +
+        ` raw=${rawCids.length}/${decodedCids.length}` +
+        ` cids=${decodedCids.map((id) => id.slice(9, 16)).join(",")}`,
+    );
   }
 
   async restore(): Promise<void> {
