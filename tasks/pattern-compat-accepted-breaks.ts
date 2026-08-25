@@ -63,6 +63,52 @@ export interface AcceptedContractBreak {
 
 export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
   {
+    // The board demanded `TopicPiece` — the topic's whole published surface,
+    // three verb streams among them — of every stored topic. A holder's
+    // required demands are write-once and a stream cannot carry a default, so
+    // a verb named there could never be added to or dropped, and every future
+    // verb on a topic was priced as a break of the board. The board calls no
+    // topic verb, so it was paying that for nothing.
+    pattern: "topics/main.tsx",
+    baselines: [
+      "20260817T051200Z-NIE10ssgY89CXloq",
+      "20260817T212730Z-3FUPLp4oeb7gwpch",
+      "20260817T231646Z-3OsO1miQLNSxm34N",
+      "20260818T002831Z-Lk1mtrXcWtEV2FAK",
+      "20260818T020120Z-AfZn709Q7YVH7WlZ",
+      "20260819T172917Z-ocrU646RD4YKITBc",
+    ],
+    // `argument.topics[]` is the demand itself. `result.mentionable[]` narrows
+    // with it and cannot be held back: a pattern cannot serve a wider view of
+    // a stored piece than the one it requires. The result role is named
+    // through one verb because the proof reports at most one issue per role —
+    // keep an eye on that, since a second result problem could sit behind it.
+    paths: [
+      "argument.topics[]",
+      "result.mentionable[].addComment",
+    ],
+    reason:
+      "The board's demand narrows to the eight members it uses, so a new topic verb stops moving the board's shape. Narrowing an argument is a break by construction, and the published projection narrows with it.",
+    record: "docs/history/topics-demand-narrowing-break.md",
+  },
+  {
+    // The board hands one array to every child as its mention universe, so the
+    // topic's demand on its siblings and the board's demand on its topics are
+    // one shape and neither moves alone.
+    pattern: "topics/topic.tsx",
+    baselines: [
+      "20260818T002831Z-ULPZkKYbQEmzLpDl",
+      "20260818T020121Z-Y5Q-u4fiTKGUrP5Y",
+      "20260819T172917Z-K_8fL8hZtM4xYV7V",
+    ],
+    paths: [
+      "argument.mentionable[]",
+    ],
+    reason:
+      "The sibling projection narrows with the board's demand, which hands the same array to every child.",
+    record: "docs/history/topics-demand-narrowing-break.md",
+  },
+  {
     // Topics no longer derives a prose reference graph. `crossrefs` published
     // that graph, and there is no shape of the board that both keeps the
     // published field and removes the feature behind it.
@@ -77,9 +123,6 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20260810T212206Z-cIIz70jbLbbPc-F3",
       "20260812T003521Z-Jy37T5qk4KSHkgQe",
       "20260814T233350Z-jHoJZsDa5eUdWU-B",
-      "20260817T051200Z-NIE10ssgY89CXloq",
-      "20260817T212730Z-3FUPLp4oeb7gwpch",
-      "20260817T231646Z-3OsO1miQLNSxm34N",
     ],
     // `argument.topics[]` is every change to `TopicPiece` seen from the board's
     // list: each stored topic's defaults moved, which the proof cannot show is

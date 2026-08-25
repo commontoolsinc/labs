@@ -76,27 +76,72 @@ export interface AcceptedStateDrop {
 
 export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
   {
+    // The board demanded the topic's whole published surface of every stored
+    // topic, three verb streams among them, and a holder's required demands
+    // are write-once — so a verb named there priced every future verb as a
+    // break of the board. The demand is now the eight members the board reads,
+    // and the thirteen below go from each element of both lists it holds.
+    //
+    // Listed per element rather than as whole roots, deliberately: `topics`
+    // and `mentionable` both survive and are still compared, so a removal that
+    // also stranded a title, a body, or a timestamp still fails.
+    //
+    // A stored topic loses none of this. What it loses is the board's claim on
+    // it: the fields and the verbs stay on the topic, reachable at the topic's
+    // own address, and only the board's view of them narrows.
     pattern: "topics/main.tsx",
     paths: [
+      "topics[].addComment",
+      "topics[].addLink",
+      "topics[].bodyUpdatedAt",
+      "topics[].bodyUpdatedBy",
+      "topics[].comments",
+      "topics[].createdByName",
+      "topics[].links",
+      "topics[].setBody",
+      "mentionable[].addComment",
+      "mentionable[].addLink",
+      "mentionable[].bodyUpdatedAt",
+      "mentionable[].bodyUpdatedBy",
+      "mentionable[].comments",
+      "mentionable[].createdByName",
+      "mentionable[].links",
+      "mentionable[].setBody",
+    ],
+    // The vintages this forgives are those captured while the board still
+    // demanded the wide shape. Anything captured after holds the narrow one and
+    // owes the comparison the same answer as any other state.
+    capturedThrough: "2026-08-06T23-04-13.189Z",
+    reason:
+      "The board's demand narrowed to the eight members it uses, so a new " +
+      "topic verb stops moving the board's shape — see the matching entry in " +
+      "tasks/pattern-compat-accepted-breaks.ts. The verbs, thread, links and " +
+      "update stamps stay on the topic; only the board's projection of them " +
+      "goes.",
+    record: "docs/history/topics-demand-narrowing-break.md",
+  },
+  {
+    pattern: "topics/main.tsx",
+    paths: [
+      "crossrefs",
+      "index[].refsOut",
+      "index[].referencedBy",
+      "index[].topic",
+      "topics[].crossrefs",
+      "mentionable[].crossrefs",
       // `crossrefs` is listed WHOLE, and that is the honest shape of what
       // happened: the old graph row carried an fid, a title, summary counts and
       // two edge sets, and the pivot row that replaced it carries a topic and
       // who mentions it. Nothing of the old row survives to be compared field
       // by field.
-      "crossrefs",
       // The old index rows carried the same two edge sets beside their
       // summaries. The summaries themselves are untouched.
-      "index[].refsOut",
-      "index[].referencedBy",
       // An index row IS its topic now, so the title-only reference that used to
       // sit beside it goes; the row's own address is the topic's. The copied
       // `fid` field goes with it, and needs no entry here: no replayed vintage
       // holds a resolved one.
-      "index[].topic",
       // The retired per-topic edge row, seen through each of the board's two
       // lists of children.
-      "topics[].crossrefs",
-      "mentionable[].crossrefs",
     ],
     // The newest topics vintage predating the rebuild. Both replayed fixtures
     // sit at or under it, and any captured from here on hold the pivot rows,
