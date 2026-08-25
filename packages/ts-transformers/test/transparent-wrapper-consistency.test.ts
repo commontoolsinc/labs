@@ -1,0 +1,198 @@
+/**
+ * The transparent wrapper set — `(x)`, `x as T`, `<T>x`, `x satisfies T`, `x!`,
+ * and the partially emitted node — is defined once in `src/utils/expression.ts`
+ * and read by every stage that looks through a wrapper to the expression it
+ * wraps.
+ *
+ * These tests pin the property that makes that worth doing: a stage's answer
+ * does not depend on which spelling the author reached for. They span several
+ * source files on purpose, because the failure they guard against is one
+ * consumer drifting away from the others rather than any single stage being
+ * wrong on its own.
+ */
+
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import ts from "typescript";
+
+import { transformFiles, transformSource, validateSource } from "./utils.ts";
+import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
+import type { TransformationDiagnostic } from "../src/mod.ts";
+import { normalizeDataFlows } from "../src/ast/normalize.ts";
+import type { DataFlowGraph, DataFlowNode } from "../src/ast/dataflow.ts";
+
+/** Every spelling available in a `.tsx` source. `<T>x` is JSX there, so it is
+ * exercised separately against a `.ts` module. */
+const TSX_SPELLINGS: Readonly<Record<string, (inner: string) => string>> = {
+  bare: (inner) => inner,
+  parenthesized: (inner) => `(${inner})`,
+  "as-cast": (inner) => `(${inner}) as never`,
+  satisfies: (inner) => `(${inner}) satisfies unknown`,
+  "non-null": (inner) => `(${inner})!`,
+};
+
+describe("transparent wrapper consistency", () => {
+  describe("action() callback lowering", () => {
+    // `action()` throws when it reaches the runtime — it exists only to be
+    // rewritten to `handler()` at compile time. A spelling the callback
+    // unwrapper does not strip therefore does not degrade the output, it
+    // compiles a guaranteed runtime failure.
+    const source = (callback: string) =>
+      `      import { action, pattern } from "commonfabric";
+      export default pattern<{ n: number }, { go: unknown }>(({ n }) => ({
+        go: action(${callback}),
+      }));
+    `;
+
+    for (const [name, wrap] of Object.entries(TSX_SPELLINGS)) {
+      it(`rewrites the callback to a handler when it is ${name}`, async () => {
+        const output = await transformSource(source(wrap("() => { n; }")), {
+          types: COMMONFABRIC_TYPES,
+        });
+
+        expect(/\baction\(/.test(output)).toBe(false);
+        expect(/handler\(|__cfHandler/.test(output)).toBe(true);
+      });
+    }
+
+    it("rewrites the callback behind an angle-bracket assertion in a `.ts` module", async () => {
+      const output = await transformFiles({
+        "/m.ts": `      import { action, pattern } from "commonfabric";
+      export default pattern<{ n: number }, { go: unknown }>(({ n }) => ({
+        go: action(<() => void>(() => { n; })),
+      }));
+    `,
+      }, { types: COMMONFABRIC_TYPES });
+
+      expect(/\baction\(/.test(output["/m.ts"]!)).toBe(false);
+    });
+  });
+
+  describe("verb tier marking", () => {
+    const source = (verb: string) =>
+      `      import { action, pattern, type PerSession, Stream, type Writable } from "commonfabric";
+      interface Out {
+        draft: PerSession<Writable<string>>;
+        openComposer: Stream<void>;
+      }
+      export default pattern<Record<string, never>, Out>(() => {
+        const draft = new Writable("");
+        const openComposer = ${verb};
+        return { draft, openComposer };
+      });
+    `;
+
+    for (const [name, wrap] of Object.entries(TSX_SPELLINGS)) {
+      it(`marks the verb wrapper-tier when the action is ${name}`, async () => {
+        const output = await transformSource(
+          source(wrap(`action(() => { draft.set(""); })`)),
+          { types: COMMONFABRIC_TYPES },
+        );
+        const start = output.indexOf("openComposer: {");
+
+        expect(start).toBeGreaterThanOrEqual(0);
+        expect(output.slice(start, start + 400)).toContain('tier: "wrapper"');
+      });
+    }
+  });
+
+  describe("verb return validation", () => {
+    const errorsIn = async (body: string) => {
+      const { diagnostics } = await validateSource(
+        `      import { action } from "commonfabric";
+      const verb = action((id: string) => {
+        return ${body};
+      });
+      export { verb };
+    `,
+        { types: COMMONFABRIC_TYPES },
+      );
+      return (diagnostics as readonly TransformationDiagnostic[]).filter((d) =>
+        d.type === "verb-result:undeclared-return"
+      );
+    };
+
+    for (const [name, wrap] of Object.entries(TSX_SPELLINGS)) {
+      it(`reports an undeclared return when the value is ${name}`, async () => {
+        expect((await errorsIn(wrap("{ picked: id }"))).length).toBe(1);
+      });
+    }
+
+    it("stays opted out when the value is asserted to `any`", async () => {
+      // The deliberate fail-open: an `any` assertion means the validator
+      // cannot judge the shape, whichever assertion form carries it.
+      expect((await errorsIn("{ picked: id } as any")).length).toBe(0);
+      expect((await errorsIn("({ picked: id }) satisfies any")).length).toBe(0);
+    });
+  });
+
+  describe("normalizeDataFlows()", () => {
+    // Built directly rather than through the pipeline: a partially emitted node
+    // is synthetic, so a hand-built graph is the only way to put one in front
+    // of the normalizer.
+    const graphOf = (...expressions: ts.Expression[]): DataFlowGraph => ({
+      nodes: expressions.map((expression, id): DataFlowNode => ({
+        id,
+        expression,
+        canonicalKey: `k${id}`,
+        parentId: null,
+        scopeId: 0,
+        isExplicit: true,
+      })),
+      scopes: [{ id: 0, parentId: null, parameters: [] }],
+      rootScopeId: 0,
+    });
+
+    const parseInitializers = (code: string): ts.Expression[] => {
+      const sourceFile = ts.createSourceFile(
+        "/t.ts",
+        code,
+        ts.ScriptTarget.Latest,
+        true,
+      );
+      const found: ts.Expression[] = [];
+      const walk = (candidate: ts.Node) => {
+        if (ts.isVariableDeclaration(candidate) && candidate.initializer) {
+          found.push(candidate.initializer);
+        }
+        ts.forEachChild(candidate, walk);
+      };
+      walk(sourceFile);
+      return found;
+    };
+
+    it("groups flows that differ only by a transparent wrapper", () => {
+      const [bare, cast, satisfied, nonNull] = parseInitializers(
+        `const a = obj.value;
+         const b = (obj.value) as never;
+         const c = (obj.value) satisfies unknown;
+         const d = (obj.value)!;`,
+      );
+
+      const normalized = normalizeDataFlows(
+        graphOf(bare!, cast!, satisfied!, nonNull!),
+      );
+
+      expect(normalized.length).toBe(1);
+      expect(normalized[0]!.occurrences.length).toBe(4);
+    });
+
+    it("groups a partially emitted wrapper with the expression it wraps", () => {
+      const [bare] = parseInitializers(`const a = obj.value;`);
+      const wrapped = ts.factory.createPartiallyEmittedExpression(bare!);
+
+      const normalized = normalizeDataFlows(graphOf(bare!, wrapped));
+
+      expect(normalized.length).toBe(1);
+    });
+
+    it("keeps flows that differ by more than a wrapper apart", () => {
+      const [a, b] = parseInitializers(
+        `const a = obj.value;
+         const b = (obj.other) as never;`,
+      );
+
+      expect(normalizeDataFlows(graphOf(a!, b!)).length).toBe(2);
+    });
+  });
+});

@@ -310,8 +310,9 @@ Deno.test("exchange-rule declarations survive every transparent wrapper spelling
   // wrapper problem — the rule binding simply stops resolving, and
   // `exchangeRules()` reports the rule as invalid, which points the author at
   // the wrong thing entirely.
-  const ruleSource = (suffix: string) => `
-    export const releaseToReviewer = exchangeRule({
+  const ruleSource = (wrap: (rule: string) => string) => `
+    export const releaseToReviewer = ${
+    wrap(`exchangeRule({
       appliesTo: THIS_POLICY,
       pre: {
         integrity: [cfcPattern.hasRole(
@@ -323,17 +324,30 @@ Deno.test("exchange-rule declarations survive every transparent wrapper spelling
       post: {
         addAlternatives: [cfcPattern.user(v("reviewer"))],
       },
-    })${suffix};
+    })`)
+  };
 
     export const releaseRules = exchangeRules([releaseToReviewer]);
   `;
 
-  for (const suffix of ["", " satisfies unknown", "!"]) {
-    const manifests = compilePolicySource(ruleSource(suffix));
+  // Policy sources compile as .ts, so the angle-bracket assertion is available
+  // here alongside the spellings a .tsx pattern can use.
+  const spellings: Record<string, (rule: string) => string> = {
+    bare: (rule) => rule,
+    parenthesized: (rule) => `(${rule})`,
+    "as-cast": (rule) => `(${rule}) as never`,
+    satisfies: (rule) => `(${rule}) satisfies unknown`,
+    "non-null": (rule) => `(${rule})!`,
+    "angle-bracket": (rule) => `<never>(${rule})`,
+    nested: (rule) => `((${rule}) satisfies unknown)!`,
+  };
+
+  for (const [name, wrap] of Object.entries(spellings)) {
+    const manifests = compilePolicySource(ruleSource(wrap));
     assertEquals(
       manifests.length,
       1,
-      `expected one manifest for initializer suffix "${suffix}"`,
+      `expected one manifest for the ${name} spelling`,
     );
     assertEquals(manifests[0]!.manifest.symbol, "releaseRules");
   }
@@ -698,6 +712,53 @@ Deno.test("PolicyOf lowers a local exported ruleset to an exact schema marker", 
   );
   assertEquals(output.includes("__ctOwningSpace: true"), true);
   assertEquals(output.includes("__ctPolicyIdentityOf"), false);
+});
+
+Deno.test("PolicyOf resolves a ruleset binding through each wrapper spelling", async () => {
+  // The recognizer looks through wrappers to the `exchangeRules()` call. A
+  // spelling it does not strip surfaces as "PolicyOf binding must resolve to an
+  // exchangeRules() declaration" — a diagnostic that names the binding rather
+  // than the wrapper, and so points the author at the wrong thing.
+  const spellings: Record<string, string> = {
+    bare: "exchangeRules([release])",
+    parenthesized: "(exchangeRules([release]))",
+    "as-cast": "exchangeRules([release]) as never",
+    satisfies: "exchangeRules([release]) satisfies unknown",
+    "non-null": "exchangeRules([release])!",
+  };
+
+  for (const [name, ruleset] of Object.entries(spellings)) {
+    const { diagnostics } = await validateSource(
+      `/// <cts-enable />
+      import { Confidential, toSchema } from "commonfabric";
+      import type { PolicyOf } from "commonfabric/cfc";
+      import {
+        cfcPattern, exchangeRule, exchangeRules, THIS_POLICY, v,
+      } from "commonfabric/cfc";
+      export const release = exchangeRule({
+        appliesTo: THIS_POLICY,
+        pre: { integrity: [cfcPattern.hasRole(v("user"), THIS_POLICY.subject, "reader")] },
+        post: { addAlternatives: [cfcPattern.user(v("user"))] },
+      });
+      export const rules = ${ruleset};
+      export const schema = toSchema<
+        Confidential<string, [PolicyOf<typeof rules>]>
+      >();
+    `,
+      {
+        types: COMMONFABRIC_TYPES,
+        moduleIdentities: new Map([["/test.tsx", "sha256:module"]]),
+      },
+    );
+
+    assertEquals(
+      diagnostics.filter((diagnostic) =>
+        diagnostic.message.includes("must resolve to an exchangeRules()")
+      ).length,
+      0,
+      `the ${name} spelling should resolve as a ruleset binding`,
+    );
+  }
 });
 
 Deno.test("PolicyOf retains the defining identity of an imported ruleset", async () => {

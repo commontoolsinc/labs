@@ -808,8 +808,11 @@ reports:
   (`src/transformers/verb-return-validation.ts`) — a block body contains a
   top-level `return <expr>` whose expression is **definitely plain-shaped**:
   an object/array literal, a string/number/boolean/null literal, a template
-  string, or arithmetic/concatenation over such operands (recursing through
-  parentheses, non-`any` assertions, and conditionals). The message points
+  string, or arithmetic/concatenation over such operands (recursing through the
+  transparent wrapper set — parentheses, `as`, `<T>x`, `satisfies`, `!`, and
+  partially emitted nodes — and through conditionals). An assertion whose type
+  is `any` opts the expression out whichever assertion form carries it, because
+  the validator then cannot judge the shape. The message points
   the author at declaring the result (`action<Event, Result>` /
   `handler<Event, State, Result>`) or using a bare `return;` for an early
   exit.
@@ -1135,7 +1138,10 @@ Transforms `action(...)` to handler factory invocation:
   emitted `handler`, which is where the declared result would otherwise be
   lost: the rewritten call carries schemas rather than the authored type
   arguments. SchemaInjection lowers that slot (§10.3).
-- callback extraction currently supports arrow callbacks only
+- callback extraction supports arrow callbacks only, and reaches the arrow
+  through the transparent wrapper set (parentheses, `as`, `<T>x`, `satisfies`, `!`, and partially emitted nodes). The whole set comes off: a spelling left on hides the callback
+  from this strategy, and `action(...)` then survives into the emitted module,
+  where the runtime throws because `action` exists only to be lowered here
 
 ### 9.4 Array-method strategy
 
@@ -1591,6 +1597,12 @@ builder call to a named module-scope `const` and rewrites the original site to
 reference that name. Three builder shapes are registered in
 `HOISTABLE_BUILDERS`:
 
+A module-scope `const` initializer is read through the transparent wrapper set (parentheses, `as`, `<T>x`, `satisfies`, `!`, and partially emitted nodes) before its builder
+shape is matched, so a wrapped builder const registers in `__cfReg` on the same
+terms as a bare one. A spelling not stripped costs the const its
+content-addressed provenance and drops it to the SES source fallback at resolve
+time.
+
 - **Applied builders** (`lift`, `handler`): the site is `builder(...)(captures)`
   — the callee is itself the inner `builder(...)` call. Hoist the inner call,
   leave `__cfLift_N(captures)` / `__cfHandler_N(captures)` at the site (any
@@ -1908,6 +1920,10 @@ in the one window where its inference is pure syntax: handler factories are
 already hoisted with LITERAL bound-state schemas, the pattern call carries its
 generated result-schema literal, and the callback's returned identifiers are
 not yet `.for(...)`-wrapped.
+
+Expressions this inference reads — the returned verb and the values it walks
+to reach an action — are read through the transparent wrapper set (parentheses, `as`, `<T>x`, `satisfies`, `!`, and partially emitted nodes), so a wrapped verb marks as its bare
+form does.
 
 For each `pattern(cb, argumentSchema, resultSchema)` call it marks
 result-schema stream properties `tier: "wrapper"` — the verb-listing mark

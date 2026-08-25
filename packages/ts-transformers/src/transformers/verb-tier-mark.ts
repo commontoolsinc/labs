@@ -2,6 +2,7 @@ import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import { detectCallKind } from "../ast/call-kind.ts";
 import { visitEachChildWithJsx } from "../ast/utils.ts";
+import { unwrapExpression } from "../utils/expression.ts";
 
 /**
  * Verb listing marks, producer 1 (verb contract WS-F): a stream whose handler
@@ -164,15 +165,9 @@ function staticPropertyName(name: ts.PropertyName): string | undefined {
   return undefined;
 }
 
-/** Strip parentheses and `as const` / `satisfies` wrappers. */
+/** Strip the transparent wrapper set to reach the expression a tier reads. */
 function unwrapExpr(expr: ts.Expression): ts.Expression {
-  let current = expr;
-  while (true) {
-    if (ts.isParenthesizedExpression(current)) current = current.expression;
-    else if (ts.isAsExpression(current)) current = current.expression;
-    else if (ts.isSatisfiesExpression(current)) current = current.expression;
-    else return current;
-  }
+  return unwrapExpression(expr);
 }
 
 function callbackBodyStatements(

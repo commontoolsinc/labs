@@ -240,8 +240,9 @@ export { s };
   assertEquals(schema.nested, { inner: 3, deep: { x: "y" } });
   assertEquals(schema.constant, 5);
   assert(!("undef" in schema), "undefined option should be dropped");
-  // Every transparent wrapper spelling reaches the same value; the
-  // evaluator reads the shared set rather than a hand-written subset.
+  // Each wrapper spelling a .tsx source can carry reaches the same value; the
+  // evaluator reads the shared set rather than a hand-written subset. The
+  // angle-bracket assertion is JSX in .tsx and so is not among them.
   assertEquals(schema.wrappedParen, "p");
   assertEquals(schema.wrappedCast, "c");
   assertEquals(schema.wrappedSatisfies, "t");

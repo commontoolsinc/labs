@@ -35,6 +35,8 @@
  */
 
 import ts from "typescript";
+
+import { unwrapTransparentWrapperOnce } from "../utils/expression.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import {
   declaredVerbResultTypeNode,
@@ -125,12 +127,19 @@ function verbCallback(
  * An `any` assertion anywhere below opts the expression out.
  */
 function isDefinitelyPlainShaped(expr: ts.Expression): boolean {
-  if (ts.isParenthesizedExpression(expr)) {
-    return isDefinitelyPlainShaped(expr.expression);
+  // An assertion to `any` opts the expression out, whichever form carries it.
+  // That rule is stated once, before the wrapper set is stepped through, so a
+  // wrapper spelling added later cannot slip past it.
+  if (
+    (ts.isAsExpression(expr) || ts.isSatisfiesExpression(expr) ||
+      ts.isTypeAssertionExpression(expr)) &&
+    expr.type.kind === ts.SyntaxKind.AnyKeyword
+  ) {
+    return false;
   }
-  if (ts.isAsExpression(expr) || ts.isSatisfiesExpression(expr)) {
-    if (expr.type.kind === ts.SyntaxKind.AnyKeyword) return false;
-    return isDefinitelyPlainShaped(expr.expression);
+  const unwrappedExpr = unwrapTransparentWrapperOnce(expr);
+  if (unwrappedExpr) {
+    return isDefinitelyPlainShaped(unwrappedExpr);
   }
   if (ts.isConditionalExpression(expr)) {
     return isDefinitelyPlainShaped(expr.whenTrue) &&
