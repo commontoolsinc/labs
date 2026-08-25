@@ -15,6 +15,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
+  isFabricContainerValue,
   isFabricPlainObject,
   isValidFabricPlainObject,
   isValidFabricValue,
@@ -626,6 +627,53 @@ describe("type-check", () => {
       it("returns `false` for a `FabricSpecialObject`", () => {
         expect(isValidFabricPlainObject(new FabricBytes(new Uint8Array([1]))))
           .toBe(false);
+      });
+    });
+  });
+
+  describe("isFabricContainerValue()", () => {
+    describe("given a container arm of `FabricValue`", () => {
+      it("returns `true` for a plain object", () => {
+        expect(isFabricContainerValue({})).toBe(true);
+        expect(isFabricContainerValue({ a: 1, b: "two" })).toBe(true);
+      });
+
+      it("returns `true` for an array", () => {
+        expect(isFabricContainerValue([])).toBe(true);
+        expect(isFabricContainerValue([1, 2, 3])).toBe(true);
+      });
+
+      it("returns `true` for a `FabricInstance`", () => {
+        expect(
+          isFabricContainerValue(FabricError.fromNativeError(new Error("x"))),
+        )
+          .toBe(true);
+      });
+    });
+
+    describe("given a non-container `FabricValue`", () => {
+      // The whole of the difference from `isFabricObjectOrArray()`, which
+      // accepts these: a `FabricPrimitive` is an object that holds no
+      // `FabricValue`, so there is nothing in one to descend into.
+      it("returns `false` for a `FabricPrimitive`", () => {
+        expect(isFabricContainerValue(new FabricBytes(new Uint8Array([1]))))
+          .toBe(false);
+        expect(isFabricContainerValue(new FabricEpochNsec(1n))).toBe(false);
+      });
+
+      it("returns `false` for `null`", () => {
+        expect(isFabricContainerValue(null)).toBe(false);
+      });
+
+      it("returns `false` for `undefined`", () => {
+        expect(isFabricContainerValue(undefined)).toBe(false);
+      });
+
+      it("returns `false` for a scalar", () => {
+        expect(isFabricContainerValue(1)).toBe(false);
+        expect(isFabricContainerValue("a")).toBe(false);
+        expect(isFabricContainerValue(true)).toBe(false);
+        expect(isFabricContainerValue(42n)).toBe(false);
       });
     });
   });

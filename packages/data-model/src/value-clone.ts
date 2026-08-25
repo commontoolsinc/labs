@@ -20,7 +20,6 @@ import { type Immutable, isPlainContainer } from "@commonfabric/utils/types";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 
 import {
-  FabricContainerValue,
   FabricInstance,
   FabricValue,
   MutableFabricArrayLayer,
@@ -29,6 +28,7 @@ import {
 } from "./interface.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { deepFreeze, isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
+import { isFabricContainerValue } from "./type-check.ts";
 import { toDebugKindString } from "./value-debug.ts";
 
 /** Options for `cloneIfNecessary()`. */
@@ -509,7 +509,9 @@ export function cloneForMutation<T extends FabricValue>(
 
   // Empty-path fast path
   if (path.length === 0) {
-    if (!isMutableHandle(value)) {
+    // A non-container is a primitive or a `FabricPrimitive`, and neither has a
+    // mutable handle to hand back.
+    if (!isFabricContainerValue(value)) {
       throw new CloneForMutationError(
         "non-mutable-root",
         -1,
@@ -581,7 +583,8 @@ export function cloneForMutation<T extends FabricValue>(
     }
 
     if (isLast) {
-      if (!isMutableHandle(next)) {
+      // A non-container leaf has no mutable handle; see the root check above.
+      if (!isFabricContainerValue(next)) {
         throw new CloneForMutationError(
           "non-mutable-leaf",
           i,
@@ -644,15 +647,6 @@ function createMissingContainer(
   nextKey: string,
 ): MutableFabricArrayLayer | MutableFabricPlainObjectLayer {
   return isArrayIndexPropertyName(nextKey) || nextKey === "-" ? [] : {};
-}
-
-/**
- * Returns `true` when `cloneForMutation` can produce a mutable handle for
- * the value at `path`. A container qualifies; primitives and
- * `FabricPrimitive`s (which are immutable by construction) do not.
- */
-function isMutableHandle(value: unknown): value is FabricContainerValue {
-  return isPlainContainer(value) || value instanceof FabricInstance;
 }
 
 /**

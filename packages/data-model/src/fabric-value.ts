@@ -40,6 +40,7 @@ export {
 } from "./value-clone.ts";
 
 export {
+  isFabricContainerValue,
   isFabricObjectOrArray,
   isFabricPlainObject,
   isValidFabricPlainObject,
