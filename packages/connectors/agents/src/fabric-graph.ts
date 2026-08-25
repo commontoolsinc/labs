@@ -8,6 +8,7 @@ import {
   type Runtime,
 } from "@commonfabric/runner";
 import { readStoredCfcMetadata } from "@commonfabric/runner/cfc";
+import { addressKey } from "@commonfabric/runner/shared";
 import { stableFabricValue } from "./stable-fabric-value.ts";
 
 export interface AgentFabricConnection {
@@ -160,12 +161,7 @@ export async function pushStableCellGraph(
   const protectedCells = new Map<string, Cell<unknown>>();
   const protectedWrites = writes.map(({ cell, value }) => {
     const link = cell.getAsNormalizedFullLink();
-    const key = JSON.stringify({
-      space: link.space,
-      scope: link.scope,
-      id: link.id,
-      path: link.path,
-    });
+    const key = addressKey(link);
     let protectedCell = protectedCells.get(key);
     if (protectedCell === undefined) {
       protectedCell = cell.asSchema(ownerSchema);
@@ -196,12 +192,7 @@ export async function pushStableCellGraph(
     const writeCellValue = (cell: Cell<unknown>, value: unknown) => {
       const link = cell.getAsNormalizedFullLink();
       const priorValue = tx.readValueOrThrow(link);
-      const cellKey = JSON.stringify({
-        space: link.space,
-        scope: link.scope,
-        id: link.id,
-        path: link.path,
-      });
+      const cellKey = addressKey(link);
       if (
         priorValue !== undefined &&
         !writtenCells.has(cellKey) &&
