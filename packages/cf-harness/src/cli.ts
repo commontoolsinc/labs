@@ -857,8 +857,16 @@ const parseSeedHandles = async (
     ? []
     : (typeof raw === "string" ? [raw] : raw);
   const specs: HarnessSeedHandleSpec[] = [];
+  const names = new Set<string>();
   for (const value of values) {
     const parsed = parseSeedHandleArgument(value);
+    // Refused here, at parse, so the defect is classified as the invalid
+    // request it is and no model client, session, or run setup is reached;
+    // `mintSeededHandles` keeps its own check for non-CLI callers.
+    if (names.has(parsed.name)) {
+      throw new Error(`--seed-handle names \`${parsed.name}\` twice`);
+    }
+    names.add(parsed.name);
     let schema: JSONSchema | undefined;
     if (parsed.schemaFile !== undefined) {
       const path = resolve(options.cwd, parsed.schemaFile);
@@ -1481,6 +1489,12 @@ export const parseCfHarnessCliArgs = async (
     args["seed-handle"] as string | readonly string[] | undefined,
     { cwd, readTextFile },
   );
+  // A resumed run replays the seeds its run state recorded; a new seed on
+  // resume would be silently ignored, so it is refused like --skill and
+  // --image are.
+  if (resumeRun !== undefined && seedHandles.length > 0) {
+    throw new Error("--seed-handle is not supported with --resume-run");
+  }
   const structuredResult = await parseStructuredResultConfig(args, {
     cwd,
     workspace,

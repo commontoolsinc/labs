@@ -2455,6 +2455,66 @@ Deno.test("runCfHarnessCli announces operator seeds to the model and the operato
   );
 });
 
+Deno.test("parseCfHarnessCliArgs rejects a seed handle alongside --resume-run", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--resume-run",
+          "/tmp/project/.cf-harness-artifacts/run-1",
+          "--prompt",
+          "hi",
+          "--seed-handle",
+          `travellerName=/of:fid1:${"A".repeat(43)}/travellerName`,
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--seed-handle is not supported with --resume-run",
+  );
+});
+
+Deno.test("runCfHarnessCli refuses duplicate seed names before any run setup", async () => {
+  const { io, stderr } = createIoBuffers();
+  const seedRef = `/of:fid1:${"A".repeat(43)}/travellerName`;
+  let startupWorkReached = false;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--model-provider",
+      "openai-compatible-gateway",
+      "--workspace",
+      "/tmp/project",
+      "--prompt",
+      "Plan the trip",
+      "--seed-handle",
+      `travellerName=${seedRef}`,
+      "--seed-handle",
+      `travellerName=${seedRef}`,
+    ],
+    {
+      io,
+      env: { CF_HARNESS_API_KEY: "test-key" },
+      fabricSessionFactory: () => {
+        startupWorkReached = true;
+        return Promise.reject(new Error("must not be reached"));
+      },
+      createPromptLoop: () => {
+        startupWorkReached = true;
+        throw new Error("must not be reached");
+      },
+    },
+  );
+
+  assertEquals(exitCode, 1);
+  assertEquals(startupWorkReached, false);
+  assertEquals(
+    stderr.some((line) =>
+      line.includes("--seed-handle names `travellerName` twice")
+    ),
+    true,
+  );
+});
+
 Deno.test("parseCfHarnessCliArgs rejects a seed schema file that cannot be read", async () => {
   await assertRejects(
     () =>
