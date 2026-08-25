@@ -42,8 +42,19 @@ answering, re-establish it (see "Recovering the piece") and update this block.
 
 ### `estuary` — the stately instance, holding the real poll
 
-`estuary.saga-castor.ts.net` carries the team's **populated** poll — real
-participants, options and votes. Treat its state as production data.
+`estuary.saga-castor.ts.net` carries the team's poll as two pieces while the
+identity rollout is in progress. The **current** poll runs the profile-cell
+identity source (fresh piece, joined by creating or picking a profile):
+
+```
+space:  team-lunch
+piece:  fid1:gi7f-G8Z353Q_f_yLs_T3kB7A06TZjUmhf-M59bqvrE
+url:    https://estuary.saga-castor.ts.net/team-lunch/fid1:gi7f-G8Z353Q_f_yLs_T3kB7A06TZjUmhf-M59bqvrE
+```
+
+The **legacy name-keyed** poll still holds the accumulated participants, options
+and votes, and is Option B's migration source. Treat its state as production
+data.
 
 ```
 space:  team-lunch
@@ -102,9 +113,10 @@ on it before running it against a shared space.
 ## Environment setup
 
 ```bash
-export CF_API_URL=https://estuary.saga-castor.ts.net/   # the populated poll; rapids.saga-castor.ts.net to iterate; http://localhost:8000 for local dev
+export CF_API_URL=https://estuary.saga-castor.ts.net/   # estuary; rapids.saga-castor.ts.net to iterate; http://localhost:8000 for local dev
 export CF_IDENTITY=./your-identity.key
-PIECE=fid1:S2MlU76VbKBRTtFt_hgPyi9MB04ti9yKN08G2IJJUW4   # estuary
+PIECE=fid1:gi7f-G8Z353Q_f_yLs_T3kB7A06TZjUmhf-M59bqvrE   # estuary current poll — every operation in this guide targets it
+LEGACY_PIECE=fid1:S2MlU76VbKBRTtFt_hgPyi9MB04ti9yKN08G2IJJUW4   # populated name-keyed poll; Option B's migration SOURCE only
 SPACE=team-lunch
 
 # Keep this complete set on every source deployment in this guide.
@@ -243,14 +255,15 @@ the input interface casually against a piece you care about.
 ## Option B — migrate the populated name-keyed poll to a fresh piece
 
 Use this for the profile-cell identity rollout, or to get your **own** instance
-seeded with the current data without touching the shared poll:
+seeded with the team's accumulated data without touching the shared poll:
 
 ```bash
-# 1. Create your own empty piece (note the new ID it prints).
-MINE=$(deno task cf piece new packages/patterns/lunch-poll/main.tsx \
-  --root packages/patterns \
-  "${LUNCH_POLL_TEST_ARGS[@]}" \
-  -s "$SPACE" | grep -oE 'fid1:[A-Za-z0-9_-]+' | head -1)
+# 1. Pick the copy TARGET. The team rollout copies into the current piece:
+MINE="$PIECE"
+# To seed your OWN instance instead, mint a fresh piece as the target:
+#   MINE=$(deno task cf piece new packages/patterns/lunch-poll/main.tsx \
+#     --root packages/patterns "${LUNCH_POLL_TEST_ARGS[@]}" \
+#     -s "$SPACE" | grep -oE 'fid1:[A-Za-z0-9_-]+' | head -1)
 
 # 2. Resolve your piece's argument document. This is the cell the copy writes
 #    into; `cf set --input` cannot do it (see the note below).
@@ -259,12 +272,12 @@ ARG=$(deno task cf get --piece "$MINE" -s "$SPACE" --input --select '@' -q \
 
 # 3. Copy each PerSpace field except the visit log and the host seat.
 for field in question users options votes; do
-  deno task cf get --piece "$PIECE" -s "$SPACE" "$field" --input -q \
+  deno task cf get --piece "$LEGACY_PIECE" -s "$SPACE" "$field" --input -q \
     | deno task cf set -s "$SPACE" "$ARG/$field" -q
 done
 
 # 4. Copy the visit log, deleting the predecessor's roster links (see below).
-deno task cf get --piece "$PIECE" -s "$SPACE" visits --input -q \
+deno task cf get --piece "$LEGACY_PIECE" -s "$SPACE" visits --input -q \
   | deno eval '
       const v = JSON.parse(await new Response(Deno.stdin.readable).text());
       for (const e of v) {
@@ -348,10 +361,10 @@ path ANSWERS rather than silently doing nothing:
 
 ```bash
 # joinAs takes no arguments: it joins as the calling identity's own profile.
-deno task cf piece call --piece "$PIECE" -s "$SPACE" joinAs '{}'
+deno task cf call --piece "$PIECE" -s "$SPACE" joinAs '{}'
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
 # Read the verdict — do NOT assume the join landed:
-deno task cf piece get --piece "$PIECE" -s "$SPACE" joinMessage
+deno task cf get --piece "$PIECE" -s "$SPACE" joinMessage
 ```
 
 - **`""` (empty)** — the join landed: this identity's `#profile` resolved.
@@ -365,12 +378,12 @@ deno task cf piece get --piece "$PIECE" -s "$SPACE" joinMessage
 With a joined identity, exercise the host-gated flow end to end:
 
 ```bash
-deno task cf piece call --piece "$PIECE" -s "$SPACE" addOption '{"title":"Test Cafe"}'
+deno task cf call --piece "$PIECE" -s "$SPACE" addOption '{"title":"Test Cafe"}'
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
-deno task cf piece call --piece "$PIECE" -s "$SPACE" logVisit '{"title":"Test Cafe"}'
+deno task cf call --piece "$PIECE" -s "$SPACE" logVisit '{"title":"Test Cafe"}'
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
 # Confirm the entry landed (no browser needed):
-deno task cf piece get --piece "$PIECE" -s "$SPACE" visits --input -q
+deno task cf get --piece "$PIECE" -s "$SPACE" visits --input -q
 ```
 
 Put the inline JSON argument last: a flag after it makes `cf call` report
@@ -420,17 +433,17 @@ and they are the only path the browser also takes:
 - **History:** use the **`clearHistory` handler** (host-gated) — it empties the
   `visits` log and its embedded vote snapshots:
   ```bash
-  deno task cf piece call --piece "$PIECE" -s "$SPACE" clearHistory '{}'
+  deno task cf call --piece "$PIECE" -s "$SPACE" clearHistory '{}'
   deno task cf piece step --piece "$PIECE" -s "$SPACE"
   ```
   Or, since `visits` is an ordinary `PerSpace` cell, write it directly (below).
 - **PerSpace cells:** write the input cells directly:
   ```bash
-  echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" users     --input -q
-  echo '{}' | deno task cf piece set --piece "$PIECE" -s "$SPACE" host      --input -q
-  echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" options   --input -q
-  echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" votes     --input -q
-  echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" visits    --input -q
+  echo '[]' | deno task cf set --piece "$PIECE" -s "$SPACE" users     --input -q
+  echo '{}' | deno task cf set --piece "$PIECE" -s "$SPACE" host      --input -q
+  echo '[]' | deno task cf set --piece "$PIECE" -s "$SPACE" options   --input -q
+  echo '[]' | deno task cf set --piece "$PIECE" -s "$SPACE" votes     --input -q
+  echo '[]' | deno task cf set --piece "$PIECE" -s "$SPACE" visits    --input -q
   deno task cf piece step --piece "$PIECE" -s "$SPACE"
   ```
   After this, the first person to join in the browser becomes host as their own

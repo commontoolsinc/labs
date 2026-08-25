@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import { expect } from "@std/expect";
 import {
   $conn,
   CellHandle,
@@ -77,11 +78,14 @@ class MockConnection {
     this.listeners.get(event)?.delete(callback);
   }
 
+  /** What the next `mountVDom` reports as the tree's root. */
+  public mountRootId: number | null = null;
+
   mountVDom(
     _mountId: number,
     _cellRef: CellRef,
-  ): Promise<{ rootId: number }> {
-    return Promise.resolve({ rootId: 0 });
+  ): Promise<{ rootId: number | null }> {
+    return Promise.resolve({ rootId: this.mountRootId });
   }
 
   unmountVDom(mountId: number): Promise<void> {
@@ -109,37 +113,112 @@ class MockConnection {
   }
 }
 
-Deno.test("VDomRenderer - does not remove container when rootId is sentinel 0", async () => {
-  const removedNodes: unknown[] = [];
-  const parentNode = {
-    removeChild(node: unknown) {
-      removedNodes.push(node);
-    },
+Deno.test("VDomRenderer - takes the mount response's rootId as the root", async (t) => {
+  const setup = (mountRootId: number | null) => {
+    const connection = new MockConnection();
+    connection.mountRootId = mountRootId;
+    const mock = new MockDoc(
+      '<!DOCTYPE html><html><body><div id="root"></div></body></html>',
+    );
+    const renderer = new VDomRenderer({
+      runtimeClient: {} as any,
+      connection: connection as any,
+      document: mock.document,
+    });
+    const cellRef = {
+      space: "did:key:test",
+      id: "cell-id",
+      path: [],
+      type: "application/json",
+    } as unknown as CellRef;
+    const container = mock.document.getElementById("root")!;
+    return { connection, renderer, cellRef, container };
   };
-  const container = { parentNode };
-  const connection = new MockConnection();
 
-  const renderer = new VDomRenderer({
-    runtimeClient: {} as any,
-    connection: connection as any,
-    document: {
-      createElement: (tagName: string) => ({ tagName }),
-      createTextNode: (text: string) => ({ text }),
-    } as unknown as Document,
+  await t.step("reports no root when the mount reports none", async () => {
+    const { renderer, cellRef, container } = setup(null);
+
+    await renderer.render(container as unknown as HTMLElement, cellRef);
+
+    expect(renderer.getRootNode()).toBe(null);
+
+    await renderer.dispose();
   });
 
-  const cellRef = {
-    space: "did:key:test",
-    id: "cell-id",
-    path: [],
-    type: "application/json",
-  } as unknown as CellRef;
+  await t.step("reports the node the mount named", async () => {
+    const { renderer, cellRef, container } = setup(1);
 
-  await renderer.render(container as unknown as HTMLElement, cellRef);
-  await renderer.stopRendering();
+    await renderer.render(container as unknown as HTMLElement, cellRef);
+    // The mount names a node the applicator has yet to hear of, so create it
+    // before reading back: `getRootNode()` resolves the id through the node
+    // map, and an unresolved id would report no root for the wrong reason --
+    // which is the answer the other step expects, so the two would agree
+    // while measuring different things.
+    renderer.getApplicator().applyBatch({
+      batchId: 1,
+      ops: [{ op: "create-element", nodeId: 1, tagName: "button" }],
+    });
 
-  assertEquals(connection.unmountCalls.length, 1);
-  assertEquals(removedNodes.includes(container), false);
+    expect(renderer.getRootNode()).toBe(renderer.getApplicator().getNode(1));
+
+    await renderer.dispose();
+  });
+});
+
+Deno.test("VDomRenderer - tearing down leaves the caller's container", async (t) => {
+  const setup = (mountRootId: number | null) => {
+    const connection = new MockConnection();
+    connection.mountRootId = mountRootId;
+    const mock = new MockDoc(
+      '<!DOCTYPE html><html><body><div id="root"></div></body></html>',
+    );
+    const renderer = new VDomRenderer({
+      runtimeClient: {} as any,
+      connection: connection as any,
+      document: mock.document,
+    });
+    const cellRef = {
+      space: "did:key:test",
+      id: "cell-id",
+      path: [],
+      type: "application/json",
+    } as unknown as CellRef;
+    const container = mock.document.getElementById("root")!;
+    return { renderer, cellRef, container };
+  };
+
+  await t.step("when the mount reported no root", async () => {
+    const { renderer, cellRef, container } = setup(null);
+    await renderer.render(container as unknown as HTMLElement, cellRef);
+
+    await renderer.stopRendering();
+
+    expect((container as any).parentNode).not.toBe(null);
+    await renderer.dispose();
+  });
+
+  await t.step("and removes the root it did report", async () => {
+    const { renderer, cellRef, container } = setup(1);
+    await renderer.render(container as unknown as HTMLElement, cellRef);
+    renderer.getApplicator().applyBatch({
+      batchId: 1,
+      ops: [
+        { op: "create-element", nodeId: 1, tagName: "button" },
+        { op: "insert-child", parentId: 0, childId: 1, beforeId: null },
+      ],
+    });
+    const root = renderer.getApplicator().getNode(1);
+    expect((container as any).childNodes.length).toBe(1);
+
+    await renderer.stopRendering();
+
+    // The root goes and the container stays: teardown reaches into the
+    // container rather than removing it, which is the distinction the two
+    // steps together pin.
+    expect((root as any).parentNode).toBe(null);
+    expect((container as any).parentNode).not.toBe(null);
+    await renderer.dispose();
+  });
 });
 
 Deno.test("VDomRenderer - forwards trusted event provenance through delivery", async () => {
@@ -233,6 +312,56 @@ Deno.test("VDomRenderer - acknowledges applied batches", async () => {
   });
 
   assertEquals(connection.acknowledgedBatches, [{ mountId, batchId: 7 }]);
+
+  await renderer.dispose();
+});
+
+Deno.test("VDomRenderer - a batch's null rootId clears the tracked root", async () => {
+  const connection = new MockConnection();
+  const mock = new MockDoc(
+    '<!DOCTYPE html><html><body><div id="root"></div></body></html>',
+  );
+  const renderer = new VDomRenderer({
+    runtimeClient: {} as any,
+    connection: connection as any,
+    document: mock.document,
+  });
+
+  const cellRef = {
+    space: "did:key:test",
+    id: "cell-id",
+    path: [],
+    type: "application/json",
+  } as unknown as CellRef;
+
+  const container = mock.document.getElementById("root")!;
+  await renderer.render(container as unknown as HTMLElement, cellRef);
+  const mountId = renderer.getMountId();
+  if (mountId === null) {
+    throw new Error("expected renderer to have an active mount");
+  }
+
+  const batch = (batchId: number, rootId: number | null | undefined) => ({
+    type: "vdom:batch",
+    batchId,
+    mountId,
+    ops: batchId === 1
+      ? [{ op: "create-element", nodeId: 1, tagName: "button" }]
+      : [],
+    ...(rootId === undefined ? {} : { rootId }),
+  });
+
+  connection.emit("vdombatch", batch(1, 1));
+  assertEquals(renderer.getRootNode() !== null, true);
+
+  // Absent says nothing about the root, so the tracked one stands.
+  connection.emit("vdombatch", batch(2, undefined));
+  assertEquals(renderer.getRootNode() !== null, true);
+
+  // `null` is what the reconciler reports for a tree with no root child, and
+  // it is a statement rather than a silence: the tracked root goes away.
+  connection.emit("vdombatch", batch(3, null));
+  assertEquals(renderer.getRootNode(), null);
 
   await renderer.dispose();
 });

@@ -127,7 +127,7 @@ export class VDomRenderer {
     logger.timeStart("mount", String(this.mountId));
     try {
       const response = await this.session.mount(this.mountId, cellRef);
-      this.rootNodeId = response.rootId > 0 ? response.rootId : null;
+      this.rootNodeId = response.rootId;
 
       const elapsed = logger.timeEnd("mount", String(this.mountId));
       logger.debug("render-mount", () => [
@@ -264,9 +264,11 @@ export class VDomRenderer {
         rootId: notification.rootId,
       });
 
-      // Track root node ID if provided (for cleanup)
+      // Track the root node for cleanup. An absent `rootId` says nothing
+      // about the root and leaves the tracked one standing; `null` is the
+      // reconciler reporting a tree with no root child, and clears it.
       if (notification.rootId !== undefined) {
-        this.rootNodeId = notification.rootId > 0 ? notification.rootId : null;
+        this.rootNodeId = notification.rootId;
       }
 
       if (notification.mountId !== undefined) {

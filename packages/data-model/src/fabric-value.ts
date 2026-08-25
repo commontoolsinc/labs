@@ -10,6 +10,7 @@
 // base class.
 export {
   type FabricArray,
+  type FabricContainerValue,
   type FabricConvertibleValue,
   FabricInstance,
   type FabricNativeObject,
@@ -19,6 +20,7 @@ export {
   type FabricValue,
   type FabricValueLayer,
   type MutableFabricArrayLayer,
+  type MutableFabricContainerValueLayer,
   type MutableFabricPlainObjectLayer,
   type MutableFabricValueLayer,
   type NonNullableFabricValue,
@@ -38,6 +40,7 @@ export {
 } from "./value-clone.ts";
 
 export {
+  isFabricContainerValue,
   isFabricObjectOrArray,
   isFabricPlainObject,
   isValidFabricPlainObject,

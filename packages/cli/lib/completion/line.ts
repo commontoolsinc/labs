@@ -12,6 +12,9 @@
  */
 
 import type { Argument, Command, Option } from "@cliffy/command";
+// Free at completion time: walking the tree means loading the command tree,
+// which already resolves this module.
+import { matchLLMFriendlyLink } from "@commonfabric/runner/shared";
 
 /**
  * A command of any option/argument parameterization.
@@ -100,6 +103,12 @@ export interface CompletionLine {
   readonly options: ReadonlyMap<string, string>;
   /** Long names of valueless flags already on the line. */
   readonly flags: ReadonlySet<string>;
+  /**
+   * A canonical reference written in the first positional, in place of
+   * `--piece`. It does not count as a positional: the command reads it out
+   * before the rest, so `<callable>` is still the argument after it.
+   */
+  readonly address?: string;
   /** Positional words already supplied to `command`. */
   readonly positionals: readonly string[];
   /** Words after a `--` separator, excluding the separator itself. */
@@ -172,6 +181,52 @@ function realSubcommands(command: AnyCommand): AnyCommand[] {
   return command.getCommands(false).filter((child) =>
     child.getName() !== "help"
   );
+}
+
+/**
+ * Whether the command ends its own option parsing at the first positional.
+ *
+ * `cf piece call` and `cf exec` are `stopEarly()`, so every word after the
+ * callable name belongs to the callable's schema-derived parser and the CLI's
+ * own flags are refused there. Cliffy stores the property with no accessor, so
+ * it is read off the field: keeping the question where the command declares it
+ * means a third command becoming `stopEarly()` needs no edit here.
+ */
+function stopsEarly(command: AnyCommand): boolean {
+  return (command as unknown as { _stopEarly?: boolean })._stopEarly === true;
+}
+
+/**
+ * Commands whose first positional may carry a canonical reference in place of
+ * `--piece`, keyed the way the provider tables are.
+ *
+ * `readTargetPositionals` and `readCallTarget` in `commands/piece.ts` are what
+ * implement it, and nothing on the command tree distinguishes those two
+ * arguments from an ordinary one — `get` declares `[addressOrPath]` and `call`
+ * declares `<callable>`, both plain strings. Carried explicitly for the same
+ * reason `PRE_PARSE_GLOBALS` is.
+ */
+const POSITIONAL_ADDRESS_COMMANDS: ReadonlySet<string> = new Set([
+  "piece get",
+  "piece set",
+  "piece call",
+  "get",
+  "set",
+  "call",
+]);
+
+/**
+ * Whether `token` in the first positional of `path` names the target rather
+ * than filling that argument. The deciding grammar is the command's:
+ * a canonical reference begins with `/`, and neither a cell path nor a
+ * callable name ever does.
+ */
+function isPositionalAddress(
+  path: readonly string[],
+  token: string,
+): boolean {
+  return POSITIONAL_ADDRESS_COMMANDS.has(path.join(" ")) &&
+    matchLLMFriendlyLink.test(token.trim());
 }
 
 /** Resolve a subcommand by name or alias, skipping Cliffy's own `help`. */
@@ -275,6 +330,7 @@ export function resolveCompletionLine(
   const path: string[] = [];
   const options = new Map<string, string>();
   const flags = new Set<string>();
+  let address: string | undefined;
   let positionals: string[] = [];
   const passthrough: string[] = [];
   let separatorSeen = false;
@@ -288,6 +344,14 @@ export function resolveCompletionLine(
     }
     if (token === "--") {
       separatorSeen = true;
+      continue;
+    }
+
+    // Past a `stopEarly()` boundary every word belongs to the callable, so a
+    // flag-shaped one is data rather than an option. Reading it as an option
+    // would shift the positional index the argument slot depends on.
+    if (positionals.length > 0 && stopsEarly(command)) {
+      positionals.push(token);
       continue;
     }
 
@@ -355,6 +419,12 @@ export function resolveCompletionLine(
         positionals = [];
         continue;
       }
+      // A positional address replaces `--piece` rather than filling the
+      // argument, so the words after it keep the indices they would have had.
+      if (address === undefined && isPositionalAddress(path, token)) {
+        address = token;
+        continue;
+      }
     }
     positionals.push(token);
   }
@@ -376,6 +446,7 @@ export function resolveCompletionLine(
     word,
     options,
     flags,
+    ...(address !== undefined && { address }),
     positionals,
     passthrough,
   };
@@ -394,6 +465,15 @@ function resolveSlot(input: {
 
   if (separatorSeen) {
     return { kind: "passthrough", index: input.passthrough.length };
+  }
+
+  // Past a `stopEarly()` boundary the CLI's own flags are refused, so no
+  // option slot is reachable there. The position belongs to the callable's
+  // vocabulary, which the argument slot below names — and which nothing
+  // completes yet. Offering nothing is what a position whose words the command
+  // cannot name should offer; offering flags the command rejects is not.
+  if (positionals.length > 0 && stopsEarly(command)) {
+    return positionalSlot(command, positionals);
   }
 
   // `--name=<cursor>` completes the value, and candidates must be emitted with
@@ -446,16 +526,22 @@ function resolveSlot(input: {
     return { kind: "subcommand" };
   }
 
-  const args = command.getArguments();
-  if (args.length > 0) {
-    const index = Math.min(positionals.length, args.length - 1);
-    const argument = args[index];
-    // Only a variadic final argument accepts more words than it declares.
-    if (positionals.length < args.length || argument.variadic) {
-      return { kind: "argument", argument, index: positionals.length };
-    }
-  }
+  return positionalSlot(command, positionals);
+}
 
+/** The argument the next positional word fills, or `null` past the last one. */
+function positionalSlot(
+  command: AnyCommand,
+  positionals: readonly string[],
+): CompletionSlot | null {
+  const args = command.getArguments();
+  if (args.length === 0) return null;
+  const index = Math.min(positionals.length, args.length - 1);
+  const argument = args[index];
+  // Only a variadic final argument accepts more words than it declares.
+  if (positionals.length < args.length || argument.variadic) {
+    return { kind: "argument", argument, index: positionals.length };
+  }
   return null;
 }
 

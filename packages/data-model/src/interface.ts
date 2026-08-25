@@ -164,20 +164,25 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
  * violates it can corrupt data-model invariants, as any broken contract can.
  */
 export type FabricValue =
-  // -- Primitives --
-  | null
+  | bigint
   | boolean
+  | null
   | number
   | string
-  | bigint
   | symbol
-  // -- Fabric special objects --
-  | FabricSpecialObject
-  // -- Containers --
+  | undefined
   | FabricArray
   | FabricPlainObject
-  // -- undefined --
-  | undefined;
+  | FabricSpecialObject;
+
+/**
+ * The container types that are part of `FabricValue`. Note that
+ * `FabricSpecialObject` is a combination of container and non-container.
+ */
+export type FabricContainerValue =
+  | FabricArray
+  | FabricInstance // One of the two direct subclasses of `FabricSpecialObject`.
+  | FabricPlainObject;
 
 /** A `FabricValue` other than `null` or `undefined`. */
 export type NonNullableFabricValue = NonNullable<FabricValue>;
@@ -215,6 +220,18 @@ export type MutableFabricArrayLayer = FabricValue[];
 
 /** A mutable record root whose values remain `FabricValue`s. */
 export type MutableFabricPlainObjectLayer = Record<string, FabricValue>;
+
+/**
+ * A `FabricContainerValue` with a mutable root. Nested containers remain
+ * ordinary (readonly) `FabricValue`s, so this models a single construction
+ * layer rather than a deep thaw. A `FabricInstance` arm passes through
+ * unchanged: an instance's mutability is its own frozen state to report, not
+ * something a type can layer over it.
+ */
+export type MutableFabricContainerValueLayer =
+  | FabricInstance
+  | MutableFabricArrayLayer
+  | MutableFabricPlainObjectLayer;
 
 /**
  * A `FabricValue` with a mutable root container. Nested containers remain

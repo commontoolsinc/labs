@@ -21,6 +21,9 @@ concurrency:
 # variables holding the numbers are how a workflow declares a value an anchor
 # can name; nothing reads them.
 env:
+  # GitHub's Ubuntu image includes Chrome. Astral uses it directly instead of
+  # downloading another browser when the first browser test starts.
+  ASTRAL_BIN_PATH: /usr/bin/google-chrome
   WORK_TIMEOUT_MINUTES: &work-timeout 30
   JOB_TIMEOUT_MINUTES: &job-timeout 40
   CLI_WORK_TIMEOUT_MINUTES: &cli-work-timeout 10
@@ -75,7 +78,28 @@ jobs:
 
       - name: 🧹 Lint codebase
         timeout-minutes: *work-timeout
-        run: deno task run-recorded lint repo deno-lint -- deno lint
+        run: |
+          ulimit -c unlimited
+          sudo sysctl -w kernel.core_pattern="$GITHUB_WORKSPACE/deno-core.%p"
+          deno task run-recorded lint repo deno-lint -- deno lint
+
+      - name: 📋 Describe Deno lint core dump
+        if: ${{ failure() }}
+        run: |
+          shopt -s nullglob
+          cores=(deno-core.*)
+          for core in "${cores[@]}"; do
+            file "$core"
+          done
+
+      - name: 📤 Upload Deno lint core dump
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: deno-lint-core-a${{ github.run_attempt }}
+          path: deno-core.*
+          if-no-files-found: ignore
+          retention-days: 14
 
       # This is the only type check for the paths listed in
       # tasks/typecheck.ts: the test jobs in this workflow and the package
@@ -905,13 +929,14 @@ jobs:
           # The lanes opted out while OW61's crash class was open (the
           # ensured root's content-addressed computed cells landed in
           # fixture spaces' plain subscriptions and the arrival throw
-          # killed the consumers); with the arrival containment merged
-          # the lanes run the production posture again, and these ON
-          # lanes ARE the CI coverage of the ensure at the true
-          # topology (the OW45/OW61 rows' flagged gap). A
-          # `schema-doc-quarantine` log line here is non-fatal evidence
-          # for the client-side absorb investigation (OW61), not a
-          # failure.
+          # killed the consumers); with the arrival containment (#6223)
+          # and the client absorb fix (#6292) merged the lanes run the
+          # production posture again, and these ON lanes ARE the CI
+          # coverage of the ensure at the true topology (the OW45/OW61
+          # rows' flagged gap). `schema-doc-quarantine` log lines are
+          # expected to be ZERO here; a live one is contained (not a
+          # process kill) but is evidence that another client
+          # absorb/ordering defect remains — OW61's residual trigger.
           CFTS_AI_GATEWAY_URL="" \
           CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
           EXPERIMENTAL_SERVER_EXECUTION=true \
@@ -1354,9 +1379,10 @@ jobs:
   # browser shell (build-toolshed-on) — the FULL ON posture, verified by the
   # probe below before the shard runs. Skips happen only through the explicit
   # per-phase lists in tasks/server-execution-on-skips.ts, printed by the run
-  # step — never by silent filtering (ONE `patterns` STEP entry today —
-  # default-app's reload step, under OW45's isolated client rehydration
-  # starvation — with its loud reason; the flip PR needs every list EMPTY).
+  # step — never by silent filtering (TWO `patterns` entries today, both
+  # OW45 arm B: default-app's reload STEP — the read-side residue — and
+  # the lunch-poll-vote FILE, #5744's client-start re-skip; each with its
+  # loud reason; the flip PR needs every list EMPTY).
   # No coverage collection and no cache save-back: the default lane owns
   # both; the compile byte cache is restored read-only (compiled bytes do not
   # depend on the flag).
@@ -1408,7 +1434,7 @@ jobs:
           # returns, so the test steps never race a not-yet-listening server.
           # Space-root ensure ON — the production default (see the
           # package ON lane's note: the opt-out retired with OW61's
-          # arrival containment).
+          # arrival containment (#6223) and client absorb fix (#6292)).
           CFTS_AI_GATEWAY_URL="" \
           CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
           EXPERIMENTAL_SERVER_EXECUTION=true \

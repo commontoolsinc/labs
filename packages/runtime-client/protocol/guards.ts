@@ -18,7 +18,12 @@ import {
   PendingWritesNotification,
   RequestType,
   TelemetryNotification,
+  TransportNotificationType,
   VDomBatchNotification,
+  WORKER_CONSOLE_LEVELS,
+  WorkerConsoleLevel,
+  WorkerConsoleNotification,
+  WorkerReadyNotification,
 } from "./types.ts";
 
 export function isCellRef(value: unknown): value is CellRef {
@@ -163,5 +168,35 @@ export function isVDomBatchNotification(
     value.type === NotificationType.VDomBatch &&
     typeof value.batchId === "number" &&
     Array.isArray(value.ops)
+  );
+}
+
+/**
+ * Is `value` a {@link WorkerReadyNotification}? This is the post the transport
+ * settles `ready()` on, and the only message it treats that way.
+ */
+export function isWorkerReadyNotification(
+  value: unknown,
+): value is WorkerReadyNotification {
+  return (
+    isObjectNotArray(value) &&
+    value.type === TransportNotificationType.WorkerReady
+  );
+}
+
+/**
+ * Is `value` a {@link WorkerConsoleNotification}? A `level` outside
+ * {@link WORKER_CONSOLE_LEVELS} is not one, which bounds what this recognizes
+ * to what the worker's console bridge produces: the bridge posts from that
+ * same roster, so nothing it sends is excluded here.
+ */
+export function isWorkerConsoleNotification(
+  value: unknown,
+): value is WorkerConsoleNotification {
+  return (
+    isObjectNotArray(value) &&
+    value.type === TransportNotificationType.WorkerConsole &&
+    WORKER_CONSOLE_LEVELS.includes(value.level as WorkerConsoleLevel) &&
+    typeof value.text === "string"
   );
 }

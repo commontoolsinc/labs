@@ -6,11 +6,13 @@
  * TypeScript parse that would misread a bare top-level `{…}` as a block and
  * shred it.
  *
- * The tokenizer is lenient: it never throws on malformed input (an unterminated
- * string or comment simply runs to end of file) so the pager keeps coloring a
- * file the user is midway through editing. JSONC line and block comments and
- * trailing commas are colored, not rejected. Object keys in a single top-level
- * value become a navigation tree, so `wasd`/Tab step through its structure.
+ * The tokenizer is lenient: it never throws on malformed input, so the pager
+ * keeps coloring a file the user is midway through editing. An unterminated
+ * string or comment runs to the end of an ordinary JSON source. JSON Lines
+ * ends it at the record boundary so the next record starts with fresh lexical
+ * state. JSONC line and block comments and trailing commas are colored, not
+ * rejected. Object keys in a single top-level value become a navigation tree,
+ * so `wasd`/Tab step through its structure.
  */
 
 import type {
@@ -37,42 +39,58 @@ interface Token {
 
 const WS = new Set([" ", "\t", "\n", "\r"]);
 
-/** Tokenise `text` into a gapless run of tokens covering every character. */
-function tokenize(text: string): Token[] {
+/** Tokenize `text` into a gapless run of tokens covering every character. */
+function tokenize(text: string, isolateLines = false): Token[] {
+  if (!isolateLines) return tokenizeRange(text, 0, text.length);
+
   const toks: Token[] = [];
-  const n = text.length;
-  let i = 0;
+  let start = 0;
+  while (start < text.length) {
+    const newline = text.indexOf("\n", start);
+    const end = newline < 0 ? text.length : newline;
+    for (const token of tokenizeRange(text, start, end)) toks.push(token);
+    if (newline < 0) break;
+    toks.push({ start: newline, end: newline + 1, cls: "whitespace" });
+    start = newline + 1;
+  }
+  return toks;
+}
+
+/** Tokenize the half-open range from `start` to `end`. */
+function tokenizeRange(text: string, start: number, end: number): Token[] {
+  const toks: Token[] = [];
+  let i = start;
   let depth = 0;
-  while (i < n) {
+  while (i < end) {
     const c = text[i];
     if (WS.has(c)) {
       let j = i + 1;
-      while (j < n && WS.has(text[j])) j++;
+      while (j < end && WS.has(text[j])) j++;
       toks.push({ start: i, end: j, cls: "whitespace" });
       i = j;
     } else if (c === "/" && text[i + 1] === "/") {
       let j = i + 2;
-      while (j < n && text[j] !== "\n") j++;
+      while (j < end && text[j] !== "\n") j++;
       toks.push({ start: i, end: j, cls: "comment" });
       i = j;
     } else if (c === "/" && text[i + 1] === "*") {
       let j = i + 2;
-      while (j < n && !(text[j] === "*" && text[j + 1] === "/")) j++;
-      j = Math.min(n, j + 2); // include the closing `*/` when present
+      while (j < end && !(text[j] === "*" && text[j + 1] === "/")) j++;
+      j = Math.min(end, j + 2); // include the closing `*/` when present
       toks.push({ start: i, end: j, cls: "comment" });
       i = j;
     } else if (c === '"') {
-      const end = scanString(text, i);
+      const stringEnd = scanString(text, i, end);
       // A string immediately followed (past trivia) by `:` is an object key.
-      const cls: TokenClass = nextSignificantIs(text, end, ":")
+      const cls: TokenClass = nextSignificantIs(text, stringEnd, end, ":")
         ? "propertyName"
         : "string";
-      toks.push({ start: i, end, cls });
-      i = end;
+      toks.push({ start: i, end: stringEnd, cls });
+      i = stringEnd;
     } else if (c === "-" || (c >= "0" && c <= "9")) {
-      const end = scanNumber(text, i);
-      toks.push({ start: i, end, cls: "number" });
-      i = end;
+      const numberEnd = scanNumber(text, i, end);
+      toks.push({ start: i, end: numberEnd, cls: "number" });
+      i = numberEnd;
     } else if (c === "{" || c === "[") {
       toks.push({ start: i, end: i + 1, cls: "bracket", depth });
       depth++;
@@ -86,7 +104,7 @@ function tokenize(text: string): Token[] {
       i++;
     } else if (isWordChar(c)) {
       let j = i + 1;
-      while (j < n && isWordChar(text[j])) j++;
+      while (j < end && isWordChar(text[j])) j++;
       const word = text.slice(i, j);
       const cls: TokenClass = word === "true" || word === "false"
         ? "boolean"
@@ -108,49 +126,53 @@ function tokenize(text: string): Token[] {
   return toks;
 }
 
-/** End offset of the string literal starting at `start` (past the close quote,
- * or end of text when unterminated). Backslash escapes the next character. */
-function scanString(text: string, start: number): number {
-  const n = text.length;
+/**
+ * Return the end offset of the string literal starting at `start`.
+ * Backslash escapes the next character.
+ */
+function scanString(text: string, start: number, end: number): number {
   let j = start + 1;
-  while (j < n && text[j] !== '"') {
+  while (j < end && text[j] !== '"') {
     if (text[j] === "\\") j++;
     j++;
   }
-  return Math.min(n, j + 1);
+  return Math.min(end, j + 1);
 }
 
 /** End offset of the number literal starting at `start`. */
-function scanNumber(text: string, start: number): number {
-  const n = text.length;
+function scanNumber(text: string, start: number, end: number): number {
   let j = start;
   if (text[j] === "-") j++;
-  while (j < n && isDigit(text[j])) j++;
+  while (j < end && isDigit(text[j])) j++;
   if (text[j] === ".") {
     j++;
-    while (j < n && isDigit(text[j])) j++;
+    while (j < end && isDigit(text[j])) j++;
   }
   if (text[j] === "e" || text[j] === "E") {
     j++;
     if (text[j] === "+" || text[j] === "-") j++;
-    while (j < n && isDigit(text[j])) j++;
+    while (j < end && isDigit(text[j])) j++;
   }
   return j;
 }
 
 /** Whether the next significant (non-trivia) character from `from` is `ch`. */
-function nextSignificantIs(text: string, from: number, ch: string): boolean {
-  const n = text.length;
+function nextSignificantIs(
+  text: string,
+  from: number,
+  end: number,
+  ch: string,
+): boolean {
   let i = from;
-  while (i < n) {
+  while (i < end) {
     const c = text[i];
     if (WS.has(c)) {
       i++;
     } else if (c === "/" && text[i + 1] === "/") {
-      while (i < n && text[i] !== "\n") i++;
+      while (i < end && text[i] !== "\n") i++;
     } else if (c === "/" && text[i + 1] === "*") {
       i += 2;
-      while (i < n && !(text[i] === "*" && text[i + 1] === "/")) i++;
+      while (i < end && !(text[i] === "*" && text[i + 1] === "/")) i++;
       i += 2;
     } else {
       return c === ch;
@@ -167,14 +189,13 @@ function isWordChar(c: string): boolean {
   return (c >= "a" && c <= "z") || (c >= "A" && c <= "Z");
 }
 
-/** Color `text` into rendered lines by splitting each token across the line
- * boundaries it spans (a block comment is the only token that crosses one). */
-export function jsonHighlightLines(text: string): Line[] {
+/** Color `text` into rendered lines from the selected token stream. */
+function highlightLines(text: string, isolateLines: boolean): Line[] {
   const lineStarts = computeLineStarts(text);
   const rawLines = text.split("\n");
   const spans: Span[][] = rawLines.map(() => []);
   const col = rawLines.map(() => 0);
-  for (const tok of tokenize(text)) {
+  for (const tok of tokenize(text, isolateLines)) {
     let pos = tok.start;
     let li = lineIndexOf(lineStarts, pos);
     while (pos < tok.end && li < rawLines.length) {
@@ -207,16 +228,41 @@ export function jsonHighlightLines(text: string): Line[] {
   return rawLines.map((t, i) => ({ text: t, spans: spans[i] }));
 }
 
-/** A whole-document JSON highlighter. JSON is cheap enough to recolor whole on
- * every keystroke, so no incremental state is needed. */
+/** Color a JSON or JSONC source into rendered lines. */
+export function jsonHighlightLines(text: string): Line[] {
+  return highlightLines(text, false);
+}
+
+/** Color JSON Lines source with independent lexical state for every record. */
+export function jsonLinesHighlightLines(text: string): Line[] {
+  return highlightLines(text, true);
+}
+
+/**
+ * Build a whole-document JSON highlighter. JSON is cheap enough to recolor
+ * whole on every keystroke, so no incremental state is needed.
+ */
 export function createJsonHighlighter(initial: string): Highlighter {
-  let lines: Line[] = jsonHighlightLines(initial);
+  return createHighlighter(initial, jsonHighlightLines);
+}
+
+/** A whole-document JSON Lines highlighter with independent record state. */
+export function createJsonLinesHighlighter(initial: string): Highlighter {
+  return createHighlighter(initial, jsonLinesHighlightLines);
+}
+
+/** Build a highlighter from a whole-source coloring function. */
+function createHighlighter(
+  initial: string,
+  highlight: (text: string) => Line[],
+): Highlighter {
+  let lines: Line[] = highlight(initial);
   return {
     get lines() {
       return lines;
     },
     update(next: string): readonly Line[] {
-      lines = jsonHighlightLines(next);
+      lines = highlight(next);
       return lines;
     },
   };
@@ -241,6 +287,23 @@ export function jsonDocument(text: string): Document {
     structure,
     flatStructure: flattenStructure(structure),
     definitions,
+  };
+}
+
+/** Build a JSON Lines document with structure only for one-record input. */
+export function jsonLinesDocument(text: string): Document {
+  const lines = jsonLinesHighlightLines(text);
+  const recordCount =
+    text.split("\n").filter((line) => line.trim().length > 0).length;
+  if (recordCount === 1) {
+    return { ...jsonDocument(text), lines };
+  }
+  return {
+    text,
+    lines,
+    structure: [],
+    flatStructure: [],
+    definitions: new Map(),
   };
 }
 

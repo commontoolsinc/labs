@@ -138,6 +138,28 @@ describe("bulk-plan", () => {
       expect(() => decodePlan(numericPiece)).toThrow("row 1");
     });
 
+    it("refuses to derive a rollback across repair rows, naming them", () => {
+      const plan = retargetPlan();
+      const withRepair = {
+        header: plan.header,
+        rows: [{
+          piece: plan.rows[0].piece,
+          expect: { ...plan.rows[0].expect, documentHash: "9f2c" },
+          op: {
+            kind: "repair" as const,
+            fixer: "fix-titles.ts",
+            fixerIdentity: "impl-v1",
+          },
+        }],
+      };
+      expect(() => deriveRollbackPlan(withRepair, "later")).toThrow(
+        "no derivable",
+      );
+      expect(() => deriveRollbackPlan(withRepair, "later")).toThrow(
+        plan.rows[0].piece,
+      );
+    });
+
     it("returns a derived rollback unchanged on a round-trip", () => {
       const rollback = deriveRollbackPlan(retargetPlan(), "later");
       expect(decodePlan(encodePlan(rollback))).toEqual(rollback);
@@ -218,6 +240,49 @@ describe("bulk-plan", () => {
         };
         expect(() => decodePlan(JSON.stringify(bad) + "\n")).toThrow("header");
       }
+    });
+
+    it("carries a repair row only with its document-hash precondition", () => {
+      const plan = retargetPlan();
+      const repairRow = {
+        piece: plan.rows[0].piece,
+        phase: plan.rows[0].phase,
+        expect: { ...plan.rows[0].expect, documentHash: "9f2c" },
+        op: {
+          kind: "repair",
+          fixer: "fix-titles.ts",
+          fixerIdentity: "impl-v1",
+        },
+      };
+      const good = JSON.stringify(header) + "\n" + JSON.stringify(repairRow);
+      expect(decodePlan(good).rows[0].op).toEqual({
+        kind: "repair",
+        fixer: "fix-titles.ts",
+        fixerIdentity: "impl-v1",
+      });
+      const hashless = {
+        ...repairRow,
+        expect: { ...plan.rows[0].expect },
+      };
+      expect(() =>
+        decodePlan(JSON.stringify(header) + "\n" + JSON.stringify(hashless))
+      ).toThrow("row 1");
+      const nameless = {
+        ...repairRow,
+        op: { kind: "repair", fixer: "", fixerIdentity: "impl-v1" },
+      };
+      expect(() =>
+        decodePlan(JSON.stringify(header) + "\n" + JSON.stringify(nameless))
+      ).toThrow("row 1");
+      // A repair op without its implementation pin is the bypass the codec
+      // exists to refuse: nothing could hold the run to what was reviewed.
+      const pinless = {
+        ...repairRow,
+        op: { kind: "repair", fixer: "fix-titles.ts" },
+      };
+      expect(() =>
+        decodePlan(JSON.stringify(header) + "\n" + JSON.stringify(pinless))
+      ).toThrow("row 1");
     });
 
     it("throws for a restore op whose revision is not a string", () => {

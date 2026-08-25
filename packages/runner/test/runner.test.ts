@@ -3312,8 +3312,10 @@ describe("runner utils", () => {
       (resultCell as any).synced = true;
 
       const runner = runtime.runner as any;
+      let dependencySyncRuns = 0;
       const originalSync = runner.syncCellsForRunningPattern.bind(runner);
       runner.syncCellsForRunningPattern = async (...args: any[]) => {
+        dependencySyncRuns++;
         await clock.settle();
         return originalSync(...args);
       };
@@ -3325,6 +3327,10 @@ describe("runner utils", () => {
         ]);
         expect(first).toBe(true);
         expect(second).toBe(true);
+        // The second start joins the first attempt, so the dependency
+        // pre-sync — the expensive phase concurrent starts used to repeat —
+        // runs once for the pair.
+        expect(dependencySyncRuns).toBe(1);
 
         resultCell.key("increment").send();
         await runtime.idle();

@@ -210,7 +210,7 @@ get`, `cf piece set`, and `cf piece call` are the same commands, deprecated
 as spellings: each still works and warns on stderr with the date it stops
 working.
 
-One subtlety: neither `piece set` nor `piece call` refreshes *computed*
+One subtlety: neither `cf set` nor `cf call` refreshes *computed*
 outputs. `set` writes the cell without running anything; `call` runs the
 handler (so the handler's own writes land and sync), but the scheduler is
 lazy — derived values recompute only when something observes them

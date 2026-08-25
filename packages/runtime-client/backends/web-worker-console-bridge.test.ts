@@ -8,8 +8,10 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { CompilerStackLoadError } from "../../runner/src/harness/deferred-compiler-stack.ts";
 import {
   ClientNotificationType,
+  isWorkerConsoleNotification,
   RequestType,
   RuntimeErrorCode,
+  TransportNotificationType,
 } from "../protocol/mod.ts";
 import { RuntimeProcessor } from "./mod.ts";
 
@@ -20,7 +22,7 @@ import { RuntimeProcessor } from "./mod.ts";
 // `MessageEvent`s — exercising the opt-in console bridge and the request
 // branches without spawning a real worker or initializing the runtime.
 
-type Posted = Record<string, unknown> | string;
+type Posted = Record<string, unknown>;
 
 function dispatch(data: unknown): Promise<void> {
   globalThis.dispatchEvent(new MessageEvent("message", { data }));
@@ -45,15 +47,18 @@ describe("web worker console bridge", () => {
     };
 
     try {
-      // Importing registers the message listener and posts "READY".
+      // Importing registers the message listener and posts the ready
+      // notification.
       await import("./web-worker/index.ts");
-      expect(posted).toContain("READY");
+      expect(posted).toContainEqual({
+        type: TransportNotificationType.WorkerReady,
+      });
 
       const consoleMessages = () =>
-        posted.filter(
-          (m): m is { __workerConsole: { level: string; text: string } } =>
-            typeof m === "object" && m !== null && "__workerConsole" in m,
-        ).map((m) => m.__workerConsole);
+        posted.filter(isWorkerConsoleNotification).map(({ level, text }) => ({
+          level,
+          text,
+        }));
 
       // A request before initialization is rejected (not patched yet, so no
       // forwarded copy reaches `posted`).

@@ -20,6 +20,8 @@ import type { Candidate } from "./static.ts";
 import type { CompletionLine } from "./line.ts";
 import { longName } from "./line.ts";
 import { absPath } from "../utils.ts";
+import { normalizeLLMFriendlyRef } from "../llm-friendly-ref.ts";
+import { parseScopedIdSegment } from "@commonfabric/runner/shared";
 import type { PieceConfig, SpaceConfig } from "../piece.ts";
 import ports from "@commonfabric/ports" with { type: "json" };
 
@@ -57,6 +59,7 @@ function directive(...directives: Directive[]): ProviderResult {
  */
 export function resolveSpaceContext(
   line: CompletionLine,
+  embeddedSpace?: string,
 ): SpaceConfig | null {
   const url = line.options.get("url");
   const identity = line.options.get("identity") ??
@@ -64,7 +67,11 @@ export function resolveSpaceContext(
   if (!identity) return null;
 
   let apiUrl = line.options.get("api-url") ?? Deno.env.get("CF_API_URL");
-  let space = line.options.get("space");
+  // A reference carrying a space DID supplies one the line did not name, which
+  // is what `parsePieceOptions` does with the same reference. Where the line
+  // named a space it wins, and a mismatch between the two is settled by the
+  // command rather than here: completion offers candidates, it does not judge.
+  let space = line.options.get("space") ?? embeddedSpace;
 
   if (url) {
     try {
@@ -95,29 +102,109 @@ export function resolveSpaceContext(
   }
 }
 
-/** Same as `resolveSpaceContext`, plus the `--piece` the line already names. */
-function resolvePieceContext(line: CompletionLine): PieceConfig | null {
-  const space = resolveSpaceContext(line);
-  if (!space) return null;
-  const piece = line.options.get("piece") ??
-    (line.options.get("url")
-      ? new URL(line.options.get("url")!).pathname.split("/").filter(Boolean)[1]
-      : undefined);
-  if (!piece) return null;
-  return { ...space, piece };
+/**
+ * The target reference the line names, in whichever of the four spellings it
+ * was written: `--piece`, a positional canonical address, or the piece a
+ * `--url` carries.
+ */
+function writtenPieceRef(line: CompletionLine): string | undefined {
+  const piece = line.options.get("piece") ?? line.address;
+  if (piece) return piece;
+  const url = line.options.get("url");
+  if (!url) return undefined;
+  try {
+    return new URL(url).pathname.split("/").filter(Boolean)[1];
+  } catch {
+    return undefined;
+  }
 }
 
 /**
- * Pieces in the line's space, as `id` with the piece's name as annotation.
+ * Same as `resolveSpaceContext`, plus the target the line already names —
+ * parsed through the same grammar the command's own intake parses it with.
  *
- * A piece that failed to load still lists — its id is exactly what an operator
- * reaches for completion to recover.
+ * `normalizeLLMFriendlyRef` reads the canonical reference: the embedded space,
+ * the `@scope` suffix, an embedded path, and the `#argument` suffix that
+ * selects the arguments cell the way `--input` does. What it does not
+ * recognize falls through to the alias grammar, which is `id[@scope]`. Taking
+ * the word verbatim as a piece id — which this did — meant every documented
+ * spelling but the bare id resolved to a listing call that could not succeed,
+ * and so to a slot that silently offered nothing.
+ *
+ * A malformed reference is `null` rather than a throw: the caller is a
+ * provider, and a half-typed word is the normal state of one.
+ */
+function resolvePieceContext(line: CompletionLine): PieceConfig | null {
+  const written = writtenPieceRef(line);
+  if (!written) return null;
+
+  let ref;
+  try {
+    ref = normalizeLLMFriendlyRef(written, {
+      space: line.options.get("space"),
+    });
+  } catch {
+    return null;
+  }
+
+  if (!ref) {
+    let alias;
+    try {
+      alias = parseScopedIdSegment(written);
+    } catch {
+      return null;
+    }
+    const space = resolveSpaceContext(line);
+    if (!space) return null;
+    return {
+      ...space,
+      piece: alias.id,
+      ...(alias.scope && { pieceScope: alias.scope }),
+    };
+  }
+
+  const space = resolveSpaceContext(line, ref.embeddedSpace);
+  if (!space) return null;
+  return {
+    ...space,
+    piece: ref.pieceId,
+    ...(ref.scope && { pieceScope: ref.scope }),
+    ...(ref.path.length > 0 && { piecePath: ref.path }),
+    ...(ref.input && { pieceInput: true }),
+  };
+}
+
+/**
+ * What the `--piece` slot accepts: every slug the space's index records, then
+ * every piece id.
+ *
+ * Both are values the flag takes, and the slug is the readable half of that
+ * vocabulary — so it leads, and the opaque id follows.
  */
 async function pieceCandidates(line: CompletionLine): Promise<ProviderResult> {
   const config = resolveSpaceContext(line);
   if (!config) return NOTHING;
-  const { listPieces } = await import("../piece.ts");
-  return values(shapePieceCandidates(await listPieces(config)));
+  const { listPieces, listSpaceSlugs } = await import("../piece.ts");
+  const [pieces, slugs] = await Promise.all([
+    listPieces(config),
+    listSpaceSlugs(config),
+  ]);
+  return values([
+    ...shapeSlugCandidates(slugs, pieces),
+    ...shapePieceCandidates(pieces),
+  ]);
+}
+
+/** Just the slugs, for the positional that takes one and nothing else. */
+async function slugCandidates(line: CompletionLine): Promise<ProviderResult> {
+  const config = resolveSpaceContext(line);
+  if (!config) return NOTHING;
+  const { listPieces, listSpaceSlugs } = await import("../piece.ts");
+  const [pieces, slugs] = await Promise.all([
+    listPieces(config),
+    listSpaceSlugs(config),
+  ]);
+  return values(shapeSlugCandidates(slugs, pieces));
 }
 
 /** Listing shape used by `shapePieceCandidates`, structural so tests need no runtime. */
@@ -125,6 +212,12 @@ export interface PieceListingLike {
   readonly id: string;
   readonly name?: string;
   readonly patternRef?: { readonly symbol?: string } | null;
+}
+
+/** Listing shape used by `shapeSlugCandidates`, structural for the same reason. */
+export interface SlugListingLike {
+  readonly slug: string;
+  readonly piece?: string;
 }
 
 /**
@@ -142,6 +235,31 @@ export function shapePieceCandidates(
   }));
 }
 
+/**
+ * Label slugs so they are not read as ids. The annotation says what the value
+ * is and, where the slug resolves to a piece the listing named, what it points
+ * at — which is the question a caller choosing between two slugs is asking.
+ *
+ * A slug whose target failed to resolve still lists: it is a name the space
+ * records and the flag accepts, and completion is not the surface that decides
+ * whether it still points anywhere.
+ */
+export function shapeSlugCandidates(
+  slugs: readonly SlugListingLike[],
+  pieces: readonly PieceListingLike[],
+): Candidate[] {
+  const named = new Map(
+    pieces.map((piece) => [piece.id, piece.name ?? piece.patternRef?.symbol]),
+  );
+  return slugs.map((entry) => {
+    const name = entry.piece ? named.get(entry.piece) : undefined;
+    return {
+      value: entry.slug,
+      description: name ? `slug for ${name}` : "slug",
+    };
+  });
+}
+
 /** Callables (handlers and streams) exposed by the line's `--piece`. */
 async function callableCandidates(
   line: CompletionLine,
@@ -157,13 +275,47 @@ async function callableCandidates(
 export interface VerbListingLike {
   readonly name: string;
   readonly kind: string;
+  /** The author's doc comment on the verb, where the listing carries one. */
+  readonly description?: string;
+  /** A UI affordance rather than a headless verb. Hidden by `cf piece verbs`. */
+  readonly tier?: string;
+  /** `@deprecated` on the verb. Hidden by `cf piece verbs`. */
+  readonly deprecated?: boolean;
 }
 
-/** Callables annotated by kind, matching what `cf piece verbs` reports. */
+/**
+ * Callables, annotated with what the author said the verb is FOR.
+ *
+ * `cf piece verbs` prints that sentence under each row and it is the one a
+ * verb's help page opens with, so it is what the annotation column is for. The
+ * kind is a two-value fact that rarely decides anything at the prompt, and it
+ * is the fallback where the author documented nothing — never derived from the
+ * name, which would report a caller's own word back as documentation.
+ *
+ * A wrapper or deprecated verb is marked. `cf piece verbs` holds both back
+ * unless `--all` and says how many it held; completion offers them, because
+ * both are callable and a name that works should be reachable. What is not
+ * defensible is the two surfaces disagreeing silently, and the mark is the
+ * cheapest way to agree: it keeps the name reachable while saying what it is.
+ */
 export function shapeVerbCandidates(
   verbs: readonly VerbListingLike[],
 ): Candidate[] {
-  return verbs.map((verb) => ({ value: verb.name, description: verb.kind }));
+  return verbs.map((verb) => {
+    // Both marks, in the order and the join `cf piece verbs` renders them
+    // with. They can coexist, and picking one would put the two surfaces back
+    // into the silent disagreement this item is about.
+    const marks = [
+      ...(verb.tier === "wrapper" ? ["wrapper"] : []),
+      ...(verb.deprecated === true ? ["deprecated"] : []),
+    ].join(",");
+    const said = verb.description?.split("\n")[0].trim();
+    const body = said && said.length > 0 ? said : verb.kind;
+    return {
+      value: verb.name,
+      description: marks ? `[${marks}] ${body}` : body,
+    };
+  });
 }
 
 /**
@@ -181,7 +333,9 @@ async function cellPathCandidates(
 
   const { parentPath, prefix } = splitPathPrefix(line.word);
   const keys = await childKeys(config, parentPath, {
-    input: line.flags.has("input"),
+    // `#argument` on the reference and `--input` as a flag are two spellings
+    // of one selection, so both reach the arguments cell here.
+    input: line.flags.has("input") || config.pieceInput === true,
   });
   if (keys.length === 0) return NOTHING;
 
@@ -195,6 +349,10 @@ async function cellPathCandidates(
  * Keys directly under `path` on a piece's cell. An array yields its indices, an
  * object its property names, and a leaf yields nothing — which is the correct
  * signal that the path is already complete.
+ *
+ * A path embedded in the reference comes first, the way `mergePiecePath` puts
+ * it, so `--piece /of:fid1:…/items` completes `items`' keys rather than the
+ * root's.
  */
 async function childKeys(
   config: PieceConfig,
@@ -203,7 +361,10 @@ async function childKeys(
 ): Promise<string[]> {
   const { getCellValue } = await import("../piece.ts");
   const { parseCellPath } = await import("@commonfabric/runner");
-  const segments = path ? parseCellPath(path) : [];
+  const segments = [
+    ...(config.piecePath ?? []),
+    ...(path ? parseCellPath(path) : []),
+  ];
   return keysOf(await getCellValue(config, segments, options));
 }
 
@@ -234,6 +395,244 @@ export function splitPathPrefix(
   if (cut === -1) return { parentPath: "", prefix: "" };
   const parentPath = typed.slice(0, cut);
   return { parentPath, prefix: `${parentPath}/` };
+}
+
+/**
+ * Commands whose `--select`/`--schema` names positions in the value at the
+ * target the line already gives.
+ *
+ * `call` and `exec` shape a VERB's result instead, whose vocabulary is the
+ * verb's `outputSchema` rather than the piece's root — reading the root there
+ * would offer plausible names for a different value, which is worse than
+ * offering none. `wish` shapes what its query resolved to, and resolving a
+ * wish commits a cell to the space: a Tab must not write.
+ */
+const PROJECTION_SOURCE_COMMANDS: ReadonlySet<string> = new Set([
+  "piece get",
+  "get",
+]);
+
+/**
+ * Field paths into the value a read returns, for `--select` and `--schema`.
+ *
+ * The grammar is its own and is not the cell-path grammar: a list splits on
+ * `,` and a path on `.`, where a cell path walks `/`. A segment ending in `@`
+ * asks for that position's address rather than its value, and a bare `@` asks
+ * the read for its own — so both spellings of a position are offered.
+ *
+ * The vocabulary needs no request the slot does not already have: the value
+ * being projected is the one at the piece and path the line names, which is
+ * what `cf get` would read.
+ */
+function projectionFieldCandidates(
+  flag: "select" | "schema",
+): (line: CompletionLine) => Promise<ProviderResult> {
+  return async (line) => {
+    if (!PROJECTION_SOURCE_COMMANDS.has(line.path.join(" "))) return NOTHING;
+    // `--schema` reads a JSON Schema or an `@file` as well as this list, and
+    // both are recognized by their first character. Neither is a field path.
+    if (flag === "schema" && /^[@{]/.test(line.word)) return NOTHING;
+
+    const config = resolvePieceContext(line);
+    if (!config) return NOTHING;
+
+    const { list, path, prefix, atElementStart } = splitSelectPrefix(line.word);
+    const { getCellValue } = await import("../piece.ts");
+    const { parseCellPath } = await import("@commonfabric/runner");
+    const value = await getCellValue(
+      config,
+      [
+        ...(config.piecePath ?? []),
+        ...(line.positionals[0] ? parseCellPath(line.positionals[0]) : []),
+      ],
+      { input: line.flags.has("input") || config.pieceInput === true },
+    );
+
+    // Everything the position could name, including the bare address suffix
+    // wherever an element begins — then held to what the flag's own parser
+    // accepts. Which spellings are reserved is not a rule worth restating:
+    // `--select true` is refused while `revision,true` is a field, and
+    // `--schema @` is an empty file path while `revision,@` is the suffix.
+    // Round-tripping is what keeps the offered set and the accepted set one.
+    const candidates = await acceptedProjections(
+      shapeProjectionCandidates(
+        descendProjection(value, path),
+        `${list}${prefix}`,
+        { self: atElementStart },
+      ),
+      flag,
+    );
+    if (candidates.length === 0) return NOTHING;
+    // A field path continues with `.` or `,`, so hold the cursor in place the
+    // way a cell path does.
+    return { candidates, directives: [{ kind: "nospace" }] };
+  };
+}
+
+/**
+ * The candidates the flag's own parser accepts, written as the whole argument
+ * they would become.
+ *
+ * A completion is a spelling a caller may stop at, so the bar is the one every
+ * other slot here is held to: the command takes it. The two flags read the
+ * same field list and reserve different spellings around it — `--select true`
+ * is refused while `revision,true` is a field, `--schema @` is an empty file
+ * path while `revision,@` is the suffix — and both sets of rules live in
+ * `lib/cell-selection.ts`, so they are asked rather than mirrored.
+ */
+export async function acceptedProjections(
+  candidates: readonly Candidate[],
+  flag: "select" | "schema",
+): Promise<Candidate[]> {
+  const { parseSelectProjection, parseSelectionProjection } = await import(
+    "../cell-selection.ts"
+  );
+  const accepted: Candidate[] = [];
+  for (const candidate of candidates) {
+    try {
+      const parsed = flag === "select"
+        ? parseSelectProjection(candidate.value)
+        : await parseSelectionProjection(candidate.value);
+      // Parsing is not enough: `--schema true` succeeds and means the boolean
+      // JSON Schema, not a field of that name. The parser reports which
+      // reading it took, and only the field-list one is what this slot offers.
+      if (parsed.kind === "concise") accepted.push(candidate);
+    } catch {
+      // A spelling this flag refuses is not a candidate for it.
+    }
+  }
+  return accepted;
+}
+
+/**
+ * Split the projection word being typed into the part each candidate must
+ * carry back and the path already closed within the element being typed.
+ *
+ * `notes@,settings.the` is one closed element, then `settings.` closed within
+ * the element under the cursor: the candidates are `notes@,settings.theme` and
+ * its address spelling, because the shell replaces the whole word.
+ */
+export function splitSelectPrefix(typed: string): {
+  /** Elements already closed, trailing comma included. */
+  list: string;
+  /** Segments already closed within the element being typed. */
+  path: string[];
+  /** Those segments as written, trailing dot included. */
+  prefix: string;
+  /** Whether nothing has been typed yet in this element. */
+  atElementStart: boolean;
+} {
+  const comma = typed.lastIndexOf(",");
+  const list = comma === -1 ? "" : typed.slice(0, comma + 1);
+  const element = typed.slice(list.length);
+  const dot = element.lastIndexOf(".");
+  const prefix = dot === -1 ? "" : element.slice(0, dot + 1);
+  return {
+    list,
+    // A closed segment may carry the address marker — `topic@.title` marks
+    // `topic` and projects `title` — so the marker is stripped for the walk
+    // and kept in the prefix the candidate carries back. Descending a literal
+    // `topic@` would find no such property and offer nothing.
+    path: prefix ? prefix.slice(0, -1).split(".").map(segmentName) : [],
+    prefix,
+    atElementStart: element.length === 0,
+  };
+}
+
+/**
+ * The field a written segment names: the trailing address marker is not part
+ * of it, and `\@` is an escaped `@` that is. Mirrors `parseConciseSegment`,
+ * which is what the command reads a segment with.
+ */
+function segmentName(segment: string): string {
+  const escaped = "\\@";
+  const marked = segment.endsWith("@") && !segment.endsWith(escaped);
+  return (marked ? segment.slice(0, -1) : segment).replaceAll(escaped, "@");
+}
+
+/**
+ * The value a projection path names, read the way a projection reads it: a
+ * list is element-wise across an array, so a segment below one names a field
+ * of each element rather than an index. `--select items.0.title` is refused
+ * for exactly that reason.
+ */
+export function descendProjection(
+  value: unknown,
+  path: readonly string[],
+): unknown {
+  let current = value;
+  for (const name of path) current = descendOne(current, name);
+  return current;
+}
+
+/**
+ * One segment of that walk. An array is descended through however many layers
+ * it has, because a projection is element-wise at every one of them:
+ * `matrix.nested.leaf` reads through `[[{nested: {leaf}}]]`, so a walk that
+ * unwrapped a single layer would offer `nested` and then nothing.
+ */
+function descendOne(value: unknown, name: string): unknown {
+  if (Array.isArray(value)) {
+    return value.map((element) => descendOne(element, name));
+  }
+  if (!value || typeof value !== "object") return undefined;
+  return (value as Record<string, unknown>)[name];
+}
+
+/**
+ * A name a concise field path can carry. `parseConciseSegment` holds a segment
+ * to an identifier grammar, and a trailing `@` in a name would be read as the
+ * address suffix — the escape that writes one needs shell quoting to survive,
+ * so such a key is left out rather than offered in a form that does not work.
+ */
+function isWritableFieldName(name: string): boolean {
+  return /^[A-Za-z_$][A-Za-z0-9_$@-]*$/.test(name) && !name.endsWith("@");
+}
+
+/**
+ * The positions one level below a projection path: an array contributes its
+ * elements' fields rather than its indices, and a leaf contributes nothing.
+ */
+export function projectionKeys(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    const seen: string[] = [];
+    for (const element of value) {
+      for (const key of projectionKeys(element)) {
+        if (!seen.includes(key)) seen.push(key);
+      }
+    }
+    return seen;
+  }
+  if (value && typeof value === "object") {
+    return Object.keys(value as Record<string, unknown>);
+  }
+  return [];
+}
+
+/**
+ * Both spellings of every position below `value`, each carrying `prefix` so
+ * the shell replaces the whole word.
+ */
+export function shapeProjectionCandidates(
+  value: unknown,
+  prefix: string,
+  options: { self?: boolean } = {},
+): Candidate[] {
+  const candidates: Candidate[] = [];
+  if (options.self) {
+    candidates.push({
+      value: `${prefix}@`,
+      description: "the read source's address",
+    });
+  }
+  for (const key of projectionKeys(value).filter(isWritableFieldName)) {
+    candidates.push({ value: `${prefix}${key}` });
+    candidates.push({
+      value: `${prefix}${key}@`,
+      description: "its address",
+    });
+  }
+  return candidates;
 }
 
 /**
@@ -332,6 +731,8 @@ const OPTION_VALUE_PROVIDERS: Readonly<
   Record<string, (line: CompletionLine) => Promise<ProviderResult>>
 > = {
   piece: pieceCandidates,
+  select: projectionFieldCandidates("select"),
+  schema: projectionFieldCandidates("schema"),
   space: () => spaceCandidates(),
   "api-url": () => Promise.resolve(apiUrlCandidates()),
   identity: () => Promise.resolve(directive({ kind: "files", glob: "*.key" })),
@@ -373,6 +774,9 @@ const ARGUMENT_PROVIDERS: Readonly<
   "set:path": cellPathCandidates,
   "piece link:source": linkEndpointCandidates,
   "piece link:target": linkEndpointCandidates,
+  // Naming an existing slug re-points it, which is the case completion helps
+  // with; a slug being coined for the first time is a word nothing can offer.
+  "piece set-slug:slug": slugCandidates,
   "piece new:main": patternFiles,
   "piece setsrc:main": patternFiles,
   "check:files": patternFiles,

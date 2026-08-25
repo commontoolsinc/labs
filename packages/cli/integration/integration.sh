@@ -1082,6 +1082,24 @@ run_verb_session_gaps() {
   echo "Successfully ran the verb-session gap harness for ${API_URL}."
 }
 
+# The completion chain against a live fabric. Same delegation rationale as the
+# two above; it deploys its own fixture and takes its own space.
+#
+# It is the only thing that drives a completion provider against real state,
+# and it reaches every provider that reads any — the fabric, the local stores,
+# or the environment. Its own header draws the boundary exactly:
+# the unit tests cover the pure half, and a provider that reaches a fabric and
+# returns the WRONG set looks exactly like one that returned nothing, because
+# completion swallows every error on purpose. It also carries `gap` assertions
+# for slots that deliberately answer nothing today, which fail the day one
+# starts answering.
+run_completion_walkthrough() {
+  echo "Running the completion walkthrough..."
+  API_URL="$API_URL" bash "$SCRIPT_DIR/completion-over-the-cli.sh" ||
+    error "The completion walkthrough failed."
+  echo "Successfully ran the completion walkthrough for ${API_URL}."
+}
+
 # The Topics content-safety drill: export a space's authored content, clobber a
 # topic the way a bad migration would, restore it, and prove the restore
 # byte-exact. docs/plans/topics-migration-rehearsal.md makes it part of every
@@ -1373,6 +1391,8 @@ case "$SECTION" in
     run_verbs_walkthrough
     cf_test_step_begin verb-session-gaps
     run_verb_session_gaps
+    cf_test_step_begin completion-walkthrough
+    run_completion_walkthrough
     cf_test_step_begin topics-restore-drill
     run_topics_restore_drill
     cf_test_step_begin bulk-survey-drill
@@ -1397,6 +1417,10 @@ case "$SECTION" in
   verb-gaps)
     cf_test_step_begin verb-session-gaps
     run_verb_session_gaps
+    ;;
+  completion)
+    cf_test_step_begin completion-walkthrough
+    run_completion_walkthrough
     ;;
   topics-drill)
     cf_test_step_begin topics-restore-drill

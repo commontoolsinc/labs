@@ -36,9 +36,9 @@ function classesOf(lines: readonly Line[], token: string): Set<TokenClass> {
 Deno.test("json: language metadata selects JSON filenames", () => {
   assertEquals(languageForFile("deno.json").id, "json");
   assertEquals(languageForFile("/a/b/tsconfig.jsonc").id, "json");
-  assertEquals(languageForFile("records.jsonl").id, "json");
-  assertEquals(languageForFile("events.ndjson").id, "json");
-  assertEquals(languageForFile("EVENTS.NDJSON").id, "json");
+  assertEquals(languageForFile("records.jsonl").id, "json-lines");
+  assertEquals(languageForFile("events.ndjson").id, "json-lines");
+  assertEquals(languageForFile("EVENTS.NDJSON").id, "json-lines");
   assertEquals(languageForFile("UPPER.JSON").id, "json");
   assertEquals(languageForFile("config.json.example").id, "json");
   assertEquals(languageForFile("main.ts").id, "typescript");
@@ -60,7 +60,49 @@ Deno.test("json: line-oriented files use JSON token classes", () => {
   assertEquals(verbatim(lines), src);
 });
 
-Deno.test("json: line-oriented live edits reuse JSON token classes", () => {
+Deno.test("json: malformed records leave following records highlighted", () => {
+  for (
+    const malformed of [
+      '{"broken":"unterminated',
+      '{"broken":/* unterminated',
+      '{"broken":[',
+    ]
+  ) {
+    const src = `${malformed}\n{"next":true}`;
+    const lines = languageForFile("events.jsonl").highlightLines(
+      src,
+      "events.jsonl",
+    );
+    const brackets = lines[1].spans.filter((span) => span.cls === "bracket");
+
+    assertEquals(
+      classesOf(lines.slice(1), '"next"'),
+      new Set([
+        "propertyName",
+      ]),
+    );
+    assertEquals(classesOf(lines.slice(1), "true"), new Set(["boolean"]));
+    assertEquals(brackets.map((span) => span.bracketDepth), [0, 0]);
+    assertEquals(verbatim(lines), src);
+  }
+});
+
+Deno.test("json: large line-oriented records highlight without throwing", () => {
+  const properties = Array.from(
+    { length: 40_000 },
+    (_, index) => `"key${index}":${index}`,
+  );
+  const src = `{${properties.join(",")}}`;
+  const lines = languageForFile("large.jsonl").highlightLines(
+    src,
+    "large.jsonl",
+  );
+
+  assertEquals(classesOf(lines, '"key39999"'), new Set(["propertyName"]));
+  assertEquals(verbatim(lines), src);
+});
+
+Deno.test("json: line-oriented live edits preserve record isolation", () => {
   const before = '{"event":"created","sequence":1}\n';
   const after = [
     '{"event":"created","sequence":1}',
@@ -77,6 +119,23 @@ Deno.test("json: line-oriented live edits reuse JSON token classes", () => {
   assertEquals(classesOf(lines, '"updated"'), new Set(["string"]));
   assertEquals(classesOf(lines, "2"), new Set(["number"]));
   assertEquals(verbatim(lines), after);
+
+  const malformed = [
+    '{"event":"unterminated',
+    '{"event":"recovered","sequence":3}',
+  ].join("\n");
+  const recoveredLines = highlighter.update(malformed);
+
+  assertEquals(
+    classesOf(recoveredLines.slice(1), '"event"'),
+    new Set(["propertyName"]),
+  );
+  assertEquals(
+    classesOf(recoveredLines.slice(1), '"recovered"'),
+    new Set(["string"]),
+  );
+  assertEquals(classesOf(recoveredLines.slice(1), "3"), new Set(["number"]));
+  assertEquals(verbatim(recoveredLines), malformed);
 });
 
 Deno.test("json: line-oriented documents expose no partial structure", () => {
@@ -89,6 +148,19 @@ Deno.test("json: line-oriented documents expose no partial structure", () => {
 
   assertEquals(doc.structure, []);
   assertEquals(doc.definitions.size, 0);
+});
+
+Deno.test("json: one line-oriented record exposes its structure", () => {
+  const language = languageForFile("event.jsonl");
+  const source = '{"event":"created","sequence":1}\n';
+  const doc = language.parseDocument(source, "event.jsonl");
+
+  assertEquals(doc.structure.map((node) => node.label), [
+    "event",
+    "sequence",
+  ]);
+  assert(doc.definitions.has("event"));
+  assert(doc.definitions.has("sequence"));
 });
 
 Deno.test("json: keys, values, and literals get distinct classes", () => {
