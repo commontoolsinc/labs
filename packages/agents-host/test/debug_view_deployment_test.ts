@@ -457,6 +457,7 @@ Deno.test("debug deployment rolls back an aborted registration", async () => {
       let commitCount = 0;
       manager.startPiece = (async (piece, options) => {
         await originalStartPiece.call(manager, piece, options);
+        if (typeof piece !== "string") candidatePiece = piece;
         interceptRegistrationCommit = true;
       }) as typeof manager.startPiece;
       runtime.runner.stop = ((piece) => {
