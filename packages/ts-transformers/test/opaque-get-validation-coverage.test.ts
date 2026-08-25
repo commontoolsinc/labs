@@ -108,6 +108,44 @@ Deno.test(
   },
 );
 
+// isReactiveInitializer reads the shared transparent-wrapper set, so every
+// spelling that wraps the origin call without changing it reaches the same
+// diagnostic. `satisfies` is the spelling most easily left out of a
+// hand-written wrapper list, so it is pinned here alongside its neighbours.
+Deno.test(
+  "opaque-get flags .get() on a local initialized through each wrapper spelling",
+  async () => {
+    const initializers = [
+      "computed(() => count * 2)",
+      "(computed(() => count * 2))",
+      "computed(() => count * 2)!",
+      "computed(() => count * 2) as never",
+      "computed(() => count * 2) satisfies unknown",
+      "(computed(() => count * 2) satisfies unknown)",
+    ];
+
+    for (const initializer of initializers) {
+      const source = `      import { computed, pattern } from "commonfabric";
+
+      export default pattern<{ count: number }>(({ count }) => {
+        const doubled = ${initializer};
+        const bad = doubled.get();
+        return { bad };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getOpaqueGetErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        1,
+        `expected one opaque-get error for initializer: ${initializer}`,
+      );
+    }
+  },
+);
+
 // isReactiveExpression binding-element branch: a value destructured out of a
 // local whose initializer is a reactive-origin call is still reactive, so
 // .get() on the destructured binding is flagged.

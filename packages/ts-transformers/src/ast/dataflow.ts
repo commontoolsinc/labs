@@ -9,7 +9,10 @@ import {
 import { isFunctionLikeExpression } from "./function-predicates.ts";
 import { symbolDeclaresCommonFabricDefault } from "../core/common-fabric-symbols.ts";
 import { isBrandedCellType } from "../transformers/cell-type.ts";
-import { unwrapExpression } from "../utils/expression.ts";
+import {
+  unwrapExpression,
+  unwrapTransparentWrapperOnce,
+} from "../utils/expression.ts";
 import { isSafeIdentifierText } from "../utils/identifiers.ts";
 import {
   detectCallKind,
@@ -664,13 +667,9 @@ export function createDataFlowAnalyzer(
           current = current.expression;
           continue;
         }
-        if (
-          ts.isParenthesizedExpression(current) ||
-          ts.isAsExpression(current) ||
-          ts.isTypeAssertionExpression(current) ||
-          ts.isNonNullExpression(current)
-        ) {
-          current = current.expression;
+        const unwrapped = unwrapTransparentWrapperOnce(current);
+        if (unwrapped) {
+          current = unwrapped;
           continue;
         }
         if (ts.isCallExpression(current)) {
