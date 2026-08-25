@@ -1,6 +1,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Command } from "@cliffy/command";
+import { dirname, fromFileUrl, join } from "@std/path";
+import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import { declaredSlots } from "../packages/cli/lib/completion/line.ts";
 import {
   describeFailures,
@@ -98,6 +100,33 @@ function captureConsole(
     console.log = origLog;
     console.error = origError;
   }
+}
+
+const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
+
+/** Run the gate the way its task does, and return what the process reported. */
+async function runAsProgram(
+  ...args: string[]
+): Promise<{ code: number; out: string }> {
+  const output = await runDenoCommandWithTemporaryLock({
+    root: REPO_ROOT,
+    args: (lockPath) => [
+      "run",
+      "--config",
+      join(REPO_ROOT, "deno.jsonc"),
+      "--lock",
+      lockPath,
+      // The permissions deno.jsonc grants the task, so a run that needs more
+      // than the task allows fails here rather than in CI.
+      "--allow-read",
+      "--allow-env",
+      "--allow-sys",
+      "--allow-ffi",
+      join(REPO_ROOT, "tasks/check-completion-slots.ts"),
+      ...args,
+    ],
+  });
+  return { code: output.code, out: new TextDecoder().decode(output.stdout) };
 }
 
 /** `providerOptions` for names whose provider answers on every command. */
@@ -291,6 +320,26 @@ describe("check-completion-slots", () => {
       for (const [key, reason] of [...NO_CANDIDATES, ...NO_OPTION_CANDIDATES]) {
         expect(reason.trim().length, `${key} has no reason`).toBeGreaterThan(0);
       }
+    });
+  });
+
+  describe("as the task runs it", () => {
+    // Calling main() above would still pass if the entry point never ran it,
+    // or if the permissions the task declares were too narrow to walk the
+    // tree. This is the promise the CI job makes: the command exits 0, having
+    // done the work.
+    it("exits 0 reporting the slots it walked", async () => {
+      const { code, out } = await runAsProgram();
+      expect(code).toBe(0);
+      expect(out).toContain("Completion slots OK");
+      expect(out).toMatch(/\d+ option slot\(s\) over \d+ name\(s\)/);
+    });
+
+    it("exits 0 listing what is undecided when asked for the list", async () => {
+      const { code, out } = await runAsProgram("--list");
+      expect(code).toBe(0);
+      expect(out).toContain("Undecided options:");
+      expect(out).toContain("Undecided positionals:");
     });
   });
 });
