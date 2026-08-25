@@ -18,6 +18,7 @@
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { env } from "@commonfabric/integration";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import { Identity } from "@commonfabric/identity";
 import { join } from "@std/path";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
@@ -180,48 +181,74 @@ describe("topic-board-pivot-contract", () => {
     await cc?.dispose();
   });
 
-  const inbound = async (t: PieceController) =>
-    (await t.result.get(["referencedBy"])) as { title: string }[];
-  const outbound = async (t: PieceController) =>
-    (await t.result.get(["mentions"])) as unknown[];
+  /** Await a derived edge count rather than reading straight after `set()`.
+   * A verb's completion says the event ran, not that the pivot has recomputed
+   * and served its consequence — under server execution those are different
+   * moments, and reading between them sees a transient count. */
+  const awaitEdges = async (
+    t: PieceController,
+    key: "referencedBy" | "mentions",
+    length: number,
+  ): Promise<unknown[]> => {
+    const cell = (await t.result.getCell()).key(key);
+    return await waitForCellValue<unknown[]>(
+      cc.runtime,
+      cell,
+      (v) => Array.isArray(v) && v.length === length,
+    );
+  };
+
+  const inboundTitles = async (t: PieceController, length: number) =>
+    (await awaitEdges(t, "referencedBy", length)) as { title: string }[];
 
   it("builds one pivot row per topic, claiming no edges before any mention", async () => {
-    expect(((await board.result.get(["crossrefs"])) as unknown[]).length)
-      .toBe(3);
-    expect((await inbound(target)).length).toBe(0);
-    expect((await outbound(target)).length).toBe(0);
+    const crossrefs = (await board.result.getCell()).key("crossrefs");
+    await waitForCellValue<unknown[]>(
+      cc.runtime,
+      crossrefs,
+      (v) => Array.isArray(v) && v.length === 3,
+    );
+    await awaitEdges(target, "referencedBy", 0);
+    await awaitEdges(target, "mentions", 0);
   });
 
+  // NOTE ON WHAT THIS CANNOT SEPARATE, because the distinction is easy to
+  // assume from the wording: every topic here sits at exactly ONE index, so
+  // this case cannot tell the pivot's identity check from a position check —
+  // swap `!equals(other, topic)` for `from !== to` in `crossrefTable` and it
+  // still passes. Only a board listing one topic at two indices separates
+  // them, and that is `assert_twin_earns_no_edge` in
+  // `packages/patterns/topics/topics.test.tsx`, which stays where it is. It
+  // cannot move here: a duplicate cannot be written into a board's list from
+  // outside it, by `push`, by seeding the array, or through the controller's
+  // `input` — the last is refused by `assertSchemaSubset`. Retiring that test
+  // needs the pivot's join extracted into something a unit test can hand a
+  // duplicated list, not a rehousing.
   it("records a self-mention without earning the topic an inbound edge", async () => {
-    // Referencing yourself is not being referenced from somewhere else. The
-    // rule is asked of the topic's identity rather than its array position.
+    // Referencing yourself is not being referenced from somewhere else.
     await target.result.set({ topic: target.getCell() }, ["mention"]);
-    expect((await outbound(target)).length).toBe(1);
-    expect((await inbound(target)).length).toBe(0);
+    await awaitEdges(target, "mentions", 1);
+    expect((await awaitEdges(target, "referencedBy", 0)).length).toBe(0);
   });
 
   it("gives each mentioned topic its own inbound edge, and is not symmetric", async () => {
     await source.result.set({ topic: target.getCell() }, ["mention"]);
     await source.result.set({ topic: third.getCell() }, ["mention"]);
+    await awaitEdges(source, "mentions", 2);
 
-    expect((await outbound(source)).length).toBe(2);
-    const intoTarget = await inbound(target);
-    expect(intoTarget.length).toBe(1);
-    expect(intoTarget[0].title).toBe("Graph source");
-    expect((await inbound(third)).length).toBe(1);
+    expect((await inboundTitles(target, 1))[0].title).toBe("Graph source");
+    expect((await inboundTitles(third, 1))[0].title).toBe("Graph source");
     // Mentioning is not mutual.
-    expect((await inbound(source)).length).toBe(0);
+    expect((await awaitEdges(source, "referencedBy", 0)).length).toBe(0);
   });
 
   it("drops only the retracted edge on unmention, leaving the other standing", async () => {
     await source.result.set({ topic: target.getCell() }, ["unmention"]);
+    await awaitEdges(source, "mentions", 1);
 
-    expect((await outbound(source)).length).toBe(1);
-    expect((await inbound(target)).length).toBe(0);
+    expect((await awaitEdges(target, "referencedBy", 0)).length).toBe(0);
     // The edge that was not retracted survives as a reference, not a
     // flattened copy of the piece it names.
-    const intoThird = await inbound(third);
-    expect(intoThird.length).toBe(1);
-    expect(intoThird[0].title).toBe("Graph source");
+    expect((await inboundTitles(third, 1))[0].title).toBe("Graph source");
   });
 });
