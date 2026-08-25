@@ -5585,7 +5585,22 @@ class SpaceReplica implements ISpaceReplica {
         continue;
       }
       const doc = upsert.doc;
-      if (!isObjectNotArray(doc)) continue;
+      if (!isObjectNotArray(doc)) {
+        // OW61 TEMPORARY: a carried upsert that never enters the overlay is
+        // invisible to every later resolution in this frame.
+        if (id.startsWith("cid:")) {
+          logger.error("ow61-OVERLAY-SKIP", () => [
+            `id=${id.slice(0, 20)} docType=${
+              doc === undefined
+                ? "undefined"
+                : Array.isArray(doc)
+                ? "array"
+                : typeof doc
+            } deleted=${upsert.deleted} keys=${Object.keys(upsert).join(",")}`,
+          ]);
+        }
+        continue;
+      }
       overlay.set(id, doc);
       deletedInFrame.delete(id);
       if (id.startsWith("cid:")) {
@@ -5611,6 +5626,13 @@ class SpaceReplica implements ISpaceReplica {
         // check is a forged replacement, not another document class.
         // Quarantine the ARRIVING copy; the stored verified one stays,
         // so refs to this hash keep resolving.
+        logger.error("ow61-CID-NOT-IDENTITY", () => [
+          `id=${id.slice(0, 20)} isSubschema=${isSubschema(value)} actual=${
+            isSubschema(value)
+              ? internSchemaAsTaggedHashString(value as JSONSchema).slice(0, 20)
+              : "n/a"
+          }`,
+        ]);
         if (this.#isVerifiedSchemaDocDelivered(hash, EMPTY_OVERLAY)) {
           quarantined.add(id);
           overlay.delete(id);
