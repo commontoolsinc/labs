@@ -70,20 +70,27 @@ export type {
  * consumer then pays a maybe at the call site, whose obvious spelling
  * (`piece.verb?.send(...)`) skips in silence.
  *
- * The membership, measured rather than guessed. Eight fields the board
- * READS: the card list renders `title`, `body`, `commentCount`, `createdBy`,
- * `createdByName` and `lastActivityAt`; `index` publishes `title`,
+ * The membership, measured rather than guessed. Seven fields the board
+ * READS: the card list renders `title`, `body`, `commentCount`, `createdBy`
+ * and `lastActivityAt`; `index` publishes `title`,
  * `createdAt`, `createdBy`, `commentCount`, `lastActivityAt` — the same
  * array declared through a narrower row schema, which is why a field it
  * names has to be demanded here to resolve at all; `crossrefTable` joins on
  * `mentions`; `cardsByActivity` sorts on `lastActivityAt`; `topicCount`
  * reads only a length.
  *
- * Nine members, then, because `[NAME]` is demanded for a reason none of
+ * Eight members, then, because `[NAME]` is demanded for a reason none of
  * those readers show: the board hands this same array on as each topic's
  * mention universe, so the name has to survive the demand to reach the
  * editor. Counting only what the board reads is what nearly dropped it.
  * No verbs.
+ *
+ * `createdByName` is deliberately NOT among them, though the card once read
+ * it. It is `topicAuthorLabel`'s fallback for a topic written before
+ * structured authorship, and every one of the deployed board's 113 topics
+ * carries a structured `createdBy.name`, so the fallback is reached by none
+ * of them. Demanding it would write a field this plan retires into the one
+ * schema that cannot drop it later.
  *
  * Every field carries a default, and that is load-bearing rather than
  * stylistic: a demanded path an older topic cannot produce makes the WHOLE
@@ -96,7 +103,6 @@ export interface TopicDemand extends TopicSummary {
    * costs no type error and silently empties every `@`-mention completion. */
   [NAME]: string | Default<""> | undefined;
   body: string | Default<"">;
-  createdByName: string | Default<"">;
   mentions: unknown[] | Default<[]>;
 }
 
@@ -571,7 +577,6 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
                     <cf-text variant="caption" tone="muted">
                       {card.commentCount} comments · by {topicAuthorLabel(
                         card.createdBy,
-                        card.createdByName,
                       )}
                       {" · "}
                       {whenLabel(card.lastActivityAt ?? 0)}
