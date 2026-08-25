@@ -44,17 +44,21 @@ export interface DescribeHandleToolOutput {
  * stands on elsewhere, and it is the contract patterns already work under
  * internally: you cannot see the data, you can only describe the data flow.
  *
- * Two shapes can answer, in this order:
+ * Three shapes can answer, in this order:
  *
- * 1. The schema the mint recorded out of the harness's OWN work — the result
- *    schema of a pattern this harness compiled and ran, marked
- *    `schemaSource: "harness"` on the entry.
+ * 1. The schema the operator wrote alongside a seeded handle, marked
+ *    `schemaSource: "operator"` on the entry. It answers without a fabric
+ *    read: it is the view the operator bound the handle under, stated ahead
+ *    of the run.
  * 2. The schema the referent DECLARES in the fabric, read through the run's
  *    session when it has one. A piece's document schema is the result schema
  *    of the pattern behind it, which is the shape an agent holding a handle to
  *    that piece would be wiring into a pattern of its own. The read is of the
  *    document's declared schema and of nothing else; the referent's value is
  *    not read, and a reference outside the session's own space is not followed.
+ * 3. The schema the mint recorded out of the harness's OWN work — the result
+ *    schema of a pattern this harness compiled and ran, marked
+ *    `schemaSource: "harness"` on the entry.
  *
  * Either way what leaves this tool is STRUCTURE. A JSON Schema is a place a
  * value can hide — `const`, `enum`, `default` and `examples` carry values
@@ -198,13 +202,18 @@ export const describeHandleTool: HarnessToolDefinition<
       };
     }
     const path = pathSegmentsOf(entry.ref);
-    // What the referent DECLARES answers first, because the question asked is
-    // what is at this address and the document at it is the authority on
-    // that. A recorded schema is second-best — it is what whichever step
-    // minted the handle happened to know — and it answers when the run has no
-    // session, or when the session can state no shape for the address.
-    let schema: JSONSchema | undefined;
-    if (context.getFabricSession !== undefined) {
+    // An operator-authored schema answers first, and without a fabric read:
+    // it is the view the operator bound the handle under, stated ahead of
+    // the run. After that, what the referent DECLARES answers, because the
+    // question asked is what is at this address and the document at it is
+    // the authority on that. A harness-recorded schema is last — it is what
+    // whichever step minted the handle happened to know — and it answers
+    // when the run has no session, or when the session can state no shape
+    // for the address.
+    let schema: JSONSchema | undefined = entry.schemaSource === "operator"
+      ? entry.schema
+      : undefined;
+    if (schema === undefined && context.getFabricSession !== undefined) {
       try {
         schema = await declaredSchemaOf(
           await context.getFabricSession(),

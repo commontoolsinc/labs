@@ -1370,6 +1370,82 @@ Deno.test("parseCfHarnessCliArgs rejects a handle-value origin that is not one",
   }
 });
 
+Deno.test("parseCfHarnessCliArgs collects operator seed handles, reading each schema file", async () => {
+  const seedRef = `/of:fid1:${"A".repeat(43)}/travellerName`;
+  const citiesRef = `/of:fid1:${"B".repeat(43)}/cities`;
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--seed-handle",
+      `travellerName=${seedRef}`,
+      "--seed-handle",
+      `cities=${citiesRef};schema=cities.schema.json`,
+    ],
+    {
+      cwd: "/tmp/project",
+      env: {},
+      readTextFile: (path: string) => {
+        assertEquals(path, "/tmp/project/cities.schema.json");
+        return Promise.resolve('{"type":"object"}');
+      },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.seedHandles, [
+    { name: "travellerName", ref: seedRef },
+    { name: "cities", ref: citiesRef, schema: { type: "object" } },
+  ]);
+});
+
+Deno.test("parseCfHarnessCliArgs seeds no handles by default", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.seedHandles, []);
+});
+
+Deno.test("parseCfHarnessCliArgs rejects a seed handle that does not fit the grammar", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--seed-handle", "no-reference-here"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--seed-handle must be <name>=<link>",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects a seed schema file that is not JSON", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--seed-handle",
+          `cities=/of:fid1:${"B".repeat(43)}/cities;schema=broken.json`,
+        ],
+        {
+          cwd: "/tmp/project",
+          env: {},
+          readTextFile: () => Promise.resolve("{ not json"),
+        },
+      ),
+    Error,
+    "must be valid JSON",
+  );
+});
+
 Deno.test("parseCfHarnessCliArgs rejects malformed Browser Access leases", async () => {
   await assertRejects(
     () =>

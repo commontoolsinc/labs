@@ -721,6 +721,25 @@ session that cannot be established leaves the run to proceed without its grants,
 and the CLI says so on stderr rather than staying silent. The grant list is
 designed to grow; the identity's profile is the expected next entry.
 
+#### Operator-seeded handles
+
+`--seed-handle <name>=<link>[;schema=<file>]` (repeatable) mints a handle the
+same way for a reference the operator names — a cell seeded into the space
+before the run exists. The model is told the token and the operator's `<name>`
+for it, nothing more: values placed in cells ahead of the run reach the model as
+handles from its first turn, so a prompt never holds a literal it could inline
+or pass on by accident. The optional schema file records the operator's
+statement of the referent's shape on the handle entry
+(`schemaSource: "operator"`), which `describe_handle` answers from without a
+fabric read.
+
+Unlike a grant, a seed is explicit configuration, so failure is closed and loud
+rather than tolerated: a malformed argument or unreadable schema file is a usage
+error, and a reference that does not parse, targets another space, or is seeded
+on a run without a fabric session fails the run before the model is involved.
+The seeds are recorded in run state (`seededHandles`), replayed rather than
+re-minted on resume, and reported in the operator summary as `seededHandles:`.
+
 #### Inspecting a handle's shape
 
 A token says nothing about what it refers to, and an agent handed one cannot

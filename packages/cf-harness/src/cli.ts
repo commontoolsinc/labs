@@ -135,6 +135,11 @@ import {
   setCurrentProvenance,
   setProvenanceCommand,
 } from "./provenance.ts";
+import type { HarnessSeedHandleSpec } from "./contracts/seeded-handles.ts";
+import {
+  parseSeedHandleArgument,
+  seededHandlesContextMessage,
+} from "./seeded-handles.ts";
 import {
   HarnessControlError,
   type HarnessControlErrorCode,
@@ -146,6 +151,7 @@ const DEFAULT_ARTIFACT_DIRNAME = ".cf-harness-artifacts";
 const CLI_OUTPUT_MODES = ["operator", "batch"] as const;
 const CLI_STRING_FLAGS = [
   "handle-value-origin",
+  "seed-handle",
   "workspace",
   "cwd",
   "focus-root",
@@ -210,6 +216,7 @@ const CLI_COLLECT_FLAGS = [
   "image",
   "host-mount",
   "handle-value-origin",
+  "seed-handle",
 ] as const;
 
 export type CfHarnessCliOutputMode = (typeof CLI_OUTPUT_MODES)[number];
@@ -251,6 +258,7 @@ export interface CfHarnessCliConfig {
   cfcInvocationContextDir?: string;
   browserAccess?: HarnessBrowserAccessLease;
   handleValueOrigins: readonly string[];
+  seedHandles: readonly HarnessSeedHandleSpec[];
   maxModelTurns: number;
   printTranscript: boolean;
   apiKey?: string;
@@ -514,6 +522,7 @@ Options:
   --browser-access-profile-mode <mode> persistent | transient
   --browser-access-account-access <access> available | none
   --handle-value-origin <origin> Origin a handle's value may be sent to (repeatable; none by default)
+  --seed-handle <name>=<link>[;schema=<file>] Mint a handle for a reference seeded into the fabric space, announced to the model under the operator-authored <name> (repeatable; requires --fabric-space)
   --cfc-enforcement-mode <mode> disabled | observe | enforce-explicit | enforce-strict
   --cfc-result-dir <path>       Host dir where runsc writes the CFC result sidecar (required for enforce-* modes)
   --cfc-invocation-context-dir <path> Host dir where the harness writes the CFC invocation-context sidecar (required for enforce-* modes)
@@ -827,6 +836,53 @@ const parseHandleValueOrigins = (
     origins.push(origin);
   }
   return uniqueStrings(origins);
+};
+
+/**
+ * The seeds `--seed-handle` names, with each schema file read and parsed.
+ * Grammar defects, an unreadable schema file, and a schema that is not a
+ * JSON Schema are all refused at parse: a seed is explicit operator
+ * configuration, and a run must not start without what it asked for. The
+ * references themselves are validated against the session space later, at
+ * mint time, where the space is known.
+ */
+const parseSeedHandles = async (
+  raw: string | readonly string[] | undefined,
+  options: {
+    cwd: string;
+    readTextFile: (path: string) => Promise<string>;
+  },
+): Promise<readonly HarnessSeedHandleSpec[]> => {
+  const values = raw === undefined
+    ? []
+    : (typeof raw === "string" ? [raw] : raw);
+  const specs: HarnessSeedHandleSpec[] = [];
+  for (const value of values) {
+    const parsed = parseSeedHandleArgument(value);
+    let schema: JSONSchema | undefined;
+    if (parsed.schemaFile !== undefined) {
+      const path = resolve(options.cwd, parsed.schemaFile);
+      let text: string;
+      try {
+        text = await options.readTextFile(path);
+      } catch (error) {
+        throw new Error(
+          `--seed-handle \`${parsed.name}\` schema file cannot be read: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+      schema = parseStructuredResultSchema(text, {
+        label: `--seed-handle \`${parsed.name}\` schema`,
+      })?.schema;
+    }
+    specs.push({
+      name: parsed.name,
+      ref: parsed.ref,
+      ...(schema !== undefined ? { schema } : {}),
+    });
+  }
+  return specs;
 };
 
 const parseBrowserAccessLease = (
@@ -1421,6 +1477,10 @@ export const parseCfHarnessCliArgs = async (
     );
   }
   const readTextFile = deps.readTextFile ?? Deno.readTextFile;
+  const seedHandles = await parseSeedHandles(
+    args["seed-handle"] as string | readonly string[] | undefined,
+    { cwd, readTextFile },
+  );
   const structuredResult = await parseStructuredResultConfig(args, {
     cwd,
     workspace,
@@ -1659,6 +1719,7 @@ export const parseCfHarnessCliArgs = async (
       : {}),
     ...(browserAccess !== undefined ? { browserAccess } : {}),
     handleValueOrigins,
+    seedHandles,
     maxModelTurns: parsePositiveInteger(
       typeof args["max-model-turns"] === "string"
         ? args["max-model-turns"]
@@ -2337,6 +2398,18 @@ export const formatCfHarnessCliResult = (
       `fabricGrants: ${
         result.runState.wellKnownGrants.map((grant) =>
           `${grant.name} ${grant.token}`
+        ).join(", ")
+      }`,
+    );
+  }
+  if (
+    result.runState.seededHandles !== undefined &&
+    result.runState.seededHandles.length > 0
+  ) {
+    lines.push(
+      `seededHandles: ${
+        result.runState.seededHandles.map((seed) =>
+          `${seed.name} ${seed.token}`
         ).join(", ")
       }`,
     );
@@ -3207,6 +3280,9 @@ export const runCfHarnessCli = async (
           ? { runManifestPath: parsed.runManifestPath }
           : {}),
         ...(additionalMounts.length > 0 ? { additionalMounts } : {}),
+        ...(parsed.seedHandles.length > 0
+          ? { seedHandles: parsed.seedHandles }
+          : {}),
       });
       activateEngine(engine);
       const loop = createPromptLoop({
@@ -3281,6 +3357,14 @@ export const runCfHarnessCli = async (
             })\n`,
           );
         }
+      }
+      // Operator-seeded handles are explicit configuration, so unlike the
+      // grants a failure here fails the run rather than proceeding without
+      // what the operator asked for.
+      const seeded = await engine.establishSeededHandles();
+      const seededMessage = seededHandlesContextMessage(seeded);
+      if (seededMessage !== undefined) {
+        contextMessages.push(seededMessage);
       }
       result = await loop.runPrompt({
         prompt: parsed.prompt!,

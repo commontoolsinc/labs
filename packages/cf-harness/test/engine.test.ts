@@ -247,6 +247,92 @@ Deno.test("CfHarnessEngine seeds the piece-registry grant once and replays the r
   assertEquals(registryReads, 1);
 });
 
+Deno.test("CfHarnessEngine mints operator seeds once and replays the record", async () => {
+  const seedSpace = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+  const seedRef = `/of:fid1:${"D".repeat(43)}/travellerName`;
+  let spaceReads = 0;
+  const engine = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    seedHandles: [{
+      name: "travellerName",
+      ref: seedRef,
+      schema: { type: "string" },
+    }],
+    fabricSessionFactory: () =>
+      Promise.resolve(
+        {
+          pieces: {
+            getSpace: () => {
+              spaceReads += 1;
+              return seedSpace;
+            },
+          },
+          // deno-lint-ignore no-explicit-any
+        } as any,
+      ),
+  });
+
+  const seeded = await engine.establishSeededHandles();
+  assertEquals(seeded.length, 1);
+  assertEquals(seeded[0]!.name, "travellerName");
+  assertEquals(seeded[0]!.ref, seedRef);
+  assertEquals(engine.getRunState().seededHandles, seeded);
+  const entry = engine.handleTable?.entries.find(
+    (candidate) => candidate.token === seeded[0]!.token,
+  );
+  assertEquals(entry?.schema, { type: "string" });
+  assertEquals(entry?.schemaSource, "operator");
+
+  // A second establishment answers from the record without another session.
+  assertEquals(await engine.establishSeededHandles(), seeded);
+  assertEquals(spaceReads, 1);
+});
+
+Deno.test("CfHarnessEngine refuses operator seeds without a fabric session", async () => {
+  const engine = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    seedHandles: [{
+      name: "travellerName",
+      ref: `/of:fid1:${"D".repeat(43)}/travellerName`,
+    }],
+  });
+  await assertRejects(
+    () => engine.establishSeededHandles(),
+    Error,
+    "requires a fabric session",
+  );
+  assertEquals(engine.getRunState().seededHandles, undefined);
+});
+
+Deno.test("CfHarnessEngine refuses an operator seed into another space, recording nothing", async () => {
+  const engine = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    seedHandles: [{
+      name: "foreign",
+      ref: `/@did:key:z6MkforeignSpaceForEngineSeedTest/of:fid1:${
+        "E".repeat(43)
+      }/x`,
+    }],
+    fabricSessionFactory: () =>
+      Promise.resolve(
+        {
+          pieces: {
+            getSpace: () =>
+              "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
+          },
+          // deno-lint-ignore no-explicit-any
+        } as any,
+      ),
+  });
+  await assertRejects(
+    () => engine.establishSeededHandles(),
+    Error,
+    "targets another space",
+  );
+  assertEquals(engine.getRunState().seededHandles, undefined);
+  assertEquals(engine.handleTable, undefined);
+});
+
 Deno.test("CfHarnessEngine rejects only cross-model Codex resume", () => {
   const resumedState = (
     modelProvider: "openai-codex" | "openai-compatible-gateway",

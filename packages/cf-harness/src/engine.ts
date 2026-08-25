@@ -82,6 +82,11 @@ import {
   mintWellKnownGrants,
   resolveWellKnownGrantRefs,
 } from "./well-known-grants.ts";
+import type {
+  HarnessSeededHandle,
+  HarnessSeedHandleSpec,
+} from "./contracts/seeded-handles.ts";
+import { mintSeededHandles } from "./seeded-handles.ts";
 import {
   appendHarnessCfcModelContextObservations,
   appendHarnessFailureRecord,
@@ -213,6 +218,12 @@ export interface CreateHarnessEngineOptions
    * tool surface.
    */
   fabricSessionFactory?: HarnessFabricSessionFactory;
+  /**
+   * Operator-seeded handles to mint into the run's table at start; see
+   * `establishSeededHandles`. Requires a fabric session — the seeds name
+   * references into its space.
+   */
+  seedHandles?: readonly HarnessSeedHandleSpec[];
   now?: () => string;
 }
 
@@ -334,6 +345,7 @@ export class CfHarnessEngine {
   #outputSequence: number;
   readonly #now: () => string;
   readonly #fabricSessionFactory?: HarnessFabricSessionFactory;
+  readonly #seedHandles: readonly HarnessSeedHandleSpec[];
   readonly #hostMounts: readonly HostSandboxMount[];
   readonly #ownedRunscConfig?: DockerRunscSandboxConfig;
   readonly #resumedRun: boolean;
@@ -472,6 +484,7 @@ export class CfHarnessEngine {
     this.#fabricSessionFactory = fabricSessionFactory === undefined
       ? undefined
       : cacheHarnessFabricSessionFactory(fabricSessionFactory);
+    this.#seedHandles = options.seedHandles ?? [];
     const sandboxConfig = options.sandboxRuntime === undefined
       ? resolveSandboxConfig(this.config, {
         workspaceHostPath: options.workspaceHostPath,
@@ -796,6 +809,46 @@ export class CfHarnessEngine {
     );
     await this.persistRunState();
     return minted.grants;
+  }
+
+  /**
+   * Establishes the run's operator-seeded handles: mints a token for each
+   * `--seed-handle` reference into the handle table, records the seeds in
+   * run state, and returns them. Idempotent across resume, like the
+   * well-known grants: seeds already recorded are returned as they stand.
+   *
+   * Unlike a grant, a seed is explicit operator configuration, so failure is
+   * closed and loud rather than tolerated: seeds configured on a run with no
+   * fabric session, a reference that does not parse, and a reference
+   * targeting another space all throw before any seed is recorded.
+   */
+  async establishSeededHandles(): Promise<HarnessSeededHandle[]> {
+    if (this.#runState.seededHandles !== undefined) {
+      return structuredClone(this.#runState.seededHandles);
+    }
+    if (this.#seedHandles.length === 0) {
+      return [];
+    }
+    if (this.#fabricSessionFactory === undefined) {
+      throw new Error(
+        "--seed-handle requires a fabric session; configure --fabric-space",
+      );
+    }
+    const session = await this.#fabricSessionFactory();
+    const minted = await mintSeededHandles(
+      this.handleTable,
+      this.#runState.runId,
+      this.#seedHandles,
+      session.pieces.getSpace(),
+    );
+    await this.recordHandleTable(minted.table);
+    this.#runState = patchHarnessRunState(
+      this.#runState,
+      { seededHandles: structuredClone(minted.seeded) },
+      this.#now(),
+    );
+    await this.persistRunState();
+    return minted.seeded;
   }
 
   async ensureRunManifestPersisted(): Promise<string | undefined> {

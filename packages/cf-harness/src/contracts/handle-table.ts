@@ -78,16 +78,17 @@ export interface HarnessHandleEntry {
   /**
    * Where {@link HarnessHandleEntry.schema} came from. `harness` means a
    * harness step supplied it out of its own work — the schema a pattern WE
-   * compiled and ran declares — which is the only provenance a mint records.
+   * compiled and ran declares. `operator` means the person configuring the
+   * run wrote it, alongside a seeded handle.
    *
-   * A schema is disclosed to a model only under that provenance. The
-   * difference is not fussiness: a schema that arrived with data is data, and
-   * property names are a channel wide enough to carry whatever whoever wrote
-   * them wanted said. An entry whose schema has no provenance — one adopted
-   * from state this code did not write — reads as shapeless rather than as
-   * trusted.
+   * A schema is disclosed to a model only under one of those provenances.
+   * The difference is not fussiness: a schema that arrived with data is
+   * data, and property names are a channel wide enough to carry whatever
+   * whoever wrote them wanted said. An entry whose schema has no provenance
+   * — one adopted from state this code did not write — reads as shapeless
+   * rather than as trusted.
    */
-  schemaSource?: "harness";
+  schemaSource?: "harness" | "operator";
 }
 
 /**

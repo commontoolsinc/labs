@@ -192,6 +192,33 @@ describe("describe_handle", () => {
     expect(output.path).toEqual(["summary"]);
   });
 
+  it("returns an operator-recorded schema without touching the fabric session", async () => {
+    const minted = await mintAddressHandle(
+      createHarnessHandleTable("run-describe"),
+      REF_A,
+      { schema: DOUBLED_SCHEMA, schemaSource: "operator" },
+    );
+    // A session whose establishment throws proves the operator schema
+    // answers before any fabric read is attempted.
+    const context = {
+      handleTable: minted.table,
+      getFabricSession: () => {
+        throw new Error("must not be consulted");
+      },
+      nextOutputId: (toolId: string) =>
+        createToolOutputId("run-describe", toolId, 1),
+    } as unknown as HarnessToolContext;
+
+    const output = await describeHandleTool.invoke(
+      context,
+      { token: minted.token },
+    );
+
+    expect(output.known).toBe(true);
+    expect(output.hasSchema).toBe(true);
+    expect(output.schema).toEqual(DOUBLED_SCHEMA);
+  });
+
   it("does not disclose a schema the harness did not derive", async () => {
     // A schema on an entry with no harness provenance is one this code did
     // not record — it arrived with data, or with state written elsewhere.

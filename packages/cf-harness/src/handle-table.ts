@@ -152,10 +152,17 @@ export interface MintAddressHandleOptions {
    * ran, say. A mint never reads the referent to discover one, and never takes
    * one off the reference it is given: a schema that arrived with data is
    * data, and the entry it would land on is one a model can ask about. What
-   * this records is marked `schemaSource: "harness"`, and that is the only
-   * provenance `describe_handle` discloses.
+   * this records is marked with {@link MintAddressHandleOptions.schemaSource}
+   * (`"harness"` when unstated), and those operator/harness provenances are
+   * the only ones `describe_handle` discloses.
    */
   schema?: JSONSchema;
+  /**
+   * Provenance recorded with {@link MintAddressHandleOptions.schema}:
+   * `harness` for a schema a harness step produced out of its own work (the
+   * default), `operator` for one the person configuring the run wrote.
+   */
+  schemaSource?: "harness" | "operator";
 }
 
 /**
@@ -186,6 +193,7 @@ export const mintAddressHandle = async (
   const link = normalizeHandleRef(refText);
   const key = addressKey(link);
   const schema = options.schema;
+  const schemaSource = options.schemaSource ?? "harness";
   const existing = table.entries.find((entry) => entry.addressKey === key);
   if (existing !== undefined) {
     if (existing.schema !== undefined || schema === undefined) {
@@ -195,9 +203,7 @@ export const mintAddressHandle = async (
       table: {
         ...table,
         entries: table.entries.map((entry) =>
-          entry === existing
-            ? { ...entry, schema, schemaSource: "harness" as const }
-            : entry
+          entry === existing ? { ...entry, schema, schemaSource } : entry
         ),
       },
       token: existing.token,
@@ -220,9 +226,7 @@ export const mintAddressHandle = async (
     kind: "address",
     ref: canonicalRef(link),
     addressKey: key,
-    ...(schema !== undefined
-      ? { schema, schemaSource: "harness" as const }
-      : {}),
+    ...(schema !== undefined ? { schema, schemaSource } : {}),
   };
   return {
     table: { ...table, entries: [...table.entries, entry] },
@@ -519,7 +523,10 @@ export const assertValidHarnessHandleTable = (
         `invalid handle table: entry \`${entry.token}\` has a schema that is not a JSON Schema object or boolean`,
       );
     }
-    if (entry.schemaSource !== undefined && entry.schemaSource !== "harness") {
+    if (
+      entry.schemaSource !== undefined && entry.schemaSource !== "harness" &&
+      entry.schemaSource !== "operator"
+    ) {
       throw new Error(
         `invalid handle table: entry \`${entry.token}\` has an unknown schemaSource \`${
           String(entry.schemaSource)
