@@ -153,12 +153,7 @@ describe("topic-board-pivot-contract", () => {
   beforeAll(async () => {
     const identity = await Identity.generate({ implementation: "noble" });
     cc = await initializePiecesController({
-      // A space of this suite's own. Two boards started in one space contend
-      // on deferred start under server execution — the second start reads a
-      // computed the first has not confirmed, the transaction retries, and the
-      // suite that started first never settles. Nothing here needs to share a
-      // space with the suite above, so it does not.
-      space: `${SPACE_NAME}-pivot`,
+      space: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity,
     });
