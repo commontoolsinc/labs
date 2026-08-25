@@ -419,6 +419,28 @@ Deno.test("shaping: a projection word splits into the part carried back and the 
   });
 });
 
+Deno.test("shaping: a projection path reads through however many array layers it meets", () => {
+  // `--select matrix.nested.leaf` is valid over `[[{nested: {leaf}}]]`, so a
+  // walk that unwrapped one layer would offer `nested` and then nothing.
+  const nested = { matrix: [[{ nested: { leaf: 1 } }]] };
+  assertEquals(projectionKeys(descendProjection(nested, ["matrix"])), [
+    "nested",
+  ]);
+  assertEquals(
+    projectionKeys(descendProjection(nested, ["matrix", "nested"])),
+    ["leaf"],
+  );
+});
+
+Deno.test("shaping: the bare address suffix is offered at any element of the list", () => {
+  // `revision,@` parses: a path that is only the suffix is legal wherever an
+  // element begins, not only at the first.
+  assertEquals(
+    shapeProjectionCandidates({ a: 1 }, "revision,", { self: true })[0].value,
+    "revision,@",
+  );
+});
+
 Deno.test("shaping: a projection path reads an array element-wise", () => {
   // `--select items.title` projects each element; `--select items.0.title` is
   // refused. Offering an index would name a path the command rejects.

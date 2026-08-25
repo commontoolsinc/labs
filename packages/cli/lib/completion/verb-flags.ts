@@ -58,18 +58,36 @@ export function shapeVerbFlagCandidates(
   verb: VerbFlagListingLike,
 ): Candidate[] {
   const candidates: Candidate[] = [];
+  const seen = new Set<string>();
+  // Nothing reserves a field name, so a verb may declare `json`, `json-file`
+  // or `help` — the spellings the command itself owns. A declared field wins
+  // the slot and the generic flag is not repeated, because two candidates of
+  // one value are a menu entry that means two things.
+  const add = (value: string, description: string) => {
+    if (seen.has(value)) return;
+    seen.add(value);
+    candidates.push({ value, description });
+  };
+
   for (const flag of declaredVerbFlags(verb.inputSchema)) {
     const description = fieldDescription(flag.schema) ??
       (flag.required ? "required" : "optional");
-    candidates.push({ value: `--${flag.name}`, description });
-    if (flag.negatable) {
-      candidates.push({
-        value: `--no-${flag.name}`,
-        description: `${description} (false)`,
-      });
+    // Bare `--help` opens the verb's own page whatever a field of that name
+    // says, so a declared boolean `help` is set by the two spellings that
+    // cannot be mistaken for it — which is what its help page prints too.
+    if (flag.name === "help" && flag.negatable) {
+      add("--help=true", description);
+      add("--no-help", `${description} (false)`);
+      continue;
     }
+    add(`--${flag.name}`, description);
+    if (flag.negatable) add(`--no-${flag.name}`, `${description} (false)`);
   }
-  return [...candidates, ...GENERIC_FLAGS];
+
+  for (const generic of GENERIC_FLAGS) {
+    add(generic.value, generic.description ?? "");
+  }
+  return candidates;
 }
 
 /** The author's doc comment on the field, where the schema carries one. */

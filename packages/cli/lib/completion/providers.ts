@@ -418,9 +418,11 @@ function projectionFieldCandidates(
       descendProjection(value, path),
       `${list}${prefix}`,
       // A path that is only the suffix names the position the read is already
-      // at, which no field path reaches. `--schema` does not accept it: a
-      // leading `@` there names a file.
-      { self: flag === "select" && atElementStart && list.length === 0 },
+      // at, which no field path reaches. It is legal as any element of the
+      // list — `revision,@` parses — so it is offered at every element start,
+      // carrying the elements already closed. `--schema` does not accept it:
+      // a leading `@` there names a file.
+      { self: flag === "select" && atElementStart },
     );
     if (candidates.length === 0) return NOTHING;
     // A field path continues with `.` or `,`, so hold the cursor in place the
@@ -471,19 +473,22 @@ export function descendProjection(
   path: readonly string[],
 ): unknown {
   let current = value;
-  for (const name of path) {
-    if (Array.isArray(current)) {
-      current = current.map((element) =>
-        element && typeof element === "object"
-          ? (element as Record<string, unknown>)[name]
-          : undefined
-      );
-      continue;
-    }
-    if (!current || typeof current !== "object") return undefined;
-    current = (current as Record<string, unknown>)[name];
-  }
+  for (const name of path) current = descendOne(current, name);
   return current;
+}
+
+/**
+ * One segment of that walk. An array is descended through however many layers
+ * it has, because a projection is element-wise at every one of them:
+ * `matrix.nested.leaf` reads through `[[{nested: {leaf}}]]`, so a walk that
+ * unwrapped a single layer would offer `nested` and then nothing.
+ */
+function descendOne(value: unknown, name: string): unknown {
+  if (Array.isArray(value)) {
+    return value.map((element) => descendOne(element, name));
+  }
+  if (!value || typeof value !== "object") return undefined;
+  return (value as Record<string, unknown>)[name];
 }
 
 /**
@@ -527,7 +532,10 @@ export function shapeProjectionCandidates(
 ): Candidate[] {
   const candidates: Candidate[] = [];
   if (options.self) {
-    candidates.push({ value: "@", description: "the read source's address" });
+    candidates.push({
+      value: `${prefix}@`,
+      description: "the read source's address",
+    });
   }
   for (const key of projectionKeys(value).filter(isWritableFieldName)) {
     candidates.push({ value: `${prefix}${key}` });

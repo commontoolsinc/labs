@@ -85,6 +85,34 @@ describe("shapeVerbFlagCandidates()", () => {
     ]);
   });
 
+  it("sets a declared boolean `help` by the spellings that are not the help page", () => {
+    // Bare `--help` opens the verb's own page whatever a field of that name
+    // says, so offering it as the way to set the field names a flag that does
+    // something else.
+    const values = shapeVerbFlagCandidates({
+      inputSchema: {
+        type: "object",
+        properties: { help: { type: "boolean" } },
+      },
+    }).map((candidate) => candidate.value);
+    expect(values).toContain("--help=true");
+    expect(values).toContain("--no-help");
+    expect(values.filter((v) => v === "--help").length).toBe(1);
+  });
+
+  it("offers one candidate per value where a field collides with a generic flag", () => {
+    // Nothing reserves a field name, so a verb may declare `json`. Two menu
+    // entries of one value would mean two different things.
+    const values = shapeVerbFlagCandidates({
+      inputSchema: {
+        type: "object",
+        properties: { json: { type: "string" }, jsonFile: { type: "string" } },
+      },
+    }).map((candidate) => candidate.value);
+    expect(values).toEqual([...new Set(values)]);
+    expect(values.filter((v) => v === "--json").length).toBe(1);
+  });
+
   it("reads fields an `allOf` contributes, which the payload door judges", () => {
     // The two doors read one schema. A field the parser accepts and this did
     // not offer would be a slot silently short of the vocabulary it claims.
