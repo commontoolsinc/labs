@@ -3,13 +3,21 @@
 # a Tab offers at each slot of space -> piece -> verb -> verb fields -> cell
 # path -> result shape.
 #
-# Every provider that reads real state is exercised here and nowhere else. The
-# unit tests under packages/cli/test/completion-*.test.ts cover the pure half —
-# line resolution, candidate shaping, and the degrade-to-empty path — and by
-# construction cannot see a provider that reaches a fabric and comes back with
-# the wrong set. Completion swallows every error on purpose, so a provider that
-# throws and a provider that has nothing to say are one experience at the
-# prompt: silence. This script is what tells them apart.
+# Every provider in lib/completion/providers.ts is exercised here: the ones
+# that read a fabric (pieces, callables, cell paths, link endpoints), the one
+# that reads local memory-v2 stores (--space), and the two that answer from the
+# environment (--api-url, pattern files). The unit tests under
+# packages/cli/test/completion-*.test.ts cover the pure half — line resolution,
+# candidate shaping, and the degrade-to-empty path — and by construction cannot
+# see a provider that reaches a fabric and comes back with the wrong set.
+# Completion swallows every error on purpose, so a provider that throws and a
+# provider that has nothing to say are one experience at the prompt: silence.
+# This script is what tells them apart.
+#
+# One provider cannot be held to that everywhere: --space reads what is on
+# disk, so a run with no local store discoverable exercises it only as far as
+# saying so. That step reports which case it saw rather than passing either
+# way.
 #
 # Two rules follow from that silence, and both are held to below. A slot is
 # judged only after the equivalent `cf` command has been run against the same
@@ -58,10 +66,31 @@ bad() { printf '  FAIL %s\n' "$1"; FAIL=$((FAIL + 1)); }
 check() {
   if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (expected [$1], got [$2])"; fi
 }
-# A gap we expect to be there. When it closes this fails loudly, which is how
-# the script tells us the slot started answering rather than quietly passing.
+# Run the completion command, keeping its exit status apart from its output.
+#
+# A provider that answers nothing and a CLI that could not run both print
+# nothing, so a probe reading output alone reports a dead instrument as
+# evidence: with a `cf` that only exits nonzero, every gap below still read as
+# "gap still open". The status is what tells the two apart, and it is kept in a
+# variable rather than returned because the callers below read the output
+# through command substitution, which would run this in a subshell and lose it.
+PROBE_OUT=""
+PROBE_STATUS=0
+probe() {
+  PROBE_OUT=$($CF completion complete --shell bash --line "$1" \
+    --point "${#1}" 2>/dev/null)
+  PROBE_STATUS=$?
+}
+
+# A gap we expect to be there, named by the line that probes it. When it closes
+# this fails loudly, which is how the script tells us the slot started
+# answering rather than quietly passing — and when the command itself fails,
+# that is a third outcome rather than a gap.
 gap() {
-  if [ -n "$1" ]; then
+  probe "$1"
+  if [ "$PROBE_STATUS" -ne 0 ]; then
+    bad "completion exited $PROBE_STATUS probing $2 — no gap can be read from that"
+  elif [ -n "$(printf '%s\n' "$PROBE_OUT" | grep -v '^:cf:')" ]; then
     bad "GAP CLOSED — $2 now completes; update this script and the plan"
   else
     ok "gap still open: $2"
@@ -85,7 +114,8 @@ ARGS="--api-url=$API_URL --identity=$CF_IDENTITY --space=$SPACE"
 # completed. Every provider resolves its fabric from the half-typed line first,
 # so a probe that carried them only in the environment would prove nothing
 # about the precedence the providers actually apply.
-LINE_ARGS="--api-url $API_URL --identity $CF_IDENTITY --space $SPACE"
+CONN_ARGS="--api-url $API_URL --identity $CF_IDENTITY"
+LINE_ARGS="$CONN_ARGS --space $SPACE"
 echo "API_URL=$API_URL"
 echo "SPACE=$SPACE"
 
@@ -123,7 +153,16 @@ annotation_at() {
 
 START=$(date +%s)
 
-step "1. Deploy the fixture and give it a child"
+step "1. The completion command answers, and the fixture deploys"
+# Every probe below reads an empty candidate list as a fact about a slot, and
+# that reading holds only while the command itself runs. A static completion
+# needs no fabric and no identity, so nothing but a broken CLI can empty it —
+# which makes this the one place the instrument is checked rather than assumed.
+probe "cf piece "
+check "0" "$PROBE_STATUS" "cf completion complete exits zero"
+check "1" "$(printf '%s\n' "$PROBE_OUT" | grep -c '^verbs$')" \
+  "and a static slot answers, so an empty one below is about the slot"
+
 # --quiet makes the piece id stdout's only line; stderr is dropped and the
 # grep anchored so a compile warning carrying a fid1: token cannot be taken
 # for the deploy's id.
@@ -139,6 +178,7 @@ fi
 ADDED=$($CF call --quiet --show-links --piece board $ARGS --invocation add-1 \
   addItem '{"title":"First item"}' 2>/dev/null)
 ITEM=$(echo "$ADDED" | jq -r '.links["/item"] // empty')
+ITEM_ID=${ITEM#/of:}
 if [ -n "$ITEM" ]; then ok "added a child item: $ITEM"; else
   bad "addItem returned no address for the item it created"
   exit 1
@@ -180,15 +220,14 @@ step "3. The slug the same slot accepts does not complete"
 check "Completion fixture" \
   "$($CF get --quiet --piece board $ARGS '$NAME' 2>/dev/null | tr -d '"')" \
   "the slug is a --piece value the command accepts"
-gap "$(complete_at "cf call $LINE_ARGS --piece bo")" "a slug in the --piece slot"
+gap "cf call $LINE_ARGS --piece bo" "a slug in the --piece slot"
 
 step "4. The inline spelling of an option drops every live candidate"
 # `--piece=<TAB>` and `--piece <TAB>` are the same slot. Only the second works,
 # and the first is the spelling `tokenizeLine` exists to serve.
 check "$BOARD" "$(complete_at "cf call $LINE_ARGS --piece ")" \
   "the spaced spelling completes"
-gap "$(complete_at "cf call $LINE_ARGS --piece=")" \
-  "the inline --piece= spelling"
+gap "cf call $LINE_ARGS --piece=" "the inline --piece= spelling"
 # The directive half of the same slot: the glob reaches the shell attached to a
 # word that still carries `--identity=`, so nothing can match it.
 check ":cf:files *.key" "$(directives_at "cf call $LINE_ARGS --identity ")" \
@@ -200,23 +239,23 @@ QUALIFIED="/@$SPACE_DID/of:$BOARD"
 check "Completion fixture" \
   "$($CF get --quiet --piece "$CANONICAL" $ARGS '$NAME' 2>/dev/null | tr -d '"')" \
   "the canonical reference is a --piece value the command accepts"
-gap "$(complete_at "cf call $LINE_ARGS --piece $CANONICAL ")" \
+gap "cf call $LINE_ARGS --piece $CANONICAL " \
   "the verb slot behind a canonical --piece reference"
 check "Completion fixture" \
   "$($CF get --quiet --piece "$QUALIFIED" $ARGS '$NAME' 2>/dev/null | tr -d '"')" \
   "and so is its space-qualified spelling"
-gap "$(complete_at "cf call $LINE_ARGS --piece $QUALIFIED ")" \
+gap "cf call $LINE_ARGS --piece $QUALIFIED " \
   "the verb slot behind a space-qualified reference"
 
 check "Completion fixture" \
   "$($CF get --quiet $ARGS "$CANONICAL" '$NAME' 2>/dev/null | tr -d '"')" \
   "a positional canonical address is a target the command accepts"
-gap "$(complete_at "cf call $LINE_ARGS $CANONICAL ")" \
+gap "cf call $LINE_ARGS $CANONICAL " \
   "the verb slot behind a positional address"
 
 check "1" "$(succeeds $CF get --quiet --piece "$CANONICAL#argument" $ARGS)" \
   "the #argument suffix is a --piece value the command accepts"
-gap "$(complete_at "cf get $LINE_ARGS --piece $CANONICAL#argument ")" \
+gap "cf get $LINE_ARGS --piece $CANONICAL#argument " \
   "the cell path behind an #argument reference"
 # The flag spelling of the same selection does complete, which is what makes
 # the suffix read as random rather than as a missing capability.
@@ -263,7 +302,7 @@ check "pinned,title" "$($CF piece verbs --piece board $ARGS --json 2>/dev/null |
   "addItem declares the fields its flags are named for"
 check "1" "$(succeeds $CF call --quiet --piece board $ARGS --invocation flags-1 \
   addItem -- --title 'Flagged item')" "and the parser accepts them as flags"
-gap "$(complete_at "cf call $LINE_ARGS --piece board addItem -- --")" \
+gap "cf call $LINE_ARGS --piece board addItem -- --" \
   "a verb's fields after the marker"
 
 step "9. A cell path completes one segment at a time"
@@ -301,25 +340,71 @@ step "11. Result field paths do not complete"
 check "dark" "$($CF get --quiet --piece board $ARGS --step \
   --select settings.theme 2>/dev/null | jq -r '.settings.theme')" \
   "a --select field path is a projection the command reads"
-gap "$(complete_at "cf get $LINE_ARGS --piece board --select ")" \
-  "--select field paths"
-gap "$(complete_at "cf get $LINE_ARGS --piece board --schema ")" \
-  "--schema field paths"
+gap "cf get $LINE_ARGS --piece board --select " "--select field paths"
+gap "cf get $LINE_ARGS --piece board --schema " "--schema field paths"
 
 step "12. A name on two cells completes against the one the dispatcher reaches"
 # The child is handed a callable named `record` in its arguments AND declares
 # one on its result. The listing states that the result shadows the input; a
 # candidate set that offered both, or the wrong one, would name a call that
 # does something else.
-check "record" "$(candidates_at "cf call $LINE_ARGS --piece ${ITEM#/of:} ")" \
+check "record" "$(candidates_at "cf call $LINE_ARGS --piece $ITEM_ID ")" \
   "the shadowed name is offered exactly once"
 BOARD_REVISION=$($CF get --quiet --piece board $ARGS revision 2>/dev/null)
-check "1" "$($CF call --quiet --piece "${ITEM#/of:}" $ARGS --invocation rec-1 \
+check "1" "$($CF call --quiet --piece "$ITEM_ID" $ARGS --invocation rec-1 \
   record '{"text":"first"}' 2>/dev/null | jq -r '.result.recorded')" \
   "calling it reaches the result cell's callable"
 check "$BOARD_REVISION" "$($CF get --quiet --piece board $ARGS revision \
   2>/dev/null)" \
   "and not the one the arguments cell carries, which writes elsewhere"
+
+step "13. The slots that read something other than the fabric"
+# Two providers answer from the environment rather than from a server, so a
+# probe of them proves nothing about reachability and everything about the
+# vocabulary — which is the half that can silently go missing.
+check "1" "$(complete_at "cf piece ls $CONN_ARGS --api-url http" |
+  grep -c '^http')" "--api-url offers a URL to connect to"
+check ":cf:files *.tsx" "$(directives_at "cf piece new $LINE_ARGS --test ")" \
+  "a pattern-file slot hands the shell the glob it filters by"
+# `--space` completes from local memory-v2 stores rather than from the server,
+# so it has nothing to offer where none is discoverable — which is item 8's
+# positional discovery rather than a defect here. The step says which it saw,
+# so a run that could not exercise the provider does not read as one that did.
+DISCOVERED=$($CF inspect spaces 2>/dev/null |
+  grep -oE '^did:key:[A-Za-z0-9]+' | head -1)
+if [ -n "$DISCOVERED" ]; then
+  ok "a local space db is discoverable: $DISCOVERED"
+  check "1" "$(complete_at "cf piece ls $CONN_ARGS --space ${DISCOVERED%??????????}" |
+    grep -c "^$DISCOVERED\$")" \
+    "the --space slot offers a DID discovered on disk"
+else
+  ok "no local space db here, so --space has nothing to discover"
+fi
+
+step "14. Both halves of a link endpoint"
+# `piece link` takes `pieceId/path/to/field` twice. Before the `/` the
+# candidates are piece ids and after it they are that piece's cell keys, so one
+# slot spans two vocabularies and both are read from the fabric.
+check ":cf:nospace" "$(directives_at "cf piece link $LINE_ARGS ")" \
+  "the endpoint holds the cursor for the separator it continues with"
+check "1" "$(complete_at "cf piece link $LINE_ARGS ${BOARD%??????????}" |
+  grep -c "^$BOARD\$")" "the source offers a piece id before the separator"
+check "1" "$(complete_at "cf piece link $LINE_ARGS $BOARD/rev" |
+  grep -c "^$BOARD/revision\$")" "and that piece's keys after it"
+check "1" "$(complete_at "cf piece link $LINE_ARGS $BOARD/revision ${BOARD%??????????}" |
+  grep -c "^$BOARD\$")" "the target completes the same way"
+# The id half offers what the listing holds — registered pieces — while the key
+# half reads whichever id was typed. So the child, which the listing does not
+# name, still completes its own keys once its address is pasted in.
+check "1" "$(complete_at "cf piece link $LINE_ARGS $BOARD/revision $ITEM_ID/rec" |
+  grep -c "^$ITEM_ID/recorded\$")" \
+  "and a pasted child address completes its keys, which the listing cannot name"
+# And the pair the two slots completed is one the command accepts, which is the
+# bar every other slot here is held to. Last, because it writes: a link makes
+# the target mirror the source, so nothing above may depend on either value.
+check "1" "$(succeeds $CF piece link --quiet $LINE_ARGS \
+  "$BOARD/revision" "$ITEM_ID/recorded")" \
+  "a pair of completed endpoints is a link the command writes"
 
 ELAPSED=$(($(date +%s) - START))
 printf '\n== %d passed, %d failed, %d gaps open — %ds wall clock\n' \

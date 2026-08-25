@@ -36,10 +36,12 @@ needs a space, `--space` is required on every command that reads one, and
 value a caller types is a space name. A name derives its DID one way, so a
 discovered DID can never produce the name that made it.
 
-**Nothing exercises a live provider.** The unit tests cover the pure shaping
-functions and assert that a slot with no fabric context degrades to empty.
-Every path that reaches a fabric is unverified, and the defects below sit
-exactly where no live exercise runs.
+**A live provider is exercised in one place only.** The unit tests cover the
+pure shaping functions and assert that a slot with no fabric context degrades
+to empty; nothing they can see distinguishes a provider that reaches a fabric
+and returns the wrong set. `completion-over-the-cli.sh` (item 18) is what does,
+and the defects below are the ones it was written to make visible — several of
+them are asserted there as gaps until the item that closes them lands.
 
 ## How this list is ranked
 
@@ -118,10 +120,11 @@ line read for context, since a projection precedes the verb it shapes; after
 step 10 the verb is already before the cursor and it needs nothing. Building it
 now means building the machinery that step 10 makes unnecessary.
 
-Items 8 and 11 hold open decisions and are not work yet. Items 18 and 19 are the
-mechanism, and are worth having early rather than last: item 18 is the only way
-to see a live provider fail, and everything above it is a shape no live exercise
-currently runs.
+Items 8 and 11 hold open decisions and are not work yet. Item 18 is the
+mechanism the rest is worked against, and it landed first for that reason: it
+is the only way to see a live provider fail, and the slots the items above
+describe are asserted there as gaps so that each one closing announces itself.
+Item 19 is its other half and is still to do.
 
 ## What this list covers, and what it cannot
 
@@ -550,8 +553,13 @@ lands.
 
 ### 18. A live-provider test seam
 
-`packages/cli/integration/completion-over-the-cli.sh` is where every provider
-that reads live state is exercised. It deploys `pattern/completion-target.tsx`,
+`packages/cli/integration/completion-over-the-cli.sh` is where every provider in
+`lib/completion/providers.ts` is exercised — those that read a fabric, the one
+that reads local stores, and the two that answer from the environment.
+`--space` is the one that cannot be held to it everywhere: it reads what is on
+disk, so a run with no store discoverable exercises it only as far as saying
+so, and that step reports which case it saw. It deploys
+`pattern/completion-target.tsx`,
 then asserts what a Tab offers at each slot of the chain, and runs in CI through
 `integration.sh`'s `piece-call` section (`completion` is the standalone
 selector). `test/completion-*.test.ts` stay the home for everything answerable
