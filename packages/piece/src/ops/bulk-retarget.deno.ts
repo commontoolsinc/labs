@@ -112,9 +112,9 @@ export interface RetargetReport {
   /**
    * Why the run stopped when no piece is at fault: a session that could not
    * be opened, could not be released, or opened onto a space other than the
-   * plan's. A piece's own trouble rides its
-   * row's `problem`; a boundary failure belongs to the run rather than to
-   * any one piece, so it is reported here — and its presence makes
+   * plan's. A piece's own trouble rides its row's `problem`; a boundary
+   * failure belongs to the run rather than to any one piece, so it is
+   * reported here — and its presence makes
    * `complete` false whatever the rows say, since a run whose session
    * accounting broke did not finish cleanly.
    */
@@ -134,7 +134,13 @@ export interface RetargetOptions {
    * live at once stay bounded by it.
    */
   groupSize?: number;
-  /** Called as each row settles, for reporting as the run proceeds. */
+  /**
+   * Called as each row settles, for reporting as the run proceeds. A throw
+   * from it is the caller's error rather than the run's: it reaches the
+   * caller in place of a report, having released the session in hand, and
+   * is never mistaken for the operational failure that turns a row
+   * `failed`.
+   */
   onRow?: (row: RetargetRow) => void;
   /** The clock behind `elapsedMs`, injectable for deterministic tests. */
   now?: () => number;
@@ -253,9 +259,20 @@ export async function retargetPieces(
     throw new Error("groupSize must be a positive integer.");
   }
   const rows: RetargetRow[] = [];
+  // Set when a caller's `onRow` throws, so the row handling below can tell
+  // that error from the operational ones it classifies: the row it was
+  // handed has already settled, and re-reporting it would put one plan row
+  // in the report twice under two verdicts.
+  let reporterThrew = false;
   const report = (row: RetargetRow) => {
     rows.push(row);
-    options.onRow?.(row);
+    if (options.onRow === undefined) return;
+    try {
+      options.onRow(row);
+    } catch (error) {
+      reporterThrew = true;
+      throw error;
+    }
   };
 
   // Preflight: every row classified from one read, before the first write.
@@ -402,19 +419,24 @@ export async function retargetPieces(
       // untouched, so they are unattempted and the reason is the run's.
       const mismatch = `The plan names space ${plan.header.space}; this ` +
         `group's session targets ${pieces.getSpace()}.`;
-      for (const row of group) {
-        const phase = row.phase === undefined ? {} : { phase: row.phase };
-        report({ piece: row.piece, ...phase, verdict: "unattempted" });
-      }
       stopped = true;
-      // This session opened, so it is released like any other. A release
-      // that fails too is named after the mismatch and never instead of
-      // it: the wrong space is why the run stopped.
-      const closeProblem = await closeSession(sessions, pieces);
-      sessionProblem = mismatch +
-        (closeProblem === undefined
-          ? ""
-          : ` Its session could not be released either: ${closeProblem}.`);
+      try {
+        for (const row of group) {
+          const phase = row.phase === undefined ? {} : { phase: row.phase };
+          report({ piece: row.piece, ...phase, verdict: "unattempted" });
+        }
+      } finally {
+        // This session opened, so it is released like any other — in a
+        // `finally`, because reporting runs a caller's callback and one
+        // that throws must take a session with it. A release that fails
+        // too is named after the mismatch and never instead of it: the
+        // wrong space is why the run stopped.
+        const closeProblem = await closeSession(sessions, pieces);
+        sessionProblem = mismatch +
+          (closeProblem === undefined
+            ? ""
+            : ` Its session could not be released either: ${closeProblem}.`);
+      }
       continue;
     }
     // One retained-source cache for this group's session, as in preflight.
@@ -496,8 +518,14 @@ export async function retargetPieces(
             elapsedMs: now() - startedAt,
           });
         } catch (error) {
-          // The failure is classified by a state check made after it, the
-          // way the design requires — never a probe before.
+          // A reporting callback that threw is the caller's own error, and
+          // the row it was handed has already settled: state-checking it
+          // would report that one plan row a second time, under a verdict
+          // contradicting the one the caller just saw. It leaves instead,
+          // the group's `finally` releasing the session on the way.
+          if (reporterThrew) throw error;
+          // Every other failure is classified by a state check made after
+          // it, the way the design requires — never a probe before.
           const problem = error instanceof Error
             ? error.message
             : String(error);

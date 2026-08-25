@@ -24,6 +24,7 @@ import {
 import {
   retargetPieces,
   type RetargetReport,
+  type RetargetRow,
   type RetargetSessions,
 } from "../../src/ops/bulk-retarget.deno.ts";
 import type {
@@ -596,6 +597,79 @@ describe("bulk-retarget", () => {
     expect((await pinOf(ids[2]))?.patternIdentity).toBe(
       plan.rows[2].expect.patternIdentity,
     );
+  });
+
+  it("hands a row callback's throw back rather than failing the row it settled", async () => {
+    const { plan, ids } = await seed(3);
+    const before = { opens, closes };
+    const seen: RetargetRow[] = [];
+    let failure: unknown;
+
+    // The reporter gives up on the first row whose write lands.
+    const report = await retargetPieces(sessions, {
+      plan,
+      apply: true,
+      groupSize: 2,
+      onRow: (row) => {
+        seen.push(row);
+        if (row.verdict === "applied") {
+          throw new Error("the reporter gave up");
+        }
+      },
+    }).catch((error: unknown) => {
+      failure = error;
+      return undefined;
+    });
+
+    // One plan row, one report row: the piece whose write landed is never
+    // also reported failed, and the run does not carry on past the throw.
+    expect(seen.map((row) => row.verdict)).toEqual(["applied"]);
+    expect(seen[0].piece).toBe(ids[0]);
+    // The caller's own error reaches the caller, in place of a report.
+    expect((failure as Error | undefined)?.message).toBe(
+      "the reporter gave up",
+    );
+    expect(report).toBeUndefined();
+    // The session in hand was released on the way out.
+    expect(opens - before.opens).toBe(2);
+    expect(closes - before.closes).toBe(2);
+    // The write the caller was told about did land, and stands.
+    expect((await pinOf(ids[0]))?.patternIdentity).toBe(
+      (plan.rows[0].op as RetargetOp).patternIdentity,
+    );
+  });
+
+  it("releases a wrong-space group's session when a row callback throws", async () => {
+    const { plan } = await seed(3);
+    const elsewhere = `${spaceName}-elsewhere`;
+    const before = { opens, closes };
+    let attempts = 0;
+    const strayGroup: RetargetSessions = {
+      open: () => {
+        attempts += 1;
+        return attempts === 3 ? openSession(elsewhere) : sessions.open();
+      },
+      close: (pieces) => sessions.close(pieces),
+    };
+
+    // The reporter gives up exactly on the row the wrong-space group names.
+    await expect(
+      retargetPieces(strayGroup, {
+        plan,
+        apply: true,
+        groupSize: 2,
+        onRow: (row) => {
+          if (row.verdict === "unattempted") {
+            throw new Error("the reporter gave up");
+          }
+        },
+      }),
+    ).rejects.toThrow("the reporter gave up");
+
+    // The run kept no session: the wrong-space one was released on the way
+    // out, so every open this run made has its close.
+    expect(opens - before.opens).toBe(3);
+    expect(closes - before.closes).toBe(3);
   });
 
   it("names the remainder when a group's session cannot be released", async () => {
