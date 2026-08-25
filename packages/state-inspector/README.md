@@ -106,11 +106,17 @@ reconstructs within the resolved branch from the latest
 `set`/`delete`/`snapshot` base, and applies patches through the server's own
 `applyPatch` (`@commonfabric/memory/v2/patch`) — not a re-implementation, since
 that dialect has a custom `splice` op and specific add/missing-key semantics a
-hand-rolled applier gets wrong. Stored payloads are decoded on the engine's
-terms as well: a document root is refused through the engine's own
-`isEntityDocument`, an absent document payload reads as `null` and an absent
-patch payload as `[]`, so a malformed write is rejected here exactly where the
-engine rejects it rather than being read as an absent one.
+hand-rolled applier gets wrong. Stored payloads go through the engine's rule
+too: `decodeStoredDocumentPayload` / `decodeStoredPatchListPayload`
+(`@commonfabric/memory/v2`) default an absent payload and refuse a root that is
+not a tree of paths, taking this package's decoder as an argument so an offline
+read still accepts the untagged plain-JSON rows the engine's own boundary
+decoder does not. Patches apply through `applyPatchToDocument` rather than bare
+`applyPatch`, because a root op can replace a document with any value and the
+engine rejects at the FIRST boundary that leaves a non-document — validating
+only the end of a chain would let a later patch restore an object and launder
+the invalid step before it. Every boundary a reconstruction crosses is checked
+where the engine checks it: base, snapshot, and each patch in turn.
 `reconstruct-parity.test.ts` **drives the real engine** and asserts
 `reconstructDocument == engine.read()` across branch inheritance, child-local
 patches, tombstones, patch-first, and snapshots. Conflict and scope analysis

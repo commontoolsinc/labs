@@ -746,8 +746,8 @@ export function listEntityModels(
   const kind = opts.kind;
 
   // A listing describes the space's RECORDS, so it keeps tombstones (they model
-  // as `unknown`) — which also keeps `extent.total` counting exactly the set
-  // this pass returns.
+  // as `deleted`, which is why `--kind deleted` can ask for them) — and that
+  // keeps `extent.total` counting exactly the set this pass returns.
   const rows = visibleEntityRows(space, {
     branch,
     scope,

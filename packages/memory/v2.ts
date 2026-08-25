@@ -1904,6 +1904,58 @@ export const isEntityDocument = (
   value: unknown,
 ): value is EntityDocument => isObjectNotArray(value);
 
+/**
+ * How a stored payload reads when its row holds none. A document defaults to
+ * `null`, which {@link decodeStoredDocumentPayload} then refuses as a root — a stored
+ * document is always a tree of paths. A patch list defaults to the empty list,
+ * which IS applicable. The asymmetry is the rule callers get wrong when they
+ * re-derive it, so it lives here rather than at each reader.
+ */
+const ABSENT_DOCUMENT_PAYLOAD = "null";
+const ABSENT_PATCH_LIST_PAYLOAD = "[]";
+
+/**
+ * Read a stored document payload: default an absent one, decode it, and refuse
+ * a root that is not a tree of paths.
+ *
+ * `decode` is the caller's, because the readers disagree on which payloads they
+ * accept and only on that: the engine reads what it wrote, through
+ * {@link decodeMemoryBoundary}, while an offline reader over a durable file may
+ * also meet untagged plain-JSON rows and route accordingly. Everything else —
+ * the default, the root check — is one rule shared here, since a reader that
+ * tests the payload for truthiness instead takes an empty string for an absent
+ * one and rebuilds a document the engine would have rejected.
+ */
+export const decodeStoredDocumentPayload = (
+  decode: (source: string) => unknown,
+  data: string | null,
+): EntityDocument => {
+  const parsed = decode(data ?? ABSENT_DOCUMENT_PAYLOAD);
+  if (!isEntityDocument(parsed)) {
+    const shape = parsed === null
+      ? "null"
+      : Array.isArray(parsed)
+      ? "an array"
+      : `a ${typeof parsed}`;
+    throw new TypeError(
+      `memory v2 stored documents must be plain object roots; got ${shape}`,
+    );
+  }
+  return parsed;
+};
+
+/** Read a stored patch-list payload. Absent means the empty list. */
+export const decodeStoredPatchListPayload = (
+  decode: (source: string) => unknown,
+  data: string | null,
+): PatchOp[] => {
+  const parsed = decode(data ?? ABSENT_PATCH_LIST_PAYLOAD);
+  if (!Array.isArray(parsed)) {
+    throw new TypeError("memory v2 stored patches must be arrays");
+  }
+  return parsed as PatchOp[];
+};
+
 export const getEntityDocumentMetadata = (
   document: EntityDocument,
 ): Record<string, FabricValue> => {

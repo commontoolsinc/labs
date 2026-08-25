@@ -17,8 +17,14 @@
 // applier would get subtly wrong. `applyPatch` is offline-safe (pure value ops;
 // no live runtime/cell). See packages/memory/v2/patch.ts.
 
-import { applyPatch } from "@commonfabric/memory/v2/patch";
-import { isEntityDocument, type PatchOp } from "@commonfabric/memory/v2";
+import { applyPatchToDocument } from "@commonfabric/memory/v2/patch";
+import {
+  decodeStoredDocumentPayload,
+  decodeStoredPatchListPayload,
+  type EntityDocument as StoredDocument,
+  isEntityDocument,
+  type PatchOp,
+} from "@commonfabric/memory/v2";
 import type { FabricValue } from "@commonfabric/api";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 
@@ -101,41 +107,19 @@ interface RevRow {
 const MAX_SEQ = Number.MAX_SAFE_INTEGER;
 
 /**
- * Decode a stored document the way the engine's `decodeStoredDocument` does: a
- * missing payload reads as `null`, and a root that is not a plain object is
- * refused through the engine's own `isEntityDocument`. Testing the payload for
- * truthiness instead would take an empty string — a malformed write — for an
- * absent one and hand back a document the engine refuses to produce.
+ * Read a stored document payload through the memory layer's rule, with THIS
+ * package's decoder. The rule — default an absent payload, refuse a root that is
+ * not a tree of paths — belongs to the engine and is shared rather than
+ * re-derived. The decoder is ours, because a durable file may hold untagged
+ * plain-JSON rows that the engine's own boundary decoder does not accept.
  */
-function decodeStoredDocument(data: string | null): EntityDocument {
-  const parsed = decodeStored(data ?? "null");
-  if (!isEntityDocument(parsed)) throw notADocument(parsed);
-  return parsed as EntityDocument;
+function storedDocument(data: string | null): StoredDocument {
+  return decodeStoredDocumentPayload(decodeStored, data);
 }
 
-/** The error for a payload that decoded into something other than a document. */
-function notADocument(decoded: unknown): TypeError {
-  const shape = decoded === null
-    ? "null"
-    : Array.isArray(decoded)
-    ? "an array"
-    : `a ${typeof decoded}`;
-  return new TypeError(
-    `memory v2 stored documents must be plain object roots; got ${shape}`,
-  );
-}
-
-/**
- * Decode a stored patch list as the engine's `decodeStoredPatchList` does. Here
- * a missing payload IS an empty list — the asymmetry with a document is the
- * engine's, not a shortcut.
- */
-function decodeStoredPatchList(data: string | null): PatchOp[] {
-  const parsed = decodeStored(data ?? "[]");
-  if (!Array.isArray(parsed)) {
-    throw new TypeError("memory v2 stored patches must be arrays");
-  }
-  return parsed as PatchOp[];
+/** Read a stored patch-list payload through the same shared rule. */
+function storedPatchList(data: string | null): PatchOp[] {
+  return decodeStoredPatchListPayload(decodeStored, data);
 }
 
 /** Does this DB carry a given table? (legacy/partial DBs lack branch/snapshot.) */
@@ -375,7 +359,7 @@ function reconstructWithinBranch(
   id: string,
   rowSeq: number,
   rowOpIndex: number,
-): FabricValue {
+): StoredDocument {
   const base = space.db
     .prepare(
       `SELECT seq, op_index, op, data FROM revision
@@ -385,8 +369,8 @@ function reconstructWithinBranch(
     )
     .get<RevRow>(branch, id, scope, rowSeq, rowSeq, rowOpIndex);
 
-  let doc: FabricValue = base && base.op === "set"
-    ? decodeStoredDocument(base.data) as FabricValue
+  let doc: StoredDocument = base && base.op === "set"
+    ? storedDocument(base.data)
     : {};
   let baseSeq = base ? base.seq : 0;
   let baseOpIndex = base ? base.op_index : -1;
@@ -404,7 +388,10 @@ function reconstructWithinBranch(
       )
       .get<{ seq: number; value: string }>(branch, id, scope, rowSeq);
     if (snap && snap.seq >= baseSeq) {
-      doc = decodeStored(snap.value) as FabricValue;
+      // A snapshot is a materialized document, held to the same root rule as
+      // any other. Decoding it without that check lets a malformed one through
+      // for later patches to rebuild a valid-looking document over.
+      doc = storedDocument(snap.value);
       baseSeq = snap.seq;
       baseOpIndex = MAX_SEQ; // patches with seq > snapshot.seq only
     }
@@ -430,8 +417,11 @@ function reconstructWithinBranch(
       rowOpIndex,
     );
   for (const p of patches) {
-    const ops = decodeStoredPatchList(p.data);
-    doc = applyPatch(doc, ops);
+    // `applyPatchToDocument`, not bare `applyPatch`: a root op can replace the
+    // document with any value, and the engine rejects at the FIRST patch that
+    // leaves a non-document. Checking only the final result would let a later
+    // patch restore an object and launder the invalid step before it.
+    doc = applyPatchToDocument(doc, storedPatchList(p.data));
   }
   return doc;
 }
@@ -440,9 +430,10 @@ function reconstructWithinBranch(
  * The result of reconstructing an entity, naming WHY there is no document when
  * there is none. Four unrelated situations leave an entity without a document
  * at a (branch, seq), and a reader told only "no document" cannot tell a routine
- * deletion from a corrupt payload. `reconstructDocument` collapses them back to
- * `undefined` for callers that do not care; the ones that report entities to a
- * human read this instead.
+ * deletion from a corrupt payload. `reconstructDocument` collapses `deleted`,
+ * `empty` and `absent` back to `undefined` for callers that do not care, and
+ * rethrows an `undecodable` one; the callers that report entities to a human
+ * read this instead, and never have to catch.
  */
 export type ReconstructOutcome =
   | { status: "present"; document: EntityDocument }
@@ -506,7 +497,12 @@ export function reconstructOutcome(
     // an array, a scalar — is malformed, and calling it present hands every
     // reader a value they will dereference as a document.
     if (!isEntityDocument(decoded)) {
-      return { status: "undecodable", error: notADocument(decoded) };
+      return {
+        status: "undecodable",
+        error: new TypeError(
+          "memory v2 stored documents must be plain object roots",
+        ),
+      };
     }
     return { status: "present", document: decoded as EntityDocument };
   } catch (error) {

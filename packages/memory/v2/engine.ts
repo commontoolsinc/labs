@@ -46,6 +46,8 @@ import {
   type CommitClass,
   commitPreconditionValueHash,
   decodeMemoryBoundary,
+  decodeStoredDocumentPayload,
+  decodeStoredPatchListPayload,
   DEFAULT_BRANCH,
   type DeleteOperation,
   type DerivedWriteAnnotation,
@@ -6541,21 +6543,11 @@ const cacheDocumentForRevision = (
   engine.documentCache.set(key, document);
 };
 
-const decodeStoredDocument = (data: string | null): EntityDocument => {
-  const parsed = decodeMemoryBoundary(data ?? "null");
-  if (!isEntityDocument(parsed)) {
-    throw new Error("memory v2 stored documents must be plain object roots");
-  }
-  return parsed;
-};
+const decodeStoredDocument = (data: string | null): EntityDocument =>
+  decodeStoredDocumentPayload(decodeMemoryBoundary, data);
 
-const decodeStoredPatchList = (data: string | null): PatchOp[] => {
-  const parsed = decodeMemoryBoundary(data ?? "[]");
-  if (!Array.isArray(parsed)) {
-    throw new Error("memory v2 stored patches must be arrays");
-  }
-  return parsed as PatchOp[];
-};
+const decodeStoredPatchList = (data: string | null): PatchOp[] =>
+  decodeStoredPatchListPayload(decodeMemoryBoundary, data);
 
 const sameStoredOriginal = (
   stored: string,
