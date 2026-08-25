@@ -130,12 +130,10 @@ export function systemPatternSourceForModuleName(
  * The result either resolves as a ref or is the input unchanged; nothing here
  * can mint a ref the resolver rejects.
  *
- * TODO(seefeldb) 2026-08-31: revisit — do NOT delete on sight. Removal needs
- * two things this change does not do. Durable pre-existing provenance has to be
- * migrated, which only happens on a successful check and therefore never on a
- * deployment running with `systemPatternAutoUpdate` off. And
- * `isLegacyPieceRegistryRoot` reads this to recognize a root that tracks the
- * official default app, on a path with no flag gate at all.
+ * TODO(seefeldb) 2026-08-31: revisit — do NOT delete on sight. Durable
+ * pre-existing provenance has to be migrated first. Migration only happens on
+ * a successful check, so it never runs on a deployment with
+ * `systemPatternAutoUpdate` off.
  */
 export function normalizePatternSource(
   source: string,

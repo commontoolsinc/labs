@@ -44,9 +44,6 @@ const stubSession = (
           return Promise.resolve(undefined);
         }
         return Promise.resolve({
-          // Answering no pattern identity makes the canonical legacy-root
-          // predicate say "modern" without touching any registry field.
-          getMetaRaw: () => undefined,
           key: (segment: string) => ({
             getAsNormalizedFullLink: () => ({
               space: SPACE_DID,

@@ -328,7 +328,6 @@
     "adminMode",
     "aliases",
     "allItems",
-    "allPieces",
     "allowMutableTransactionRead",
     "apiUrl",
     "applyEditToFilesystem",

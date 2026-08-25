@@ -67,6 +67,11 @@ interface DebugRegistrationState {
   value: DebugRegistration | undefined;
 }
 
+/** Default-pattern list names mutated during debug view deployment. */
+type DebugRegistrationListName =
+  | "pieceRegistry"
+  | "recentPieces";
+
 const debugDeploymentTails = new Map<string, Promise<void>>();
 
 async function serializeDebugDeployment<T>(
@@ -283,17 +288,14 @@ async function debugRegistration(
 
 async function debugRegistrationLists(
   defaultPattern: Cell<unknown>,
-): Promise<Map<"allPieces" | "recentPieces", Cell<FabricValue[]>>> {
-  const lists = new Map<
-    "allPieces" | "recentPieces",
-    Cell<FabricValue[]>
-  >();
+): Promise<Map<DebugRegistrationListName, Cell<FabricValue[]>>> {
+  const lists = new Map<DebugRegistrationListName, Cell<FabricValue[]>>();
   const root = defaultPattern.asSchema(undefined);
-  for (const name of ["allPieces", "recentPieces"] as const) {
+  for (const name of ["pieceRegistry", "recentPieces"] as const) {
     const slot = root.key(name);
     if (slot.getRaw() === undefined) {
-      if (name === "allPieces") {
-        throw new Error("default pattern does not expose allPieces");
+      if (name === "pieceRegistry") {
+        throw new Error("default pattern does not expose pieceRegistry");
       }
       continue;
     }
@@ -361,12 +363,9 @@ async function registerDebugPiece(
   if (!nextRegistration.pieceId) {
     throw new Error("debug view piece has no entity ID");
   }
-  const priorListValues = new Map<
-    "allPieces" | "recentPieces",
-    FabricValue[]
-  >();
+  const priorListValues = new Map<DebugRegistrationListName, FabricValue[]>();
   const removedListValues = new Map<
-    "allPieces" | "recentPieces",
+    DebugRegistrationListName,
     FabricValue[]
   >();
   signal?.throwIfAborted();
@@ -416,6 +415,19 @@ async function registerDebugPiece(
     ) {
       throw new Error("default pattern changed during debug view deployment");
     }
+    const activeRegistry = defaultPattern.withTx(tx).key("pieceRegistry");
+    if (
+      activeRegistry.getRawUntyped() === undefined ||
+      !areLinksSame(
+        activeRegistry.resolveAsCell(),
+        lists.get("pieceRegistry")!,
+        activeRegistry,
+      )
+    ) {
+      throw new Error(
+        "default pattern registry changed during debug view deployment",
+      );
+    }
     let changed = false;
     for (const [name, list] of lists) {
       const listWithTx = list.withTx(tx);
@@ -424,7 +436,7 @@ async function registerDebugPiece(
         throw new Error(`default pattern ${name} is not an array`);
       }
       priorListValues.set(name, [...current]);
-      const remove = name === "allPieces"
+      const remove = name === "pieceRegistry"
         ? [...piecesToUnregister, piece]
         : piecesToUnregister;
       removedListValues.set(
@@ -436,13 +448,13 @@ async function registerDebugPiece(
       const retained = current.filter((value) =>
         !remove.some((target) => areLinksSame(value, target, listWithTx))
       );
-      if (name === "allPieces") {
+      if (name === "pieceRegistry") {
         retained.push(piece.getAsLink({
           base: listWithTx,
           includeSchema: true,
         }));
       }
-      if (retained.length !== current.length || name === "allPieces") {
+      if (retained.length !== current.length || name === "pieceRegistry") {
         listWithTx.setRawUntyped(retained);
         changed = true;
       }
