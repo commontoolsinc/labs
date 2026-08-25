@@ -1,0 +1,175 @@
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { createSession, Identity } from "@commonfabric/identity";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { createBuilder } from "../../../runner/src/builder/factory.ts";
+import type { Cell } from "../../../runner/src/builder/types.ts";
+import { pieceId } from "../../src/piece-id.ts";
+import { PiecesController } from "../../src/ops/pieces-controller.ts";
+
+const signer = await Identity.fromPassphrase("pieces controller registry");
+
+/** A default pattern exposing the registry surface `add()` drives. */
+function defaultRegistryPattern() {
+  const { commonfabric } = createBuilder();
+  const { handler, pattern } = commonfabric;
+
+  const addPiece = handler<
+    { piece: Cell<unknown> },
+    { pieceRegistry: Cell<Cell<unknown>[]> }
+  >(
+    true,
+    {
+      type: "object",
+      properties: { pieceRegistry: { type: "array", asCell: ["cell"] } },
+    },
+    ({ piece }, { pieceRegistry }) => {
+      pieceRegistry.push(piece);
+    },
+  );
+  return pattern<{ pieceRegistry: Cell<unknown>[] }>(
+    ({ pieceRegistry }) => ({
+      pieceRegistry,
+      addPiece: addPiece({ pieceRegistry }),
+    }),
+  );
+}
+
+function valuePattern() {
+  const { commonfabric } = createBuilder();
+  return commonfabric.pattern<{ value: number }>(({ value }) => ({ value }));
+}
+
+describe("pieces-controller", () => {
+  describe("PiecesController", () => {
+    let storageManager: ReturnType<typeof StorageManager.emulate>;
+    let runtime: Runtime;
+    let pieces: PiecesController;
+    let piece: Cell<unknown>;
+
+    beforeEach(async () => {
+      storageManager = StorageManager.emulate({ as: signer });
+      runtime = new Runtime({
+        apiUrl: new URL("http://toolshed.test"),
+        storageManager,
+      });
+      pieces = new PiecesController(
+        await createSession({
+          identity: signer,
+          spaceName: `pieces-controller-${crypto.randomUUID()}`,
+        }),
+        runtime,
+      );
+      await pieces.synced();
+
+      const defaultRoot = await pieces.runPersistent(
+        defaultRegistryPattern(),
+        { pieceRegistry: [] },
+        "pieces-controller-default-root",
+      );
+      await pieces.linkDefaultPattern(defaultRoot);
+      await runtime.idle();
+      await pieces.synced();
+
+      piece = await pieces.runPersistent(
+        valuePattern(),
+        { value: 42 },
+        "pieces-controller-registered-piece",
+      );
+      await pieces.add([piece]);
+      await runtime.idle();
+      await pieces.synced();
+    });
+
+    afterEach(async () => {
+      await runtime?.dispose();
+      await storageManager?.close();
+    });
+
+    /**
+     * Replace `editWithRetry` with one that reports a commit failure without
+     * running the callback, so no write happens. Returns the restore function.
+     */
+    function failCommits(): () => void {
+      const editWithRetry = runtime.editWithRetry;
+      runtime.editWithRetry = (() =>
+        Promise.resolve({
+          error: {
+            name: "StorageTransactionAborted",
+            message: "commit rejected by test",
+          },
+        })) as unknown as typeof runtime.editWithRetry;
+      return () => {
+        runtime.editWithRetry = editWithRetry;
+      };
+    }
+
+    async function registeredIds(): Promise<string[]> {
+      return (await pieces.getRegisteredPieces()).map((entry) => entry.id);
+    }
+
+    describe("instance members", () => {
+      describe("remove()", () => {
+        it("returns `true` and unregisters the piece it removes", async () => {
+          const id = pieceId(piece)!;
+          expect(await registeredIds()).toContain(id);
+
+          const removed = await pieces.remove(piece);
+
+          expect(removed).toBe(true);
+          expect(await registeredIds()).not.toContain(id);
+        });
+
+        it("returns `false` for a piece that is not registered", async () => {
+          await pieces.remove(piece);
+
+          expect(await pieces.remove(piece)).toBe(false);
+        });
+
+        it("throws when the removal cannot commit, leaving the piece registered", async () => {
+          const restore = failCommits();
+          try {
+            await expect(pieces.remove(piece)).rejects.toThrow(
+              "Removing the piece failed because storage returned " +
+                "StorageTransactionAborted: commit rejected by test",
+            );
+          } finally {
+            restore();
+          }
+          expect(await registeredIds()).toContain(pieceId(piece)!);
+        });
+      });
+
+      describe("linkDefaultPattern()", () => {
+        it("throws when the link cannot commit", async () => {
+          const restore = failCommits();
+          try {
+            await expect(pieces.linkDefaultPattern(piece)).rejects.toThrow(
+              "Linking the default pattern failed because storage returned " +
+                "StorageTransactionAborted: commit rejected by test",
+            );
+          } finally {
+            restore();
+          }
+        });
+      });
+
+      describe("unlinkDefaultPattern()", () => {
+        it("throws when the unlink cannot commit, leaving the link in place", async () => {
+          const restore = failCommits();
+          try {
+            await expect(pieces.unlinkDefaultPattern()).rejects.toThrow(
+              "Unlinking the default pattern failed because storage returned " +
+                "StorageTransactionAborted: commit rejected by test",
+            );
+          } finally {
+            restore();
+          }
+          expect(await pieces.getDefaultPattern(false)).toBeDefined();
+        });
+      });
+    });
+  });
+});

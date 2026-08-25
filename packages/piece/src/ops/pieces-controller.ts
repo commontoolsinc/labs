@@ -455,10 +455,16 @@ export class PiecesController<T = unknown> {
   async linkDefaultPattern(
     defaultPatternCell: Cell<any>,
   ): Promise<void> {
-    await this.runtime.editWithRetry((tx) => {
+    const { error } = await this.runtime.editWithRetry((tx) => {
       const spaceCellWithTx = this.spaceCell.withTx(tx);
       spaceCellWithTx.key("defaultPattern").set(defaultPatternCell.withTx(tx));
     });
+    if (error) {
+      throw new Error(
+        `Linking the default pattern failed because storage returned ${error.name}: ${error.message}`,
+        { cause: error },
+      );
+    }
     await this.runtime.idle();
   }
 
@@ -467,10 +473,16 @@ export class PiecesController<T = unknown> {
    * Used when the default pattern is being deleted.
    */
   async unlinkDefaultPattern(): Promise<void> {
-    await this.runtime.editWithRetry((tx) => {
+    const { error } = await this.runtime.editWithRetry((tx) => {
       const spaceCellWithTx = this.spaceCell.withTx(tx);
       spaceCellWithTx.key("defaultPattern").set(undefined);
     });
+    if (error) {
+      throw new Error(
+        `Unlinking the default pattern failed because storage returned ${error.name}: ${error.message}`,
+        { cause: error },
+      );
+    }
     await this.runtime.idle();
   }
 
@@ -1161,7 +1173,12 @@ export class PiecesController<T = unknown> {
     return piece;
   }
 
-  // note: removing a piece doesn't clean up the piece's cells
+  /**
+   * Remove a piece from this space's registry. Does not clean up the piece's
+   * cells. Returns whether this call removed the piece — `false` means the
+   * piece was not registered. A removal that cannot commit throws instead, so
+   * `false` never stands in for a storage failure.
+   */
   async remove(pieceOrId: string | Cell<unknown>): Promise<boolean> {
     const piece = typeof pieceOrId === "string"
       ? this.runtime.getCellFromEntityId(this.space, entityIdFrom(pieceOrId))
@@ -1178,7 +1195,7 @@ export class PiecesController<T = unknown> {
       await this.unlinkDefaultPattern();
     }
 
-    const { ok } = await this.runtime.editWithRetry((tx) => {
+    const { ok, error } = await this.runtime.editWithRetry((tx) => {
       const pieces = piecesCell.withTx(tx);
 
       // Remove from main list
@@ -1190,6 +1207,12 @@ export class PiecesController<T = unknown> {
         return false;
       }
     });
+    if (error) {
+      throw new Error(
+        `Removing the piece failed because storage returned ${error.name}: ${error.message}`,
+        { cause: error },
+      );
+    }
 
     // Ensure full synchronization
     if (ok) {
