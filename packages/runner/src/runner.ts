@@ -114,6 +114,7 @@ import {
 } from "./storage/reactivity-log.ts";
 import {
   isConflictRejection,
+  isStaleReadConflict,
   isStorageTransactionInconsistent,
 } from "./storage/rejection.ts";
 
@@ -216,6 +217,15 @@ type StartAttempt = {
   // The result this attempt resolved to, which a link start only learns by
   // following the link.
   targetKey?: `${MemorySpace}/${ScopeKey}/${URI}`;
+  // The exact registration THIS attempt's startCore created, when it
+  // created one. A walk can also report success for a registration it did
+  // NOT create (doStart's already-started returns, including the
+  // mid-resume re-check) — a COMPETING start can install into a registry
+  // the caller emptied, with no stop and so no generation bump to witness
+  // it. A caller that hands a registration to an ownership it holds must
+  // hand off THIS one, never merely whatever `cancels` holds at claim
+  // time (the catch-up recovery's Cubic-P1 fix).
+  installedRegistration?: Cancel;
   // The attempt's outcome, which a concurrent start of the same doc joins
   // instead of running a second resolution pipeline. Assigned by start() once
   // the pipeline promise exists.
@@ -1249,6 +1259,14 @@ export class Runner {
   // so tests can synchronize deterministically under the frozen-clock
   // preload, where wall-clock polling cannot observe this work.
   private pendingWatcherPatternLoads = new Set<Promise<unknown>>();
+  // In-flight catch-up recoveries of commit-gated starts whose transaction
+  // lost its basis to the serving side's own first-hydration materialization
+  // (see `catchUpAndStartOnStaleRead`). NEVER awaited by dispose(), for the
+  // same reason as the watcher loads above: the readiness gate they await is
+  // a session catch-up, which a closing runtime may never reach, and a
+  // cancelled ownership already tombstones the work. Tracked solely so tests
+  // can synchronize deterministically.
+  private pendingDeferredStartCatchUps = new Set<Promise<unknown>>();
   // Both maps record that this runner prepared or stopped a result, so a later
   // start of the same result can reuse the cells it already assembled instead
   // of re-syncing dependencies and rehydrating a snapshot. They are shortcuts:
@@ -3279,7 +3297,7 @@ export class Runner {
     if (wasPreparedLocally || wasStoppedLocally) {
       if (!this.isStartAttemptCurrent(attempt)) return Promise.resolve(false);
       try {
-        this.startCore(rootCell, {
+        attempt.installedRegistration = this.startCore(rootCell, {
           givenPattern: resolvedPattern,
           schedulePatternUpdate: attempt.schedulePatternUpdate,
         });
@@ -3320,7 +3338,7 @@ export class Runner {
 
       const startCoreStart = performance.now();
       try {
-        this.startCore(rootCell, {
+        attempt.installedRegistration = this.startCore(rootCell, {
           givenPattern: resolvedPattern,
           schedulePatternUpdate: attempt.schedulePatternUpdate,
           schedulerRehydration: this.schedulerRehydrationOptions(
@@ -3422,6 +3440,7 @@ export class Runner {
     speculativeConsequence?: { eventId: string },
   ): Cancel {
     const resultLink = resultCell.getAsNormalizedFullLink();
+    const startLifecycleEpoch = this.lifecycleEpoch;
     const ownership = this.createDeferredStartOwnership(resultCell);
     tx.addCommitCallback((_committedTx, result) => {
       if (result.error) {
@@ -3474,22 +3493,32 @@ export class Runner {
         startTx,
       );
       try {
-        if (
-          ownership.markInstalled(
-            this.startWithTx(
-              startTx,
-              committedResultCell,
-              givenPattern,
-              options,
-            ),
-          )
-        ) {
+        const installedRegistration = this.startWithTx(
+          startTx,
+          committedResultCell,
+          givenPattern,
+          options,
+        );
+        if (ownership.markInstalled(installedRegistration)) {
           startTx.abort("Deferred runner start was cancelled");
           return;
         }
         this.runtime.prepareTxForCommit(startTx);
         startTx.commit().then(({ error }) => {
           if (error) {
+            if (
+              this.catchUpAndStartOnStaleRead(
+                error,
+                resultCell,
+                "start",
+                startLifecycleEpoch,
+                pullOnceAfterStart,
+                ownership,
+                installedRegistration,
+              )
+            ) {
+              return;
+            }
             ownership.cancel();
             logger.error(
               "tx-commit-error",
@@ -3519,6 +3548,320 @@ export class Runner {
     return ownership.cancel;
   }
 
+  /**
+   * The catch-up recovery a commit-gated start earns when its transaction
+   * is refused for a STALE CONFIRMED READ under server execution — the
+   * seat of the OW45 arm-B client-start fix (verification-coverage.md;
+   * RULED 2026-08-24). Returns whether a recovery was scheduled — `false`
+   * leaves the caller's terminal arm to run exactly as it does for every
+   * other refusal.
+   *
+   * WHY a start earns one at all. Under the flag a piece is materialized
+   * SERVER-side, and the client's navigate-deferred start reads that
+   * piece's computed documents to base its own transaction on. At first
+   * hydration those two acts race by construction: the serving loop's
+   * derived commits for the just-born piece are in flight exactly while
+   * the client reads their targets as absent, so the client's basis is
+   * stale whenever the interleaving is tight — the EXPECTED outcome of
+   * losing the race, not an exceptional one. Terminating there is what
+   * made the race fatal: `startWithTx` has already installed the
+   * client-side piece inside the transaction when the refusal lands, the
+   * error arm's cancel tears that install down, and nothing re-runs it —
+   * the piece has no client context for the rest of the session and every
+   * read that depends on it resolves to nothing, while the store holds
+   * every append (verification-coverage.md OW45 arm B, the run b04 catch).
+   *
+   * WHAT the recovery does — and deliberately does not. The refusal is
+   * treated as "the server won the race": await the conflict's readiness
+   * (the session catch-up the wire attaches as `readyToRetry`, plus the
+   * named document's pull — `Runtime.awaitCommitRetryReadiness`), then
+   * START the piece from the served documents through the ordinary load
+   * walk (`doStart`), the same walk a reload runs. The recovery arm
+   * COMMITS NOTHING: it does not re-mint and re-commit the refused
+   * materialization (#6208's retry — census-proved non-convergent,
+   * closed), and it mints no transaction of its own. The load walk's own
+   * instantiation transaction keeps its sanctioned `bookkeeping` stamp
+   * exactly as a reload's does (serving-loop.md §3d's piece-start site),
+   * and for a piece the server materialized it has nothing left to write.
+   * A document still in flight reads as PENDING and re-triggers on
+   * arrival (speculation.md §2's unresolved-input semantics) — the
+   * entirely reactive flow that catches up with the server.
+   *
+   * ON-ONLY, by the coordinator's conservative default: under OFF a stale
+   * confirmed read on a deferred start means another CLIENT raced, and
+   * the cross-tab mutex semantics own that story — the OFF arm keeps
+   * today's terminal behavior byte-for-byte.
+   *
+   * WHAT stays terminal. Only the engine's stale-read family recovers —
+   * `stale confirmed read` and its `stale pending read` sibling
+   * ({@link isStaleReadConflict}, head-anchored). Every other refusal
+   * keeps today's behavior exactly: a CFC or speculative-basis refusal,
+   * an authorization denial, a precondition failure, a row-label
+   * violation, a withdrawal that merely embeds a staleness phrase — none
+   * of them describe a basis the served documents repair.
+   *
+   * CANCELLATION AUTHORITY (review F1 + Cubic P1 — both faces of one
+   * root). The recovery RIDES THE ORIGINAL ATTEMPT'S OWNERSHIP TOKEN —
+   * the one Cancel handle the parent holds (its cancel group and lineage
+   * piece-stop) — and recovers only an attempt whose install is STILL THE
+   * CURRENT REGISTRATION when the refusal lands. Concretely: (1) at
+   * entry, a stop or supersede that landed during the commit round trip
+   * (which removed the install, could cancel no pending token — the
+   * ownership unregistered at markInstalled — and bumps no epoch) makes
+   * the recovery DECLINE, so the stop wins exactly as it does on the
+   * terminal path; (2) the refused install is torn down with the same
+   * registry-guarded stop the token's own cancel performs, WITHOUT
+   * spending the token, and the token's now-stale install reference is
+   * CLEARED (delta review D1: the token's cancel is a one-shot `stopped`
+   * latch — fired against a stale install it would no-op AND burn the
+   * latch, leaving a later hand-off unable to stop the recovered run;
+   * with the install cleared, a cancel landing anywhere in the wait or
+   * walk window stays pending-shaped); (3) the token re-enters the
+   * pending index for the readiness wait, so a stop, a release, or
+   * `stopAll()` during that window tombstones the recovery through the
+   * same path that tombstones a pending first attempt; (4) the walk
+   * hands the claimed registration to the token INSIDE its claim
+   * mapping — the same synchronous block as the claim checks, no
+   * promise hop for a stop+restart to slip a foreign registration into
+   * (delta review D2) — and the hand-off is EXACT: only the
+   * registration this attempt's own startCore created, still current
+   * (Cubic P1 — a COMPETING start can install into the registry the
+   * recovery's entry emptied with no stop and so no generation bump,
+   * and the walk's already-started returns report it as success; an
+   * identity-blind hand-off would bind the parent's token to a run
+   * whose lifecycle the parent does not own, so the recovery instead
+   * yields exactly as on an owned key). A parent cancel from the
+   * hand-off on stops the recovered run, and one that landed during
+   * the wait or the walk is finished by that markInstalled against the
+   * real registration: the run is stopped in the same breath and the
+   * walk reports not-running.
+   * If another start took the key while the recovery waited, the
+   * recovery yields exactly as `startWithTx` yields on an owned key:
+   * the piece has a context under someone else's authority, and the
+   * token settles without touching it. The lifecycle epoch still covers
+   * the one window no token can: a teardown that ran before the
+   * refusal's continuation, whose sweep could not see this scheduling.
+   */
+  private catchUpAndStartOnStaleRead<T>(
+    error: { name?: string; message?: string },
+    resultCell: Cell<T>,
+    label: string,
+    scheduledLifecycleEpoch: number,
+    pullOnceAfterStart: boolean,
+    ownership: DeferredCancelOwnership,
+    installedRegistration: Cancel | undefined,
+  ): boolean {
+    if (this.runtime.experimental.serverExecution !== true) return false;
+    if (!isStaleReadConflict(error)) return false;
+    if (scheduledLifecycleEpoch !== this.lifecycleEpoch) return false;
+    if (ownership.isCancelled()) return false;
+    const key = this.getDocKey(resultCell);
+    // The cancellation-authority gate: recover only an attempt whose
+    // install is still the current registration as the refusal lands. A
+    // stop or release during the commit round trip removed it; a
+    // replacement start superseded it. Either way the authority over this
+    // key has moved on, and the recovery must not override it — the
+    // caller's terminal arm runs as before (which no-op-cancels the spent
+    // registration exactly like today).
+    if (
+      installedRegistration === undefined ||
+      this.cancels.get(key) !== installedRegistration
+    ) {
+      return false;
+    }
+    logger.warn(
+      "deferred-start-catchup",
+      `Deferred ${label} transaction lost its first-hydration basis to ` +
+        "the serving side; starting from the served documents instead",
+      error,
+    );
+    // Tear the refused install down exactly as the token's own cancel
+    // would — the registry-guarded stop — WITHOUT spending the token: the
+    // token is the parent's one handle to this start, and it now carries
+    // the recovery.
+    this.stop(resultCell);
+    // Clear the token's now-STALE install (delta review D1). The token's
+    // cancel is a ONE-SHOT `stopped` latch: fired against the stale
+    // install it would be a registry-guarded no-op that BURNS the latch,
+    // and the hand-off's later markInstalled would return at the latch
+    // WITHOUT stopping the freshly recovered run — the F1 leak one
+    // window later. With the install cleared, a cancel landing anywhere
+    // in the wait or walk window stays pending-shaped (no latch burn),
+    // and the hand-off's markInstalled finishes it against the real
+    // registration.
+    ownership.markInstalled(undefined);
+    // Back into the pending index under the SAME token, so a stop or a
+    // release during the readiness wait tombstones the recovery through
+    // the same path that tombstones a pending first attempt. (The
+    // markInstalled above also unregistered the token — a no-op, it was
+    // not registered — so this add is the token's one live entry.)
+    let pending = this.pendingDeferredStarts.get(key);
+    if (pending === undefined) {
+      pending = new Set();
+      this.pendingDeferredStarts.set(key, pending);
+    }
+    pending.add(ownership);
+    const recovery = this.runtime.awaitCommitRetryReadiness(error)
+      .then(async () => {
+        // Paired guards, each the other's backstop (the mutation pins kill
+        // them jointly): the token covers a stop or a stopAll that ran
+        // while the readiness gate was awaited (the token re-entered the
+        // pending index before the await, so the sweep sees it), and the
+        // epoch covers a teardown that ran before this recovery was even
+        // scheduled, when the sweep could not have seen it.
+        if (
+          ownership.isCancelled() ||
+          scheduledLifecycleEpoch !== this.lifecycleEpoch
+        ) {
+          return;
+        }
+        if (this.cancels.has(key)) {
+          // Another start took the key while the recovery waited — the
+          // same yield startWithTx makes on an owned key. The piece HAS a
+          // context under someone else's authority; the recovery's purpose
+          // is met and its claim dissolves. Settling the token touches no
+          // live registration (its stale install no longer matches).
+          ownership.cancel();
+          return;
+        }
+        try {
+          // The hand-off to the parent's token happens INSIDE the walk's
+          // claim mapping — the same synchronous block as the claim
+          // checks — so there is no promise-hop window between "the walk
+          // left the piece running" and "the token owns that
+          // registration" for a stop+restart to slip a foreign
+          // registration into (delta review D2, closed by construction).
+          // `started` is therefore already the hand-off's verdict: true
+          // means the token owns the recovered run un-cancelled; false
+          // with a cancelled token means a cancel landed in the wait or
+          // walk window and the run was stopped in the same breath.
+          const started = await this.startFromServedState(
+            resultCell,
+            ownership,
+          );
+          if (started) {
+            if (pullOnceAfterStart && !ownership.isCancelled()) {
+              this.pullCellOnceInPullMode(
+                this.runtime.getCellFromLink<T>(
+                  resultCell.getAsNormalizedFullLink(),
+                ),
+              );
+            }
+            return;
+          }
+          if (!ownership.isCancelled()) {
+            // A recovery that resolves without leaving the piece running,
+            // with nobody having stopped it, is the silent no-context
+            // state this arm exists to prevent — surface it loudly (the
+            // r06 gate run's post-mortem could not distinguish this
+            // outcome from a read-side stall; this line makes the next
+            // occurrence decisive).
+            logger.error(
+              "deferred-start-catchup-failed",
+              `Deferred ${label} catch-up start resolved without the ` +
+                "piece running (superseded or stopped mid-walk)",
+            );
+            ownership.cancel();
+          }
+        } catch (cause) {
+          // Settle the token before surfacing: its stale install matches
+          // no live registration, so this cancel only unregisters.
+          ownership.cancel();
+          throw cause;
+        }
+      })
+      .catch((cause) => {
+        // Loud in every arm, per serving-loop.md §3d's piece-start
+        // surfacing rule: a failed recovery is a piece with no client
+        // context, never a silent state.
+        logger.error(
+          "deferred-start-catchup-failed",
+          `Deferred ${label} catch-up start failed; the piece has no ` +
+            "client-side context",
+          cause,
+        );
+      });
+    this.pendingDeferredStartCatchUps.add(recovery);
+    recovery.finally(() => this.pendingDeferredStartCatchUps.delete(recovery));
+    return true;
+  }
+
+  /**
+   * The ordinary load walk (`doStart`), invoked for a catch-up recovery:
+   * the piece starts from what the store serves, exactly as a reload
+   * would start it. Identical to {@link start} except that the result is
+   * NOT marked independently started — a recovered deferred start remains
+   * its parent's child, releasable exactly like the install the refused
+   * attempt would have registered.
+   *
+   * When an `ownership` token is supplied, the walk hands the claimed
+   * registration to it IN THE CLAIM MAPPING — the same synchronous block
+   * as the claim checks — so a cancel that landed during the walk stops
+   * the just-claimed run in the same breath (markInstalled finishes a
+   * pending cancellation), and no promise hop separates the claim from
+   * the hand-off (delta review D1/D2). The mapping then reports whether
+   * the token owns a RUNNING piece: a hand-off that resolved a pending
+   * cancellation reports false.
+   */
+  private startFromServedState<T>(
+    resultCell: Cell<T>,
+    ownership?: DeferredCancelOwnership,
+  ): Promise<boolean> {
+    const attempt: StartAttempt = {
+      lifecycleEpoch: this.lifecycleEpoch,
+      schedulePatternUpdate: true,
+      generationsByDoc: new Map(),
+      preResolutionStopKeys: new Set(),
+    };
+    this.activeStartAttempts.add(attempt);
+    this.trackStartAttempt(attempt, this.getDocKey(resultCell));
+    try {
+      return this.doStart(resultCell, new Set(), attempt)
+        .then((started) => {
+          // Same target-scoped claim as start(): a stop that superseded
+          // this walk, or a start that resolved elsewhere, reports false.
+          const target = attempt.targetKey;
+          const stillRunning = started && target !== undefined &&
+            this.isStartAttemptCurrentFor(attempt, target) &&
+            this.cancels.has(target);
+          if (stillRunning && ownership !== undefined) {
+            const current = this.cancels.get(target!);
+            if (
+              attempt.installedRegistration === undefined ||
+              current !== attempt.installedRegistration
+            ) {
+              // Not this walk's own registration (Cubic P1): a COMPETING
+              // start claimed the result while the walk was in flight —
+              // installing into the registry the recovery's entry
+              // emptied needs no stop, so no generation bump witnesses
+              // it, and doStart's already-started returns report it as
+              // success. The piece runs under the competitor's
+              // authority; binding it to the caller's token would let a
+              // parent cancel tear down a run whose lifecycle the
+              // parent does not own. Yield exactly as startWithTx
+              // yields on an owned key: settle the token without
+              // touching the registration.
+              ownership.cancel();
+              return true;
+            }
+            if (ownership.markInstalled(current!)) {
+              // A cancel was pending (it landed during the wait or the
+              // walk): markInstalled just finished it against the real
+              // registration — the run is stopped, not owned.
+              return false;
+            }
+          }
+          return stillRunning;
+        })
+        .finally(() => {
+          this.finishStartAttempt(attempt);
+        });
+    } catch (error) {
+      this.finishStartAttempt(attempt);
+      return Promise.reject(error);
+    }
+  }
+
   private runPatternAfterSuccessfulCommit<T = any>(
     tx: IExtendedStorageTransaction,
     resultCell: Cell<T>,
@@ -3529,6 +3872,7 @@ export class Runner {
     speculativeConsequence?: { eventId: string },
   ): Cancel {
     const resultLink = resultCell.getAsNormalizedFullLink();
+    const startLifecycleEpoch = this.lifecycleEpoch;
     const ownership = this.createDeferredStartOwnership(resultCell);
     tx.addCommitCallback((_committedTx, result) => {
       if (result.error) {
@@ -3571,16 +3915,13 @@ export class Runner {
         startTx,
       );
       try {
-        if (
-          ownership.markInstalled(
-            this.runWithStartOwnership(
-              startTx,
-              pattern,
-              inputs,
-              committedResultCell,
-            ).installedCancel,
-          )
-        ) {
+        const installedRegistration = this.runWithStartOwnership(
+          startTx,
+          pattern,
+          inputs,
+          committedResultCell,
+        ).installedCancel;
+        if (ownership.markInstalled(installedRegistration)) {
           startTx.abort("Deferred runner start was cancelled");
           return;
         }
@@ -3592,6 +3933,19 @@ export class Runner {
         this.runtime.prepareTxForCommit(startTx);
         startTx.commit().then(({ error }) => {
           if (error) {
+            if (
+              this.catchUpAndStartOnStaleRead(
+                error,
+                resultCell,
+                "cross-space pattern",
+                startLifecycleEpoch,
+                pullOnceAfterStart,
+                ownership,
+                installedRegistration,
+              )
+            ) {
+              return;
+            }
             ownership.cancel();
             logger.error(
               "tx-commit-error",
@@ -4651,6 +5005,20 @@ export class Runner {
         ...this.pendingWatcherPatternLoads,
         ...this.pendingPointerCommits,
       ]);
+    }
+  }
+
+  /**
+   * TESTS ONLY: settle in-flight catch-up recoveries of commit-gated starts
+   * (see `catchUpAndStartOnStaleRead`). Loops in case a settled recovery's
+   * continuation schedules another. Never called from dispose(): the
+   * readiness gate a recovery awaits is a session catch-up, which a closing
+   * runtime need never reach — a cancelled ownership is what stops the work
+   * there.
+   */
+  async idleDeferredStartCatchUps(): Promise<void> {
+    while (this.pendingDeferredStartCatchUps.size > 0) {
+      await Promise.allSettled([...this.pendingDeferredStartCatchUps]);
     }
   }
 

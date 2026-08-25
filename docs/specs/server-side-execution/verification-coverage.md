@@ -5673,6 +5673,242 @@ supply; OW29/OW32/OW34 closed):
     the lanes off; and no CI lane now exercises the production ensure
     at the true topology — unit pins and the measurement harness carry
     it until a lane opts in.
+    **CATCH-UP-AND-START BUILT 2026-08-24 — the ruled close of the
+    client-start class. RULED 2026-08-24: the coordinator's
+    recommendation, ACKED verbatim by the owner ("so ack on all
+    recommendaions"):**
+
+    > In the stale-confirmed-read error arm of the deferred start,
+    > treat the refusal as "the server won the race": wait for the
+    > conflicting docs to arrive (the wire path already attaches
+    > `readyToRetry` = `waitForCaughtUpLocalSeq`,
+    > packages/memory/v2/client.ts ~:1403), then START the runner
+    > against the served docs, COMMITTING NOTHING. Not re-commit
+    > (#6208's retry — census-proved non-convergent, closed), not
+    > refuse-to-start (today's terminal arm).
+
+    The owner's model statements grounding it (same date, verbatim):
+
+    > "clients should actually start patterns when they load, but
+    > it's an entirely reactive flow that catches up with the
+    > server."
+
+    > "a client can still speculatively run it locally, just that
+    > the server-state will eventually win"
+
+    > "ah, one thing i forgot, and we can change: clients do create
+    > patterns, but only in tests. for production client we
+    > currently don't have a way to instantiate a new pattern with
+    > new code from \"the outside\" (as opposed to patterns doing
+    > it). (and just to be clear, a .map creates and starts a lot of
+    > sub patterns, but it does so deterministacally and reactively
+    > and with existing code, so the client just speculates, the
+    > servers fills in, it converges, done)."
+
+    — owner (Berni), 2026-08-24. As built (`runner.ts`
+    `catchUpAndStartOnStaleRead` + `startFromServedState`; the
+    readiness `awaitCommitRetryReadiness` cherry-picked from closed
+    #6208 along with its discriminator — the retry itself
+    deliberately NOT brought): both deferred-start arms' stale-read
+    refusals, ON-ONLY (`experimental.serverExecution === true`, the
+    coordinator's conservative default — under OFF the refusal means
+    another CLIENT raced and cross-tab mutex semantics own that
+    story; OFF byte-identical, pinned). COVERED SHAPES, exactly (the
+    adversarial review's F4 — the class language is scoped to these,
+    never "all conflicts"): the engine's stale-read family —
+    `stale confirmed read` (validateConfirmedReads) and its sibling
+    `stale pending read` (resolvePendingReads) — matched HEAD-
+    ANCHORED by `isStaleReadConflict` (né #6208's
+    `isStaleConfirmedReadConflict`; renamed when the pending sibling
+    joined, both directions red-first), so a client-fabricated
+    withdrawal that merely EMBEDS a staleness phrase never
+    classifies (review note F5). Deliberately NOT matched, each with
+    its reason in the predicate's docstring: `pending dependency not
+    resolved` (own-commit fate), `entity-value-hash precondition
+    target changed` (create-only double-handling), and the
+    same-family preempt-mode client shape (`commit preempted: …`,
+    experimental `CF_CONFLICT_ADMISSION=preempt`, default off) —
+    recorded, not silently extended; a b04-shaped death under THAT
+    message is that mode's own open item. THE RECOVERY, as
+    restructured by the review's F1 (+ Cubic P1 — the
+    cancellation-authority root, both faces) and CORRECTED by the
+    delta review's D1: it recovers only an attempt whose install is
+    STILL THE CURRENT REGISTRATION when the refusal lands (a stop or
+    release during the commit round trip now WINS, exactly as on the
+    terminal path), tears the refused install down with the token's
+    own registry-guarded stop WITHOUT spending the token, CLEARS the
+    token's now-stale install reference (D1's root: the token's
+    cancel is a one-shot `stopped` latch — fired against a stale
+    install it no-ops AND burns the latch, and the first cut's later
+    hand-off then returned at the latch without stopping the
+    recovered run: the F1 leak one window later, the reviewer's
+    `registered-after-parent-cancel` probe; with the install
+    cleared, a cancel landing anywhere in the wait or walk window
+    stays pending-shaped), re-enters the pending index under the
+    SAME token the parent holds (stops tombstone the readiness wait
+    there), then awaits the conflict's readiness and runs the
+    ORDINARY LOAD WALK (`doStart`, the reload walk) with no
+    independent-start marking. The walk hands the claimed
+    registration to the token INSIDE its claim mapping — the same
+    synchronous block as the claim checks, so no promise hop
+    separates claim from hand-off for a stop+restart to slip a
+    foreign registration into (the delta review's D2, closed by
+    construction) — and the hand-off is IDENTITY-EXACT (Cubic P1,
+    post-mini-delta, confirmed and fixed red-first): the attempt
+    records the registration its OWN startCore created, and only
+    that registration, still current, is handed off — because a
+    COMPETING start can install into the registry the recovery's
+    entry emptied with no stop and so no generation bump (startCore's
+    unconditional install; the only bump sites live in stopResult),
+    and the walk's already-started returns report it as success; on
+    a foreign registration the recovery YIELDS exactly as
+    `startWithTx` yields on an owned key (the piece runs under the
+    competitor's authority — an independent navigate keeps its
+    life). After the hand-off the parent's one Cancel handle stops
+    the recovered run, and a cancel that landed during the wait or
+    the walk is finished by that markInstalled against the real
+    registration: stopped in the same breath, the walk reporting
+    not-running. If another start took the key during the wait, the
+    recovery yields exactly as `startWithTx` yields on an owned
+    key. The recovery arm commits nothing (store-door pin: zero
+    `commitNative` calls post-refusal), mints no transaction, and
+    re-issues the one-shot pull the refused commit's success arm
+    would have issued. Log keys: `deferred-start-catchup` (recovery
+    scheduled), `deferred-start-catchup-failed` (walk failed —
+    loud, the piece has no client context). The two design checks
+    flagged to the owner, resolved with evidence before code:
+    (1) nothing downstream in the start walk requires the CLIENT's
+    startTx commit to have succeeded — the walk consumes the
+    ORIGINATING committed tx's products (root doc, patternIdentity
+    meta, argument link, setup state; the deferred callback only
+    arms on that commit's success) plus in-memory context the
+    recovery re-creates; the two startTx-success-gated products are
+    the one-shot pull (the recovery re-issues it) and the
+    pattern-updater schedule (the walk's own instantiation tx
+    re-arms it); the startTx's staged materialization writes are
+    exactly what the SERVER already materialized (deterministic,
+    cause-derived ids). (2) §3d restated in serving-loop.md §3d's
+    RULED 2026-08-24 paragraph (the sanction names the
+    deferred-start transaction; the recovery mints none) — no
+    semantic beyond the ruling. Red-first:
+    `deferred-start-catchup-start.test.ts`, watched red at the
+    exact b04 shape (terminal tx-commit-error, one install, the
+    awaited second install failed by quiescence), and again for the
+    review round — the stop-during-round-trip revival and the spent
+    parent handle both watched red before the F1 restructure, the
+    stale-pending-read recovery and the embedded-phrase terminality
+    both watched red before the predicate change, and the delta
+    round's mid-walk parent cancel watched red at the D1 leak
+    (`cancels.has` true after the handle fired inside the recovery's
+    assembly) before the latch-clear + in-claim hand-off landed.
+    Mutation kills: the ON gate (OFF pin), the discriminator
+    (other-refusals-terminal pin), the token registration point
+    (stop pin), the epoch pair JOINTLY (teardown pin — the two
+    checks are each other's backstop, individually shadowed;
+    recorded as one joint kill, not two), the entry authority gate
+    (stop-wins pin), the stale-install CLEAR (mid-walk pin), the
+    in-claim markInstalled hand-off (parent-handle AND mid-walk
+    pins — doubly load-bearing), the hand-off's IDENTITY gate
+    (competing-start pin — watched red at the pre-fix head: the
+    parent's cancel tore down the competitor's independent run), and
+    the cross-space CALL SITE (the
+    routing pin's entry-point instrumentation — the review's F13
+    found the prior pin vacuous to exactly this mutation; it now
+    reds). The
+    readiness gate itself is pinned (Cubic P2/F12): a test-held
+    `readyToRetry` shows no re-assembly while held and recovery
+    exactly after release; the other unit refusals are
+    injected-shape pins whose readiness resolves immediately (the
+    named-doc pull only), the live campaign being the wire-gate's
+    true-topology witness. Disclosed deltas, the FULL enumeration
+    (review F10), each derived from "the context is the normal
+    start walk's": the recovery re-derives the pattern from the
+    durable patternIdentity meta (a KEYLESS piece — no stored
+    pointer — therefore fails LOUD, "Cannot start: no pattern
+    identity", rather than starting) and drops the refused
+    attempt's RunnerRunOptions — no navigate event context (the
+    server owns the intent — §3d's own rationale), no
+    independent-start marking (the recovered piece stays its
+    parent's child), no caller `doNotUpdateOnPatternChange` /
+    `awaitSyncBeforeInitialRun` / `parentPieceRootId`, and
+    `schedulePatternUpdate` at the walk's default (true); a
+    document still in flight at walk time reads PENDING and
+    re-triggers on arrival (OW51 semantics).
+    **THE 10/10 GATE AT THE FIX HEAD (2026-08-24): 7/10 — the b04
+    START death is closed live; the residue is TWO READ-SIDE members
+    the deferred-start error arm cannot reach; THE SKIP STAYS,
+    reworded.** Method: ON-built binary (sha256 88631052bc76…),
+    fresh store + posture probe per run
+    (shellServerExecutionDefine "true" + servingLoop present, every
+    run), ensure-off (`SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false` —
+    deliberately the CI ON lanes' posture, i.e. what a lifted step
+    would actually run under, and the harsher client-creates regime),
+    the skip neutralized in the working tree for all ten runs
+    (skip-print verified absent per run), quiet-and-loaded (ambient
+    5-14 on a busy shared box; loaded = +6 pinned CPU spinners,
+    ambient peaked 144 before r09), PID-only kills, ports 9711-9730.
+    Per-run ledger on the PR. What the recovery did, live: catchup
+    activations 1-2 in EVERY run (18 across the ten counted runs; 19
+    with smoke r00 — the first write-up said 17, corrected by the
+    adversarial review's reconciliation), terminal deferred-start
+    deaths ZERO, recovery failures ZERO — and in the green runs the
+    SECOND catchup was the NOTEBOOK space's own refused root start
+    (space-DID-matched in r03/r04/r05), i.e. the exact b04 sequence
+    (interactive piece → stale-confirmed-read refusal → teardown)
+    now ends in a running piece and a green step (22-46 s steps,
+    including at loads 23-40). The three reds, classified: (i) r01
+    (quiet) — the h01/h05 READ member, store-verified: all 7
+    /value/notes appends durable (seqs 48-88), serving loop healthy,
+    notebook context fully live (isNotebook true, internal noteCount
+    7, render notesLength 7, chips 6/7), the predicate's readCell of
+    the argument's redirect-linked notes undefined across the full
+    300 s net — SILENT (zero error lines; its one catchup was a
+    DIFFERENT space's, so no recovery was even involved); one
+    recorded thread: a speculation.md §6 speculative-basis refusal
+    (designed, terminal) in-window whose doc then never landed
+    anywhere. (ii) r06+r09 (both loaded) — the STRANDED WHOLE-PIECE
+    member, identical chain twice: the notebook space's root
+    recovery fired and no start died, then ONE watcher
+    `pattern-load-error` for a KEYLESS identity, then every read of
+    the piece (argument, internal, render's own) returning nothing
+    at diagnostics time — the CT-1923 stranded-state shape; the
+    durable store's patternIdentity pointers are all REAL
+    identities, so the keyless ref is session-side (an
+    overlay/session-synthetic pointer reaching the watcher), and the
+    load-error is the discriminating event between recovered-green
+    and stranded-red (greens have the same catchup and no
+    load-error). CONSEQUENCE for the family map: the fork memo's
+    working hypothesis that h01/h05/rf2 were "the same die-off
+    later/earlier in the start walk" is DISPROVED — the walk
+    completes in both red shapes; the residue lives in the
+    read/delivery path (r01) and in the post-start pointer-watcher
+    path (r06/r09). Follow-on aids landed with this build: the
+    recovery logs a LOUD
+    `deferred-start-catchup-failed …resolved without the piece
+    running` when its walk resolves false un-stopped (r06's
+    post-mortem could not distinguish that outcome; the next
+    occurrence is decisive — and the F1 restructure narrowed the
+    line's confound: a supersede now yields BEFORE the walk at the
+    owned-key check and a stop cancels the token, so review note
+    F11's benign-supersede false fire is structurally squeezed to
+    the mid-walk window), beside the existing
+    `deferred-start-catchup` scheduling line. Recorded follow-on
+    (review F9, veto not exercised — a recommendation, not owed
+    here): §3d makes failure-arm loudness a CONTRACT, and the
+    client half of it is unpinned because this package has no
+    logger-capture idiom; the serving half's model is an assertable
+    counter (`structureLoadFailures`) — a client-side counter or a
+    capture idiom would make the client half assertable too. The lift bar's STEP
+    half is unchanged — the fixed step greens ON 10/10
+    quiet-and-loaded — and its class half is now the named read-side
+    residue (the START class the bar originally named is closed by
+    this build); the step entry's reason names the narrowed charge.
+    Sibling entry, landed mid-review: #5744 (lunch-poll profile-first
+    join) re-skipped `integration/lunch-poll-vote.test.ts` as a FILE
+    entry on this row's b04 signature — its recorded reds PREDATE the
+    recovery, whose mechanism targets exactly that death; the entry
+    lifts on its own gate evidence at the merged head, never by
+    inference from the default-app gate.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
@@ -6926,7 +7162,39 @@ supply; OW29/OW32/OW34 closed):
     fix is deliberately not flag-gated). Trigger: the post-flip soak,
     or any ON surface where a re-attempted start is observed
     exhausting its budget in real usage
-    (`deferred-start-conflict-exhausted`), whichever comes first.**
+    (`deferred-start-conflict-exhausted`), whichever comes first.
+    **RE-FRAMED (RULED 2026-08-24, owner ack "so ack on all
+    recommendaions"): the destination is START-WITHOUT-COMMIT, not
+    adopt-not-start.** Clients DO start pieces — speculatively, with
+    the normal start walk's context — and the server-state wins:
+
+    > "a client can still speculatively run it locally, just that
+    > the server-state will eventually win"
+
+    > "clients should actually start patterns when they load, but
+    > it's an entirely reactive flow that catches up with the
+    > server."
+
+    — owner (Berni), 2026-08-24. The five pieces, re-dispositioned
+    (the history above kept as written): (i) adopted-context,
+    (ii) the birth-adoption wait, and (v) the hydration UX all
+    DISSOLVE — the context is the normal start walk's; whoever wins
+    the race materializes and the loser catches up; the UX is
+    today's. (iii) the §3d restatement arrived EARLY via the OW45
+    catch-up-and-start build (serving-loop.md §3d's RULED 2026-08-24
+    paragraph). (iv) — whether the OFF-arm start path is retained as
+    a fallback under ON, and under exactly which predicate — is the
+    STAGE-2 question, unchanged, and is what remains of this row.
+    The landing DUTY above is discharged by history: #6208 closed
+    unmerged, so no retry ever landed to retire; its
+    `isStaleConfirmedReadConflict` predicate lands via the OW45
+    build as the LIVE discriminator of the catch-up recovery — not
+    dead code, and renamed `isStaleReadConflict` when the engine's
+    pending-read staleness sibling joined it (the OW45 block's
+    covered-shapes sentence) — and `reattemptDeferredStartOnStaleRead`
+    never landed at all (`deferred-start-conflict-exhausted` never
+    became a live log key; the recovery's keys are
+    `deferred-start-catchup` / `deferred-start-catchup-failed`).**
 
 ## 4. Standing rule
 

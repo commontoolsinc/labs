@@ -1350,9 +1350,10 @@ jobs:
   # browser shell (build-toolshed-on) — the FULL ON posture, verified by the
   # probe below before the shard runs. Skips happen only through the explicit
   # per-phase lists in tasks/server-execution-on-skips.ts, printed by the run
-  # step — never by silent filtering (ONE `patterns` STEP entry today —
-  # default-app's reload step, under OW45's isolated client rehydration
-  # starvation — with its loud reason; the flip PR needs every list EMPTY).
+  # step — never by silent filtering (TWO `patterns` entries today, both
+  # OW45 arm B: default-app's reload STEP — the read-side residue — and
+  # the lunch-poll-vote FILE, #5744's client-start re-skip; each with its
+  # loud reason; the flip PR needs every list EMPTY).
   # No coverage collection and no cache save-back: the default lane owns
   # both; the compile byte cache is restored read-only (compiled bytes do not
   # depend on the flag).

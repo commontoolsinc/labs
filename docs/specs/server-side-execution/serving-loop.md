@@ -892,6 +892,28 @@ carving an exception. The serving side's and the OFF arm's
 deferred starts keep `bookkeeping`; the rule for wave-seal
 internal writes is unchanged.
 
+**The bookkeeping-stamped deferred start's refusal arm: catch up
+and start (RULED 2026-08-24).** The OTHER deferred start — the
+`bookkeeping`-stamped one, which commits to the store — can be
+REFUSED for a stale confirmed read when the serving side
+materialized the piece first (the first-hydration race,
+verification-coverage.md OW45 arm B). Under the flag that refusal
+is the expected outcome of losing the race, not a failure: the
+client treats it as "the server won", waits for the conflicting
+documents to arrive (the conflict's catch-up gate plus the named
+document's pull), and STARTS the piece from the served documents
+through the ordinary load walk — the reactive flow that catches
+up with the server. The recovery arm COMMITS NOTHING: it neither
+re-commits the refused materialization nor mints a start
+transaction of its own, so the speculative-consequence sanction
+above — written for the deferred-start transaction — has nothing
+to govern there; the load walk's own setup/instantiation writes
+keep the sanctioned `bookkeeping` stamp of the piece-start site,
+exactly as a reload's do. The OFF arm keeps the refusal terminal
+(a cross-tab race is the cross-tab mutex's story — this OFF
+sentence is the COORDINATOR's conservative default, not part of
+the 2026-08-24 ruling; the owner may re-rule it).
+
 - The accumulator is a layered view: store snapshot at the wave's input
   seq + previously sealed writes. Actions run serially per space, so a
   later action reads earlier ones' sealed writes; intra-wave ordering is

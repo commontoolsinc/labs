@@ -32,13 +32,57 @@ tables with the v2 basis index — and partly a build. The spec §5
 deletion list is enforced by deleting on main and *not rebuilding*,
 with the survival test as the gate on anything that feels needed.
 
-## Coordination state (2026-08-22) — read this first
+## Coordination state (2026-08-24) — read this first
 
 The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
-**Delta 2026-08-23 (this PR): OW45 arm-B server-ensure STAGE 1 BUILT —
+**Delta 2026-08-24 (this PR): the b04 client-start DEATH closed by
+CATCH-UP-AND-START (RULED 2026-08-24); the 10/10 gate found the arm-B
+residue is TWO read-side members the start fix does not reach — the
+reload-step skip STAYS (7/10), reworded to the narrowed charge.** The
+ruled mechanism (coordinator recommendation, owner ack): in the
+deferred start's stale-confirmed-read error arm, treat the refusal as
+"the server won the race" — await the conflict's readiness (the
+wire-attached `readyToRetry` catch-up + the named document's pull),
+then START the piece from the served documents through the ordinary
+load walk, COMMITTING NOTHING in the recovery arm. Not #6208's
+re-commit retry (census-proved non-convergent, closed — its
+`isStaleConfirmedReadConflict` discriminator and
+`awaitCommitRetryReadiness` extraction are cherry-picked as live
+pieces of this build); not the old refuse-to-start. ON-only (the
+coordinator's conservative default; OFF byte-identical, pinned —
+under OFF the refusal means another CLIENT raced and cross-tab mutex
+semantics own that story). OW62 is RE-FRAMED from adopt-not-start to
+START-WITHOUT-COMMIT (clients start speculatively; server-state
+wins); its remaining open piece is the stage-2
+unmaterialized-fallback question. Binding sentence: serving-loop.md
+§3d's RULED 2026-08-24 refusal-arm paragraph; full record: the
+register's OW45 CATCH-UP-AND-START block (ruling + owner model
+statements verbatim, design-check findings, red-first + mutation
+evidence, the campaign ledger) and OW62's re-framing block. The gate
+(ensure-off — the CI ON lanes' posture, i.e. what a lifted step
+would actually run under; fresh store + posture probe per run,
+quiet-and-loaded): the recovery arm fired live in EVERY run with
+zero terminal deferred-start deaths, and in the green runs it
+demonstrably resurrected the NOTEBOOK space's refused root start
+(catchup → step green, steps 22–46 s). The three reds are NOT the
+client-start death: r01 is the single-chain readCell starvation
+(notebook context fully live, store holds all 7 appends,
+argument-notes read undefined for the whole net, silent) and
+r06/r09 are the stranded whole-piece mid-session read death — the
+recovery fired for the notebook space, no start died terminally,
+then one watcher `pattern-load-error` for a KEYLESS identity (the
+CT-1923 stranded shape) and every read of the piece returned
+nothing at diagnostics time — which disproves the fork memo's
+working hypothesis that h01/h05/rf2 were "the same die-off" as the
+start class. The flip's list-EMPTY bar hangs on this step plus the
+lunch-poll-vote FILE entry #5744 landed mid-review (the same
+client-start class, its reds recorded BEFORE this recovery landed —
+it lifts on its own gate evidence at the merged head).
+
+**Delta 2026-08-23: OW45 arm-B server-ensure STAGE 1 BUILT —
 the space-root ensure (existence + freshness, no start) runs at the
 SpaceServer's activation as a lease-guarded, single-flight owed step —
 non-blocking at activation, DEADLINE-BOUNDED in the first cycle
