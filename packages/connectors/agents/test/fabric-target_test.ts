@@ -1,4 +1,9 @@
-import { assertEquals, assertFalse, assertRejects } from "@std/assert";
+import {
+  assertEquals,
+  assertFalse,
+  assertRejects,
+  assertStrictEquals,
+} from "@std/assert";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import { Identity } from "@commonfabric/identity";
 import { Runtime } from "@commonfabric/runner";
@@ -34,14 +39,37 @@ Deno.test("Fabric target validates a discovered checkout", async () => {
     storageManager,
   });
   const connection = { runtime, spaceDid: signer.did() };
+  const calls: string[][] = [];
+  let receivedSignal: AbortSignal | undefined;
   const gitContext = new GitContextResolver(
-    () => Promise.resolve({ code: 0, stdout: "/repo\n" }),
+    (args, signal) => {
+      calls.push(args);
+      receivedSignal = signal;
+      return Promise.resolve({
+        code: 0,
+        stdout: "/requested-checkout\n",
+      });
+    },
     () => new Date("2026-08-21T00:00:00.000Z"),
     (path) => Promise.resolve(path),
   );
+  const controller = new AbortController();
   try {
     const target = await AgentFabricTarget.open(connection, gitContext);
-    assertEquals(await target.validateCheckout("/repo"), true);
+    assertEquals(
+      await target.validateCheckout(
+        "/requested-checkout",
+        controller.signal,
+      ),
+      true,
+    );
+    assertEquals(calls, [[
+      "-C",
+      "/requested-checkout",
+      "rev-parse",
+      "--show-toplevel",
+    ]]);
+    assertStrictEquals(receivedSignal, controller.signal);
   } finally {
     await runtime.dispose();
     await storageManager.close();
