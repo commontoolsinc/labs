@@ -1150,7 +1150,9 @@ memory-v2 stores, or the environment — is exercised by
 what a Tab offers at each slot of the chain. The remaining table entries hand
 the shell a constant `files` or `dirs` directive, which a fabric cannot change:
 those are asserted one by one, kind and glob, in
-`test/completion-providers.test.ts`.
+`test/completion-providers.test.ts`; `deno task check-completion-slots` is what
+catches an entry naming a slot that does not exist, or a slot with no entry at
+all.
 
 That split is not tidiness: a provider that reaches a fabric and comes back with
 the wrong set is invisible to a unit test and invisible at the prompt, because
