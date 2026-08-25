@@ -7287,6 +7287,254 @@ supply; OW29/OW32/OW34 closed):
     true never-fires net), and any live `schema-doc-quarantine` log
     — each occurrence is evidence for that investigation, not a
     server-side hole.
+    ABSORB-CONTRACT FIX (the investigation session, this row's
+    second closing PR): the dismissal is LOCATED and CLOSED, and it
+    is not an interleaving — it is unconditional. The arrival
+    validator met a document naming an unresolved `cid:` schema by
+    DROPPING it, and the only heal on offer was a re-delivery of that
+    document (the FULL evaluation: watch.set, reconnect). Under the
+    elision the owner's reversal restored, an unchanged document is
+    never re-sent mid-session, so the drop was permanent for the
+    session: the client had dismissed information the server had sent
+    and would never send again. That is the owner's contract broken
+    on the plain path, with no race required — the reason CI's
+    delivery-window timing decided whether it fired is only that the
+    timing decides whether a mention ever precedes its cid, not
+    whether the drop is recoverable. Watched red at `4ac3b2e70` by
+    the register's new pin
+    (`runner/test/schema-doc-sync.test.ts`, "absorbs a doc whose cid
+    arrives in a LATER frame, with no re-delivery of the doc"): frame
+    one carries the mentioning doc, frame two carries ONLY the cid —
+    the elision shape, the sole further information the session ever
+    gets — and the doc stayed absent. The fix ABSORBS instead: an
+    entry whose refs cannot resolve yet is PARKED verbatim
+    (`#parkedOnSchemaClosure`) against the hashes it waits on, and
+    RELEASED — re-entering `applySessionSync`, so it is re-validated
+    and a stale park can never install unverified content — as soon
+    as those hashes resolve from any later frame; the drain is
+    iterative (a released entry may be the schema document that frees
+    the next) and bounded by the park's size. What stays parked names
+    a document this replica has never seen, so it is PULLED
+    (`hydrateParkedSchemaClosures`) — the answer
+    `hydrateArrivedCfcSchemaRefs` already gave for the `/cfc`
+    metadata refs these link-position refs sit beside, which is why
+    the two ref classes had opposite answers to one question. A
+    FORGED replacement for a content-addressed id stays a hard drop
+    (no later arrival makes it applicable). Fail-closed is UNCHANGED:
+    a parked doc is not visible, and the `schema-doc-quarantine`
+    diagnostic stands. CONSEQUENCE FOR THE CONTAINMENT: it is NOT
+    retired and must not be — the park makes the compliant path
+    self-healing rather than dependent on perfect retention, so the
+    containment is now the net under a genuinely absent document (a
+    hash the server never installed) and under any future producer
+    bug. Its ensure-driven pin still passes unchanged, because that
+    simulation drops cid upserts on EVERY frame including the
+    hydration pull's answer. RETENTION, examined and NOT patched: no
+    path was found by which a cid this replica applied later
+    disappears from it — `applySessionSync`'s
+    `upsert.seq < record.confirmed.seq` skip is harmless for content-
+    addressed docs (the content cannot differ), and `reset()`'s
+    `#docs.clear()` has one caller (`replaceProvisionalReplica`),
+    which builds the replacement replica on a FRESH session whose
+    delivery cache re-ships the closure. Retention hardening was
+    therefore left unbuilt rather than added without a red pin; the
+    park+pull makes it moot for correctness either way. RULED OUT as
+    the OW61 mechanism, each with evidence:
+    `experimentalConcurrentWatchRefresh`'s deferred watch-response
+    apply (a real ordering inversion, but the flag is DEFAULT OFF and
+    was off on the board); `handleEffect` with a null `#watchView`
+    (`WatchView.fromSync` absorbs with `emit:false`, so the frame
+    reaches no consumer — but both nulling sites set `#closed` first
+    and `handleEffect` returns early on it, so it is unreachable
+    while open); and the runner's `#updatePromises.size === 0`
+    consumer gate (harmless, because `watchAddSync` REUSES
+    `#watchView` rather than handing back a fresh instance).
+    STANDING HAZARD, reported not fixed (outside this row's fix and
+    deliberately pinned as-is today): `refreshWatchSet`'s
+    `view.close()` on a failed frame closes the SHARED WatchView —
+    its comment reasons about a per-refresh view that the client's
+    reuse means does not exist — which would silence every later push
+    frame for the session. The quarantine and the park together mean
+    `applySessionSync` no longer throws for the schema class, so the
+    path is far less reachable; it wants the coordinator's call
+    because `runner/test/schema-doc-sync.test.ts`'s "closes the
+    staged watch view when a frame fails validation" pins the current
+    behavior on purpose.
+    REPRODUCTION, at the true topology: PR #6248's ensure-ON board is
+    the defect's best evidence and supersedes the original 13-file
+    crash board for this purpose — 1069 `schema-doc-quarantine` lines
+    across TEN lanes (pattern shards 1/2/4/6/7/8/9/10, package
+    runtime-client 249, package shell 13), ZERO worker kills, and the
+    quarantined pair byte-for-byte the board's original
+    (`computed:fid1:7BycCyHc…` / `cid:fid1:zgJY1m9lR0…`). Every
+    failure signature there is DOWNSTREAM of a doc that never applied:
+    `Failed to create or find default pattern`
+    (`piece/src/ops/pieces-controller.ts` :1762), `[alice] No data at
+    cell`, the `/sourceMap` CFC prepare abort, and the shell lane's
+    30-minute hang. That board is the containment working exactly as
+    shipped AND the dismissal costing the lanes their data — the two
+    halves of OW61 separated cleanly. Modeling its shape as a pin (the
+    cid installed in the space, elided for the session, the mentioning
+    doc unrecoverable) caught TWO defects in this fix, either of which
+    would have left that board red: (a) the release never ran after a
+    PULL, because `pull()` installs its documents directly rather than
+    through `applySessionSync`, so the frame-end hook never saw the
+    delivery the park was waiting for — the pull now releases on
+    completion, and its residency check, not its result, decides
+    whether to re-arm (a pull can report a connection error and still
+    have delivered); (b) the supersede rule discarded LIVE parks,
+    because a seq-0 absent-doc marker — the "no confirmed version"
+    answer to a pull, not a newer version — counted as a newer
+    arrival, so a sink's own pull for the not-yet-applied doc evicted
+    the park waiting to supply it; superseding now happens only where
+    a real delivery lands (seq > 0), plus on a remove. NOTE for
+    anyone reading a future ON board: with this fix a
+    `schema-doc-quarantine` line no longer means the doc was dropped —
+    it is held and healing, so the line is expected and the lane's
+    colour, not the quarantine count, is the health metric.
+    THE FLOOR, found on the verification board (#6260 = this fix
+    under #6248's flip) and NOT a client defect: a pull issues
+    `session.watch.add`, and `watchAdd` DIFFS its answer against the
+    session's delivery cache (`memory/v2/server.ts` ~:3649,
+    `!sameSnapshot(session.entities…)`) — so a document the cache
+    claims delivered is elided EVEN WHEN THE REQUEST NAMES IT AS A
+    ROOT. Once the cache and a replica disagree about a document, the
+    replica cannot obtain it by asking: the frame comes back empty,
+    every time. That is the cache-claims-sent-but-never-sent shape,
+    and it is why the original board's clients could never recover —
+    the absorb fix's park+pull cleared every lane whose consumer
+    WAITS (package runtime-client, 249 quarantines on #6248, and
+    package shell, a 30-minute hang — both green on board 1) and
+    could not clear the ones that need the document to actually
+    arrive, whose logs show ONE cid missing 48 times in a single
+    shard. `watch.set` is the way back and needs no change to the
+    elision: `buildFullSync` (memory/v2/server-sync.ts) maps EVERY
+    entry to an upsert, diffing only removes, which is exactly the
+    "full evaluation" the quarantine diagnostic already names and
+    that nothing was reaching. The park therefore ESCALATES — a pull
+    that completes WITHOUT its document is the disagreement's
+    signature, not an absent document, so the replica requests one
+    full re-evaluation (`Session.resyncWatchSet`, single-flight) and
+    drains the park behind it. Pinned red-first ("ESCALATES to a full
+    evaluation when the session cache claims the cid was delivered
+    and the pull comes back empty"), mutation-checked against a
+    stubbed escalation. BOARD PROGRESSION on the ON lanes, all three
+    at the true topology: #6248 (no fix) 2 pattern shards green, 1 of
+    3 package lanes green; board 1 (absorb fix) 2 shards, 3 of 3
+    package lanes; board 2 (plus escalation) 4 shards (1, 2, 3, 8), 3
+    of 3 package lanes. Real movement, NOT closure — six shards (4,
+    5, 6, 7, 9, 10) still red and undiagnosed, so OW61 stays OPEN and
+    #6248 stays blocked on it. OWNER'S CALL WANTED, recorded here
+    because it is cheaper than what was built: making `watchAdd` not
+    elide a document the request explicitly NAMES as a root would fix
+    this at the seam, and answering a direct request for one named
+    document is not the "retransmit the schemas all the time" the
+    reversal ruling objected to. The client-side escalation re-ships a
+    whole closure where one document would do; it was built that way
+    only because the investigation's mandate fenced the server side
+    off.
+    BOARD 3 (the resync made UPSERTS-ONLY): EIGHT of ten pattern
+    shards green and 3/3 package lanes — the ON lanes' progression
+    across four boards at the true topology is 2 -> 2 -> 4 -> 8
+    shards, 1/3 -> 3/3 -> 3/3 -> 3/3 package lanes. Board 2 had
+    caught the escalation HARMING what it was meant to help: pattern
+    shard 7, green on board 1, failed on board 2 inside
+    `shopping-list.tsx` (`hasTags is not a function`, destructured
+    undefined) — data vanishing under a live pattern, because
+    `buildFullSync` derives its removes by diffing the session cache
+    against the freshly evaluated closure, so a legitimately
+    different closure carries removes for documents a running
+    consumer still reads. The resync is a REPAIR and never a
+    watch-set authority; it now applies upserts only, and shard 7
+    returned to green with 4, 5 and 9 joining it. TWO RESIDUALS, both
+    diagnosed, neither closed:
+    (a) SHARD 6 is STILL THIS DEFECT — `cid:fid1:zgJY1m9lR0…` missing
+    64 times in one run with ZERO `schema-closure-resync-failed`, so
+    the escalation fires and still does not obtain the document. The
+    suspected floor beneath the floor is the GRAPH-level staging this
+    row already describes ("stages a closure doc only while the
+    tracked graph has never delivered it"): a second elision layer
+    that a full `watch.set` does not clear either, which would mean
+    NO request a client can make recovers the document. Unverified —
+    it is the next thing to pin.
+    (b) SHARD 10 is NOT this defect: its degradation gate fails
+    because `PatternManager.writeBackCompileCache`
+    (`runner/src/pattern-manager.ts` :2208) throws the `/sourceMap`
+    CFC prepare abort — #6248's third signature, outside the delivery
+    path, and its own scope decision.
+    The other two signatures #6248 recorded are GONE from every
+    failing shard (`Failed to create or find default pattern` and
+    `No data at cell` both at zero), which retires #6248's
+    attribution of its whole board to the quarantine: part of that
+    residue was a second blast radius, and part of it — shard 7's —
+    was this fix's own.
+    THE FLOOR UNDER THE FLOOR, and OW61's last delivery-side
+    mechanism: `session.entities` is the server's MODEL OF WHAT THE
+    CLIENT HOLDS — not a transmission log (a refresh pass caches
+    every entry it recomputes, including ones the wire frame omits
+    precisely because the model already claims them) — and it
+    advances when a frame is BUILT, on the assumption that the frame
+    arrives. Nothing validated that assumption. A
+    socket that dies mid-flight loses frames the server counts as
+    delivered — `rollbackUndeliveredSync` repairs only a
+    locally-throwing send, as its own comment concedes — so the cache
+    goes on claiming documents the client never received and the next
+    diff elides exactly those. A schema document elided that way is
+    unobtainable, which is what made this class terminal rather than
+    transient. The repair input was already on the wire and being
+    DISCARDED: a resuming client reports the highest server seq it
+    actually received (`client.ts` `reopen`, `seenSeq:
+    this.#serverSeq`), and `session-registry.ts` took
+    `Math.max(existing.seenSeq, client.seenSeq)` — throwing away the
+    only case that matters, a client admitting it is BEHIND. When
+    that report is below this session's `lastSyncedSeq`, the frames
+    between were sent and lost, and the next pass now routes through
+    the full evaluation (`forceFullResync`, existing machinery) that
+    re-ships the whole assembled state. No new protocol, no
+    retransmission to a client that holds the data, and the elision
+    the reversal ruling protects is untouched — a caught-up resume
+    takes the incremental path exactly as before. Pinned both
+    registry cases
+    (`memory/test/v2-session-resume-watermark.test.ts`: a resume
+    BEHIND its last synced seq arms the flag, a caught-up resume does
+    not — the pair guards against a blanket always-true). The
+    discrimination itself was established by a manual mutation of the
+    flag assignment, which reds the behind case and leaves the
+    caught-up case green; that check is not itself recorded
+    coverage. BOARD 4: NINE of ten pattern shards green, 3/3
+    package lanes. Shard 6 — the residual board 3 could not explain,
+    the same cid unhealed with the escalation firing and reporting no
+    error — went GREEN, which settles what it was: reconnects were
+    live in those lanes, and the lost-frame-on-resume class was the
+    cause. (The reasoning that a reliable ordered socket means no
+    loss without death, so resume could not be implicated, was WRONG;
+    this board is what corrected it.) Full ON-lane progression across
+    five boards: 2 -> 2 -> 4 -> 8 -> 9 pattern shards, 1/3 -> 3/3
+    package lanes. THE LAST RESIDUAL IS NOT THIS DEFECT: shard 10's
+    degradation gate dies on `PatternManager.writeBackCompileCache`
+    (`runner/src/pattern-manager.ts` :2208) throwing the `/sourceMap`
+    CFC prepare abort — #6248's third signature, outside the delivery
+    path, with `Failed to create or find default pattern` and `No
+    data at cell` both at ZERO across every lane. It is #6248's own
+    scope decision, not OW61's.
+    ABLATION, run because four cumulative boards prove only that
+    each fix helped GIVEN the ones before it — never that the earlier
+    ones are still load-bearing once the last lands (the coordinator
+    was asked "why do we still need this approach" and could not
+    answer from the boards it had). PR #6262 = main + the
+    resume-watermark fix ALONE + the lane flip, with no park, no
+    pull and no escalation in the tree. Result: SIX pattern shards
+    red (1, 2, 6, 8, 9, 10 — only 3, 4, 5 and 7 green) and package
+    runtime-client red — against board 4's single red shard and 3/3
+    package lanes. So the two
+    halves are COMPLEMENTARY, not redundant, and the client-side
+    absorb machinery stays: the server fix stops the delivery model
+    from lying about what a resumed client holds, and the client fix
+    is what survives the window before a reconnect (and covers
+    runtime-client, which board 1 had already shown the absorb fix
+    alone takes from red to green). A shrink of this row's PR to the
+    one-line server change was the alternative on the table; the
+    ablation is the evidence against it.
 
   - **OW62 — adopt-not-start: the piece-open seam is where the ON
     execution model's "one starter per piece" has to land. POST-FLIP
