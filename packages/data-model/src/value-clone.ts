@@ -19,7 +19,14 @@ import { backtickQuote } from "@commonfabric/utils/markdown";
 import { type Immutable, isPlainContainer } from "@commonfabric/utils/types";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 
-import { FabricInstance, FabricValue } from "./interface.ts";
+import {
+  FabricContainerValue,
+  FabricInstance,
+  FabricValue,
+  MutableFabricArrayLayer,
+  MutableFabricContainerValueLayer,
+  MutableFabricPlainObjectLayer,
+} from "./interface.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { deepFreeze, isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
 import { toDebugKindString } from "./value-debug.ts";
@@ -429,7 +436,7 @@ export interface CloneForMutationResult<T extends FabricValue> {
    * own children remain identity-shared with the input. For a
    * `FabricInstance` at `path`, `pathValue` is its `shallowClone(false)`.
    */
-  pathValue: FabricValue;
+  pathValue: MutableFabricContainerValueLayer;
 }
 
 /**
@@ -494,7 +501,10 @@ export function cloneForMutation<T extends FabricValue>(
   const createMissing = options?.createMissing ?? false;
   const nextKeyAfterPath = options?.nextKeyAfterPath ?? "";
   // Used for every per-container shallow thaw along the spine, and for the
-  // final value-at-`path` thaw, whichever container arm that lands on.
+  // final value-at-`path` thaw, whichever container arm that lands on. The
+  // `frozen: false` overload returns the input type, so a thawed container
+  // arrives here as the readonly view of itself; that is what the casts to
+  // `MutableFabricContainerValueLayer` below correct.
   const cloneOpts = { frozen: false as const, deep: false as const, force };
 
   // Empty-path fast path
@@ -511,7 +521,10 @@ export function cloneForMutation<T extends FabricValue>(
       );
     }
     const newRoot = cloneIfNecessary(value, cloneOpts) as T;
-    return { value: newRoot, pathValue: newRoot };
+    return {
+      value: newRoot,
+      pathValue: newRoot as MutableFabricContainerValueLayer,
+    };
   }
 
   // Non-empty path: The root must be a plain container; descent through a
@@ -533,9 +546,8 @@ export function cloneForMutation<T extends FabricValue>(
   // `current` is always a plain container at the top of each loop iteration:
   // we enter with `newRoot` (a plain container by the root check above) and
   // before descending we always type-check the next container.
-  let current: Record<string, FabricValue> | FabricValue[] = newRoot as
-    | Record<string, FabricValue>
-    | FabricValue[];
+  let current: MutableFabricArrayLayer | MutableFabricPlainObjectLayer =
+    newRoot as MutableFabricArrayLayer | MutableFabricPlainObjectLayer;
 
   for (let i = 0; i < path.length; i++) {
     const key = path[i]!;
@@ -549,12 +561,12 @@ export function cloneForMutation<T extends FabricValue>(
       // the next key that will be used against it: `path[i+1]` for
       // intermediate steps, `nextKeyAfterPath` for the final step.
       const nextKey = isLast ? nextKeyAfterPath : path[i + 1]!;
-      next = createMissingContainer(nextKey);
-      (current as Record<string, FabricValue>)[key] = next;
-      // `next` is freshly allocated and already mutable; skip the
+      const fresh = createMissingContainer(nextKey);
+      (current as Record<string, FabricValue>)[key] = fresh;
+      // `fresh` is freshly allocated and already mutable; skip the
       // shallow-thaw step below.
-      if (isLast) return { value: newRoot, pathValue: next };
-      current = next as Record<string, FabricValue> | FabricValue[];
+      if (isLast) return { value: newRoot, pathValue: fresh };
+      current = fresh;
       continue;
     } else {
       throw new CloneForMutationError(
@@ -604,13 +616,16 @@ export function cloneForMutation<T extends FabricValue>(
     }
 
     if (isLast) {
-      return { value: newRoot, pathValue: thawed };
+      return {
+        value: newRoot,
+        pathValue: thawed as MutableFabricContainerValueLayer,
+      };
     }
 
     // Type assertion safe: we type-checked `next` is a plain container,
     // and shallow-thaw preserves prototype, so `thawed` is also a plain
     // container.
-    current = thawed as Record<string, FabricValue> | FabricValue[];
+    current = thawed as MutableFabricArrayLayer | MutableFabricPlainObjectLayer;
   }
 
   // Unreachable: the loop always returns on its final iteration when
@@ -627,7 +642,7 @@ export function cloneForMutation<T extends FabricValue>(
  */
 function createMissingContainer(
   nextKey: string,
-): Record<string, FabricValue> | FabricValue[] {
+): MutableFabricArrayLayer | MutableFabricPlainObjectLayer {
   return isArrayIndexPropertyName(nextKey) || nextKey === "-" ? [] : {};
 }
 
@@ -636,7 +651,7 @@ function createMissingContainer(
  * the value at `path`. A container qualifies; primitives and
  * `FabricPrimitive`s (which are immutable by construction) do not.
  */
-function isMutableHandle(value: unknown): boolean {
+function isMutableHandle(value: unknown): value is FabricContainerValue {
   return isPlainContainer(value) || value instanceof FabricInstance;
 }
 
