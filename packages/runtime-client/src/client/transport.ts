@@ -3,7 +3,7 @@ import {
   IPCClientMessage,
   IPCClientNotification,
   IPCRemoteMessage,
-} from "../protocol/mod.ts";
+} from "@/protocol/mod.ts";
 
 export type RuntimeTransportEvents = {
   message: [IPCRemoteMessage];

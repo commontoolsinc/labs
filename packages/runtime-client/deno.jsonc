@@ -1,6 +1,10 @@
 {
   // Dependency guide: ../../docs/development/DEPENDENCIES.md
   "name": "@commonfabric/runtime-client",
+  "imports": {
+    // Dependency guide: ../../docs/development/DEPENDENCIES.md
+    "@/": "./src/"
+  },
   "tasks": {
     // --no-check: this package is type-checked by `deno task check` (tasks/check.sh).
     "test": "deno test --no-check --allow-env --allow-read --allow-ffi test/",

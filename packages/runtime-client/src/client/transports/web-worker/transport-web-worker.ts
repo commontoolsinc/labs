@@ -7,9 +7,12 @@ import {
   isWorkerConsoleNotification,
   isWorkerReadyNotification,
   NotificationType,
-} from "../../../protocol/mod.ts";
-import { RuntimeTransport, RuntimeTransportEvents } from "../../transport.ts";
-import { EventEmitter } from "../../emitter.ts";
+} from "@/protocol/mod.ts";
+import {
+  RuntimeTransport,
+  RuntimeTransportEvents,
+} from "@/client/transport.ts";
+import { EventEmitter } from "@/client/emitter.ts";
 
 export interface WebWorkerRuntimeTransportOptions {
   // URL to hosted `backends/web-worker/index.ts`

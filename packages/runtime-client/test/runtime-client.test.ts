@@ -3,13 +3,13 @@ import { expect } from "@std/expect";
 import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
-import { RuntimeClient } from "../src/runtime-client.ts";
+import { RuntimeClient } from "@/runtime-client.ts";
 import {
   NotificationType,
   RequestType,
   type UploadBlobRequest,
-} from "../src/protocol/mod.ts";
-import type { RuntimeTransport } from "../src/client/transport.ts";
+} from "@/protocol/mod.ts";
+import type { RuntimeTransport } from "@/client/transport.ts";
 
 describe("RuntimeClient", () => {
   describe("initialize option validation", () => {

@@ -92,8 +92,8 @@ import {
   KeepAsCell,
   type NormalizedFullLink,
   parseLink,
-} from "../../../runner/src/link-utils.ts";
-import { StorageManager } from "../../../runner/src/storage/cache.ts";
+} from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache";
 import {
   type ActionRunTraceResponse,
   BooleanResponse,
@@ -179,9 +179,9 @@ import {
   type VDomMountResponse,
   type VDomUnmountRequest,
   type WriteStackTraceResponse,
-} from "../protocol/mod.ts";
-import type { VDomOp } from "../protocol/types.ts";
-import { cellRefToKey } from "../shared/utils.ts";
+} from "@/protocol/mod.ts";
+import type { VDomOp } from "@/protocol/types.ts";
+import { cellRefToKey } from "@/shared/utils.ts";
 import { postToClient } from "./post-to-client.ts";
 import {
   postContextualRuntimeError,

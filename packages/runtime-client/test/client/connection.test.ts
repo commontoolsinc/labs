@@ -6,11 +6,8 @@ import {
 } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { getLogger } from "@commonfabric/utils/logger";
-import {
-  consoleMessageFrom,
-  RuntimeConnection,
-} from "../../src/client/connection.ts";
-import { EventEmitter } from "../../src/client/emitter.ts";
+import { consoleMessageFrom, RuntimeConnection } from "@/client/connection.ts";
+import { EventEmitter } from "@/client/emitter.ts";
 import {
   type ConsoleNotification,
   type InitializationData,
@@ -19,11 +16,11 @@ import {
   NotificationType,
   RequestType,
   RuntimeErrorCode,
-} from "../../src/protocol/mod.ts";
+} from "@/protocol/mod.ts";
 import type {
   RuntimeTransport,
   RuntimeTransportEvents,
-} from "../../src/client/transport.ts";
+} from "@/client/transport.ts";
 
 /**
  * Transport that records everything sent and auto-acknowledges every request
