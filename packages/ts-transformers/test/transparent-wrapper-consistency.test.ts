@@ -126,6 +126,83 @@ describe("transparent wrapper consistency", () => {
     });
   });
 
+  describe("verb callback resolution", () => {
+    // The matrix above varies the wrapper around the RETURNED value. This one
+    // varies the wrapper around the CALLBACK, which is a separate lookup: an
+    // unresolved wrapper hides the body from the validator entirely, so it
+    // judges nothing rather than judging it differently.
+    const undeclaredReturns = async (source: string) => {
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      return (diagnostics as readonly TransformationDiagnostic[]).filter((d) =>
+        d.type === "verb-result:undeclared-return"
+      );
+    };
+
+    for (const [name, wrap] of Object.entries(TSX_SPELLINGS)) {
+      it(`reads an action body behind a ${name} callback`, async () => {
+        const source = `      import { action } from "commonfabric";
+      const verb = action(${
+          wrap("(id: string) => { return { picked: id }; }")
+        });
+      export { verb };
+    `;
+
+        expect((await undeclaredReturns(source)).length).toBe(1);
+      });
+
+      it(`reads a handler body behind a ${name} callback`, async () => {
+        const source = `      import { handler } from "commonfabric";
+      const verb = handler<{ id: string }, Record<string, never>>(${
+          wrap("(event) => { return { picked: event.id }; }")
+        });
+      export { verb };
+    `;
+
+        expect((await undeclaredReturns(source)).length).toBe(1);
+      });
+    }
+  });
+
+  describe("callback boundary classification", () => {
+    // Extraction and boundary classification have to agree about where a
+    // callback sits. When they disagree, an otherwise legal body is reported
+    // against — a false positive on valid source, not a missed rewrite.
+    const patternContextErrors = async (source: string) => {
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      return (diagnostics as readonly TransformationDiagnostic[]).filter((d) =>
+        d.type.startsWith("pattern-context:")
+      );
+    };
+
+    const body = "() => { const o = { run: () => { n; } }; o.run(); }";
+
+    for (const [name, wrap] of Object.entries(TSX_SPELLINGS)) {
+      it(`leaves a ${name} action callback free of pattern-context errors`, async () => {
+        const source = `      import { action, pattern } from "commonfabric";
+      export default pattern<{ n: number }, { go: unknown }>(({ n }) => ({
+        go: action(${wrap(body)}),
+      }));
+    `;
+
+        expect(await patternContextErrors(source)).toEqual([]);
+      });
+
+      it(`leaves a ${name} JSX event handler free of pattern-context errors`, async () => {
+        const source = `      import { pattern } from "commonfabric";
+      export default pattern<{ n: number }, { ui: unknown }>(({ n }) => ({
+        ui: <button onClick={${wrap(body)}}>hi</button>,
+      }));
+    `;
+
+        expect(await patternContextErrors(source)).toEqual([]);
+      });
+    }
+  });
+
   describe("normalizeDataFlows()", () => {
     // Built directly rather than through the pipeline: a partially emitted node
     // is synthetic, so a hand-built graph is the only way to put one in front

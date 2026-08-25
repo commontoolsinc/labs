@@ -714,7 +714,7 @@ Deno.test("PolicyOf lowers a local exported ruleset to an exact schema marker", 
   assertEquals(output.includes("__ctPolicyIdentityOf"), false);
 });
 
-Deno.test("PolicyOf resolves a ruleset binding through each wrapper spelling", async () => {
+Deno.test("PolicyOf resolves a ruleset binding through each .tsx wrapper spelling", async () => {
   // The recognizer looks through wrappers to the `exchangeRules()` call. A
   // spelling it does not strip surfaces as "PolicyOf binding must resolve to an
   // exchangeRules() declaration" — a diagnostic that names the binding rather
@@ -759,6 +759,39 @@ Deno.test("PolicyOf resolves a ruleset binding through each wrapper spelling", a
       `the ${name} spelling should resolve as a ruleset binding`,
     );
   }
+});
+
+Deno.test("PolicyOf resolves a ruleset binding behind an angle-bracket assertion", async () => {
+  // `<T>x` is JSX in a .tsx source, so the angle-bracket spelling is only
+  // reachable from a .ts module — which is where a policy module usually is.
+  const { diagnostics } = await validateFiles({
+    "/policy.ts": `/// <cts-enable />
+      import { Confidential, toSchema } from "commonfabric";
+      import type { PolicyOf } from "commonfabric/cfc";
+      import {
+        cfcPattern, exchangeRule, exchangeRules, THIS_POLICY, v,
+      } from "commonfabric/cfc";
+      export const release = exchangeRule({
+        appliesTo: THIS_POLICY,
+        pre: { integrity: [cfcPattern.hasRole(v("user"), THIS_POLICY.subject, "reader")] },
+        post: { addAlternatives: [cfcPattern.user(v("user"))] },
+      });
+      export const rules = <never>exchangeRules([release]);
+      export const schema = toSchema<
+        Confidential<string, [PolicyOf<typeof rules>]>
+      >();
+    `,
+  }, {
+    types: COMMONFABRIC_TYPES,
+    moduleIdentities: new Map([["/policy.ts", "sha256:module"]]),
+  });
+
+  assertEquals(
+    diagnostics.filter((diagnostic) =>
+      diagnostic.message.includes("must resolve to an exchangeRules()")
+    ).length,
+    0,
+  );
 });
 
 Deno.test("PolicyOf retains the defining identity of an imported ruleset", async () => {

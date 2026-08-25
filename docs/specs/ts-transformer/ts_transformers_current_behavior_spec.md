@@ -748,6 +748,13 @@ that reference to the defining module identity, export symbol, exact manifest
 digest, and an owning-space placeholder. Direct imports and pinned `cf:` imports
 retain the dependency's identity.
 
+Both recognizers read a declaration's initializer through the transparent wrapper set (parentheses, `as`, `<T>x`, `satisfies`, `!`, and partially emitted nodes), so an
+authored rule or ruleset is recognized however it is spelled. A spelling not
+stripped does not surface as a wrapper problem: the authoring pass reports the
+rule as invalid, and the `PolicyOf` pass reports that the binding must resolve
+to an `exchangeRules()` declaration — each naming the declaration rather than
+the wrapper that hid it.
+
 `WriteAuthorizedByValidationTransformer` separately validates writer-binding
 claims.
 
@@ -1027,6 +1034,19 @@ The rewriter uses normalized data-flow dependencies and ordered emitters:
 7. prefix unary
 8. container expression
 
+The container emitter owns a literal that holds other expressions, and a
+transparent wrapper around one: it rewrites the children and leaves the
+container unwrapped. It reads the transparent wrapper set (parentheses, `as`, `<T>x`, `satisfies`, `!`, and partially emitted nodes), so a wrapped container is owned on the
+same terms as a bare one.
+
+The data-flow analysis behind these emitters reads that same set twice. An
+expression wrapped in it is analyzed as the expression it wraps, which is what
+carries the inner analysis's `rewriteHint` out to the caller — a spelling not
+named there falls to the generic child walk, which merges through
+`mergeAnalyses` and drops the hint. Normalization then groups flows by their
+normalized text, and strips the set before comparing, so flows differing only
+by a wrapper collapse into one dependency instead of splitting.
+
 Key rewrite rules:
 
 - `a && b`: lowers to `when(condition, value)` only in pattern context
@@ -1123,7 +1143,13 @@ Transforms inline JSX event handlers:
 
 - `<el onClick={() => ...} />` ->
   `onClick={handler<Event,State>((event, params) => ...)(captures)}`
-- currently unwraps arrow functions only (not function expressions)
+- currently unwraps arrow functions only (not function expressions), and
+  reaches the arrow through the transparent wrapper set (parentheses, `as`, `<T>x`, `satisfies`, `!`, and partially emitted nodes)
+- boundary classification looks for the JSX attribute from the outermost
+  wrapper around the callback rather than from the callback itself, so
+  extraction and classification agree on where the callback sits. When they
+  disagree the cost is a false positive on legal source — a wrapped handler
+  draws `pattern-context:*` diagnostics its bare spelling does not
 - preserves body after recursive child transforms
 
 ### 9.3 Action strategy

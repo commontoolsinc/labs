@@ -36,7 +36,10 @@
 
 import ts from "typescript";
 
-import { unwrapTransparentWrapperOnce } from "../utils/expression.ts";
+import {
+  unwrapExpression,
+  unwrapTransparentWrapperOnce,
+} from "../utils/expression.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import {
   declaredVerbResultTypeNode,
@@ -112,10 +115,15 @@ export class VerbReturnValidationTransformer extends HelpersOnlyTransformer {
 function verbCallback(
   call: ts.CallExpression,
 ): ts.ArrowFunction | ts.FunctionExpression | undefined {
-  const fns = call.arguments.filter(
-    (arg): arg is ts.ArrowFunction | ts.FunctionExpression =>
-      ts.isArrowFunction(arg) || ts.isFunctionExpression(arg),
-  );
+  // Each argument is resolved through the transparent wrapper set first: a
+  // wrapped callback is still the verb body, and leaving it unresolved hides
+  // the body from this validator entirely rather than judging it differently.
+  const fns = call.arguments
+    .map((arg) => unwrapExpression(arg))
+    .filter(
+      (arg): arg is ts.ArrowFunction | ts.FunctionExpression =>
+        ts.isArrowFunction(arg) || ts.isFunctionExpression(arg),
+    );
   return fns.length === 1 ? fns[0] : undefined;
 }
 

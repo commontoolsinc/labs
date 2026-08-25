@@ -1,5 +1,7 @@
 import ts from "typescript";
 
+import { outermostTransparentWrapper } from "../utils/expression.ts";
+
 /**
  * A node's position as a direct call argument: the call that lists it, the
  * argument node as listed, and its index in the argument list.
@@ -26,19 +28,20 @@ export interface CallArgumentPosition {
  * the two spellings apart. Parentheses only: type-level wrappers (`as`,
  * `satisfies`) change what the checker sees and stay visible to callers.
  *
- * Returns undefined when `node` (paren wrappers included) is not a direct
+ * Returns undefined when `node` (transparent wrappers included) is not a direct
  * argument of a call — including when it is the callee, or an argument of a
  * `new` expression.
  */
 export function getCallArgumentPosition(
   node: ts.Node,
 ): CallArgumentPosition | undefined {
-  let argument: ts.Node = node;
-  let parent: ts.Node | undefined = node.parent;
-  while (parent && ts.isParenthesizedExpression(parent)) {
-    argument = parent;
-    parent = parent.parent;
-  }
+  // The argument the call actually holds is the outermost transparent wrapper
+  // around `node`, so the walk runs out to the usage site and reports that node
+  // rather than the inner one — callers index into `call.arguments` with it.
+  const argument: ts.Node = ts.isExpression(node)
+    ? outermostTransparentWrapper(node)
+    : node;
+  const parent: ts.Node | undefined = argument.parent;
   if (!parent || !ts.isCallExpression(parent) || !ts.isExpression(argument)) {
     return undefined;
   }
