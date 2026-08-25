@@ -1,10 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { TransportNotificationType } from "../protocol/mod.ts";
 import { WebWorkerRuntimeTransport } from "./transports/web-worker/transport-web-worker.ts";
 
-// Exercises the transport's handling of `{ __workerConsole }` messages without
-// a real worker: a fake Worker class lets us construct the transport, then we
-// drive its private message handler directly.
+// Exercises the transport's handling of forwarded worker console output
+// without a real worker: a fake Worker class lets us construct the transport,
+// then we drive its private message handler directly.
 class FakeWorker extends EventTarget {
   posted: unknown[] = [];
   terminated = false;
@@ -36,6 +37,34 @@ function handlerOf(
   })._handleMessage;
 }
 
+describe("WebWorkerRuntimeTransport ready handshake", () => {
+  it("settles `ready()` on the worker's ready notification", async () => {
+    const transport = makeTransport();
+    let settled = false;
+    const ready = transport.ready().then(() => {
+      settled = true;
+    });
+
+    const handle = handlerOf(transport);
+
+    // Anything else leaves it pending, the notification being the one message
+    // that says the worker's entry has run.
+    handle(new MessageEvent("message", { data: { msgId: 1 } }));
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    handle(
+      new MessageEvent("message", {
+        data: { type: TransportNotificationType.WorkerReady },
+      }),
+    );
+    await ready;
+    expect(settled).toBe(true);
+
+    await transport.dispose();
+  });
+});
+
 describe("WebWorkerRuntimeTransport worker-console re-emit", () => {
   it("re-emits forwarded worker console at the matching level and stops", async () => {
     const transport = makeTransport();
@@ -57,28 +86,42 @@ describe("WebWorkerRuntimeTransport worker-console re-emit", () => {
 
       handle(
         new MessageEvent("message", {
-          data: { __workerConsole: { level: "error", text: "kaboom" } },
+          data: {
+            type: TransportNotificationType.WorkerConsole,
+            level: "error",
+            text: "kaboom",
+          },
         }),
       );
       handle(
         new MessageEvent("message", {
-          data: { __workerConsole: { level: "warn", text: "careful" } },
-        }),
-      );
-      // A level with no matching console method falls back to console.log.
-      handle(
-        new MessageEvent("message", {
-          data: { __workerConsole: { level: "fatal", text: "fallback" } },
+          data: {
+            type: TransportNotificationType.WorkerConsole,
+            level: "warn",
+            text: "careful",
+          },
         }),
       );
 
       expect(calls).toEqual([
         ["error", "[worker] kaboom"],
         ["warn", "[worker] careful"],
-        ["log", "[worker] fallback"],
       ]);
-      // None of these were treated as IPC messages.
+      // Neither was treated as an IPC message.
       expect(emitted).toEqual([]);
+
+      // A level outside the forwarded roster is not this transport's traffic,
+      // so it is forwarded on rather than logged. The roster is one constant
+      // that the worker's bridge posts from and this transport recognizes by,
+      // so nothing the bridge sends can land here.
+      const offRoster = {
+        type: TransportNotificationType.WorkerConsole,
+        level: "fatal",
+        text: "not console traffic",
+      };
+      handle(new MessageEvent("message", { data: offRoster }));
+      expect(calls).toHaveLength(2);
+      expect(emitted).toEqual([offRoster]);
     } finally {
       console.log = realConsole.log;
       console.warn = realConsole.warn;

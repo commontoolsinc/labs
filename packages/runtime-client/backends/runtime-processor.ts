@@ -182,6 +182,7 @@ import {
 } from "../protocol/mod.ts";
 import type { VDomOp } from "../protocol/types.ts";
 import { cellRefToKey } from "../shared/utils.ts";
+import { postToClient } from "./post-to-client.ts";
 import {
   postContextualRuntimeError,
   postRuntimeError,
@@ -605,7 +606,7 @@ export class RuntimeProcessor {
     // consults it from its beforeunload handler, so a reload with unconfirmed
     // writes prompts the user instead of silently dropping them.
     storageManager.subscribePendingCommits((pending) => {
-      self.postMessage({
+      postToClient({
         type: NotificationType.PendingWritesChanged,
         pending,
       });
@@ -623,7 +624,7 @@ export class RuntimeProcessor {
         telemetry,
       ),
       consoleHandler: ({ metadata, method, args }) => {
-        self.postMessage({
+        postToClient({
           type: NotificationType.ConsoleMessage,
           metadata,
           method,
@@ -634,7 +635,7 @@ export class RuntimeProcessor {
 
       navigateCallback: (target) => {
         const link = parseLink(target.getAsLink()) as NormalizedFullLink;
-        self.postMessage({
+        postToClient({
           type: NotificationType.NavigateRequest,
           targetCellRef: link,
         });
@@ -1096,10 +1097,10 @@ export class RuntimeProcessor {
       // in a microtask so that the subscription response returns
       // before a notification fires.
       queueMicrotask(() =>
-        self.postMessage({
+        postToClient({
           type: NotificationType.CellUpdate,
           cell: request.cell,
-          value: converted,
+          value: converted as JSONValue,
           ...(request.includeCfcLabel ? { cfcLabel: redactedLabel } : {}),
         })
       );
@@ -1628,7 +1629,7 @@ export class RuntimeProcessor {
   #onTelemetry = (event: Event) => {
     if (!this.#telemetryEnabled) return;
     const marker = (event as RuntimeTelemetryEvent).marker;
-    self.postMessage({
+    postToClient({
       type: NotificationType.Telemetry,
       marker,
     });
@@ -2002,7 +2003,7 @@ export class RuntimeProcessor {
       membershipProvider: this.renderMembershipProvider,
       onOps: (ops: VDomOp[]) => {
         const batchId = this.vdomBatchIdCounter++;
-        self.postMessage({
+        postToClient({
           type: NotificationType.VDomBatch,
           batchId,
           ops,

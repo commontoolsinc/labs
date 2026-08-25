@@ -266,7 +266,8 @@ export class VDomRenderer {
 
       // Track root node ID if provided (for cleanup)
       if (notification.rootId !== undefined) {
-        this.rootNodeId = notification.rootId > 0 ? notification.rootId : null;
+        const rootId = notification.rootId;
+        this.rootNodeId = (rootId !== null) && (rootId > 0) ? rootId : null;
       }
 
       if (notification.mountId !== undefined) {

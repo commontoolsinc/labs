@@ -18,8 +18,12 @@ import {
   isIPCClientNotification,
   RequestType,
   RuntimeErrorCode,
+  TransportNotificationType,
+  WORKER_CONSOLE_LEVELS,
+  WorkerConsoleLevel,
 } from "../../protocol/mod.ts";
 import { RuntimeProcessor } from "../mod.ts";
+import { postToClient } from "../post-to-client.ts";
 
 // Count-only ledger of request traffic as seen by the worker: one
 // `received/<type>` per request that reached this message handler and one
@@ -68,14 +72,12 @@ const loopLagLogger = getLogger("runner.loop", { enabled: false });
 let worker: RuntimeProcessor | undefined;
 let workerInitialization: Promise<RuntimeProcessor> | undefined;
 
-const CONSOLE_LEVELS = ["log", "warn", "error"] as const;
-type ConsoleLevel = (typeof CONSOLE_LEVELS)[number];
 type ConsoleMethod = (...args: unknown[]) => void;
 
 // The worker's original console methods, saved while the bridge is installed.
 // `undefined` means the bridge is off and `console` is untouched, so disabled
 // forwarding adds no per-log cost.
-let savedConsole: Record<ConsoleLevel, ConsoleMethod> | undefined;
+let savedConsole: Record<WorkerConsoleLevel, ConsoleMethod> | undefined;
 
 function formatConsoleArg(arg: unknown): string {
   if (typeof arg === "string") return arg;
@@ -92,28 +94,27 @@ function formatConsoleArg(arg: unknown): string {
 
 /**
  * Patch the worker's `console.log`/`warn`/`error` so each call also posts a
- * structured `{ __workerConsole: { level, text } }` message that the web-worker
- * transport re-emits on the page console. The original method is called first,
- * so nothing is lost in the worker's own console. No-op if already installed.
+ * `WorkerConsoleNotification` that the web-worker transport re-emits on the
+ * page console. The original method is called first, so nothing is lost in the
+ * worker's own console. No-op if already installed.
  */
 function installWorkerConsoleBridge(): void {
   if (savedConsole) return;
-  const saved: Record<ConsoleLevel, ConsoleMethod> = {
+  const saved: Record<WorkerConsoleLevel, ConsoleMethod> = {
     log: console.log,
     warn: console.warn,
     error: console.error,
   };
   savedConsole = saved;
 
-  for (const level of CONSOLE_LEVELS) {
+  for (const level of WORKER_CONSOLE_LEVELS) {
     console[level] = (...args: unknown[]) => {
       saved[level].apply(console, args);
       try {
-        self.postMessage({
-          __workerConsole: {
-            level,
-            text: args.map(formatConsoleArg).join(" "),
-          },
+        postToClient({
+          type: TransportNotificationType.WorkerConsole,
+          level,
+          text: args.map(formatConsoleArg).join(" "),
         });
       } catch {
         // A non-cloneable payload or a closed channel must not break the
@@ -129,7 +130,7 @@ function installWorkerConsoleBridge(): void {
  */
 function uninstallWorkerConsoleBridge(): void {
   if (!savedConsole) return;
-  for (const level of CONSOLE_LEVELS) {
+  for (const level of WORKER_CONSOLE_LEVELS) {
     console[level] = savedConsole[level];
   }
   savedConsole = undefined;
@@ -196,7 +197,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
       // (e.g. a non-cloneable payload) the catch below records a
       // `responded-error/*` instead, so the ledger never double-counts one
       // request as both a success and an error.
-      self.postMessage({ msgId: message.msgId });
+      postToClient({ msgId: message.msgId });
       ipcLogger.debug(`responded/${request.type}`, () => []);
       return;
     }
@@ -206,7 +207,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
     // of runtime initialization, so it is answered before the init check.
     if (request.type === RequestType.SetForwardWorkerConsole) {
       setWorkerConsoleBridge(request.enabled);
-      self.postMessage({ msgId });
+      postToClient({ msgId });
       ipcLogger.debug(`responded/${request.type}`, () => []);
       return;
     }
@@ -218,7 +219,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
       // After disposal, silently ack any late-arriving requests.
       // Components may still be unsubscribing or finishing in-flight
       // operations during teardown — no point erroring on these.
-      self.postMessage({ msgId });
+      postToClient({ msgId });
       ipcLogger.debug(`responded/${request.type}`, () => []);
       return;
     }
@@ -235,7 +236,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
     const payload: IPCRemoteResponse = response !== undefined
       ? { msgId, data: response }
       : { msgId };
-    self.postMessage(payload);
+    postToClient(payload);
     ipcLogger.debug(`responded/${request.type}`, () => []);
   } catch (error) {
     console.error("[RuntimeWorker] Error:", error);
@@ -244,7 +245,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
     const code = error instanceof CompilerStackLoadError
       ? RuntimeErrorCode.CompilerStackLoadFailed
       : undefined;
-    self.postMessage({
+    postToClient({
       msgId: message.msgId,
       error: error instanceof Error ? error.message : String(error),
       ...(code ? { code } : {}),
@@ -252,8 +253,12 @@ self.addEventListener("message", async (event: MessageEvent) => {
   }
 });
 
-if (typeof self !== "undefined" && self.postMessage) {
-  // This is a web worker transport only message, coordinating
-  // with the client indicating the web worker is active
-  self.postMessage("READY");
+// `postMessage` is absent from a main-thread global, where a test importing
+// this entry to drive the message handler runs.
+if (
+  (typeof self !== "undefined") && (typeof self.postMessage === "function")
+) {
+  // The transport's own traffic, not the runtime's: it tells the client this
+  // entry has run and the listener above is installed.
+  postToClient({ type: TransportNotificationType.WorkerReady });
 }
