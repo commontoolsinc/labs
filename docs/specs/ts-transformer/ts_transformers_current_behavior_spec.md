@@ -303,8 +303,9 @@ On call `receiver.get()` (no args):
     - a **`pattern` / `render` callback parameter** (including via destructured
       binding elements), or
     - a local variable whose initializer is a **reactive-origin call** (after
-      stripping non-null/parenthesized/cast wrappers and property/element-access
-      tails), as defined by `isReactiveOriginCall` / the runtime registry (§5):
+      stripping the transparent wrapper set — parentheses, `as`, `<T>`,
+      `satisfies`, `!` — and property/element-access tails), as defined by
+      `isReactiveOriginCall` / the runtime registry (§5):
       reactive-origin builders (`pattern`, `computed`, `lift`, `handler`,
       `action`, `render`), the lift-applied shape, `ifElse` / `when` / `unless`,
       cell factories / `Cell.for`, `wish`, `generateObject`, `generateText`, and
