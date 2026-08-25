@@ -42,6 +42,7 @@ export {
 export {
   isFabricContainerValue,
   isFabricObjectOrArray,
+  isFabricPlainContainer,
   isFabricPlainObject,
   isValidFabricPlainObject,
   isValidFabricValue,

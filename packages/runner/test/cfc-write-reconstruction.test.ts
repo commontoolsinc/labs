@@ -9,9 +9,10 @@
  * bare envelope `{}`) and mis-authorizes it.
  */
 
-import { assertEquals, assertStrictEquals } from "@std/assert";
+import { assertEquals, assertStrictEquals, assertThrows } from "@std/assert";
 
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 
 import { writeDetailValueForTarget } from "../src/cfc/prepare.ts";
@@ -226,4 +227,38 @@ Deno.test("writeDetailValueForTarget: composition preserves large off-spine subt
         `copy-on-write spine-thawing, not a full deep clone).`,
     );
   }
+});
+
+// A `FabricInstance` holds its state privately, so an overlay path addresses
+// nothing in one. Both arms are covered: the base itself, and an instance
+// nested deeper -- reached only through a descendant's parent path, which the
+// base check does not see.
+Deno.test("writeDetailValueForTarget: refuses an overlay onto a `FabricInstance` base", () => {
+  const err = FabricError.fromNativeError(new Error("boom"));
+  const tx = txWith([
+    detail(["value"], deepFreeze(err)),
+    detail(["value", "extra"], 42),
+  ]);
+
+  assertThrows(
+    () => writeDetailValueForTarget(tx, target([]), "value"),
+    Error,
+    "FabricInstance",
+  );
+  assertEquals(Object.getOwnPropertyNames(err), []);
+});
+
+Deno.test("writeDetailValueForTarget: refuses an overlay through a nested `FabricInstance`", () => {
+  const err = FabricError.fromNativeError(new Error("boom"));
+  const tx = txWith([
+    detail(["value"], deepFreeze({ err })),
+    detail(["value", "err", "extra"], 42),
+  ]);
+
+  assertThrows(
+    () => writeDetailValueForTarget(tx, target([]), "value"),
+    Error,
+    "FabricInstance",
+  );
+  assertEquals(Object.getOwnPropertyNames(err), []);
 });

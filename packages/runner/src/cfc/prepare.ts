@@ -10,6 +10,7 @@ import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-pri
 import {
   cloneForMutation,
   type CloneForMutationResult,
+  FabricInstance,
   FabricPrimitive,
   isFabricObjectOrArray,
   valueEqual,
@@ -27,6 +28,7 @@ import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { encodePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { refuseFabricInstance } from "../fabric-special-object.ts";
 import {
   containsExternalSchemaRef,
   decomposeSchema,
@@ -2607,6 +2609,20 @@ export const writeDetailValueForTarget = (
       rel.slice(0, -1),
       { createMissing: true, nextKeyAfterPath: leaf },
     );
+    if (thawed.pathValue instanceof FabricInstance) {
+      // An instance is a container, but its state is private, so `leaf`
+      // addresses nothing in it: assigning through one would leave an own
+      // property the codec cannot persist. This is every overlay path's
+      // parent, the base's own included, so it is the only check needed.
+      //
+      // TODO(danfuzz): descend by codec-mediated traversal into instance
+      // state, at which point an overlay onto one becomes a walk rather than
+      // a refusal.
+      refuseFabricInstance(
+        thawed.pathValue,
+        "when overlaying deeper CFC field-writes",
+      );
+    }
     setValueAtPath(
       thawed.pathValue as Record<PropertyKey, unknown> | unknown[],
       [leaf],
