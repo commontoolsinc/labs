@@ -654,6 +654,45 @@ describe("bulk-repair", () => {
       expect((await rawInput(b)).seed).toBe("bravo");
     });
 
+    it("says the state is unknown when the failed piece cannot be re-read", async () => {
+      const a = await member("alpha");
+      const holder = await seedHolder([a]);
+      // The connection drops between the failed write and the state check:
+      // once the fixer has run (so selection and the row's own read are
+      // done), every further load of the piece fails. The wrapper delegates
+      // everything else, bound so the controller's private state still
+      // works.
+      let armed = false;
+      const flaky = new Proxy(pieces, {
+        get(target, prop, receiver) {
+          if (prop === "get") {
+            return (id: string, run?: boolean) => {
+              if (armed && id === a.id) {
+                return Promise.reject(new Error("the connection dropped"));
+              }
+              return target.get(id, run);
+            };
+          }
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+
+      const report = await repairPieces(flaky as never, {
+        selector: collectionOf(holder),
+        fixer: (d) => {
+          armed = true;
+          // The answer breaks the schema, so the write path refuses it and
+          // the state check is what runs next.
+          return { ...d, seed: 7 };
+        },
+        apply: true,
+      });
+
+      expect(report.rows.map((row) => row.verdict)).toEqual(["failed"]);
+      expect(report.rows[0].problem).toContain("state is unknown");
+    });
+
     it("reports every refusal on a dry run instead of stopping", async () => {
       const a = await member("alpha");
       const b = await member("bravo");
