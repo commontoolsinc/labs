@@ -664,6 +664,73 @@ describe("schema-doc-sync", () => {
     expect(replica.getDocument("of:heal-carrier")).toEqual(carrierDoc);
   });
 
+  it("absorbs a doc whose cid arrives in a LATER frame, with no re-delivery of the doc (the elision shape)", () => {
+    const depSchema = {
+      type: "string",
+      title: "absorbs-late-cid",
+    } as const;
+    const depHash = internSchemaAsTaggedHashString(depSchema);
+    const provider = readerStorage.open(space);
+    const replica = provider.replica as unknown as {
+      applySessionSync(sync: unknown, type: string): void;
+      getDocument(uri: string): unknown;
+    };
+    const carrierDoc = {
+      value: {
+        linked: {
+          "/": {
+            [LINK_V1_TAG]: {
+              id: "of:absorb-target",
+              path: [],
+              schema: { $ref: `cid:${depHash}` },
+            },
+          },
+        },
+      },
+    };
+    // Frame 1: the mentioning doc arrives BEFORE the cid it names. The
+    // client's contract is to ABSORB every frame the server sends —
+    // never to dismiss one (OW61's owner ruling, 2026-08-24). Holding
+    // the doc back from the visible state is fail-closed and correct;
+    // DISCARDING it is the defect, because of what frame 2 cannot do.
+    replica.applySessionSync({
+      type: "sync",
+      fromSeq: 900_000,
+      toSeq: 900_001,
+      upserts: [
+        {
+          branch: "",
+          id: "of:absorb-carrier",
+          scope: "space",
+          seq: 1,
+          doc: carrierDoc,
+        },
+      ],
+      removes: [],
+    }, "integrate");
+    // Frame 2: the cid sibling ALONE. The server elides an already-
+    // delivered cid doc and never re-sends an unchanged carrier, so
+    // this is the only further information this session will ever
+    // carry about the pair — there is no full evaluation coming. The
+    // carrier must become resident off the client's own retained copy.
+    replica.applySessionSync({
+      type: "sync",
+      fromSeq: 900_001,
+      toSeq: 900_002,
+      upserts: [
+        {
+          branch: "",
+          id: `cid:${depHash}`,
+          scope: "space",
+          seq: 2,
+          doc: { value: depSchema },
+        },
+      ],
+      removes: [],
+    }, "integrate");
+    expect(replica.getDocument("of:absorb-carrier")).toEqual(carrierDoc);
+  });
+
   it("the background consumer survives a frame that fails to apply and keeps consuming", async () => {
     const provider = readerStorage.open(space);
     const replica = provider.replica as unknown as {

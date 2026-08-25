@@ -188,6 +188,19 @@ const pendingPatchLogger = getLogger("storage.v2.pending-patch", {
 
 const EMPTY_OVERLAY: ReadonlyMap<string, unknown> = new Map();
 
+/**
+ * The arrival validator's verdict on one frame: which upserts must not
+ * apply, and which of those are merely WAITING on a schema document
+ * (keyed by the dependency hashes each still needs). A deferred entry is
+ * retained for release; a quarantined-but-not-deferred entry — a forged
+ * replacement for a content-addressed id — is dropped outright, because
+ * no later arrival can make it applicable.
+ */
+interface ArrivalValidation {
+  quarantined: Set<string>;
+  deferred: Map<string, Set<string>>;
+}
+
 function withCommitTiming<T>(
   keys: string[],
   fn: () => T,
@@ -2512,6 +2525,29 @@ class SpaceReplica implements ISpaceReplica {
   // whose cid: pull is in flight or has succeeded; a failed pull removes
   // its entry so a later frame can retry.
   readonly #kickedCfcSchemaPulls = new Set<string>();
+  /**
+   * Documents ABSORBED but not yet applicable: they arrived naming a
+   * `cid:` schema document this replica cannot resolve yet. The client's
+   * contract is to absorb every frame the server sends and never dismiss
+   * one (verification-coverage.md OW61, owner ruling 2026-08-24) — and
+   * the server, by design, never re-sends an unchanged document, so a
+   * dropped entry is lost for the session. Keyed by upsert id (one
+   * entry per id: a newer arrival supersedes an older park), each
+   * holding the upsert verbatim and the dependency hashes it waits on.
+   * Released — re-validated and applied — as soon as those hashes
+   * resolve, from any later frame or from #kickedSchemaClosurePulls.
+   */
+  readonly #parkedOnSchemaClosure = new Map<string, {
+    upsert: SessionSync["upserts"][number];
+    waitingOn: Set<string>;
+  }>();
+  /** Hydration dedupe for #parkedOnSchemaClosure's missing hashes; a
+   * failed pull removes its entry so a later frame can retry. */
+  readonly #kickedSchemaClosurePulls = new Set<string>();
+  /** Set while the release loop below is draining, so a nested
+   * applySessionSync (the released entries' own frame) does not start a
+   * second drain. */
+  #releasingParkedClosure = false;
   readonly #updatePromises = new Set<Promise<void>>();
   readonly #sinks = new Map<
     string,
@@ -5362,9 +5398,12 @@ class SpaceReplica implements ISpaceReplica {
    * and a forged local copy fails even when the realm registry holds a
    * valid twin from another space.
    *
-   * @returns the ids of the frame's upserts that must NOT apply.
+   * @returns the ids of the frame's upserts that must NOT apply, split
+   * into the ones DEFERRED on an unresolved schema ref (retained for
+   * release, keyed by the hashes they wait on) and the ones dropped
+   * outright.
    */
-  #validateArrivedSchemaDocuments(sync: SessionSync): Set<string> {
+  #validateArrivedSchemaDocuments(sync: SessionSync): ArrivalValidation {
     const registered: [string, JSONSchema][] = [];
     // Dependency hash → every delivered document id that embeds it: the
     // quarantine set on a violation, and the violation report.
@@ -5387,6 +5426,19 @@ class SpaceReplica implements ISpaceReplica {
     // in the same frame drops with the offender — strictly less damage
     // than the whole-frame rejection this replaces (review note S1).
     const quarantined = new Set<string>();
+    // Deferred entries and the dependency hashes each still waits on.
+    // A FORGED cid replacement below is a hard drop and never lands
+    // here: its content violates content addressing, so no later
+    // arrival can make it applicable.
+    const deferred = new Map<string, Set<string>>();
+    const defer = (id: string, hash: string) => {
+      let waiting = deferred.get(id);
+      if (waiting === undefined) {
+        waiting = new Set();
+        deferred.set(id, waiting);
+      }
+      waiting.add(hash);
+    };
     for (const remove of sync.removes) {
       if (typeof remove.id === "string") deletedInFrame.add(remove.id);
     }
@@ -5468,6 +5520,7 @@ class SpaceReplica implements ISpaceReplica {
           !this.#isVerifiedSchemaDocDelivered(dep, overlay)
         ) {
           for (const referrer of referrers) {
+            defer(referrer, dep);
             if (quarantined.has(referrer)) continue;
             quarantined.add(referrer);
             overlay.delete(referrer);
@@ -5488,7 +5541,7 @@ class SpaceReplica implements ISpaceReplica {
         }
       }
     }
-    return quarantined;
+    return { quarantined, deferred };
   }
 
   /**
@@ -5546,14 +5599,35 @@ class SpaceReplica implements ISpaceReplica {
     // loud diagnostic — never half-installed, never a process kill; see
     // #validateArrivedSchemaDocuments), and the rest of the frame
     // applies.
-    const quarantined = this.#validateArrivedSchemaDocuments(sync);
+    const { quarantined, deferred } = this.#validateArrivedSchemaDocuments(
+      sync,
+    );
     if (quarantined.size > 0) {
+      // Absorb before filtering: a DEFERRED entry is retained verbatim
+      // so it can be applied once the schema document it names resolves.
+      // Dropping it here would lose it for the session — the server
+      // never re-sends an unchanged document (OW61's elision design).
+      for (const upsert of sync.upserts) {
+        const id = upsert.id;
+        if (typeof id !== "string") continue;
+        const waitingOn = deferred.get(id);
+        if (waitingOn === undefined) continue;
+        this.#parkedOnSchemaClosure.set(id, { upsert, waitingOn });
+      }
       sync = {
         ...sync,
         upserts: sync.upserts.filter((upsert) =>
           typeof upsert.id !== "string" || !quarantined.has(upsert.id)
         ),
       };
+    }
+    // An id this frame DID apply supersedes any older parked copy of it.
+    if (this.#parkedOnSchemaClosure.size > 0) {
+      for (const upsert of sync.upserts) {
+        if (typeof upsert.id === "string") {
+          this.#parkedOnSchemaClosure.delete(upsert.id);
+        }
+      }
     }
 
     // A keyed frame (a lease-holder session's — server-execution v2 stage
@@ -5754,6 +5828,93 @@ class SpaceReplica implements ISpaceReplica {
       }
     }
     this.hydrateArrivedCfcSchemaRefs(sync);
+    this.releaseParkedSchemaClosures(type);
+  }
+
+  /**
+   * Apply every parked entry whose schema documents now resolve, and pull
+   * the ones still missing.
+   *
+   * The release is a real frame: the parked upserts re-enter
+   * `applySessionSync`, so they are re-validated (a stale park cannot
+   * install unverified content) and integrate through the same
+   * notification path a delivered frame does. Draining is iterative
+   * because a released entry may itself be a schema document that frees
+   * further parks; `#releasingParkedClosure` keeps the nested apply from
+   * starting a second drain, and each pass removes what it releases, so
+   * the loop is bounded by the park's size.
+   *
+   * Whatever stays parked is missing a document this replica has never
+   * seen. Pull it: under elision the server will not volunteer it again,
+   * so the pull is what turns "absorbed but not yet applicable" into
+   * applied without waiting for a full evaluation.
+   */
+  private releaseParkedSchemaClosures(type: "pull" | "integrate"): void {
+    if (
+      this.#releasingParkedClosure || this.#parkedOnSchemaClosure.size === 0
+    ) {
+      return;
+    }
+    this.#releasingParkedClosure = true;
+    try {
+      while (true) {
+        const releasable: SessionSync["upserts"][number][] = [];
+        for (const [id, parked] of this.#parkedOnSchemaClosure) {
+          const resolved = [...parked.waitingOn].every((hash) =>
+            this.#isVerifiedSchemaDocDelivered(hash, EMPTY_OVERLAY)
+          );
+          if (!resolved) continue;
+          releasable.push(parked.upsert);
+          this.#parkedOnSchemaClosure.delete(id);
+        }
+        if (releasable.length === 0) break;
+        this.applySessionSync({
+          type: "sync",
+          fromSeq: 0,
+          toSeq: 0,
+          upserts: releasable,
+          removes: [],
+        } as SessionSync, type);
+      }
+    } finally {
+      this.#releasingParkedClosure = false;
+    }
+    this.hydrateParkedSchemaClosures();
+  }
+
+  /** Pull the `cid:` documents the park is still waiting on. Deduped
+   * while a pull is in flight or has delivered; a failure or an empty
+   * completion re-arms the hash so the next arriving frame kicks
+   * again. Mirrors `hydrateArrivedCfcSchemaRefs`, whose refs are the
+   * metadata class this one's link-position refs sit beside. */
+  private hydrateParkedSchemaClosures(): void {
+    const missing = new Set<string>();
+    for (const parked of this.#parkedOnSchemaClosure.values()) {
+      for (const hash of parked.waitingOn) {
+        if (this.#isVerifiedSchemaDocDelivered(hash, EMPTY_OVERLAY)) continue;
+        if (this.#kickedSchemaClosurePulls.has(hash)) continue;
+        missing.add(hash);
+      }
+    }
+    for (const hash of missing) {
+      this.#kickedSchemaClosurePulls.add(hash);
+      queueMicrotask(() => {
+        this.sync(`cid:${hash}` as URI)
+          .then((result) => {
+            if (
+              result.error !== undefined ||
+              !this.#isVerifiedSchemaDocDelivered(hash, EMPTY_OVERLAY)
+            ) {
+              // Not installed server-side yet, or the pull failed:
+              // re-arm so a later frame retries instead of the window
+              // going permanent for the session.
+              this.#kickedSchemaClosurePulls.delete(hash);
+            }
+          }, () => {
+            this.#kickedSchemaClosurePulls.delete(hash);
+          });
+      });
+    }
   }
 
   /** Schema-hash hydration for arrived metadata (verification-coverage.md
