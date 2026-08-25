@@ -7523,9 +7523,10 @@ supply; OW29/OW32/OW34 closed):
     was asked "why do we still need this approach" and could not
     answer from the boards it had). PR #6262 = main + the
     resume-watermark fix ALONE + the lane flip, with no park, no
-    pull and no escalation in the tree. Result: FIVE pattern shards
-    red (1, 2, 6, 9, 10) and package runtime-client red — against
-    board 4's single red shard and 3/3 package lanes. So the two
+    pull and no escalation in the tree. Result: SIX pattern shards
+    red (1, 2, 6, 8, 9, 10 — only 3, 4, 5 and 7 green) and package
+    runtime-client red — against board 4's single red shard and 3/3
+    package lanes. So the two
     halves are COMPLEMENTARY, not redundant, and the client-side
     absorb machinery stays: the server fix stops the delivery model
     from lying about what a resumed client holds, and the client fix
