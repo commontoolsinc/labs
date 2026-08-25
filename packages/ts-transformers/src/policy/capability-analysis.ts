@@ -19,7 +19,12 @@ import {
   type UnreadableCellArgument,
 } from "../core/mod.ts";
 import { isBrandedCellType } from "../transformers/cell-type.ts";
-import { unwrapAssertCapture, unwrapExpression } from "../utils/expression.ts";
+import {
+  isTransparentWrapper,
+  outermostTransparentWrapper,
+  unwrapAssertCapture,
+  unwrapExpression,
+} from "../utils/expression.ts";
 import { decodePath, encodePath } from "../utils/path-serialization.ts";
 import { getKnownComputedKeyPathSegment } from "../utils/reactive-keys.ts";
 import {
@@ -702,14 +707,7 @@ function isBooleanConditionUsage(expression: ts.Expression): boolean {
   const parent = expression.parent;
   if (!parent) return false;
 
-  if (
-    (ts.isParenthesizedExpression(parent) ||
-      ts.isAsExpression(parent) ||
-      ts.isTypeAssertionExpression(parent) ||
-      ts.isSatisfiesExpression(parent) ||
-      ts.isNonNullExpression(parent)) &&
-    parent.expression === expression
-  ) {
+  if (isTransparentWrapper(parent) && parent.expression === expression) {
     return isBooleanConditionUsage(parent);
   }
 
@@ -753,52 +751,8 @@ function isBooleanConditionUsage(expression: ts.Expression): boolean {
   return false;
 }
 
-function unwrapIdentifierUsageSite(node: ts.Identifier): ts.Expression {
-  let current: ts.Expression = node;
-  while (true) {
-    const parent = current.parent;
-    if (!parent) {
-      return current;
-    }
-    if (
-      (ts.isParenthesizedExpression(parent) ||
-        ts.isAsExpression(parent) ||
-        ts.isTypeAssertionExpression(parent) ||
-        ts.isSatisfiesExpression(parent) ||
-        ts.isNonNullExpression(parent)) &&
-      parent.expression === current
-    ) {
-      current = parent;
-      continue;
-    }
-    return current;
-  }
-}
-
-function unwrapExpressionUsageSite(node: ts.Expression): ts.Expression {
-  let current = node;
-  while (true) {
-    const parent = current.parent;
-    if (!parent) {
-      return current;
-    }
-    if (
-      (ts.isParenthesizedExpression(parent) ||
-        ts.isAsExpression(parent) ||
-        ts.isTypeAssertionExpression(parent) ||
-        ts.isSatisfiesExpression(parent) ||
-        ts.isNonNullExpression(parent)) &&
-      parent.expression === current
-    ) {
-      current = parent;
-      continue;
-    }
-    return current;
-  }
-}
-
 function isPassThroughIdentifierUsage(node: ts.Identifier): boolean {
-  const usage = unwrapIdentifierUsageSite(node);
+  const usage = outermostTransparentWrapper(node);
   const parent = usage.parent;
   if (!parent) return false;
 
@@ -891,14 +845,7 @@ function isOptionalAliasInitializerMemberUsage(usage: ts.Expression): boolean {
       current = parent;
       continue;
     }
-    if (
-      (ts.isParenthesizedExpression(parent) ||
-        ts.isAsExpression(parent) ||
-        ts.isTypeAssertionExpression(parent) ||
-        ts.isSatisfiesExpression(parent) ||
-        ts.isNonNullExpression(parent)) &&
-      parent.expression === current
-    ) {
+    if (isTransparentWrapper(parent) && parent.expression === current) {
       current = parent;
       continue;
     }
@@ -920,12 +867,7 @@ function getIdentityArrayLocalNameForElementUsage(
   while (current.parent) {
     const parentNode = current.parent;
     if (
-      (ts.isParenthesizedExpression(parentNode) ||
-        ts.isAsExpression(parentNode) ||
-        ts.isTypeAssertionExpression(parentNode) ||
-        ts.isSatisfiesExpression(parentNode) ||
-        ts.isNonNullExpression(parentNode)) &&
-      parentNode.expression === current
+      isTransparentWrapper(parentNode) && parentNode.expression === current
     ) {
       current = parentNode;
       continue;
@@ -2424,7 +2366,7 @@ export function analyzeFunctionCapabilities(
           const suppressOrdinaryRead = () => {
             handled.add(index);
             signatureCapabilityArgumentUses.add(
-              unwrapExpressionUsageSite(argument.expression),
+              outermostTransparentWrapper(argument.expression),
             );
           };
           if (spreadSource) {
@@ -2508,7 +2450,7 @@ export function analyzeFunctionCapabilities(
 
         handled.add(index);
         signatureCapabilityArgumentUses.add(
-          unwrapExpressionUsageSite(capabilityArgument),
+          outermostTransparentWrapper(capabilityArgument),
         );
 
         if (source.dynamic) {
@@ -2756,7 +2698,7 @@ export function analyzeFunctionCapabilities(
           const source = aliases.get(node.text);
           if (source && !isMemberRootIdentifier(node)) {
             const resolvedSource = materializeSourceRef(source);
-            const usage = unwrapIdentifierUsageSite(node);
+            const usage = outermostTransparentWrapper(node);
             const parent = usage.parent;
             if (!parent) {
               // Synthetic identifiers can temporarily be detached from parent links.
@@ -2924,7 +2866,7 @@ export function analyzeFunctionCapabilities(
             // type already supplied the capability is accounted for, same as a
             // destructured identifier; don't add a second read here.
             !signatureCapabilityArgumentUses.has(
-              unwrapExpressionUsageSite(node),
+              outermostTransparentWrapper(node),
             )
           ) {
             const ref = resolveSourceRef(node);
@@ -3136,7 +3078,7 @@ export function analyzeFunctionCapabilities(
               if (argPath.dynamic) {
                 markWildcard(receiver.root, receiver.path);
               } else {
-                const keyUsage = unwrapExpressionUsageSite(node);
+                const keyUsage = outermostTransparentWrapper(node);
                 const keyUsageParent = keyUsage.parent;
                 const isChainedIntoMemberAccess = !!(
                   keyUsageParent &&

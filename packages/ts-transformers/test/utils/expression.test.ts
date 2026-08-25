@@ -5,6 +5,7 @@ import ts from "typescript";
 
 import {
   isTransparentWrapper,
+  outermostTransparentWrapper,
   unwrapExpression,
   unwrapTransparentWrapperOnce,
 } from "../../src/utils/expression.ts";
@@ -24,6 +25,29 @@ const WRAPPERS: Readonly<
   "x!": (inner) => ts.factory.createNonNullExpression(inner),
   "partially emitted": (inner) =>
     ts.factory.createPartiallyEmittedExpression(inner),
+};
+
+/**
+ * Parses `code` with parent pointers set and returns the first identifier named
+ * `x`, whose enclosing wrappers each test then walks out of.
+ */
+const identifierX = (code: string): ts.Identifier => {
+  const sourceFile = ts.createSourceFile(
+    "t.ts",
+    code,
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  let found: ts.Identifier | undefined;
+  const walk = (candidate: ts.Node) => {
+    if (ts.isIdentifier(candidate) && candidate.text === "x") {
+      found ??= candidate;
+    }
+    ts.forEachChild(candidate, walk);
+  };
+  walk(sourceFile);
+  if (!found) throw new Error(`no identifier \`x\` in: ${code}`);
+  return found;
 };
 
 describe("expression", () => {
@@ -61,6 +85,34 @@ describe("expression", () => {
     it("returns `undefined` for an expression that is not a wrapper", () => {
       expect(unwrapTransparentWrapperOnce(ts.factory.createNumericLiteral("1")))
         .toBe(undefined);
+    });
+  });
+
+  describe("outermostTransparentWrapper()", () => {
+    it("returns the expression itself when no wrapper encloses it", () => {
+      const x = identifierX("const a = x;");
+
+      expect(outermostTransparentWrapper(x)).toBe(x);
+    });
+
+    it("returns the outermost wrapper of an enclosing chain", () => {
+      const x = identifierX("const a = ((x as T)!);");
+      // The whole initializer is the outermost thing denoting x's value.
+      let initializer: ts.Node = x;
+      while (!ts.isVariableDeclaration(initializer.parent)) {
+        initializer = initializer.parent;
+      }
+
+      expect(ts.isParenthesizedExpression(initializer)).toBe(true);
+      expect(outermostTransparentWrapper(x)).toBe(initializer);
+    });
+
+    it("stops at a parent that is not a transparent wrapper", () => {
+      const x = identifierX("const a = (x).y;");
+      const paren = x.parent;
+
+      expect(ts.isPropertyAccessExpression(paren.parent)).toBe(true);
+      expect(outermostTransparentWrapper(x)).toBe(paren);
     });
   });
 

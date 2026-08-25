@@ -36,7 +36,7 @@ import { spellingsWhere } from "@commonfabric/schema-generator/wrapper-names";
 import { TwoLevelWeakCache } from "@commonfabric/utils/two-level-weak-cache";
 import { CF_HELPERS_IDENTIFIER } from "../core/cf-helpers.ts";
 import { isCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
-import { unwrapExpression } from "../utils/expression.ts";
+import { isTransparentWrapper, unwrapExpression } from "../utils/expression.ts";
 import { getCallArgumentPosition } from "./call-arguments.ts";
 import { getEnclosingFunctionLikeDeclaration } from "./function-predicates.ts";
 import {
@@ -1624,13 +1624,7 @@ export function isConsumedByTerminalChainCall(
       return false;
     }
 
-    if (
-      ts.isParenthesizedExpression(parent) ||
-      ts.isAsExpression(parent) ||
-      ts.isTypeAssertionExpression(parent) ||
-      ts.isNonNullExpression(parent) ||
-      ts.isSatisfiesExpression(parent)
-    ) {
+    if (isTransparentWrapper(parent)) {
       current = parent;
       continue;
     }

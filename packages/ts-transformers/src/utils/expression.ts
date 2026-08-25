@@ -7,12 +7,13 @@ import { CF_HELPERS_IDENTIFIER } from "../core/cf-helpers.ts";
  * value it denotes: `(x)`, `x as T`, `<T>x`, `x satisfies T`, `x!`, and the
  * partially emitted node that carries an already-rewritten subtree.
  *
- * This is the one set the pipeline looks through, and it is read in three
- * forms so that every shape of consumer has a definition to reach for:
+ * This is the one set the pipeline looks through, and it is read in four forms
+ * so that every shape of consumer has a definition to reach for:
  * {@link isTransparentWrapper} tests a node, {@link unwrapTransparentWrapperOnce}
- * steps through a single wrapper, and {@link unwrapExpression} reaches the
- * innermost expression. A spelling added here reaches all three at once, so a
- * wrapper cannot be handled by one resolver and missed by another.
+ * steps through a single wrapper, {@link unwrapExpression} reaches the innermost
+ * expression, and {@link outermostTransparentWrapper} walks the other way, out
+ * to the expression's usage site. A spelling added here reaches all four at
+ * once, so a wrapper cannot be handled by one resolver and missed by another.
  *
  * A stripper that reads a narrower set does so deliberately, and says why at
  * its own definition.
@@ -64,6 +65,36 @@ export function unwrapExpression(expr: ts.Expression): ts.Expression {
     current = current.expression;
   }
   return current;
+}
+
+/**
+ * The outermost expression that still denotes the same value as `expr`: `expr`
+ * itself when nothing wraps it, otherwise the last transparent wrapper stacked
+ * around it.
+ *
+ * The mirror of {@link unwrapExpression}, which walks in to the innermost
+ * expression. A caller asking what an expression is *used as* wants this one,
+ * because the use sits at the outside of the stack — `f(x as T)` hands `f` the
+ * whole `x as T`, not `x`.
+ *
+ * Only a wrapper reached along the `expression` spine counts. A node standing
+ * in a wrapper's type position is not the value that wrapper wraps, so the walk
+ * stops rather than climbing past it.
+ */
+export function outermostTransparentWrapper(
+  expr: ts.Expression,
+): ts.Expression {
+  let current = expr;
+  while (true) {
+    const parent = current.parent;
+    if (
+      !parent || !isTransparentWrapper(parent) ||
+      parent.expression !== current
+    ) {
+      return current;
+    }
+    current = parent;
+  }
 }
 
 /**
