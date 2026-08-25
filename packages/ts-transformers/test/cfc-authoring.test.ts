@@ -304,6 +304,41 @@ Deno.test("static exchange-rule declarations emit a deterministic side-channel m
   assertEquals(repeated, manifests);
 });
 
+Deno.test("exchange-rule declarations survive every transparent wrapper spelling", () => {
+  // The authoring grammar reads through wrappers that do not change the value a
+  // declaration denotes. A spelling left out of that set does not fail as a
+  // wrapper problem — the rule binding simply stops resolving, and
+  // `exchangeRules()` reports the rule as invalid, which points the author at
+  // the wrong thing entirely.
+  const ruleSource = (suffix: string) => `
+    export const releaseToReviewer = exchangeRule({
+      appliesTo: THIS_POLICY,
+      pre: {
+        integrity: [cfcPattern.hasRole(
+          v("reviewer"),
+          THIS_POLICY.subject,
+          "reader",
+        )],
+      },
+      post: {
+        addAlternatives: [cfcPattern.user(v("reviewer"))],
+      },
+    })${suffix};
+
+    export const releaseRules = exchangeRules([releaseToReviewer]);
+  `;
+
+  for (const suffix of ["", " satisfies unknown", "!"]) {
+    const manifests = compilePolicySource(ruleSource(suffix));
+    assertEquals(
+      manifests.length,
+      1,
+      `expected one manifest for initializer suffix "${suffix}"`,
+    );
+    assertEquals(manifests[0]!.manifest.symbol, "releaseRules");
+  }
+});
+
 Deno.test("exchange-rule authoring rejects dynamic and unguarded declarations", async () => {
   const { diagnostics } = await validateSource(
     `/// <cts-enable />

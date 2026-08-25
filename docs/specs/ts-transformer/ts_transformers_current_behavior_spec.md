@@ -1850,10 +1850,10 @@ Behavior:
 2. evaluate literal options object — string, boolean and `null` literals,
    object and array literals, and numbers in any of their spellings (bare
    literal, sign-prefixed, or the `NaN` / `Infinity` globals, the latter only
-   where the name is not shadowed). Parentheses and the type-only assertion
-   forms (`as`, `satisfies`, `<T>x`) are transparent at any depth, including
-   nested inside a sign (`-(1 as number)`). A property whose value is none of
-   these is dropped from the options object.
+   where the name is not shadowed). The transparent wrapper set — parentheses
+   and the type-only assertion forms `as`, `satisfies`, `<T>x`, `!` — is
+   transparent at any depth, including nested inside a sign (`-(1 as number)`).
+   A property whose value is none of these is dropped from the options object.
 
    The code carries a `checker.getConstantValue()` fallback intended to recover
    a named constant or enum member. It runs, but the call returns `undefined`
