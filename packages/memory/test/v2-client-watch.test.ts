@@ -353,3 +353,62 @@ Deno.test("memory v2 session closed mid-watch-set arms no ack timer", async () =
     await server.close();
   }
 });
+
+Deno.test("memory v2 resyncWatchSet re-ships the whole closure, and answers undefined when there is no watch set", async () => {
+  const server = new Server({
+    ...testSessionOpenServerOptions,
+    store: new URL("memory://memory-v2-client-resync"),
+    subscriptionRefreshDelayMs: 0,
+  });
+  const writerClient = await connect({ transport: loopback(server) });
+  const watcherClient = await connect({ transport: loopback(server) });
+  const space = "did:key:z6Mk-memory-v2-client-resync";
+  const writer = await writerClient.mount(
+    space,
+    {},
+    testSessionOpenAuthFactory,
+  );
+  const watcher = await watcherClient.mount(
+    space,
+    {},
+    testSessionOpenAuthFactory,
+  );
+
+  try {
+    // No watch set yet: nothing to re-establish.
+    assertEquals(await watcher.resyncWatchSet(), undefined);
+
+    await writer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:resync:1",
+        value: { value: { hello: "resync" } },
+      }],
+    });
+    await watcher.watchSet([{
+      id: "root",
+      kind: "graph",
+      query: {
+        roots: [{ id: "of:resync:1", selector: { path: [], schema: false } }],
+      },
+    }]);
+
+    // A DIFFED answer would be empty here — the session cache already
+    // holds this entry from the watch.set above. The full evaluation
+    // re-ships it, which is what makes it the recovery path for a
+    // document the cache wrongly believes a replica holds.
+    const again = await watcher.resyncWatchSet();
+    assertEquals(
+      again?.sync.upserts.map((upsert) => upsert.id),
+      ["of:resync:1"],
+    );
+  } finally {
+    await watcher.close();
+    await writer.close();
+    await watcherClient.close();
+    await writerClient.close();
+    await server.close();
+  }
+});
