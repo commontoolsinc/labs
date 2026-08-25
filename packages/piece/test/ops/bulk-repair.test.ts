@@ -191,6 +191,35 @@ describe("bulk-repair", () => {
       expect(outcome.problem).toContain("not a document");
     });
 
+    it("refuses an answer the store cannot hold, wherever the defect sits", () => {
+      const fn = evaluateFixer({ seed: "a" }, (d) => ({
+        ...d,
+        wrap: { deep: () => {} },
+      }));
+      expect(fn.kind).toBe("refused");
+      if (fn.kind !== "refused") throw new Error("expected a refusal");
+      expect(fn.problem).toContain("cannot hold");
+      const ctor = evaluateFixer({ seed: "a" }, (d) => ({
+        ...d,
+        constructor: { x: 1 },
+      }));
+      expect(ctor.kind).toBe("refused");
+      if (ctor.kind !== "refused") throw new Error("expected a refusal");
+      expect(ctor.problem).toContain("cannot hold");
+    });
+
+    it("turns a classification failure into a refusal, not an escape", () => {
+      // Valid at every layer admission inspects, but too deep for the
+      // comparison machinery: the failure must become this row's refusal
+      // rather than an exception that aborts the whole evaluation.
+      let deep: Record<string, unknown> = { end: true };
+      for (let index = 0; index < 200000; index += 1) deep = { next: deep };
+      const outcome = evaluateFixer({ seed: "a" }, (d) => ({ ...d, deep }));
+      expect(outcome.kind).toBe("refused");
+      if (outcome.kind !== "refused") throw new Error("expected a refusal");
+      expect(outcome.problem).toContain("Classifying the fixer's answer");
+    });
+
     it("refuses a fixer whose two runs answer differently", () => {
       let calls = 0;
       const outcome = evaluateFixer({ seed: "a" }, (d) => {
@@ -260,6 +289,15 @@ describe("bulk-repair", () => {
       expect(outcome.kind).toBe("refused");
       if (outcome.kind !== "refused") throw new Error("expected a refusal");
       expect(outcome.problem).toContain("rows/0/note");
+      // The guard holds through a shrink too: a surviving element keeps
+      // its fields even when the array behind it got shorter.
+      const shrunk = evaluateFixer(
+        { rows: [{ id: 1, note: "keep" }, { id: 2 }] },
+        (d) => ({ ...d, rows: [{ id: 1 }] }),
+      );
+      expect(shrunk.kind).toBe("refused");
+      if (shrunk.kind !== "refused") throw new Error("expected a refusal");
+      expect(shrunk.problem).toContain("rows/0/note");
     });
 
     it("addresses a key containing the separator unambiguously", () => {
@@ -419,12 +457,16 @@ describe("bulk-repair", () => {
         fixerName: "upper-seed.ts",
       });
 
+      // Both hashes computed independently from the stored documents, so
+      // a wrong hash cannot certify itself.
+      const hashA = hashStringOf(await rawInput(a));
+      const hashB = hashStringOf(await rawInput(b));
       expect(report.rows).toEqual([
         {
           piece: a.id,
           phase: "members",
           verdict: "would-change",
-          documentHash: report.rows[0].documentHash,
+          documentHash: hashA,
           changes: [
             {
               path: "/seed",
@@ -438,10 +480,9 @@ describe("bulk-repair", () => {
           piece: b.id,
           phase: "members",
           verdict: "conforms",
-          documentHash: report.rows[1].documentHash,
+          documentHash: hashB,
         },
       ]);
-      expect(report.rows[0].documentHash).toBeDefined();
       expect(report.applied).toBe(0);
       expect(report.complete).toBe(true);
       expect((await rawInput(a)).seed).toBe("alpha");
@@ -665,7 +706,31 @@ describe("bulk-repair", () => {
         header: dry.plan.header,
         rows: [...dry.plan.rows].reverse(),
       };
-      const report = await repairPieces(pieces, {
+      // The proof of serial order is what the store holds mid-run, not the
+      // report's ordering: when the second-planned piece is fetched for
+      // its own write, the first-planned one has already landed.
+      let aSerialGets = 0;
+      let bSeedAtASerialFetch: unknown;
+      const observing = new Proxy(pieces, {
+        get(target, prop, receiver) {
+          if (prop === "get") {
+            return async (id: string, run?: boolean) => {
+              if (id === a.id && ++aSerialGets === 3) {
+                const cell = await (await target.get(b.id, false)).input
+                  .getCell();
+                await cell.pull();
+                bSeedAtASerialFetch =
+                  (cell.getRaw({ lastNode: "value" }) as { seed?: unknown })
+                    .seed;
+              }
+              return target.get(id, run);
+            };
+          }
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      const report = await repairPieces(observing as never, {
         selector: collectionOf(holder),
         fixer: upperSeed,
         fixerName: "upper-seed.ts",
@@ -673,6 +738,7 @@ describe("bulk-repair", () => {
         apply: true,
       });
       expect(report.rows.map((row) => row.piece)).toEqual([b.id, a.id]);
+      expect(bSeedAtASerialFetch).toBe("BRAVO");
 
       const truncated = {
         header: dry.plan.header,
@@ -687,6 +753,59 @@ describe("bulk-repair", () => {
           apply: true,
         }),
       ).rejects.toThrow("the selection holds pieces the plan does not name");
+    });
+
+    it("catches an unholdable answer at preflight, before anything lands", async () => {
+      const a = await member("alpha");
+      const b = await member("bravo");
+      const holder = await seedHolder([a, b]);
+
+      const report = await repairPieces(pieces, {
+        selector: collectionOf(holder),
+        // Valid for the first piece, unholdable for the second: without
+        // the admission check in preflight, the first repair would land
+        // before the second row failed at its write.
+        fixer: (d) =>
+          d.seed === "bravo"
+            ? { ...d, wrap: { deep: () => {} } } as never
+            : { ...d, seed: (d.seed as string).toUpperCase() },
+        apply: true,
+      });
+
+      expect(report.rows.map((row) => row.verdict)).toEqual([
+        "would-change",
+        "refused",
+      ]);
+      expect(report.rows[1].problem).toContain("cannot hold");
+      expect(report.applied).toBe(0);
+      expect((await rawInput(a)).seed).toBe("alpha");
+    });
+
+    it("refuses an incomplete supplied plan instead of laundering it", async () => {
+      const a = await member("alpha");
+      const holder = await seedHolder([a]);
+      const dry = await repairPieces(pieces, {
+        selector: collectionOf(holder),
+        fixer: upperSeed,
+        fixerName: "upper-seed.ts",
+      });
+
+      await expect(
+        repairPieces(pieces, {
+          selector: collectionOf(holder),
+          fixer: upperSeed,
+          fixerName: "upper-seed.ts",
+          plan: {
+            header: {
+              ...dry.plan.header,
+              problems: [{ piece: "fid1:x", problem: "unreadable" }],
+            },
+            rows: dry.plan.rows,
+          },
+          apply: true,
+        }),
+      ).rejects.toThrow("incomplete plan");
+      expect((await rawInput(a)).seed).toBe("alpha");
     });
 
     it("holds an in-memory plan to the codec's invariants", async () => {
@@ -869,6 +988,10 @@ describe("bulk-repair", () => {
       expect(report.rows[0].problem).toContain("still needs the repair");
       expect(report.applied).toBe(0);
       expect((await rawInput(a)).seed).toBe("alpha");
+      // Exactly one artifact row per piece, whatever went wrong: the
+      // emitted plan still satisfies the codec.
+      expect(() => decodePlan(encodePlan(report.plan))).not.toThrow();
+      expect(report.plan.rows.length).toBe(2);
     });
 
     it("does not repair the holder's own row on a collection selector", async () => {

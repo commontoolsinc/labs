@@ -2810,13 +2810,16 @@ class PiecePropIo implements PieceCellIo {
   /**
    * Compute-and-set in one transaction. `produce` receives the value stored
    * at `path`, read raw inside the transaction, and answers with the value
-   * to write — or `undefined`, which leaves the document unwritten while
-   * still committing the read, so a decision made on what was read holds
-   * against concurrent writers. On a commit conflict the whole closure
-   * re-runs against fresh state, `produce` included: what lands is always
-   * a function of the document the commit saw, never of an earlier read.
-   * `produce` must therefore be a pure function of its argument — it runs
-   * any number of times, and only its last answer is written.
+   * to write — or `undefined`, which leaves the document unwritten. On a
+   * commit conflict the whole closure re-runs against fresh state,
+   * `produce` included: what lands is always a function of the document
+   * the commit saw, never of an earlier read. `produce` must therefore be
+   * a pure function of its argument — it runs any number of times, and
+   * only its last answer is written. A no-write answer stages no
+   * operation, and a transaction holding only reads is not
+   * conflict-checked by storage: a caller whose decision not to write
+   * must hold against concurrent writers has to verify it with a later
+   * read, the way a write's caller verifies the write.
    */
   async edit(
     produce: (stored: unknown) => { value: unknown } | undefined,

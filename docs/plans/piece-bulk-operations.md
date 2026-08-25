@@ -92,9 +92,10 @@ the whole collection at once and names neither the offending member nor its
 position, so finding the one bad piece among a hundred has no better method
 than bisection by hand. A survey answers it in one pass.
 
-Survey is also how the other three are judged. A survey taken before a run is
-the pre-state record the plan needs; the same survey taken afterwards is the
-verification; and the difference between them is the report of what the run
+Survey is also how the reference operations are judged. A survey taken
+before a run is the pre-state record the plan needs; the same survey taken
+afterwards is the verification; and the difference between them is the
+report of what the run
 actually did. One artifact, three uses — which is why it is built first.
 
 ## The spine
@@ -149,9 +150,14 @@ resume a re-invocation rather than a separate mode.
 not a limitation to be optimized away — a parent recomputing over children
 mid-change is the failure this ordering exists to prevent.
 
-**Verify** is a separate pass, never a side effect of applying. An apply that
-exits zero is not a verdict: the source-update path reports success for a
-piece whose source committed but whose running instance failed to refresh.
+**Verify** is a separate pass, never a side effect of applying. An apply
+that exits zero is not a verdict: the source-update path reports success for
+a piece whose source committed but whose running instance failed to refresh.
+The instrument differs by operation: a reference operation is verified by
+the after-survey diff, while a repair is verified by re-reading the stored
+document and re-asking the fixer — its own separate pass, since a reference
+diff cannot see document work, and the survey-diff refuses repair rows for
+exactly that reason.
 
 **Resume** is the precondition check again: re-running the same command
 re-derives what is outstanding, skips what landed, and stops on what moved
@@ -487,8 +493,10 @@ that looks like a complete one.
 containment result, and `retained` column — run against the live board on
 day one, it answers which pieces sit on which identity and whether anything
 registered sits outside the holder; the survey-diff, which compares a survey
-against a plan or an earlier survey and is the verification every later
-stage uses; the reference a local source produces, computed without
+against a plan or an earlier survey and is the verification every
+reference operation uses — a repair's verification is re-asking its own
+fixer, and the diff refuses repair rows rather than answering about work
+it cannot see; the reference a local source produces, computed without
 compiling; and the drill.
 
 - [x] Enumeration comes from the holder's collection, and the registry is

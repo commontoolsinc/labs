@@ -32,7 +32,10 @@
  */
 
 import type { FabricValue } from "@commonfabric/api";
-import { valueEqual } from "@commonfabric/data-model/fabric-value";
+import {
+  isValidFabricValue,
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
 import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isLink } from "@commonfabric/runner";
@@ -249,27 +252,28 @@ function lostFields(
   out: string[] = [],
 ): readonly string[] {
   if (isLink(before)) return out;
-  const bothRecords = isPlainRecord(before) && isPlainRecord(after);
-  const bothArrays = Array.isArray(before) && Array.isArray(after) &&
-    before.length === after.length;
-  if (!bothRecords && !bothArrays) return out;
-  for (const key of Object.keys(before as object)) {
-    const beforeValue = (before as Record<string, unknown>)[key];
-    if (
-      bothRecords &&
-      (!Object.hasOwn(after as object, key) ||
-        ((after as Record<string, unknown>)[key] === undefined &&
-          beforeValue !== undefined))
-    ) {
-      out.push(displayPath([...path, key]));
-      continue;
+  if (isPlainRecord(before) && isPlainRecord(after)) {
+    for (const key of Object.keys(before)) {
+      const beforeValue = before[key];
+      if (
+        !Object.hasOwn(after, key) ||
+        (after[key] === undefined && beforeValue !== undefined)
+      ) {
+        out.push(displayPath([...path, key]));
+        continue;
+      }
+      lostFields(beforeValue, after[key], [...path, key], out);
     }
-    lostFields(
-      beforeValue,
-      (after as Record<string, unknown>)[key],
-      [...path, key],
-      out,
-    );
+    return out;
+  }
+  if (Array.isArray(before) && Array.isArray(after)) {
+    // An array may legitimately shrink — a dedup is a repair — but the
+    // elements that survive at overlapping positions keep their own
+    // fields, whatever happened to the length.
+    const overlap = Math.min(before.length, after.length);
+    for (let index = 0; index < overlap; index += 1) {
+      lostFields(before[index], after[index], [...path, String(index)], out);
+    }
   }
   return out;
 }
@@ -363,43 +367,66 @@ export function evaluateFixer(
       problem: "The fixer returned a value that is not a document.",
     };
   }
-  if (!storedEqual(first, second)) {
-    return {
-      kind: "refused",
-      problem: "The fixer is not a pure function of the document: two runs " +
-        "over one document answered differently.",
-    };
-  }
-  // The write replaces the whole document, so a field the fixer's answer
-  // lacks would be zeroed by it — a defect, never an intent — and a nested
-  // field is as gone as a top-level one.
-  const lost = lostFields(document, first);
-  if (lost.length > 0) {
-    return {
-      kind: "refused",
-      problem: `The fixer returned an incomplete document: ` +
-        `${lost.join(", ")} would be lost by the write.`,
-    };
-  }
-  // A reference either round-trips untouched or the document is refused: a
-  // link rewritten as a value is corrupted and a dropped one is destroyed,
-  // and neither is visible in the result until much later.
-  for (const linkPath of collectLinkPaths(document)) {
-    const kept = valueAtPath(first, linkPath);
-    if (!storedEqual(valueAtPath(document, linkPath), kept)) {
+  // The store's own admission test, over the whole answer: a function, an
+  // accessor, a class instance, an own constructor or __proto__ key — any
+  // of them deep in the answer would pass a root-only look and then fail
+  // at the write, after earlier rows had already landed. Preflight exists
+  // to find exactly that before anything is written, so the admission
+  // question is asked here, and a failure while classifying the answer is
+  // a refusal too rather than an escape.
+  try {
+    if (!isValidFabricValue(first)) {
       return {
         kind: "refused",
-        problem: `The fixer rewrote or dropped the link at ` +
-          `${linkPath.length === 0 ? "<root>" : displayPath(linkPath)}.`,
+        problem: "The fixer returned a document the store cannot hold — a " +
+          "function, an accessor, or a class instance somewhere in it.",
       };
     }
+    if (!storedEqual(first, second)) {
+      return {
+        kind: "refused",
+        problem: "The fixer is not a pure function of the document: two " +
+          "runs over one document answered differently.",
+      };
+    }
+    // The write replaces the whole document, so a field the fixer's answer
+    // lacks would be zeroed by it — a defect, never an intent — and a
+    // nested field is as gone as a top-level one.
+    const lost = lostFields(document, first);
+    if (lost.length > 0) {
+      return {
+        kind: "refused",
+        problem: `The fixer returned an incomplete document: ` +
+          `${lost.join(", ")} would be lost by the write.`,
+      };
+    }
+    // A reference either round-trips untouched or the document is refused:
+    // a link rewritten as a value is corrupted and a dropped one is
+    // destroyed, and neither is visible in the result until much later.
+    for (const linkPath of collectLinkPaths(document)) {
+      const kept = valueAtPath(first, linkPath);
+      if (!storedEqual(valueAtPath(document, linkPath), kept)) {
+        return {
+          kind: "refused",
+          problem: `The fixer rewrote or dropped the link at ` +
+            `${linkPath.length === 0 ? "<root>" : displayPath(linkPath)}.`,
+        };
+      }
+    }
+    if (storedEqual(document, first)) return { kind: "conforms" };
+    return {
+      kind: "change",
+      document: first,
+      changes: documentChanges(document, first),
+    };
+  } catch (error) {
+    return {
+      kind: "refused",
+      problem: `Classifying the fixer's answer failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
   }
-  if (storedEqual(document, first)) return { kind: "conforms" };
-  return {
-    kind: "change",
-    document: first,
-    changes: documentChanges(document, first),
-  };
 }
 
 /** What one pass over a piece's stored document decided. */
@@ -410,6 +437,10 @@ type RowDecision =
   | {
     kind: "change";
     documentHash: string;
+    /** The evaluated answer — the exact document a write must land, so
+     * the report and the write cannot describe two different evaluations
+     * of a fixer that lied to the purity probe. */
+    document: Record<string, unknown>;
     changes: readonly DocumentChange[];
   }
   | { kind: "refused"; documentHash: string; problem: string };
@@ -490,6 +521,17 @@ export async function repairPieces(
     // would refuse cannot reach a write by skipping the file: a repair row
     // without its document hash, a duplicate piece, an invalid row.
     const plan = normalizePlan(options.plan);
+    if (
+      (plan.header.problems?.length ?? 0) > 0 ||
+      (plan.header.outside?.length ?? 0) > 0
+    ) {
+      // Executing it would also launder it: the report's plan carries the
+      // fresh survey's clean header, so the incompleteness would vanish.
+      throw new Error(
+        "No repair can run from an incomplete plan: its header names " +
+          "pieces the survey did not account for.",
+      );
+    }
     if (options.fixerName === undefined) {
       throw new Error(
         "A supplied plan needs the run's fixerName: without it the plan's " +
@@ -549,6 +591,33 @@ export async function repairPieces(
       };
     });
   }
+  // The one classification both passes use, so preflight and the serial
+  // recheck cannot drift: not-document, then the fixer's own answer with
+  // landed preceding moved — a document the fixer no longer changes is in
+  // the state the operation produces, whatever it hashes to.
+  const decideFor = (
+    stored: unknown,
+    expectedHash: string | undefined,
+  ): RowDecision => {
+    if (!isPlainRecord(stored)) return { kind: "not-document" };
+    const documentHash = hashStringOf(stored);
+    const outcome = evaluateFixer(stored, options.fixer);
+    if (outcome.kind === "conforms") {
+      return { kind: "conforms", documentHash };
+    }
+    if (expectedHash !== undefined && documentHash !== expectedHash) {
+      return { kind: "moved", documentHash };
+    }
+    if (outcome.kind === "refused") {
+      return { kind: "refused", documentHash, problem: outcome.problem };
+    }
+    return {
+      kind: "change",
+      documentHash,
+      document: outcome.document,
+      changes: outcome.changes,
+    };
+  };
   const rows: RepairRow[] = [];
   const planRows: PiecePlanRow[] = [];
   let applied = 0;
@@ -569,24 +638,10 @@ export async function repairPieces(
         const controller = await pieces.get(row.piece, false);
         const cell = await controller.input.getCell();
         await cell.pull();
-        const decision = ((): RowDecision => {
-          const stored = cell.getRaw({ lastNode: "value" });
-          if (!isPlainRecord(stored)) return { kind: "not-document" };
-          const documentHash = hashStringOf(stored);
-          const outcome = evaluateFixer(stored, options.fixer);
-          if (outcome.kind === "conforms") {
-            return { kind: "conforms", documentHash };
-          }
-          if (
-            row.expectedHash !== undefined && documentHash !== row.expectedHash
-          ) {
-            return { kind: "moved", documentHash };
-          }
-          if (outcome.kind === "refused") {
-            return { kind: "refused", documentHash, problem: outcome.problem };
-          }
-          return { kind: "change", documentHash, changes: outcome.changes };
-        })();
+        const decision = decideFor(
+          cell.getRaw({ lastNode: "value" }),
+          row.expectedHash,
+        );
         preflight.set(row.piece, decision);
         if (decision.kind !== "conforms" && decision.kind !== "change") {
           startBlocked = true;
@@ -700,27 +755,6 @@ export async function repairPieces(
       emitRow(preflight.get(row.piece), false);
       continue;
     }
-    const expected = row.expectedHash;
-    const decide = (stored: unknown): RowDecision => {
-      if (!isPlainRecord(stored)) return { kind: "not-document" };
-      const documentHash = hashStringOf(stored);
-      const outcome = evaluateFixer(stored, options.fixer);
-      // Landed before moved: a document the fixer no longer changes is in
-      // the state the operation produces, whatever it hashes to now — a
-      // completed plan re-run must read as landed, not as moved. Only a
-      // document that still needs the repair and no longer matches its
-      // recorded precondition was moved by something else.
-      if (outcome.kind === "conforms") {
-        return { kind: "conforms", documentHash };
-      }
-      if (expected !== undefined && documentHash !== expected) {
-        return { kind: "moved", documentHash };
-      }
-      if (outcome.kind === "refused") {
-        return { kind: "refused", documentHash, problem: outcome.problem };
-      }
-      return { kind: "change", documentHash, changes: outcome.changes };
-    };
     try {
       const controller = await pieces.get(row.piece, false);
       const cell = await controller.input.getCell();
@@ -732,25 +766,21 @@ export async function repairPieces(
       if (options.apply === true) {
         // Evaluate-and-write in one transaction: on a commit conflict the
         // closure re-runs against fresh state, so `decision` is whatever
-        // the committed pass decided, later passes overwriting earlier.
+        // the committed pass decided, later passes overwriting earlier —
+        // and the document written is the very one that decision carries,
+        // so the report and the write cannot describe two evaluations.
         await controller.input.edit((stored) => {
-          decision = decide(stored);
-          if (decision.kind !== "change") return undefined;
-          const outcome = evaluateFixer(
-            stored as Record<string, unknown>,
-            options.fixer,
-          );
-          return outcome.kind === "change"
-            ? { value: outcome.document }
+          decision = decideFor(stored, row.expectedHash);
+          return decision.kind === "change"
+            ? { value: decision.document }
             : undefined;
         });
       } else {
-        decision = decide(cell.getRaw({ lastNode: "value" }));
+        decision = decideFor(
+          cell.getRaw({ lastNode: "value" }),
+          row.expectedHash,
+        );
       }
-      emitRow(
-        decision,
-        decision.kind === "conforms" || decision.kind === "change",
-      );
       if (decision.kind === "not-document") {
         rows.push({
           piece: row.piece,
@@ -758,6 +788,7 @@ export async function repairPieces(
           verdict: "refused",
           problem: "The stored input is not a document.",
         });
+        emitRow(decision, false);
         stopped = options.apply === true;
         continue;
       }
@@ -770,6 +801,7 @@ export async function repairPieces(
           problem: "The stored document no longer hashes to what the plan " +
             "recorded: something other than this plan changed it.",
         });
+        emitRow(decision, false);
         stopped = options.apply === true;
         continue;
       }
@@ -781,6 +813,7 @@ export async function repairPieces(
           documentHash: decision.documentHash,
           problem: decision.problem,
         });
+        emitRow(decision, false);
         stopped = options.apply === true;
         continue;
       }
@@ -791,6 +824,7 @@ export async function repairPieces(
           verdict: "conforms",
           documentHash: decision.documentHash,
         });
+        emitRow(decision, true);
         continue;
       }
       if (options.apply !== true) {
@@ -801,6 +835,7 @@ export async function repairPieces(
           documentHash: decision.documentHash,
           changes: decision.changes,
         });
+        emitRow(decision, true);
         continue;
       }
       applied += 1;
@@ -818,6 +853,7 @@ export async function repairPieces(
           documentHash: decision.documentHash,
           changes: decision.changes,
         });
+        emitRow(decision, true);
         continue;
       }
       rows.push({
@@ -831,6 +867,7 @@ export async function repairPieces(
           "the answer either way.",
         changes: decision.changes,
       });
+      emitRow(decision, false);
       stopped = true;
     } catch (error) {
       // An operational failure — an unreachable piece, a write the schema
