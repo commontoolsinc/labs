@@ -356,8 +356,8 @@ implementation):**
   BuilderCallHoisting and rebuilds essentially every builder call bare — it
   alone re-strips anything stages 8–12 preserve, which is why the original
   three-site diagnosis could never have been sufficient.
-- **Straightforward broad slice:** `registerReplacementType` carries ranges for
-  its pattern-body replacement family; UI-helper outer elements, JSX expression
+- **Straightforward broad slice:** `registerReplacement` carries ranges for its
+  pattern-body replacement family; UI-helper outer elements, JSX expression
   containers, handler attributes and initializers, nested array receiver `key()`
   calls, and module-scope `__cf_data` wrappers carry their authored container or
   expression range. These sites use `preserveSourceMapRange` exclusively.
