@@ -1213,12 +1213,16 @@ describe("runtime-processor", () => {
 
     describe("what the transport accepts", () => {
       /**
-       * Puts `value` through the two ends the notification actually uses: the
-       * producer's `toConsoleWireValue()`, `postMessage`'s structured clone, and
-       * the `fabricFromRealmValue()` that `client/connection.ts` decodes with.
+       * Puts `value` through the ends the notification actually uses: the
+       * producer's `toConsoleWireValue()`, then the envelope's own encode,
+       * `postMessage`'s structured clone, and the decode the transport does on
+       * arrival. The encode is the envelope's now rather than the argument's,
+       * which is the only thing that moved.
        */
       function acrossTheWire(value: unknown): unknown {
-        return fabricFromRealmValue(structuredClone(toConsoleWireValue(value)));
+        return fabricFromRealmValue(
+          structuredClone(realmFromFabricValue(toConsoleWireValue(value))),
+        );
       }
 
       it("returns a value the realm encoding carries, for each shape it renders", () => {
@@ -1453,7 +1457,7 @@ describe("runtime-processor", () => {
         expect(isValidFabricValue(toConsoleDebugValue(forged))).toBe(true);
         expect(() => realmFromFabricValue(toConsoleDebugValue(forged)))
           .toThrow();
-        expect(fabricFromRealmValue(toConsoleWireValue(forged)))
+        expect(toConsoleWireValue(forged))
           .toEqual({ "/unconvertible": "no encoding for value" });
       });
 
@@ -1462,7 +1466,7 @@ describe("runtime-processor", () => {
         // surrounding value survives, which is the price of not sifting a
         // hostile graph for the piece that broke.
         const forged = Object.create(FabricBytes.prototype);
-        expect(fabricFromRealmValue(toConsoleWireValue({ a: 1, forged })))
+        expect(toConsoleWireValue({ a: 1, forged }))
           .toEqual({ "/unconvertible": "no encoding for value" });
       });
 
@@ -1881,11 +1885,9 @@ describe("runtime-processor", () => {
         },
       } as unknown as RuntimeProcessor;
 
-      // Freshly encoded, as the transport's clone delivers it: the handler owns
+      // The bytes as the transport's decode delivers them: the handler owns
       // its request's payload. Kept here so the test can check what became of it.
-      const payload = realmFromFabricValue(
-        new FabricBytes(new Uint8Array([1, 2, 3])),
-      );
+      const payload = new FabricBytes(new Uint8Array([1, 2, 3]));
 
       try {
         await expect(
@@ -1904,11 +1906,9 @@ describe("runtime-processor", () => {
         globalThis.fetch = originalFetch;
       }
 
-      // The handler CONSUMES its payload -- `BaseRequest` entitles it to, and it
-      // does, which is what makes the transport's ownership guarantee load-
-      // bearing rather than decorative. A spent tree is what a second decode
-      // reports.
-      expect(() => fabricFromRealmValue(payload)).toThrow("detached buffer");
+      // The handler no longer decodes, so the ceding that `BaseRequest`'s
+      // ownership rule turns on happens at the envelope rather than here: the
+      // bytes arrive already decoded and are handed on as they are.
 
       expect(requestedUrl).toBe(
         "http://toolshed.test/did:key:test-space/blobs/upload.png",
@@ -2380,7 +2380,10 @@ describe("runtime-processor", () => {
       const orig = self.postMessage;
       (self as { postMessage: unknown }).postMessage = (
         m: { value?: unknown },
-      ) => posted.push(m);
+      ) =>
+        posted.push(
+          fabricFromRealmValue(m as never) as { value?: unknown },
+        );
       try {
         RuntimeProcessor.prototype.handleCellSubscribe.call(processor, {
           type: RequestType.CellSubscribe,

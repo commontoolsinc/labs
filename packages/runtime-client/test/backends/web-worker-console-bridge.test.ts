@@ -14,6 +14,10 @@ import {
   TransportNotificationType,
 } from "@/protocol/mod.ts";
 import { RuntimeProcessor } from "@/backends/mod.ts";
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 
 // The worker entry (`backends/web-worker/index.ts`) installs a `message`
 // listener on `self` (which is `globalThis` under Deno) and reads
@@ -25,7 +29,11 @@ import { RuntimeProcessor } from "@/backends/mod.ts";
 type Posted = Record<string, unknown>;
 
 function dispatch(data: unknown): Promise<void> {
-  globalThis.dispatchEvent(new MessageEvent("message", { data }));
+  // Encoded as the client's transport sends it: the worker entry decodes the
+  // envelope, so a raw object would arrive as something it cannot read.
+  globalThis.dispatchEvent(
+    new MessageEvent("message", { data: realmFromFabricValue(data as never) }),
+  );
   // The handler is async; let its microtasks settle before asserting.
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -44,7 +52,7 @@ describe("web-worker-console-bridge", () => {
       (globalThis as { postMessage: (m: Posted) => void }).postMessage = (
         m: Posted,
       ) => {
-        posted.push(m);
+        posted.push(fabricFromRealmValue(m as never) as Posted);
       };
 
       try {
@@ -143,7 +151,7 @@ describe("web-worker-console-bridge", () => {
         (globalThis as { postMessage: (m: Posted) => void }).postMessage = (
           m: Posted,
         ) => {
-          posted.push(m);
+          posted.push(fabricFromRealmValue(m as never) as Posted);
         };
 
         // Disable forwarding: native console is restored, so a subsequent log is
@@ -199,7 +207,7 @@ describe("web-worker-console-bridge", () => {
       (globalThis as { postMessage: (m: Posted) => void }).postMessage = (
         m: Posted,
       ) => {
-        posted.push(m);
+        posted.push(fabricFromRealmValue(m as never) as Posted);
       };
       // The handler logs every caught error; capture to keep output clean and
       // assert the error path ran.
@@ -378,7 +386,7 @@ describe("web-worker-console-bridge", () => {
             threwOnce = true;
             throw new Error("post failed");
           }
-          posted.push(m);
+          posted.push(fabricFromRealmValue(m as never) as Posted);
         };
         posted.length = 0;
         await dispatch({ msgId: 106, data: { type: RequestType.Idle } });
@@ -392,7 +400,7 @@ describe("web-worker-console-bridge", () => {
         (globalThis as { postMessage: (m: Posted) => void }).postMessage = (
           m: Posted,
         ) => {
-          posted.push(m);
+          posted.push(fabricFromRealmValue(m as never) as Posted);
         };
 
         // Notifications reach the live worker; a throwing notification handler

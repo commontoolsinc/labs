@@ -42,6 +42,10 @@ import {
   type IPCRemoteMessage,
   RequestType,
 } from "@/protocol/mod.ts";
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 
 const signer = await Identity.fromPassphrase("cell-set-echo-race");
 const space = signer.did();
@@ -200,7 +204,9 @@ describe("CellSet / CellUpdate echo race over IPC", () => {
       );
       const transport = new InProcessWorkerTransport(processor);
       (globalThis as { postMessage?: unknown }).postMessage = (m: unknown) =>
-        transport.outbox.push(m as IPCRemoteMessage);
+        transport.outbox.push(
+          fabricFromRealmValue(m as never) as IPCRemoteMessage,
+        );
 
       const connectionPromise = new RuntimeConnection(transport).initialize(
         {} as InitializationData,

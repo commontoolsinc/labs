@@ -144,9 +144,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     const initialized = await (new RuntimeConnection(transport)).initialize({
       apiUrl: options.apiUrl.toString(),
       spaceHostMap: options.spaceHostMap,
-      identity: realmValueFromKeyPair(options.identity.keyPair),
-      spaceIdentity: options.spaceIdentity &&
-        realmValueFromKeyPair(options.spaceIdentity.keyPair),
+      identity: options.identity.keyPair,
+      spaceIdentity: options.spaceIdentity?.keyPair,
       spaceDid: options.spaceDid,
       spaceName: options.spaceName,
       experimental: options.experimental,
@@ -758,7 +757,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       type: RequestType.UploadBlob,
       space: options.space,
       contentType: options.contentType,
-      body: realmFromFabricValue(new FabricBytes(options.body)),
+      body: new FabricBytes(options.body),
       suffix: options.suffix,
     });
   }

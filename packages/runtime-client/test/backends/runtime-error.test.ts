@@ -6,15 +6,21 @@ import {
   postContextualRuntimeError,
   postRuntimeError,
 } from "@/backends/runtime-error.ts";
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 
 describe("runtime error notifications", () => {
   it("classifies compiler-load failures in contextual and renderer errors", () => {
     const posted: unknown[] = [];
     const originalPostMessage =
       (globalThis as { postMessage?: unknown }).postMessage;
+    // Decoded as the client's transport decodes it: `postToClient()` encodes
+    // the envelope, so what a raw capture sees is the encoding.
     (globalThis as { postMessage: (message: unknown) => void }).postMessage = (
       message,
-    ) => posted.push(message);
+    ) => posted.push(fabricFromRealmValue(message as never));
 
     try {
       const compilerError = Object.assign(

@@ -483,22 +483,29 @@ export function toConsoleDebugValue(value: unknown): FabricValue {
 }
 
 /**
- * Converts one of a pattern's `console.*` arguments into the form the
- * notification carries it in. The other half is the `fabricFromRealmValue()`
- * in `client/connection.ts`, which decodes before the client emits.
+ * Converts one of a pattern's `console.*` arguments into the value the
+ * notification carries, which the envelope then encodes along with everything
+ * else.
+ *
+ * The argument is proved encodable here rather than left for the envelope. An
+ * object forged onto a `FabricPrimitive`'s prototype is a `FabricValue` by
+ * every check and still has no encoding, and one such argument reaching the
+ * envelope would throw there -- losing the whole notification rather than the
+ * one argument that earned it. So this encodes as a probe and discards the
+ * result, which costs a second walk of a value only on the console path, and
+ * substitutes a token for an argument that cannot cross. What a reader needs
+ * is the argument's position in the call, and that arrives either way.
  *
  * Exported for testing.
  */
-export function toConsoleWireValue(value: unknown): RealmEncodedValue {
+export function toConsoleWireValue(value: unknown): FabricValue {
+  const debugValue = toConsoleDebugValue(value);
+
   try {
-    return realmFromFabricValue(toConsoleDebugValue(value));
+    realmFromFabricValue(debugValue);
+    return debugValue;
   } catch {
-    // An object forged onto a `FabricPrimitive`'s prototype is a `FabricValue`
-    // by every check and still has no encoding, so the encode is the one step
-    // here a hostile argument can stop. It says so and says nothing further:
-    // the value was built to defeat this, and what a reader needs is the
-    // argument's position in the call, which arrives either way.
-    return realmFromFabricValue({ "/unconvertible": "no encoding for value" });
+    return { "/unconvertible": "no encoding for value" };
   }
 }
 
@@ -564,14 +571,11 @@ export class RuntimeProcessor {
   static async initialize(data: InitializationData): Promise<RuntimeProcessor> {
     const apiUrlObj = new URL(data.apiUrl);
     const identity = await Identity.fromKeyPair(
-      keyPairFromRealmValue(data.identity, "Initialization `identity`"),
+      data.identity,
     );
     const spaceIdentity = data.spaceIdentity
       ? await Identity.fromKeyPair(
-        keyPairFromRealmValue(
-          data.spaceIdentity,
-          "Initialization `spaceIdentity`",
-        ),
+        data.spaceIdentity,
       )
       : undefined;
     const space = data.spaceDid;
@@ -1696,7 +1700,7 @@ export class RuntimeProcessor {
     // legitimate because a handler owns the values its request carries, per
     // `BaseRequest`, so nothing else can be reading this tree. What comes back
     // is a `FabricValue`, of which only the one arm is a blob's bytes.
-    const bytes = fabricFromRealmValue(request.body);
+    const bytes = request.body;
     if (!(bytes instanceof FabricBytes)) {
       throw new Error("uploadBlob requires bytes as its body");
     }

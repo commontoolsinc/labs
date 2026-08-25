@@ -1,6 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 import { RuntimeClient } from "@/runtime-client.ts";
@@ -498,9 +497,8 @@ describe("RuntimeClient", () => {
       expect(request.contentType).toBe("image/png");
       expect(request.suffix).toBe("png");
 
-      const sent = fabricFromRealmValue(request.body);
-      expect(sent).toBeInstanceOf(FabricBytes);
-      expect((sent as FabricBytes).slice()).toEqual(new Uint8Array([1, 2, 3]));
+      expect(request.body).toBeInstanceOf(FabricBytes);
+      expect(request.body.slice()).toEqual(new Uint8Array([1, 2, 3]));
     });
   });
 });

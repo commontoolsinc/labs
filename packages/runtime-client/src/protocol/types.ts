@@ -1,5 +1,8 @@
 import type { MetaField } from "@commonfabric/api";
-import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
+import type {
+  FabricBytes,
+  FabricKeyPair,
+} from "@commonfabric/data-model/fabric-primitives";
 import type {
   FabricPlainObject,
   FabricValue,
@@ -559,12 +562,11 @@ export type InitializationData = {
    */
   spaceHostMap?: Record<string, string>;
   /**
-   * Signer, as a `codec-realm` encoding of the `FabricKeyPair` it signs with.
-   * Encoded rather than plain because that is the one format which carries
-   * either state of a key pair -- key handles included -- across a realm
-   * boundary whole.
+   * The signer's key pair. It crosses inside the envelope's own encoding,
+   * which is the one format carrying either state of a key pair -- key
+   * handles included -- across a realm boundary whole.
    */
-  identity: RealmEncodedValue;
+  identity: FabricKeyPair;
   /**
    * The space this connection opens on.
    */
@@ -573,8 +575,8 @@ export type InitializationData = {
    * The space's name, where the client knows it. Temporary.
    */
   spaceName?: string;
-  /** Temporary identity of space, encoded as `identity` above is. */
-  spaceIdentity?: RealmEncodedValue;
+  /** Temporary key pair for the space, carried as `identity` above is. */
+  spaceIdentity?: FabricKeyPair;
   /**
    * How long a request may go unanswered before the client gives up on it.
    */
@@ -1226,13 +1228,12 @@ export type UploadBlobRequest = BaseRequest & {
    */
   contentType: string;
   /**
-   * The blob's bytes: a `FabricBytes` in the realm-crossing form, which
-   * carries it as a bare `ArrayBuffer` that structured cloning delivers whole
-   * and a send can transfer. It decodes back into a `FabricBytes`, so the
-   * bytes are an immutable value at both ends rather than a view a sender
-   * still holds.
+   * The blob's bytes. The envelope's encoding carries a `FabricBytes` as a
+   * bare `ArrayBuffer` that structured cloning delivers whole, and decodes it
+   * back into a `FabricBytes`, so the bytes are an immutable value at both
+   * ends rather than a view a sender still holds.
    */
-  body: RealmEncodedValue;
+  body: FabricBytes;
   /**
    * The extension the stored blob is served under, defaulting to `bin`.
    * A leading dot is stripped.
@@ -2343,25 +2344,19 @@ export type ConsoleNotification = {
    */
   method: string;
   /**
-   * The arguments, each encoded on its own. `ConsoleMessage` is this same
-   * notification with them decoded, which is what the client emits.
-   *
-   * TODO(danfuzz): once the envelope itself is encoded, this field holds a
-   * `FabricValue[]` and the encoding at each end goes away with it.
-   */
-  args: RealmEncodedValue[];
-};
-
-/**
- * A console notification as the client emits it, with its arguments decoded
- * back into the values the pattern logged.
- */
-export type ConsoleMessage = Omit<ConsoleNotification, "args"> & {
-  /**
-   * The arguments, decoded back into the values the pattern logged.
+   * The arguments, as the values the pattern logged. They cross inside the
+   * envelope's own encoding, so a `FabricBytes` arrives as bytes and an
+   * instance arrives with its class.
    */
   args: FabricValue[];
 };
+
+/**
+ * A console notification as the client emits it: the same shape the worker
+ * sent. The arguments were values on the wire, so there is nothing left for
+ * the client to convert.
+ */
+export type ConsoleMessage = ConsoleNotification;
 
 /**
  * A pattern asking the client to navigate to a cell. A request in name only:

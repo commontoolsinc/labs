@@ -8,14 +8,17 @@
 import "core-js/proposals/explicit-resource-management";
 import "core-js/proposals/async-explicit-resource-management";
 
+import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
 import { getLogger } from "@commonfabric/utils/logger";
 import { unrefTimer } from "@commonfabric/utils/sleep";
 
 import { CompilerStackLoadError } from "@commonfabric/runner";
 import {
+  IPCClientMessage,
   IPCRemoteResponse,
   isIPCClientMessage,
   isIPCClientNotification,
+  NotificationType,
   RequestType,
   RuntimeErrorCode,
   TransportNotificationType,
@@ -24,6 +27,7 @@ import {
 } from "@/protocol/mod.ts";
 import { RuntimeProcessor } from "@/backends/mod.ts";
 import { postToClient } from "@/backends/post-to-client.ts";
+import { describeFailure } from "@/shared/utils.ts";
 
 // Count-only ledger of request traffic as seen by the worker: one
 // `received/<type>` per request that reached this message handler and one
@@ -142,13 +146,29 @@ function setWorkerConsoleBridge(enabled: boolean): void {
 }
 
 self.addEventListener("message", async (event: MessageEvent) => {
-  // TODO(danfuzz): what arrives here is whatever structured cloning preserved,
-  // which is less than the payload type describes; decoding with `codec-realm`
-  // is what would make the two agree. The payload type carries the matching
-  // marker -- `IPCClientRequest` in `../../protocol/types.ts` -- as does the
-  // sending end, `WebWorkerRuntimeTransport.send()` in
-  // `../../client/transports/web-worker/transport-web-worker.ts`.
-  const message = event.data;
+  // Decoded whole, so what arrives is what was sent rather than whatever
+  // structured cloning preserved of it. The encoding end is
+  // `WebWorkerRuntimeTransport.send()`.
+  //
+  // Typed as a request rather than as the `FabricValue` a decode returns: the
+  // guards below are what actually vet it, and every use here is behind one
+  // of them or inside the `catch`, which wants the id of whatever failed.
+  let message: IPCClientMessage;
+
+  try {
+    message = fabricFromRealmValue(event.data) as IPCClientMessage;
+  } catch (error) {
+    // Defense in depth, as at the other end. Nothing undecodable should reach
+    // here, and if something does there is no `msgId` to answer under -- so
+    // this reports rather than replies, and the request it belonged to is left
+    // to time out. Throwing instead would surface as an unhandled rejection
+    // out of this async listener, which is the quiet failure to avoid.
+    postToClient({
+      type: NotificationType.ErrorReport,
+      message: `Undecodable message from the client: ${describeFailure(error)}`,
+    });
+    return;
+  }
 
   // One-way notifications carry no msgId and get no response. Drop them once
   // the worker is gone or disposed; in teardown the main thread may still be

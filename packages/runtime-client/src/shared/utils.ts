@@ -1,6 +1,23 @@
 import { cloneCfcLabelView } from "@commonfabric/runner/cfc/label-view-core";
 import { CellRef } from "@/protocol/mod.ts";
 
+/**
+ * Renders a thrown value as text for a message that must be produced no matter
+ * what was thrown.
+ *
+ * A thrown value can refuse even to be stringified -- a null-prototype object
+ * has no `toString` to reach, and a hostile proxy can throw from any property
+ * read -- so the derivation of a failure's description must not fail in turn.
+ * `/undescribable` is the fixed token for that.
+ */
+export function describeFailure(error: unknown): string {
+  try {
+    return String(error);
+  } catch {
+    return "/undescribable";
+  }
+}
+
 export function cellRefToKey(cell: CellRef): string {
   // Key on the FULL id including its URI scheme: the hash preimage is
   // kind-free, so `of:fid1:H` and `computed:fid1:H` can name two distinct

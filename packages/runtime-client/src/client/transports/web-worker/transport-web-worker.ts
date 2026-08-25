@@ -1,9 +1,15 @@
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 import { defer } from "@commonfabric/utils/defer";
 import { isDeno } from "@commonfabric/utils/env";
 import {
   ErrorNotification,
   IPCClientMessage,
   IPCClientNotification,
+  IPCRemoteMessage,
+  IPCRemotePost,
   isWorkerConsoleNotification,
   isWorkerReadyNotification,
   NotificationType,
@@ -13,6 +19,7 @@ import {
   RuntimeTransportEvents,
 } from "@/client/transport.ts";
 import { EventEmitter } from "@/client/emitter.ts";
+import { describeFailure } from "@/shared/utils.ts";
 
 export interface WebWorkerRuntimeTransportOptions {
   // URL to hosted `backends/web-worker/index.ts`
@@ -49,13 +56,7 @@ export class WebWorkerRuntimeTransport
 
   /** @inheritDoc */
   send(data: IPCClientMessage | IPCClientNotification): void {
-    // TODO(danfuzz): this send should encode `data` with `codec-realm`, which
-    // is what would let the payload carry the whole `FabricValue` domain
-    // instead of whatever structured cloning happens to preserve of it. The
-    // payload type carries the matching marker -- `IPCClientRequest` in
-    // `../../../protocol/types.ts` -- as does the receiving end, the `message`
-    // listener in `../../../backends/web-worker/index.ts`.
-    this._worker.postMessage(data);
+    this._worker.postMessage(realmFromFabricValue(data));
   }
 
   /** @inheritDoc */
@@ -81,7 +82,24 @@ export class WebWorkerRuntimeTransport
   }
 
   private _handleMessage = (event: MessageEvent): void => {
-    const data = event.data;
+    let data: IPCRemotePost;
+
+    try {
+      data = fabricFromRealmValue(event.data) as IPCRemotePost;
+    } catch (error) {
+      // Defense in depth. The worker proves each payload encodable before it
+      // sends, so nothing undecodable should arrive; that is the ideal, and it
+      // may not always hold. When it does not, losing one message loudly beats
+      // an exception leaving this listener, which would take the connection's
+      // whole dispatch with it.
+      this.emit("message", {
+        type: NotificationType.ErrorReport,
+        message: `Undecodable message from the worker: ${
+          describeFailure(error)
+        }`,
+      } as ErrorNotification);
+      return;
+    }
 
     // Worker-side console output forwarded by the bridge in
     // `backends/web-worker/index.ts` (opt-in). Re-emit it on the page
@@ -98,7 +116,9 @@ export class WebWorkerRuntimeTransport
       return;
     }
 
-    this.emit("message", data);
+    // The two above are this transport's own traffic and have returned, so
+    // what is left is the connection's.
+    this.emit("message", data as IPCRemoteMessage);
   };
 
   private _handleError = (event: ErrorEvent): void => {
