@@ -405,10 +405,11 @@ Epic H activation (flip defaults onto conforming states) — cheap, high leverag
 Epic F (range-scoped integrity) — last of the big epics; most speculative
 ```
 
-Rule of thumb: **A unlocks the most** (B, most of E, H's ceiling shaping, and 3–4
-Tier-2 items). **D is the most urgent for security** (live soundness holes) and is
-largely independent. **H is the cheapest leverage** (the system doesn't enforce much
-by default today). Everything in Tier 3 is spec-writing, not runner code.
+Rule of thumb: **A unlocks the most** (B, most of E, and 3–4 Tier-2 items).
+**D is the most urgent for security** (live soundness holes) and is largely
+independent. **H is the cheapest leverage** — it depends on nothing above it,
+and the hosts below the shell enforce little by default today. Everything in
+Tier 3 is spec-writing, not runner code.
 
 ## Provenance
 
