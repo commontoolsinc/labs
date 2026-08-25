@@ -1453,6 +1453,22 @@ describe("toConsoleDebugValue", () => {
       expect(arrived).not.toContain("bottom");
     });
 
+    it("returns a forged `FabricPrimitive`'s fallback with markers unescaped", () => {
+      // The fallback renders a value the conversion has already been over, so
+      // its markers must come through as themselves. A renderer that converts
+      // what it is handed would escape each one a second time -- `/function`
+      // arriving as `//function` -- and the depth marker alone cannot say so,
+      // since the limit mints a fresh one at the same place either way.
+      const forged = Object.create(FabricBytes.prototype);
+      const arrived = fabricFromRealmValue(
+        toConsoleWireValue({ forged, fn: function named() {}, m: new Map() }),
+      ) as string;
+
+      expect(arrived).toContain('"/function":"named(...)"');
+      expect(arrived).toContain('"/Map":"/..."');
+      expect(arrived).not.toContain("//");
+    });
+
     it("returns a unique symbol as its marker", () => {
       // Unlike an interned one, this has no encoding: the description is all
       // that can be said about it on the far side.
