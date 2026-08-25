@@ -47,6 +47,7 @@ import {
   canBranchMatch,
   combineOptionalSchema,
   combineSchema,
+  combineSchemaForLink,
   createDefaultTraversalContext,
   IObjectCreator,
   mergeAnyOfMatches,
@@ -1208,7 +1209,7 @@ export function validateAndTransform(
   const resolvedLinkSchema = resolveSchema(resolvedLink.schema);
   const effectiveSchema = resolvedSchema !== undefined
     ? resolvedLinkSchema !== undefined
-      ? combineSchema(resolvedSchema, resolvedLinkSchema)
+      ? combineSchemaForLink(resolvedSchema, resolvedLinkSchema)
       : resolvedSchema
     : resolvedLinkSchema;
   const filteredSchema = filterAsCell(effectiveSchema);
@@ -1289,7 +1290,7 @@ export function validateAndTransform(
       // We leave the asCell/asStream in the schema, so that createObject
       // knows to create a cell
       const mergedSchema = (next.schema !== undefined)
-        ? combineSchema(effectiveSchema!, next.schema)
+        ? combineSchemaForLink(effectiveSchema!, next.schema)
         : effectiveSchema!;
       link = { ...next, schema: mergedSchema };
     }

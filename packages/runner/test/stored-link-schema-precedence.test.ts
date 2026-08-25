@@ -162,4 +162,43 @@ describe("stored-link-schema-precedence", () => {
       expect(elementByPath(holder)).toBeUndefined();
     });
   });
+
+  // Read within the array, the reader's item schema combines with the stored
+  // one (`combineSchemaForLink`): the reader's shape projects the stored
+  // schema, so a property the reader did not select stays out of the read,
+  // and the stored schema's `required` for that property cannot void the row.
+  describe("a stored schema that describes more than the reader selects", () => {
+    const wideStoredSchema = {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        glaze: { type: "string" },
+      },
+      required: ["title", "glaze"],
+    } as const satisfies JSONSchema;
+
+    it("excludes a stored-schema property the reader did not select", () => {
+      const holder = holderOverLinkCarrying(wideStoredSchema);
+
+      expect(projectionOf(elementWithinArray(holder))).toEqual({
+        title: "cruller",
+      });
+    });
+
+    it("projects a row missing a field only the stored schema requires", () => {
+      const row = runtime.getCell(space, `row-${seq}-narrow`, undefined, tx);
+      row.setRaw({ title: "cruller" });
+      const holder = runtime.getCell<Holder>(
+        space,
+        `holder-${seq}-narrow`,
+        holderSchema,
+        tx,
+      );
+      holder.setRaw({ rows: [linkCarrying(row, wideStoredSchema)] } as never);
+
+      expect(projectionOf(elementWithinArray(holder))).toEqual({
+        title: "cruller",
+      });
+    });
+  });
 });
