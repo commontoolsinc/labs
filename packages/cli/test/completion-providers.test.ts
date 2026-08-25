@@ -1,8 +1,15 @@
 import { assert, assertEquals, assertFalse } from "@std/assert";
 import { Database } from "@db/sqlite";
-import { resolveCompletionLine } from "../lib/completion/line.ts";
+import {
+  type CompletionLine,
+  declaredSlots,
+  longName,
+  resolveCompletionLine,
+} from "../lib/completion/line.ts";
+import type { Directive } from "../lib/completion/providers.ts";
 import {
   acceptedProjections,
+  completionProviderKeys,
   descendProjection,
   entityListingView,
   keysOf,
@@ -178,52 +185,287 @@ Deno.test("live candidates: unmapped slots ask for nothing", async () => {
   }
 });
 
+/**
+ * Every slot whose whole answer is a shell handoff, and the directive it must
+ * hand over. The kind and the glob are the assertion: a wrong glob is the
+ * "wrong set" defect in its quietest form, since the slot still answers, with
+ * the wrong files, and nothing upstream can tell.
+ *
+ * Hand-written, because what each slot SHOULD hand over is not derivable from
+ * the code that hands it over. Which slots belong here is derivable, and is
+ * derived below rather than remembered.
+ */
+const DIRECTIVE_CASES: Array<[string, string, string | undefined]> = [
+  ["cf piece ls -i ", "files", "*.key"],
+  ["cf id did ", "files", "*.key"],
+  // Every command whose `--root` is the directory its sources resolve
+  // against. The set is hand-maintained, so it is asserted whole.
+  ["cf piece new --root ", "dirs", undefined],
+  ["cf piece setsrc --root ", "dirs", undefined],
+  ["cf piece survey --root ", "dirs", undefined],
+  ["cf piece set-home --root ", "dirs", undefined],
+  ["cf check --root ", "dirs", undefined],
+  ["cf test --root ", "dirs", undefined],
+  ["cf piece new --test ", "files", "*.tsx"],
+  ["cf piece new ", "files", "*.tsx"],
+  ["cf piece setsrc ", "files", "*.tsx"],
+  ["cf check ", "files", "*.tsx"],
+  ["cf test ", "files", "*.tsx"],
+  ["cf piece new --datafile ", "files", undefined],
+  ["cf view ", "files", undefined],
+  ["cf exec ", "files", undefined],
+  ["cf space clone --to ", "dirs", undefined],
+  ["cf space clone x --from ", "files", undefined],
+  ["cf space verify ", "dirs", undefined],
+  ["cf space reset ", "dirs", undefined],
+  ["cf inspect spaces --dir ", "dirs", undefined],
+  ["cf inspect html x --out ", "files", undefined],
+  ["cf check --output ", "files", undefined],
+  ["cf piece set-home ", "files", "*.tsx"],
+  ["cf piece getsrc ", "files", undefined],
+  ["cf deps update ", "files", undefined],
+  ["cf fuse mount ", "dirs", undefined],
+  ["cf fuse unmount ", "dirs", undefined],
+  ["cf piece repair --fixer ", "files", "*.ts"],
+  ["cf piece repair --plan ", "files", undefined],
+  ["cf piece survey --validator ", "files", undefined],
+  ["cf test --pattern-coverage-dir ", "dirs", undefined],
+  ["cf test --timing-measures-out ", "files", undefined],
+  ["cf fuse mount --cfc-writeback-state ", "files", undefined],
+];
+
+/** The commands each option provider answers on, or `null` for every one. */
+const PROVIDER_SCOPES = completionProviderKeys().options;
+
+/**
+ * What a case has to name to pin this slot, keyed the way its provider varies.
+ *
+ * A positional provider is keyed by command path already, so one case pins one
+ * command. An option provider that names the commands it answers on can answer
+ * differently on each, so each of those is pinned on its own — which is what
+ * `--from` and `--to` need, being a file and a directory on `space clone` and
+ * sequence numbers on `inspect diff`. One that names no commands answers the
+ * same wherever its option is declared, and the test below holds it to that,
+ * so a single case covers every command at once.
+ */
+function providerKeyOf(line: CompletionLine): string | null {
+  const slot = line.slot;
+  const where = line.path.join(" ") || "<root>";
+  if (slot?.kind === "argument") return `${where}:${slot.argument.name}`;
+  if (slot?.kind !== "option-value") return null;
+  const name = longName(slot.option);
+  return (PROVIDER_SCOPES.get(name) ?? null) === null
+    ? `--${name}`
+    : `${where}:--${name}`;
+}
+
+/**
+ * Whether the answer is a shell handoff and nothing else: one `files` or
+ * `dirs` directive, no candidates. That is the half a fabric cannot change,
+ * and so the half a unit test can pin.
+ *
+ * A `nospace` directive is not one. It accompanies live candidates to hold the
+ * cursor mid-path, so what it comes with is exactly what a fabric changes, and
+ * `completion-over-the-cli.sh` is where those slots are judged.
+ */
+function shellHandoff(
+  result: { candidates: readonly unknown[]; directives: readonly Directive[] },
+): Directive | null {
+  if (result.candidates.length > 0 || result.directives.length !== 1) {
+    return null;
+  }
+  const directive = result.directives[0];
+  return directive.kind === "files" || directive.kind === "dirs"
+    ? directive
+    : null;
+}
+
+/**
+ * The spelling that puts the cursor on an option's own value.
+ *
+ * An option whose value may be omitted never swallows the next word, so after
+ * `--remote ` the cursor is on a positional and the slot being probed would be
+ * somebody else's. `--remote=` is the spelling that reaches it, and the
+ * declaration is what says which of the two an option needs.
+ */
+function optionProbeLine(
+  name: string,
+  where: string,
+  optionalValues: ReadonlySet<string>,
+): string {
+  const path = where === "<root>" ? "" : `${where} `;
+  return optionalValues.has(`${where}:--${name}`)
+    ? `cf ${path}--${name}=`
+    : `cf ${path}--${name} `;
+}
+
+/**
+ * A line that puts the cursor on each slot the command tree declares. Only the
+ * text: the key comes from the resolved line, so `providerKeyOf` is the one
+ * place that says what a case has to name.
+ */
+function probeLines(): string[] {
+  const slots = declaredSlots(main);
+  const probes: string[] = [];
+  for (const [name, paths] of slots.options) {
+    for (const where of paths) {
+      probes.push(optionProbeLine(name, where, slots.optionalValues));
+    }
+  }
+  for (const slot of slots.positionals) {
+    const path = slot.where === "<root>" ? "" : `${slot.where} `;
+    // Earlier positionals have to be filled for the cursor to reach this one.
+    const filled = Array.from({ length: slot.index }, (_, i) => `x${i} `).join(
+      "",
+    );
+    probes.push(`cf ${path}${filled}`);
+  }
+  return probes;
+}
+
+/** How a slot answered, as a line of the report the tests below print. */
+function handoffLabel(directive: Directive): string {
+  const glob = (directive as { glob?: string }).glob;
+  return glob ? `${directive.kind} ${glob}` : directive.kind;
+}
+
 Deno.test("live candidates: every path-shaped slot hands the shell its own directive", async () => {
-  // One entry per reachable directive in the provider tables, asserting the
-  // glob as well as the kind. A wrong glob is the "wrong set" defect in its
-  // quietest form: the slot still answers, with the wrong files, and nothing
-  // upstream can tell. These read no state, so this is where they belong —
-  // the integration walkthrough covers the providers that reach a fabric and
-  // deliberately does not re-check these.
-  const cases: Array<[string, string, string | undefined]> = [
-    ["cf piece ls -i ", "files", "*.key"],
-    ["cf id did ", "files", "*.key"],
-    // Every command whose `--root` is the directory its sources resolve
-    // against. The set is hand-maintained, so it is asserted whole.
-    ["cf piece new --root ", "dirs", undefined],
-    ["cf piece setsrc --root ", "dirs", undefined],
-    ["cf piece survey --root ", "dirs", undefined],
-    ["cf piece set-home --root ", "dirs", undefined],
-    ["cf check --root ", "dirs", undefined],
-    ["cf test --root ", "dirs", undefined],
-    ["cf piece new --test ", "files", "*.tsx"],
-    ["cf piece new ", "files", "*.tsx"],
-    ["cf piece setsrc ", "files", "*.tsx"],
-    ["cf check ", "files", "*.tsx"],
-    ["cf test ", "files", "*.tsx"],
-    ["cf piece new --datafile ", "files", undefined],
-    ["cf view ", "files", undefined],
-    ["cf exec ", "files", undefined],
-    ["cf space clone --to ", "dirs", undefined],
-    ["cf space clone x --from ", "files", undefined],
-    ["cf space verify ", "dirs", undefined],
-    ["cf space reset ", "dirs", undefined],
-    ["cf inspect spaces --dir ", "dirs", undefined],
-    ["cf inspect html x --out ", "files", undefined],
-    ["cf check --output ", "files", undefined],
-    ["cf piece set-home ", "files", "*.tsx"],
-    ["cf piece getsrc ", "files", undefined],
-    ["cf deps update ", "files", undefined],
-    ["cf fuse mount ", "dirs", undefined],
-    ["cf fuse unmount ", "dirs", undefined],
-  ];
-  for (const [text, kind, glob] of cases) {
+  // These read no state, so this is where they belong — the integration
+  // walkthrough covers the providers that reach a fabric and deliberately does
+  // not re-check these.
+  for (const [text, kind, glob] of DIRECTIVE_CASES) {
     const result = await liveCandidates(lineFor(text));
     assertEquals(result.directives.length, 1, `${text} emits one directive`);
     const directive = result.directives[0] as { kind: string; glob?: string };
     assertEquals(directive.kind, kind, text);
     assertEquals(directive.glob, glob, `${text} glob`);
   }
+});
+
+Deno.test("provider keys report which commands each option provider answers on", () => {
+  // What the slot gate subtracts from the command tree. An option keyed here
+  // with no commands answers wherever it is declared; one keyed with commands
+  // answers on those and is silent everywhere else, which is the difference
+  // between a slot that was decided about and one that only looks decided.
+  const { options, arguments: positionals } = completionProviderKeys();
+  assertEquals(options.get("piece"), null);
+  assertEquals(options.get("from"), ["space clone"]);
+  assertEquals(options.get("to"), ["space clone"]);
+  assertEquals(options.get("scope"), ["wish"]);
+  assertEquals(options.get("list"), ["piece survey", "piece repair"]);
+  assertEquals(options.get("select"), ["piece get", "get"]);
+  assertEquals(options.get("root"), [
+    "check",
+    "piece new",
+    "piece set-home",
+    "piece setsrc",
+    "piece survey",
+    "test",
+    "inspect graph",
+  ]);
+  // A positional entry is keyed by command path already, so it carries no
+  // command list of its own.
+  assert(positionals.has("piece call:callable"));
+  assertFalse(positionals.has("callable"));
+});
+
+Deno.test("live candidates: every probe reaches the slot it was built for", () => {
+  // What both nets below rest on. A probe that lands on a neighbouring slot
+  // tests that neighbour and reports nothing about the slot it named, so the
+  // net would pass over a whole class of options while looking exhaustive —
+  // which is what the spaced spelling did to every optional-valued option,
+  // whose flag does not swallow the word after it.
+  const slots = declaredSlots(main);
+  const wrong: string[] = [];
+  for (const [name, paths] of slots.options) {
+    for (const where of paths) {
+      const text = optionProbeLine(name, where, slots.optionalValues);
+      const line = lineFor(text);
+      const reached = line.slot?.kind === "option-value" &&
+        longName(line.slot.option) === name &&
+        (line.path.join(" ") || "<root>") === where;
+      if (!reached) wrong.push(`${text.trim()} misses ${where}:--${name}`);
+    }
+  }
+  for (const slot of slots.positionals) {
+    const path = slot.where === "<root>" ? "" : `${slot.where} `;
+    const filled = Array.from({ length: slot.index }, (_, i) => `x${i} `).join(
+      "",
+    );
+    const text = `cf ${path}${filled}`;
+    const line = lineFor(text);
+    const reached = line.slot?.kind === "argument" &&
+      `${line.path.join(" ")}:${line.slot.argument.name}` === slot.key;
+    if (!reached) wrong.push(`${text.trim()} misses ${slot.key}`);
+  }
+  assertEquals(wrong, []);
+});
+
+Deno.test("live candidates: no slot hands the shell a directive the cases miss", async () => {
+  // The case table above is hand-maintained, and a hand-maintained table falls
+  // behind the thing it describes without saying so — which is what it did
+  // when four providers were added with no case. So the set is asked of the
+  // code: every slot the tree declares is probed with no fabric configured,
+  // and a shell handoff no case pins fails here rather than going unnoticed.
+  //
+  // The probe is keyed the way the provider varies, which is why a case on one
+  // command does not vouch for a scoped provider's other commands. An
+  // unscoped provider is vouched for by one case and held to answering the
+  // same everywhere by the test below.
+  const covered = new Set(
+    DIRECTIVE_CASES.map(([text]) => providerKeyOf(lineFor(text))),
+  );
+  const missing: string[] = [];
+  await withEnv({}, async () => {
+    for (const text of probeLines()) {
+      const line = lineFor(text);
+      const handoff = shellHandoff(await liveCandidates(line));
+      if (!handoff) continue;
+      const key = providerKeyOf(line);
+      if (key !== null && covered.has(key)) continue;
+      missing.push(`${text.trim()} hands over ${handoffLabel(handoff)}`);
+    }
+  });
+  assertEquals(missing, []);
+});
+
+Deno.test("live candidates: an unscoped option provider answers the same everywhere", async () => {
+  // What makes one case cover every command declaring the option. A provider
+  // that names no commands is a function of the line rather than of the path,
+  // so a different answer on two commands means it is scoped in fact and not
+  // in the table — the state `--root`, `--select` and `--schema` were in
+  // before they said where they applied, and the state a single case cannot
+  // pin.
+  const answers = new Map<string, Map<string, string[]>>();
+  const slots = declaredSlots(main);
+  await withEnv({}, async () => {
+    for (const [name, paths] of slots.options) {
+      if ((PROVIDER_SCOPES.get(name) ?? null) !== null) continue;
+      const byAnswer = new Map<string, string[]>();
+      for (const where of paths) {
+        const result = await liveCandidates(
+          lineFor(optionProbeLine(name, where, slots.optionalValues)),
+        );
+        const handoff = shellHandoff(result);
+        const answer = handoff
+          ? handoffLabel(handoff)
+          : result.candidates.length > 0
+          ? "candidates"
+          : "nothing";
+        byAnswer.set(answer, [...(byAnswer.get(answer) ?? []), where]);
+      }
+      if (byAnswer.size > 1) answers.set(name, byAnswer);
+    }
+  });
+  assertEquals(
+    [...answers].map(([name, byAnswer]) =>
+      `--${name}: ${
+        [...byAnswer].map(([answer, where]) => `${answer} on ${where[0]}`)
+          .join(", ")
+      }`
+    ),
+    [],
+  );
 });
 
 Deno.test("live candidates: an option that means two things is completed per command", async () => {

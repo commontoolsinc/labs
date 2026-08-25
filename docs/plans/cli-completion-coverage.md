@@ -81,7 +81,7 @@ read before picking one up; this table is the roll-up.
 | 2 | Flags offered past a `stopEarly()` boundary | correctness | done |
 | 3 | Target resolution lags the reference grammar | correctness | done |
 | 4 | Verb flags do not complete | pattern vocabulary | shaper done, wiring after step 10 |
-| 5 | Result field paths for `get` and `wish` | pattern vocabulary | `get` done, `wish` refused |
+| 5 | Result field paths for `get` and `wish` | pattern vocabulary | `get` done, `wish` declined |
 | 6 | Result field paths for `call` and `exec` | pattern vocabulary | needs step 10 |
 | 7 | Slugs never complete | pattern vocabulary | done |
 | 8 | `--space` has no source a caller recognizes | first link | partly settled |
@@ -95,10 +95,20 @@ read before picking one up; this table is the roll-up.
 | 16 | Two provider entries that can never fire | hygiene | done |
 | 17 | The README table omits the top-level spellings | hygiene | done |
 | 18 | A live-provider test seam | mechanism | done |
-| 19 | A gate that fails when a new slot has no decision | mechanism | not started |
+| 19 | A gate that fails when a new slot has no decision | mechanism | done |
 
-**What can be picked up today.** Item 19 is what remains: the other half of the
-mechanism item 18 landed.
+**What can be picked up today.** Nothing on this list. What is left is held or
+settled rather than open: item 4's wiring waits on step 10 of
+[CLI surface shape](cli-surface-shape.md) and item 6 waits on the same step;
+items 8 and 11 hold decisions; and item 5's `wish` half is declined, because
+resolving a wish writes.
+
+One defect this list does not enumerate is open and unranked: the cell-path slot
+offers a piece's callables, which `cf get` refuses and redirects to `cf call`.
+It is asserted in `completion-over-the-cli.sh` as what happens today. Telling a
+callable from a value at a path needs the verbs listing, which that provider
+does not fetch — so it is a round trip rather than a filter, and that is the
+decision it waits on.
 
 Item 4's candidates are built and its wiring waits: step 10 decides whether a
 verb's fields are written before the `--` marker or after it, and the position
@@ -120,13 +130,14 @@ Two of the four ways completion can be wrong are enumerated here exhaustively,
 and two are not. Knowing which is which is the difference between working the
 list and trusting it.
 
-**Enumerated exhaustively.** A slot with no provider entry: the keys of both
-provider tables are derivable from the same command tree the resolver walks, so
-walking the tree and subtracting the tables names every one. That is items 13
-to 16, and item 19 is the same walk made permanent.
+**Enumerated exhaustively, and now gated.** A slot with no provider entry: the
+keys of both provider tables are derivable from the same command tree the
+resolver walks, so walking the tree and subtracting the tables names every one.
+That is items 13 to 16, and `deno task check-completion-slots` is the same walk
+made permanent.
 
-**Enumerated exhaustively.** A provider entry with no slot: the same
-subtraction run the other way. That is item 16.
+**Enumerated exhaustively, and now gated.** A provider entry with no slot: the
+same subtraction run the other way. That is item 16, and the same gate.
 
 **Not enumerated.** A provider that returns the *wrong set* rather than an
 empty one. This is invisible at the prompt — plausible candidates look like
@@ -309,9 +320,11 @@ query adds nothing, because the cell is keyed by the query; a caller editing a
 query writes once per spelling they pass through.
 
 That is a keystroke with a side effect, which is the bar this item said to clear
-before building it, and it is not cleared. Completing `wish --select` needs a
-resolution that reads without committing, which is a change to `resolveWish`
-rather than to completion.
+before building it. **It is not cleared, and that is decided rather than
+deferred: a durable write per distinct query is not acceptable at a keystroke.**
+The slot stays empty. Completing it would need a resolution that reads without
+committing — a change to `resolveWish`, and a question for whoever owns the
+wish builtin rather than for this plan.
 
 `call` and `exec` are the other two commands carrying these flags, and their
 projection names positions in a verb's result rather than in the piece's root.
@@ -577,9 +590,11 @@ lands, which is the obligation rather than the one edit.
 `packages/cli/integration/completion-over-the-cli.sh` is where every provider
 that reads state is exercised — the four that reach a fabric, the one that
 reads local stores, the one that reads the environment, and the pattern-file
-glob. The rest of the table hands the shell a constant directive that a fabric
-cannot change, and those are asserted one by one — kind and glob — in
-`test/completion-providers.test.ts`. Item 19 adds the other half: whether a
+glob — at one of the slots it answers. The rest of the table hands the shell a
+constant directive that a fabric cannot change, and those are asserted one by
+one — kind and glob — in `test/completion-providers.test.ts`, over a set that
+file derives from the tree rather than remembers: a slot handing the shell a
+directive that no case pins fails there. Item 19 adds the other half: whether a
 slot has an entry at all.
 
 `--space` is the one whose candidates depend on the machine, since it reads
@@ -622,17 +637,38 @@ It is asserted there as what happens today.
 
 ### 19. A gate that fails when a new slot has no decision
 
-Completion falling behind the command surface is the mechanism this whole plan
-is a list of instances of. The tables are keyed by option long name and by
-`<command path>:<argument name>`, and both keys are derivable from the tree that
-`resolveCompletionLine` already walks, so the drift is machine-detectable: walk
-the tree, and name every value-taking option and every positional with no
-provider entry and no enumerated set.
+`deno task check-completion-slots` walks the same tree `resolveCompletionLine`
+walks and subtracts the two provider tables from it, in three directions:
 
-The check cannot decide that a slot *should* complete — plenty should not. It
-can require that every slot has been decided about, which is what an allowlist
-of deliberate omissions records. That turns the next command's completion from
-something remembered into something the gate asks for.
+- A slot with no provider, no enumerated set, and no allowlist entry.
+- A provider entry matching no slot — item 16's subtraction, made permanent.
+- An allowlist entry that decides no slot, so the record of a decision cannot
+  outlive the thing it was about.
 
-Item 16 is what the same walk finds in the other direction, so both fall out of
-one implementation.
+A slot is one option on one command, not one option name. The scoped providers
+carry the commands they answer on, and the gate asks about each command the
+name is declared on separately: a `--from` answered on `space clone` says
+nothing about the `--from` on `inspect diff`, and reading the key alone would
+report the second as decided when what it offers is silence. The allowlist
+takes the same two shapes — a bare long name where nothing provides the option
+anywhere, and `<command path>:<long name>` for the commands where an option
+that is provided elsewhere means something else.
+
+It cannot decide that a slot *should* complete, and does not try. It requires
+that every slot has been decided about, and the allowlist is where a decision
+not to complete one is written down with its reason — what the candidates would
+have been, and why there are none.
+
+Its first run named thirty-six options and no positionals. Three of them turned
+out to be path-shaped and got directives rather than an allowance
+(`--pattern-coverage-dir`, `--timing-measures-out`, `--cfc-writeback-state`);
+the rest are counts, timestamps, pasted identifiers, coined words, and
+expressions with their own grammar.
+
+Asking per command named twenty more. One took candidates — `piece repair
+--list` names a piece, exactly as the `--list` on `piece survey` does. The rest
+are recorded: the two sequence numbers `inspect diff` spells `--from` and
+`--to`; the raw scope keys nine `inspect` subcommands take, which are read out
+of the data being inspected the way `--session` already is; and the eight
+projections that shape something other than the value at a target, which are
+items 6 and 5's `wish` half rather than an omission.
