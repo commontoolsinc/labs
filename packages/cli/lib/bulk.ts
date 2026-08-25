@@ -24,7 +24,11 @@ import {
   surveyPieces,
   type SurveyResult,
 } from "@commonfabric/piece/ops";
-import { localRetargetOp } from "@commonfabric/piece/ops/bulk-local";
+import {
+  localRetargetOp,
+  programEntryIdentity,
+  resolveLocalSourceProgram,
+} from "@commonfabric/piece/ops/bulk-local";
 import type { JSONSchema } from "@commonfabric/runner";
 
 import { loadPieces, type PieceConfig, type SpaceConfig } from "./piece.ts";
@@ -93,6 +97,8 @@ export interface RepairRunDependencies {
   readTextFile?: (path: string) => Promise<string>;
   /** The module import, injectable so tests supply a fixer without disk. */
   importModule?: (path: string) => Promise<unknown>;
+  /** The closure-identity computation, injectable the same way. */
+  computeFixerIdentity?: (path: string) => Promise<string>;
 }
 
 /**
@@ -119,6 +125,15 @@ export async function runRepair(
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
   const resolve = deps.resolvePieceAddress ?? resolvePieceAddress;
   const selector = await resolveSelector(pieces, request.selector, resolve);
+  // The identity of the fixer module's authored closure, computed the way a
+  // retarget's source identity is — without compiling — so the plan pins
+  // the implementation reviewed rather than a path whose file can change.
+  const computeIdentity = deps.computeFixerIdentity ??
+    (async (path: string) =>
+      await programEntryIdentity(
+        await resolveLocalSourceProgram(pieces.runtime, { main: path }),
+      ));
+  const fixerIdentity = await computeIdentity(request.fixerPath);
   const plan = request.planPath === undefined ? undefined : decodePlan(
     await (deps.readTextFile ?? Deno.readTextFile)(request.planPath),
   );
@@ -126,6 +141,7 @@ export async function runRepair(
     selector,
     fixer: fixer as Fixer,
     fixerName: request.fixerName,
+    fixerIdentity,
     ...(plan === undefined ? {} : { plan }),
     ...(request.apply === true ? { apply: true } : {}),
   });

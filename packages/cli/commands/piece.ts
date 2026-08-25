@@ -34,6 +34,10 @@ import {
   parseCellSelectionOptions,
 } from "../lib/cell-selection.ts";
 import { cliCommand, cliText } from "../lib/cli-name.ts";
+import type { FabricValue } from "@commonfabric/api";
+import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+
 import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
 import { normalizeLLMFriendlyRef } from "../lib/llm-friendly-ref.ts";
 import { renderPiece } from "../lib/piece-render.ts";
@@ -2394,7 +2398,7 @@ export const piece = targetOptions(
   )
   .option(
     "--json",
-    "Write the full repair report as JSON to stdout instead of the plan.",
+    "Write the full repair report to stdout instead of the plan, in the canonical FabricValue JSON encoding — a diffed document may hold values plain JSON cannot carry.",
     { conflicts: ["out"] },
   )
   .action(repairFromCommand)
@@ -3450,7 +3454,10 @@ export async function repairFromCommand(
   const print = deps.render ?? render;
   const printHint = deps.printHint ?? hint;
   if (options.json) {
-    print(report, { json: true });
+    // The canonical FabricValue encoding, not a JSON.stringify: a diffed
+    // document's values may be Fabric specials — bytes, a hash — that a
+    // plain serializer flattens into empty shells.
+    print(jsonFromFabricValue(report as unknown as FabricValue));
   } else {
     const plan = encodePlan(report.plan);
     if (options.out !== undefined) {
@@ -3468,6 +3475,32 @@ export async function repairFromCommand(
     [...tally.entries()].map(([verdict, count]) => `${verdict}: ${count}`)
       .join(" · "),
   );
+  if (options.apply !== true) {
+    // The dry run's product is the exact per-piece diff, so every changed
+    // position renders — through the data-model's own debug stringifier,
+    // which shows a Fabric special value as itself.
+    for (const row of report.rows) {
+      for (const change of row.changes ?? []) {
+        if (change.kind === "added") {
+          printHint(
+            `+ ${row.piece} ${change.path} ` +
+              toCompactDebugString(change.after),
+          );
+        } else if (change.kind === "removed") {
+          printHint(
+            `- ${row.piece} ${change.path} ` +
+              toCompactDebugString(change.before),
+          );
+        } else {
+          printHint(
+            `~ ${row.piece} ${change.path} ` +
+              `${toCompactDebugString(change.before)} -> ` +
+              toCompactDebugString(change.after),
+          );
+        }
+      }
+    }
+  }
   for (const row of report.rows) {
     if (row.problem !== undefined) {
       printHint(`${row.verdict}: ${row.piece} ${row.problem}`);

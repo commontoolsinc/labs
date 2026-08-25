@@ -151,6 +151,14 @@ export interface RepairOptions {
    */
   fixerName?: string;
   /**
+   * The content identity of the fixer module's authored closure — the pin
+   * the name cannot be. Recorded on every emitted repair op, and held
+   * against a supplied plan's recorded identities: a plan reviewed against
+   * one implementation must not execute another, however the file is
+   * spelled or what it holds today.
+   */
+  fixerIdentity?: string;
+  /**
    * A previously emitted plan, which then IS the execution: its rows run
    * in its order, each row's recorded document hash is its precondition,
    * and the plan must agree with this run — same space, same fixer name,
@@ -611,6 +619,29 @@ export async function repairPieces(
           disagreeing.map((row) => row.piece).join(", ") + ".",
       );
     }
+    const pinned = plan.rows.filter((row) =>
+      row.op?.kind === "repair" && row.op.fixerIdentity !== undefined
+    );
+    if (pinned.length > 0 && options.fixerIdentity === undefined) {
+      throw new Error(
+        "The plan pins its fixer's implementation and this run supplies " +
+          "no fixerIdentity to hold it against.",
+      );
+    }
+    const repinned = pinned.filter((row) =>
+      row.op?.kind === "repair" &&
+      row.op.fixerIdentity !== options.fixerIdentity
+    );
+    if (repinned.length > 0) {
+      // The name matching is not the pin: the file behind it may have
+      // changed since the plan was reviewed, and a reviewed plan must not
+      // execute an implementation nobody reviewed.
+      throw new Error(
+        "The plan pins a different fixer implementation than this run " +
+          "supplies, on: " + repinned.map((row) => row.piece).join(", ") +
+          ".",
+      );
+    }
     const surveyByPiece = new Map(members.map((row) => [row.piece, row]));
     const planPieces = new Set(plan.rows.map((row) => row.piece));
     const missing = members.filter((row) => !planPieces.has(row.piece));
@@ -737,7 +768,13 @@ export async function repairPieces(
           ...phase,
           expect: { ...row.expect, documentHash: decision.documentHash },
           ...(options.fixerName === undefined ? {} : {
-            op: { kind: "repair", fixer: options.fixerName },
+            op: {
+              kind: "repair",
+              fixer: options.fixerName,
+              ...(options.fixerIdentity === undefined
+                ? {}
+                : { fixerIdentity: options.fixerIdentity }),
+            },
           }),
         });
         return;

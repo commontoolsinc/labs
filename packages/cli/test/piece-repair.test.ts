@@ -1,11 +1,17 @@
+/**
+ * `cf piece repair`'s command action and its `runRepair` seam: flag intake
+ * and passthrough, output in both modes, the exit discipline, and the run
+ * end to end against a real controller over emulated storage — the fixer
+ * module injected, so no disk import runs in a unit test.
+ */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { createSession, Identity } from "@commonfabric/identity";
-import { Runtime } from "@commonfabric/runner";
+import { PiecesController, type RepairReport } from "@commonfabric/piece/ops";
+import { Runtime, type RuntimeProgram } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { PiecesController } from "@commonfabric/piece/ops";
-import type { RuntimeProgram } from "@commonfabric/runner";
-import type { RepairReport } from "@commonfabric/piece/ops";
 import { decode } from "@commonfabric/utils/encoding";
 
 import { type RepairRunRequest, runRepair } from "../lib/bulk.ts";
@@ -98,7 +104,71 @@ describe("piece-repair", () => {
       expect(request?.fixerName).toBe("fix-seeds.ts");
       expect(request?.fixerPath.endsWith("/fix-seeds.ts")).toBe(true);
       expect(request?.apply).toBeUndefined();
-      expect(hints).toEqual(["would-change: 1"]);
+      // The dry run's product is the exact diff, so it renders beside the
+      // tally.
+      expect(hints).toEqual([
+        "would-change: 1",
+        '~ fid1:aaa /seed "a" -> "A"',
+      ]);
+    });
+
+    it("renders the dry diff through the canonical debug stringifier", async () => {
+      const hints: string[] = [];
+      const fabric: RepairReport = {
+        ...REPORT,
+        rows: [{
+          piece: "fid1:aaa",
+          verdict: "would-change",
+          documentHash: "9f2c",
+          changes: [
+            { path: "/gone", kind: "removed", before: 1 },
+            {
+              path: "/pin",
+              kind: "added",
+              after: FabricHash.fromString("fid1:" + "A".repeat(43)),
+            },
+          ],
+        }],
+      };
+      await captureStdout(() =>
+        repairFromCommand({ ...OPTIONS, path: "topics" }, {
+          runRepair: () => Promise.resolve(fabric),
+          printHint: (message) => {
+            hints.push(message);
+          },
+        })
+      );
+      expect(hints).toContain("- fid1:aaa /gone 1");
+      const added = hints.find((line) => line.startsWith("+ fid1:aaa /pin"));
+      // A Fabric special value renders in the canonical debug form — its
+      // kind named, never an empty shell; the value-exact rendering is the
+      // --json encoding's job.
+      expect(added).toBeDefined();
+      expect(added).toContain("/Hash(");
+    });
+
+    it("emits --json in the canonical FabricValue encoding", async () => {
+      const a = FabricHash.fromString("fid1:" + "A".repeat(43));
+      const b = FabricHash.fromString("fid1:" + "B".repeat(42) + "A");
+      const fabric: RepairReport = {
+        ...REPORT,
+        rows: [{
+          piece: "fid1:aaa",
+          verdict: "would-change",
+          documentHash: "9f2c",
+          changes: [{ path: "/pin", kind: "changed", before: a, after: b }],
+        }],
+      };
+      const out = await captureStdout(() =>
+        repairFromCommand({ ...OPTIONS, path: "topics", json: true }, {
+          runRepair: () => Promise.resolve(fabric),
+          printHint: () => {},
+        })
+      );
+      expect(out.startsWith("fvj1:")).toBe(true);
+      // Two distinct hashes stay two distinct hashes, not two empty shells.
+      expect(out).toContain("A".repeat(43));
+      expect(out).toContain("B".repeat(42));
     });
 
     it("passes the plan path and the apply flag through", async () => {
@@ -155,18 +225,6 @@ describe("piece-repair", () => {
       expect(written?.path).toBe("plan.jsonl");
       expect(written?.text).toContain('"piece-plan"');
       expect(hints).toContain("refused: fid1:aaa the fixer threw");
-    });
-
-    it("prints the whole report as JSON under --json", async () => {
-      const rendered: Array<{ value: unknown; json: boolean | undefined }> = [];
-      await repairFromCommand({ ...OPTIONS, path: "topics", json: true }, {
-        runRepair: () => Promise.resolve(REPORT),
-        render: (value, config) => {
-          rendered.push({ value, json: config?.json });
-        },
-        printHint: () => {},
-      });
-      expect(rendered).toEqual([{ value: REPORT, json: true }]);
     });
 
     it("routes cf piece repair to repairFromCommand", () => {
@@ -247,6 +305,10 @@ describe("piece-repair", () => {
           expect(path).toBe("/repairs/fix-seeds.ts");
           return Promise.resolve(upperSeed);
         },
+        computeFixerIdentity: (path: string) => {
+          expect(path).toBe("/repairs/fix-seeds.ts");
+          return Promise.resolve("impl-v1");
+        },
       };
 
       const dry = await runRepair({} as never, base, deps as never);
@@ -255,6 +317,7 @@ describe("piece-repair", () => {
       expect(dry.plan.rows[0].op).toEqual({
         kind: "repair",
         fixer: "fix-seeds.ts",
+        fixerIdentity: "impl-v1",
       });
 
       // The emitted plan drives the apply, read back through the codec.
@@ -277,11 +340,71 @@ describe("piece-repair", () => {
       expect(applied.rows[0].verdict).toBe("repaired");
       expect(applied.complete).toBe(true);
 
+      // An edited fixer file resolves to a different closure identity, and
+      // the reviewed plan refuses to run it.
+      await expect(
+        runRepair({} as never, {
+          ...base,
+          planPath: "/plans/repair.jsonl",
+          apply: true,
+        }, {
+          ...deps,
+          computeFixerIdentity: () => Promise.resolve("impl-v2"),
+          readTextFile: () =>
+            Promise.resolve(
+              [
+                JSON.stringify(dry.plan.header),
+                ...dry.plan.rows.map((row) => JSON.stringify(row)),
+              ].join("\n"),
+            ),
+        } as never),
+      ).rejects.toThrow("different fixer implementation");
+
       const cell = await member.input.getCell();
       await cell.pull();
       expect(
         (cell.getRaw({ lastNode: "value" }) as { seed?: unknown }).seed,
       ).toBe("ALPHA");
+    });
+
+    it("imports a real on-disk fixer and pins its computed identity", async () => {
+      const member = await pieces.create(memberProgram(), {
+        input: { seed: "alpha" },
+      });
+      const dir = await Deno.makeTempDir({ prefix: "cli-repair-fixer" });
+      try {
+        const fixerPath = `${dir}/fix-seeds.ts`;
+        await Deno.writeTextFile(
+          fixerPath,
+          [
+            "export default (document: Readonly<Record<string, unknown>>) => ({",
+            "  ...document,",
+            '  ...(typeof document.seed === "string"',
+            "    ? { seed: document.seed.toUpperCase() }",
+            "    : {}),",
+            "});",
+            "",
+          ].join("\n"),
+        );
+        // No injected import and no injected identity: the defaults import
+        // the module from disk and hash its authored closure.
+        const dry = await runRepair({} as never, {
+          selector: { kind: "list", pieces: [member.id] },
+          fixerPath,
+          fixerName: "fix-seeds.ts",
+        }, {
+          loadPieces: () => Promise.resolve(pieces),
+          resolvePieceAddress: (_pieces: unknown, token: string) =>
+            Promise.resolve(token),
+        } as never);
+        expect(dry.rows[0].verdict).toBe("would-change");
+        const op = dry.plan.rows[0].op;
+        if (op?.kind !== "repair") throw new Error("expected a repair op");
+        expect(op.fixerIdentity).toBeDefined();
+        expect(op.fixerIdentity).not.toBe("");
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
     });
 
     it("refuses a fixer module that does not default-export a function", async () => {
@@ -295,6 +418,7 @@ describe("piece-repair", () => {
             throw new Error("must not load");
           },
           importModule: () => Promise.resolve({}),
+          computeFixerIdentity: () => Promise.resolve("impl-v1"),
         } as never),
       ).rejects.toThrow("must default-export the fixer function");
     });

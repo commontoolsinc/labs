@@ -161,6 +161,14 @@ export interface RepairOp {
   kind: "repair";
   /** The fixer's name as supplied — a module path or label; never resolved. */
   fixer: string;
+  /**
+   * The content identity of the fixer module's authored closure — the same
+   * no-compile identity a retarget's source carries — which is the pin the
+   * name cannot be: a path re-resolved elsewhere, or a file edited after
+   * review, changes this and the apply refuses the plan. The name is for
+   * readers; this is for the run.
+   */
+  fixerIdentity?: string;
 }
 
 /** What a plan row does to its piece, absent on a survey-only row. */
@@ -472,7 +480,8 @@ function isPlanRow(value: unknown): value is PiecePlanRow {
 function isPieceOp(value: unknown): value is PieceOp {
   if (!isRecord(value)) return false;
   if (value.kind === "repair") {
-    return typeof value.fixer === "string" && value.fixer !== "";
+    return typeof value.fixer === "string" && value.fixer !== "" &&
+      isOptionalName(value.fixerIdentity);
   }
   if (
     typeof value.patternIdentity !== "string" ||

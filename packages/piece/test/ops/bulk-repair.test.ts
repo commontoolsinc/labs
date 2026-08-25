@@ -1123,6 +1123,56 @@ describe("bulk-repair", () => {
       expect(resumed.complete).toBe(true);
     });
 
+    it("pins the fixer implementation, not its name", async () => {
+      const a = await member("alpha");
+      const holder = await seedHolder([a]);
+      const dry = await repairPieces(pieces, {
+        selector: collectionOf(holder),
+        fixer: upperSeed,
+        fixerName: "upper-seed.ts",
+        fixerIdentity: "impl-v1",
+      });
+      expect(dry.plan.rows[0].op).toEqual({
+        kind: "repair",
+        fixer: "upper-seed.ts",
+        fixerIdentity: "impl-v1",
+      });
+      expect(decodePlan(encodePlan(dry.plan))).toEqual(dry.plan);
+
+      // The same name over a different implementation is exactly what the
+      // pin exists to refuse.
+      await expect(
+        repairPieces(pieces, {
+          selector: collectionOf(holder),
+          fixer: upperSeed,
+          fixerName: "upper-seed.ts",
+          fixerIdentity: "impl-v2",
+          plan: dry.plan,
+          apply: true,
+        }),
+      ).rejects.toThrow("different fixer implementation");
+      await expect(
+        repairPieces(pieces, {
+          selector: collectionOf(holder),
+          fixer: upperSeed,
+          fixerName: "upper-seed.ts",
+          plan: dry.plan,
+          apply: true,
+        }),
+      ).rejects.toThrow("no fixerIdentity");
+      expect((await rawInput(a)).seed).toBe("alpha");
+
+      const applied = await repairPieces(pieces, {
+        selector: collectionOf(holder),
+        fixer: upperSeed,
+        fixerName: "upper-seed.ts",
+        fixerIdentity: "impl-v1",
+        plan: dry.plan,
+        apply: true,
+      });
+      expect(applied.rows[0].verdict).toBe("repaired");
+    });
+
     it("refuses a plan that disagrees with the run", async () => {
       const a = await member("alpha");
       const holder = await seedHolder([a]);
