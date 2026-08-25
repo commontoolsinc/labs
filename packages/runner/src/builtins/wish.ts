@@ -1518,12 +1518,31 @@ function releaseSharedHashtagResolver(runtime: Runtime, key: string): void {
   resolvers?.delete(key);
 }
 
+// The schema-registry epoch every sidecar cache compares against: a compiled
+// pattern's binding schemas are externalized to `cid:` references whose
+// documents live in the realm schema registry only for the epoch that
+// compiled it. A sidecar cache outlives runtimes, so a pattern reused past
+// the registry-clear transition (last lease out) would mint cells carrying
+// schemas nobody can resolve, and the first sync built from one would be
+// rejected by the server (#6303). One shared counter, bumped by one shared
+// listener, instead of a listener per cache: caches compare their recorded
+// epoch on read, so an abandoned cache (tests create them freely) holds
+// nothing in the registry's listener set.
+let sidecarPatternEpoch = 0;
+onSchemaRegistryClear(() => {
+  sidecarPatternEpoch++;
+});
+
 // Fetch-and-compile cache for one sidecar pattern (suggestion /
 // profile-create / profile-picker), shared across all wish invocations. The
 // cache tracks the URL each fetch was started for: `setPatternEnvironment`
 // can change the apiUrl while a fetch is in flight, so a launch for a
 // different URL starts a fresh fetch, and a superseded fetch leaves the cache
-// untouched and resolves to undefined when it settles.
+// untouched and resolves to undefined when it settles. The schema-registry
+// epoch supersedes the same way (see `sidecarPatternEpoch`): a pattern
+// fetched in an earlier epoch is never served or recorded, and the next
+// launch recompiles (cheap — the compile caches are content-addressed and
+// survive) and registers its schema documents afresh.
 //
 // The cache is keyed only on the URL, not the user identity, even with
 // `compileInUserSpace`. A same-apiUrl identity switch reuses the prior user's
@@ -1541,22 +1560,8 @@ export function createSidecarPatternCache(options: {
 }) {
   let fetchPromise: Promise<Pattern | undefined> | undefined;
   let fetchUrl: string | undefined;
+  let fetchEpoch = -1;
   let pattern: Pattern | undefined;
-
-  // A compiled pattern's binding schemas are externalized to `cid:`
-  // references whose documents live in the realm schema registry for the
-  // epoch that compiled it. This cache outlives runtimes, so on the
-  // registry-clear transition (last lease out) the cached pattern's
-  // references would dangle — every cell its next instantiation minted
-  // would carry a schema nobody can resolve, and the first sync built from
-  // one would be rejected by the server (#6303). Drop the cache with the
-  // epoch; the next launch recompiles (cheap — the compile caches are
-  // content-addressed and survive) and registers its documents afresh.
-  onSchemaRegistryClear(() => {
-    fetchPromise = undefined;
-    fetchUrl = undefined;
-    pattern = undefined;
-  });
 
   // Resolved lazily (not at module load): in the browser worker this module
   // is imported before the runtime calls `setPatternEnvironment` with the
@@ -1604,13 +1609,17 @@ export function createSidecarPatternCache(options: {
   }
 
   return {
-    // Pattern from a completed fetch for the current environment's URL.
+    // Pattern from a completed fetch for the current environment's URL and
+    // the current schema-registry epoch.
     cached(): Pattern | undefined {
-      return fetchUrl === patternUrl() ? pattern : undefined;
+      return fetchUrl === patternUrl() && fetchEpoch === sidecarPatternEpoch
+        ? pattern
+        : undefined;
     },
     // Memoized fetch for the current environment's URL, started by this call
-    // when none is in flight for that URL. When this call starts the fetch,
-    // `onSuccess` runs once it resolves with a pattern, unless a later fetch
+    // when none is in flight for that URL in the current schema-registry
+    // epoch. When this call starts the fetch, `onSuccess` runs once it
+    // resolves with a pattern, unless a later fetch or an epoch transition
     // superseded it. A superseded fetch resolves to undefined.
     fetch(
       runtime: Runtime,
@@ -1618,18 +1627,27 @@ export function createSidecarPatternCache(options: {
       compileSpace?: Cell<unknown>["space"],
     ): Promise<Pattern | undefined> {
       const url = patternUrl();
-      if (!fetchPromise || fetchUrl !== url) {
+      if (
+        !fetchPromise || fetchUrl !== url || fetchEpoch !== sidecarPatternEpoch
+      ) {
         fetchUrl = url;
+        const startedEpoch = sidecarPatternEpoch;
+        fetchEpoch = startedEpoch;
         pattern = undefined;
         const started: Promise<Pattern | undefined> = fetchPattern(
           runtime,
           url,
           compileSpace,
         ).then((fetched) => {
-          // Only the fetch the cache currently points to records and reports
-          // its result; launches chained on a superseded fetch get undefined
-          // so a stale pattern is never run.
-          if (fetchPromise !== started) return undefined;
+          // Only the fetch the cache currently points to, settling in the
+          // epoch it started in, records and reports its result; launches
+          // chained on a superseded fetch get undefined so a stale pattern
+          // is never run.
+          if (
+            fetchPromise !== started || startedEpoch !== sidecarPatternEpoch
+          ) {
+            return undefined;
+          }
           pattern = fetched;
           if (fetched) {
             onSuccess?.(fetched);
