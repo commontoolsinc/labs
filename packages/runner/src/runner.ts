@@ -1092,10 +1092,13 @@ export function isStoredArgumentSchemaRefusal(error: unknown): boolean {
  * missing document arrives; nothing classifies this as a refusal, so a boot
  * repair treats it as transient rather than escalating.
  *
- * The whole argument's judgment waits, deliberately: a readable
- * wrong-typed slot beside a missing one is refused only once every slot has
- * been read, so a refusal — when it comes — is always a verdict over the
- * complete value.
+ * The whole argument's judgment waits, deliberately, in BOTH directions: a
+ * readable wrong-typed slot beside a missing one is refused only once every
+ * slot has been read, and an acceptance likewise only stands over the
+ * complete value — an optional slot behind an unloaded link reads as absent
+ * and would pass, while the converged read may find a wrong-typed value
+ * there and refuse. Either verdict, minted early, would depend on which
+ * docs this replica happened to hold.
  */
 export class StoredArgumentValidationPendingError extends Error {
   /** One key per link target the materialization missed, deduplicated. */
@@ -1577,12 +1580,12 @@ export class Runner {
     // resolves the argument's whole link graph through this transaction, and
     // every link target it crosses that the local replica cannot serve is
     // noted on the transaction (and its load kicked) by the read path. A
-    // failure with no such note is a verdict over data that was read; a
-    // failure alongside one is no verdict at all — the value is unknowable
-    // HERE, and judging its absence would mint a permanent refusal over a
+    // validation with no such note is a verdict over data that was read; one
+    // alongside a note is no verdict at all, whichever way it leaned — the
+    // value is unknowable HERE, and judging it would tie the outcome to a
     // replication state (the 2026-08-21 fleet outage: a profile name's seed
     // doc sat one value-hop past everything the cold-start closure delivers,
-    // and validating the resulting `undefined` bricked every home space).
+    // and refusing over the resulting `undefined` bricked every home space).
     const missedBefore = missingLinkTargetsTx(tx).length;
     const materializedArgument = argumentCell.asSchema(undefined).withTx(tx)
       .get();
@@ -1614,7 +1617,12 @@ export class Runner {
         optionalUndefinedIsAbsent: true,
       },
     );
-    if (validationFailure === undefined) return;
+    // The miss check comes BEFORE the verdict, on both arms: an acceptance
+    // over unread bytes is as false as a refusal over them. An OPTIONAL slot
+    // whose link target was never pulled materializes `undefined` and would
+    // pass as absent — while the converged read may find a wrong-typed value
+    // there and refuse — so a validation that crossed any unloaded target
+    // yields no verdict at all, whichever way the readable subset leaned.
     const missed = missingLinkTargetsTx(tx).slice(missedBefore);
     if (missed.length > 0) {
       const keys = [
@@ -1623,8 +1631,13 @@ export class Runner {
           return `${space}/${String(scope ?? "space")}/${id}`;
         })),
       ];
-      throw new StoredArgumentValidationPendingError(keys, validationFailure);
+      throw new StoredArgumentValidationPendingError(
+        keys,
+        validationFailure ??
+          "strict validation passed over the readable subset",
+      );
     }
+    if (validationFailure === undefined) return;
     throw new Error(
       `${STORED_ARGUMENT_SCHEMA_REFUSAL}: ${validationFailure}`,
     );
