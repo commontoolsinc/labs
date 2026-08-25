@@ -162,6 +162,7 @@ describe("GithubClient", () => {
         node.headRepository = null;
         node.reviewDecision = null;
         node.statusCheckRollup = null;
+        node.headRefOid = null;
         const client = new GithubClient(() =>
           Promise.resolve(response([node], false, null))
         );
@@ -172,6 +173,7 @@ describe("GithubClient", () => {
         expect(result.headRepositoryUrl).toBeNull();
         expect(result.reviewDecision).toBeNull();
         expect(result.checkState).toBeNull();
+        expect(result.headRefOid).toBeNull();
       });
 
       it("rejects malformed pull-request fields", async () => {
@@ -299,6 +301,22 @@ describe("GithubClient", () => {
         )).rejects.toThrow("known pull-request response has invalid nodes");
       });
 
+      it("rejects an unsupported known pull-request state", async () => {
+        const prior = await new GithubClient(() =>
+          Promise.resolve(response([pullRequest(1)], false, null))
+        ).collectOpenPullRequests();
+        const replies = [
+          response([], false, null),
+          { data: { nodes: [{ state: "UNKNOWN" }] } },
+        ];
+        const client = new GithubClient(() => Promise.resolve(replies.shift()));
+
+        await expect(client.collectOpenPullRequests(
+          undefined,
+          prior.pullRequests,
+        )).rejects.toThrow("state has an unsupported value");
+      });
+
       it("honors cancellation before starting collection", async () => {
         const controller = new AbortController();
         controller.abort(new Error("cancelled"));
@@ -377,5 +395,32 @@ describe("createGithubGraphqlTransport", () => {
     await expect(transport({ query: "query", variables: {} })).rejects.toThrow(
       "GitHub GraphQL request failed: first failure; unknown GraphQL error",
     );
+  });
+
+  it("cancels a pending response body when the request is aborted", async () => {
+    let bodyCancelled = false;
+    const bodyRead = Promise.withResolvers<void>();
+    const stream = new ReadableStream<Uint8Array>({
+      pull: () => bodyRead.resolve(),
+      cancel: () => {
+        bodyCancelled = true;
+      },
+    });
+    const response = new Response(stream);
+    const transport = createGithubGraphqlTransport({
+      token: "secret",
+      fetch: () => Promise.resolve(response),
+    });
+    const controller = new AbortController();
+    const result = transport(
+      { query: "query", variables: {} },
+      controller.signal,
+    );
+
+    await bodyRead.promise;
+    controller.abort(new Error("shutdown"));
+
+    await expect(result).rejects.toThrow("shutdown");
+    expect(bodyCancelled).toBe(true);
   });
 });

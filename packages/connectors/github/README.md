@@ -47,7 +47,8 @@ complete GitHub scan:
 2. Conflicting pull requests are `merge-conflicts`.
 3. Failed or errored check rollups are `tests-failed`.
 4. Pending or expected check rollups are `tests-running`.
-5. Clean pull requests without requested changes are `green-and-can-land`.
+5. Mergeable, clean pull requests with no required review are
+   `green-and-can-land`.
 6. Every other open pull request is `merge-blocked`.
 
 When a previously visible pull request disappears from the authored list, the

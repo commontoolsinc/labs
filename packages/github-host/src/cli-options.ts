@@ -62,8 +62,8 @@ export function parseGithubHostCliOptions(
   );
   try {
     new URL(apiUrl);
-  } catch (error) {
-    throw new Error("--api-url is not a valid URL", { cause: error });
+  } catch {
+    throw new Error("--api-url is not a valid URL");
   }
   return {
     help: false,

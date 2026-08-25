@@ -31,6 +31,11 @@ export interface GithubConnectorSource {
   account: string;
 }
 
+export interface GithubLastCompleteCollection {
+  completedAt: string;
+  pullRequestCount: number;
+}
+
 /** Deterministic Fabric causes for the GitHub connector's root cells. */
 export function githubFabricCauses(
   spaceDid: string,
@@ -97,7 +102,6 @@ const STORED_PULL_REQUEST_STRING_FIELDS = [
   "baseRefName",
   "baseRefOid",
   "headRefName",
-  "headRefOid",
   "mergeable",
   "mergeState",
   "createdAt",
@@ -115,6 +119,7 @@ function storedPullRequest(
   const nullableStrings = [
     pullRequest.headRepository,
     pullRequest.headRepositoryUrl,
+    pullRequest.headRefOid,
     pullRequest.reviewDecision,
     pullRequest.checkState,
   ];
@@ -264,6 +269,26 @@ export class GithubFabricTarget {
       }
       return storedPullRequest(row, index);
     });
+  }
+
+  /** Read durable metadata for the last complete collection. */
+  async readLastComplete(): Promise<GithubLastCompleteCollection | undefined> {
+    const value = await readGithubFabricCell(this.conn, this.cells.index);
+    if (value === undefined || value === null) return undefined;
+    previousGeneration(value);
+    if (
+      !isRecord(value) || value.formatVersion !== 1 ||
+      typeof value.lastCompleteCollectionAt !== "string" ||
+      !Array.isArray(value.pullRequests) ||
+      typeof value.viewer !== "string" ||
+      value.viewer.toLowerCase() !== this.source.account
+    ) {
+      throw new Error("GitHub pull-request index has an invalid shape");
+    }
+    return {
+      completedAt: value.lastCompleteCollectionAt,
+      pullRequestCount: value.pullRequests.length,
+    };
   }
 
   /** Publish host health without changing the last complete PR index. */

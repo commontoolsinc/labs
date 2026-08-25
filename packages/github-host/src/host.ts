@@ -26,6 +26,10 @@ export interface GithubHostHealth {
     pullRequestCount?: number;
     error?: string;
   };
+  lastComplete?: {
+    completedAt: string;
+    pullRequestCount: number;
+  };
 }
 
 function errorMessage(error: unknown): string {
@@ -41,6 +45,7 @@ export class GithubHost {
   readonly #startedAt: string;
   #status: GithubHostStatus = "starting";
   #sync?: GithubHostHealth["sync"];
+  #lastComplete?: GithubHostHealth["lastComplete"];
   #syncTail: Promise<void> = Promise.resolve();
 
   /** Create a host for one GitHub account and Fabric destination. */
@@ -73,12 +78,14 @@ export class GithubHost {
         },
       },
       ...(this.#sync ? { sync: this.#sync } : {}),
+      ...(this.#lastComplete ? { lastComplete: this.#lastComplete } : {}),
     });
   }
 
   /** Publish initial health before the first GitHub request. */
-  start(): Promise<void> {
-    return this.#target.publishHealth(this.health());
+  async start(): Promise<void> {
+    this.#lastComplete = await this.#target.readLastComplete();
+    await this.#target.publishHealth(this.health());
   }
 
   /** Schedule a complete collection after any collection already in flight. */
@@ -108,12 +115,17 @@ export class GithubHost {
       );
       signal?.throwIfAborted();
       const count = await this.#target.publish(collection);
+      const completedAt = this.#now();
       this.#status = "ready";
       this.#sync = {
         reason,
         status: "complete",
         startedAt,
-        completedAt: this.#now(),
+        completedAt,
+        pullRequestCount: count,
+      };
+      this.#lastComplete = {
+        completedAt,
         pullRequestCount: count,
       };
       await this.#target.publishHealth(this.health());

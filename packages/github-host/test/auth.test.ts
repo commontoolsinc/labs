@@ -28,15 +28,24 @@ describe("auth", () => {
     });
 
     it("reports a failed `gh auth token` without including stdout", async () => {
-      await expect(resolveGithubToken(
-        () => undefined,
-        () =>
-          Promise.resolve({
-            code: 1,
-            stdout: "sensitive",
-            stderr: "not logged in\nmore detail",
-          }),
-      )).rejects.toThrow("gh auth token failed: not logged in");
+      try {
+        await resolveGithubToken(
+          () => undefined,
+          () =>
+            Promise.resolve({
+              code: 1,
+              stdout: "sensitive",
+              stderr: "not logged in\nmore detail",
+            }),
+        );
+        throw new Error("expected token resolution to fail");
+      } catch (error) {
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toBe(
+          "gh auth token failed: not logged in",
+        );
+        expect((error as Error).message.includes("sensitive")).toBe(false);
+      }
     });
   });
 });

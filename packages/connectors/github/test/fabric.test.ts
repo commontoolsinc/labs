@@ -64,17 +64,40 @@ function pullRequest(): GithubPullRequest {
   };
 }
 
+async function createTestConnection(passphrase: string): Promise<{
+  connection: GithubFabricConnection;
+  close: () => Promise<void>;
+}> {
+  const signer = await Identity.fromPassphrase(passphrase);
+  const storageManager = StorageManager.emulate({ as: signer });
+  let runtime: Runtime;
+  try {
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+  } catch (error) {
+    await storageManager.close();
+    throw error;
+  }
+  return {
+    connection: { runtime, spaceDid: signer.did() },
+    close: async () => {
+      try {
+        await runtime.dispose();
+      } finally {
+        await storageManager.close();
+      }
+    },
+  };
+}
+
 describe("GithubFabricTarget", () => {
   describe("instance members", () => {
     describe("publish()", () => {
       it("publishes details before a complete generation index", async () => {
-        const signer = await Identity.fromPassphrase("GitHub connector test");
-        const storageManager = StorageManager.emulate({ as: signer });
-        const runtime = new Runtime({
-          apiUrl: new URL(import.meta.url),
-          storageManager,
-        });
-        const connection = { runtime, spaceDid: signer.did() };
+        const fixture = await createTestConnection("GitHub connector test");
+        const { connection } = fixture;
         try {
           const target = await GithubFabricTarget.open(connection, {
             host: " API.GITHUB.COM ",
@@ -100,6 +123,10 @@ describe("GithubFabricTarget", () => {
           expect(first.lastCompleteCollectionAt).toBe(
             "2026-08-21T01:00:00.000Z",
           );
+          expect(await target.readLastComplete()).toEqual({
+            completedAt: "2026-08-21T01:00:00.000Z",
+            pullRequestCount: 1,
+          });
           const rows = first.pullRequests as Array<Record<string, unknown>>;
           expect(rows).toHaveLength(1);
           expect(rows[0].number).toBe(42);
@@ -143,32 +170,33 @@ describe("GithubFabricTarget", () => {
           expect(second.generation).toBe(2);
           expect(second.pullRequests).toEqual([]);
         } finally {
-          await runtime.dispose();
-          await storageManager.close();
+          await fixture.close();
         }
       });
 
       it("leaves prior detail links unchanged when the index write fails", async () => {
-        const signer = await Identity.fromPassphrase(
+        const fixture = await createTestConnection(
           "GitHub connector failure test",
         );
-        const storageManager = StorageManager.emulate({ as: signer });
-        const runtime = new Runtime({
-          apiUrl: new URL(import.meta.url),
-          storageManager,
-        });
-        const connection = { runtime, spaceDid: signer.did() };
-        let writeCount = 0;
-        let failedWrite = Number.POSITIVE_INFINITY;
+        const { connection } = fixture;
+        let target: GithubFabricTarget | undefined;
+        let failIndexWrite = false;
+        let detailPublishedBeforeFailure = false;
         const writeGraph: typeof writeGithubFabricCells = (conn, entries) => {
-          writeCount++;
-          if (writeCount === failedWrite) {
+          const isIndexWrite = entries.some((entry) =>
+            entry.cell === target?.cells.index
+          );
+          if (failIndexWrite && isIndexWrite) {
             return Promise.reject(new Error("index write failed"));
           }
-          return writeGithubFabricCells(conn, entries);
+          return writeGithubFabricCells(conn, entries).then(() => {
+            if (failIndexWrite && !isIndexWrite) {
+              detailPublishedBeforeFailure = true;
+            }
+          });
         };
         try {
-          const target = await GithubFabricTarget.open(
+          target = await GithubFabricTarget.open(
             connection,
             { host: "api.github.com", account: "ianh" },
             writeGraph,
@@ -178,7 +206,7 @@ describe("GithubFabricTarget", () => {
             observedAt: "2026-08-21T01:00:00.000Z",
             pullRequests: [pullRequest()],
           });
-          failedWrite = writeCount + 2;
+          failIndexWrite = true;
           await expect(target.publish({
             viewer: "ianh",
             observedAt: "2026-08-21T02:00:00.000Z",
@@ -188,6 +216,7 @@ describe("GithubFabricTarget", () => {
               observedAt: "2026-08-21T02:00:00.000Z",
             }],
           })).rejects.toThrow("index write failed");
+          expect(detailPublishedBeforeFailure).toBe(true);
 
           const index = await readIndex(connection, target.cells.index);
           const rows = index.pullRequests as Array<Record<string, unknown>>;
@@ -196,21 +225,15 @@ describe("GithubFabricTarget", () => {
             "Pull request 42",
           );
         } finally {
-          await runtime.dispose();
-          await storageManager.close();
+          await fixture.close();
         }
       });
 
       it("rejects malformed prior indexes and rows", async () => {
-        const signer = await Identity.fromPassphrase(
+        const fixture = await createTestConnection(
           "GitHub connector malformed index test",
         );
-        const storageManager = StorageManager.emulate({ as: signer });
-        const runtime = new Runtime({
-          apiUrl: new URL(import.meta.url),
-          storageManager,
-        });
-        const connection = { runtime, spaceDid: signer.did() };
+        const { connection } = fixture;
         try {
           const target = await GithubFabricTarget.open(connection, {
             host: "api.github.com",
@@ -267,8 +290,7 @@ describe("GithubFabricTarget", () => {
             "index has an invalid shape",
           );
         } finally {
-          await runtime.dispose();
-          await storageManager.close();
+          await fixture.close();
         }
       });
     });

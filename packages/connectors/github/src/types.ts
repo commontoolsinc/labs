@@ -46,7 +46,7 @@ export interface GithubPullRequest {
   baseRefName: string;
   baseRefOid: string;
   headRefName: string;
-  headRefOid: string;
+  headRefOid: string | null;
   headRepository: string | null;
   headRepositoryUrl: string | null;
   isDraft: boolean;

@@ -129,6 +129,7 @@ const CHECK_STATES = new Set([
   "PENDING",
   "SUCCESS",
 ]);
+const PULL_REQUEST_STATES = new Set(["OPEN", "CLOSED", "MERGED"]);
 
 function parsePullRequest(
   value: unknown,
@@ -184,7 +185,7 @@ function parsePullRequest(
     baseRefName: string(source.baseRefName, `${label}.baseRefName`),
     baseRefOid: string(source.baseRefOid, `${label}.baseRefOid`),
     headRefName: string(source.headRefName, `${label}.headRefName`),
-    headRefOid: string(source.headRefOid, `${label}.headRefOid`),
+    headRefOid: nullableString(source.headRefOid, `${label}.headRefOid`),
     headRepository: headRepository === null ? null : string(
       headRepository.nameWithOwner,
       `${label}.headRepository.nameWithOwner`,
@@ -247,6 +248,41 @@ function parsePage(value: unknown, observedAt: string): PullRequestPage {
       parsePullRequest(node, observedAt, `pullRequests.nodes[${index}]`)
     ),
   };
+}
+
+async function readJsonResponse(
+  response: Response,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  if (response.body === null) return await response.json();
+  signal?.throwIfAborted();
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let removeAbortListener = () => {};
+  const aborted = signal === undefined
+    ? new Promise<never>(() => {})
+    : new Promise<never>((_, reject) => {
+      const onAbort = () => {
+        void reader.cancel(signal.reason).catch(() => {});
+        reject(signal.reason);
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      removeAbortListener = () => signal.removeEventListener("abort", onAbort);
+    });
+  try {
+    while (true) {
+      const result = await Promise.race([reader.read(), aborted]);
+      if (result.done) break;
+      text += decoder.decode(result.value, { stream: true });
+    }
+    signal?.throwIfAborted();
+    text += decoder.decode();
+  } finally {
+    removeAbortListener();
+    reader.releaseLock();
+  }
+  return JSON.parse(text);
 }
 
 /** A direct GitHub GraphQL client that performs complete paginated scans. */
@@ -368,7 +404,11 @@ export class GithubClient {
       for (let index = 0; index < batch.length; index++) {
         const node = data.nodes[index];
         if (node !== null) {
-          const state = record(node, `known pull-request node ${index}`).state;
+          const state = enumeration<"OPEN" | "CLOSED" | "MERGED">(
+            record(node, `known pull-request node ${index}`).state,
+            PULL_REQUEST_STATES,
+            `known pull-request node ${index}.state`,
+          );
           if (state === "CLOSED" || state === "MERGED") continue;
         }
         retained.push({
@@ -407,7 +447,7 @@ export function createGithubGraphqlTransport(options: {
     if (!response.ok) {
       throw new Error(`GitHub GraphQL request failed with ${response.status}`);
     }
-    const value: unknown = await response.json();
+    const value = await readJsonResponse(response, signal);
     const root = record(value, "GitHub GraphQL response");
     if (Array.isArray(root.errors) && root.errors.length > 0) {
       const messages = root.errors.map((item, index) => {

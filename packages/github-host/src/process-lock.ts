@@ -1,4 +1,6 @@
 import { dirname, join, resolve } from "@std/path";
+import { sha256 } from "@commonfabric/content-hash";
+import { encodeGithubTargetIdentity } from "@commonfabric/github-connector/identity";
 
 const heldPaths = new Set<string>();
 
@@ -36,33 +38,44 @@ async function openLockFile(path: string): Promise<Deno.FsFile> {
 /** Return the private default directory for GitHub host process locks. */
 export function defaultGithubHostLockDirectory(
   readEnv: (key: string) => string | undefined = (key) => Deno.env.get(key),
+  os: typeof Deno.build.os = Deno.build.os,
+  uid: () => number | null = () => Deno.uid(),
 ): string {
   const configured = readEnv("CF_GITHUB_HOST_LOCK_DIR")?.trim();
   if (configured) return resolve(configured);
+  const runtimeDirectory = readEnv("XDG_RUNTIME_DIR")?.trim();
+  if (runtimeDirectory) {
+    return join(resolve(runtimeDirectory), "commonfabric", "github-host");
+  }
+  if (os === "windows") {
+    const windowsBase = readEnv("LOCALAPPDATA")?.trim() ||
+      readEnv("TEMP")?.trim() || readEnv("TMP")?.trim();
+    if (!windowsBase) {
+      throw new Error(
+        "CF_GITHUB_HOST_LOCK_DIR is required when no Windows runtime directory is available",
+      );
+    }
+    return join(resolve(windowsBase), "CommonFabric", "github-host");
+  }
   const temporaryDirectory = readEnv("TMPDIR")?.trim() || "/tmp";
+  const userId = uid();
+  if (userId === null) {
+    throw new Error("CF_GITHUB_HOST_LOCK_DIR is required without a user ID");
+  }
   return join(
     resolve(temporaryDirectory),
-    `commonfabric-github-host-${Deno.uid()}`,
+    `commonfabric-github-host-${userId}`,
   );
 }
 
 /** Return a deterministic process-lock path for one Fabric destination. */
-export async function githubTargetProcessLockPath(
+export function githubTargetProcessLockPath(
   apiUrl: string,
   spaceDid: string,
   source: string,
   directory = defaultGithubHostLockDirectory(),
-): Promise<string> {
-  const endpoint = new URL(apiUrl);
-  endpoint.username = "";
-  endpoint.password = "";
-  endpoint.hash = "";
-  endpoint.search = "";
-  endpoint.pathname = "/";
-  const bytes = new TextEncoder().encode(
-    `${endpoint.href}\n${spaceDid}\n${source.toLowerCase()}`,
-  );
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+): string {
+  const digest = sha256(encodeGithubTargetIdentity(apiUrl, spaceDid, source));
   const key = [...digest]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");

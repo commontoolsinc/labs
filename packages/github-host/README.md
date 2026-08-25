@@ -35,7 +35,8 @@ deno task github-host --config ./github-host.jsonc \
 
 Use `--once` for one complete reconciliation and exit. In long-running mode,
 send `SIGHUP` for an immediate collection. Send `SIGINT` or `SIGTERM` for a
-graceful stop.
+graceful stop when running the host directly. For the launchd deployment, use
+`launchctl bootout "gui/$(id -u)/com.commonfabric.github-host"` to stop it.
 
 ## Availability behavior
 
@@ -85,5 +86,6 @@ The host holds an exclusive process lock for each API, space, GitHub host, and
 account combination. A second host targeting the same cells exits instead of
 racing index generations.
 
-Recompile the binary after updating this checkout. Use `launchctl kickstart -k`
-to replace the running process with the new binary.
+Recompile the binary after updating this checkout. Use
+`launchctl kickstart -k "gui/$(id -u)/com.commonfabric.github-host"` to replace
+the running process with the new binary.
