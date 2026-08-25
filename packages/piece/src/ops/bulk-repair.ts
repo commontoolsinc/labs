@@ -49,10 +49,24 @@ export type Fixer = (
 
 /** One leaf-level difference between a stored document and a fixer's. */
 export interface DocumentChange {
-  /** The changed position, segments joined with `/`; `""` is the root. */
+  /**
+   * The changed position: segments joined with `/`, a segment's own `/`
+   * escaped `~1` and `~` escaped `~0` — the JSON Pointer spelling, so a
+   * key containing the separator stays unambiguous. `""` is the root.
+   */
   path: string;
   before: unknown;
   after: unknown;
+}
+
+/** One path segment, display-escaped in the JSON Pointer spelling. */
+function escapeSegment(segment: string): string {
+  return segment.replaceAll("~", "~0").replaceAll("/", "~1");
+}
+
+/** Segments joined for display; `""` is the root. */
+function displayPath(segments: readonly string[]): string {
+  return segments.map(escapeSegment).join("/");
 }
 
 /**
@@ -120,32 +134,77 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Every path in `node` that holds a sigil link, in traversal order. */
+/**
+ * Every path in `node` that holds a sigil link, in traversal order. Paths
+ * are segment arrays rather than joined strings, so a key containing the
+ * display separator addresses its own slot and nobody else's.
+ */
 export function collectLinkPaths(
   node: unknown,
-  path = "",
-  found: string[] = [],
-): readonly string[] {
+  path: readonly string[] = [],
+  found: (readonly string[])[] = [],
+): readonly (readonly string[])[] {
   if (node === null || typeof node !== "object") return found;
   if (isLink(node)) {
     found.push(path);
     return found;
   }
   for (const [key, value] of Object.entries(node)) {
-    collectLinkPaths(value, path === "" ? key : `${path}/${key}`, found);
+    collectLinkPaths(value, [...path, key], found);
   }
   return found;
 }
 
-/** The value at a `/`-joined path, or `undefined` where the path breaks. */
-function valueAtPath(node: unknown, path: string): unknown {
-  if (path === "") return node;
+/** The value at a segment path, or `undefined` where the path breaks. */
+function valueAtPath(node: unknown, path: readonly string[]): unknown {
   let current: unknown = node;
-  for (const segment of path.split("/")) {
+  for (const segment of path) {
     if (current === null || typeof current !== "object") return undefined;
     current = (current as Record<string, unknown>)[segment];
   }
   return current;
+}
+
+/**
+ * Paths the fixer's answer lost, recursively: an input object's own key
+ * absent from the answer — or present as `undefined`, which the write
+ * treats the same — wherever both sides keep a record, or an equally long
+ * array, at the same position. Recursion stops where the shapes part:
+ * replacing a container outright is an act the diff reports as a change,
+ * while omitting fields from one that survives is the fragment accident
+ * this check exists to refuse. Link nodes are the links-intact check's to
+ * judge, so they are skipped here rather than reported twice.
+ */
+function lostFields(
+  before: unknown,
+  after: unknown,
+  path: readonly string[] = [],
+  out: string[] = [],
+): readonly string[] {
+  if (isLink(before)) return out;
+  const bothRecords = isRecord(before) && isRecord(after);
+  const bothArrays = Array.isArray(before) && Array.isArray(after) &&
+    before.length === after.length;
+  if (!bothRecords && !bothArrays) return out;
+  for (const key of Object.keys(before as object)) {
+    const beforeValue = (before as Record<string, unknown>)[key];
+    if (
+      bothRecords &&
+      (!Object.hasOwn(after as object, key) ||
+        ((after as Record<string, unknown>)[key] === undefined &&
+          beforeValue !== undefined))
+    ) {
+      out.push(displayPath([...path, key]));
+      continue;
+    }
+    lostFields(
+      beforeValue,
+      (after as Record<string, unknown>)[key],
+      [...path, key],
+      out,
+    );
+  }
+  return out;
 }
 
 /**
@@ -157,14 +216,14 @@ function valueAtPath(node: unknown, path: string): unknown {
 export function documentChanges(
   before: unknown,
   after: unknown,
-  path = "",
+  path: readonly string[] = [],
   out: DocumentChange[] = [],
 ): readonly DocumentChange[] {
   if (deepEqual(before, after)) return out;
   const bothRecords = isRecord(before) && isRecord(after);
   const bothArrays = Array.isArray(before) && Array.isArray(after);
   if (!bothRecords && !bothArrays) {
-    out.push({ path, before, after });
+    out.push({ path: displayPath(path), before, after });
     return out;
   }
   const keys = new Set([
@@ -175,7 +234,7 @@ export function documentChanges(
     documentChanges(
       (before as Record<string, unknown>)[key],
       (after as Record<string, unknown>)[key],
-      path === "" ? key : `${path}/${key}`,
+      [...path, key],
       out,
     );
   }
@@ -224,10 +283,9 @@ export function evaluateFixer(
     };
   }
   // The write replaces the whole document, so a field the fixer's answer
-  // lacks would be zeroed by it — a defect, never an intent.
-  const lost = Object.keys(document).filter((key) =>
-    document[key] !== undefined && first[key] === undefined
-  );
+  // lacks would be zeroed by it — a defect, never an intent — and a nested
+  // field is as gone as a top-level one.
+  const lost = lostFields(document, first);
   if (lost.length > 0) {
     return {
       kind: "refused",
@@ -244,7 +302,7 @@ export function evaluateFixer(
       return {
         kind: "refused",
         problem: `The fixer rewrote or dropped the link at ` +
-          `${linkPath === "" ? "<root>" : linkPath}.`,
+          `${linkPath.length === 0 ? "<root>" : displayPath(linkPath)}.`,
       };
     }
   }

@@ -107,9 +107,9 @@ describe("bulk-repair", () => {
         wrap: { inner: sigil("of:fid1:c") },
       };
       expect(collectLinkPaths(doc)).toEqual([
-        "members/0",
-        "members/1",
-        "wrap/inner",
+        ["members", "0"],
+        ["members", "1"],
+        ["wrap", "inner"],
       ]);
     });
   });
@@ -173,6 +173,69 @@ describe("bulk-repair", () => {
       expect(outcome.kind).toBe("refused");
       if (outcome.kind !== "refused") throw new Error("expected a refusal");
       expect(outcome.problem).toContain("keep, also");
+    });
+
+    it("refuses a nested field the answer lost, wherever the container survived", () => {
+      const outcome = evaluateFixer(
+        { meta: { author: "a", stamp: "s" }, seed: "x" },
+        (d) => ({
+          ...d,
+          meta: { author: (d.meta as Record<string, unknown>).author },
+        }),
+      );
+      expect(outcome.kind).toBe("refused");
+      if (outcome.kind !== "refused") throw new Error("expected a refusal");
+      expect(outcome.problem).toContain("meta/stamp");
+    });
+
+    it("refuses a field returned as an explicit undefined, which the write drops", () => {
+      const outcome = evaluateFixer(
+        { seed: "a", keep: 1 },
+        (d) => ({ ...d, keep: undefined }),
+      );
+      expect(outcome.kind).toBe("refused");
+      if (outcome.kind !== "refused") throw new Error("expected a refusal");
+      expect(outcome.problem).toContain("keep");
+    });
+
+    it("treats a container replaced outright as a change, not a fragment", () => {
+      const outcome = evaluateFixer(
+        { wrap: { a: 1, b: 2 }, seed: "x" },
+        (d) => ({ ...d, wrap: 7 }),
+      );
+      expect(outcome.kind).toBe("change");
+      if (outcome.kind !== "change") throw new Error("expected a change");
+      expect(outcome.changes).toEqual([
+        { path: "wrap", before: { a: 1, b: 2 }, after: 7 },
+      ]);
+    });
+
+    it("lets an array shrink, and still guards an element's own fields", () => {
+      const dedup = evaluateFixer(
+        { tags: ["a", "a", "b"] },
+        (d) => ({ ...d, tags: [...new Set(d.tags as string[])] }),
+      );
+      expect(dedup.kind).toBe("change");
+      const outcome = evaluateFixer(
+        { rows: [{ id: 1, note: "n" }] },
+        (d) => ({ ...d, rows: [{ id: 1 }] }),
+      );
+      expect(outcome.kind).toBe("refused");
+      if (outcome.kind !== "refused") throw new Error("expected a refusal");
+      expect(outcome.problem).toContain("rows/0/note");
+    });
+
+    it("addresses a key containing the separator unambiguously", () => {
+      const doc = { "a/b": sigil("of:fid1:slash"), seed: "x" };
+      const kept = evaluateFixer(doc, (d) => ({ ...d, seed: "y" }));
+      expect(kept.kind).toBe("change");
+      const dropped = evaluateFixer(doc, (d) => ({
+        seed: d.seed,
+        "a/b": "gone",
+      }));
+      expect(dropped.kind).toBe("refused");
+      if (dropped.kind !== "refused") throw new Error("expected a refusal");
+      expect(dropped.problem).toContain("a~1b");
     });
 
     it("refuses a fixer that rewrites a link as a value", () => {
@@ -323,9 +386,10 @@ describe("bulk-repair", () => {
 
       const report = await repairPieces(pieces, {
         selector: collectionOf(holder),
-        // A fixer the holder's document would fail loudly: it drops the
-        // members field, so touching the holder would refuse the run.
-        fixer: (d) => ({ ...d, seed: d.seed }),
+        // A fixer the holder's document would fail loudly: it returns only
+        // the members' own field, so touching the holder would refuse the
+        // run as an incomplete document.
+        fixer: (d) => ({ seed: d.seed }),
       });
 
       expect(report.rows.map((row) => row.piece)).toEqual([a.id]);

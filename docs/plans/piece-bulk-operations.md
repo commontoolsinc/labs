@@ -321,12 +321,9 @@ piece and pieces controllers they call — the layer that owns piece
 operations, and one from which the runner's local-program resolution is
 importable, so turning a row's source into a program belongs there too.
 There they are tested on the package's own runtime fixtures, with no command
-surface at all. Only a small wrapper in the CLI has to decide whether this is
-spelled as a subcommand of an existing group, a group of its own, or
-something else — so that decision is genuinely deferred rather than quietly
-made, and the first increment does not wait on it. A decision made when the
-first *write* operation needs a home is made with more information than one
-made now.
+surface at all. Only a small wrapper in the CLI carries the spelling, which
+decision 1 has since settled: the `piece` group holds every piece operation,
+single or bulk.
 
 **Two selectors to start, and the collection one carries the order.** A
 selector is a value handed to the survey. `{kind: "collection", holder,
@@ -520,8 +517,8 @@ compiling; and the drill.
       survey, reporting per piece moved as planned, still outstanding, or
       moved to something the plan did not ask for.
 - [x] The survey and the pin read are invocable from `cf`
-      (`cf piece survey`, `cf piece inspect --pattern-identity`),
-      provisionally spelled per decision 1.
+      (`cf piece survey`, `cf piece inspect --pattern-identity`), the
+      spelling decision 1 has since confirmed.
 - [x] The stage-1 drill runs in continuous integration, under the CLI
       integration suite's `piece-call` section.
 
@@ -608,8 +605,8 @@ a verdict, and the two stay separate invocations.
 per-piece
 timing, where the number from the first rehearsal run decides whether
 siblings may run concurrently and whether stage 5 is worth building; and the
-retarget drill. This is also the stage at which the entry point gets its
-spelling (decision 1).
+retarget drill. The entry point's spelling follows decision 1: the `piece`
+group.
 
 - [ ] A retarget of a seeded board runs to completion from a checked-in plan.
 - [ ] Preconditions are proved for every row before the first write.
@@ -733,7 +730,7 @@ settled before work starts.
    repair, and it lands as `cf piece repair` beside `cf piece survey` and
    `cf piece inspect`: one group, one word for "one piece", and the later
    write stages follow the same shape. A separate bulk group would buy a
-   second home at the cost of the consistency
+   second home at the cost of the consistency that
    [CLI surface shape](cli-surface-shape.md) exists to protect.
 2. ~~**Where preconditions are evaluated.**~~ **Resolved: over the API, and
    stage 1 builds the read.** A piece's pattern identity is readable from a
