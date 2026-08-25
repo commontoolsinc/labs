@@ -525,6 +525,13 @@ step "15. The operator surface completes from the same store"
 if [ -n "$DISCOVERED" ]; then
   check "1" "$(complete_at "cf inspect entities ${DISCOVERED:0:20}" |
     grep -c "^$DISCOVERED\$")" "the space positional completes from it"
+  # The same prefix under --remote: the command would resolve it through the
+  # remote's listing and open the snapshot it fetches, so the local DID it
+  # completes to above is one that read rejects. The pair is what shows the
+  # silence is a decision rather than an empty disk.
+  check "" "$(complete_at \
+    "cf inspect entities --remote=http://remote.invalid ${DISCOVERED:0:20}")" \
+    "and offers nothing once --remote moves the space off this disk"
   run $CF inspect entities "$DISCOVERED" --json
   check "0" "$RUN_STATUS" "cf inspect entities runs against it"
   ENTITY=$(printf '%s\n' "$RUN_OUT" | jq -r '.[0].id // empty' 2>/dev/null)
@@ -553,6 +560,14 @@ fi
 # both branches above's terms: whatever the store holds, this slot is empty.
 check "" "$(directives_at "cf inspect pull ")$(complete_at "cf inspect pull ")" \
   "the remote-only space positional offers nothing local"
+# `--remote` is global on `inspect` and says the same thing about every one of
+# its slots. Asserted with no store too, so the branch above cannot be the only
+# place this is checked.
+check "" "$(complete_at "cf inspect summary --remote=http://remote.invalid ")" \
+  "a --remote space positional offers nothing local"
+check "" "$(complete_at \
+  "cf inspect piece --remote=http://remote.invalid did:key:zNoSuchSpace ")" \
+  "and neither does the entity beside it"
 
 step "16. wish and the enumerated remainder"
 # These are the CLI's own vocabulary rather than a pattern's, which is what

@@ -1041,6 +1041,13 @@ from the view that subcommand will read: its `--branch` and `--scope`, except on
 `inspect overlay`, which takes no `--scope` and reports every scope, so its
 candidates span every scope too.
 
+`--remote` says the same thing about every `inspect` slot at once. It is a
+global option there and it decides where the space comes from: the token is
+resolved through the remote's own listing and the snapshot it names is fetched,
+so a local DID, a local entity and a local `graph --root` are each a candidate
+that read rejects. Every one of those slots answers nothing while it is on the
+line, in either of its spellings — `--remote=<url>` or bare.
+
 An option's value completes the same whether it is written after a space or
 after `=`, and every spelling of a target reaches the same slots behind it: the
 bare id, the canonical reference (space-qualified or not, with an `@scope`

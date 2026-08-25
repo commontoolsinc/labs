@@ -714,11 +714,14 @@ async function spaceCandidates(): Promise<ProviderResult> {
  * default one, which is what `entityListingView` works out from the line.
  *
  * Local stores only. `--remote` fetches a snapshot over the network before it
- * can list anything, which is a round trip a keystroke should not start.
+ * can list anything, which is a round trip a keystroke should not start — so a
+ * line that names one is answered by `namesRemote` instead. Every caller is an
+ * `inspect` subcommand, which is what makes that check belong here.
  */
 async function entityCandidates(
   line: CompletionLine,
 ): Promise<ProviderResult> {
+  if (namesRemote(line)) return NOTHING;
   const token = line.positionals[0];
   if (!token) return NOTHING;
   const { listEntityModels, listScopes, openSpace, resolveSpace } =
@@ -831,6 +834,24 @@ async function wishScopeCandidates(): Promise<ProviderResult> {
     { value: "profile", description: "profile elements" },
     ...spaces.candidates,
   ]);
+}
+
+/**
+ * Whether the line puts `cf inspect` in remote mode.
+ *
+ * `--remote` is a global option on `inspect`, and it decides where the space
+ * comes from: `openByToken` resolves the token through the REMOTE's own
+ * listing and opens the snapshot it fetches, so a locally discovered DID and
+ * the entities of a local DB are candidates the command rejects. Its value is
+ * optional, so the flag reaches the line as an option when written
+ * `--remote=<url>` and as a bare flag otherwise, and both spellings count.
+ *
+ * Completion answers nothing there rather than listing the remote, which is a
+ * network round trip a keystroke must not start. The slot stays decided, and
+ * is decided as empty — the same disposition `inspect pull` carries.
+ */
+function namesRemote(line: CompletionLine): boolean {
+  return line.options.has("remote") || line.flags.has("remote");
 }
 
 /**
@@ -1050,7 +1071,8 @@ function inspectSpaceProviders(): Record<
     (line: CompletionLine) => Promise<ProviderResult>
   > = {};
   for (const command of INSPECT_SPACE_COMMANDS) {
-    entries[`inspect ${command}:space`] = () => spaceCandidates();
+    entries[`inspect ${command}:space`] = (line) =>
+      namesRemote(line) ? Promise.resolve(NOTHING) : spaceCandidates();
   }
   return entries;
 }

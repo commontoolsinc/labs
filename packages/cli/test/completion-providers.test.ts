@@ -353,6 +353,58 @@ Deno.test("live candidates: an entity slot lists the scope the line named", asyn
   }
 });
 
+Deno.test("live candidates: an inspect line naming --remote offers nothing local", async () => {
+  // `--remote` is global on `inspect` and decides where the space comes from:
+  // `openByToken` resolves the token through the REMOTE's own listing and
+  // opens the snapshot it fetches, so a locally discovered DID and the
+  // entities of a local DB are both candidates the command rejects. Listing
+  // the remote is a round trip a keystroke must not start, which leaves
+  // nothing honest to offer. Both spellings count — the value is optional, so
+  // the flag reaches the line as an option or as a bare flag.
+  const dir = await Deno.makeTempDir();
+  const saved = Deno.env.get("MEMORY_DIR");
+  try {
+    const did = "did:key:zCompletionRemoteFixture";
+    const db = `${dir}/${did}.sqlite`;
+    seedScopedSpace(db);
+    Deno.env.set("MEMORY_DIR", dir);
+    // Local mode answers each slot, which is what makes the silence below a
+    // decision rather than a machine with nothing on it.
+    assert(
+      (await liveCandidates(lineFor("cf inspect summary "))).candidates
+        .some((candidate) => candidate.value === did),
+      "the space positional answers locally",
+    );
+    assert(
+      (await liveCandidates(lineFor(`cf inspect piece ${db} `)))
+        .candidates.length > 0,
+      "the entity positional answers locally",
+    );
+    assert(
+      (await liveCandidates(lineFor(`cf inspect graph ${db} --root `)))
+        .candidates.length > 0,
+      "graph --root answers locally",
+    );
+    for (
+      const text of [
+        "cf inspect summary --remote=http://remote.invalid ",
+        "cf inspect summary --remote ",
+        `cf inspect piece --remote=http://remote.invalid ${db} `,
+        `cf inspect piece --remote ${db} `,
+        `cf inspect graph --remote=http://remote.invalid ${db} --root `,
+      ]
+    ) {
+      const result = await liveCandidates(lineFor(text));
+      assertEquals(result.candidates, [], text);
+      assertEquals(result.directives, [], text);
+    }
+  } finally {
+    if (saved === undefined) Deno.env.delete("MEMORY_DIR");
+    else Deno.env.set("MEMORY_DIR", saved);
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("live candidates: a remote-only space positional offers nothing local", async () => {
   // `inspect pull` names a space on the REMOTE and resolves it through the
   // remote's own listing, so a locally discovered DID is a candidate the
