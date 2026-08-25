@@ -18,8 +18,8 @@ import {
 } from "../mod.ts";
 import { cellRefToKey } from "../shared/utils.ts";
 
-describe("CellHandle", () => {
-  describe("CFC label IPC", () => {
+describe("cell-handle", () => {
+  describe("CellHandle CFC label IPC", () => {
     it("queries the runtime for the label view behind a cell", async () => {
       const cfcLabel = {
         version: 1 as const,
@@ -368,7 +368,7 @@ describe("CellHandle", () => {
     });
   });
 
-  describe("reactive CFC label delivery", () => {
+  describe("CellHandle reactive CFC label delivery", () => {
     const makeRuntime = () =>
       ({
         [$conn]: () => ({
@@ -474,7 +474,7 @@ describe("CellHandle", () => {
     });
   });
 
-  describe("$alias records stay plain data", () => {
+  describe("CellHandle $alias records stay plain data", () => {
     // `$alias` records are Pattern-binding vocabulary, only meaningful inside
     // Pattern objects the client never interprets. In data they are inert plain
     // values: hydration must not turn them into CellHandles (PR #4895).
@@ -550,7 +550,7 @@ describe("CellHandle", () => {
     });
   });
 
-  describe("update change detection", () => {
+  describe("CellHandle update change detection", () => {
     const makeRuntime = () =>
       ({
         [$conn]: () => ({
@@ -650,7 +650,7 @@ describe("CellHandle", () => {
     });
   });
 
-  describe("disposal-raced writes", () => {
+  describe("CellHandle disposal-raced writes", () => {
     const ref: CellRef = {
       id: "of:write-cell" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
@@ -724,7 +724,7 @@ describe("CellHandle", () => {
     });
   });
 
-  describe("push (read-modify-write)", () => {
+  describe("CellHandle push (read-modify-write)", () => {
     const ref: CellRef = {
       id: "of:push-cell" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
@@ -770,7 +770,7 @@ describe("CellHandle", () => {
     });
   });
 
-  describe("special-object refusal", () => {
+  describe("CellHandle special-object refusal", () => {
     // A `FabricSpecialObject` is a `ClientCellValue` -- a cell holds one like
     // any other value -- and `WireCellValue` has no representation for it.
     // Without the refusal, serializing one rebuilds it from its enumerable own
@@ -816,7 +816,7 @@ describe("CellHandle", () => {
     });
   });
 
-  describe("refused writes", () => {
+  describe("CellHandle refused writes", () => {
     const ref: CellRef = {
       id: "of:refused-cell" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
@@ -878,7 +878,7 @@ describe("CellHandle", () => {
     });
   });
 
-  describe("refusal reaches every write path", () => {
+  describe("CellHandle refusal reaches every write path", () => {
     const ref: CellRef = {
       id: "of:paths-cell" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
