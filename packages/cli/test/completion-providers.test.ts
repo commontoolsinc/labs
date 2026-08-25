@@ -234,14 +234,29 @@ const DIRECTIVE_CASES: Array<[string, string, string | undefined]> = [
   ["cf fuse mount --cfc-writeback-state ", "files", undefined],
 ];
 
-/** The provider-table key the slot under the cursor reads its answer from. */
+/** The commands each option provider answers on, or `null` for every one. */
+const PROVIDER_SCOPES = completionProviderKeys().options;
+
+/**
+ * What a case has to name to pin this slot, keyed the way its provider varies.
+ *
+ * A positional provider is keyed by command path already, so one case pins one
+ * command. An option provider that names the commands it answers on can answer
+ * differently on each, so each of those is pinned on its own — which is what
+ * `--from` and `--to` need, being a file and a directory on `space clone` and
+ * sequence numbers on `inspect diff`. One that names no commands answers the
+ * same wherever its option is declared, and the test below holds it to that,
+ * so a single case covers every command at once.
+ */
 function providerKeyOf(line: CompletionLine): string | null {
   const slot = line.slot;
-  if (slot?.kind === "option-value") return `--${longName(slot.option)}`;
-  if (slot?.kind === "argument") {
-    return `${line.path.join(" ")}:${slot.argument.name}`;
-  }
-  return null;
+  const where = line.path.join(" ") || "<root>";
+  if (slot?.kind === "argument") return `${where}:${slot.argument.name}`;
+  if (slot?.kind !== "option-value") return null;
+  const name = longName(slot.option);
+  return (PROVIDER_SCOPES.get(name) ?? null) === null
+    ? `--${name}`
+    : `${where}:--${name}`;
 }
 
 /**
@@ -265,14 +280,18 @@ function shellHandoff(
     : null;
 }
 
-/** A line that puts the cursor on each slot the command tree declares. */
-function probeLines(): Array<{ text: string; key: string }> {
+/**
+ * A line that puts the cursor on each slot the command tree declares. Only the
+ * text: the key comes from the resolved line, so `providerKeyOf` is the one
+ * place that says what a case has to name.
+ */
+function probeLines(): string[] {
   const slots = declaredSlots(main);
-  const probes: Array<{ text: string; key: string }> = [];
+  const probes: string[] = [];
   for (const [name, paths] of slots.options) {
     for (const where of paths) {
       const path = where === "<root>" ? "" : `${where} `;
-      probes.push({ text: `cf ${path}--${name} `, key: `--${name}` });
+      probes.push(`cf ${path}--${name} `);
     }
   }
   for (const slot of slots.positionals) {
@@ -281,9 +300,15 @@ function probeLines(): Array<{ text: string; key: string }> {
     const filled = Array.from({ length: slot.index }, (_, i) => `x${i} `).join(
       "",
     );
-    probes.push({ text: `cf ${path}${filled}`, key: slot.key });
+    probes.push(`cf ${path}${filled}`);
   }
   return probes;
+}
+
+/** How a slot answered, as a line of the report the tests below print. */
+function handoffLabel(directive: Directive): string {
+  const glob = (directive as { glob?: string }).glob;
+  return glob ? `${directive.kind} ${glob}` : directive.kind;
 }
 
 Deno.test("live candidates: every path-shaped slot hands the shell its own directive", async () => {
@@ -332,19 +357,63 @@ Deno.test("live candidates: no slot hands the shell a directive the cases miss",
   // when four providers were added with no case. So the set is asked of the
   // code: every slot the tree declares is probed with no fabric configured,
   // and a shell handoff no case pins fails here rather than going unnoticed.
+  //
+  // The probe is keyed the way the provider varies, which is why a case on one
+  // command does not vouch for a scoped provider's other commands. An
+  // unscoped provider is vouched for by one case and held to answering the
+  // same everywhere by the test below.
   const covered = new Set(
     DIRECTIVE_CASES.map(([text]) => providerKeyOf(lineFor(text))),
   );
   const missing: string[] = [];
   await withEnv({}, async () => {
-    for (const probe of probeLines()) {
-      const handoff = shellHandoff(await liveCandidates(lineFor(probe.text)));
+    for (const text of probeLines()) {
+      const line = lineFor(text);
+      const handoff = shellHandoff(await liveCandidates(line));
       if (!handoff) continue;
-      if (covered.has(probe.key)) continue;
-      missing.push(`${probe.text.trim()} hands over ${handoff.kind}`);
+      const key = providerKeyOf(line);
+      if (key !== null && covered.has(key)) continue;
+      missing.push(`${text.trim()} hands over ${handoffLabel(handoff)}`);
     }
   });
   assertEquals(missing, []);
+});
+
+Deno.test("live candidates: an unscoped option provider answers the same everywhere", async () => {
+  // What makes one case cover every command declaring the option. A provider
+  // that names no commands is a function of the line rather than of the path,
+  // so a different answer on two commands means it is scoped in fact and not
+  // in the table — the state `--root`, `--select` and `--schema` were in
+  // before they said where they applied, and the state a single case cannot
+  // pin.
+  const answers = new Map<string, Map<string, string[]>>();
+  await withEnv({}, async () => {
+    for (const [name, paths] of declaredSlots(main).options) {
+      if ((PROVIDER_SCOPES.get(name) ?? null) !== null) continue;
+      const byAnswer = new Map<string, string[]>();
+      for (const where of paths) {
+        const path = where === "<root>" ? "" : `${where} `;
+        const result = await liveCandidates(lineFor(`cf ${path}--${name} `));
+        const handoff = shellHandoff(result);
+        const answer = handoff
+          ? handoffLabel(handoff)
+          : result.candidates.length > 0
+          ? "candidates"
+          : "nothing";
+        byAnswer.set(answer, [...(byAnswer.get(answer) ?? []), where]);
+      }
+      if (byAnswer.size > 1) answers.set(name, byAnswer);
+    }
+  });
+  assertEquals(
+    [...answers].map(([name, byAnswer]) =>
+      `--${name}: ${
+        [...byAnswer].map(([answer, where]) => `${answer} on ${where[0]}`)
+          .join(", ")
+      }`
+    ),
+    [],
+  );
 });
 
 Deno.test("live candidates: an option that means two things is completed per command", async () => {
