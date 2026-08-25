@@ -2449,6 +2449,82 @@ const docKey = (id: URI, instance: string): string => `${instance}\0${id}`;
  * caller knows it, the explicit instance key. */
 type LocalDocAddress = { id: URI; scope?: CellScope; scopeKey?: ScopeKey };
 
+// ---- OW61 TEMPORARY DIAGNOSTIC (not for commit) ----
+// Stages S2/S3/S4 of the arrival path, paired with stage S1 in
+// memory/v2/client.ts. S1 records what the socket saw; these say what the
+// frame carried on entry to apply, what the store held before and after,
+// and — at a quarantine — how far the missing document actually got.
+type Ow61State = { socketSeen: Set<string>; socketFrames: number };
+const ow61State = (): Ow61State => {
+  const g = globalThis as unknown as { __ow61?: Ow61State };
+  return (g.__ow61 ??= { socketSeen: new Set(), socketFrames: 0 });
+};
+
+const ow61CidsOf = (sync: SessionSync): string[] => {
+  const ids: string[] = [];
+  for (const upsert of sync.upserts) {
+    if (typeof upsert.id === "string" && upsert.id.startsWith("cid:")) {
+      ids.push(upsert.id.slice("cid:".length));
+    }
+  }
+  return ids;
+};
+
+const ow61Apply = (
+  replica: SpaceReplica,
+  sync: SessionSync,
+  type: string,
+): void => {
+  const carried = ow61CidsOf(sync);
+  if (carried.length === 0) return;
+  const held = carried.filter((hash) =>
+    (replica as unknown as { isSchemaDocPersisted(h: string): boolean })
+      .isSchemaDocPersisted(hash)
+  );
+  logger.error("ow61-S2-apply", () => [
+    `type=${type} toSeq=${sync.toSeq} carried=${
+      carried.map((h) => h.slice(5, 12)).join(",")
+    } alreadyHeld=${held.length}/${carried.length}`,
+  ]);
+  // S3: the same question after this frame has applied.
+  queueMicrotask(() => {
+    const after = carried.filter((hash) =>
+      (replica as unknown as { isSchemaDocPersisted(h: string): boolean })
+        .isSchemaDocPersisted(hash)
+    );
+    logger.error("ow61-S3-stored", () => [
+      `toSeq=${sync.toSeq} storedAfterApply=${after.length}/${carried.length}` +
+      ` missing=${
+        carried.filter((h) => !after.includes(h)).map((h) => h.slice(5, 12))
+          .join(",")
+      }`,
+    ]);
+  });
+};
+
+const ow61Stages = (replica: SpaceReplica, hash: string): string => {
+  const state = ow61State();
+  const store = replica as unknown as {
+    isSchemaDocPersisted(h: string): boolean;
+    getDocument(uri: string): unknown;
+  };
+  const atSocket = state.socketSeen.has(hash);
+  const inStore = store.getDocument(`cid:${hash}`) !== undefined;
+  const confirmed = store.isSchemaDocPersisted(hash);
+  // The discriminator: a hash the SOCKET saw but the store does not hold was
+  // delivered and lost on the way in; one the socket never saw never
+  // arrived at this replica at all.
+  const verdict = !atSocket
+    ? "NEVER-ARRIVED-AT-SOCKET"
+    : inStore
+    ? "AT-SOCKET+IN-STORE-UNCONFIRMED"
+    : "AT-SOCKET-BUT-LOST-BEFORE-STORE";
+  return `cid:${hash.slice(5, 12)} verdict=${verdict} socket=${atSocket}` +
+    ` store=${inStore} confirmed=${confirmed}` +
+    ` socketFramesWithCids=${state.socketFrames}`;
+};
+// ---- end OW61 TEMPORARY DIAGNOSTIC ----
+
 class SpaceReplica implements ISpaceReplica {
   readonly #space: MemorySpace;
   readonly #subscription: IStorageSubscription;
@@ -5472,6 +5548,9 @@ class SpaceReplica implements ISpaceReplica {
             quarantined.add(referrer);
             overlay.delete(referrer);
             changed = true;
+            logger.error("schema-doc-quarantine-stages", () => [
+              ow61Stages(this, dep),
+            ]);
             logger.error("schema-doc-quarantine", () => [
               `Document ${referrer} was delivered with a broken schema ` +
               `ref: cid:${dep} is not delivered and verified in this ` +
@@ -5541,6 +5620,7 @@ class SpaceReplica implements ISpaceReplica {
       return;
     }
 
+    ow61Apply(this, sync, type);
     // Validation precedes every record mutation: an entry that fails the
     // delivery guarantee is QUARANTINED (dropped from this frame with a
     // loud diagnostic — never half-installed, never a process kill; see

@@ -13,6 +13,99 @@ import {
 } from "../v2.ts";
 import { toDirtyKey } from "./query.ts";
 
+// ---- OW61 TEMPORARY DIAGNOSTIC (not for commit) ----
+import { collectExternalSchemaRefHashes } from "../../runner/src/schema-decompose.ts";
+import { isSubschema } from "../../runner/src/schema-walk.ts";
+import { mapLinkSchemas } from "./schema-table-links.ts";
+import { isObjectNotArray } from "@commonfabric/utils/types";
+import type { JSONSchema } from "@commonfabric/api";
+
+// Per session: hash -> the ordinal of the frame that first carried it, so
+// an obligation can be reported as met in the SAME frame, met by an
+// EARLIER frame (and how many back), or never met at all.
+const ow61Sent = new Map<string, Map<string, number>>();
+const ow61FrameNo = new Map<string, number>();
+const ow61On = () => {
+  try {
+    return Deno.env.get("OW61_PROBE") === "1";
+  } catch {
+    return false;
+  }
+};
+export const ow61Frame = (
+  where: string,
+  sessionId: string,
+  upserts: readonly SessionCacheEntry[],
+): void => {
+  if (!ow61On()) return;
+  let sent = ow61Sent.get(sessionId);
+  if (sent === undefined) {
+    sent = new Map();
+    ow61Sent.set(sessionId, sent);
+  }
+  const frameNo = (ow61FrameNo.get(sessionId) ?? 0) + 1;
+  ow61FrameNo.set(sessionId, frameNo);
+
+  const inFrame: string[] = [];
+  for (const entry of upserts) {
+    if (entry.id.startsWith("cid:")) {
+      const hash = entry.id.slice(4);
+      inFrame.push(hash);
+      if (!sent.has(hash)) sent.set(hash, frameNo);
+    }
+  }
+  const need: Array<[string, string]> = [];
+  for (const entry of upserts) {
+    const doc = entry.doc;
+    if (!isObjectNotArray(doc)) continue;
+    if (entry.id.startsWith("cid:")) {
+      const inner = (doc as { value?: unknown }).value;
+      if (isSubschema(inner)) {
+        for (const h of collectExternalSchemaRefHashes(inner as JSONSchema)) {
+          need.push([entry.id, h]);
+        }
+      }
+      continue;
+    }
+    mapLinkSchemas(doc as never, (schema) => {
+      for (const h of collectExternalSchemaRefHashes(schema as JSONSchema)) {
+        need.push([entry.id, h]);
+      }
+      return schema;
+    });
+  }
+  if (need.length === 0) return;
+
+  let sameFrame = 0;
+  let earlier = 0;
+  let worstLag = 0;
+  const missing: string[] = [];
+  for (const [id, hash] of need) {
+    const carried = sent.get(hash);
+    if (carried === undefined) {
+      missing.push(`${id}->cid:${hash}`);
+    } else if (carried === frameNo) {
+      sameFrame += 1;
+    } else {
+      earlier += 1;
+      worstLag = Math.max(worstLag, frameNo - carried);
+    }
+  }
+  if (missing.length > 0) {
+    console.error(
+      `[ow61-VIOLATION] ${where} session=${sessionId.slice(0, 10)} ` +
+        `frame=${frameNo} missing=${missing.join(" ")}`,
+    );
+    return;
+  }
+  console.error(
+    `[ow61-ok] ${where} session=${sessionId.slice(0, 10)} frame=${frameNo} ` +
+      `refs=${need.length} sameFrame=${sameFrame} earlierFrame=${earlier} ` +
+      `worstLagFrames=${worstLag}`,
+  );
+};
+// ---- end OW61 TEMPORARY DIAGNOSTIC ----
+
 /**
  * A session's cached snapshot of one tracked doc INSTANCE. `scopeKey` is
  * server-internal (the wire upsert keeps the scope NAME — a client's

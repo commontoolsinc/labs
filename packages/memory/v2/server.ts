@@ -104,6 +104,7 @@ import {
   groupedQueries,
   isEmptySync,
   mergeWatchesById,
+  ow61Frame,
   sameSnapshot,
   sameWatchSpec,
   type SessionCacheEntry,
@@ -3426,6 +3427,7 @@ export class Server {
           sessionId: message.sessionId,
         },
       );
+      ow61Frame("watch.set", message.sessionId, [...entities.values()]);
       const sync = buildFullSync(
         session.entities,
         entities,
@@ -3655,6 +3657,7 @@ export class Server {
         session.trackedIds.add(toDirtyKey(entry.id, entry.scopeKey));
       }
 
+      ow61Frame("watch.add", message.sessionId, upserts);
       const serverSeq = Engine.serverSeq(engine);
       const fromSeq = session.lastSyncedSeq;
       session.graphs = graphs;
@@ -4173,6 +4176,13 @@ export class Server {
                   origin.sessionId === sessionId &&
                   origin.seq === entry.seq &&
                   (origin.op !== "patch" || !getOwnWriteEchoConfig());
+                if (held && entry.id.startsWith("cid:")) {
+                  console.error(
+                    `[ow61-held] cid elided as own-write session=${sessionId} ` +
+                      `principal=${session.principal} originOp=${origin?.op} ` +
+                      `seq=${entry.seq} id=${entry.id}`,
+                  );
+                }
                 if (!held) {
                   upserts.push(entry);
                 }
@@ -4232,6 +4242,7 @@ export class Server {
             recordSlowQueryDuration("session.watch.refresh", space, startedAt, {
               watches: session.watches.length,
             });
+            ow61Frame("push", sessionId, upserts);
             const message = finishCatchUp({
               type: "sync",
               fromSeq,
@@ -4299,6 +4310,7 @@ export class Server {
             delivered,
             keyed,
           );
+          ow61Frame("full-reeval", sessionId, delivered.upserts);
           // As above: commit the re-evaluated watch state only once the
           // frame is built, so a throw leaves the diff recomputable. The
           // empty-sync branch commits first — its frame carries no doc
