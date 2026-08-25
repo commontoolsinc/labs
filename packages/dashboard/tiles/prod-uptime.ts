@@ -6,6 +6,10 @@
  * and warning states, a red state shows only the hosts that are not good, and
  * a host that answers stays out of the body.
  *
+ * The tile stays unknown until the public-site check has received an HTTP
+ * response. It does not check production hosts before that independent signal
+ * confirms the dashboard's own connectivity.
+ *
  * Both servers are on the tailnet. PROD_PROXY routes the health requests
  * through a proxy when the dashboard cannot reach the tailnet directly.
  * Tailnet names live in Tailscale's MagicDNS, which the resolver of a
@@ -16,6 +20,7 @@
  * from the dashboard itself.
  */
 
+import { dashboardConnectivityConfirmed } from "../connectivity.ts";
 import { escapeHtml } from "../lib.ts";
 import type { Status, Tile, TileView } from "../types.ts";
 
@@ -451,6 +456,14 @@ export const prodUptime: Tile = {
   id: "prod-uptime",
   intervalMs: 30_000,
   async collect(ctx): Promise<TileView> {
+    if (!dashboardConnectivityConfirmed()) {
+      return {
+        label: "production",
+        status: "unknown",
+        value: "—",
+        sub: "waiting for connectivity",
+      };
+    }
     const targets = [
       healthTarget(
         "estuary",

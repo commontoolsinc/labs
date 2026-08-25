@@ -1,19 +1,23 @@
 import { assert, assertEquals, assertFalse } from "@std/assert";
+import { Database } from "@db/sqlite";
 import { resolveCompletionLine } from "../lib/completion/line.ts";
 import {
   acceptedProjections,
   descendProjection,
+  entityListingView,
   keysOf,
   linkEndpointPrefix,
   liveCandidates,
   projectionKeys,
   resolveSpaceContext,
+  shapeEntityCandidates,
   shapePieceCandidates,
   shapeProjectionCandidates,
   shapeSlugCandidates,
   shapeVerbCandidates,
   splitPathPrefix,
   splitSelectPrefix,
+  wishTargetCandidates,
 } from "../lib/completion/providers.ts";
 import {
   parseSelectionProjection,
@@ -21,6 +25,7 @@ import {
 } from "../lib/cell-selection.ts";
 import { tokenizeLine } from "../lib/completion/mod.ts";
 import { main } from "../commands/main.ts";
+import { wish } from "../commands/wish.ts";
 
 function lineFor(text: string) {
   const { words, cword } = tokenizeLine(text, text.length);
@@ -183,7 +188,14 @@ Deno.test("live candidates: every path-shaped slot hands the shell its own direc
   const cases: Array<[string, string, string | undefined]> = [
     ["cf piece ls -i ", "files", "*.key"],
     ["cf id did ", "files", "*.key"],
+    // Every command whose `--root` is the directory its sources resolve
+    // against. The set is hand-maintained, so it is asserted whole.
     ["cf piece new --root ", "dirs", undefined],
+    ["cf piece setsrc --root ", "dirs", undefined],
+    ["cf piece survey --root ", "dirs", undefined],
+    ["cf piece set-home --root ", "dirs", undefined],
+    ["cf check --root ", "dirs", undefined],
+    ["cf test --root ", "dirs", undefined],
     ["cf piece new --test ", "files", "*.tsx"],
     ["cf piece new ", "files", "*.tsx"],
     ["cf piece setsrc ", "files", "*.tsx"],
@@ -193,8 +205,17 @@ Deno.test("live candidates: every path-shaped slot hands the shell its own direc
     ["cf view ", "files", undefined],
     ["cf exec ", "files", undefined],
     ["cf space clone --to ", "dirs", undefined],
+    ["cf space clone x --from ", "files", undefined],
     ["cf space verify ", "dirs", undefined],
     ["cf space reset ", "dirs", undefined],
+    ["cf inspect spaces --dir ", "dirs", undefined],
+    ["cf inspect html x --out ", "files", undefined],
+    ["cf check --output ", "files", undefined],
+    ["cf piece set-home ", "files", "*.tsx"],
+    ["cf piece getsrc ", "files", undefined],
+    ["cf deps update ", "files", undefined],
+    ["cf fuse mount ", "dirs", undefined],
+    ["cf fuse unmount ", "dirs", undefined],
   ];
   for (const [text, kind, glob] of cases) {
     const result = await liveCandidates(lineFor(text));
@@ -202,6 +223,210 @@ Deno.test("live candidates: every path-shaped slot hands the shell its own direc
     const directive = result.directives[0] as { kind: string; glob?: string };
     assertEquals(directive.kind, kind, text);
     assertEquals(directive.glob, glob, `${text} glob`);
+  }
+});
+
+Deno.test("live candidates: an option that means two things is completed per command", async () => {
+  // The option table is keyed by long name alone, so a slot answering by name
+  // would hand the shell directory completion for a sequence number and for an
+  // entity id. Offering the wrong set teaches the caller a word the command
+  // rejects, which is worse than offering none.
+  for (
+    const text of [
+      // A clone directory on `space clone`, a sequence number here.
+      "cf inspect diff space entity --to ",
+      // A snapshot file on `space clone`, a sequence number here.
+      "cf inspect diff space entity --from ",
+      // A wish search scope on `wish`, a scope key here.
+      "cf inspect diff space entity --scope ",
+      // A source directory on the commands that compile one, an entity here.
+      // No space is named yet, so the entity provider has nothing to read —
+      // which is the point: the slot reaches that provider, not the directory
+      // one, and reads no disk to find out.
+      "cf inspect graph --root ",
+    ]
+  ) {
+    const result = await liveCandidates(lineFor(text));
+    assertEquals(result.directives.length, 0, `${text} emits no directive`);
+    assertEquals(result.candidates.length, 0, `${text} offers no candidate`);
+  }
+});
+
+Deno.test("an inspect entity slot reads the view its command will read", () => {
+  // `--branch` and `--scope` choose which records the command resolves. A
+  // listing taken from the space's default view would offer entities that read
+  // is not going to find.
+  assertEquals(entityListingView(lineFor("cf inspect diff space ")), {
+    branch: undefined,
+    scope: undefined,
+    allScopes: false,
+  });
+  assertEquals(
+    entityListingView(
+      lineFor("cf inspect diff --branch draft --scope of:fid1:owner space "),
+    ),
+    { branch: "draft", scope: "of:fid1:owner", allScopes: false },
+  );
+  // `inspect overlay` declares no `--scope` and reports an entity's value in
+  // every scope, so its slot covers them all rather than the default one.
+  assertEquals(entityListingView(lineFor("cf inspect overlay space ")), {
+    branch: undefined,
+    scope: undefined,
+    allScopes: true,
+  });
+});
+
+/**
+ * A space DB holding one entity in the default scope and one in another, so a
+ * listing taken from the wrong scope offers the wrong id rather than none.
+ */
+function seedScopedSpace(path: string): void {
+  const db = new Database(path, { create: true });
+  db.exec(`
+CREATE TABLE "commit" (
+  seq INTEGER NOT NULL PRIMARY KEY, branch TEXT NOT NULL DEFAULT '',
+  session_id TEXT NOT NULL, local_seq INTEGER NOT NULL,
+  invocation_ref TEXT, authorization_ref TEXT,
+  original JSON NOT NULL, resolution JSON NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE revision (
+  branch TEXT NOT NULL DEFAULT '', id TEXT NOT NULL,
+  scope_key TEXT NOT NULL DEFAULT 'space', seq INTEGER NOT NULL,
+  op_index INTEGER NOT NULL, op TEXT NOT NULL, data JSON, commit_seq INTEGER NOT NULL,
+  PRIMARY KEY (branch, id, scope_key, seq, op_index)
+);
+CREATE TABLE branch (
+  name TEXT NOT NULL PRIMARY KEY DEFAULT '', parent_branch TEXT,
+  fork_seq INTEGER, created_seq INTEGER NOT NULL DEFAULT 0,
+  head_seq INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active'
+);
+INSERT INTO branch (name, head_seq, status) VALUES ('', 2, 'active');`);
+  const commit = db.prepare(
+    `INSERT INTO "commit" (seq, session_id, local_seq, original, resolution)
+     VALUES (?, 'session:did%3Akey%3AzAlice:s1', ?, '{}', '{"seq":0}')`,
+  );
+  const rev = db.prepare(
+    `INSERT INTO revision (id, scope_key, seq, op_index, op, data, commit_seq)
+     VALUES (?, ?, ?, 0, 'set', ?, ?)`,
+  );
+  const entities: Array<[string, string]> = [
+    ["of:in-space", "space"],
+    ["of:in-other", "other"],
+  ];
+  entities.forEach(([id, scope], index) => {
+    const seq = index + 1;
+    commit.run(seq, seq);
+    rev.run(id, scope, seq, JSON.stringify({ value: id }), seq);
+  });
+  db.close();
+}
+
+Deno.test("live candidates: an entity slot lists the scope the line named", async () => {
+  // The read the command will run is scoped, so the candidates have to be:
+  // an id offered from the default scope is one that read cannot reach.
+  const dir = await Deno.makeTempDir();
+  try {
+    const path = `${dir}/space.sqlite`;
+    seedScopedSpace(path);
+    assertEquals(
+      (await liveCandidates(lineFor(`cf inspect piece ${path} `)))
+        .candidates.map((candidate) => candidate.value),
+      ["of:in-space"],
+    );
+    assertEquals(
+      (await liveCandidates(lineFor(`cf inspect piece ${path} --scope other `)))
+        .candidates.map((candidate) => candidate.value),
+      ["of:in-other"],
+    );
+    // `inspect overlay` reports an entity's value in EVERY scope and takes no
+    // `--scope` to narrow it, so its slot covers every scope at once. Offering
+    // only the space scope would hide exactly the per-user and per-session
+    // entities the command exists to show.
+    assertEquals(
+      (await liveCandidates(lineFor(`cf inspect overlay ${path} `)))
+        .candidates.map((candidate) => candidate.value).sort(),
+      ["of:in-other", "of:in-space"],
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("live candidates: an inspect line naming --remote offers nothing local", async () => {
+  // `--remote` is global on `inspect` and decides where the space comes from:
+  // `openByToken` resolves the token through the REMOTE's own listing and
+  // opens the snapshot it fetches, so a locally discovered DID and the
+  // entities of a local DB are both candidates the command rejects. Listing
+  // the remote is a round trip a keystroke must not start, which leaves
+  // nothing honest to offer. Both spellings count — the value is optional, so
+  // the flag reaches the line as an option or as a bare flag.
+  const dir = await Deno.makeTempDir();
+  const saved = Deno.env.get("MEMORY_DIR");
+  try {
+    const did = "did:key:zCompletionRemoteFixture";
+    const db = `${dir}/${did}.sqlite`;
+    seedScopedSpace(db);
+    Deno.env.set("MEMORY_DIR", dir);
+    // Local mode answers each slot, which is what makes the silence below a
+    // decision rather than a machine with nothing on it.
+    assert(
+      (await liveCandidates(lineFor("cf inspect summary "))).candidates
+        .some((candidate) => candidate.value === did),
+      "the space positional answers locally",
+    );
+    assert(
+      (await liveCandidates(lineFor(`cf inspect piece ${db} `)))
+        .candidates.length > 0,
+      "the entity positional answers locally",
+    );
+    assert(
+      (await liveCandidates(lineFor(`cf inspect graph ${db} --root `)))
+        .candidates.length > 0,
+      "graph --root answers locally",
+    );
+    for (
+      const text of [
+        "cf inspect summary --remote=http://remote.invalid ",
+        "cf inspect summary --remote ",
+        `cf inspect piece --remote=http://remote.invalid ${db} `,
+        `cf inspect piece --remote ${db} `,
+        `cf inspect graph --remote=http://remote.invalid ${db} --root `,
+      ]
+    ) {
+      const result = await liveCandidates(lineFor(text));
+      assertEquals(result.candidates, [], text);
+      assertEquals(result.directives, [], text);
+    }
+  } finally {
+    if (saved === undefined) Deno.env.delete("MEMORY_DIR");
+    else Deno.env.set("MEMORY_DIR", saved);
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("live candidates: a remote-only space positional offers nothing local", async () => {
+  // `inspect pull` names a space on the REMOTE and resolves it through the
+  // remote's own listing, so a locally discovered DID is a candidate the
+  // command rejects — while every sibling that opens a local space takes one.
+  const dir = await Deno.makeTempDir();
+  const saved = Deno.env.get("MEMORY_DIR");
+  try {
+    const did = "did:key:zCompletionPullFixture";
+    await Deno.writeTextFile(`${dir}/${did}.sqlite`, "");
+    Deno.env.set("MEMORY_DIR", dir);
+    const listed = await liveCandidates(lineFor("cf inspect entities "));
+    assert(
+      listed.candidates.some((candidate) => candidate.value === did),
+      "the local store is discoverable at all",
+    );
+    const pull = await liveCandidates(lineFor("cf inspect pull "));
+    assertEquals(pull.candidates, []);
+    assertEquals(pull.directives, []);
+  } finally {
+    if (saved === undefined) Deno.env.delete("MEMORY_DIR");
+    else Deno.env.set("MEMORY_DIR", saved);
+    await Deno.remove(dir, { recursive: true });
   }
 });
 
@@ -235,7 +460,7 @@ Deno.test("command: bash and zsh subcommands emit their scripts", async () => {
   const bash = await captureStdout(async () => {
     await main.parse(["completion", "bash"]);
   });
-  assert(bash.includes("complete -F _cf_complete cf"));
+  assert(bash.includes("complete -o nospace -F _cf_complete cf"));
 
   const zsh = await captureStdout(async () => {
     await main.parse(["completion", "zsh"]);
@@ -247,7 +472,7 @@ Deno.test("command: --no-deno-task reaches the script generator", async () => {
   const bash = await captureStdout(async () => {
     await main.parse(["completion", "bash", "--no-deno-task"]);
   });
-  assert(bash.includes("complete -F _cf_complete cf"));
+  assert(bash.includes("complete -o nospace -F _cf_complete cf"));
   assert(!bash.includes("complete -F _cf_complete deno"));
 });
 
@@ -634,6 +859,41 @@ Deno.test("shaping: a key the concise grammar cannot carry is not offered", () =
       .map((candidate) => candidate.value),
     ["ok", "ok@"],
   );
+});
+
+Deno.test("shaping: an entity is labeled by what was reconstructed for it", () => {
+  // The id is what the next positional takes; the label is what makes it
+  // readable. `(piece)` is what the reconstruction says when it found no name,
+  // which is the kind's job rather than the label's.
+  assertEquals(
+    shapeEntityCandidates([
+      { id: "of:fid1:a", label: "Completion fixture", kind: "piece" },
+      { id: "of:fid1:b", label: "(piece)", kind: "piece" },
+      { id: "of:fid1:c", kind: "free-cell" },
+    ]),
+    [
+      { value: "of:fid1:a", description: "Completion fixture" },
+      { value: "of:fid1:b", description: "piece" },
+      { value: "of:fid1:c", description: "free-cell" },
+    ],
+  );
+});
+
+Deno.test("every wish target offered is one the command's help enumerates", () => {
+  // The vocabulary is the wish builtin's rather than the command tree's, so it
+  // is carried here by hand. The help text is where it is documented, and a
+  // target in one and not the other is the drift this catches.
+  //
+  // Whole words, not substrings: the help enumerates `#profileName` as well as
+  // `#profile`, so a substring test would keep passing after `#profile` itself
+  // was dropped from the help — the one drift most likely to happen.
+  const documented = new Set(wish.getDescription().split(/\s+/));
+  for (const candidate of wishTargetCandidates().candidates) {
+    assert(
+      documented.has(candidate.value),
+      `${candidate.value} is offered but not documented in cf wish --help`,
+    );
+  }
 });
 
 Deno.test("shaping: containers yield keys, leaves yield nothing", () => {

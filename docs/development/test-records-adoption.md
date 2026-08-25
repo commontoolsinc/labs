@@ -15,11 +15,11 @@ and leans on everything shared.
   repository.
 - **The record schema and library**:
   `@commonfabric/test-support/records` in this repository — the identity
-  triple, the NDJSON line codecs with untrusted-input validation, the
-  spool lifecycle with kernel-released locks, the JUnit ingester, the
-  create-only store client, and the validating reader. Vendor or import it
-  rather than reimplementing; the schema version (`v1` in object paths) is
-  shared across repositories.
+  with three required parts and an optional variant, the NDJSON line codecs
+  with untrusted-input validation, the spool lifecycle with kernel-released
+  locks, the JUnit ingester, the create-only store client, and the validating
+  reader. Vendor or import it rather than reimplementing; the schema version
+  (`v1` in object paths) is shared across repositories.
 - **Personal keys**: scoped to people, not repositories. A key minted once
   through this repository's minting workflow writes
   `<repo>/test-records/submissions/local/<username>/` in every adopted
@@ -52,10 +52,12 @@ and leans on everything shared.
    deterministic names. Copy `.github/workflows/test-records-relay.yml`
    and `tasks/test-records-relay.ts`; the only repository-specific parts
    are the constants and the watched workflow names.
-4. **An identity table.** For each test surface: its kind, its scope, and
-   what its runner reports as the name. Hold the line on the rules that
-   keep identities durable — names from the runner, shard labels never in
-   identity, file paths only where the file genuinely is the test.
+4. **An identity table.** For each test surface: its kind, its scope, what
+   its runner reports as the name, and any non-default configuration that
+   needs a separate variant. Keep the default configuration unmarked. Hold
+   the line on the rules that keep identities durable — names from the
+   runner, shard labels never in identity, file paths only where the file
+   genuinely is the test.
 5. **Producers.** Three classes cover every surface:
    - Jobs that already write JUnit XML: add the ship step with a
      `--junit kind=...,scope=...,prefix=...,glob=...` specification and
@@ -65,7 +67,13 @@ and leans on everything shared.
    - Command-level checks: wrap with a `run-recorded`-style task that
      spools one record from the exit code.
    Each job points `CF_TEST_RECORDS_DIR` at a workspace spool and ends
-   with the credential-free gather-and-upload step, `if: always()`.
+   with the credential-free gather-and-upload step, `if: always()`. Set the
+   step's `variant` input only for a stable non-default configuration whose
+   history must remain separate.
+   The relay checks out its parser from the default branch. Land support for
+   a new optional record field before a later change starts emitting it from
+   test workflows. An older relay drops an unknown field before writing the
+   create-only store object.
 6. **Local ownership.** The task entry points that people actually run
    stamp a spool when `CF_TEST_RECORDS_KEY_FILE` is present, ship it at
    the end, and sweep the spool root for orphans; see

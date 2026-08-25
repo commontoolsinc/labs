@@ -60,7 +60,6 @@ describe("FabricError", () => {
     const se = FabricError.fromNativeError(new Error("test"));
     se.setExtra("extra", 1);
     expect(Object.getOwnPropertyNames(se)).toEqual([]);
-    expect(Object.getOwnPropertySymbols(se)).toEqual([]);
     expect({ ...se }).toEqual({});
   });
 

@@ -60,46 +60,45 @@ stopped.
 Each Raw data link opens a separate read-only piece for that session's stable
 manifest cell. The detail piece reads the provider metadata, complete normalized
 message list, and native event chunks. Those values include the provider session
-ID. The sessions table omits provider IDs. The table shows 20 sessions per page
-and projects the preceding and following pages as a bounded prefetch window.
-This keeps adjacent page changes responsive while keeping every published
-session reachable. At most 60 session rows and their raw-data pieces remain
-active for the table. Raw views opened as separate pages have independent
-lifetimes. The page filter and column sorting apply to the current page only and
-do not load every retained row.
+ID. The sessions table omits provider IDs. The table shows and projects up to 20
+sessions per page. Every published session remains reachable without keeping
+off-page session rows or their raw-data pieces active. Raw views opened as
+separate pages have independent lifetimes. The page filter and column sorting
+apply to the current page only and do not load every retained row.
 
 The complete index stores live cells for session rows. The pattern selects a
-three-page window before projecting those cells into table rows. The list runner
-uses each session cell as the projection identity, reuses overlapping rows as
-the window moves, and stops projections that leave the window. Projection
-results remain row-cell links until the pattern slices out the current page.
-Only those selected row cells feed sorting, filtering, and rendering. A raw view
-that was opened as its own page has an independent lifetime, so reclaiming its
-table row does not stop the open page. A session gets the same raw-view URL when
-it returns to the table page. Each row stores a manifest cell with an empty
-document schema, so validating the table does not follow the manifest's child
-links. When the separate raw session view mounts, its start handler removes that
-listing schema and reads the selected session. Manifests store live cells for
-chunk descriptors, and each descriptor stores a live native-event chunk cell.
-Arrays inside provider JSON use the same stable child-cell convention. The
-rendered loading state does not contain the manifest cell. Opening the session
-table therefore does not read every retained transcript.
+current page before projecting those cells into table rows. The list runner uses
+each session cell as the projection identity and stops projections that leave
+the page. Projection results remain row-cell links. Only those selected row
+cells feed sorting, filtering, and rendering. A raw view that was opened as its
+own page has an independent lifetime, so reclaiming its table row does not stop
+the open page. A session gets the same raw-view URL when it returns to the table
+page. Each row stores a manifest cell with an empty document schema, so
+validating the table does not follow the manifest's child links. When the
+separate raw session view mounts, its start handler removes that listing schema
+and reads the selected session. Manifests store live cells for chunk
+descriptors, and each descriptor stores a live native-event chunk cell. Arrays
+inside provider JSON use the same stable child-cell convention. The rendered
+loading state does not contain the manifest cell. Opening the session table
+therefore does not read every retained transcript.
 
 The debug pattern gives session rows only the shallow fields used by the table.
 Each row keeps its manifest behind an opaque cell link. Opening the table does
 not read transcript chunks; the separate raw-data view loads them when opened.
 
-The host prepares and registers the debug piece without starting it. Its static
-name makes the prepared piece visible in the space home. Opening the piece
-starts the view in the reader's runtime. Host startup therefore does not pull
-the view's complete result graph.
+The host protects the deterministic command queue before it creates or starts
+the debug piece. It starts the piece, labels the rendered result for the owner,
+and stores an owner-confidential registration. It does not add the piece to the
+space-wide home registry. The host reports the piece ID as a local discovery
+handle.
 
-On later starts, the host reuses a prepared piece whose pattern identity still
-matches the bundled debug pattern. The pattern identity is part of the piece's
-stable cause. A new pattern identity therefore creates a new piece. A shallow
-registration record identifies the current piece and retains the causes of
-retired pieces. The host removes stale links on every deployment and erases a
-newly superseded root without traversing its result graph.
+On later starts, the host reuses a prepared piece only when its pattern
+identity, configured owner, and every connector input link match. The pattern
+identity is part of the piece's stable cause. A new pattern identity therefore
+creates a new piece. A shallow owner-confidential registration identifies the
+current piece and retains the causes of retired pieces. The host removes stale
+shared-registry links and stops superseded local runners without traversing
+their result graphs.
 
 The Overview tab reports the recent and complete index generations, generation
 times, row counts, total session counts, and older-session counts. It reads the

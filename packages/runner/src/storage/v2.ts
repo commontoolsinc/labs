@@ -4130,7 +4130,9 @@ class SpaceReplica implements ISpaceReplica {
         },
       }));
 
-      const { view, sync } = await session.watchAddSync(watches);
+      const { view, precedingSyncs, sync } = await session.watchAddSync(
+        watches,
+      );
 
       if (this.#closed) {
         view.close();
@@ -4139,6 +4141,9 @@ class SpaceReplica implements ISpaceReplica {
 
       this.#watchView = view;
       try {
+        for (const precedingSync of precedingSyncs) {
+          this.applySessionSync(precedingSync, "integrate");
+        }
         this.applySessionSync(sync, type);
       } catch (error) {
         // The frame failed validation, so this refresh's view never gets a

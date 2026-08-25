@@ -22,6 +22,7 @@ import {
 } from "commonfabric";
 import { pattern } from "commonfabric";
 import Topics, {
+  mentionedBy,
   submitProfileTopic,
   type TopicCrossrefRow,
   type TopicPiece,
@@ -600,6 +601,24 @@ export default pattern(() => {
   });
 
   // A fresh comment on the FIRST topic makes it the most recently active.
+  // The pivot's join, handed a list a board cannot produce: the SAME topic at
+  // two indices. That is the only shape that separates the rule the pivot
+  // actually holds — exclude by identity — from the one that passes every
+  // board-built test, exclude by array position. With a position check the
+  // twin at index 1 is not excluded, its mention of `twin` matches, and a
+  // topic that only ever mentioned itself is reported as referenced from
+  // elsewhere.
+  const twinA = Topic({ title: "Twin" });
+  const twinB = Topic({ title: "Other" });
+  const assert_self_mention_inert_through_a_twin = assert(() =>
+    mentionedBy(twinA, [twinA, twinA, twinB], [[twinA], [twinA], []])
+        .length === 0 &&
+    // The same list still reports a real inbound edge, so the exclusion is
+    // not simply swallowing everything.
+    mentionedBy(twinB, [twinA, twinA, twinB], [[twinB], [twinB], []])
+        .length === 2
+  );
+
   const assert_pure_helpers = assert(() =>
     snippet("a b  c", 3) === "a b…" &&
     snippet("hi", 10) === "hi" &&
@@ -1001,6 +1020,7 @@ export default pattern(() => {
       { render: legacy[UI] },
       { assertion: assert_legacy_fields_load },
       { assertion: assert_pure_helpers },
+      { assertion: assert_self_mention_inert_through_a_twin },
       { action: action_add_graph_topics },
       { assertion: assert_graph_baseline },
       { action: action_source_mentions_target },

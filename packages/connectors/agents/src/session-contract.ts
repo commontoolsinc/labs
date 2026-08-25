@@ -30,13 +30,14 @@ export function sessionKey(sourceId: string, nativeSessionId: string): string {
 
 export function sessionCause(
   spaceDid: string,
+  ownerDid: string,
   sourceId: string,
   nativeSessionId: string,
 ): Record<string, string | number> {
   return {
     spaceDid,
+    ownerDid: requiredIdentityPart(ownerDid, "ownerDid"),
     agentConnector: "session",
-    version: 1,
     sourceId: normalizeSourceId(sourceId),
     nativeSessionId: normalizeNativeSessionId(nativeSessionId),
   };
@@ -44,6 +45,7 @@ export function sessionCause(
 
 export function sessionChunkCause(
   spaceDid: string,
+  ownerDid: string,
   sourceId: string,
   nativeSessionId: string,
   part: number,
@@ -53,7 +55,7 @@ export function sessionChunkCause(
     throw new Error("part must be a non-negative safe integer");
   }
   return {
-    ...sessionCause(spaceDid, sourceId, nativeSessionId),
+    ...sessionCause(spaceDid, ownerDid, sourceId, nativeSessionId),
     agentConnector: "session-chunk",
     part,
     contentHash: requiredIdentityPart(contentHash, "contentHash"),
@@ -62,12 +64,13 @@ export function sessionChunkCause(
 
 export function commandReceiptCause(
   spaceDid: string,
+  ownerDid: string,
   commandId: string,
 ): Record<string, string | number> {
   return {
     spaceDid,
+    ownerDid: requiredIdentityPart(ownerDid, "ownerDid"),
     agentConnector: "command-receipt",
-    version: 1,
     commandId: normalizeCommandId(commandId),
   };
 }

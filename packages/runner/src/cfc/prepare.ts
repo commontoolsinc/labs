@@ -10,6 +10,7 @@ import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-pri
 import {
   cloneForMutation,
   type CloneForMutationResult,
+  FabricInstance,
   FabricPrimitive,
   isFabricObjectOrArray,
   valueEqual,
@@ -27,6 +28,7 @@ import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { encodePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { refuseFabricInstance } from "../fabric-special-object.ts";
 import {
   containsExternalSchemaRef,
   decomposeSchema,
@@ -1386,6 +1388,10 @@ const valueWriteTargets = (
     // present slot holding `undefined` must not read as absent (the
     // snapshot value cannot make that distinction at its own root).
     previousPresentByPath: Map<string, boolean>;
+    // Whether every write recorded at a path (pathKey) arrived on the raw
+    // meta seam. Such a path carries no schema write-policy input, so the
+    // policy requirement skips it; it stays a flow-label target.
+    metaOnlyByPath: Map<string, boolean>;
   }
 > => {
   const result = new Map<
@@ -1399,6 +1405,7 @@ const valueWriteTargets = (
       valuesByPath: Map<string, unknown>;
       previousValuesByPath: Map<string, unknown>;
       previousPresentByPath: Map<string, boolean>;
+      metaOnlyByPath: Map<string, boolean>;
     }
   >();
   const log = tx.getReactivityLog?.();
@@ -1432,6 +1439,18 @@ const valueWriteTargets = (
       ) {
         continue;
       }
+      // Whether this write came in on the meta seam. `value` is the payload
+      // root, and the runtime surfaces that are not payload either returned
+      // above (`cfc`, `source`) or are the meta fields `setMetaRaw`
+      // addresses, so a write rooted anywhere but `value` is envelope
+      // metadata, which no schema describes. Recorded per canonical path
+      // rather than excluding the write: the meta seam is a flow-label
+      // target like any other write, and only the schema-policy requirement
+      // treats it differently. A meta root and a user field of the same
+      // name canonicalize to one path, so a path counts as meta only while
+      // every write that reached it was a meta write. A document-root write
+      // carries the whole envelope, payload included, and is not the seam.
+      const metaWrite = rawPath.length > 0 && rawPath[0] !== "value";
       // A document-root write carries the RAW envelope ({value, source, …}):
       // writeOrThrow's missing-doc retry materializes the whole document in
       // one write at storage path []. `writePath` is already logical, so the
@@ -1464,6 +1483,11 @@ const valueWriteTargets = (
       if (existing !== undefined) {
         existing.paths.push(writePath);
         existing.valuesByPath.set(pathKey(writePath), writtenValue);
+        existing.metaOnlyByPath.set(
+          pathKey(writePath),
+          (existing.metaOnlyByPath.get(pathKey(writePath)) ?? true) &&
+            metaWrite,
+        );
         if (!existing.previousValuesByPath.has(pathKey(writePath))) {
           existing.previousValuesByPath.set(
             pathKey(writePath),
@@ -1490,6 +1514,7 @@ const valueWriteTargets = (
             pathKey(writePath),
             previousWrittenPresent,
           ]]),
+          metaOnlyByPath: new Map([[pathKey(writePath), metaWrite]]),
         });
       }
     }
@@ -2607,6 +2632,20 @@ export const writeDetailValueForTarget = (
       rel.slice(0, -1),
       { createMissing: true, nextKeyAfterPath: leaf },
     );
+    if (thawed.pathValue instanceof FabricInstance) {
+      // An instance is a container, but its state is private, so `leaf`
+      // addresses nothing in it: assigning through one would leave an own
+      // property the codec cannot persist. This is every overlay path's
+      // parent, the base's own included, so it is the only check needed.
+      //
+      // TODO(danfuzz): descend by codec-mediated traversal into instance
+      // state, at which point an overlay onto one becomes a walk rather than
+      // a refusal.
+      refuseFabricInstance(
+        thawed.pathValue,
+        "when overlaying deeper CFC field-writes",
+      );
+    }
     setValueAtPath(
       thawed.pathValue as Record<PropertyKey, unknown> | unknown[],
       [leaf],
@@ -4286,19 +4325,22 @@ const setupResultSchemaFor = (
   tx: IExtendedStorageTransaction,
   source: LinkWritePolicyInput["source"],
 ): JSONSchema | undefined => {
-  const document = tx.readOrThrow({
+  // Read AT ["schema"], never the whole document: the same commit-time
+  // concurrency scoping `storedMetadataFor` above applies here. A path-[]
+  // recursive read makes the whole source document a value dependency, so
+  // a concurrent write to the source's value — an append to a collection
+  // this link points into among them — conflicts the commit. The
+  // ["schema"] read depends on that member alone, which such a write
+  // leaves undisturbed.
+  const schema = tx.readOrThrow({
     space: source.space,
     id: source.id as URI,
     scope: source.scope,
     type: "application/json",
-    path: [],
+    path: ["schema"],
   }, {
     meta: INTERNAL_VERIFIER_META,
   });
-  if (!isObjectOrArray(document)) {
-    return undefined;
-  }
-  const schema = (document as Record<string, unknown>).schema;
   return schema === undefined || schema === null
     ? undefined
     : schema as JSONSchema;
@@ -5400,7 +5442,23 @@ export const prepareBoundaryCommit = (
     if (existing === undefined) {
       continue;
     }
-    if (!metadataAppliesToAnyPath(existing, target.paths)) {
+    // The schema write-policy requirement quantifies over the paths a
+    // schema could describe. A raw meta-seam write is not one: `setMetaRaw`
+    // lands on a document-root sibling of `value` (`slug`,
+    // `patternIdentity`, and the rest of the `MetaField` union), and no
+    // schema describes that seam, so demanding a policy input for it
+    // rejects every meta write on a labeled document — slug assignment, the
+    // pattern updater's identity swap, setup over an existing piece, and
+    // the source-lifecycle transitions. These paths stay flow-label
+    // targets: the write above still carries the transaction's join onto
+    // the document, so nothing is laundered by skipping them here.
+    const policyPaths = target.paths.filter((path) =>
+      target.metaOnlyByPath.get(pathKey(path)) !== true
+    );
+    if (policyPaths.length === 0) {
+      continue;
+    }
+    if (!metadataAppliesToAnyPath(existing, policyPaths)) {
       continue;
     }
     const linkWriteInputs = linkWrites.get(key) ?? [];
@@ -5408,7 +5466,7 @@ export const prepareBoundaryCommit = (
       linkWriteInputs.length > 0 &&
       linkWritesCoverCfcAffectedPaths(
         existing,
-        target.paths,
+        policyPaths,
         linkWriteInputs,
       )
     ) {

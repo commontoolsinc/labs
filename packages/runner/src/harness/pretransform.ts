@@ -4,15 +4,6 @@ import type ts from "typescript";
 import { compilerStack } from "./deferred-compiler-stack.ts";
 import { RuntimeProgram } from "./types.ts";
 
-export function pretransformProgram(
-  program: RuntimeProgram,
-  id: string,
-): RuntimeProgram {
-  program = transformInjectHelperModule(program);
-  program = transformProgramWithPrefix(program, id);
-  return program;
-}
-
 // For each source file in the program, inject the internal helper import used
 // by the AST transformer. Every file is transformed.
 //
@@ -26,7 +17,7 @@ export function pretransformProgram(
 // reach `transformCfDirective`, so the guard never fires for them. Set this
 // ONLY for storage-fetched, Merkle-verified input (the engine's cold
 // recovery path and fabric mounts). Authoring paths
-// (`pretransformProgram(ForModules)`) never set it — authored source
+// (`pretransformProgramForModules`) never set it — authored source
 // containing `__cfHelpers` keeps throwing, so the poison can never be
 // WRITTEN again; tolerance exists only for what history already stored.
 // Skipping `normalizeMixedModuleImports` for these files is safe: the
@@ -69,40 +60,9 @@ export function transformInjectHelperModule(
   };
 }
 
-// Adds `id` as a prefix to all files in the program.
-// Injects a new entry at root `/index.ts` to re-export
-// the entry contents because otherwise `typescript`
-// flattens the output, eliding the common prefix.
-export function transformProgramWithPrefix(
-  program: RuntimeProgram,
-  id: string,
-): RuntimeProgram {
-  const main = program.main;
-  const exportNameds = `export * from "${prefix(main, id)}";`;
-  const exportDefault = `export { default } from "${prefix(main, id)}";`;
-  const hasDefault = !program.mainExport || program.mainExport === "default";
-  const files = [
-    ...program.files.map((source) => ({
-      name: prefix(source.name, id),
-      contents: source.contents,
-    })),
-    {
-      name: `/index.ts`,
-      contents: `${exportNameds}${hasDefault ? `\n${exportDefault}` : ""}`,
-    },
-  ];
-  return {
-    main: `/index.ts`,
-    files,
-    sourceRoots: program.sourceRoots?.map((root) => prefix(root, id)),
-    dataFiles: program.dataFiles?.map((data) => prefix(data, id)),
-  };
-}
-
-// Module-graph variant: inject the helper import and prefix files with `id` to
-// namespace this load's source-map and diagnostic coordinates, but DO NOT add a
-// synthetic `/index.ts` re-export. A per-module graph has no bundle entrypoint
-// to re-export through, so the program entry is simply the prefixed main module.
+// Inject the helper import and prefix every file with `id`, which namespaces
+// this load's source-map and diagnostic coordinates. The program entry is the
+// prefixed main module.
 export function pretransformProgramForModules(
   program: RuntimeProgram,
   id: string,

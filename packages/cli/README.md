@@ -983,17 +983,21 @@ source <(cf completion bash)
 Completion covers the command tree — subcommands, flags, and enumerated values
 such as `--log-level` — plus live values read from the fabric:
 
-| Slot                            | Completes to                                                  |
-| ------------------------------- | ------------------------------------------------------------- |
-| `--piece`                       | the space's slugs, then its piece ids                         |
-| `cf call <callable>`            | the piece's callables, annotated with the doc comment on each |
-| `cf get`/`cf set <path>`        | cell keys, one path segment at a time                         |
-| `cf get --select`/`--schema`    | field paths into the value, and their `@` form                |
-| `piece set-slug <slug>`         | the space's slugs                                             |
-| `piece link <source>/<target>`  | `pieceId/path/to/field` endpoints                             |
-| `--space`                       | space DIDs of local memory-v2 stores                          |
-| `--identity`, pattern arguments | `*.key` / `*.tsx` files, via the shell                        |
-| `--datafile`                    | any file, via the shell                                       |
+| Slot                                                         | Completes to                                                  |
+| ------------------------------------------------------------ | ------------------------------------------------------------- |
+| `--piece`                                                    | the space's slugs, then its piece ids                         |
+| `cf call <callable>`                                         | the piece's callables, annotated with the doc comment on each |
+| `cf get`/`cf set <path>`                                     | cell keys, one path segment at a time                         |
+| `cf get --select`/`--schema`                                 | field paths into the value, and their `@` form                |
+| `piece set-slug <slug>`                                      | the space's slugs                                             |
+| `piece link <source>/<target>`                               | `pieceId/path/to/field` endpoints                             |
+| `--space`, a positional space                                | space DIDs of local memory-v2 stores                          |
+| `inspect <entity>`, `inspect graph --root`                   | that space's entities, as `cf inspect entities` lists them    |
+| `cf wish <target>`, `cf wish --scope`                        | the vocabulary `cf wish --help` enumerates                    |
+| `--identity`, pattern arguments                              | `*.key` / `*.tsx` files, via the shell                        |
+| `--datafile`, `--out`, `--output`, `space clone --from`      | any file, via the shell                                       |
+| `--dir`, a source `--root`, `space clone --to`, a mountpoint | a directory, via the shell                                    |
+| `--remote`                                                   | what `--api-url` takes, in the `--remote=<url>` spelling      |
 
 A callable is annotated with what its author said it is for, falling back to its
 kind where they wrote nothing. A wrapper or deprecated verb — the two
@@ -1020,6 +1024,30 @@ projections shape a verb's result rather than the piece's root, and are not
 completed from it; `cf wish`'s resolution writes to the space, and a Tab must
 not.
 
+An option name can mean two things on two commands, so the ones that do are
+completed per command rather than by name. `--root` is a source directory on the
+commands that compile one and an entity on `cf inspect graph`; `--to` is a clone
+directory on `cf space clone` and a sequence number on `cf inspect diff`;
+`--from` and `--scope` divide the same way. Where the value is a sequence number
+the slot offers nothing, which is the honest answer for a word no set can name —
+offering the wrong set is worse than offering none.
+
+A positional divides the same way. Every `cf inspect` subcommand that opens a
+local space completes it from local stores, but `inspect pull` names a space on
+the remote and resolves it through the remote's own listing, so it offers
+nothing rather than a local DID the command would reject — listing the remote is
+a network round trip a keystroke must not start. The entity beside a space comes
+from the view that subcommand will read: its `--branch` and `--scope`, except on
+`inspect overlay`, which takes no `--scope` and reports every scope, so its
+candidates span every scope too.
+
+`--remote` says the same thing about every `inspect` slot at once. It is a
+global option there and it decides where the space comes from: the token is
+resolved through the remote's own listing and the snapshot it names is fetched,
+so a local DID, a local entity and a local `graph --root` are each a candidate
+that read rejects. Every one of those slots answers nothing while it is on the
+line, in either of its spellings — `--remote=<url>` or bare.
+
 An option's value completes the same whether it is written after a space or
 after `=`, and every spelling of a target reaches the same slots behind it: the
 bare id, the canonical reference (space-qualified or not, with an `@scope`
@@ -1039,6 +1067,29 @@ name. When nothing is resolvable, or the server is unreachable, completion
 yields nothing — it never prints an error into the command line. Each request
 costs one CLI invocation plus one round trip, so value completion is as fast as
 the fabric it queries.
+
+A path-shaped slot — a cell path, a link endpoint, a projection path — completes
+one segment at a time and holds the cursor for the next separator. bash gets
+that by having the binding registered `complete -o nospace`, with a candidate
+that should end the word carrying its own space: `compopt` is the per-completion
+switch and it is bash 4 and later, while macOS ships bash 3.2, so the space is
+inverted rather than suppressed. zsh does it natively.
+
+The inversion is registered on the `cf` binding alone. A `deno` line can be
+handed back to whatever completed `deno` beforehand, and that completion's own
+spacing has to survive the handoff, so the `deno` binding keeps bash's default
+and `deno task cf` pays a keystroke per path segment where `cf` does not. On
+bash 4 and later `compopt` reaches that binding too and the cost disappears;
+under bash 3.2 there is no per-completion switch to reach it with, and taking
+the space away from every `deno test` and `deno run` completion is the larger
+loss.
+
+A candidate that opens with `#` — every `cf wish` target but the root — is
+inserted backslash-escaped in bash, as `\#profile`. Written bare it would be a
+comment, and the target would never reach the command; the escape is one word to
+the shell and the bare target to the CLI, and completing it again reads back the
+same target. zsh quotes what it inserts, so it arrives escaped there without the
+script doing anything.
 
 ### `deno task cf` and other invocations
 

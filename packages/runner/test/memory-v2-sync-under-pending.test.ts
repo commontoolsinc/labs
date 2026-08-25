@@ -207,7 +207,7 @@ const notificationCarriesField = (
 // WIRE protocol (the scripted transport plays the server). It does NOT touch
 // the main-thread↔worker IPC hop — the CellSet/CellUpdate echo ordering on
 // that hop is pinned separately by
-// packages/runtime-client/backends/cell-set-echo-race.test.ts.
+// packages/runtime-client/test/backends/cell-set-echo-race.test.ts.
 //
 // The red/green/blue race: a local blind leaf write ("green") is committed and
 // in flight (unconfirmed) when a foreign writer's server sync ("blue", which

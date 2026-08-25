@@ -127,7 +127,7 @@ export class VDomRenderer {
     logger.timeStart("mount", String(this.mountId));
     try {
       const response = await this.session.mount(this.mountId, cellRef);
-      this.rootNodeId = response.rootId > 0 ? response.rootId : null;
+      this.rootNodeId = response.rootId;
 
       const elapsed = logger.timeEnd("mount", String(this.mountId));
       logger.debug("render-mount", () => [

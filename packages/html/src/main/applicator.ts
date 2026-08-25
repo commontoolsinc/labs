@@ -11,7 +11,7 @@ import { CellHandle, cellRefToKey } from "@commonfabric/runtime-client";
 import { getLogger } from "@commonfabric/utils/logger";
 
 import { setPropDefault, type SetPropHandler } from "../render-utils.ts";
-import type { VDomBatch, VDomOp } from "../vdom-ops.ts";
+import { CONTAINER_NODE_ID, type VDomBatch, type VDomOp } from "../vdom-ops.ts";
 import { serializeEvent } from "./events.ts";
 import type { DomEventMessage } from "./events.ts";
 import {
@@ -43,12 +43,6 @@ function isElementNode(node: unknown): node is HTMLElement {
 function isTextNode(node: unknown): node is Node {
   return hasNodeType(node, TEXT_NODE);
 }
-
-/**
- * Reserved node ID for the container element.
- * Must match the value in worker/reconciler.ts.
- */
-export const CONTAINER_NODE_ID = 0;
 
 /**
  * Options for creating a DOM applicator.

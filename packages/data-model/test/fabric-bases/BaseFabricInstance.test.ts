@@ -37,13 +37,20 @@ import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 class Probe extends BaseFabricInstance {
   readonly #tag;
 
+  readonly #counter: { calls: number };
+
   constructor(
     tag: string,
-    readonly counter: { calls: number } = { calls: 0 },
+    counter: { calls: number } = { calls: 0 },
   ) {
     super();
 
     this.#tag = tag;
+    this.#counter = counter;
+  }
+
+  get counter(): { calls: number } {
+    return this.#counter;
   }
 
   get wireTypeTag(): string {
@@ -80,12 +87,22 @@ class Probe extends BaseFabricInstance {
  * independence (which the payload-less `Probe` cannot express).
  */
 class DeepProbe extends BaseFabricInstance {
-  state: { n: number };
+  readonly #state: { n: number };
+  readonly #counter: { calls: number };
 
-  constructor(state: { n: number }, readonly counter = { calls: 0 }) {
+  constructor(state: { n: number }, counter = { calls: 0 }) {
     super();
 
-    this.state = state;
+    this.#state = state;
+    this.#counter = counter;
+  }
+
+  get counter(): { calls: number } {
+    return this.#counter;
+  }
+
+  get state(): { n: number } {
+    return this.#state;
   }
 
   get wireTypeTag(): string {
@@ -138,6 +155,49 @@ describe("BaseFabricInstance", () => {
       const probe = new Probe("t");
       expect(probe instanceof BaseFabricInstance).toBe(true);
       expect(probe instanceof FabricInstance).toBe(true);
+    });
+  });
+
+  describe("constructor()", () => {
+    it("leaves the instance sealed and non-extensible", () => {
+      const probe = new Probe("t");
+      expect(Object.isSealed(probe)).toBe(true);
+      expect(Object.isExtensible(probe)).toBe(false);
+    });
+
+    it("refuses a new property, whichever way it is added", () => {
+      // Every path here is strict-mode, which is what a module is. Sloppy-mode
+      // assignment is the one path that fails silently instead of throwing.
+      const probe = new Probe("t") as unknown as Record<string, unknown>;
+
+      expect(() => {
+        probe.extra = 42;
+      }).toThrow(TypeError);
+      expect(() => Object.defineProperty(probe, "extra", { value: 42 }))
+        .toThrow(TypeError);
+      expect(() => Object.assign(probe, { extra: 42 })).toThrow(TypeError);
+      expect(Reflect.set(probe, "extra", 42)).toBe(false);
+      expect(Object.getOwnPropertyNames(probe)).toEqual([]);
+    });
+
+    it("reports an unfrozen instance as not frozen", () => {
+      // Sealing an object that has no own properties would make this `true`,
+      // and every thaw would then short-circuit to identity.
+      const probe = new Probe("t");
+      expect(Object.isFrozen(probe)).toBe(false);
+    });
+
+    it("reports a frozen instance as frozen", () => {
+      const probe = new Probe("t");
+      expect(Object.isFrozen(Object.freeze(probe))).toBe(true);
+    });
+
+    it("keeps the instance absent from every structural view", () => {
+      const probe = new Probe("t");
+      expect(Object.getOwnPropertyNames(probe)).toEqual([]);
+      expect(Object.keys(probe)).toEqual([]);
+      expect({ ...probe }).toEqual({});
+      expect(JSON.stringify(probe)).toBe("{}");
     });
   });
 

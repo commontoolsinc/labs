@@ -361,11 +361,9 @@ older server can reconnect even though a later attempt to enumerate
 `entities/` will report that pagination is unsupported.
 
 If the caller later opens `pieces/`, the piece-registry projection is
-materialized. An eligible legacy default root can still supply its retired
-`allPieces` registry. The resulting known controllers can support exact entity
-access, but they do not change the `entities/` enumeration. Compatibility
-remains explicit and fail closed; absence of a capability never triggers a
-hidden space-wide value scan.
+materialized. The resulting known controllers can support exact entity access,
+but they do not change the `entities/` enumeration. Absence of a capability
+never triggers a hidden space-wide value scan.
 
 ---
 

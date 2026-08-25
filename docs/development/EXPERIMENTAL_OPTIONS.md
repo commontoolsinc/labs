@@ -1260,7 +1260,7 @@ Browser (main thread)
         |  postMessage (IPC), InitializationData carries experimental + CFC dials
         v
 Browser web worker
-  +-- runtime-client/backends/runtime-processor.ts
+  +-- runtime-client/src/backends/runtime-processor.ts
         --> new Runtime(runtimePresets.browserWorker({ experimental, cfcEnforcementMode, cfcFlowLabels, ... }))
 ```
 
