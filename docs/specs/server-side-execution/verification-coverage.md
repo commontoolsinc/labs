@@ -5651,6 +5651,40 @@ supply; OW29/OW32/OW34 closed):
     same family's second, pre-existing member is `PatternManager`'s
     compile-cache write-backs minted inside `compilePattern` (escape
     the stamp hook; enumerated with the flag in the stage-1 report).
+    **SHARD-10 DISCRIMINATED AND FIXED 2026-08-25 (PR #6320): the
+    ensure-ON board's compile-cache write-back CFC red is NOT this
+    attribution family** — the failing writer is the CLIENT under its
+    own identity in its own space, and no identity/carriage question is
+    open (the stamp-hook escape above stays flagged exactly as
+    written). Root cause, reproduced 3/3 deterministic at the true
+    topology: `loadCompiledClosure`'s `verifiedDoc` returned
+    `cell.get()` docs whose `sourceMap` is a LIVE query-result view;
+    consumers carry the field verbatim into module artifacts (the
+    process byte cache — `putAll` runs on storage-served compiles too
+    and replaces existing entries — storage-served compile bodies,
+    repair/replication write-backs), and written back into ANOTHER
+    space the view serializes as the sigil link it names: a cross-space
+    `/sourceMap` link into the space it was read from. Under ensure-ON
+    the target doc pre-exists with its stored envelope (the ensured
+    default-app closure shares content-addressed helper docs with every
+    pattern's closure), so the link write is CFC-relevant and prepare
+    fail-closes on the unreadable foreign source — `missing link source
+    metadata … at /sourceMap`, the sx2-scale shard-10 red; CFC is
+    CORRECT there. Under ensure-OFF the same corrupt link LANDED
+    SILENTLY AND DURABLY (control run: 10 of 12 fresh spaces held a
+    quoted cross-space link at `/sourceMap`; value-level reads resolve
+    THROUGH the link, which is why the green regime never noticed) — so
+    the ensure exposed a pre-existing silent-corruption class rather
+    than creating one. FIXED red-first at the one read boundary every
+    consumer funnels through: `verifiedDoc` snapshots `sourceMap`
+    exactly as it already snapshots `policyManifests`; enforcement
+    untouched. Pin `compile-cache-storage-served-values.test.ts` (both
+    arms, asserting on the RAW stored value — resolved reads are
+    blind). Live: pre-fix 3/3 red, post-fix 3/3 green ensure-ON, and
+    the ensure-OFF store dump post-fix holds 0 corrupt of 24 stored
+    sourceMap fields. Expected on #6248's board: shard 10 greens (its
+    red is this exact deterministic producer); shards 2/6 remain the
+    row's separate profile program-materialization family.
     **SCOPE RULED 2026-08-24 (the owner; verbatim in the stage-1
     report): production ensures a root for EVERY activated space —
     per-space discrimination is DEFERRED to its own design work — and
