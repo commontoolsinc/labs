@@ -749,6 +749,12 @@ Deno.test("Fabric target publishes sessions and command receipts", async () => {
       Error,
       "agent session index checkout 0 has an invalid shape",
     );
+    await writeInvalidIndex(
+      publishedSession,
+      index.sources,
+      [{ ...validCheckout, root: "C:\\repo" }],
+    );
+    assertEquals(await target.publish(collected), 1);
   } finally {
     await runtime.dispose();
     await storageManager.close();
@@ -1091,6 +1097,16 @@ Deno.test("Fabric target can defer its storage claim", async () => {
     const target = await AgentFabricTarget.connect(connection);
     assertEquals(target.cells.index.getRaw(), undefined);
     assertEquals(target.cells.commands.getRaw(), undefined);
+    await assertRejects(
+      () => target.publish([]),
+      Error,
+      "agent connector storage has not been claimed",
+    );
+    await assertRejects(
+      () => target.publishHealth({ status: "starting" }),
+      Error,
+      "agent connector storage has not been claimed",
+    );
 
     await target.claimStorage();
 

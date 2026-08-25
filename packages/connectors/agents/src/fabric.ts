@@ -44,7 +44,8 @@ import {
   type StableArrayCellPlan,
 } from "./array-cell-identity.ts";
 import { AsyncSerialQueue } from "./serial-queue.ts";
-import { isAbsolute } from "@std/path";
+import { isAbsolute as isPosixAbsolute } from "@std/path/posix";
+import { isAbsolute as isWindowsAbsolute } from "@std/path/windows";
 
 export interface AgentFabricCells {
   index: Cell<unknown>;
@@ -578,7 +579,8 @@ function asIndex(
   for (const [index, checkout] of (record.checkouts ?? []).entries()) {
     if (
       !isRecord(checkout) || typeof checkout.root !== "string" ||
-      !isAbsolute(checkout.root) || checkoutRoots.has(checkout.root) ||
+      !(isPosixAbsolute(checkout.root) || isWindowsAbsolute(checkout.root)) ||
+      checkoutRoots.has(checkout.root) ||
       !isNullableString(checkout.gitRepo) ||
       !isNullableString(checkout.gitBranch) ||
       !isNullableString(checkout.gitHeadSha) ||
@@ -796,15 +798,18 @@ export class AgentFabricTarget implements CommandTarget {
   readonly #latestDescriptorObservationBySource = new Map<string, number>();
   #nextObservationSequence = 1;
   #commandCellBound = false;
+  #storageClaimed: boolean;
 
   private constructor(
     conn: AgentFabricConnection,
     cells: AgentFabricCells,
     gitContext: GitContextResolver,
+    storageClaimed: boolean,
   ) {
     this.conn = conn;
     this.cells = cells;
     this.#gitContext = gitContext;
+    this.#storageClaimed = storageClaimed;
   }
 
   static async open(
@@ -812,7 +817,7 @@ export class AgentFabricTarget implements CommandTarget {
     gitContext = new GitContextResolver(),
   ): Promise<AgentFabricTarget> {
     const cells = await ensureAgentFabricCells(conn);
-    return new AgentFabricTarget(conn, cells, gitContext);
+    return new AgentFabricTarget(conn, cells, gitContext, true);
   }
 
   static async connect(
@@ -820,34 +825,42 @@ export class AgentFabricTarget implements CommandTarget {
     gitContext = new GitContextResolver(),
   ): Promise<AgentFabricTarget> {
     const cells = await syncAgentFabricCells(conn);
-    return new AgentFabricTarget(conn, cells, gitContext);
+    return new AgentFabricTarget(conn, cells, gitContext, false);
   }
 
   claimStorage(): Promise<void> {
-    return this.#mutations.run(() =>
-      claimAgentFabricRoots(this.conn, this.cells)
-    );
+    return this.#mutations.run(async () => {
+      if (this.#storageClaimed) return;
+      await claimAgentFabricRoots(this.conn, this.cells);
+      this.#storageClaimed = true;
+    });
   }
 
-  publish(
+  #assertStorageClaimed(): void {
+    if (!this.#storageClaimed) {
+      throw new Error("agent connector storage has not been claimed");
+    }
+  }
+
+  async publish(
     collected: CollectedSource[],
     options: AgentFabricPublishOptions = {},
   ): Promise<number> {
+    this.#assertStorageClaimed();
     const observationSequence = options.observationSequence ??
       this.beginSessionObservation();
     if (
       !Number.isSafeInteger(observationSequence) || observationSequence < 1
     ) {
-      return Promise.reject(
-        new Error("observationSequence must be a positive safe integer"),
-      );
+      throw new Error("observationSequence must be a positive safe integer");
     }
-    return this.#mutations.run(() =>
+    return await this.#mutations.run(() =>
       this.#publish(collected, { ...options, observationSequence })
     );
   }
 
   beginSessionObservation(): number {
+    this.#assertStorageClaimed();
     const sequence = this.#nextObservationSequence;
     if (!Number.isSafeInteger(sequence)) {
       throw new Error("session observation sequence is exhausted");
@@ -860,6 +873,7 @@ export class AgentFabricTarget implements CommandTarget {
     directory: string,
     signal?: AbortSignal,
   ): Promise<boolean> {
+    this.#assertStorageClaimed();
     return await this.#gitContext.validateCheckout(directory, signal);
   }
 
@@ -1226,8 +1240,9 @@ export class AgentFabricTarget implements CommandTarget {
     return activeSessions.length;
   }
 
-  publishHealth(value: Record<string, unknown>): Promise<void> {
-    return this.#mutations.run(() => this.#publishHealth(value));
+  async publishHealth(value: Record<string, unknown>): Promise<void> {
+    this.#assertStorageClaimed();
+    return await this.#mutations.run(() => this.#publishHealth(value));
   }
 
   async #publishHealth(value: Record<string, unknown>): Promise<void> {
@@ -1247,10 +1262,12 @@ export class AgentFabricTarget implements CommandTarget {
   }
 
   commandCellId(): string {
+    this.#assertStorageClaimed();
     return stableCellId(this.cells.commands.resolveAsCell());
   }
 
   receiptCellId(): string {
+    this.#assertStorageClaimed();
     return stableCellId(this.cells.receipts);
   }
 
@@ -1258,6 +1275,7 @@ export class AgentFabricTarget implements CommandTarget {
     cell: Cell<unknown>,
     writerAuthorization: unknown,
   ): Promise<void> {
+    this.#assertStorageClaimed();
     const suppliedLink = cell.getAsNormalizedFullLink();
     const expectedLink = this.cells.commands.getAsNormalizedFullLink();
     if (
@@ -1326,6 +1344,7 @@ export class AgentFabricTarget implements CommandTarget {
   }
 
   commandsAreBound(): boolean {
+    this.#assertStorageClaimed();
     return this.#commandCellBound;
   }
 
@@ -1338,6 +1357,7 @@ export class AgentFabricTarget implements CommandTarget {
   async readReceipt(
     commandId: string,
   ): Promise<AgentSessionCommandReceipt | undefined> {
+    this.#assertStorageClaimed();
     const cell = this.conn.runtime.getCell(
       this.conn.spaceDid,
       commandReceiptCause(this.conn.spaceDid, this.conn.ownerDid, commandId),
@@ -1394,6 +1414,7 @@ export class AgentFabricTarget implements CommandTarget {
   async subscribeCommands(
     callback: (commands: unknown[]) => void,
   ): Promise<Cancel> {
+    this.#assertStorageClaimed();
     this.#assertCommandCellBound();
     return await subscribeStableActions(
       this.conn,
@@ -1403,14 +1424,16 @@ export class AgentFabricTarget implements CommandTarget {
   }
 
   async pollCommands(): Promise<unknown[]> {
+    this.#assertStorageClaimed();
     this.#assertCommandCellBound();
     return await readStableActions(this.conn, this.cells.commands);
   }
 
-  publishReceipt(
+  async publishReceipt(
     receipt: AgentSessionCommandReceipt,
   ): Promise<void> {
-    return this.#mutations.run(() => {
+    this.#assertStorageClaimed();
+    return await this.#mutations.run(() => {
       const parsed = parseCommandReceipt(receipt.commandId, receipt);
       if (parsed.ownerDid !== this.conn.ownerDid) {
         throw new Error(
@@ -1424,6 +1447,7 @@ export class AgentFabricTarget implements CommandTarget {
   async #publishReceipt(
     receipt: AgentSessionCommandReceipt,
   ): Promise<void> {
+    this.#assertStorageClaimed();
     const cell = this.conn.runtime.getCell(
       this.conn.spaceDid,
       commandReceiptCause(
