@@ -58,7 +58,11 @@ Deno.test("Fabric target validates a discovered checkout", async () => {
     apiUrl: new URL(import.meta.url),
     storageManager,
   });
-  const connection = { runtime, spaceDid: signer.did() };
+  const connection = {
+    runtime,
+    spaceDid: signer.did(),
+    ownerDid: signer.did(),
+  };
   const calls: string[][] = [];
   let receivedSignal: AbortSignal | undefined;
   const gitContext = new GitContextResolver(
@@ -1203,7 +1207,11 @@ Deno.test("checkout publication preserves partial-refresh inventory", async () =
     apiUrl: new URL(import.meta.url),
     storageManager,
   });
-  const connection = { runtime, spaceDid: signer.did() };
+  const connection = {
+    runtime,
+    spaceDid: signer.did(),
+    ownerDid: signer.did(),
+  };
   let observedAt = "2026-08-21T00:00:00.000Z";
   let failExtraHead = false;
   let failSessionHead = false;
@@ -1416,7 +1424,7 @@ Deno.test("publication finishes after its first graph commit", async () => {
     storageManager,
   });
   const space = signer.did();
-  const connection = { runtime, spaceDid: space };
+  const connection = { runtime, spaceDid: space, ownerDid: space };
   const source: SourceDescriptor = {
     id: "codex:test",
     driver: "codex-app-server",
@@ -1456,7 +1464,7 @@ Deno.test("publication finishes after its first graph commit", async () => {
     await target.publish(collected("Before"));
     const manifest = runtime.getCell(
       space,
-      sessionCause(space, source.id, "session-1"),
+      sessionCause(space, space, source.id, "session-1"),
     );
     const manifestId = manifest.getAsNormalizedFullLink().id;
     const controller = new AbortController();

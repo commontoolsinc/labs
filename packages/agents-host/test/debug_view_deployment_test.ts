@@ -9,6 +9,7 @@ import {
 import { AgentFabricTarget } from "@commonfabric/agents-connector/fabric";
 import {
   AGENT_CONNECTOR_WRITER_ID,
+  agentOwnerSchema,
   agentPrincipalSchema,
   cellHasOwnerConfidentiality,
   cellHasOwnerProtection,
@@ -567,6 +568,144 @@ Deno.test("debug deployment rolls back an aborted registration", async () => {
   }
 });
 
+Deno.test("debug deployment rejects stale registration across runtimes", async () => {
+  const server = newSharedServer();
+  const spaceName = `debug-registration-race-${crypto.randomUUID()}`;
+  const readerSession = await createSession({ identity, spaceName });
+  const readerStorage = SharedServerStorageManager.connectTo(server, {
+    as: readerSession.as,
+  });
+  const readerRuntime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: readerStorage,
+  });
+  try {
+    const readerManager = new PiecesController(readerSession, readerRuntime);
+    await readerManager.synced();
+    const defaultPattern = await installDefaultPattern(readerManager);
+    const ownerDid = readerSession.as.did();
+    const target = await AgentFabricTarget.open({
+      runtime: readerRuntime,
+      spaceDid: readerSession.space,
+      ownerDid,
+    });
+    const originalPieceId = await deployAgentSessionsDebugView(
+      readerManager,
+      target,
+    );
+    await readerStorage.synced();
+
+    const writerSession = await createSession({ identity, spaceName });
+    const writerStorage = SharedServerStorageManager.connectTo(server, {
+      as: writerSession.as,
+    });
+    const writerRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: writerStorage,
+    });
+    try {
+      const writerManager = new PiecesController(writerSession, writerRuntime);
+      await writerManager.synced();
+      const registration = writerRuntime.getCell(
+        writerSession.space,
+        `agent-sessions-debug-registration:${ownerDid}`,
+      );
+      await registration.sync();
+      const competingRegistration = {
+        cause: "agent-sessions-debug:competing",
+        pieceId: "fid1:competing-debug-piece",
+        patternIdentity: "fid1:competing-debug-pattern",
+        patternSymbol: "default",
+        retiredCauses: [],
+      };
+      const commitEntered = Promise.withResolvers<void>();
+      const releaseCommit = Promise.withResolvers<void>();
+      const originalStartPiece = readerManager.startPiece;
+      const originalEditWithRetry = readerRuntime.editWithRetry.bind(
+        readerRuntime,
+      );
+      let interceptRegistrationCommit = false;
+      let intercepted = false;
+      readerManager.startPiece = (async (piece, options) => {
+        await originalStartPiece.call(readerManager, piece, options);
+        interceptRegistrationCommit = true;
+      }) as typeof readerManager.startPiece;
+      readerRuntime.editWithRetry = ((action, maxRetries) =>
+        originalEditWithRetry((transaction) => {
+          const result = action(transaction);
+          if (interceptRegistrationCommit && !intercepted) {
+            intercepted = true;
+            const originalCommit = transaction.commit.bind(transaction);
+            transaction.commit = async () => {
+              commitEntered.resolve();
+              await releaseCommit.promise;
+              return await originalCommit();
+            };
+          }
+          return result;
+        }, maxRetries)) as typeof readerRuntime.editWithRetry;
+      try {
+        const defaultLocation = defaultDebugPatternLocation();
+        const deployment = deployAgentSessionsDebugView(
+          readerManager,
+          target,
+          {
+            rootPath: defaultLocation.rootPath,
+            mainPath: fromFileUrl(
+              new URL("./fixtures/alternate-debug-view.tsx", import.meta.url),
+            ),
+          },
+        );
+        await commitEntered.promise;
+        const competingResult = await writerRuntime.editWithRetry((tx) => {
+          tx.setCfcImplementationIdentity({
+            kind: "builtin",
+            builtinId: AGENT_CONNECTOR_WRITER_ID,
+          });
+          registration.withTx(tx).asSchema(agentOwnerSchema(ownerDid))
+            .setRawUntyped(competingRegistration);
+        });
+        if (competingResult.error) {
+          throw competingResult.error;
+        }
+        releaseCommit.resolve();
+
+        await assertRejects(
+          () =>
+            deployment,
+          Error,
+          "debug view registration changed during deployment",
+        );
+        assertEquals(registration.getRaw(), competingRegistration);
+        assertEquals(
+          await registeredPieceIds(defaultPattern, "pieceRegistry"),
+          [],
+        );
+        await target.publish([{
+          source: sourceDescriptor(),
+          sessions: [sessionSnapshot(1)],
+          errors: [],
+          complete: true,
+        }]);
+        await readerRuntime.settled();
+        const originalPiece = await readerManager.get(originalPieceId, false);
+        assertEquals(await originalPiece.result.get(["sessionCount"]), 1);
+      } finally {
+        releaseCommit.resolve();
+        readerManager.startPiece = originalStartPiece;
+        readerRuntime.editWithRetry = originalEditWithRetry;
+      }
+    } finally {
+      await writerRuntime.dispose();
+      await writerStorage.close();
+    }
+  } finally {
+    await readerRuntime.dispose();
+    await readerStorage.close();
+    await server.close();
+  }
+});
+
 Deno.test("debug deployment refuses a pre-created unprotected piece", async () => {
   const session = await createSession({
     identity,
@@ -658,7 +797,7 @@ Deno.test("debug registration rejects writes from another owner", async () => {
       target,
     );
     await readerStorage.synced();
-    assertEquals(await registeredPieceIds(defaultPattern, "allPieces"), []);
+    assertEquals(await registeredPieceIds(defaultPattern, "pieceRegistry"), []);
     const registration = readerRuntime.getCell(
       readerSession.space,
       `agent-sessions-debug-registration:${readerSession.as.did()}`,
@@ -894,6 +1033,7 @@ Deno.test("debug deployment rejects an in-place registry change", async () => {
     const target = await AgentFabricTarget.open({
       runtime,
       spaceDid: session.space,
+      ownerDid: session.as.did(),
     });
     const originalStartPiece = manager.startPiece;
     const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
