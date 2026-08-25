@@ -345,28 +345,42 @@ type PointerCycleTracker = CompoundCycleTracker<
 ### 5.3.4 Schema Narrowing
 
 When following a reference from entity A to entity B, the schema applicable to B
-is the **intersection** of:
+combines:
 
 1. The schema context from A's traversal (what A expects B to look like).
 2. Any schema embedded in the reference itself (what the reference declares B to
    contain).
 
-`combineSchema` computes a best-effort pseudo-intersection. False schemas and
-disjoint types produce a false schema, while an unconstrained schema yields to
-the other input. Integer is treated as a subtype of number. For combinations
+`combineSchemaForLink` computes this combination, with the traversal's schema
+projecting the reference's. A reference routinely describes more of its target
+than the traversal asked for, so when the traversal's object schema names
+`properties` and does not admit extra keys, a reference property outside that
+shape is excluded rather than adopted, the reference's `required` entries
+survive only for keys the traversal's shape selects, and the reference's
+`additionalProperties` cannot reopen the closed shape. A traversal schema that
+admits extra keys (no `properties`, or a non-false `additionalProperties`)
+adopts the reference's fuller shape, including its `required` entries.
+
+Within the shared shape the two schemas intersect best-effort. False schemas
+and disjoint types produce a false schema, while an unconstrained schema yields
+to the other input. Integer is treated as a subtype of number. For combinations
 that do not receive more specific handling, the parent schema takes precedence
 while retaining relevant flags from the link schema.
 
-Object schemas combine shared properties recursively, retain properties allowed
-by only one side, and preserve every property required by either input. Array
-schemas combine their `items` schemas recursively. Their positional
-`prefixItems` extend to the longer input prefix: each position combines the two
-positional schemas, falling back to that input's `items` schema after its prefix
-ends. The result omits `prefixItems` when the merged prefix is empty.
+Object schemas combine shared properties recursively. Array schemas combine
+their `items` schemas recursively. Their positional `prefixItems` extend to the
+longer input prefix: each position combines the two positional schemas, falling
+back to that input's `items` schema after its prefix ends. The result omits
+`prefixItems` when the merged prefix is empty.
 
-The operation is intentionally not a complete JSON Schema intersection and does
-not resolve `$ref` values. See `combineSchema` and `narrowSchema` in
-`packages/runner/src/traverse.ts` for the implementation.
+The sibling `combineSchema` keeps the strict pseudo-intersection — retaining
+properties allowed by only one side and preserving every property required by
+either input — and merges a compound schema's base keywords with its own
+`anyOf`/`oneOf` branches, where both parts were authored as one constraint.
+
+Neither operation is a complete JSON Schema intersection, and neither resolves
+`$ref` values. See `combineSchemaForLink`, `combineSchema`, and `narrowSchema`
+in `packages/runner/src/traverse.ts` for the implementation.
 
 ### 5.3.5 Schema Tracker
 
