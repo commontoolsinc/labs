@@ -340,14 +340,11 @@ inert.** The mechanisms, each observed and root-caused during implementation
 
 ## 7. Narrow vs broad — decision and pricing
 
-**Decision: narrow-first (the §5 set), broad as a separately-ticketed sweep.**
-Rationale: the narrow set is complete against direct probe evidence, every site
-has its anchor in hand, and it fully unblocks A′. Broad (every replacement node
-pipeline-wide carries lineage) dissolves the bug-class and is worth doing, but
-each site needs individual anchor-correctness judgment (see hazards, §6) — a
-wrong anchor produces wrong sourcemap spans, worse than absent ones. Contingency
-honored from the seed: fold broad in now ONLY if the sweep prices it
-nearly-free.
+**Decision: narrow-first (the §5 set), then a source-map-range-only broad
+sweep.** The narrow set is complete against direct probe evidence and fully
+unblocks A′. The first broad slice covers the replacement sites whose authored
+anchor is already in scope and unambiguous. More opaque sites remain separate: a
+wrong sourcemap anchor is worse than an absent one.
 
 **Sweep results (read-only Opus survey, 2026-07-07, on 39afdb62b; three claims
 spot-verified exactly — treat the rest as a work list to re-verify at
@@ -359,31 +356,26 @@ implementation):**
   BuilderCallHoisting and rebuilds essentially every builder call bare — it
   alone re-strips anything stages 8–12 preserve, which is why the original
   three-site diagnosis could never have been sufficient.
-- **Remaining for broad** (~15–18 sites, none A′-gating, none structurally hard
-  — an anchor is in scope at every one):
-  - `pattern-body-reactive-root-lowering.ts` key()-lowering replacements
-    (`:360`, `:853/:858`, `:895`) + destructured-binding decls
-    (`:659/:666/:682`). Natural chokepoint: `registerReplacementType` (`:124`)
-    already receives the original node and could attach lineage for all of them.
-  - `ui-helper-lowering.ts:85/:96` (lowered `<ct-…>` JSX elements).
-  - JSX container rebuilds: `jsx-expression-site-router.ts:66/:86`,
-    `expression-site-lowering.ts:572/:903`, `handler-strategy.ts:85/:90` (all
-    have `update*` drop-ins).
-  - `array-method-transform.ts:93` (receiver `key()` rewrite),
-    `module-scope-cf-data.ts:138` (wrapper, borderline additive).
-  - Caveat to carry: `ifelse.ts` when/unless helpers anchor on `condition` (left
-    operand), not the whole expression — fine for emit, worth a look when broad
-    lands.
+- **Straightforward broad slice:** `registerReplacement` carries ranges for its
+  pattern-body replacement family; UI-helper outer elements, JSX expression
+  containers, handler attributes and initializers, nested array receiver `key()`
+  calls, and module-scope `__cf_data` wrappers carry their authored container or
+  expression range. These sites use `preserveSourceMapRange` exclusively.
+- **Remaining judgment work:** destructured-binding declarations in
+  `pattern-body-reactive-root-lowering.ts` do not retain the original binding
+  node in their intermediate representation, so they need an explicit anchor
+  design. The diagnostics replacement audit and `CFHelpers` API cleanup remain
+  independent follow-ups. The `ifelse.ts` when/unless helpers anchor on the
+  condition (left operand), not the whole logical expression; that existing
+  choice remains intentionally unchanged pending a focused sourcemap review.
 - **Excluded correctly** (sweep audit list retained in the session record):
   expression-rewrite emitters (delegate to known sites), reactive-variable-for
   (already fully preserved), type-position construction, additive schema/
   coverage/hardening/shadowing machinery, analysis-only stages.
 
-**Final call: narrow-first stands, with "narrow" = builder-path-complete (§5).**
-Broad is real but not nearly-free: it roughly doubles the diff into exactly the
-sites where anchor-judgment is subtlest (containers, key() lowering), and none
-of it gates A′. It gets its own ticket with the sweep table as the work list,
-sequenced after A′'s injection design rather than before.
+**Final call:** builder-path lineage stays complete, and the straightforward
+broad slice follows the same source-map-range-only safety rule. Opaque anchors
+remain out of scope until their source identity is represented explicitly.
 
 **CT-1869 implementers, carry §6a:** the implementation proved the per-site
 judgment is not just "is the anchor's span correct" but **"does textRange reach

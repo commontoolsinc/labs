@@ -4,6 +4,8 @@ import {
   ErrorNotification,
   IPCClientMessage,
   IPCClientNotification,
+  isWorkerConsoleNotification,
+  isWorkerReadyNotification,
   NotificationType,
 } from "../../../protocol/mod.ts";
 import { RuntimeTransport, RuntimeTransportEvents } from "../../transport.ts";
@@ -79,29 +81,19 @@ export class WebWorkerRuntimeTransport
     // Worker-side console output forwarded by the bridge in
     // `backends/web-worker/index.ts` (opt-in). Re-emit it on the page
     // console so it reaches devtools and integration-test console capture,
-    // then stop: it is not an IPC response and carries no `msgId`.
-    if (
-      data && typeof data === "object" &&
-      (data as { __workerConsole?: unknown }).__workerConsole
-    ) {
-      const { level, text } = (data as {
-        __workerConsole: { level: string; text: string };
-      }).__workerConsole;
-      const sink = (console as unknown as Record<
-        string,
-        (message: string) => void
-      >)[level] ?? console.log;
-      sink(`[worker] ${text}`);
+    // then stop: it is this transport's traffic, not the connection's.
+    if (isWorkerConsoleNotification(data)) {
+      console[data.level](`[worker] ${data.text}`);
       return;
     }
 
-    if (!this._ready && data === "READY") {
+    if (!this._ready && isWorkerReadyNotification(data)) {
       this._ready = true;
       this._readyPromise.resolve();
       return;
     }
 
-    this.emit("message", event.data);
+    this.emit("message", data);
   };
 
   private _handleError = (event: ErrorEvent): void => {

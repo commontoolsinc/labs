@@ -1,4 +1,5 @@
 import { assertEquals, assertRejects } from "@std/assert";
+import { FakeTime } from "@std/testing/time";
 import ports from "@commonfabric/ports" with { type: "json" };
 import {
   buildFilteredTestArgs,
@@ -11,6 +12,7 @@ import {
   runPackageIntegration,
   selectIntegrationTestFiles,
   selectPatternTestFiles,
+  startServers,
 } from "./integration.ts";
 
 Deno.test("selectPatternTestFiles assigns every file by stable FNV-1a hash", () => {
@@ -319,6 +321,42 @@ Deno.test("runPackageIntegration returns false when a filtered run matches nothi
   } finally {
     await Deno.remove(rootDir, { recursive: true });
   }
+});
+
+Deno.test("startServers returns when the startup script completes", async () => {
+  using time = new FakeTime();
+  let ran = false;
+  let settled = false;
+  const completion = startServers(
+    17,
+    "/repo",
+    {},
+    () => {
+      ran = true;
+      return Promise.resolve({ success: true, code: 0 });
+    },
+  ).then((code) => {
+    settled = true;
+    return code;
+  });
+
+  await time.tickAsync(0);
+
+  assertEquals(ran, true);
+  assertEquals(settled, true);
+  assertEquals(await completion, 0);
+});
+
+Deno.test("startServers returns the startup script failure", async () => {
+  const failureCode = 42;
+  const code = await startServers(
+    17,
+    "/repo",
+    {},
+    () => Promise.resolve({ success: false, code: failureCode }),
+  );
+
+  assertEquals(code, failureCode);
 });
 
 // Every offset the choice can return, collected by sweeping its random input

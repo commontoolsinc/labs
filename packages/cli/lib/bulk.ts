@@ -7,18 +7,30 @@
  * above it stay seams.
  */
 
+import { dirname, join, toFileUrl } from "@std/path";
+
 import { resolvePieceAddress } from "@commonfabric/piece";
 import {
+  assertPlanRunsFixer,
+  decodePlan,
+  type Fixer,
   type PiecePin,
+  type PiecesController,
   type PieceSelector,
   type PlannedRetarget,
   readPiecePin,
+  repairPieces,
+  type RepairReport,
   type RetargetSource,
   surveyPieces,
   type SurveyResult,
 } from "@commonfabric/piece/ops";
-import { localRetargetOp } from "@commonfabric/piece/ops/bulk-local";
-import type { JSONSchema } from "@commonfabric/runner";
+import {
+  localRetargetOp,
+  programEntryIdentity,
+  resolveLocalSourceProgram,
+} from "@commonfabric/piece/ops/bulk-local";
+import type { JSONSchema, RuntimeProgram } from "@commonfabric/runner";
 
 import { loadPieces, type PieceConfig, type SpaceConfig } from "./piece.ts";
 
@@ -45,6 +57,154 @@ export async function readSourcePin(
     config.piece,
   );
   return await readPiecePin(pieces, piece, new Map(), config.pieceScope);
+}
+
+/**
+ * Resolve a selector's addresses the way every other piece verb resolves
+ * one — slugs included — shared by the survey and the repair so the two
+ * cannot drift in what an address means.
+ */
+async function resolveSelector(
+  pieces: PiecesController,
+  selector: PieceSelector,
+  resolve: typeof resolvePieceAddress,
+): Promise<PieceSelector> {
+  if (selector.kind === "collection") {
+    return { ...selector, holder: await resolve(pieces, selector.holder) };
+  }
+  const resolved: string[] = [];
+  for (const entry of selector.pieces) {
+    resolved.push(await resolve(pieces, entry));
+  }
+  return { kind: "list", pieces: resolved };
+}
+
+/** What one repair run is asked to do, parsed off the command line. */
+export interface RepairRunRequest {
+  selector: PieceSelector;
+  /** The fixer module's absolute path, for the import. */
+  fixerPath: string;
+  /** The fixer's name as supplied, recorded in the emitted plan. */
+  fixerName: string;
+  /** A plan file to execute, row for row, under its preconditions. */
+  planPath?: string;
+  /** Write the fixer's documents; absent, the run is the dry report. */
+  apply?: boolean;
+}
+
+export interface RepairRunDependencies {
+  loadPieces?: typeof loadPieces;
+  resolvePieceAddress?: typeof resolvePieceAddress;
+  readTextFile?: (path: string) => Promise<string>;
+  /**
+   * Resolve the fixer's closure snapshot — the one read of the authored
+   * sources that both the identity and the execution come from.
+   */
+  resolveFixerProgram?: (path: string) => Promise<RuntimeProgram>;
+  /** The snapshot's closure identity. */
+  programIdentity?: (program: RuntimeProgram) => Promise<string>;
+  /** Execute the snapshot — never the path it was read from. */
+  importProgram?: (program: RuntimeProgram) => Promise<unknown>;
+}
+
+/**
+ * Run the repair: import the fixer module, resolve the selector's addresses
+ * the way the other piece verbs do, decode the plan file when one drives
+ * the run, and hand the library the pieces. Dry by default; the library
+ * owns every refusal beyond the fixer module's own shape.
+ */
+export async function runRepair(
+  config: SpaceConfig,
+  request: RepairRunRequest,
+  deps: RepairRunDependencies = {},
+): Promise<RepairReport> {
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  const resolve = deps.resolvePieceAddress ?? resolvePieceAddress;
+  const selector = await resolveSelector(pieces, request.selector, resolve);
+  // One closure snapshot serves the whole run: the identity is computed
+  // from it and the execution imports it, so nothing on disk can change
+  // between the hash and the code — the path is read exactly once. The
+  // resolution and the hash are reads, never executions.
+  const program = await (deps.resolveFixerProgram ??
+    ((path: string) =>
+      resolveLocalSourceProgram(pieces.runtime, { main: path })))(
+      request.fixerPath,
+    );
+  const fixerIdentity = await (deps.programIdentity ?? programEntryIdentity)(
+    program,
+  );
+  const plan = request.planPath === undefined ? undefined : decodePlan(
+    await (deps.readTextFile ?? Deno.readTextFile)(request.planPath),
+  );
+  if (plan !== undefined && plan.rows.length > 0) {
+    // Every row is held to the run's fixer — operation, name, and pin —
+    // before the module is imported: a dynamic import evaluates top-level
+    // code, and a plan that cannot run this fixer must not run any of it.
+    // The library applies the same gate again behind the seam.
+    assertPlanRunsFixer(plan, request.fixerName, fixerIdentity);
+  }
+  if (plan !== undefined && plan.rows.length === 0) {
+    // A zero-row plan pins nothing, so nothing must run under it — the
+    // fixer is not even imported. Whether the plan fits this run is the
+    // library's selection equality, which refuses it against any nonempty
+    // selection; against an empty one the run is a no-op report.
+    return await repairPieces(pieces, {
+      selector,
+      fixer: zeroRowFixer,
+      fixerName: request.fixerName,
+      fixerIdentity,
+      plan,
+      ...(request.apply === true ? { apply: true } : {}),
+    });
+  }
+  const module = await (deps.importProgram ?? importProgramSnapshot)(program);
+  const fixer = (module as { default?: unknown }).default;
+  if (typeof fixer !== "function") {
+    throw new Error(
+      `The fixer module must default-export the fixer function: ` +
+        `${request.fixerName}.`,
+    );
+  }
+  return await repairPieces(pieces, {
+    selector,
+    fixer: fixer as Fixer,
+    fixerName: request.fixerName,
+    fixerIdentity,
+    ...(plan === undefined ? {} : { plan }),
+    ...(request.apply === true ? { apply: true } : {}),
+  });
+}
+
+/**
+ * The fixer a zero-row plan run carries: such a run evaluates no rows, so
+ * nothing may call this — and it says so if something does, rather than
+ * quietly transforming a document no plan accounted for.
+ */
+export function zeroRowFixer(): Record<string, unknown> {
+  throw new Error("A zero-row plan runs no fixer.");
+}
+
+/**
+ * Execute a resolved closure snapshot: its files land in a fresh temporary
+ * directory — relative imports resolving among themselves exactly as they
+ * did on disk — and the entry is imported from there, so the code that runs
+ * is the code that was hashed, whatever happened to the original path
+ * since. The directory is removed once the module is loaded.
+ */
+async function importProgramSnapshot(
+  program: RuntimeProgram,
+): Promise<unknown> {
+  const dir = await Deno.makeTempDir({ prefix: "cf-fixer-snapshot" });
+  try {
+    for (const file of program.files) {
+      const target = join(dir, file.name);
+      await Deno.mkdir(dirname(target), { recursive: true });
+      await Deno.writeTextFile(target, file.contents);
+    }
+    return await import(toFileUrl(join(dir, program.main)).href);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
 }
 
 /** One `--retarget` flag, parsed: which phase, what source, what label. */
@@ -101,16 +261,7 @@ export async function runSurvey(
 
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
   const resolve = deps.resolvePieceAddress ?? resolvePieceAddress;
-  let selector = request.selector;
-  if (selector.kind === "collection") {
-    selector = { ...selector, holder: await resolve(pieces, selector.holder) };
-  } else {
-    const resolved: string[] = [];
-    for (const entry of selector.pieces) {
-      resolved.push(await resolve(pieces, entry));
-    }
-    selector = { kind: "list", pieces: resolved };
-  }
+  const selector = await resolveSelector(pieces, request.selector, resolve);
 
   // A null prototype, so a phase named like an `Object.prototype` member is
   // an own key rather than a write through the prototype chain.

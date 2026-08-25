@@ -151,6 +151,14 @@ export interface RepairOptions {
    */
   fixerName?: string;
   /**
+   * The content identity of the fixer module's authored closure — the pin
+   * the name cannot be. Recorded on every emitted repair op, and held
+   * against a supplied plan's recorded identities: a plan reviewed against
+   * one implementation must not execute another, however the file is
+   * spelled or what it holds today.
+   */
+  fixerIdentity?: string;
+  /**
    * A previously emitted plan, which then IS the execution: its rows run
    * in its order, each row's recorded document hash is its precondition,
    * and the plan must agree with this run — same space, same fixer name,
@@ -166,6 +174,61 @@ export interface RepairOptions {
    * dry-run report — the exact per-piece diff, and no write at all.
    */
   apply?: boolean;
+}
+
+/**
+ * Hold a plan's rows to the run's fixer — every row must carry a repair
+ * operation, its recorded name must match, and its implementation pin must
+ * match. Exported apart from execution so a command seam can hold the pin
+ * BEFORE the fixer module is imported: a dynamic import runs top-level
+ * code, and an implementation the plan's reviewer never saw must not run
+ * even that much. `repairPieces` applies the same gate behind the seam.
+ *
+ * A zero-row plan is refused here outright: it pins nothing, so this gate
+ * would hold nothing, and a caller with a legitimately empty run has no
+ * fixer to gate — it skips the gate and the import both.
+ */
+export function assertPlanRunsFixer(
+  plan: PiecePlan,
+  fixerName: string,
+  fixerIdentity: string,
+): void {
+  if (plan.rows.length === 0) {
+    throw new Error(
+      "A zero-row plan pins no fixer, so nothing can be gated against it.",
+    );
+  }
+  const unrunnable = plan.rows.filter((row) => row.op?.kind !== "repair");
+  if (unrunnable.length > 0) {
+    throw new Error(
+      "The plan carries rows with no repair operation, which cannot be " +
+        "executed or precondition-checked: " +
+        unrunnable.map((row) => row.piece).join(", ") + ".",
+    );
+  }
+  const disagreeing = plan.rows.filter((row) =>
+    row.op?.kind === "repair" && row.op.fixer !== fixerName
+  );
+  if (disagreeing.length > 0) {
+    throw new Error(
+      `The plan records a different fixer than this run supplies ` +
+        `(${fixerName}) on: ` +
+        disagreeing.map((row) => row.piece).join(", ") + ".",
+    );
+  }
+  const repinned = plan.rows.filter((row) =>
+    row.op?.kind === "repair" && row.op.fixerIdentity !== fixerIdentity
+  );
+  if (repinned.length > 0) {
+    // The name matching is not the pin: the file behind it may have
+    // changed since the plan was reviewed, and a reviewed plan must not
+    // execute an implementation nobody reviewed.
+    throw new Error(
+      "The plan pins a different fixer implementation than this run " +
+        "supplies, on: " + repinned.map((row) => row.piece).join(", ") +
+        ".",
+    );
+  }
 }
 
 /** How one evaluation of the fixer over one document came out. */
@@ -522,10 +585,20 @@ export async function repairPieces(
   pieces: PiecesController,
   options: RepairOptions,
 ): Promise<RepairReport> {
-  if (options.fixerName === "") {
-    // Stamped into the artifact it would be an op the codec refuses, so a
-    // successful apply would return a plan nothing can decode or resume.
-    throw new Error("A fixerName must be nonempty when given.");
+  if (options.fixerName === "" || options.fixerIdentity === "") {
+    // Stamped into the artifact either would be an op the codec refuses,
+    // so a successful apply would return a plan nothing can decode.
+    throw new Error(
+      "A fixerName and a fixerIdentity must be nonempty when given.",
+    );
+  }
+  if (
+    (options.fixerName === undefined) !== (options.fixerIdentity === undefined)
+  ) {
+    // The name is for readers and the identity is the pin; an op carrying
+    // one without the other is a plan the codec refuses, so the pair is
+    // required together before anything is read.
+    throw new Error("fixerName and fixerIdentity travel together.");
   }
   const survey = await surveyPieces(pieces, { selector: options.selector });
   if (!survey.complete) {
@@ -593,23 +666,13 @@ export async function repairPieces(
           `targets ${survey.plan.header.space}.`,
       );
     }
-    const unrunnable = plan.rows.filter((row) => row.op?.kind !== "repair");
-    if (unrunnable.length > 0) {
-      throw new Error(
-        "The plan carries rows with no repair operation, which cannot be " +
-          "executed or precondition-checked: " +
-          unrunnable.map((row) => row.piece).join(", ") + ".",
-      );
-    }
-    const disagreeing = plan.rows.filter((row) =>
-      row.op?.kind === "repair" && row.op.fixer !== options.fixerName
-    );
-    if (disagreeing.length > 0) {
-      throw new Error(
-        `The plan records a different fixer than this run supplies ` +
-          `(${options.fixerName}) on: ` +
-          disagreeing.map((row) => row.piece).join(", ") + ".",
-      );
+    // The pair rule above means a run with a fixerName carries the
+    // identity too, and the fixerName requirement for plans has already
+    // fired for a run with neither. A zero-row plan pins nothing and gates
+    // nothing; whether it fits this run is the selection equality's
+    // question below, which refuses it against any nonempty selection.
+    if (plan.rows.length > 0) {
+      assertPlanRunsFixer(plan, options.fixerName, options.fixerIdentity!);
     }
     const surveyByPiece = new Map(members.map((row) => [row.piece, row]));
     const planPieces = new Set(plan.rows.map((row) => row.piece));
@@ -736,9 +799,16 @@ export async function repairPieces(
           piece: row.piece,
           ...phase,
           expect: { ...row.expect, documentHash: decision.documentHash },
-          ...(options.fixerName === undefined ? {} : {
-            op: { kind: "repair", fixer: options.fixerName },
-          }),
+          ...(options.fixerName === undefined ||
+              options.fixerIdentity === undefined
+            ? {}
+            : {
+              op: {
+                kind: "repair",
+                fixer: options.fixerName,
+                fixerIdentity: options.fixerIdentity,
+              },
+            }),
         });
         return;
       }

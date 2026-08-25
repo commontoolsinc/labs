@@ -15,6 +15,7 @@ import ts from "typescript";
 import { detectCallKind, isReactiveOriginCall } from "../ast/call-kind.ts";
 import { getNodeText } from "../ast/mod.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
+import { unwrapTransparentWrapperOnce } from "../utils/expression.ts";
 
 export class OpaqueGetValidationTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
@@ -198,13 +199,9 @@ export class OpaqueGetValidationTransformer extends HelpersOnlyTransformer {
   ): boolean {
     let current: ts.Expression = expr;
     while (true) {
-      if (
-        ts.isNonNullExpression(current) ||
-        ts.isParenthesizedExpression(current) ||
-        ts.isAsExpression(current) ||
-        ts.isTypeAssertionExpression(current)
-      ) {
-        current = current.expression;
+      const unwrapped = unwrapTransparentWrapperOnce(current);
+      if (unwrapped) {
+        current = unwrapped;
         continue;
       }
       if (

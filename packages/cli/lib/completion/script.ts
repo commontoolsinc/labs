@@ -112,18 +112,28 @@ ${fn}() {
     return
   fi
 
+  # bash replaces only the fragment after the last word-break character, and
+  # \${cur} is the whole word — \`--identity=~/keys/a\` rather than \`~/keys/a\`.
+  # A glob applied to the whole word matches nothing, so file completion is
+  # given the fragment the shell will actually replace.
+  local frag="\${cur}"
+  if [[ "\${cur}" == *[:=]* ]]; then
+    frag="\${cur##*[:=]}"
+  fi
+
   if [[ -n "\${glob}" ]]; then
     if [[ "\${glob}" == ":dirs:" ]]; then
       while IFS= read -r reply; do COMPREPLY+=("\${reply}"); done \\
-        < <(compgen -d -- "\${cur}")
+        < <(compgen -d -- "\${frag}")
     else
       while IFS= read -r reply; do COMPREPLY+=("\${reply}"); done \\
-        < <(compgen -f -X "!\${glob}" -- "\${cur}"; compgen -d -- "\${cur}")
+        < <(compgen -f -X "!\${glob}" -- "\${frag}"; compgen -d -- "\${frag}")
     fi
   fi
 
-  # bash replaces only the fragment after the last word-break character, so
-  # trim each candidate by the same amount or the prefix is duplicated.
+  # Candidates from the CLI carry the whole word, so trim them by the same
+  # amount or the prefix is duplicated. A file candidate is already the
+  # fragment and carries no such prefix, so this leaves it alone.
   if [[ "\${cur}" == *[:=]* ]]; then
     local head="\${cur%[:=]*}"
     local i
@@ -214,6 +224,10 @@ ${fn}() {
   fi
 
   if [[ -n "\${glob}" ]]; then
+    # An inline \`--name=value\` word reaches here whole. Moving the flag and
+    # its \`=\` into IPREFIX leaves \`_path_files\` completing the path rather
+    # than looking for a file whose name begins with the flag.
+    compset -P '--[^=]#='
     if [[ "\${glob}" == ":dirs:" ]]; then
       _path_files -/
     else

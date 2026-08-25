@@ -4,6 +4,7 @@ import {
   isCollectionType,
   isFunctionLikeExpression,
   isSyntheticNode,
+  preserveSourceMapRange,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
@@ -553,9 +554,12 @@ export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
         preferInputBoundWrappers: true,
       });
       if (rewritten) {
-        return context.factory.createJsxExpression(
-          node.dotDotDotToken,
-          rewritten,
+        return preserveSourceMapRange(
+          context.factory.createJsxExpression(
+            node.dotDotDotToken,
+            rewritten,
+          ),
+          node,
         );
       }
 
@@ -875,9 +879,12 @@ export function rewriteArrayMethodCallbackExpressionSites(
           preferInputBoundWrappers: true,
         });
         if (rewritten) {
-          return context.factory.createJsxExpression(
-            node.dotDotDotToken,
-            rewritten,
+          return preserveSourceMapRange(
+            context.factory.createJsxExpression(
+              node.dotDotDotToken,
+              rewritten,
+            ),
+            node,
           );
         }
       }

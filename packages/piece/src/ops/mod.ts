@@ -17,6 +17,7 @@ export {
   type SurveyProblem,
 } from "./bulk-plan.ts";
 export {
+  assertPlanRunsFixer,
   collectLinkPaths,
   type DocumentChange,
   documentChanges,

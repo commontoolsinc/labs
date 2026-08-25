@@ -152,15 +152,24 @@ export interface RestoreOp {
 
 /**
  * Run a caller-supplied fixer over the piece's stored input document. The
- * fixer itself is a TypeScript module the run imports, so the plan records
- * only its name for readers and for diffing — the row's enforceable half is
- * `expect.documentHash`, which pins the document the fixer's answer was
- * computed from.
+ * fixer itself is a TypeScript module the run imports; the row's
+ * enforceable halves are `expect.documentHash`, which pins the document
+ * the fixer's answer was computed from, and `fixerIdentity`, which pins
+ * the implementation itself. The name is for readers and for diffing.
  */
 export interface RepairOp {
   kind: "repair";
   /** The fixer's name as supplied — a module path or label; never resolved. */
   fixer: string;
+  /**
+   * The content identity of the fixer module's authored closure — the same
+   * no-compile identity a retarget's source carries — which is the pin the
+   * name cannot be: a path re-resolved elsewhere, or a file edited after
+   * review, changes this and the apply refuses the plan. Required: a
+   * repair row without it is a plan nothing can hold to what was
+   * reviewed, so the codec refuses it rather than carrying a bypass.
+   */
+  fixerIdentity: string;
 }
 
 /** What a plan row does to its piece, absent on a survey-only row. */
@@ -472,7 +481,8 @@ function isPlanRow(value: unknown): value is PiecePlanRow {
 function isPieceOp(value: unknown): value is PieceOp {
   if (!isRecord(value)) return false;
   if (value.kind === "repair") {
-    return typeof value.fixer === "string" && value.fixer !== "";
+    return typeof value.fixer === "string" && value.fixer !== "" &&
+      typeof value.fixerIdentity === "string" && value.fixerIdentity !== "";
   }
   if (
     typeof value.patternIdentity !== "string" ||

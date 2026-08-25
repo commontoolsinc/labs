@@ -1,7 +1,7 @@
 /**
  * Reports the share of recent completed runs that passed on the first attempt,
- * which is the wall's signal for flakiness, with a history strip carrying
- * every run in the fetched window. One factory builds both the labs and loom
+ * which is the wall's signal for flakiness, with a history strip carrying the
+ * newest runs in the trust window. One factory builds both the labs and loom
  * instances against their own repository and workflow.
  */
 
@@ -13,7 +13,7 @@ import {
   type TileView,
 } from "../types.ts";
 import { strip } from "../lib.ts";
-import { CI_RUNS_MAX, CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, REPO, TRUST_COLS, TRUST_GOOD, TRUST_WARN } from "../config.ts";
+import { CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, REPO, TRUST_COLS, TRUST_GOOD, TRUST_RUNS_MAX, TRUST_WARN } from "../config.ts";
 
 type TrustOutcome = "green" | "red" | "run" | "gray";
 
@@ -30,7 +30,7 @@ function makeCiTrust(opts: { id: string; label: string; repo: string; workflow: 
     runSources: [runSource(opts.repo, opts.workflow)],
     async collect(ctx): Promise<TileView> {
       const runs = await ctx.runsFor(opts.repo, opts.workflow);
-      const scored = runs.slice(0, CI_RUNS_MAX).map((run) => ({
+      const scored = runs.slice(0, TRUST_RUNS_MAX).map((run) => ({
         run,
         outcome: trustOutcome(run),
       }));

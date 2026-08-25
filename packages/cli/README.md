@@ -131,11 +131,18 @@ in-scope identity that the collection lacks makes the survey exit nonzero,
 naming the piece. A `--list` survey reads exactly the pieces named and makes no
 containment claim; each entry takes either reference form, and a canonical
 entry's embedded space composes the way it does on `--piece` — supplying the
-space when `--space` is absent, agreeing with it otherwise. Read-only; the
-spelling is provisional until the bulk write operations get a home. To watch the
-surface work rather than read about it, `integration/bulk-ops-demo.sh` narrates
-a board-sized survey end to end against a running server, with the unbuilt write
-stages shown as pending acts.
+space when `--space` is absent, agreeing with it otherwise. Read-only. To watch
+the surface work rather than read about it, `integration/bulk-ops-demo.sh`
+narrates a board-sized survey and repair end to end against a running server,
+with the unbuilt write stages shown as pending acts.
+
+`cf piece repair` runs a caller-supplied fixer — a TypeScript module whose
+default export is a pure transform from a piece's stored input document to the
+document it should hold — over the same selection surface the survey takes. Dry
+by default, reporting the exact per-piece diff and writing nothing; under
+`--apply` it writes each row in its own transaction, and a plan from a dry run
+drives the apply row for row under its document-hash preconditions (`--plan`).
+The design is `docs/plans/piece-bulk-operations.md`, stage 2.
 
 `cf piece slugs` lists the space's slug index: every name assigned through
 `--slug` or `set-slug`, each resolved to the piece it names. The index records
@@ -793,12 +800,16 @@ The supported output switches are:
 - `cf inspect ... --json` serializes an inspector result. `inspect html` does
   not have a JSON representation, so `html` and `--json` are mutually exclusive.
   `inspect graph --dot` and `--json` are also mutually exclusive.
-- `cf piece ls`, `piece search`, `piece inspect`, `piece survey`, `piece view`,
-  and `piece render` use `--json` as an output switch. `piece survey` reserves
-  stdout for the plan it emits (or, under `--json`, the full survey result); its
-  tally and findings go to stderr. `piece render --watch --json` writes only
-  JSON render records to stdout; watch status goes to stderr. Rendering a piece
-  without a UI fails instead of returning an empty successful JSON stream.
+- `cf piece ls`, `piece search`, `piece inspect`, `piece survey`,
+  `piece repair`, `piece view`, and `piece render` use `--json` as an output
+  switch. `piece survey` reserves stdout for the plan it emits (or, under
+  `--json`, the full survey result); its tally and findings go to stderr.
+  `piece repair` reserves stdout the same way — the emitted plan, or under
+  `--json` the full report in the canonical FabricValue encoding — with its
+  verdict tally and dry-run diff going to stderr. `piece render --watch --json`
+  writes only JSON render records to stdout; watch status goes to stderr.
+  Rendering a piece without a UI fails instead of returning an empty successful
+  JSON stream.
 - `cf get` and `cf wish` always return JSON. Their `--json` options are
   accepted, documented no-ops for callers that select JSON explicitly.
 - `cf check --json` compiles without evaluating and prints one object with a
@@ -972,23 +983,55 @@ source <(cf completion bash)
 Completion covers the command tree — subcommands, flags, and enumerated values
 such as `--log-level` — plus live values read from the fabric:
 
-| Slot                            | Completes to                                |
-| ------------------------------- | ------------------------------------------- |
-| `--piece`                       | piece ids, annotated with each piece's name |
-| `cf call <callable>`            | the piece's callables, as `cf piece verbs`  |
-| `cf get`/`cf set <path>`        | cell keys, one path segment at a time       |
-| `piece link <source>/<target>`  | `pieceId/path/to/field` endpoints           |
-| `--space`                       | space DIDs of local memory-v2 stores        |
-| `--identity`, pattern arguments | `*.key` / `*.tsx` files, via the shell      |
-| `--datafile`                    | any file, via the shell                     |
+| Slot                            | Completes to                                   |
+| ------------------------------- | ---------------------------------------------- |
+| `--piece`                       | the space's slugs, then its piece ids          |
+| `cf call <callable>`            | the piece's callables, as `cf piece verbs`     |
+| `cf get`/`cf set <path>`        | cell keys, one path segment at a time          |
+| `cf get --select`/`--schema`    | field paths into the value, and their `@` form |
+| `piece set-slug <slug>`         | the space's slugs                              |
+| `piece link <source>/<target>`  | `pieceId/path/to/field` endpoints              |
+| `--space`                       | space DIDs of local memory-v2 stores           |
+| `--identity`, pattern arguments | `*.key` / `*.tsx` files, via the shell         |
+| `--datafile`                    | any file, via the shell                        |
+
+A projection's grammar is its own and not the cell path's: a list splits on `,`
+and a path on `.`, and a trailing `@` asks for a position's address rather than
+its value. A path below an array names a field of each element, however many
+array layers deep it sits, because that is what the projection does with one.
+
+A bare `@` asks the read for its own address and is accepted wherever an element
+of the list begins — with one exception `--schema` makes: an argument _starting_
+with `@` is its `@file` form, so `--schema @` is an empty path while
+`--schema revision,@` is the suffix. A field named `true` or `false` is offered
+wherever it is not the whole argument: written alone it is a boolean JSON Schema
+to `--schema` and refused by `--select`, and written as `revision,true` it is an
+ordinary name to both. Completion restates none of that — it puts each
+prospective candidate back through the flag's own parser and offers what comes
+back as a field list, so the two sets cannot drift. `cf call`'s and `cf exec`'s
+projections shape a verb's result rather than the piece's root, and are not
+completed from it; `cf wish`'s resolution writes to the space, and a Tab must
+not.
+
+An option's value completes the same whether it is written after a space or
+after `=`, and every spelling of a target reaches the same slots behind it: the
+bare id, the canonical reference (space-qualified or not, with an `@scope`
+suffix, an embedded path, or the `#argument` suffix), and a canonical reference
+written positionally in place of `--piece`.
+
+Past a `stopEarly()` boundary — after `cf call`'s callable name, after
+`cf exec`'s mounted file — nothing is offered. The CLI's own flags are refused
+there, so offering them would name something the command rejects; the words that
+do belong there are the callable's, and completing those is not yet built.
 
 Live values need an identity and an api-url. Both are read from the line being
 typed (`-i`, `-a`, `-u`) before falling back to `CF_IDENTITY`/`CF_API_URL`, so
 `cf call -s other-space --piece <TAB>` lists that space's pieces rather than the
-environment's. When neither is resolvable, or the server is unreachable,
-completion yields nothing — it never prints an error into the command line. Each
-request costs one CLI invocation plus one round trip, so value completion is as
-fast as the fabric it queries.
+environment's. A space DID embedded in a reference supplies one the line did not
+name. When nothing is resolvable, or the server is unreachable, completion
+yields nothing — it never prints an error into the command line. Each request
+costs one CLI invocation plus one round trip, so value completion is as fast as
+the fabric it queries.
 
 ### `deno task cf` and other invocations
 

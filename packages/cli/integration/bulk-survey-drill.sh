@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# The bulk-survey drill: deploy a board whose members are created through its
-# own verb, survey it, and assert the plan — the stage-1 drill of
+# The bulk-operations drill: deploy a board whose members are created
+# through its own verb, survey it, assert the plan — and repair it: a fixer
+# run dry with every plan row recording its precondition and fixer, applied
+# from that plan, resumed as all-landed writing nothing, and a
+# field-dropping fixer refused by name. Stages 1 and 2 of
 # docs/plans/piece-bulk-operations.md, which finishes each stage with a CI
 # drill so "does the migration tooling still work?" stays a CI result.
 #
@@ -164,7 +167,127 @@ AFTER=$($CF piece survey -q --piece "$BOARD" --path items $ARGS \
 check "$((MEMBERS_TOTAL + 1))" "$AFTER" \
   "the after-survey counts the member added since"
 
-step "10. A registered in-scope orphan makes the survey refuse"
+step "10. A repair runs dry, applies from its plan, and resumes as landed"
+cat > "$WORK/fix-titles.ts" <<'FIXER'
+export default (document: Readonly<Record<string, unknown>>) => ({
+  ...document,
+  ...(typeof document.title === "string"
+    ? { title: (document.title as string).toUpperCase() }
+    : {}),
+});
+FIXER
+if $CF piece repair -q --piece "$BOARD" --path items $ARGS \
+  --fixer "$WORK/fix-titles.ts" --out "$WORK/repair.jsonl" \
+  2>"$WORK/repair-dry.err"; then
+  ok "dry repair exited 0"
+else
+  bad "dry repair exited nonzero"
+  sed 's/^/  | /' "$WORK/repair-dry.err"
+fi
+DRY_OPS=$(tail -n +2 "$WORK/repair.jsonl" | jq -rs \
+  'map(.op.fixer) | unique | join(",")')
+check "$WORK/fix-titles.ts" "$DRY_OPS" \
+  "every plan row records the fixer it was evaluated for"
+# The reviewed plan pins the fixer implementation: an edited module is a
+# different closure identity, and the apply refuses it by name.
+cp "$WORK/fix-titles.ts" "$WORK/fix-titles.reviewed.ts"
+printf '\n// edited after review\n' >> "$WORK/fix-titles.ts"
+if $CF piece repair -q --piece "$BOARD" --path items $ARGS \
+  --fixer "$WORK/fix-titles.ts" --plan "$WORK/repair.jsonl" --apply \
+  >/dev/null 2>"$WORK/repair-pin.err"; then
+  bad "an edited fixer ran under the reviewed plan"
+else
+  ok "an edited fixer exited nonzero under the reviewed plan"
+fi
+if grep -q "different fixer implementation" "$WORK/repair-pin.err"; then
+  ok "the refusal names the implementation pin"
+else
+  bad "the refusal does not name the implementation pin"
+  sed 's/^/  | /' "$WORK/repair-pin.err"
+fi
+mv "$WORK/fix-titles.reviewed.ts" "$WORK/fix-titles.ts"
+APPLY_FACTS=$($CF piece repair -q --piece "$BOARD" --path items $ARGS \
+  --fixer "$WORK/fix-titles.ts" --plan "$WORK/repair.jsonl" --apply --json \
+  2>"$WORK/repair-apply.err" | sed 's/^fvj1://' | jq -r '[(.applied|tostring),
+    (.complete|tostring), (.rows | map(.verdict) | unique | join(","))]
+    | @tsv')
+MEMBERS_NOW=$((MEMBERS_TOTAL + 1))
+check "$(printf '%s\ttrue\trepaired' "$MEMBERS_NOW")" "$APPLY_FACTS" \
+  "the plan-driven apply repaired every member row"
+RESUME=$($CF piece repair -q --piece "$BOARD" --path items $ARGS \
+  --fixer "$WORK/fix-titles.ts" --plan "$WORK/repair.jsonl" --apply --json \
+  2>/dev/null | sed 's/^fvj1://' | jq -r '[(.applied|tostring),
+    (.complete|tostring), (.rows | map(.verdict) | unique | join(","))]
+    | @tsv')
+check "$(printf '0\ttrue\tconforms')" "$RESUME" \
+  "re-running the completed plan writes nothing and reads all-landed"
+cat > "$WORK/drop-everything.ts" <<'FIXER'
+export default () => ({});
+FIXER
+if $CF piece repair -q --piece "$BOARD" --path items $ARGS \
+  --fixer "$WORK/drop-everything.ts" \
+  >/dev/null 2>"$WORK/repair-refuse.err"; then
+  bad "a field-dropping fixer was accepted"
+else
+  ok "a field-dropping fixer exited nonzero"
+fi
+if grep -q "incomplete document" "$WORK/repair-refuse.err"; then
+  ok "the refusal names the incomplete document"
+else
+  bad "the refusal does not name the incomplete document"
+  sed 's/^/  | /' "$WORK/repair-refuse.err"
+fi
+
+step "11. A run stopped midway completes by re-invocation"
+# A fixer that appends a mark, but whose answer for the third-planned piece
+# breaks the schema: rows before it land, the run stops there with the
+# remainder named, and re-invoking skips what landed — the property the
+# design says rots silently unless a drill holds it.
+cat > "$WORK/mark-titles.ts" <<'FIXER'
+export default (document: Readonly<Record<string, unknown>>) => {
+  const title = String(document.title ?? "");
+  if (title === "GAMMA") return { ...document, title: 7 as never };
+  return {
+    ...document,
+    ...(title !== "" && !title.endsWith("!")
+      ? { title: `${title}!` }
+      : {}),
+  };
+};
+FIXER
+RUN1=$($CF piece repair -q --piece "$BOARD" --path items $ARGS \
+  --fixer "$WORK/mark-titles.ts" --apply --json 2>/dev/null |
+  sed 's/^fvj1://' | jq -r '[(.applied|tostring),
+    (.rows | map(.verdict) | .[0:3] | join(",")),
+    ((.rows | map(.verdict) | map(select(. == "unattempted")) | length > 0)
+      | tostring)] | @tsv')
+check "$(printf '2\trepaired,repaired,failed\ttrue')" "$RUN1" \
+  "the run landed two rows, stopped at the third, and named the rest"
+RUN2=$($CF piece repair -q --piece "$BOARD" --path items $ARGS \
+  --fixer "$WORK/mark-titles.ts" --apply --json 2>/dev/null |
+  sed 's/^fvj1://' | jq -r '[(.applied|tostring),
+    (.rows | map(.verdict) | .[0:3] | join(","))] | @tsv')
+check "$(printf '0\tconforms,conforms,failed')" "$RUN2" \
+  "re-invoking skips the landed rows and writes nothing for them"
+cat > "$WORK/mark-titles-v2.ts" <<'FIXER'
+export default (document: Readonly<Record<string, unknown>>) => {
+  const title = String(document.title ?? "");
+  return {
+    ...document,
+    ...(title !== "" && !title.endsWith("!")
+      ? { title: `${title}!` }
+      : {}),
+  };
+};
+FIXER
+RUN3=$($CF piece repair -q --piece "$BOARD" --path items $ARGS \
+  --fixer "$WORK/mark-titles-v2.ts" --apply --json 2>/dev/null |
+  sed 's/^fvj1://' | jq -r '[(.applied|tostring), (.complete|tostring)]
+    | @tsv')
+check "$(printf '%s\ttrue' "$((MEMBERS_NOW - 2))")" "$RUN3" \
+  "the amended fixer completes the remainder by re-invocation"
+
+step "12. A registered in-scope orphan makes the survey refuse"
 ORPHAN=$($CF piece new --quiet --main-export Member \
   "$SCRIPT_DIR/pattern/bulk-member.tsx" $ARGS 2>/dev/null |
   grep -oE '^fid1:[A-Za-z0-9_-]+' | head -1)
@@ -183,7 +306,7 @@ else
   bad "the refusal does not name the orphan"
 fi
 
-step "11. A list survey claims no containment"
+step "13. A list survey claims no containment"
 LIST_FACTS=$($CF piece survey -q --list "$BOARD" $ARGS 2>/dev/null |
   head -1 | jq -r '[.selector, (.enumerated.collection|tostring),
     (.enumerated.registeredOutside|tostring)] | @tsv')
