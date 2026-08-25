@@ -39,13 +39,13 @@ const GRANT_DESCRIPTIONS: Record<HarnessWellKnownGrantName, string> = {
 
 /**
  * Resolves the canonical references behind every well-known grant through
- * `session`. Each resolution is address-only: the registry's address is the
- * default pattern's cell plus its `pieceRegistry` field, so resolving the root
- * pointer is the whole read; nothing the registry lists is pulled.
- * (`getPieceRegistry()` is deliberately not used here: it syncs every
- * listed piece, a privileged data pull an address does not need, and in a
- * space with no default pattern it answers a detached placeholder that
- * would persist as a permanently dead grant.)
+ * `session`. Registry resolution reads the default pattern's root pointer and
+ * appends its `pieceRegistry` path. It does not read the registry contents.
+ *
+ * `getPieceRegistry()` is deliberately not used here. It syncs every listed
+ * piece, which is a privileged data pull that address resolution does not
+ * need. In a space with no default pattern, it also returns a detached
+ * placeholder that would persist as a permanently dead grant.
  *
  * @throws Error when the space has no default pattern to anchor the
  * registry; a grant that cannot name a live address is refused rather than
