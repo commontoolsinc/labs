@@ -82,6 +82,11 @@ import {
   mintWellKnownGrants,
   resolveWellKnownGrantRefs,
 } from "./well-known-grants.ts";
+import type {
+  HarnessInputCell,
+  HarnessInputCellSpec,
+} from "./contracts/input-cells.ts";
+import { mintInputCellHandles } from "./input-cells.ts";
 import {
   appendHarnessCfcModelContextObservations,
   appendHarnessFailureRecord,
@@ -213,6 +218,12 @@ export interface CreateHarnessEngineOptions
    * tool surface.
    */
   fabricSessionFactory?: HarnessFabricSessionFactory;
+  /**
+   * Operator input cells to mint handles for at run start; see
+   * `establishInputCells`. Requires a fabric session — the cells live in
+   * its space.
+   */
+  inputCells?: readonly HarnessInputCellSpec[];
   now?: () => string;
 }
 
@@ -334,6 +345,7 @@ export class CfHarnessEngine {
   #outputSequence: number;
   readonly #now: () => string;
   readonly #fabricSessionFactory?: HarnessFabricSessionFactory;
+  readonly #inputCells: readonly HarnessInputCellSpec[];
   readonly #hostMounts: readonly HostSandboxMount[];
   readonly #ownedRunscConfig?: DockerRunscSandboxConfig;
   readonly #resumedRun: boolean;
@@ -472,6 +484,7 @@ export class CfHarnessEngine {
     this.#fabricSessionFactory = fabricSessionFactory === undefined
       ? undefined
       : cacheHarnessFabricSessionFactory(fabricSessionFactory);
+    this.#inputCells = options.inputCells ?? [];
     const sandboxConfig = options.sandboxRuntime === undefined
       ? resolveSandboxConfig(this.config, {
         workspaceHostPath: options.workspaceHostPath,
@@ -796,6 +809,46 @@ export class CfHarnessEngine {
     );
     await this.persistRunState();
     return minted.grants;
+  }
+
+  /**
+   * Establishes the run's operator input cells: mints a token for each
+   * `--input-cell` reference into the handle table, records the cells in
+   * run state, and returns them. Idempotent across resume, like the
+   * well-known grants: cells already recorded are returned as they stand.
+   *
+   * Unlike a grant, an input cell is explicit operator configuration, so
+   * failure is closed and loud rather than tolerated: cells configured on a
+   * run with no fabric session, a reference that does not parse, and a
+   * reference targeting another space all throw before anything is recorded.
+   */
+  async establishInputCells(): Promise<HarnessInputCell[]> {
+    if (this.#runState.inputCells !== undefined) {
+      return structuredClone(this.#runState.inputCells);
+    }
+    if (this.#inputCells.length === 0) {
+      return [];
+    }
+    if (this.#fabricSessionFactory === undefined) {
+      throw new Error(
+        "--input-cell requires a fabric session; configure --fabric-space",
+      );
+    }
+    const session = await this.#fabricSessionFactory();
+    const minted = await mintInputCellHandles(
+      this.handleTable,
+      this.#runState.runId,
+      this.#inputCells,
+      session.pieces.getSpace(),
+    );
+    await this.recordHandleTable(minted.table);
+    this.#runState = patchHarnessRunState(
+      this.#runState,
+      { inputCells: structuredClone(minted.inputCells) },
+      this.#now(),
+    );
+    await this.persistRunState();
+    return minted.inputCells;
   }
 
   async ensureRunManifestPersisted(): Promise<string | undefined> {

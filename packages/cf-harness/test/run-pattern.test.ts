@@ -10,8 +10,14 @@ import { createSession, Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { Runtime } from "@commonfabric/runner";
 import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import {
+  EmulatedStorageManager,
+  newLoopbackServer,
+  StorageManager,
+} from "@commonfabric/runner/storage/cache.deno";
 import { CfHarnessEngine } from "../src/engine.ts";
+import type { HarnessFabricSession } from "../src/fabric-session.ts";
+import { resolveWellKnownGrantRefs } from "../src/well-known-grants.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import {
   asSerializableValue,
@@ -148,6 +154,23 @@ const LABEL_LENGTH_RESULT_SCHEMA = {
   type: "object",
   properties: { labelLength: { type: "number" } },
   required: ["labelLength"],
+} as const;
+
+/** A pattern whose single input is the registry array, counting its entries. */
+const ENTRY_COUNT_PATTERN_SOURCE = [
+  "import { computed, pattern } from 'commonfabric';",
+  "interface Input { entries: unknown[]; }",
+  "interface Output { count: number; }",
+  "export default pattern<Input, Output>(({ entries }) => ({",
+  "  count: computed(() => entries.length),",
+  "}));",
+  "",
+].join("\n");
+
+const ENTRY_COUNT_RESULT_SCHEMA = {
+  type: "object",
+  properties: { count: { type: "number" } },
+  required: ["count"],
 } as const;
 
 const DOUBLED_RESULT_SCHEMA = {
@@ -1461,6 +1484,154 @@ describe("run-pattern", () => {
       expect(output.status).toBe("error");
       expect(output.message).toContain("requires a fabric session");
       expect(output.message).toContain("--fabric-space");
+    });
+  });
+
+  describe("live-cell input validation from a cold session", () => {
+    // Two replicas on one loopback server: the writer seeds and pushes, the
+    // reader session starts cold, never having pulled what the input's
+    // referent links to. A single emulated manager cannot exercise this —
+    // seeding through it warms the very cache the validation read depends
+    // on. This is the shape of the piece-registry grant: the granted address
+    // resolves through a link, so a schema-less validation read in a fresh
+    // session measures `undefined` where the value is.
+    let server: ReturnType<typeof newLoopbackServer>;
+    let spaceName: string;
+    let writerStorage: EmulatedStorageManager;
+    let writerRuntime: Runtime;
+    let writerPieces: PiecesController;
+    let readerStorage: EmulatedStorageManager | undefined;
+    let readerRuntime: Runtime | undefined;
+
+    beforeEach(async () => {
+      server = newLoopbackServer();
+      spaceName = `run-pattern-cold-${crypto.randomUUID()}`;
+      writerStorage = EmulatedStorageManager.connectTo(server, { as: signer });
+      writerRuntime = new Runtime({
+        apiUrl: new URL("http://toolshed.test"),
+        storageManager: writerStorage,
+      });
+      writerPieces = new PiecesController(
+        await createSession({ identity: signer, spaceName }),
+        writerRuntime,
+      );
+      await writerPieces.synced();
+      readerStorage = undefined;
+      readerRuntime = undefined;
+    });
+
+    // Connected after the writer has seeded and pushed, so the reader's
+    // first sight of every seeded doc is a cold pull from the server.
+    const connectReader = async (): Promise<PiecesController> => {
+      readerStorage = EmulatedStorageManager.connectTo(server, { as: signer });
+      readerRuntime = new Runtime({
+        apiUrl: new URL("http://toolshed.test"),
+        storageManager: readerStorage,
+      });
+      const readerPieces = new PiecesController(
+        await createSession({ identity: signer, spaceName }),
+        readerRuntime,
+      );
+      await readerPieces.synced();
+      return readerPieces;
+    };
+
+    afterEach(async () => {
+      await readerRuntime?.dispose();
+      await readerStorage?.close();
+      await writerRuntime?.dispose();
+      await writerStorage?.close();
+      await server?.close();
+    });
+
+    it("validates a live-cell input whose referent sits behind a link the session has not pulled, and runs the pattern", async () => {
+      const space = writerPieces.getSpace();
+      const target = writerRuntime.getCell<number>(
+        space,
+        "run-pattern-cold-target",
+        { type: "number" },
+      );
+      const wrapper = writerRuntime.getCell(space, "run-pattern-cold-wrapper");
+      const seeded = await writerRuntime.editWithRetry((tx) => {
+        target.withTx(tx).set(7);
+        wrapper.withTx(tx).set(target.getAsLink());
+      });
+      expect(seeded.error).toBeUndefined();
+      await writerRuntime.idle();
+      await writerPieces.synced();
+      const wrapperRef = createLLMFriendlyLink(
+        wrapper.getAsNormalizedFullLink(),
+        space,
+      );
+
+      const readerPieces = await connectReader();
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: `run-pattern-test-${crypto.randomUUID()}`,
+        cfcEnforcementMode: "disabled",
+        fabricSessionFactory: () => Promise.resolve({ pieces: readerPieces }),
+      });
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: wrapperRef },
+        resultSchema: DOUBLED_RESULT_SCHEMA,
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect((output.value as { doubled: number }).doubled).toBe(14);
+    });
+
+    it("validates the piece-registry grant address as a live-cell input and runs the pattern", async () => {
+      // The writer gives the space a default pattern whose stored document
+      // reads as `undefined` through the whole-document untyped view — a
+      // shape `getDefaultPattern` itself tolerates (see
+      // `packages/piece/test/ensure-default-pattern.test.ts`) — anchoring
+      // the piece-registry well-known grant the way a real space does. The
+      // emulated client materializes more eagerly than a remote session, so
+      // this pins the grant-address wiring rather than discriminating the
+      // schema-carrying validation read; that discrimination needs a live
+      // toolshed.
+      const mockDefaultPattern = writerRuntime.getCell(
+        writerPieces.getSpace(),
+        "run-pattern-mock-default-pattern",
+        {
+          type: "object",
+          properties: {
+            pieceRegistry: { type: "array" },
+            missing: { type: "string" },
+          },
+          required: ["missing"],
+        } as const,
+      );
+      await writerRuntime.editWithRetry((tx) => {
+        mockDefaultPattern.withTx(tx).setRawUntyped({ pieceRegistry: [] });
+      });
+      await writerPieces.linkDefaultPattern(mockDefaultPattern);
+      await writerRuntime.idle();
+      await writerPieces.synced();
+
+      // The reader resolves the grant the way the harness does at run
+      // start: an address-only walk that pulls nothing the registry lists.
+      const readerPieces = await connectReader();
+      const [grant] = await resolveWellKnownGrantRefs(
+        { pieces: readerPieces } as HarnessFabricSession,
+      );
+      expect(grant?.name).toBe("piece-registry");
+
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: `run-pattern-test-${crypto.randomUUID()}`,
+        cfcEnforcementMode: "disabled",
+        fabricSessionFactory: () => Promise.resolve({ pieces: readerPieces }),
+      });
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: ENTRY_COUNT_PATTERN_SOURCE,
+        inputs: { entries: grant!.ref },
+        resultSchema: ENTRY_COUNT_RESULT_SCHEMA,
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect((output.value as { count: number }).count).toBe(0);
     });
   });
 });

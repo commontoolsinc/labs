@@ -4,7 +4,10 @@ import {
   compileAndSavePattern,
   getPatternIdentityRef,
 } from "@commonfabric/runner";
-import { validateAgainstSchema } from "@commonfabric/runner/cfc";
+import {
+  selectReferencedCfcSchemaDefs,
+  validateAgainstSchema,
+} from "@commonfabric/runner/cfc";
 import {
   createLLMFriendlyLink,
   FRAMEWORK_RESULT_KEYS,
@@ -560,12 +563,38 @@ export const runPatternTool: HarnessToolDefinition<
         `run_pattern input "${key}" does not match the pattern's argument schema: ${failure}`,
       );
     };
+    // A property schema referring into the argument schema's `$defs` leaves
+    // its root behind when it becomes a cell's whole schema, so the read
+    // schema carries the referenced definitions along —
+    // `selectReferencedCfcSchemaDefs` computes that closure, honoring a
+    // property's own `$defs` scope over the root's.
+    const argumentDefs = isObjectNotArray(argumentSchema) &&
+        isObjectNotArray((argumentSchema as { $defs?: unknown }).$defs)
+      ? (argumentSchema as { $defs: Record<string, JSONSchema> }).$defs
+      : undefined;
+    const readSchemaForKey = (key: string): JSONSchema | undefined => {
+      const propertySchema = argumentSchemaForKey(key);
+      if (propertySchema === undefined || !isObjectNotArray(propertySchema)) {
+        return propertySchema;
+      }
+      const defs = selectReferencedCfcSchemaDefs(propertySchema, argumentDefs);
+      return defs === undefined ? propertySchema : {
+        ...propertySchema,
+        $defs: defs,
+      };
+    };
     for (const { key, cell } of liveCellInputs) {
-      if (argumentSchemaForKey(key) === undefined) {
+      const readSchema = readSchemaForKey(key);
+      if (readSchema === undefined) {
         continue;
       }
-      await cell.sync();
-      const mismatch = argumentMismatch(key, cell.get());
+      // The read goes through the argument schema: a schema-less sync can
+      // complete without data for a referent that needs schema-driven
+      // materialization (a registry grant is one), and its `undefined` would
+      // be measured here as the cell's value.
+      const typedCell = cell.asSchema(readSchema);
+      await typedCell.sync();
+      const mismatch = argumentMismatch(key, typedCell.get());
       if (mismatch !== undefined) {
         return mismatch;
       }
