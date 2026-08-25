@@ -991,15 +991,16 @@ array layers deep it sits, because that is what the projection does with one.
 
 A bare `@` asks the read for its own address and is accepted wherever an element
 of the list begins — with one exception `--schema` makes: an argument _starting_
-with `@` is an `@file` path, so `--schema @` is an empty one while
-`--schema revision,@` is the suffix. `--schema` also reads `{`, `true` and
-`false` as whole-value JSON Schemas, so no field of those names is offered
-there, while `--select` takes `true` and `false` as ordinary names anywhere but
-alone. Completion does not restate any of that: it puts each prospective
-candidate back through the flag's own parser and offers what comes back as a
-field list. `cf call`'s and `cf exec`'s projections shape a verb's result rather
-than the piece's root, and are not completed from it; `cf wish`'s resolution
-writes to the space, and a Tab must not.
+with `@` is its `@file` form, so `--schema @` is an empty path while
+`--schema revision,@` is the suffix. A field named `true` or `false` is offered
+wherever it is not the whole argument: written alone it is a boolean JSON Schema
+to `--schema` and refused by `--select`, and written as `revision,true` it is an
+ordinary name to both. Completion restates none of that — it puts each
+prospective candidate back through the flag's own parser and offers what comes
+back as a field list, so the two sets cannot drift. `cf call`'s and `cf exec`'s
+projections shape a verb's result rather than the piece's root, and are not
+completed from it; `cf wish`'s resolution writes to the space, and a Tab must
+not.
 
 An option's value completes the same whether it is written after a space or
 after `=`, and every spelling of a target reaches the same slots behind it: the
