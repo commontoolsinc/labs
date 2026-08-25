@@ -7,6 +7,20 @@ reason: "Measurement record: topics tests and benchmarks ON vs OFF at tip 2ea87c
 
 # Topics tests + benchmarks, ON vs OFF — measurement report (2026-08-24)
 
+> **Amendment (2026-08-24, coordinator ruling — the frozen body below is
+> unchanged).** §1's "no posture breaks in 66 new-tip runs" is scoped to the
+> SERVER-BACKED runs. Those are the runs that boot a toolshed and produce the
+> `meta.json` / `stats-pre.json` probe files the claim rests on. The pattern
+> `.tsx` runs in the same campaign (`topics.test.tsx`,
+> `topics-rejections.test.tsx`, `multi-user.test.tsx`, 3 reps per arm each) ran
+> through the repo's own runner with NO server by design
+> (`PACKAGES_WITHOUT_SERVER`, stated in §1) and carry their posture as the env
+> var rather than a probe, so they cannot have been posture-probed and are not
+> part of a probe-verified count. This does not disturb any finding: the
+> no-server lane's own result is §5.1's multi-user RED, which §5.1 already
+> attributes to that lane having no serving loop. The register's OW60 evidence
+> note relies only on the 20 probed journey runs (§2b).
+
 *Archived verbatim 2026-08-24; the raw run artifacts it cites (the per-run
 `.bench-artifacts/` ledger, logs, stats and series) are not archived here —
 they live on the measuring box at
