@@ -7392,6 +7392,47 @@ supply; OW29/OW32/OW34 closed):
     `schema-doc-quarantine` line no longer means the doc was dropped —
     it is held and healing, so the line is expected and the lane's
     colour, not the quarantine count, is the health metric.
+    THE FLOOR, found on the verification board (#6260 = this fix
+    under #6248's flip) and NOT a client defect: a pull issues
+    `session.watch.add`, and `watchAdd` DIFFS its answer against the
+    session's delivery cache (`memory/v2/server.ts` ~:3649,
+    `!sameSnapshot(session.entities…)`) — so a document the cache
+    claims delivered is elided EVEN WHEN THE REQUEST NAMES IT AS A
+    ROOT. Once the cache and a replica disagree about a document, the
+    replica cannot obtain it by asking: the frame comes back empty,
+    every time. That is the cache-claims-sent-but-never-sent shape,
+    and it is why the original board's clients could never recover —
+    the absorb fix's park+pull cleared every lane whose consumer
+    WAITS (package runtime-client, 249 quarantines on #6248, and
+    package shell, a 30-minute hang — both green on board 1) and
+    could not clear the ones that need the document to actually
+    arrive, whose logs show ONE cid missing 48 times in a single
+    shard. `watch.set` is the way back and needs no change to the
+    elision: `buildFullSync` (memory/v2/server-sync.ts) maps EVERY
+    entry to an upsert, diffing only removes, which is exactly the
+    "full evaluation" the quarantine diagnostic already names and
+    that nothing was reaching. The park therefore ESCALATES — a pull
+    that completes WITHOUT its document is the disagreement's
+    signature, not an absent document, so the replica requests one
+    full re-evaluation (`Session.resyncWatchSet`, single-flight) and
+    drains the park behind it. Pinned red-first ("ESCALATES to a full
+    evaluation when the session cache claims the cid was delivered
+    and the pull comes back empty"), mutation-checked against a
+    stubbed escalation. BOARD PROGRESSION on the ON lanes, all three
+    at the true topology: #6248 (no fix) 2 pattern shards green, 1 of
+    3 package lanes green; board 1 (absorb fix) 2 shards, 3 of 3
+    package lanes; board 2 (plus escalation) 4 shards (1, 2, 3, 8), 3
+    of 3 package lanes. Real movement, NOT closure — six shards (4,
+    5, 6, 7, 9, 10) still red and undiagnosed, so OW61 stays OPEN and
+    #6248 stays blocked on it. OWNER'S CALL WANTED, recorded here
+    because it is cheaper than what was built: making `watchAdd` not
+    elide a document the request explicitly NAMES as a root would fix
+    this at the seam, and answering a direct request for one named
+    document is not the "retransmit the schemas all the time" the
+    reversal ruling objected to. The client-side escalation re-ships a
+    whole closure where one document would do; it was built that way
+    only because the investigation's mandate fenced the server side
+    off.
 
   - **OW62 — adopt-not-start: the piece-open seam is where the ON
     execution model's "one starter per piece" has to land. POST-FLIP
