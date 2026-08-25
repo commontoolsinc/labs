@@ -381,17 +381,29 @@ Deno.test("memory v2 resyncWatchSet re-ships the whole closure, and answers unde
     await writer.transact({
       localSeq: 1,
       reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "set",
-        id: "of:resync:1",
-        value: { value: { hello: "resync" } },
-      }],
+      operations: [
+        {
+          op: "set",
+          id: "of:resync:1",
+          value: {
+            value: {
+              hello: "resync",
+              child: { "/": { "link@1": { id: "of:resync:2", path: [] } } },
+            },
+          },
+        },
+        {
+          op: "set",
+          id: "of:resync:2",
+          value: { value: { hello: "descendant" } },
+        },
+      ],
     });
     await watcher.watchSet([{
       id: "root",
       kind: "graph",
       query: {
-        roots: [{ id: "of:resync:1", selector: { path: [], schema: false } }],
+        roots: [{ id: "of:resync:1", selector: { path: [], schema: true } }],
       },
     }]);
 
@@ -401,8 +413,8 @@ Deno.test("memory v2 resyncWatchSet re-ships the whole closure, and answers unde
     // document the cache wrongly believes a replica holds.
     const again = await watcher.resyncWatchSet();
     assertEquals(
-      again?.sync.upserts.map((upsert) => upsert.id),
-      ["of:resync:1"],
+      again?.sync.upserts.map((upsert) => upsert.id).sort(),
+      ["of:resync:1", "of:resync:2"],
     );
   } finally {
     await watcher.close();

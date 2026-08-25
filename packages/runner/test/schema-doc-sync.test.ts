@@ -734,9 +734,12 @@ describe("schema-doc-sync", () => {
   it("parks two instances of one id separately, so neither delivery is lost", () => {
     // The park is keyed by the full document address, not the bare id:
     // the quarantine unit IS the id (branch- and instance-blind, by
-    // design), but one frame may carry two instances of a single
-    // (branch, id, scope) and an id-keyed park would drop one of them
-    // on the floor. Found in review of this change.
+    // design), but one frame may carry the same id under more than one
+    // address, and an id-keyed park drops all but the last on the
+    // floor. Exercised here with two SCOPES of one id; the keyed
+    // frame's `scopeKey` instances are the other shape the same park
+    // key covers and are not exercised. Found in review of this
+    // change.
     const depSchema = { type: "string", title: "two-instances" } as const;
     const depHash = internSchemaAsTaggedHashString(depSchema);
     const provider = readerStorage.open(space);
