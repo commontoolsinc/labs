@@ -108,7 +108,9 @@ export function contendedEntities(
 ): ContendedEntity[] {
   const branch = opts.branch ?? "";
   const scope = opts.scope ?? "space";
-  const limit = opts.limit ?? 100;
+  // Resolved at ENTRY — see `hotEntities`: the refusal belongs before the scan,
+  // where the SQL this replaced put it.
+  const end = rowLimit(opts.limit ?? 100);
 
   // Counted on the branch that OWNS each entity's visible row: a child branch
   // inherits its parent's entities, and reading local rows only would report no
@@ -140,7 +142,7 @@ export function contendedEntities(
     .sort((a, b) =>
       b.sessions - a.sessions || b.writes - a.writes || utf8Compare(a.id, b.id)
     )
-    .slice(0, rowLimit(limit));
+    .slice(0, end);
 
   const writersStmt = space.db.prepare(
     `SELECT r.seq, r.commit_seq, r.op, c.session_id, c.created_at

@@ -55,6 +55,7 @@ import {
   renderInspectorHtml,
   type RequestSigner,
   resolveSpace,
+  rowLimit,
   type ScanExtent,
   type Scope,
   scopeOverlay,
@@ -163,12 +164,17 @@ function validatedLimit(limit: number): number {
  * like, and rounding it silently is how a listing under-reports.
  */
 function validatedRowLimit(limit: number): number {
-  if (!Number.isInteger(limit)) {
+  try {
+    // `rowLimit` owns the RULE — which limits a row listing accepts, and why.
+    // This owns only how a CLI user hears it: a ValidationError before the
+    // space is opened, rather than the library's stack trace after.
+    rowLimit(limit);
+    return limit;
+  } catch {
     throw new ValidationError(
       `\`--limit\` must be a whole number of rows, not ${limit}.`,
     );
   }
-  return limit;
 }
 
 /** The flag that turns a capped result into a failure. Shared by every scan. */

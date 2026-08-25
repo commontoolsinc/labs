@@ -205,7 +205,11 @@ export function hotEntities(
   opts: { branch?: string; limit?: number } = {},
 ): HotEntity[] {
   const branch = opts.branch ?? "";
-  const limit = opts.limit ?? 20;
+  // Resolved at ENTRY, not at the terminal slice: the SQL this replaced refused
+  // a bad limit before reading a row, and evaluating it last would make a
+  // library caller pay the whole chain walk, group-bys and sort before the
+  // refusal landed.
+  const end = rowLimit(opts.limit ?? 20);
   const perBranch = space.db.prepare(
     `SELECT r.id, r.scope_key,
             count(*) writes, count(DISTINCT c.session_id) sessions
@@ -241,7 +245,7 @@ export function hotEntities(
       b.writes - a.writes || utf8Compare(a.id, b.id) ||
       utf8Compare(a.scope, b.scope)
     )
-    .slice(0, rowLimit(limit));
+    .slice(0, end);
 }
 
 // Entity classification / listing moved to model.ts (`listEntityModels`),
