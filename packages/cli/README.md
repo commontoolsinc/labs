@@ -986,14 +986,14 @@ such as `--log-level` — plus live values read from the fabric:
 | Slot                                    | Completes to                                                  |
 | --------------------------------------- | ------------------------------------------------------------- |
 | `--piece`                               | the space's slugs, then its piece ids                         |
-| `call <callable>`                       | the piece's callables, annotated with the doc comment on each |
-| `get`/`set <path>`                      | cell keys, one path segment at a time                         |
-| `get --select`/`--schema`               | field paths into the value, and their `@` form                |
+| `cf call <callable>`                    | the piece's callables, annotated with the doc comment on each |
+| `cf get`/`cf set <path>`                | cell keys, one path segment at a time                         |
+| `cf get --select`/`--schema`            | field paths into the value, and their `@` form                |
 | `piece set-slug <slug>`                 | the space's slugs                                             |
 | `piece link <source>/<target>`          | `pieceId/path/to/field` endpoints                             |
 | `--space`, a positional space           | space DIDs of local memory-v2 stores                          |
 | `inspect <entity>`                      | that space's entities, as `cf inspect entities` lists them    |
-| `wish <target>`, `wish --scope`         | the vocabulary `cf wish --help` enumerates                    |
+| `cf wish <target>`, `--scope`           | the vocabulary `cf wish --help` enumerates                    |
 | `--identity`, pattern arguments         | `*.key` / `*.tsx` files, via the shell                        |
 | `--datafile`, `--out`, `--output`       | any file, via the shell                                       |
 | `--dir`, `--to`, `--root`, a mountpoint | a directory, via the shell                                    |
