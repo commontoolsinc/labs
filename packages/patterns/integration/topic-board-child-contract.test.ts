@@ -41,10 +41,9 @@ const SERVER_EXECUTION_FROM_ENV = experimentalOptionsFromEnv(Deno.env.get)
 // The ON arm's STEP-level skip guard (tasks/server-execution-on-skips.ts):
 // a step listed there for this file is skipped ONLY under the ON posture,
 // loudly (its reason is printed), and only while the entry exists — the OFF
-// arm and an unlisted step always run. The pivot baseline case is listed
-// under #6304 (the served pivot carries a duplicated row under server
-// execution while the durable store holds three); removing that entry
-// re-enables the case, which is that issue's acceptance test.
+// arm and an unlisted step always run. No step of this file is listed
+// today; the guard stays wired on the pivot baseline case so a future
+// entry binds without re-plumbing.
 function onArmStepSkip(step: string): { ignore: boolean } {
   if (SERVER_EXECUTION_FROM_ENV !== true) return { ignore: false };
   const entry = serverExecutionOnStepSkip(
@@ -76,12 +75,6 @@ function onArmStepSkip(step: string): { ignore: boolean } {
  * lease open for the whole file keeps every suite inside the epoch that
  * registered the documents. Remove once serialized-pattern reuse registers
  * its schema documents across registry epochs.
- *
- * This guard settles only that. A second symptom — `crossrefs` serving four
- * rows for three topics, while the durable store holds exactly three — is
- * #6304, not covered here: the pivot suite's baseline case observes it and
- * carries a registered ON-arm step skip
- * (tasks/server-execution-on-skips.ts) until that issue is fixed.
  */
 let epochHolder: PiecesController | undefined;
 
