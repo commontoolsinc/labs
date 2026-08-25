@@ -6963,6 +6963,51 @@ supply; OW29/OW32/OW34 closed):
     dropped echo's missing cover is user-visible (the OW33
     arrival-witness fork's fix would NOT close this — a dropped
     run seals no overlay entry at all).**
+    EVIDENCE NOTE 2026-08-24 — the OBSERVED RATE collapsed; the row
+    STAYS OPEN. Measured by the topics measurement campaign (seat
+    `topics-benchmark`, branch
+    `claude/server-exec-v2-topics-benchmark`, park checkpoint
+    `97f0745e5` carrying the harness and the per-run artifacts;
+    report `topics-measure-report-2026-08-24.md` §2b/§5.3, untracked
+    beside the worktrees) at tip `2ea87cea9` — #6199's CFC
+    envelope/cid convergence, with OW45 arm-B stage 1 (#6210) in
+    tree. The guard fired **0 times across the campaign's 20 journey
+    runs** (400 series events: 20 `addTopic` events × 20 runs), and
+    THIS ROW'S OWN WINDOW — the seed writes issued right after board
+    create, the barriered fid capture immediately after — was
+    exercised 40 times (2 seeds × 20 runs) with no fire. The row
+    records ~2/10 at earlier heads.
+    WHAT THE NUMBER IS AND IS NOT: the instrument is the seat's
+    journey harness, not the `topics-navigation` setup the ~2/10 came
+    from (that file ran in the same campaign — 6/6 green per arm —
+    but its guard fires were not counted separately). The 20 runs are
+    10 ON + 10 OFF and this row's trace is a flag-ON controller, so
+    the like-for-like evidence is 10 ON runs: at a ~0.2 per-run rate,
+    no fire in 10 runs happens ~11% of the time (0.8^10) — the
+    absence is SUGGESTIVE, not decisive. Only if the guard is
+    arm-independent (unestablished) do all 20 count, taking that
+    figure to ~1%.
+    PLAUSIBLE HEALERS — HYPOTHESIS, NOT CONCLUSION: #6199 moved the
+    commit boundaries this window sits on, and #6210 materializes
+    space roots server-side; either could plausibly make the derived
+    `crossrefs` member present at send time. Neither was tested
+    against this guard and no mechanism account exists. The same
+    campaign records the sibling observation under the same caveat —
+    the old head's deferred-start ConflictError also went quiet at
+    this tip (0 occurrences in all 66 new-tip runs), "consistent with
+    #6199's commit-boundary changes; not proven causal".
+    CLOSURE, against this row's own conditions: NOT MET. What the row
+    flags is a SPEC decision — whether the guard takes OW51's
+    refusal+re-trigger disposition, which owes its own
+    events.md/speculation.md sentence before any build — and a fire
+    count cannot discharge a spec decision; the stated trigger (the
+    next echo-semantics pass, or a live surface where the missing
+    cover is user-visible) has not occurred. The row already carries
+    the precedent for refusing closure on absence: the smell was
+    OBSERVED SURVIVING the test-side fix that closed its flake
+    symptom, which is why it was moved here at all. What this note
+    narrows is the reproduction budget — do not expect ~2/10 at this
+    tip — and nothing else.
 
   - **OW61 — delivery of content-addressed computed cells to a
     replica without their verified `cid:` schema docs: an UNCAUGHT
