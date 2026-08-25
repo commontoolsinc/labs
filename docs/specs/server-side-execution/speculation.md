@@ -391,21 +391,21 @@ either: the predicate demands the derivation itself — `derived` — not
 merely a server-side write (`!== "derived"`, conservative, converging
 on the next cover). The elision posture above is unchanged: no rewrite
 means the doc's seq stays BELOW the floor, and the predicate is never
-consulted. **A content-addressed write witnesses by IDENTITY (#6304
-fix, 2026-08-25): a `cid:` doc the store already holds — a confirmed
-cover at ANY seq — witnesses arrival regardless of the floor. The id
-derives from the content, so the stored bytes are exactly what the run
-wrote, and the cover can never advance (every rewrite is identical, so
-the equality cutoff elides it), which made the floor comparison
-unpassable: an entry whose speculative run re-set an already-stored
-schema document stood FOREVER, its other patch layers replaying over
-every newer confirmed base (an array splice is not idempotent — the
-served pivot's four rows over the store's three) while every later
-speculation reading through its layers blocked behind it. A cid doc
-with NO confirmed cover still holds the entry: nothing has served the
-schema document yet, and dropping the layer would flip local schema
-resolution to nothing. Pinned in `speculation-arrival-gate.test.ts`
-(the #6304 scripted shape, with its mutation).** Carriage: the covering commit's class rides session-frame
+consulted. **A content-addressed doc the store holds witnesses at ANY cover seq
+(#6304, 2026-08-25): its stored value is immutable — admission
+refuses a `cid:` set that is not the first installation or
+content-identical, and identical rewrites are elided — so its cover
+never advances and the floor comparison can never pass for it.
+Nothing newer can be pending at the id, and retiring the layer
+renders the STORED value whatever the layer holds: the store wins,
+the disposition every divergence gets (a divergent speculative cid
+layer is inadmissible content that can never arrive; holding the
+entry for it would strand the entry, and its sibling layers,
+forever). A cid doc with NO confirmed cover still holds the entry:
+nothing has served the schema document yet. Pinned in
+`speculation-arrival-gate.test.ts` — scripted with its mutation, and
+on a real replica for identical, divergent, and unstored cid
+writes.** Carriage: the covering commit's class rides session-frame
 upserts as `coverClass` (populated only under the flag — the OFF wire
 is byte-identical), is recorded on the replica's confirmed record
 (frames on integrate; `authored`/`derived` at own-commit promotions),

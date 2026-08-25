@@ -313,16 +313,6 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "entry's own gate evidence at the merged head, 10/10, never " +
         "by inference from the default-app gate.",
     },
-    // The topic-board pivot-baseline STEP entry (issue #6304, filed
-    // 2026-08-25) was LIFTED the same day: the served pivot's fourth row
-    // was a cid-stranded speculation overlay entry — a speculative
-    // derivation that re-set already-stored `cid:` schema documents could
-    // never pass the arrival gate (a content-addressed doc's cover never
-    // advances), so its array splice replayed over every newer confirmed
-    // base. The gate now takes a stored cid doc as arrival witnessed by
-    // identity (speculation.md §4; pinned in
-    // speculation-arrival-gate.test.ts), and the pivot baseline case is
-    // the acceptance test running again in the ON lane.
     // The sqlite identity pair's two FILE entries were LIFTED (OW53
     // CLOSED, 2026-08-22): the sqlite builtins consumed the RUNTIME's
     // ambient identity — the SERVICE, on a serving runtime — where the
