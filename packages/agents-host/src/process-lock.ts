@@ -100,9 +100,10 @@ export function defaultAgentsHostLockDirectory(
 export async function defaultTargetProcessLockPath(
   apiUrl: string,
   spaceDid: string,
+  ownerDid: string,
   lockDirectory = defaultAgentsHostLockDirectory(),
 ): Promise<string> {
-  const key = await agentTargetKey(apiUrl, spaceDid);
+  const key = await agentTargetKey(apiUrl, spaceDid, ownerDid);
   return join(resolve(lockDirectory), `target-${key}.lock`);
 }
 

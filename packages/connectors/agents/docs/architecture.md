@@ -24,14 +24,16 @@ flowchart LR
 
 The host owns process-level policy. It selects enabled sources, provides their
 configuration, creates drivers, and controls their lifecycle. It also creates
-the Common Fabric runtime and chooses the destination space DID.
+the Common Fabric runtime, chooses the destination space DID, and supplies the
+owner DID for the person whose local agents are being synchronized.
 
 The host decides when to run a full collection. It decides whether to subscribe
 to commands, poll commands, or do both. It also supplies health details and the
 location of the local command ledger.
 
 The connector never opens a Common Fabric connection by itself. It receives an
-initialized runtime through `AgentFabricConnection`.
+initialized runtime, destination space, and owner DID through
+`AgentFabricConnection`.
 
 ### Agent drivers
 
@@ -149,7 +151,8 @@ A host normally performs these steps:
 
 1. Build one `AgentSourceConfig` for every enabled source.
 2. Create each driver with `createAgentDriver()` and call `start()`.
-3. Open every `AgentFabricTarget` with an initialized runtime and space DID.
+3. Open every `AgentFabricTarget` with an initialized runtime, space DID, and
+   owner DID.
 4. Open `CommandLedger`, create `CommandWorker`, and call
    `recoverUnpublishedReceipts()`.
 5. Run `collectSource()` for each driver and publish all results together.

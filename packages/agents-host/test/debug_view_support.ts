@@ -13,7 +13,7 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { pieceId } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
-import { Runtime } from "@commonfabric/runner";
+import { compileAndSavePattern, Runtime } from "@commonfabric/runner";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
   EmulatedStorageManager,
@@ -23,7 +23,11 @@ import { fromFileUrl } from "@std/path";
 import type { RawDataProvenance } from "../../patterns/agent-sessions-debug/main.tsx";
 import { createBuilder } from "../../runner/src/builder/factory.ts";
 import type { Cell } from "../../runner/src/builder/types.ts";
-import { defaultDebugPatternLocation } from "../src/debug-view.ts";
+import {
+  debugCommandWriterAuthorization,
+  defaultDebugPatternLocation,
+  protectOwnerDebugResult,
+} from "../src/debug-view.ts";
 
 export const identity = await Identity.fromPassphrase(
   "agent sessions debug deployment test",
@@ -406,14 +410,25 @@ export async function deployDebugPiece(
     (resolver) => manager.runtime.harness.resolve(resolver),
     { main: location.mainPath, root: location.rootPath },
   );
-  return await manager.create(
+  const pattern = await compileAndSavePattern(manager.runtime, program, {
+    space: manager.getSpace(),
+  });
+  const commandWriterAuthorization = debugCommandWriterAuthorization(pattern);
+  if (commandWriterAuthorization === undefined) {
+    throw new Error("debug command writer authorization is missing");
+  }
+  await target.bindCommandCell(
+    target.cells.commands,
+    commandWriterAuthorization,
+  );
+  const piece = await manager.create(
     program,
     {
       input: {
+        ownerDid: target.conn.ownerDid,
         recentIndex: target.cells.index,
         allIndex: target.cells.allIndex,
         health: target.cells.health,
-        commands: target.cells.commands,
         receipts: target.cells.receipts,
         recentIndexCell: target.cells.index,
         allIndexCell: target.cells.allIndex,
@@ -424,6 +439,9 @@ export async function deployDebugPiece(
     },
     cause,
   );
+  const resultCell = await piece.result.getCell();
+  await protectOwnerDebugResult(manager, resultCell, target.conn.ownerDid);
+  return piece;
 }
 
 export async function deployRawDataPiece(

@@ -17,7 +17,6 @@ import {
   textContent,
 } from "../test/vnode-helpers.ts";
 import DebugView, {
-  type AgentCommand,
   type AgentCommandValue,
   type HostActivity,
   type HostHealth,
@@ -85,8 +84,8 @@ const EventChunkFixture = pattern<
   { nativeEvent: Cell<ShardedJsonValue> },
   SessionChunk
 >(({ nativeEvent }) => ({
-  schema: "commonfabric.agent-connector.session-chunk.v1",
-  formatVersion: 1,
+  schema: "commonfabric.agent-connector.session-chunk",
+  ownerDid: "did:key:test-owner",
   key: "codex/session-1",
   part: 0,
   contentHash: "sha256:chunk",
@@ -120,8 +119,8 @@ const ManifestFixture = pattern<
   },
   SessionManifest
 >(({ chunkDescriptor, message }) => ({
-  schema: "commonfabric.agent-connector.session.v1",
-  formatVersion: 1,
+  schema: "commonfabric.agent-connector.session",
+  ownerDid: "did:key:test-owner",
   key: "codex/session-1",
   sourceId: "codex",
   driver: "codex-app-server",
@@ -179,7 +178,6 @@ const SessionFixture = pattern<
   active,
   syncStatus,
 }) => ({
-  formatVersion: 1,
   key,
   sourceId: "codex",
   driver: "codex-app-server",
@@ -210,7 +208,7 @@ const IndexFixture = pattern<
   },
   SessionIndex
 >(({ bucket, source, firstSession, secondSession, sessionCount }) => ({
-  schema: "commonfabric.agent-connector.session-index.v1",
+  schema: "commonfabric.agent-connector.session-index",
   bucket,
   generatedAt: "2026-07-20T00:02:00.000Z",
   generation: 1,
@@ -244,9 +242,9 @@ const HealthFixture = pattern<
     commandAccepting,
   },
 ) => ({
-  schema: "commonfabric.agent-connector.health.v1",
+  schema: "commonfabric.agent-connector.health",
+  ownerDid: "did:key:test-owner",
   service: "agents-host",
-  formatVersion: 1,
   status,
   startedAt: "2026-07-20T00:00:00.000Z",
   updatedAt: "2026-07-20T00:02:00.000Z",
@@ -296,7 +294,8 @@ const ReceiptIndexFixture = pattern<
   { receipt: Cell<ReceiptRow>; receiptCount: number },
   ReceiptIndex
 >(({ receipt, receiptCount }) => ({
-  schema: "commonfabric.agent-connector.command-receipts.v1",
+  schema: "commonfabric.agent-connector.command-receipts",
+  ownerDid: "did:key:test-owner",
   updatedAt: "2026-07-20T00:04:00.000Z",
   receipts: receiptCount === 0 ? [] : [receipt],
 }));
@@ -340,6 +339,7 @@ export default pattern(() => {
   const receipt = ReceiptFixture();
   const status = new Writable("ready");
   const commandAccepting = new Writable(true);
+  const commands = new Writable<AgentCommandValue[]>([]);
   const activityCount = new Writable(1);
   const receiptCount = new Writable(0);
   const publishedSessionCount = new Writable(1);
@@ -365,7 +365,6 @@ export default pattern(() => {
     activityCount,
     commandAccepting,
   });
-  const commands = new Writable<AgentCommandValue[] | undefined>([]);
   const receipts = ReceiptIndexFixture({ receipt, receiptCount });
   const rawView = SessionRawView({
     manifest,
@@ -373,10 +372,10 @@ export default pattern(() => {
     nativeSessionId: "session-1",
   });
   const view = DebugView({
+    ownerDid: "did:key:test-owner",
     recentIndex,
     allIndex,
     health,
-    commands,
     receipts,
     recentIndexCell: recentIndex,
     allIndexCell: allIndex,
@@ -486,20 +485,11 @@ export default pattern(() => {
     status.set("degraded");
     activityCount.set(2);
     receiptCount.set(1);
-    commands.set([{
-      schema: "commonfabric.agent-connector.command.v1",
-      id: "command-1",
-      createdAt: "2026-07-20T00:03:00.000Z",
-      sourceId: "codex",
-      nativeSessionId: "session-1",
-      type: "prompt",
-      payload: { text: "Continue" },
-    }]);
   });
 
   const assert_updated_status = assert(() => view.status === "degraded");
   const assert_updated_sessions = assert(() => view.sessionCount === 0);
-  const assert_updated_commands = assert(() => view.commandCount === 1);
+  const assert_updated_commands = assert(() => view.commandCount === 0);
   const assert_updated_receipts = assert(() => view.receiptCount === 1);
   const assert_updated_activity = assert(() => view.activityCount === 2);
 
@@ -555,7 +545,7 @@ export default pattern(() => {
         readValue(propsOf(node)?.role) === "alert" &&
         textContent(node).includes("Enter a prompt."),
     );
-    return commands.get()?.length === 1 &&
+    return view.commandCount === 0 &&
       readValue(propsOf(modal)?.["$open"]) === false &&
       alert !== undefined;
   });
@@ -568,8 +558,9 @@ export default pattern(() => {
   const assert_command_review = assert(() => {
     const modal = elementNamed(view[UI], "cf-modal");
     const review = textContent(modal);
-    return commands.get()?.length === 1 &&
+    return view.commandCount === 0 &&
       readValue(propsOf(modal)?.["$open"]) === true &&
+      review.includes('"ownerDid": "did:key:test-owner"') &&
       review.includes('"sourceId": "codex"') &&
       review.includes('"nativeSessionId": "session-1"') &&
       review.includes('"type": "prompt"') &&
@@ -602,15 +593,11 @@ export default pattern(() => {
   });
   const assert_stopped_command_rejected = assert(() => {
     const modal = elementNamed(view[UI], "cf-modal");
-    return commands.get()?.length === 1 &&
+    return view.commandCount === 0 &&
       readValue(propsOf(modal)?.["$open"]) === true &&
       textContent(modal).includes("The host is not accepting commands.");
   });
   const assert_command_sent = assert(() => {
-    const values = commands.get() ?? [];
-    const submitted = values[1];
-    if (typeof submitted !== "string") return false;
-    const command = JSON.parse(submitted) as AgentCommand;
     const form = elementNamed(view[UI], "cf-form");
     const textarea = elementNamed(form, "cf-textarea");
     const modal = elementNamed(view[UI], "cf-modal");
@@ -618,16 +605,9 @@ export default pattern(() => {
       view[UI],
       (node) =>
         readValue(propsOf(node)?.role) === "status" &&
-        textContent(node).includes(`Submitted ${command.id}.`),
+        textContent(node).includes("Submitted debug:"),
     );
-    return values.length === 2 &&
-      command.schema === "commonfabric.agent-connector.command.v1" &&
-      command.id.startsWith("debug:") &&
-      command.sourceId === "codex" &&
-      command.nativeSessionId === "session-1" &&
-      command.type === "prompt" &&
-      command.payload.text === "Continue from the debug view" &&
-      view.commandCount === 2 &&
+    return view.commandCount === 1 &&
       readValue(propsOf(modal)?.["$open"]) === false &&
       readValue(propsOf(textarea)?.["$value"]) === "" &&
       statusMessage !== undefined;
@@ -637,19 +617,19 @@ export default pattern(() => {
   });
   const assert_invalid_command_visible = assert(() => {
     const commandTable = findElementByText(view[UI], "cf-table", "Payload");
-    return view.commandCount === 3 &&
+    return view.commandCount === 2 &&
       textContent(commandTable).includes("Invalid action value") &&
       !textContent(commandTable).includes("not command JSON") &&
-      countCellLinks(commandTable, "Raw data") === 3;
+      countCellLinks(commandTable, "Raw data") === 2;
   });
   const action_publish_nested_array_command = action(() => {
     commands.push([["nested invalid action"]]);
   });
   const assert_nested_array_command_visible = assert(() => {
     const commandTable = findElementByText(view[UI], "cf-table", "Payload");
-    return view.commandCount === 4 &&
+    return view.commandCount === 3 &&
       !textContent(commandTable).includes("nested invalid action") &&
-      countCellLinks(commandTable, "Raw data") === 4;
+      countCellLinks(commandTable, "Raw data") === 3;
   });
 
   return {

@@ -1,5 +1,6 @@
 {
-  "schema": "commonfabric.agents-host.config.v1",
+  "schema": "commonfabric.agents-host.config",
+  "ownerDid": "did:key:replace-with-the-identity-did",
   "collectionIntervalMs": 900000,
   "checkoutRoots": ["/workspace/checkouts"],
   "sources": [

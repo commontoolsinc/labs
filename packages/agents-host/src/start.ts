@@ -30,6 +30,7 @@ function failureSummary(failures: unknown[]): string {
 export interface StartAgentsHostOptions {
   apiUrl: string;
   identityPath: string;
+  ownerDid: string;
   space: string;
   sources: AgentSourceConfig[];
   checkoutRoots?: string[];
@@ -115,16 +116,26 @@ export async function startAgentsHost(
     abortable(trackStartup(task), options.signal);
   try {
     options.signal?.throwIfAborted();
-    fabric = await openAgentFabricRuntime(options);
+    fabric = await openAgentFabricRuntime({
+      ...options,
+      deferStorageClaim: true,
+    });
     options.signal?.throwIfAborted();
     const targetLockPath = options.targetLockPath ??
-      await defaultTargetProcessLockPath(options.apiUrl, fabric.spaceDid);
+      await defaultTargetProcessLockPath(
+        options.apiUrl,
+        fabric.spaceDid,
+        fabric.ownerDid,
+      );
     options.signal?.throwIfAborted();
     processLocks.push(await AgentsHostProcessLock.acquire(targetLockPath));
+    options.signal?.throwIfAborted();
+    await waitForStartup(fabric.target.claimStorage());
     options.signal?.throwIfAborted();
     const ledgerPath = await defaultTargetLedgerPath(
       options.apiUrl,
       fabric.spaceDid,
+      fabric.ownerDid,
     );
     options.signal?.throwIfAborted();
     processLocks.push(
@@ -160,7 +171,8 @@ export async function startAgentsHost(
     });
     const hostStartTask = trackStartup(host.start({
       signal: options.signal,
-      acceptCommands: options.acceptCommands,
+      acceptCommands: options.acceptCommands !== false &&
+        debugPieceId !== undefined && fabric.target.commandsAreBound(),
       deferHealthUntilReady: true,
       onHealthOwnership: () => {
         healthOwnership = true;
