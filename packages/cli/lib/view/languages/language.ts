@@ -29,7 +29,7 @@ import type { DecodedLanguageSource, LanguageDecoder } from "./decoder.ts";
 import { utf8Decoder } from "./decoder.ts";
 import { typeScriptLanguage } from "./typescript/language.ts";
 import { markdownLanguage } from "./markdown/language.ts";
-import { jsonLanguage } from "./json/language.ts";
+import { jsonLanguage, jsonLinesLanguage } from "./json/language.ts";
 import { yamlLanguage } from "./yaml/language.ts";
 import { pythonLanguage } from "./python/language.ts";
 import { binaryLanguage } from "./binary/language.ts";
@@ -186,8 +186,10 @@ export interface LanguageMetadata {
  * language's metadata once per source; all later work is method dispatch.
  */
 export interface Language {
-  /** Stable identifier, such as `"typescript"`, `"markdown"`, `"json"`,
-   * `"yaml"`, `"python"`, `"binary"`, or `"plain-text"`. */
+  /**
+   * Stable identifier, such as `"typescript"`, `"markdown"`, `"json"`,
+   * `"json-lines"`, `"yaml"`, `"python"`, `"binary"`, or `"plain-text"`.
+   */
   readonly id: string;
 
   /** Decoding and, for byte languages, incremental rendering behavior. */
@@ -367,6 +369,7 @@ function allLanguages(): readonly Language[] {
     typeScriptLanguage,
     markdownLanguage,
     jsonLanguage,
+    jsonLinesLanguage,
     yamlLanguage,
     pythonLanguage,
     binaryLanguage,

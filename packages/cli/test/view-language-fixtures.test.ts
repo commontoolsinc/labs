@@ -57,9 +57,12 @@ function expectLanguageSpecificEvidence(
   fileName: string,
   languageId: string,
   evidence: HighlightEvidence,
+  highlightingPeers: readonly string[] = [],
 ): void {
   for (const otherId of languageIds()) {
-    if (otherId === languageId) continue;
+    if (otherId === languageId || highlightingPeers.includes(otherId)) {
+      continue;
+    }
     const other = languageForName(otherId);
     if (other?.input.kind !== "text") continue;
     const lines = other.highlightLines(source, fileName);
@@ -170,18 +173,21 @@ describe("view language fixture corpus", () => {
           fixture.surveyPath,
           fixture.languageId,
           fixture.beforeEvidence,
+          fixture.highlightingPeers,
         );
         expectLanguageSpecificEvidence(
           after,
           fixture.surveyPath,
           fixture.languageId,
           fixture.afterEvidence,
+          fixture.highlightingPeers,
         );
         expectLanguageSpecificEvidence(
           incomplete,
           fixture.surveyPath,
           fixture.languageId,
           fixture.incompleteEvidence,
+          fixture.highlightingPeers,
         );
       });
 
