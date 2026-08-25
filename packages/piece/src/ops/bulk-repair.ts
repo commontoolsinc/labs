@@ -348,11 +348,9 @@ export function evaluateFixer(
     cloneIfNecessary(document as FabricValue, {
       frozen: false,
     }) as Record<string, unknown>;
-  let first: unknown;
-  let second: unknown;
+  let answer: unknown;
   try {
-    first = fixer(copy());
-    second = fixer(copy());
+    answer = fixer(copy());
   } catch (error) {
     return {
       kind: "refused",
@@ -361,7 +359,7 @@ export function evaluateFixer(
       }`,
     };
   }
-  if (!isPlainRecord(first)) {
+  if (!isPlainRecord(answer)) {
     return {
       kind: "refused",
       problem: "The fixer returned a value that is not a document.",
@@ -375,11 +373,31 @@ export function evaluateFixer(
   // question is asked here, and a failure while classifying the answer is
   // a refusal too rather than an escape.
   try {
-    if (!isValidFabricValue(first)) {
+    if (!isValidFabricValue(answer)) {
       return {
         kind: "refused",
         problem: "The fixer returned a document the store cannot hold — a " +
           "function, an accessor, or a class instance somewhere in it.",
+      };
+    }
+    // Detached before the probe's second run: a fixer that returns one
+    // closure-owned object from every call would otherwise mutate its own
+    // first answer into agreement with its second, and the probe would
+    // compare an object with itself. The detached copy is also what a
+    // change decision carries, so no alias the fixer still holds can
+    // reach the write.
+    const first = cloneIfNecessary(answer as FabricValue, {
+      frozen: false,
+    }) as Record<string, unknown>;
+    let second: unknown;
+    try {
+      second = fixer(copy());
+    } catch (error) {
+      return {
+        kind: "refused",
+        problem: `The fixer threw: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       };
     }
     if (!storedEqual(first, second)) {
@@ -763,18 +781,34 @@ export async function repairPieces(
       // has run its closure at least once, so the committed pass always
       // overwrites this before it is read.
       let decision: RowDecision = { kind: "not-document" };
+      let wroteThisRow = false;
       if (options.apply === true) {
         // Evaluate-and-write in one transaction: on a commit conflict the
         // closure re-runs against fresh state, so `decision` is whatever
         // the committed pass decided, later passes overwriting earlier —
         // and the document written is the very one that decision carries,
         // so the report and the write cannot describe two evaluations.
-        await controller.input.edit((stored) => {
+        const { wrote } = await controller.input.edit((stored) => {
           decision = decideFor(stored, row.expectedHash);
           return decision.kind === "change"
             ? { value: decision.document }
             : undefined;
         });
+        wroteThisRow = wrote;
+        if (!wrote) {
+          // A no-write commit stages nothing and is not conflict-checked
+          // (see PiecePropIo.edit), so the decision is remade from a fresh
+          // read — the later verification read that contract calls for —
+          // and the re-read's answer is the row's verdict. The handle is
+          // reacquired rather than reused: a concurrent source change may
+          // have superseded the argument cell the row started from.
+          const fresh = await controller.input.getCell();
+          await fresh.pull();
+          decision = decideFor(
+            fresh.getRaw({ lastNode: "value" }),
+            row.expectedHash,
+          );
+        }
       } else {
         decision = decideFor(
           cell.getRaw({ lastNode: "value" }),
@@ -838,10 +872,30 @@ export async function repairPieces(
         emitRow(decision, true);
         continue;
       }
+      if (!wroteThisRow) {
+        // The no-write classification did not hold on the re-read: the
+        // document changed under a decision that staged nothing. Nothing
+        // was written, so the row is simply not landed — reported as the
+        // work it still is, and a re-run resumes it.
+        rows.push({
+          piece: row.piece,
+          ...phase,
+          verdict: "would-change",
+          documentHash: decision.documentHash,
+          changes: decision.changes,
+        });
+        emitRow(decision, false);
+        continue;
+      }
       applied += 1;
       await pieces.synced();
-      await cell.pull();
-      const written = cell.getRaw({ lastNode: "value" });
+      // The write target is reacquired for verification: edit() resolves
+      // the argument cell inside its own transaction precisely because a
+      // concurrent source change can supersede it, and a verification
+      // through the handle this row started from would read the old cell.
+      const verifyCell = await controller.input.getCell();
+      await verifyCell.pull();
+      const written = verifyCell.getRaw({ lastNode: "value" });
       const verification = isPlainRecord(written)
         ? evaluateFixer(written, options.fixer)
         : undefined;

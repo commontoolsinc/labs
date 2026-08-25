@@ -155,9 +155,12 @@ that exits zero is not a verdict: the source-update path reports success for
 a piece whose source committed but whose running instance failed to refresh.
 The instrument differs by operation: a reference operation is verified by
 the after-survey diff, while a repair is verified by re-reading the stored
-document and re-asking the fixer — its own separate pass, since a reference
-diff cannot see document work, and the survey-diff refuses repair rows for
-exactly that reason.
+document and re-asking the fixer — a distinct read after each row's write,
+made row by row inside the same invocation, because the fixer is already in
+hand and a reference diff cannot see document work (the survey-diff refuses
+repair rows for exactly that reason). The separate command exists too: a
+dry repair over the same selection re-asks the fixer across the whole set,
+and one that comes back all-conforming is the after-pass.
 
 **Resume** is the precondition check again: re-running the same command
 re-derives what is outstanding, skips what landed, and stops on what moved
@@ -549,7 +552,10 @@ it.
 means that piece needs nothing, which collapses selection, resumption, and
 verification into one mechanism:
 
-- Selection is "run the fixer, keep the pieces it would change".
+- Selection is "run the fixer over the enumerated pieces and classify":
+  the ones it would change are the work, and the ones it would not are
+  already landed — recorded as such, since a resumable artifact needs the
+  landed rows as much as the outstanding ones.
 - Resume is the same question asked again — a piece already repaired is one
   the fixer no longer changes.
 - Verification is the same question asked afterwards — a repair succeeded

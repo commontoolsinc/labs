@@ -380,6 +380,33 @@ describe("bulk-repair", () => {
       expect(changed.kind).toBe("change");
     });
 
+    it("refuses a fixer that throws only on the probe's second run", () => {
+      let calls = 0;
+      const outcome = evaluateFixer({ seed: "a" }, (d) => {
+        calls += 1;
+        if (calls === 2) throw new Error("the second call dies");
+        return { ...d };
+      });
+      expect(outcome.kind).toBe("refused");
+      if (outcome.kind !== "refused") throw new Error("expected a refusal");
+      expect(outcome.problem).toContain("the second call dies");
+    });
+
+    it("catches a fixer that reuses and mutates one answer object", () => {
+      // The probe's first answer is detached before the second call, so a
+      // fixer returning one closure-owned object from every call — its
+      // second call mutating its first answer into agreement — compares
+      // its two states, not the one object with itself.
+      const shared = { n: 0 };
+      const outcome = evaluateFixer({ n: 0 }, () => {
+        shared.n += 2;
+        return shared;
+      });
+      expect(outcome.kind).toBe("refused");
+      if (outcome.kind !== "refused") throw new Error("expected a refusal");
+      expect(outcome.problem).toContain("pure function");
+    });
+
     it("is safe against a fixer that mutates its argument", () => {
       const document = { seed: "a" };
       const outcome = evaluateFixer(document, (d) => {
@@ -533,6 +560,71 @@ describe("bulk-repair", () => {
       );
       expect(report.applied).toBe(0);
       expect((await rawInput(a)).seed).toBe("ALPHA");
+    });
+
+    it("reclassifies a no-write decision from a fresh read before reporting it", async () => {
+      const a = await member("ALPHA");
+      // The piece conforms when the transaction reads it, so nothing is
+      // written and nothing is conflict-checked; a concurrent writer then
+      // changes it before the verification re-read. The row must come back
+      // as the work it now is — never as a conformity that would make the
+      // report read complete.
+      let editDone = false;
+      let mutated = false;
+      const wrapController = (controller: PieceController) =>
+        new Proxy(controller, {
+          get(c, prop, receiver) {
+            if (prop !== "input") {
+              const value = Reflect.get(c, prop, receiver);
+              return typeof value === "function" ? value.bind(c) : value;
+            }
+            const input = c.input;
+            return new Proxy(input, {
+              get(i, p, r) {
+                if (p === "edit") {
+                  return async (
+                    ...args: Parameters<typeof input.edit>
+                  ) => {
+                    const result = await input.edit(...args);
+                    editDone = true;
+                    return result;
+                  };
+                }
+                if (p === "getCell") {
+                  return async () => {
+                    if (editDone && !mutated) {
+                      mutated = true;
+                      await a.input.set("shifted", ["seed"]);
+                      await pieces.runtime.idle();
+                    }
+                    return input.getCell();
+                  };
+                }
+                const value = Reflect.get(i, p, r);
+                return typeof value === "function" ? value.bind(i) : value;
+              },
+            });
+          },
+        });
+      const racing = new Proxy(pieces, {
+        get(target, prop, receiver) {
+          if (prop === "get") {
+            return async (id: string, run?: boolean) =>
+              wrapController(await target.get(id, run));
+          }
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+
+      const report = await repairPieces(racing as never, {
+        selector: { kind: "list", pieces: [a.id] },
+        fixer: upperSeed,
+        apply: true,
+      });
+      expect(report.rows.map((row) => row.verdict)).toEqual(["would-change"]);
+      expect(report.applied).toBe(0);
+      expect(report.complete).toBe(false);
     });
 
     it("reports a preflight read failure and starts nothing", async () => {
