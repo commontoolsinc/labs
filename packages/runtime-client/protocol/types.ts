@@ -85,9 +85,13 @@ export enum RequestType {
   CellGet = "cell:get",
 
   /**
-   * Overwrites a cell's value blindly: last write wins, with no
-   * compare-and-set. Which of this and {@link CellPush} a write uses is
-   * decided by the request type rather than by inspecting the value.
+   * Overwrites a cell's value blindly: the write carries no value-equality
+   * precondition, so a concurrent write to the same cell does not make it
+   * fail. That is not the same as unconditional. A blind write still carries
+   * one structural precondition, on the cell's *parent*, so a concurrent
+   * delete of the enclosing document or a reshape of an ancestor rejects it.
+   * Which of this and {@link CellPush} a write uses is decided by the request
+   * type rather than by inspecting the value.
    */
   CellSet = "cell:set",
 
@@ -159,8 +163,10 @@ export enum RequestType {
 
   /**
    * Routes one space's storage to a named host, answering with whether the
-   * route was accepted. An already-accepted route is kept rather than
-   * replaced.
+   * route was accepted. The host is validated here and acceptance is the
+   * storage manager's to decide, so a manager with no remote resolution
+   * declines every route. A host that does not validate is refused with an
+   * error rather than a `false`.
    */
   RegisterSpaceHost = "runtime:registerSpaceHost",
 
@@ -1052,8 +1058,8 @@ export type GetWriteStackTraceRequest = BaseRequest & {
 export type SetWriteStackTraceMatchersRequest = BaseRequest & {
   type: RequestType.SetWriteStackTraceMatchers;
   /**
-   * The writes whose stack to record. Replaces the current set, and an
-   * empty one records nothing.
+   * The writes whose stack to record. Replaces the current set rather than
+   * adding to it.
    */
   matchers: WriteStackTraceMatcher[];
 };
