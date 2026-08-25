@@ -1032,6 +1032,15 @@ directory on `cf space clone` and a sequence number on `cf inspect diff`;
 the slot offers nothing, which is the honest answer for a word no set can name —
 offering the wrong set is worse than offering none.
 
+A positional divides the same way. Every `cf inspect` subcommand that opens a
+local space completes it from local stores, but `inspect pull` names a space on
+the remote and resolves it through the remote's own listing, so it offers
+nothing rather than a local DID the command would reject — listing the remote is
+a network round trip a keystroke must not start. The entity beside a space comes
+from the view that subcommand will read: its `--branch` and `--scope`, except on
+`inspect overlay`, which takes no `--scope` and reports every scope, so its
+candidates span every scope too.
+
 An option's value completes the same whether it is written after a space or
 after `=`, and every spelling of a target reaches the same slots behind it: the
 bare id, the canonical reference (space-qualified or not, with an `@scope`

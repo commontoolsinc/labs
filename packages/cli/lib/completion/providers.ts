@@ -710,10 +710,8 @@ async function spaceCandidates(): Promise<ProviderResult> {
  * Entities in the space a positional already names, as `cf inspect entities`
  * lists them: the label reads, the id is what the next positional takes.
  *
- * The line's `--branch` and `--scope` are passed through, so the candidates
- * come from the view the command will read rather than the space's default
- * one — an entity present on one branch and not another is offered where the
- * command would find it.
+ * The listing covers the view the command will read rather than the space's
+ * default one, which is what `entityListingView` works out from the line.
  *
  * Local stores only. `--remote` fetches a snapshot over the network before it
  * can list anything, which is a round trip a keystroke should not start.
@@ -723,35 +721,57 @@ async function entityCandidates(
 ): Promise<ProviderResult> {
   const token = line.positionals[0];
   if (!token) return NOTHING;
-  const { listEntityModels, openSpace, resolveSpace } = await import(
-    "@commonfabric/state-inspector"
-  );
+  const { listEntityModels, listScopes, openSpace, resolveSpace } =
+    await import("@commonfabric/state-inspector");
   const space = openSpace(await resolveSpace(token));
   try {
+    const view = entityListingView(line);
+    const scopes = view.allScopes
+      ? listScopes(space, { branch: view.branch }).map((scope) => scope.raw)
+      : [view.scope];
     // No limit of its own: the set is what `cf inspect entities` would list
     // with no `--limit`, so a completed id is one that command names too. The
     // listing reports its own extent, and a capped one is still every
     // candidate this slot can honestly offer.
-    const listing = listEntityModels(space, entityListingView(line));
-    return values(shapeEntityCandidates(listing.entities));
+    //
+    // `listScopes` sorts the space scope first, so an entity written in more
+    // than one scope keeps the label its space-scope value reconstructs to.
+    const seen = new Set<string>();
+    const entities: EntityListingLike[] = [];
+    for (const scope of scopes) {
+      for (
+        const entity of listEntityModels(space, { branch: view.branch, scope })
+          .entities
+      ) {
+        if (seen.has(entity.id)) continue;
+        seen.add(entity.id);
+        entities.push(entity);
+      }
+    }
+    return values(shapeEntityCandidates(entities));
   } finally {
     space.close();
   }
 }
 
 /**
- * The view of a space an inspect line names: its `--branch` and `--scope`.
+ * The view of a space an inspect line's entity slot has to cover: the branch,
+ * and either the one scope the command reads or every scope it reads across.
  *
- * Absent from the line, each is left undefined so the listing applies the same
- * default the command would. Separated from the read so a test can assert the
- * view without a space DB.
+ * A command that declares `--scope` reads one, the line's or the listing's own
+ * default. `cf inspect overlay` declares none and reports an entity's value in
+ * EVERY scope, so a slot completed from the default scope alone would hide the
+ * per-user and per-session entities that command exists to show.
+ *
+ * Separated from the read so a test can assert the view without a space DB.
  */
 export function entityListingView(
   line: CompletionLine,
-): { branch?: string; scope?: string } {
+): { branch?: string; scope?: string; allScopes: boolean } {
   return {
     branch: line.options.get("branch"),
     scope: line.options.get("scope"),
+    allScopes: line.path.join(" ") === "inspect overlay",
   };
 }
 
@@ -918,7 +938,7 @@ const OPTION_VALUE_PROVIDERS: Readonly<
   scope: onlyOn(["wish"], () => wishScopeCandidates()),
 };
 
-/** `cf inspect` subcommands whose first positional is a space. */
+/** `cf inspect` subcommands whose first positional opens a local space. */
 const INSPECT_SPACE_COMMANDS: readonly string[] = [
   "churn",
   "commits",
@@ -931,7 +951,6 @@ const INSPECT_SPACE_COMMANDS: readonly string[] = [
   "html",
   "overlay",
   "piece",
-  "pull",
   "scopes",
   "summary",
   "timeline",
@@ -997,6 +1016,12 @@ const ARGUMENT_PROVIDERS: Readonly<
   "fuse mount:mountpoint": () => Promise.resolve(directive({ kind: "dirs" })),
   "fuse unmount:mountpoint": () => Promise.resolve(directive({ kind: "dirs" })),
   "wish:target": () => Promise.resolve(wishTargetCandidates()),
+  // `inspect pull` names a space on the REMOTE, resolved through
+  // `resolveRemoteDid` against the remote's own listing, so a locally
+  // discovered DID is a candidate the command rejects. Listing the remote is a
+  // network round trip a keystroke must not start, which leaves this slot
+  // nothing honest to offer — decided, and decided as empty.
+  "inspect pull:space": () => Promise.resolve(NOTHING),
   // `cf space` and `cf inspect` name a space positionally rather than through
   // `--space`. Both read the same local stores, so both take the same
   // candidates.

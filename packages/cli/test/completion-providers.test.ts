@@ -205,8 +205,17 @@ Deno.test("live candidates: every path-shaped slot hands the shell its own direc
     ["cf view ", "files", undefined],
     ["cf exec ", "files", undefined],
     ["cf space clone --to ", "dirs", undefined],
+    ["cf space clone x --from ", "files", undefined],
     ["cf space verify ", "dirs", undefined],
     ["cf space reset ", "dirs", undefined],
+    ["cf inspect spaces --dir ", "dirs", undefined],
+    ["cf inspect html x --out ", "files", undefined],
+    ["cf check --output ", "files", undefined],
+    ["cf piece set-home ", "files", "*.tsx"],
+    ["cf piece getsrc ", "files", undefined],
+    ["cf deps update ", "files", undefined],
+    ["cf fuse mount ", "dirs", undefined],
+    ["cf fuse unmount ", "dirs", undefined],
   ];
   for (const [text, kind, glob] of cases) {
     const result = await liveCandidates(lineFor(text));
@@ -250,13 +259,21 @@ Deno.test("an inspect entity slot reads the view its command will read", () => {
   assertEquals(entityListingView(lineFor("cf inspect diff space ")), {
     branch: undefined,
     scope: undefined,
+    allScopes: false,
   });
   assertEquals(
     entityListingView(
       lineFor("cf inspect diff --branch draft --scope of:fid1:owner space "),
     ),
-    { branch: "draft", scope: "of:fid1:owner" },
+    { branch: "draft", scope: "of:fid1:owner", allScopes: false },
   );
+  // `inspect overlay` declares no `--scope` and reports an entity's value in
+  // every scope, so its slot covers them all rather than the default one.
+  assertEquals(entityListingView(lineFor("cf inspect overlay space ")), {
+    branch: undefined,
+    scope: undefined,
+    allScopes: true,
+  });
 });
 
 /**
@@ -322,7 +339,41 @@ Deno.test("live candidates: an entity slot lists the scope the line named", asyn
         .candidates.map((candidate) => candidate.value),
       ["of:in-other"],
     );
+    // `inspect overlay` reports an entity's value in EVERY scope and takes no
+    // `--scope` to narrow it, so its slot covers every scope at once. Offering
+    // only the space scope would hide exactly the per-user and per-session
+    // entities the command exists to show.
+    assertEquals(
+      (await liveCandidates(lineFor(`cf inspect overlay ${path} `)))
+        .candidates.map((candidate) => candidate.value).sort(),
+      ["of:in-other", "of:in-space"],
+    );
   } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("live candidates: a remote-only space positional offers nothing local", async () => {
+  // `inspect pull` names a space on the REMOTE and resolves it through the
+  // remote's own listing, so a locally discovered DID is a candidate the
+  // command rejects — while every sibling that opens a local space takes one.
+  const dir = await Deno.makeTempDir();
+  const saved = Deno.env.get("MEMORY_DIR");
+  try {
+    const did = "did:key:zCompletionPullFixture";
+    await Deno.writeTextFile(`${dir}/${did}.sqlite`, "");
+    Deno.env.set("MEMORY_DIR", dir);
+    const listed = await liveCandidates(lineFor("cf inspect entities "));
+    assert(
+      listed.candidates.some((candidate) => candidate.value === did),
+      "the local store is discoverable at all",
+    );
+    const pull = await liveCandidates(lineFor("cf inspect pull "));
+    assertEquals(pull.candidates, []);
+    assertEquals(pull.directives, []);
+  } finally {
+    if (saved === undefined) Deno.env.delete("MEMORY_DIR");
+    else Deno.env.set("MEMORY_DIR", saved);
     await Deno.remove(dir, { recursive: true });
   }
 });

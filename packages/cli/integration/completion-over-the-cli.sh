@@ -548,6 +548,11 @@ else
   probe "cf inspect piece did:key:zNoSuchSpace "
   check "0" "$PROBE_STATUS" "the entity positional runs against no store either"
 fi
+# `inspect pull` names a space on the REMOTE, resolved through the remote's own
+# listing, so a locally discovered DID is a candidate it rejects. Asserted in
+# both branches above's terms: whatever the store holds, this slot is empty.
+check "" "$(directives_at "cf inspect pull ")$(complete_at "cf inspect pull ")" \
+  "the remote-only space positional offers nothing local"
 
 step "16. wish and the enumerated remainder"
 # These are the CLI's own vocabulary rather than a pattern's, which is what
