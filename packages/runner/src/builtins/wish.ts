@@ -1670,6 +1670,17 @@ export async function sidecarRunFailureDisposition(
   return "error-ui";
 }
 
+/** Whether a sidecar result cell's raw value is a RACING WINNER a
+ * conflict-class loser may yield to. An error ACCOUNT written by
+ * `commitPatternErrorUI` is NOT a winner (Cubic P2 on the review round:
+ * yielding to a stale error account makes the surface permanently red and
+ * defeats the heal path) — it carries the `sidecarError` marker for exactly
+ * this discrimination. Exported for the unit pin. */
+export function sidecarValueIsWinner(raw: unknown): boolean {
+  if (raw === undefined) return false;
+  return !(typeof raw === "object" && raw !== null && "sidecarError" in raw);
+}
+
 // Test seam (this package has no logger-capture idiom — the OW45 register's
 // F9 note): process-global counts of sidecar launch activity, so a pin that
 // must WITNESS a duplicate launch can assert it happened instead of passing
@@ -2371,7 +2382,13 @@ export function wish(
       actionId: `wish/pattern-error-ui/${resultCell.sourceURI}`,
       kind: "bookkeeping",
     });
-    resultCell.withTx(errorTx).set({ [UI]: errorUI(message) });
+    // The `sidecarError` marker is the winner predicate's discriminator
+    // (sidecarValueIsWinner): a conflict-class loser must never yield to
+    // this account as if it were a materialized surface.
+    resultCell.withTx(errorTx).set({
+      [UI]: errorUI(message),
+      sidecarError: message,
+    });
     runtime.prepareTxForCommit(errorTx);
     const { error } = await errorTx.commit();
     // The account of the failure failed to land, so the surface stays blank
@@ -2434,7 +2451,7 @@ export function wish(
       } catch {
         // The local replica view still answers below.
       }
-      return fresh.getRaw() !== undefined;
+      return sidecarValueIsWinner(fresh.getRaw());
     };
     // Bounded: an input-doc conflict converges by re-reading fresh state;
     // three attempts outlasts any plausible burst, and the terminal arm is

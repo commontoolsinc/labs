@@ -7,6 +7,7 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
   sidecarRunFailureDisposition,
+  sidecarValueIsWinner,
   wishSidecarDiagnostics,
 } from "../src/builtins/wish.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
@@ -315,5 +316,26 @@ describe("sidecarRunFailureDisposition", () => {
     expect(
       await sidecarRunFailureDisposition(null, probeNotConsulted, false),
     ).toBe("error-ui");
+  });
+});
+
+// The winner predicate itself (Cubic P2, review round): an error ACCOUNT
+// left by commitPatternErrorUI must NOT count as a racing winner — yielding
+// to it would leave the surface permanently red and defeat the heal path.
+describe("sidecarValueIsWinner", () => {
+  it("an empty cell is no winner", () => {
+    expect(sidecarValueIsWinner(undefined)).toBe(false);
+  });
+  it("a materialized surface is a winner", () => {
+    expect(sidecarValueIsWinner({ [NAME]: "Create Profile", [UI]: {} }))
+      .toBe(true);
+    // Marker-less values stay winners — only the explicit error account is
+    // excluded (a legit UI-only surface must never be mistaken for one, or
+    // the loser retries against the real winner and clobbers it terminally).
+    expect(sidecarValueIsWinner({ [UI]: {} })).toBe(true);
+  });
+  it("an error account is NOT a winner", () => {
+    expect(sidecarValueIsWinner({ [UI]: {}, sidecarError: "fetch failed" }))
+      .toBe(false);
   });
 });
