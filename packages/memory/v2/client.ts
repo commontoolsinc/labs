@@ -1339,6 +1339,10 @@ export class SpaceSession {
       }
       this.#caughtUpLocalSeq = 0;
       this.#forwardedCaughtUpLocalSeq = 0;
+      // An unforwarded effect belongs to the retired session's delivery
+      // epoch. A replacement establishes its own watch state and must not
+      // apply that effect as though the new session delivered it.
+      this.#precedingWatchSyncs = [];
       this.rejectCaughtUpLocalSeqWaiters(sessionChangedError);
       // The marker epoch died with the old session: obligations it staged
       // are gone, and the fresh session's markers know nothing of the old
