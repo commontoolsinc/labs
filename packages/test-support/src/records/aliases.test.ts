@@ -58,7 +58,7 @@ describe("aliases", () => {
     it("returns an error for a variant-scoped alias", () => {
       const line = JSON.stringify({
         ...FULL,
-        from: { ...FULL.from, v: "server-execution" },
+        from: { ...FULL.from, v: "wood-fired" },
       });
       expect(parseAliasLine(line)).toBe("has a malformed `from`");
     });
@@ -173,14 +173,14 @@ describe("aliases", () => {
           k: "unit",
           s: "bakery",
           n: "glaze > sets",
-          v: "server-execution",
+          v: "wood-fired",
         },
         "2026/08/10",
       )).toEqual({
         k: "unit",
         s: "patisserie",
         n: "glaze > cures",
-        v: "server-execution",
+        v: "wood-fired",
       });
     });
 

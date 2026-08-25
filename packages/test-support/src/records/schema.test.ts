@@ -62,7 +62,7 @@ describe("schema", () => {
     it("keeps a non-default test variant", () => {
       const record: TestRecord = {
         ...RECORD,
-        test: { ...RECORD.test, v: "server-execution" },
+        test: { ...RECORD.test, v: "wood-fired" },
       };
       expect(parseRecordLine(serializeRecordLine(record).trim()))
         .toEqual(record);
@@ -112,9 +112,9 @@ describe("schema", () => {
     });
 
     it("adds the non-default variant as a fourth part", () => {
-      expect(testIdentityKey({ ...RECORD.test, v: "server-execution" }))
+      expect(testIdentityKey({ ...RECORD.test, v: "wood-fired" }))
         .toBe(
-          '["unit","bakery","glaze > thickens when heated","server-execution"]',
+          '["unit","bakery","glaze > thickens when heated","wood-fired"]',
         );
     });
   });

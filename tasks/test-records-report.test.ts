@@ -102,15 +102,15 @@ describe("test-records-report", () => {
       const unmarked = record("glaze", "pass", 10);
       const marked: TestRecord = {
         ...unmarked,
-        test: { ...unmarked.test, v: "server-execution" },
+        test: { ...unmarked.test, v: "wood-fired" },
       };
       const byIdentity = aggregate([report("a", [unmarked, marked])]);
       expect([...byIdentity.keys()]).toEqual([
         '["unit","bakery","glaze"]',
-        '["unit","bakery","glaze","server-execution"]',
+        '["unit","bakery","glaze","wood-fired"]',
       ]);
       expect(formatIdentity([...byIdentity.keys()][1]!)).toBe(
-        "[unit] bakery: glaze (variant: server-execution)",
+        "[unit] bakery: glaze (variant: wood-fired)",
       );
     });
   });

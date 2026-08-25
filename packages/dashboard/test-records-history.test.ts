@@ -174,7 +174,7 @@ Deno.test("isDayAggregate rejects inconsistent aggregates", () => {
   assertEquals(
     isDayAggregate({
       ...sound,
-      key: '["unit","bakery","glaze","server-execution"]',
+      key: '["unit","bakery","glaze","wood-fired"]',
     }),
     true,
   );
