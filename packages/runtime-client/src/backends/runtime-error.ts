@@ -1,4 +1,4 @@
-import { CompilerStackLoadError } from "../../runner/src/harness/deferred-compiler-stack.ts";
+import { CompilerStackLoadError } from "../../../runner/src/harness/deferred-compiler-stack.ts";
 import { NotificationType, RuntimeErrorCode } from "../protocol/mod.ts";
 import { postToClient } from "./post-to-client.ts";
 

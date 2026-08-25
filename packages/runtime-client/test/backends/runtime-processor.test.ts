@@ -41,7 +41,7 @@ import {
   ClientNotificationType,
   type GetPatternSourcesRequest,
   RequestType,
-} from "../../protocol/mod.ts";
+} from "../../src/protocol/mod.ts";
 import {
   assertServerExecutionPostureAgreement,
   browserWorkerParamsFromInitializationData,
@@ -50,13 +50,13 @@ import {
   RuntimeProcessor,
   toConsoleDebugValue,
   toConsoleWireValue,
-} from "../../backends/runtime-processor.ts";
+} from "../../src/backends/runtime-processor.ts";
 import {
   assertFabricLoggerFlags,
   cellRefToSigilLink,
   getCell,
   mapCellRefsToSigilLinks,
-} from "../../backends/utils.ts";
+} from "../../src/backends/utils.ts";
 
 const cfcSigner = await Identity.fromPassphrase(
   "runtime-processor-cfc-label-tests",

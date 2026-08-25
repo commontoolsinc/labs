@@ -92,8 +92,8 @@ import {
   KeepAsCell,
   type NormalizedFullLink,
   parseLink,
-} from "../../runner/src/link-utils.ts";
-import { StorageManager } from "../../runner/src/storage/cache.ts";
+} from "../../../runner/src/link-utils.ts";
+import { StorageManager } from "../../../runner/src/storage/cache.ts";
 import {
   type ActionRunTraceResponse,
   BooleanResponse,

@@ -11,7 +11,7 @@ import "core-js/proposals/async-explicit-resource-management";
 import { getLogger } from "@commonfabric/utils/logger";
 import { unrefTimer } from "@commonfabric/utils/sleep";
 
-import { CompilerStackLoadError } from "../../../runner/src/harness/deferred-compiler-stack.ts";
+import { CompilerStackLoadError } from "../../../../runner/src/harness/deferred-compiler-stack.ts";
 import {
   IPCRemoteResponse,
   isIPCClientMessage,

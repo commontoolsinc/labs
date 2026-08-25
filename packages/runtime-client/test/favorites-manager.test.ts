@@ -3,8 +3,8 @@ import { expect } from "@std/expect";
 import type { JSONSchema } from "@commonfabric/api";
 import type { DID } from "@commonfabric/identity";
 import { favoriteKey } from "@commonfabric/home-schemas";
-import { FavoritesManager } from "../favorites-manager.ts";
-import type { RuntimeClient } from "../runtime-client.ts";
+import { FavoritesManager } from "../src/favorites-manager.ts";
+import type { RuntimeClient } from "../src/runtime-client.ts";
 
 const space = "did:key:test-space" as DID;
 

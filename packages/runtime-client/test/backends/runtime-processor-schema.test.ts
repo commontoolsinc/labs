@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { hasExplicitSubscriptionSchema } from "../../backends/runtime-processor.ts";
+import { hasExplicitSubscriptionSchema } from "../../src/backends/runtime-processor.ts";
 
 describe("hasExplicitSubscriptionSchema", () => {
   it("treats boolean true as an explicit subscription schema", () => {

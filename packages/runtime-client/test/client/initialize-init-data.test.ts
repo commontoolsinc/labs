@@ -1,18 +1,18 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { RuntimeClient } from "../../runtime-client.ts";
-import { EventEmitter } from "../../client/emitter.ts";
-import { NotificationType, RequestType } from "../../protocol/mod.ts";
+import { RuntimeClient } from "../../src/runtime-client.ts";
+import { EventEmitter } from "../../src/client/emitter.ts";
+import { NotificationType, RequestType } from "../../src/protocol/mod.ts";
 import type {
   IPCClientMessage,
   IPCClientNotification,
   IPCRemoteMessage,
-} from "../../protocol/mod.ts";
+} from "../../src/protocol/mod.ts";
 import type {
   RuntimeTransport,
   RuntimeTransportEvents,
-} from "../../client/transport.ts";
+} from "../../src/client/transport.ts";
 
 /**
  * Guards the shell→worker `InitializationData` wiring: the fields carried by

@@ -1,11 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { CompilerStackLoadError } from "../../../runner/src/harness/deferred-compiler-stack.ts";
-import { NotificationType, RuntimeErrorCode } from "../../protocol/mod.ts";
+import { NotificationType, RuntimeErrorCode } from "../../src/protocol/mod.ts";
 import {
   postContextualRuntimeError,
   postRuntimeError,
-} from "../../backends/runtime-error.ts";
+} from "../../src/backends/runtime-error.ts";
 
 describe("runtime error notifications", () => {
   it("classifies compiler-load failures in contextual and renderer errors", () => {

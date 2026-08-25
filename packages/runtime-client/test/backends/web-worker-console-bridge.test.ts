@@ -12,8 +12,8 @@ import {
   RequestType,
   RuntimeErrorCode,
   TransportNotificationType,
-} from "../../protocol/mod.ts";
-import { RuntimeProcessor } from "../../backends/mod.ts";
+} from "../../src/protocol/mod.ts";
+import { RuntimeProcessor } from "../../src/backends/mod.ts";
 
 // The worker entry (`backends/web-worker/index.ts`) installs a `message`
 // listener on `self` (which is `globalThis` under Deno) and reads
@@ -50,7 +50,7 @@ describe("web-worker-console-bridge", () => {
       try {
         // Importing registers the message listener and posts the ready
         // notification.
-        await import("../../backends/web-worker/index.ts");
+        await import("../../src/backends/web-worker/index.ts");
         expect(posted).toContainEqual({
           type: TransportNotificationType.WorkerReady,
         });
@@ -248,7 +248,7 @@ describe("web-worker-console-bridge", () => {
         )) as typeof RuntimeProcessor.initialize;
 
       try {
-        await import("../../backends/web-worker/index.ts");
+        await import("../../src/backends/web-worker/index.ts");
         // Snapshot every counter this test asserts on: the loggers are global
         // singletons, so earlier tests in this file may already have ticked
         // some of them.
@@ -439,7 +439,7 @@ describe("web-worker-console-bridge", () => {
       // 100ms sample: the tick due during the block can only fire late, so a
       // positive workerLag is recorded. Counter existence only — the magnitude
       // is never asserted.
-      await import("../../backends/web-worker/index.ts");
+      await import("../../src/backends/web-worker/index.ts");
       const before =
         getLogger("runner.loop").getTimeStats("workerLag")?.count ??
           0;

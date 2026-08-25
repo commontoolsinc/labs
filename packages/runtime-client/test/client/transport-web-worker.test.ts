@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { TransportNotificationType } from "../../protocol/mod.ts";
-import { WebWorkerRuntimeTransport } from "../../client/transports/web-worker/transport-web-worker.ts";
+import { TransportNotificationType } from "../../src/protocol/mod.ts";
+import { WebWorkerRuntimeTransport } from "../../src/client/transports/web-worker/transport-web-worker.ts";
 
 // Exercises the transport's handling of forwarded worker console output
 // without a real worker: a fake Worker class lets us construct the transport,
