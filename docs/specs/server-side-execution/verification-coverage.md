@@ -7287,6 +7287,37 @@ supply; OW29/OW32/OW34 closed):
     true never-fires net), and any live `schema-doc-quarantine` log
     — each occurrence is evidence for that investigation, not a
     server-side hole.
+    SHIPPING SIDE, current state: the closure pass stages what a
+    delivered document's refs name, and the memory package now PINS both
+    halves of that guarantee —
+    `memory/test/v2-schema-doc-closure-delivery.test.ts`, seven
+    properties over the session frame, each with a mutation that reds it,
+    every watch using the SELECTS-NOTHING selector because under a
+    walking selector the traversal loads the schema documents anyway and
+    the assertions pass with the closure pass disabled. The gate that
+    keeps a session from being sent a closure document twice is the frame
+    builders' session-cache diff, NOT the closure pass's
+    `tracker.has(key)` staging gate: removing that gate changes no wire
+    frame. THE SHIPPING SIDE IS NOT THE DEFECT, measured rather than
+    argued: the per-session delivery probe was carried into a CI pattern
+    lane at the ensure-ON posture (the class does not reproduce on demand
+    locally), and one run produced both halves at once — 103
+    `schema-doc-quarantine` on the client over 13 distinct missing
+    `cid:` ids, including this row's own `computed:fid1:7Byc…` against
+    `cid:fid1:zgJY…`, against 136 ref-carrying frames on the server with
+    ZERO delivery violations and zero own-write elisions. Every `cid:` a
+    delivered document referenced had been put on the wire for that
+    session. That is the owner's 2026-08-24 ruling in measured form, and
+    it hands the residual to the CLIENT-side absorb/retention
+    investigation. The bound: the probe sees what the server puts in a
+    frame, not what the socket carried or the replica applied, so it
+    rules out the shipping side without separating a lost frame from an
+    unabsorbed one. The
+    measurements behind all of this, including the probe results that
+    falsify the earlier "the closure pass never completes an iteration"
+    localization and the correction to this row's own claim that
+    Cz/Nz/xz reference g2, are in
+    [`ow61-shipping-side-reexamination-2026-08-25.md`](../../history/plans/server-execution-v2/optimize/ow61-shipping-side-reexamination-2026-08-25.md).
 
   - **OW62 — adopt-not-start: the piece-open seam is where the ON
     execution model's "one starter per piece" has to land. POST-FLIP
