@@ -1,4 +1,5 @@
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { resolveSchemaRefsCanonical } from "./traverse.ts";
 import {
   fabricFromNativeValue,
   FabricInstance,
@@ -30,6 +31,7 @@ import {
   isPattern,
   isStreamValue,
   type JSONSchema,
+  type JSONSchemaObj,
   JSONValue,
   type Module,
   NAME,
@@ -243,6 +245,31 @@ type ArgumentLinkRoot = {
   cell: Cell<any>;
   schema?: JSONSchema;
 };
+
+// Whether a declared schema hands the run a reference rather than a value to
+// read through: `asCell` on the schema itself, or a union or reference whose
+// every resolved arm is itself reference-only. A union with one readable arm
+// is readable — the walk must cover the arm the run may take. Bounded ref
+// resolution guards against a self-referential declaration.
+function isReferenceOnlySchema(
+  schema: JSONSchema | undefined,
+  depth: number = 4,
+): boolean {
+  if (depth <= 0 || !isObjectOrArray(schema)) return false;
+  if (schema.asCell !== undefined) return true;
+  if ("$ref" in schema) {
+    const resolved = resolveSchemaRefsCanonical(schema as JSONSchemaObj);
+    if (resolved === schema) return false;
+    return isReferenceOnlySchema(resolved, depth - 1);
+  }
+  const arms = (schema.anyOf ?? schema.oneOf) as
+    | readonly JSONSchema[]
+    | undefined;
+  if (arms !== undefined && arms.length > 0) {
+    return arms.every((arm) => isReferenceOnlySchema(arm, depth - 1));
+  }
+  return false;
+}
 
 // The debug-name builders reuse the action's already-computed
 // `schedulerActionInstanceKey` as their uniquifying suffix instead of hashing
@@ -4898,12 +4925,23 @@ export class Runner {
     initialValues?: readonly (FabricValue | undefined)[],
   ): Promise<void> {
     // Link-hop budgets: how many further documents a walk may step INTO from
-    // a synced target. The undeclared budget preserves the two-hop reach the
-    // defaultProfile regression fixed; the declared budget only bounds a
-    // pathological declaration, since schemas end on their own.
+    // a synced target. Both keep the two-hop reach the defaultProfile
+    // regression fixed. Declared descent could in principle go as deep as the
+    // declaration, but deployed schemas declare reference GRAPHS (a topic's
+    // mentions reach topics whose mentions reach topics), and following them
+    // syncs documents no first run reads — measured on the topics board, a
+    // deeper declared budget collected more than the undeclared walk it
+    // replaced. Raising it is evidence-driven tuning, not headroom.
     const UNDECLARED_LINK_HOPS = 2;
-    const DECLARED_LINK_HOPS = 8;
-    const seenTargets = new Set<string>();
+    const DECLARED_LINK_HOPS = 2;
+    // Syncing is document-granular and walking is subtree-granular, so they
+    // dedupe separately: one sync per document, one walk per (document, path,
+    // declared/undeclared) subtree. A reference visit (`asCell`, no walk)
+    // therefore never blocks a later read-through visit from walking the same
+    // document, and two links into different paths of one document each get
+    // their own descent.
+    const syncedDocs = new Set<string>();
+    const walkedSubtrees = new Set<string>();
     type PendingTarget = {
       cell: Cell<any>;
       schema: JSONSchema | undefined;
@@ -4925,28 +4963,41 @@ export class Runner {
         schema: JSONSchema | undefined,
         hopsLeft: number,
       ) => {
-        const key = `${link.space}\0${link.id}\0${link.scope ?? "space"}`;
-        if (seenTargets.has(key)) return;
-        seenTargets.add(key);
+        const docKey = `${link.space}\0${link.id}\0${link.scope ?? "space"}`;
         const target = this.runtime.getCellFromLink(link);
-        const targetSyncStart = performance.now();
-        targetPromises.push(
-          Promise.resolve(target.sync())
-            .catch((error) => {
-              logger.warn("resume-argument-link-targets", () => [
-                "argument link target sync failed; resuming without it",
-                error,
-              ]);
-            })
-            .finally(() =>
-              logger.time(
-                targetSyncStart,
-                "start",
-                timingLabel,
-              )
-            ),
-        );
-        if (hopsLeft > 0) targets.push({ cell: target, schema, hopsLeft });
+        if (!syncedDocs.has(docKey)) {
+          syncedDocs.add(docKey);
+          const targetSyncStart = performance.now();
+          targetPromises.push(
+            Promise.resolve(target.sync())
+              .catch((error) => {
+                logger.warn("resume-argument-link-targets", () => [
+                  "argument link target sync failed; resuming without it",
+                  error,
+                ]);
+              })
+              .finally(() =>
+                logger.time(
+                  targetSyncStart,
+                  "start",
+                  timingLabel,
+                )
+              ),
+          );
+        } else {
+          // The document was synced through another handle. Mark this one
+          // synced too, or the next wave's raw read fires a background sync
+          // whose rejection nothing awaits — the same shape-cast doStart's
+          // `wasSyncedAtEntry` reads through.
+          (target as Cell<any> & { synced?: boolean }).synced = true;
+        }
+        if (hopsLeft <= 0) return;
+        const walkKey = `${docKey}\0${link.path.join("/")}\0${
+          schema !== undefined ? "declared" : "undeclared"
+        }`;
+        if (walkedSubtrees.has(walkKey)) return;
+        walkedSubtrees.add(walkKey);
+        targets.push({ cell: target, schema, hopsLeft });
       };
       const collect = (
         value: any,
@@ -4962,9 +5013,10 @@ export class Runner {
         if (link) {
           // `asCell` marks a reference the run holds rather than reads
           // through: sync the target document, walk no further. The marker
-          // rides the declared property schema itself, beside any `$ref`.
-          const reference = declared &&
-            isObjectOrArray(schema) && schema.asCell !== undefined;
+          // usually rides the declared property schema beside any `$ref`;
+          // where the declaration is a union or ends in a reference, it
+          // counts as opaque only when every resolved arm does.
+          const reference = declared && isReferenceOnlySchema(schema);
           enqueue(
             link,
             declared ? schema : undefined,
@@ -4983,7 +5035,15 @@ export class Runner {
           // — a cold target can then enter the commit basis, the exact
           // failure this walk exists to prevent.
           for (const key in value) {
-            collect(value[key], base, undefined, hopsLeft);
+            // The undeclared scan runs on its own two-hop budget from the
+            // point the declaration ran out (the enqueue clamp enforces the
+            // same bound; stating it here keeps the transition visible).
+            collect(
+              value[key],
+              base,
+              undefined,
+              Math.min(hopsLeft, UNDECLARED_LINK_HOPS),
+            );
           }
           return;
         }

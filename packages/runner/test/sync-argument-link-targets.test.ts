@@ -144,4 +144,112 @@ describe("syncArgumentLinkTargets", () => {
     expect(syncedIds).toContain(ids.hidden);
     expect(syncedIds).toContain(ids.deep);
   });
+
+  // Builds documents for a test that needs its own shapes.
+  function docBuilder(prefix: string) {
+    const tx = runtime.edit();
+    const make = (name: string, value: unknown) => {
+      const cell = runtime.getCell<unknown>(
+        space,
+        `${prefix} ${name}`,
+        undefined,
+        tx,
+      );
+      cell.set(value);
+      return cell;
+    };
+    return { make, commit: () => tx.commit() };
+  }
+  const id = (cell: Cell<unknown>) => cell.getAsNormalizedFullLink().id;
+
+  it("walks a document a reference visit reached first, when a read-through path also declares it", async () => {
+    const { make, commit } = docBuilder("reference then read");
+    const inner = make("inner", { leaf: 1 });
+    const shared = make("shared", { child: inner });
+    const root = make("root", { ref: shared, read: shared });
+    await commit();
+    await run(root, {
+      type: "object",
+      properties: {
+        ref: { type: "object", asCell: ["cell"] },
+        read: {
+          type: "object",
+          properties: { child: { type: "object" } },
+        },
+      },
+    } as JSONSchema);
+    expect(syncedIds).toContain(id(shared));
+    expect(syncedIds).toContain(id(inner));
+  });
+
+  it("walks both subtrees when two links address different paths of one document", async () => {
+    const { make, commit } = docBuilder("two paths");
+    const leftLeaf = make("left leaf", { n: 1 });
+    const rightLeaf = make("right leaf", { n: 2 });
+    const shared = make("shared", {
+      left: { l: leftLeaf },
+      right: { r: rightLeaf },
+    });
+    const root = make("root", {
+      a: shared.key("left"),
+      b: shared.key("right"),
+    });
+    await commit();
+    await run(root, {
+      type: "object",
+      properties: {
+        a: { type: "object", properties: { l: { type: "object" } } },
+        b: { type: "object", properties: { r: { type: "object" } } },
+      },
+    });
+    expect(syncedIds).toContain(id(leftLeaf));
+    expect(syncedIds).toContain(id(rightLeaf));
+  });
+
+  it("treats a union as a reference only when every arm is one", async () => {
+    const { make, commit } = docBuilder("union arms");
+    const behindOpaque = make("behind opaque", { n: 1 });
+    const opaque = make("opaque", { child: behindOpaque });
+    const behindReadable = make("behind readable", { n: 2 });
+    const readable = make("readable", { child: behindReadable });
+    const root = make("root", { allRef: opaque, mixed: readable });
+    await commit();
+    await run(root, {
+      type: "object",
+      properties: {
+        allRef: {
+          anyOf: [
+            { type: "object", asCell: ["cell"] },
+            { type: "object", asCell: ["stream"] },
+          ],
+        },
+        mixed: {
+          anyOf: [
+            { type: "object", asCell: ["cell"] },
+            { type: "object", properties: { child: { type: "object" } } },
+          ],
+        },
+      },
+    } as JSONSchema);
+    expect(syncedIds).toContain(id(opaque));
+    expect(syncedIds).not.toContain(id(behindOpaque));
+    expect(syncedIds).toContain(id(readable));
+    expect(syncedIds).toContain(id(behindReadable));
+  });
+
+  it("gives an undeclared subtree below a declared root the two-hop budget", async () => {
+    const { make, commit } = docBuilder("budget");
+    const third = make("third", { n: 3 });
+    const second = make("second", { c: third });
+    const first = make("first", { c: second });
+    const root = make("root", { sub: { c: first } });
+    await commit();
+    await run(root, {
+      type: "object",
+      properties: { sub: true },
+    });
+    expect(syncedIds).toContain(id(first));
+    expect(syncedIds).toContain(id(second));
+    expect(syncedIds).not.toContain(id(third));
+  });
 });
