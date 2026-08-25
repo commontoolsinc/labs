@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { preserveSourceMapRange } from "../ast/utils.ts";
 import { TransformationContext } from "./mod.ts";
 
 export const CF_HELPERS_IDENTIFIER = "__cfHelpers";
@@ -43,18 +44,19 @@ export class CFHelpers {
     return !!this.#helperIdent;
   }
 
-  // Returns an PropertyAccessExpression of the requested
-  // helper name e.g. `(__cfHelpers.lift)`.
+  /**
+   * Carries the range of `originalNode` and the distinct checker identity of
+   * `identityNode` onto `node`.
+   */
   preserveNodeSourceMap<T extends ts.Node>(
     node: T,
     originalNode: ts.Node,
-    identityNode?: ts.Node,
+    identityNode: ts.Node,
   ): T {
-    const sourceMapRange = ts.getSourceMapRange(originalNode) ?? originalNode;
-    const preserved = ts.setSourceMapRange(node, sourceMapRange);
-    return identityNode
-      ? ts.setOriginalNode(preserved, identityNode) as T
-      : preserved as T;
+    return ts.setOriginalNode(
+      preserveSourceMapRange(node, originalNode),
+      identityNode,
+    ) as T;
   }
 
   getHelperExpr(
@@ -77,11 +79,11 @@ export class CFHelpers {
       originalNode,
       this.#helperIdent!,
     );
-    const helperName = this.preserveNodeSourceMap(
+    const helperName = preserveSourceMapRange(
       this.#factory.createIdentifier(name),
       originalNode,
     );
-    return this.preserveNodeSourceMap(
+    return preserveSourceMapRange(
       this.#factory.createPropertyAccessExpression(
         helperIdent,
         helperName,
@@ -96,7 +98,7 @@ export class CFHelpers {
     typeArguments: readonly ts.TypeNode[] | undefined,
     argumentsArray: readonly ts.Expression[],
   ): ts.CallExpression {
-    return this.preserveNodeSourceMap(
+    return preserveSourceMapRange(
       this.#factory.createCallExpression(
         this.getHelperExpr(name, originalNode),
         typeArguments,

@@ -649,10 +649,13 @@ function rewriteTrackedOpaquePatternBody(
         rootIsFreshOpaqueOrigin = ts.isCallExpression(initializer) &&
           isOpaqueOriginCall(initializer, context);
         rewrittenDeclarations.push(
-          context.factory.createVariableDeclaration(
-            rootIdentifier,
-            undefined,
-            undefined,
+          preserveSourceMapRange(
+            context.factory.createVariableDeclaration(
+              rootIdentifier,
+              undefined,
+              undefined,
+              declaration.initializer,
+            ),
             declaration.initializer,
           ),
         );
@@ -684,11 +687,14 @@ function rewriteTrackedOpaquePatternBody(
         }
 
         rewrittenDeclarations.push(
-          context.factory.createVariableDeclaration(
-            context.factory.createIdentifier(binding.localName),
-            undefined,
-            undefined,
-            loweredInitializer,
+          preserveSourceMapRange(
+            context.factory.createVariableDeclaration(
+              context.factory.createIdentifier(binding.localName),
+              undefined,
+              undefined,
+              loweredInitializer,
+            ),
+            binding.bindingNode,
           ),
         );
       }

@@ -1712,8 +1712,9 @@ it drives the full pipeline over a five-origin fixture and asserts every
 builder call AND callback recovers to its distinctive authored snippet
 (content is the ground truth, not merely `pos >= 0`). This is the read path
 for transform-time source annotation (A′, CT-1870), and the same fallback
-family §16.2's coverage spans use. Rationale, per-site table, and the probe
-rig: `packages/ts-transformers/APRIME-LINEAGE-HANDOFF.md`.
+family §16.2's coverage spans use. The investigation and probe record is
+archived at
+`docs/history/packages/ts-transformers/APRIME-LINEAGE-HANDOFF.md`.
 
 The same source-map-range-only rule applies to semantic replacement boundaries
 outside the builder-artifact path. Pattern-body reactive-root replacements,
@@ -1727,6 +1728,24 @@ node's text range or original-node identity.
 `test/replacement-source-map-range.test.ts` runs fixtures through the owning
 pipeline stage and content-binds every recovered range; it also directly pins
 the non-input-bound reactive-wrapper helper branch.
+
+Opaque destructuring uses explicit anchors carried by `DestructureBinding`.
+The temporary-root declaration maps to the authored initializer it names;
+each lowered leaf declaration maps to its binding element. A prologue statement
+created from a destructured callback parameter carries that same binding-element
+range. `AssertDiagnosticsTransformer` maps its rebuilt callback body to the
+authored concise expression or block, and maps each replacement record block
+and `return` to the authored expression or `return` it replaces. These nodes
+carry source-map ranges only, so the lineage does not alter printing or checker
+identity.
+
+`CFHelpers.preserveNodeSourceMap` requires separate range and checker-identity
+nodes and is used only where those channels diverge. Helper names, property
+accesses, and calls that need position alone use `preserveSourceMapRange`.
+The logical-expression helpers keep their asymmetric authored anchors:
+`ifElse` maps to the whole conditional expression, while `when` and `unless`
+map to their left condition. The regression binds all three choices to source
+content.
 
 That file closes with a corpus-wide invariant: across every fixture, no
 synthesized `JsxAttribute`, `JsxElement`, `JsxExpression`, or
