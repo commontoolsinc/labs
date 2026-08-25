@@ -44,9 +44,9 @@ defaults `cfcEnforcementMode` to `enforce-explicit`
 `createRuntimeClientOptions` — the types-level
 `DEFAULT_CFC_ENFORCEMENT_MODE = "disabled"`
 ([`types.ts:42`](../../packages/runner/src/cfc/types.ts)) is only the
-bare-transaction fallback. What *is* dormant: flow-labels default `off`
-([`types.ts:331`](../../packages/runner/src/cfc/types.ts)) everywhere, the render
-confidentiality ceiling is plumbed end-to-end but no host populates it, and no
+bare-transaction fallback. What *is* dormant: flow-labels are `persist` in the
+shell and `off` in every other host, the render confidentiality ceiling is wired
+end-to-end but the shell builds one only behind a flag that defaults off, and no
 host runs at `enforce-strict`, leaving the one reject that rung adds — the
 writer-fit misfit — unexercised in deployment. So the flow-taint and display
 protections below are *built but dormant* until a host turns them on — see Epic H.
@@ -247,10 +247,18 @@ collaborative-doc model as a downgraded/future area. Ref: §14.4.8, §3.1.6.
 
 Not new machinery so much as turning the system on:
 
-- **Flow-labels default `off` → inv-9 dormant.** The router-attack flow-taint
-  (§10's own worked example) is not stamped by default. Move deployments to
-  propagation `persist`; note trigger-read confidentiality (SC-3) currently never
-  reaches the enforcement side or the egress ceiling even when the dial is on.
+- **Flow-labels `off` outside the shell → inv-9 partial.** The router-attack
+  flow-taint (§10's own worked example) is stamped where the shell runs
+  ([`lib-shell/src/runtime.ts`](../../packages/lib-shell/src/runtime.ts) defaults
+  `cfcFlowLabels` to `persist`) and nowhere else: the `Runtime` default is `off`,
+  and toolshed and background-piece-service pass no CFC options at all, so they
+  inherit it. Move them through `observe` to `persist`. `cfcTriggerReadGating` is
+  `false` in every host on the same footing — turning it on joins the §8.9.2
+  trigger reads to both enforcement gates, the sink-request ceiling and the
+  `requiredIntegrity` input gate
+  ([`prepare.ts`](../../packages/runner/src/cfc/prepare.ts) `triggerReadSources`),
+  which closes the direct trigger channel; multi-hop closure follows once flow
+  persists (SC-3).
 - **`enforce-strict` default deployment states.** The effective deployment
   default is `enforce-explicit` (Runtime + lib-shell; the types-level `disabled`
   is the bare-transaction fallback). The strict rung carries one differentiated
@@ -270,12 +278,17 @@ Not new machinery so much as turning the system on:
   standard-profile display ceiling (§8.10.6) on the strict rung, where the
   runner has it as a host-passed option the enforcement ladder does not reach —
   so a deployment that moves to strict does not thereby get it.
-- **Display-ceiling "shell flip."** The render ceiling is built and fail-closed but
-  **no host populates it**, and it admits atoms by raw structural equality rather
-  than §15.2 acting-user shapes (`User`/`PersonalSpace`/`Space`-via-`HasRole`).
-  Atom-shaping needs Epic B's exchange resolution; activation does not. (SC-16;
-  §8.10.6.) Render-boundary *composition + text integrity* itself is owned by
-  `packages/html` (see Out of scope).
+- **Display-ceiling "shell flip."** The render ceiling is built, fail-closed and
+  §15.2-shaped: `User` and `PersonalSpace` fit the acting user by exact match,
+  and a `Space(...)` clause resolves through a verified `HasRole` reader fact
+  under the standard display exchange rule
+  ([`render-ceiling.ts`](../../packages/runner/src/cfc/render-ceiling.ts)), which
+  the worker backend threads into the reconciler whenever a ceiling is in force
+  ([`runtime-processor.ts`](../../packages/runtime-client/backends/runtime-processor.ts)).
+  What remains is the flip: the shell builds that ceiling only behind its
+  `cfcRenderCeiling` flag, which defaults off, so nothing renders under a ceiling
+  today. (SC-16; §8.10.6.) Render-boundary *composition + text integrity* itself
+  is owned by `packages/html` (see Out of scope).
 
 ---
 
@@ -384,9 +397,7 @@ policy (store labels + write-authority claims), not these mechanisms.
 ```
 Epic A (CNF clauses)  ──┬──►  Epic B (exchange-rule evaluator)  ──►  B6 retire prompt special-case
                         │
-                        ├──►  Epic E (row-set / sqlite 3.b)   [3.c is a separate server-side track]
-                        │
-                        └──►  Epic H display-ceiling atom-shaping
+                        └──►  Epic E (row-set / sqlite 3.b)   [3.c is a separate server-side track]
 
 Epic C (observation classes)   — independent, start any time
 Epic D (write/agent integrity) — independent (D1 wants B's matcher); highest security urgency
