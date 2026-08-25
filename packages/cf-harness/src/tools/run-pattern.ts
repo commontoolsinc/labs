@@ -4,7 +4,10 @@ import {
   compileAndSavePattern,
   getPatternIdentityRef,
 } from "@commonfabric/runner";
-import { validateAgainstSchema } from "@commonfabric/runner/cfc";
+import {
+  selectReferencedCfcSchemaDefs,
+  validateAgainstSchema,
+} from "@commonfabric/runner/cfc";
 import {
   createLLMFriendlyLink,
   FRAMEWORK_RESULT_KEYS,
@@ -559,27 +562,22 @@ export const runPatternTool: HarnessToolDefinition<
     };
     // A property schema referring into the argument schema's `$defs` leaves
     // its root behind when it becomes a cell's whole schema, so the read
-    // schema carries those definitions along. The property's own `$defs`,
-    // when it has one, shadows the root's — the same precedence a nested
-    // `$defs` scope has in place.
+    // schema carries the referenced definitions along —
+    // `selectReferencedCfcSchemaDefs` computes that closure, honoring a
+    // property's own `$defs` scope over the root's.
     const argumentDefs = isObjectNotArray(argumentSchema) &&
         isObjectNotArray((argumentSchema as { $defs?: unknown }).$defs)
       ? (argumentSchema as { $defs: Record<string, JSONSchema> }).$defs
       : undefined;
     const readSchemaForKey = (key: string): JSONSchema | undefined => {
       const propertySchema = argumentSchemaForKey(key);
-      if (
-        propertySchema === undefined || argumentDefs === undefined ||
-        !isObjectNotArray(propertySchema)
-      ) {
+      if (propertySchema === undefined || !isObjectNotArray(propertySchema)) {
         return propertySchema;
       }
-      return {
+      const defs = selectReferencedCfcSchemaDefs(propertySchema, argumentDefs);
+      return defs === undefined ? propertySchema : {
         ...propertySchema,
-        $defs: {
-          ...argumentDefs,
-          ...(propertySchema as { $defs?: Record<string, JSONSchema> }).$defs,
-        },
+        $defs: defs,
       };
     };
     for (const { key, cell } of liveCellInputs) {
