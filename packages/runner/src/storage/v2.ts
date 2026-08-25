@@ -5621,14 +5621,6 @@ class SpaceReplica implements ISpaceReplica {
         ),
       };
     }
-    // An id this frame DID apply supersedes any older parked copy of it.
-    if (this.#parkedOnSchemaClosure.size > 0) {
-      for (const upsert of sync.upserts) {
-        if (typeof upsert.id === "string") {
-          this.#parkedOnSchemaClosure.delete(upsert.id);
-        }
-      }
-    }
 
     // A keyed frame (a lease-holder session's — server-execution v2 stage
     // A, OW17's wire leg) names each entry's instance; the replica keys
@@ -5694,6 +5686,15 @@ class SpaceReplica implements ISpaceReplica {
         coverClass,
       );
       record.materialized = undefined;
+      // A REAL delivery for this id supersedes any parked copy of it:
+      // the parked one is older, and resurrecting it later would move
+      // the doc backwards. A seq-0 absent-doc marker is exempt — it is
+      // the "no confirmed version" answer to a pull, not a newer
+      // version, and treating it as one discards a park that is still
+      // waiting (the sink's own pull for a not-yet-applied doc).
+      if (upsert.seq > 0 && this.#parkedOnSchemaClosure.size > 0) {
+        this.#parkedOnSchemaClosure.delete(upsert.id as string);
+      }
       // The arrival wake fires on a FORWARD move — and on a same-seq
       // frame whose class arrives LATE (undefined -> defined): an entry
       // failed CLOSED at its floor under an unknown class (a mixed-window
@@ -5766,6 +5767,7 @@ class SpaceReplica implements ISpaceReplica {
     }
     for (const remove of sync.removes) {
       const id = remove.id as URI;
+      this.#parkedOnSchemaClosure.delete(id);
       const record = this.record(id, remove.scope, undefined, remove.scopeKey);
       record.confirmed = confirmedVersion(0, undefined);
       record.materialized = undefined;
@@ -5900,16 +5902,21 @@ class SpaceReplica implements ISpaceReplica {
       this.#kickedSchemaClosurePulls.add(hash);
       queueMicrotask(() => {
         this.sync(`cid:${hash}` as URI)
-          .then((result) => {
-            if (
-              result.error !== undefined ||
-              !this.#isVerifiedSchemaDocDelivered(hash, EMPTY_OVERLAY)
-            ) {
+          .then(() => {
+            if (!this.#isVerifiedSchemaDocDelivered(hash, EMPTY_OVERLAY)) {
               // Not installed server-side yet, or the pull failed:
               // re-arm so a later frame retries instead of the window
-              // going permanent for the session.
+              // going permanent for the session. (The pull can report
+              // an error and still have delivered the document; the
+              // residency check is the authority, not the result.)
               this.#kickedSchemaClosurePulls.delete(hash);
+              return;
             }
+            // Release HERE rather than relying on the arrival hook: a
+            // pull installs its documents through `pull`, not through
+            // `applySessionSync`, so the frame-end release never sees
+            // this one.
+            this.releaseParkedSchemaClosures("integrate");
           }, () => {
             this.#kickedSchemaClosurePulls.delete(hash);
           });
