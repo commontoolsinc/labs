@@ -2346,23 +2346,37 @@ export class Runtime {
       scope,
       identity,
     );
-    const load = identity === undefined
-      ? this.getCellFromLink(link).sync()
-      // The instance-named load: the storage manager names the run's
-      // instance on the wire (lease-holder-only at admission) and lands
-      // the doc under it; an own-identity run takes the ordinary sync.
-      : mgr.syncCell(this.getCellFromLink(link), {
-        scopeKeyIdentity: identity,
-      });
+    // The instance option names the run's instance on the wire
+    // (lease-holder-only at admission) and lands the doc under it; an
+    // own-identity load names nothing and takes the ordinary path. The
+    // failure-reporting sync is preferred because a pull can RESOLVE while
+    // carrying an error (an ACL denial, a transport failure) — such a sync
+    // delivered nothing, and only the carried failure tells this
+    // bookkeeping so.
+    const syncOptions = identity !== undefined
+      ? { scopeKeyIdentity: identity }
+      : undefined;
+    const load = mgr.syncCellWithFailure !== undefined
+      ? mgr.syncCellWithFailure(this.getCellFromLink(link), syncOptions)
+      : mgr.syncCell(this.getCellFromLink(link), syncOptions).then(() =>
+        undefined
+      );
+    // A load that delivered nothing — rejected, or resolved carrying a
+    // failure — must not read as "the replica has seen the doc": clear the
+    // dedup so a later read retries, and hand back the storage manager's
+    // reservation when THIS kick took it (a cross-space kick never
+    // reserved, and must not clear a reservation a concurrent same-space
+    // read holds). The in-flight count clears either way; with the dedup
+    // gone the doc reads as never-kicked, so the absence stays provisional
+    // on the next ask.
+    const failed = () => {
+      this.missingDocLoadKicks.delete(key);
+      if (reserved) mgr.retractDocPullKick?.(space, id, scope, identity);
+    };
     mgr.trackUntilSettled(
-      load.catch(() => {
-        // Allow a retry on failure (e.g. transient disconnect): clear this
-        // dedup set, and hand back the storage manager's reservation when
-        // THIS kick took it — a cross-space kick never reserved, and must
-        // not clear a reservation a concurrent same-space read holds.
-        this.missingDocLoadKicks.delete(key);
-        if (reserved) mgr.retractDocPullKick?.(space, id, scope, identity);
-      }).finally(settled),
+      load.then((failure) => {
+        if (failure !== undefined) failed();
+      }, failed).finally(settled),
     );
     return true;
   }

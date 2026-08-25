@@ -241,13 +241,27 @@ const kickDocPull = (
   // confirmed absence as provisional forever. Cross-space dead ends get
   // their tracked, once-deduplicated fetch from
   // `Runtime.missingDocAbsenceIsProvisional` at the classification site.
+  //
+  // The failure-reporting sync is preferred because a pull can RESOLVE
+  // while carrying an error (an ACL denial, a transport failure): such a
+  // sync delivered nothing, and treating its settlement as "the replica
+  // has seen the doc" would turn the failure into a judged absence nobody
+  // retries. Any failure — rejected or carried — hands back the
+  // reservation so a later read may try again.
   const settled = reserved
     ? runtime.trackMissingDocLoadInFlight(space, id, scope)
     : undefined;
+  const cell = runtime.getCellFromLink(link);
+  const load = mgr.syncCellWithFailure !== undefined
+    ? mgr.syncCellWithFailure(cell)
+    : cell.sync().then(() => undefined);
+  const failed = () => {
+    if (reserved) mgr.retractDocPullKick?.(space, id, scope);
+  };
   mgr.trackUntilSettled(
-    runtime.getCellFromLink(link).sync().catch(() => {
-      if (reserved) mgr.retractDocPullKick?.(space, id, scope);
-    }).finally(() => settled?.()),
+    load.then((failure) => {
+      if (failure !== undefined) failed();
+    }, failed).finally(() => settled?.()),
   );
 };
 

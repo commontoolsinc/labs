@@ -372,6 +372,9 @@ describe("pattern setup validation convergence", () => {
       expect(error?.message).toBeUndefined();
       return undefined;
     } catch (thrown) {
+      // A pending or refusal throw propagates out of `run()` before the
+      // commit above — close the transaction rather than abandon it open.
+      if (tx.status().status === "ready") tx.abort();
       return thrown;
     }
   };

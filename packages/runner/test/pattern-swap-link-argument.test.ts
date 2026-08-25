@@ -7,9 +7,13 @@
  * postpones and retries on convergence — the two-session cases cover that
  * shape); a target the replica holds, or holds the CONFIRMED ABSENCE of, is
  * judged as the data it is — so a required slot over a confirmed-absent doc
- * holds the swap, V1 keeps running, and the first write that materializes
- * the doc re-fires the watcher and completes it. No verdict is ever minted
- * over bytes nobody read; no data that was read escapes its verdict.
+ * holds the swap and V1 keeps running, with recovery riding the next cold
+ * load's repair once the data is written (a failed watcher swap is not
+ * re-armed in session). No verdict is ever minted over bytes nobody read;
+ * no data that was read escapes its verdict. This file pins the held-swap
+ * outcomes a one-shot session can observe; the refusal-versus-postponement
+ * discrimination and the recovery live in
+ * pattern-setup-validation-convergence.test.ts.
  *
  * Production shape (the original incident): BacklinksIndex's `pieceRegistry`
  * argument links into its host default-app's registry cell; the host was down
@@ -127,19 +131,19 @@ describe("pattern swap with a link-valued argument slot", () => {
     expect((cell.getAsQueryResult() as { marker: string }).marker).toBe("v2");
   });
 
-  it("holds the swap while a REQUIRED linked slot is confirmed absent", async () => {
-    // Never written anywhere, and this single-store session has synced: the
-    // replica does not MISS the registry doc, it holds the server's word that
-    // the doc is absent. That is a judged read, not an unconverged one, so
-    // strict validation refuses the swap over it — `registry` is required —
-    // and the piece keeps running V1 with its stored argument untouched. The
-    // refusal is a verdict about the data as it stands, not a permanent
-    // sentence on the piece: the recovery — the next cold load's repair
-    // completing the swap once a write materializes the registry — is pinned
-    // in pattern-setup-validation-convergence.test.ts, whose shared-server
-    // harness can cold-start a second session; a target that is merely
-    // UNLOADED (rather than confirmed absent) postpones instead of refusing,
-    // pinned there too.
+  it("holds the swap while a REQUIRED linked slot is absent", async () => {
+    // Never written anywhere: the required slot has no value to validate,
+    // and the swap must NOT complete over it — which is precisely what the
+    // retired deferral did (this test's previous vintage asserted the swap
+    // completing, with the slot waved through as opaque). What this
+    // one-shot session can observe is only that the swap is held on V1
+    // with the stored argument untouched; whether it was held by the
+    // strict refusal (a confirmed absence, judged) or by a postponement
+    // (an unloaded target, unjudged) is indistinguishable here, and the
+    // tri-state line between those — refusal classification, and the
+    // recovery once the data is finally written — is pinned in
+    // pattern-setup-validation-convergence.test.ts, whose shared-server
+    // harness can cold-start a second session.
     const registry = rt.getCell<{ name?: string }[]>(
       space,
       "swap-link-argument-registry-absent",
@@ -148,16 +152,17 @@ describe("pattern swap with a link-valued argument slot", () => {
     const { cell } = await startThenSwap(registry);
     expect(
       (cell.getAsQueryResult() as { marker: string }).marker,
-      "a swap committed over a required slot whose linked doc is confirmed " +
-        "absent — validation judged bytes nobody read",
+      "a swap completed over a required slot whose linked doc holds " +
+        "nothing — the retired accept-as-opaque deferral is back",
     ).toBe("v1");
   });
 
-  it("holds the swap while an ITEM-level linked slot is confirmed absent", async () => {
-    // Links live at any depth: an array slot whose ITEM links to a confirmed
-    // absent doc gets the same verdict as a link at the slot itself — the
-    // item reads as a judged absence against the required item type, so the
-    // swap holds and V1 keeps running.
+  it("holds the swap while an ITEM-level linked slot is absent", async () => {
+    // Links live at any depth: an array slot whose ITEM links to an absent
+    // doc holds the swap the same as a link at the slot itself, where the
+    // retired deferral completed it. As above, refusal versus postponement
+    // is not observable in this one-shot session — the discrimination lives
+    // in pattern-setup-validation-convergence.test.ts's item-level case.
     const entry = rt.getCell<{ name?: string }>(
       space,
       "swap-link-argument-array-item-absent",

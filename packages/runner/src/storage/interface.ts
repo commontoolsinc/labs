@@ -425,6 +425,22 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   ): Promise<Cell<T>>;
 
   /**
+   * `syncCell`, resolving with the pull's FAILURE — or `undefined` when the
+   * sync delivered. A pull can "succeed" while carrying an error (an ACL
+   * denial, a transport failure), which resolves `syncCell` normally and
+   * reads as an absent doc; a caller whose bookkeeping must distinguish
+   * "the replica has now seen the doc" from "the fetch delivered nothing"
+   * (the missing-doc kick paths) consumes this instead. Optional: managers
+   * without it leave such callers treating a resolved sync as delivered.
+   */
+  syncCellWithFailure?<T>(
+    cell: Cell<T>,
+    options?: {
+      scopeKeyIdentity?: ScopeKeyIdentity;
+    },
+  ): Promise<unknown>;
+
+  /**
    * Load ONE scope INSTANCE of a document by address (server-execution v2
    * stage A — the runner's explicit-instance read at the transaction
    * layer): a served per-instance run's read of a scoped doc that its
