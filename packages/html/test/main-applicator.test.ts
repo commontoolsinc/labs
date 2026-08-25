@@ -1003,6 +1003,16 @@ Deno.test("DomApplicator - batch with rootId", async (t) => {
       onEvent: () => {},
     });
 
+    // Registering a container makes `CONTAINER_NODE_ID` a node that resolves,
+    // as it does in every applicator outside a test. Without it, a root
+    // coerced to 0 reads back as no root at all -- `getRootNode()` returning
+    // `null` from a lookup that missed rather than from the field being
+    // cleared -- and this step would pass for an implementation that puts the
+    // container on the root.
+    applicator.setContainer(
+      doc.createElement("section") as unknown as HTMLElement,
+    );
+
     applicator.applyBatch({
       batchId: 1,
       ops: [{ op: "create-element", nodeId: 1, tagName: "div" }],
