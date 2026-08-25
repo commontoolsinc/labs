@@ -3736,6 +3736,12 @@ const verifyInputRequirements = (
         return decision;
       });
       if (!ok) {
+        // The short-circuit is sound for the verdict: `.every` stops at the
+        // FIRST missing read, so an unresolved read behind it goes
+        // unexamined — but a miss whose evaluation fully resolved dooms the
+        // write on every attempt by itself (the same complete evaluation
+        // re-runs identically, and labels only widen), so unexamined reads
+        // cannot soften a deterministic miss into a retryable one.
         return {
           reason: `maxConfidentiality failed at /${entry.path.join("/")}`,
           verdict: !ceilingResolutionIncomplete,
