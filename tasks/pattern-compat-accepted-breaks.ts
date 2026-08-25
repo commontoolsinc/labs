@@ -214,4 +214,20 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "identity, so it goes with the model it keyed.",
     record: "docs/history/lunch-poll-identity-break.md",
   },
+  {
+    pattern: "agent-sessions-debug/main.tsx",
+    baselines: ["20260818T001423Z-_DSuxwZWgUTcB_2z"],
+    // The proof reports `ownerDid` first. Accepting it exposes the command
+    // cell's change from an optional opaque input to the required writable
+    // queue that the connector host supplies.
+    paths: ["argument.ownerDid", "argument.commandsCell"],
+    reason:
+      "Before its first deployment, the connector-managed debug view changed " +
+      "to require the host's configured owner DID and one authoritative, " +
+      "writable command queue. The owner isolates discovery and commands in " +
+      "a shared space, while the writable queue is the host's protected " +
+      "command input. The earlier contract was not deployed, and neither " +
+      "input has a safe compatibility default.",
+    record: "docs/history/agent-connector-owner-identity-break.md",
+  },
 ];
