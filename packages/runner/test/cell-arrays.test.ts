@@ -502,6 +502,9 @@ describe("plain-schema array traversal", () => {
       expect(sourceSpace).toBe(space);
       expect(link.path).toEqual([]);
       missingTargetKicks.push(link.id);
+      // A stubbed kick reads as a load warranted and in flight — the
+      // never-seen answer a real kick gives.
+      return true;
     };
     let value: readonly Record<string, never>[] | undefined;
     try {
@@ -565,6 +568,9 @@ describe("plain-schema array traversal", () => {
       expect(sourceSpace).toBe(space);
       expect(link.path).toEqual([]);
       missingTargetKicks.push(link.id);
+      // A stubbed kick reads as a load warranted and in flight — the
+      // never-seen answer a real kick gives.
+      return true;
     };
     let value: readonly { label: string }[] | undefined;
     try {
