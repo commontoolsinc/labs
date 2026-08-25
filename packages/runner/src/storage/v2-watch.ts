@@ -55,6 +55,23 @@ export const normalizeSyncSelector = (
 };
 
 /**
+ * Thrown instead of emitting a selector whose schema carries `cid:` refs
+ * the realm registry cannot back — see {@link externalizeSyncSelector}.
+ */
+export class SelectorClosureUnavailableError extends Error {
+  constructor(readonly refs: readonly string[], cause: unknown) {
+    super(
+      `Selector schema references ${refs.length} schema document(s) the ` +
+        `realm registry cannot supply [${refs.slice(0, 3).join(", ")}${
+          refs.length > 3 ? ", …" : ""
+        }]; emitting the reference form would only move this failure to ` +
+        `the server. ${cause instanceof Error ? cause.message : ""}`,
+    );
+    this.name = "SelectorClosureUnavailableError";
+  }
+}
+
+/**
  * Normalizes a selector's schema for the wire
  * (`docs/specs/content-addressed-schemas.md`, Phase 2; the
  * `contentAddressedSchemas` flag, shared with the link writer — the two
@@ -80,28 +97,13 @@ export const normalizeSyncSelector = (
  * throws {@link SelectorClosureUnavailableError} instead: emitting it
  * would violate the client's send-only-what-you-can-back obligation and
  * spend a round trip on the server's refusal, while the local registry is
- * where the miss actually is. Locally minted references are pinned for the
- * process lifetime (`registerMintedSchemaDocument`), so reaching this
- * throw means a reference crossed from another process without its
- * closure — a bug to surface at its source, not to forward.
+ * where the miss actually is. A reference dies with the registry epoch
+ * that minted it, and every retainer of externalized forms drops them on
+ * the registry clear (the wish sidecar pattern caches, the sanitize
+ * memo), so reaching this throw means a retainer outlived its epoch or a
+ * reference crossed from another process without its closure — a bug to
+ * surface at its source, not to forward.
  */
-/**
- * Thrown instead of emitting a selector whose schema carries `cid:` refs
- * the realm registry cannot back — see {@link externalizeSyncSelector}.
- */
-export class SelectorClosureUnavailableError extends Error {
-  constructor(readonly refs: readonly string[], cause: unknown) {
-    super(
-      `Selector schema references ${refs.length} schema document(s) the ` +
-        `realm registry cannot supply [${refs.slice(0, 3).join(", ")}${
-          refs.length > 3 ? ", …" : ""
-        }]; emitting the reference form would only move this failure to ` +
-        `the server. ${cause instanceof Error ? cause.message : ""}`,
-    );
-    this.name = "SelectorClosureUnavailableError";
-  }
-}
-
 export const externalizeSyncSelector = (
   selector: SchemaPathSelector,
   isSchemaDocPersisted: (hash: string) => boolean,

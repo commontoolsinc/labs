@@ -10,7 +10,6 @@ import {
   acquireSchemaRegistryLease,
   isSchemaDocumentClosureComplete,
   lookupSchemaDocument,
-  registerMintedSchemaDocument,
   registerSchemaDocument,
   SchemaDocumentHashMismatchError,
 } from "../src/schema-registry.ts";
@@ -104,33 +103,6 @@ describe("schema-registry", () => {
       expect(lookupSchemaDocument(hash)).toBeDefined();
       releaseB();
       expect(lookupSchemaDocument(hash)).toBeUndefined();
-    });
-
-    it("keeps a MINTED document across the clear, while a learned one goes", () => {
-      // The mint's other output — the ref-form schema object — outlives the
-      // session through the intern table and its derived memos, so the
-      // document backing it must too, or a later session stages with a
-      // `cid:` reference nothing anywhere can resolve (the shape behind the
-      // vintage gate's unresolvable home selectors). A session-LEARNED
-      // document keeps clearing: its retention rationale is the
-      // availability the session proved.
-      const release = acquireSchemaRegistryLease();
-      const minted: JSONSchema = {
-        type: "object",
-        properties: { mintedHere: { type: "string" } },
-      };
-      const learned: JSONSchema = {
-        type: "object",
-        properties: { learnedBySync: { type: "string" } },
-      };
-      const mintedHash = internSchemaAsTaggedHashString(minted);
-      const learnedHash = internSchemaAsTaggedHashString(learned);
-      registerMintedSchemaDocument(mintedHash, minted);
-      registerSchemaDocument(learnedHash, learned);
-
-      release();
-      expect(lookupSchemaDocument(mintedHash)).toBeDefined();
-      expect(lookupSchemaDocument(learnedHash)).toBeUndefined();
     });
 
     it("counts a release once, however many times it is called", () => {

@@ -141,10 +141,9 @@ describe("v2-watch", () => {
       // The client's send-only-what-you-can-back obligation, enforced at
       // the emission gate: forwarding the ref would only move this failure
       // to the server's loud refusal, one round trip later. A reference
-      // with no registered document reaches here only from another
-      // process without its closure — minted references are pinned for
-      // the process lifetime — so this is an invariant violation to
-      // surface at its source.
+      // with no registered document reaches here only through a retainer
+      // that outlived its registry epoch, or from another process without
+      // its closure — an invariant violation to surface at its source.
       setContentAddressedSchemasConfig(true);
       const orphanRef = {
         path: [],
@@ -157,13 +156,14 @@ describe("v2-watch", () => {
       );
     });
 
-    it("recomposes a MINTED reference across a registry lease epoch", () => {
-      // The vintage gate's failing shape, healed: `externalizeSchema`'s
-      // ref-form object survives the epoch through the intern table and
-      // content-keyed memos, and before minted documents were pinned, the
-      // epoch clear left that reference unresolvable — undecomposable at
-      // the emission gate, refused by the server. The mint now outlives
-      // the clear, so a later session's selector recomposes inline.
+    it("throws for a minted reference carried across a registry lease epoch", () => {
+      // The invariant made loud: a reference dies with the epoch whose
+      // registry backs it, so every retainer of externalized forms must
+      // drop them on the registry clear (the wish sidecar pattern caches
+      // do exactly that). A ref-form schema that nonetheless crosses the
+      // clear reaches this gate unresolvable, and emitting it would only
+      // move the failure to the server — the throw names the retainer bug
+      // at its source instead.
       setContentAddressedSchemasConfig(true);
       const release = acquireSchemaRegistryLease();
       const inline: JSONSchemaObj = {
@@ -174,11 +174,9 @@ describe("v2-watch", () => {
       expect(typeof refForm.$ref).toBe("string");
       release();
 
-      const emitted = externalizeSyncSelector(
-        { path: [], schema: refForm },
-        () => false,
-      );
-      expect(emitted.schema).toEqual(inline);
+      expect(() =>
+        externalizeSyncSelector({ path: [], schema: refForm }, () => false)
+      ).toThrow(SelectorClosureUnavailableError);
     });
   });
 });

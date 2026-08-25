@@ -9,6 +9,7 @@ import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { entityIdFrom } from "../src/create-ref.ts";
 import { NAME, UI } from "../src/builder/types.ts";
+import { acquireSchemaRegistryLease } from "../src/schema-registry.ts";
 import {
   createSidecarPatternCache,
   parseWishTarget,
@@ -4884,6 +4885,40 @@ describe("createSidecarPatternCache", () => {
     expect(await cache.fetch(fakeRuntime)).toBeUndefined();
     expect(cache.cached()).toBeUndefined();
     // The cleared memoization lets a later launch re-fetch the same URL.
+    expect(await cache.fetch(fakeRuntime)).toEqual({
+      source: "source from env-a.test",
+    });
+    expect(calls).toEqual(["env-a.test", "env-a.test"]);
+  });
+
+  it("drops its compiled pattern when the schema registry epoch clears", async () => {
+    // A compiled pattern's serialized graph embeds `cid:` schema references
+    // minted in the registry epoch that compiled it, and both backings die
+    // with the epoch — the registry clears on last-lease-out, and the
+    // compile context's space belongs to that session. A pattern handed
+    // across the clear would stage links whose references nothing can
+    // resolve (the emission gate throws on exactly that), so the cache
+    // drops with the epoch and the next launch refetches, minting into the
+    // epoch that will use it.
+    const { calls } = installFetchMock();
+    const fakeRuntime = makeFakeRuntime();
+    setPatternEnvironment({ apiUrl: new URL("https://env-a.test/") });
+    const cache = createSidecarPatternCache({ name: "profile-picker.tsx" });
+
+    const release = acquireSchemaRegistryLease();
+    expect(await cache.fetch(fakeRuntime)).toEqual({
+      source: "source from env-a.test",
+    });
+    expect(cache.cached()).toEqual({ source: "source from env-a.test" });
+
+    release();
+    expect(
+      cache.cached(),
+      "a compiled pattern outlived the registry epoch that minted its " +
+        "schema references",
+    ).toBeUndefined();
+
+    // The next launch re-fetches and recompiles into the new epoch.
     expect(await cache.fetch(fakeRuntime)).toEqual({
       source: "source from env-a.test",
     });
