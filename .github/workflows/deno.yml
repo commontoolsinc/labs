@@ -1008,6 +1008,7 @@ jobs:
         uses: ./.github/actions/test-records-ship
         with:
           artifact: package-integration-server-execution-on-${{ matrix.suite_name }}
+          variant: server-execution
           job: >-
             Package Integration Tests / server-execution ON
             (${{ matrix.suite_name }})
@@ -1512,6 +1513,7 @@ jobs:
         uses: ./.github/actions/test-records-ship
         with:
           artifact: pattern-integration-server-execution-on-${{ matrix.shard }}
+          variant: server-execution
           job: >-
             Pattern Integration Tests / server-execution ON
             (${{ matrix.shard }}/${{ matrix.total }})

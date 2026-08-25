@@ -71,6 +71,16 @@ the runner integration files that serve toolshed's `app.ts` in-process)
 are not arms of this contract: they have no serving host and run the
 derive-and-commit model by construction (EXPERIMENTAL_OPTIONS.md).*
 
+Test-record identity follows the [test-run record
+contract](../test-records.md). The current default arm leaves the shipping
+action's `variant` input unset. The explicit ON package and pattern jobs set
+it to `server-execution`, so results from the two configurations keep separate
+histories. Any additional non-default arm uses its own stable variant. The
+workflow tests assert both that non-default arms carry their exact marker and
+that the default arm remains unmarked. When ON becomes the default, remove its
+marker and mark the surviving explicit OFF arm as `server-execution-off`; new
+default runs then continue the existing unmarked history.
+
 ## 3. The watermark replaces polling
 
 `waitForSettled(space, seq)` — new test helper: resolves when the
