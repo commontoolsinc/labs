@@ -183,12 +183,21 @@ export interface RepairOptions {
  * BEFORE the fixer module is imported: a dynamic import runs top-level
  * code, and an implementation the plan's reviewer never saw must not run
  * even that much. `repairPieces` applies the same gate behind the seam.
+ *
+ * A zero-row plan is refused here outright: it pins nothing, so this gate
+ * would hold nothing, and a caller with a legitimately empty run has no
+ * fixer to gate — it skips the gate and the import both.
  */
 export function assertPlanRunsFixer(
   plan: PiecePlan,
   fixerName: string,
   fixerIdentity: string,
 ): void {
+  if (plan.rows.length === 0) {
+    throw new Error(
+      "A zero-row plan pins no fixer, so nothing can be gated against it.",
+    );
+  }
   const unrunnable = plan.rows.filter((row) => row.op?.kind !== "repair");
   if (unrunnable.length > 0) {
     throw new Error(
@@ -659,8 +668,12 @@ export async function repairPieces(
     }
     // The pair rule above means a run with a fixerName carries the
     // identity too, and the fixerName requirement for plans has already
-    // fired for a run with neither.
-    assertPlanRunsFixer(plan, options.fixerName, options.fixerIdentity!);
+    // fired for a run with neither. A zero-row plan pins nothing and gates
+    // nothing; whether it fits this run is the selection equality's
+    // question below, which refuses it against any nonempty selection.
+    if (plan.rows.length > 0) {
+      assertPlanRunsFixer(plan, options.fixerName, options.fixerIdentity!);
+    }
     const surveyByPiece = new Map(members.map((row) => [row.piece, row]));
     const planPieces = new Set(plan.rows.map((row) => row.piece));
     const missing = members.filter((row) => !planPieces.has(row.piece));

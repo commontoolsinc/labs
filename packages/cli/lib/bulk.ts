@@ -136,12 +136,26 @@ export async function runRepair(
   const plan = request.planPath === undefined ? undefined : decodePlan(
     await (deps.readTextFile ?? Deno.readTextFile)(request.planPath),
   );
-  if (plan !== undefined) {
+  if (plan !== undefined && plan.rows.length > 0) {
     // Every row is held to the run's fixer — operation, name, and pin —
     // before the module is imported: a dynamic import evaluates top-level
     // code, and a plan that cannot run this fixer must not run any of it.
     // The library applies the same gate again behind the seam.
     assertPlanRunsFixer(plan, request.fixerName, fixerIdentity);
+  }
+  if (plan !== undefined && plan.rows.length === 0) {
+    // A zero-row plan pins nothing, so nothing must run under it — the
+    // fixer is not even imported. Whether the plan fits this run is the
+    // library's selection equality, which refuses it against any nonempty
+    // selection; against an empty one the run is a no-op report.
+    return await repairPieces(pieces, {
+      selector,
+      fixer: zeroRowFixer,
+      fixerName: request.fixerName,
+      fixerIdentity,
+      plan,
+      ...(request.apply === true ? { apply: true } : {}),
+    });
   }
   const module = await (deps.importProgram ?? importProgramSnapshot)(program);
   const fixer = (module as { default?: unknown }).default;
@@ -159,6 +173,15 @@ export async function runRepair(
     ...(plan === undefined ? {} : { plan }),
     ...(request.apply === true ? { apply: true } : {}),
   });
+}
+
+/**
+ * The fixer a zero-row plan run carries: such a run evaluates no rows, so
+ * nothing may call this — and it says so if something does, rather than
+ * quietly transforming a document no plan accounted for.
+ */
+export function zeroRowFixer(): Record<string, unknown> {
+  throw new Error("A zero-row plan runs no fixer.");
 }
 
 /**

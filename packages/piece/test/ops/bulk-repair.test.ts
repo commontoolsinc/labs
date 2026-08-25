@@ -10,6 +10,7 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 
 import {
+  assertPlanRunsFixer,
   collectLinkPaths,
   documentChanges,
   evaluateFixer,
@@ -1140,6 +1141,28 @@ describe("bulk-repair", () => {
         "repaired",
       ]);
       expect(resumed.complete).toBe(true);
+    });
+
+    it("refuses to gate against a zero-row plan", () => {
+      // The gate holds rows to a fixer; a plan with none would pass every
+      // check vacuously, which is exactly the bypass this refusal closes.
+      expect(() =>
+        assertPlanRunsFixer(
+          {
+            header: {
+              kind: "piece-plan",
+              v: 1,
+              space: "did:key:test",
+              takenAt: "2026-08-25T00:00:00.000Z",
+              selector: "collection",
+              enumerated: { collection: 0, registry: 0, registeredOutside: 0 },
+            },
+            rows: [],
+          },
+          "upper-seed.ts",
+          "impl-v1",
+        )
+      ).toThrow("pins no fixer");
     });
 
     it("pins the fixer implementation, not its name", async () => {

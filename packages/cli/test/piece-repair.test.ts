@@ -14,7 +14,12 @@ import { Runtime, type RuntimeProgram } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { decode } from "@commonfabric/utils/encoding";
 
-import { type RepairRunRequest, runRepair } from "../lib/bulk.ts";
+import {
+  programEntryIdentity,
+  resolveLocalSourceProgram,
+} from "@commonfabric/piece/ops/bulk-local";
+
+import { type RepairRunRequest, runRepair, zeroRowFixer } from "../lib/bulk.ts";
 import { piece, repairFromCommand, setQuietMode } from "../commands/piece.ts";
 
 function captureStdout(fn: () => Promise<void>): Promise<string> {
@@ -412,7 +417,7 @@ describe("piece-repair", () => {
       ).toBe("ALPHA");
     });
 
-    it("imports a real on-disk fixer and pins its computed identity", async () => {
+    it("hashes and executes one snapshot, whatever the disk does after", async () => {
       const member = await pieces.create(memberProgram(), {
         input: { seed: "alpha" },
       });
@@ -422,17 +427,28 @@ describe("piece-repair", () => {
         await Deno.writeTextFile(
           fixerPath,
           [
+            'import { transform } from "./helper.ts";',
             "export default (document: Readonly<Record<string, unknown>>) => ({",
             "  ...document,",
             '  ...(typeof document.seed === "string"',
-            "    ? { seed: document.seed.toUpperCase() }",
+            "    ? { seed: transform(document.seed) }",
             "    : {}),",
             "});",
             "",
           ].join("\n"),
         );
-        // No injected import and no injected identity: the defaults import
-        // the module from disk and hash its authored closure.
+        await Deno.writeTextFile(
+          `${dir}/helper.ts`,
+          "export const transform = (text: string) => text.toUpperCase();\n",
+        );
+        // The resolution is the test's hook: it hands the run the REAL
+        // resolved snapshot, then rewrites both files on disk. The default
+        // identity and import run on the snapshot, so the recorded pin and
+        // the executed behavior must both be the originals.
+        const snapshot = await resolveLocalSourceProgram(pieces.runtime, {
+          main: fixerPath,
+        });
+        const expectedIdentity = await programEntryIdentity(snapshot);
         const dry = await runRepair({} as never, {
           selector: { kind: "list", pieces: [member.id] },
           fixerPath,
@@ -441,15 +457,95 @@ describe("piece-repair", () => {
           loadPieces: () => Promise.resolve(pieces),
           resolvePieceAddress: (_pieces: unknown, token: string) =>
             Promise.resolve(token),
+          resolveFixerProgram: async () => {
+            await Deno.writeTextFile(
+              `${dir}/helper.ts`,
+              "export const transform = (text: string) => " +
+                "text.toLowerCase();\n",
+            );
+            await Deno.writeTextFile(
+              fixerPath,
+              "export default () => ({ hijacked: true });\n",
+            );
+            return snapshot;
+          },
         } as never);
         expect(dry.rows[0].verdict).toBe("would-change");
+        expect(dry.rows[0].changes).toEqual([
+          { path: "/seed", kind: "changed", before: "alpha", after: "ALPHA" },
+        ]);
         const op = dry.plan.rows[0].op;
         if (op?.kind !== "repair") throw new Error("expected a repair op");
-        expect(op.fixerIdentity).toBeDefined();
-        expect(op.fixerIdentity).not.toBe("");
+        expect(op.fixerIdentity).toBe(expectedIdentity);
       } finally {
         await Deno.remove(dir, { recursive: true });
       }
+    });
+
+    it("never imports the fixer for a zero-row plan", async () => {
+      // A holder with an empty collection: the dry run's plan has no
+      // member rows, which is a valid artifact — and one that pins
+      // nothing, so nothing may run under it, the import included.
+      const holder = await pieces.create({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            "import { NAME, pattern } from 'commonfabric';",
+            "export default pattern<{ members?: unknown[] }>(",
+            "  ({ members }) => ({ [NAME]: 'Holder', members }),",
+            ");",
+            "",
+          ].join("\n"),
+        }],
+      }, { input: { members: [] } });
+      // A real (if trivial) fixer file, so the default snapshot
+      // resolution and identity run for real; only the import is a spy.
+      const dir = await Deno.makeTempDir({ prefix: "cli-repair-zero" });
+      const fixerPath = `${dir}/fix.ts`;
+      await Deno.writeTextFile(
+        fixerPath,
+        "export default (d: Readonly<Record<string, unknown>>) => ({ ...d });\n",
+      );
+      let imports = 0;
+      const deps = {
+        loadPieces: () => Promise.resolve(pieces),
+        resolvePieceAddress: (_pieces: unknown, token: string) =>
+          Promise.resolve(token),
+        importProgram: () => {
+          imports += 1;
+          return Promise.resolve(upperSeed);
+        },
+      };
+      const base = {
+        selector: {
+          kind: "collection" as const,
+          holder: holder.id,
+          path: ["members"],
+        },
+        fixerPath,
+        fixerName: "fix.ts",
+      };
+      const dry = await runRepair({} as never, base, deps as never);
+      expect(dry.plan.rows).toEqual([]);
+      expect(imports).toBe(1);
+
+      const applied = await runRepair({} as never, {
+        ...base,
+        planPath: "/plans/empty.jsonl",
+        apply: true,
+      }, {
+        ...deps,
+        readTextFile: () => Promise.resolve(JSON.stringify(dry.plan.header)),
+      } as never);
+      expect(applied.rows).toEqual([]);
+      expect(applied.complete).toBe(true);
+      expect(applied.applied).toBe(0);
+      // The dry run imported once; the zero-row apply imported nothing.
+      expect(imports).toBe(1);
+      await Deno.remove(dir, { recursive: true });
+      // The stub a zero-row run carries refuses if anything ever calls it.
+      expect(() => zeroRowFixer()).toThrow("runs no fixer");
     });
 
     it("refuses a fixer module that does not default-export a function", async () => {
