@@ -2548,6 +2548,10 @@ class SpaceReplica implements ISpaceReplica {
    * applySessionSync (the released entries' own frame) does not start a
    * second drain. */
   #releasingParkedClosure = false;
+  /** One full re-evaluation at a time for the park (see
+   * `escalateParkedSchemaClosure`); a resync is expensive and one
+   * covers every hash outstanding when it runs. */
+  #schemaClosureResyncInFlight = false;
   readonly #updatePromises = new Set<Promise<void>>();
   readonly #sinks = new Map<
     string,
@@ -5904,12 +5908,17 @@ class SpaceReplica implements ISpaceReplica {
         this.sync(`cid:${hash}` as URI)
           .then(() => {
             if (!this.#isVerifiedSchemaDocDelivered(hash, EMPTY_OVERLAY)) {
-              // Not installed server-side yet, or the pull failed:
-              // re-arm so a later frame retries instead of the window
-              // going permanent for the session. (The pull can report
-              // an error and still have delivered the document; the
-              // residency check is the authority, not the result.)
+              // The pull came back WITHOUT the document. Under the
+              // session's delivery cache that is the diagnostic
+              // signature of this defect, not an absent document: a
+              // `watch.add` — which is what a pull issues — diffs its
+              // answer against that cache, so a document the cache
+              // claims delivered is elided even when the request names
+              // it as a root. Asking again cannot help; only a full
+              // evaluation can. Re-arm (the document may genuinely be
+              // absent and arrive later) and escalate.
               this.#kickedSchemaClosurePulls.delete(hash);
+              this.escalateParkedSchemaClosure();
               return;
             }
             // Release HERE rather than relying on the arrival hook: a
@@ -5996,6 +6005,49 @@ class SpaceReplica implements ISpaceReplica {
           });
       });
     }
+  }
+
+  /**
+   * Re-establish the watch set as a FULL evaluation, so the server
+   * re-ships its whole assembled closure.
+   *
+   * The last resort behind the park, and the only one that works when
+   * the session's delivery cache and this replica disagree about a
+   * document: `watch.add` (a pull) answers from that cache and elides
+   * what it believes delivered, so the document is unobtainable by
+   * request. `watch.set` rebuilds and ships everything, which is the
+   * "full evaluation" the quarantine diagnostic names.
+   *
+   * Expensive, so it is single-flight: one resync covers every hash
+   * outstanding when it runs, and the release afterwards drains the
+   * whole park.
+   */
+  private escalateParkedSchemaClosure(): void {
+    if (
+      this.#schemaClosureResyncInFlight ||
+      this.#parkedOnSchemaClosure.size === 0 || this.#closed
+    ) {
+      return;
+    }
+    this.#schemaClosureResyncInFlight = true;
+    queueMicrotask(async () => {
+      try {
+        const { session } = await this.activeSessionHandle();
+        const result = await session.resyncWatchSet?.();
+        if (result !== undefined && !this.#closed) {
+          this.applySessionSync(result.sync, "pull");
+        }
+      } catch (error) {
+        logger.warn("schema-closure-resync-failed", () => [
+          "the parked-closure full re-evaluation failed; a later frame",
+          "carrying the reference re-kicks",
+          error,
+        ]);
+      } finally {
+        this.#schemaClosureResyncInFlight = false;
+      }
+      this.releaseParkedSchemaClosures("integrate");
+    });
   }
 
   // Mark every id this conflicted commit touched (reads + writes) stale until

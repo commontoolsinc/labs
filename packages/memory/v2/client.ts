@@ -861,6 +861,28 @@ export class SpaceSession {
     );
   }
 
+  /**
+   * Re-establish the CURRENT watch set as a FULL evaluation.
+   *
+   * `watch.add` answers from the session's delivery cache: an entry the
+   * cache already claims delivered is diffed out, even when the request
+   * names that document as a root. So a replica that does not hold a
+   * document the cache believes it has cannot obtain it by asking for
+   * it — the pull returns an empty frame. `watch.set` is the way back:
+   * the server rebuilds the assembled closure and ships all of it
+   * (`buildFullSync` maps every entry, diffing only removes), which is
+   * the "full evaluation" the arrival validator's quarantine
+   * diagnostic points at. Resolves undefined when there is no watch
+   * set to re-establish.
+   */
+  async resyncWatchSet(): Promise<WatchMutationResult | undefined> {
+    this.#assertOpen();
+    if (this.#watchSpecs.length === 0) {
+      return undefined;
+    }
+    return await this.watchSetSync([...this.#watchSpecs]);
+  }
+
   async watchAdd(watches: WatchSpec[]): Promise<WatchView> {
     this.#assertOpen();
     const hadView = this.#watchView !== null;
