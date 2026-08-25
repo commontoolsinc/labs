@@ -2864,13 +2864,10 @@ export class WaveAccumulator
         outcome.dispositions[idx] = allDropped
           ? { kind: "dropped" }
           : { kind: "partially-dropped", droppedOps };
-        if (allDropped) {
-          this.#warnDropped(
-            contribution,
-            "superseded pure derivation writes dropped from the wave " +
-              "commit (serving-loop.md §3d)",
-          );
-        }
+        // No #warnDropped here: a superseded pure derivation is the
+        // EXPECTED recovery path — the superseding authored commit is the
+        // fresh state its readers reconverge from — not the one-shot loss
+        // class the warn exists for.
         // Any surviving ops rode the wave commit; the sealed commit's own
         // overlay rolls back whole and reconverges from the wave commit
         // (or, all-dropped, from the superseding authored commit) arriving

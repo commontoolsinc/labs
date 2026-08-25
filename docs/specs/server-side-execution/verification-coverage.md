@@ -6077,25 +6077,37 @@ supply; OW29/OW32/OW34 closed):
     below), the client faithfully renders the durable error box, the
     create input never exists, and the run is SILENT — the register's
     "fail EARLIER at the host's create" prediction, mechanized. FIX
-    (red-first): the conflict-class loser now YIELDS to the winner's
-    surface — loud `sidecar-run-raced` warn per serving-loop.md §3d's
-    failure-arm contract; the error UI is reserved for real
-    fetch/compile/run failures; the thrown arm classifies
-    identically. No local dedupe latch: the pin drives the duplicate
-    from a second runtime instance of the same node (cause-derived
+    (red-first): a conflict-class failure (commit-refused or thrown
+    mid-run) now checks the RESULT CELL — a materialized value there
+    means a sibling instantiation won, and the loser YIELDS, loudly
+    (`sidecar-run-raced`, serving-loop.md §3d's failure-arm
+    contract); an EMPTY cell means the conflict came from an input
+    doc (e.g. the home `profiles` list moving), and the run RE-RUNS
+    against fresh state (bounded, three attempts) rather than
+    abandoning the only instantiation; the error UI is reserved for
+    real fetch/compile/run failures and the bounded-retry terminal.
+    No local dedupe latch: the pin drives the duplicate from a
+    second runtime instance of the same node (cause-derived
     convergence is the design), so yield-on-conflict — the OCC
     discipline `createSpaceRootIfAbsent` already uses — is the fix,
     not dedupe. Pin: `wish-sidecar-duplicate-launch.test.ts` (two
     runtimes, one store, the same compiled `#profile` piece → one
     wish-node cause → one sidecar cell; a gated fetch holds the
-    duplicate window open deterministically; watched red at
-    `$NAME` undefined with the conflict text durable; removing only
-    the conflict-class yield reds it again). The sidecar run also now
-    awaits its wave settlement and warns (`sidecar-run-withdrawn`)
-    when a committed instantiation is withdrawn, and the wave
-    accumulator names every DROPPED contribution
-    (`contribution-dropped` — requeues stay quiet): the r05/p11
-    cascades each surfaced exactly ONE logged symptom before this.
+    duplicate window open, a registration-counted witness — the
+    `wishSidecarDiagnostics` test seam, this package's stand-in for
+    the missing logger-capture idiom — proves the duplicate
+    continuation is chained before release, and a runs-delta
+    assertion kills the vacuous-green path; watched red at `$NAME`
+    undefined with the conflict text durable; removing only the
+    conflict-class yield reds it again). The sidecar run also now
+    observes its wave settlement OUTSIDE the tracked launch (an
+    awaited settlement would make `idle()` wait on the wave that
+    waits on quiescence) and warns (`sidecar-run-withdrawn`) when a
+    committed instantiation is withdrawn, and the wave accumulator
+    names DROPPED contributions (`contribution-dropped` — requeues
+    and superseded derivations stay quiet; both are expected
+    recovery): the r05/p11 cascades each surfaced exactly ONE logged
+    symptom before this.
     Live at the fix head: 6/6 GREEN in 23-27 s (shared-profile ×2,
     profile-embed ×2, probe ×2; same harness, fresh store + posture
     probe per run) against 6/11 red pre-fix on the same box — the

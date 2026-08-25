@@ -5,6 +5,7 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { Runtime } from "../src/runtime.ts";
+import { wishSidecarDiagnostics } from "../src/builtins/wish.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 import { NAME, UI } from "../src/builder/types.ts";
@@ -169,6 +170,9 @@ describe("wish profile-create sidecar duplicate launch", () => {
       // starts in the second runtime. Its launch joins the shared memoized
       // fetch and registers the duplicate continuation.
       await entryRequested.promise;
+      const continuationsBefore =
+        wishSidecarDiagnostics.profileCreateFetchContinuations;
+      const runsBefore = wishSidecarDiagnostics.sidecarRunsStarted;
 
       await rt1.patternManager.flushCompileCacheWrites();
       await rt1.storageManager.synced();
@@ -176,13 +180,24 @@ describe("wish profile-create sidecar duplicate launch", () => {
       await piece2.sync();
       const started = await rt2.start(piece2);
       expect(started).toBe(true);
-      // Demand drives rt2's wish action too (the launch that registers the
-      // duplicate continuation); its pull may also park behind the gate, so
-      // it is left racing. The pump is generosity for rt2's scheduler — the
-      // held gate means it cannot lose a race.
+      // Demand drives rt2's wish action too; its pull may also park behind
+      // the gate, so it is left racing.
       const demand2 = piece2.pull().catch(() => {});
-      await new Promise((resolve) => setTimeout(resolve, 400));
       void demand2;
+      // STRUCTURAL WITNESS: wait until rt2's launch has chained the
+      // duplicate continuation on the shared in-flight fetch (counted at
+      // registration in wish.ts's diagnostics seam). The gate is held, so
+      // this wait cannot lose a race; the bound only converts a hung
+      // scheduler into a loud failure instead of a hang.
+      for (let attempt = 0; attempt < 500; attempt++) {
+        if (
+          wishSidecarDiagnostics.profileCreateFetchContinuations >
+            continuationsBefore
+        ) break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(wishSidecarDiagnostics.profileCreateFetchContinuations)
+        .toBeGreaterThan(continuationsBefore);
 
       // Release the fetch: every registered continuation instantiates into
       // the same cause-derived cell; idle() covers the tracked launches.
@@ -203,6 +218,13 @@ describe("wish profile-create sidecar duplicate launch", () => {
       // Pre-fix, the losing duplicate's conflict-class commit error wrote an
       // error UI over the winner (remove $NAME/createProfile, $UI -> an error
       // span carrying "Transaction consistency violated").
+      // Vacuity killer: the duplicate instantiation actually RAN (rt1's
+      // and rt2's continuations both invoked runSidecarInOwnTx) — without
+      // this, a timing miss would green the contract assertions on a
+      // single launch that raced nothing.
+      expect(wishSidecarDiagnostics.sidecarRunsStarted - runsBefore)
+        .toBeGreaterThanOrEqual(2);
+
       const surface = createCell.get() as Record<string | symbol, unknown>;
       const raw = JSON.stringify(createCell.getRaw());
       // Both conflict-class spellings the loser's error arm can carry.
