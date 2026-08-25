@@ -7287,6 +7287,65 @@ supply; OW29/OW32/OW34 closed):
     true never-fires net), and any live `schema-doc-quarantine` log
     — each occurrence is evidence for that investigation, not a
     server-side hole.
+    SHIPPING SIDE RE-EXAMINED 2026-08-25 at `9e9562177` (PR #6265), and
+    the localization this row's successors were carrying does NOT HOLD.
+    That localization said `assembleSchemaDocClosures`
+    (memory/v2/query.ts) never completes one iteration of its
+    `while (pending.length > 0)` walk, leaving `additions` permanently
+    empty and the closure pass silently dead. Measured instead, by
+    instrumenting the loop: over
+    `runner/test/executor-space-root-ensure.test.ts`, 156 calls, 168
+    pops, and 22 calls staging 2 additions each; over the whole
+    `packages/runner` unit suite, up to 8 per call. The loop runs and
+    the pass stages. Three further corrections, each checked directly.
+    (i) The named reproduction does not reproduce anything: all four
+    `schema-doc-quarantine` lines in that run come from the one step
+    that DELIBERATELY drops every `cid:` upsert at the reader (this
+    row's own containment pin), and there is no organic quarantine in
+    that file on main. (ii) The delivery invariant HOLDS. A temporary
+    per-session probe at all four server frame-emission points
+    (watch.set, watch.add, push, full re-evaluation) checked that every
+    `cid:` a delivered document references was carried by that frame or
+    by an earlier frame of the same session, crediting the CT-1965
+    own-write echo elision (whose writer supplied the bytes): ZERO
+    violations across the whole `packages/memory` suite, the whole
+    `packages/runner` unit suite (118 ref-carrying frames), and — at
+    the true topology, a source-run toolshed with
+    EXPERIMENTAL_SERVER_EXECUTION=true and the space-root ensure ON
+    (`rootEnsure.created` 37) — the `packages/runner` and
+    `packages/runtime-client` integration lanes, 260 ref-carrying
+    frames, both green with zero client quarantines. (iii) This row's
+    own "Cz/Nz/xz reference g2" is wrong: all four are LEAF schemas
+    with no external refs, so that sentence describes the client
+    validator's quarantine fixpoint over REFERRERS, not a schema-ref
+    edge. What the re-examination did establish is a coverage hole: the
+    memory package pinned NEITHER half of the guarantee — no test in it
+    drove a cid-mentioning document through a session frame at all —
+    which is why a defect in it could only ever surface as a
+    cross-package integration mystery. Closed by
+    `memory/test/v2-schema-doc-closure-delivery.test.ts`: seven
+    properties over one scenario driven through the real session
+    machinery, every watch using the SELECTS-NOTHING selector (this
+    row's own space-cell-only trigger shape — that walk never descends
+    through a link, so the closure pass is the only route a mentioned
+    schema can arrive by; under a walking selector the traversal loads
+    them anyway and every assertion passes with the pass entirely
+    disabled, which is exactly the "reaches the client by incidental
+    graph traversal" observation, now pinned against). Mutation matrix,
+    one mutation per property: staging removed reds all seven; the
+    transitive dep walk removed reds exactly the transitivity leg and
+    the whole-guarantee leg; the push path's `sameSnapshot` elision
+    removed reds exactly the elision leg. The fourth mutation is the
+    finding worth keeping: removing the closure pass's
+    `tracker.has(key)` STAGING GATE changes no wire frame at all, so
+    that gate is not what protects the owner's ruling — the
+    anti-retransmission guarantee lives in the frame builders'
+    session-cache diff, and the gate is CPU saving over a redundant
+    predicate. STILL OPEN at this tip: the ensure-ON board (the four
+    `SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false` lines removed — PR
+    #6248's change, carried on #6265 to board it), whose pattern shards
+    and shell lane are the topologies the local runs above cannot
+    reach.
 
   - **OW62 — adopt-not-start: the piece-open seam is where the ON
     execution model's "one starter per piece" has to land. POST-FLIP
