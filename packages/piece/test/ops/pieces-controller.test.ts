@@ -47,6 +47,7 @@ describe("pieces-controller", () => {
     let storageManager: ReturnType<typeof StorageManager.emulate>;
     let runtime: Runtime;
     let pieces: PiecesController;
+    let defaultRoot: Cell<unknown>;
     let piece: Cell<unknown>;
 
     beforeEach(async () => {
@@ -64,7 +65,7 @@ describe("pieces-controller", () => {
       );
       await pieces.synced();
 
-      const defaultRoot = await pieces.runPersistent(
+      defaultRoot = await pieces.runPersistent(
         defaultRegistryPattern(),
         { pieceRegistry: [] },
         "pieces-controller-default-root",
@@ -139,6 +140,52 @@ describe("pieces-controller", () => {
             restore();
           }
           expect(await registeredIds()).toContain(pieceId(piece)!);
+        });
+
+        it("removes a registered default pattern and clears its link in a single commit", async () => {
+          await pieces.add([defaultRoot]);
+          const registry = await pieces.getPieceRegistry();
+
+          const editWithRetry = runtime.editWithRetry;
+          let commits = 0;
+          runtime.editWithRetry = ((fn, maxRetries) => {
+            commits += 1;
+            return editWithRetry.call(runtime, fn, maxRetries);
+          }) as typeof runtime.editWithRetry;
+          try {
+            expect(await pieces.remove(defaultRoot)).toBe(true);
+          } finally {
+            runtime.editWithRetry = editWithRetry;
+          }
+
+          expect(commits).toBe(1);
+          expect(
+            registry.get().map((entry) => pieceId(entry)),
+          ).not.toContain(pieceId(defaultRoot)!);
+          expect(await pieces.getDefaultPattern(false)).toBeUndefined();
+        });
+
+        it("leaves the registry and the default link intact when removing the default pattern cannot commit", async () => {
+          await pieces.add([defaultRoot]);
+
+          const restore = failCommits();
+          try {
+            await expect(pieces.remove(defaultRoot)).rejects.toThrow(
+              "Removing the piece failed because storage returned " +
+                "StorageTransactionAborted: commit rejected by test",
+            );
+          } finally {
+            restore();
+          }
+
+          expect(await registeredIds()).toContain(pieceId(defaultRoot)!);
+          expect(await pieces.getDefaultPattern(false)).toBeDefined();
+        });
+
+        it("returns `false` and leaves the default-pattern link in place for an unregistered default pattern", async () => {
+          expect(await pieces.remove(defaultRoot)).toBe(false);
+
+          expect(await pieces.getDefaultPattern(false)).toBeDefined();
         });
       });
 
