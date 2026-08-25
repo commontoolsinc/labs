@@ -1940,6 +1940,13 @@ export class SpeculationOverlayDestination
           // A cid doc with NO confirmed cover still holds the entry:
           // nothing has served the schema document yet, and dropping
           // the layer would flip local schema resolution to nothing.
+          // The identity is enforced, not assumed: admission refuses
+          // any `cid:` set that is not the first installation or
+          // content-identical to what is stored (memory/v2 engine.ts,
+          // the content-addressed immutability pass), so a stored cid
+          // doc's value can never change and a divergent speculative
+          // layer could never land — retiring it renders the stored
+          // value, the store-wins outcome divergence always gets.
           if (doc.id.startsWith("cid:") && state.confirmedSeq > 0) {
             continue;
           }
