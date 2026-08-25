@@ -819,7 +819,6 @@ export function wishTargetCandidates(): ProviderResult {
     { value: "#journal", description: "space-relative" },
     { value: "#learned", description: "space-relative" },
     { value: "#mentionable", description: "space-relative" },
-    { value: "#recent", description: "space-relative" },
     { value: "#pieceRegistry", description: "space-relative" },
     { value: "/", description: "the space's root" },
   ]);

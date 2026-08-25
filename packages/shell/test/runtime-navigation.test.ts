@@ -25,6 +25,7 @@ type MockRuntimeClientEvents = {
 class MockRuntimeClient extends EventEmitter<MockRuntimeClientEvents> {
   idleCalls = 0;
   syncedCalls = 0;
+  spaceRootPatternCalls = 0;
   slugByPageId = new Map<string, string | undefined>();
 
   idle(): Promise<void> {
@@ -39,6 +40,11 @@ class MockRuntimeClient extends EventEmitter<MockRuntimeClientEvents> {
 
   getPageSlug(pageId: string): Promise<string | undefined> {
     return Promise.resolve(this.slugByPageId.get(pageId));
+  }
+
+  getSpaceRootPattern(): Promise<never> {
+    this.spaceRootPatternCalls += 1;
+    return new Promise(() => {});
   }
 
   dispose(): Promise<void> {
@@ -83,7 +89,7 @@ describe("RuntimeInternals navigation", () => {
     }
   });
 
-  it("waits for the current runtime to settle before cross-space navigation", async () => {
+  it("navigates after convergence without reading the space root", async () => {
     const env = globalThis as typeof globalThis & {
       $API_URL?: string;
       $ENVIRONMENT?: string;
@@ -128,6 +134,7 @@ describe("RuntimeInternals navigation", () => {
 
       expect(client.idleCalls).toBe(1);
       expect(client.syncedCalls).toBe(1);
+      expect(client.spaceRootPatternCalls).toBe(0);
       expect(navigation).toEqual({
         spaceDid: nextSpace,
         pieceId: "piece-456",
