@@ -166,7 +166,7 @@ const runWithAbortSignal = async <T>(
 // per-connection sets are published on globalThis only so the arrival
 // validator in runner/src/storage/v2.ts can read them back.
 type Ow61Conn = {
-  seen: Set<string>;
+  seen: Map<string, number>;
   frames: number;
   label: string;
   sessions: Set<string>;
@@ -180,7 +180,7 @@ const OW61_CID = /cid:(fid1:[A-Za-z0-9_-]+)/g;
 const ow61NewConn = (): Ow61Conn => {
   const state = ow61State();
   const conn: Ow61Conn = {
-    seen: new Set(),
+    seen: new Map(),
     frames: 0,
     label: `c${++state.seq}`,
     sessions: new Set(),
@@ -206,7 +206,7 @@ const ow61Socket = (conn: Ow61Conn, payload: string): void => {
   for (const hash of mentioned) {
     if (payload.includes(`"id":"cid:${hash}"`)) {
       delivered.push(hash);
-      conn.seen.add(hash);
+      if (!conn.seen.has(hash)) conn.seen.set(hash, conn.frames);
     }
   }
   console.error(

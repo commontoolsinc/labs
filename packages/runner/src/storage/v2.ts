@@ -2455,7 +2455,7 @@ type LocalDocAddress = { id: URI; scope?: CellScope; scopeKey?: ScopeKey };
 // frame carried on entry to apply, what the store held before and after,
 // and — at a quarantine — how far the missing document actually got.
 type Ow61Conn = {
-  seen: Set<string>;
+  seen: Map<string, number>;
   frames: number;
   label: string;
   sessions: Set<string>;
@@ -2469,6 +2469,12 @@ const ow61State = (): Ow61State => {
  *  realm-wide hit is no longer reported as this replica's. */
 const ow61ConnsSeeing = (hash: string): Ow61Conn[] =>
   ow61State().conns.filter((conn) => conn.seen.has(hash));
+
+// Only the FIRST quarantine on a replica characterises the trigger. Every
+// one after it is cascade: a quarantine drops correctly delivered schema
+// documents, the server never re-offers them, and they become the next
+// frame's missing deps. Counting quarantines counts the cascade.
+const ow61FirstFire = new WeakSet<object>();
 
 const ow61CidsOf = (sync: SessionSync): string[] => {
   const ids: string[] = [];
@@ -2546,6 +2552,38 @@ const ow61Why = (
   return `overlay=${ow61Describe(overlay.get(`cid:${hash}`), hash)}` +
     ` store=${ow61Describe(store.getDocument(`cid:${hash}`), hash)}` +
     ` inFrameOverlay=${overlay.has(`cid:${hash}`)}`;
+};
+
+/**
+ * The state at a replica's FIRST quarantine — the only one that describes
+ * the trigger rather than the cascade it starts.
+ */
+const ow61First = (
+  replica: SpaceReplica,
+  hash: string,
+  sync: SessionSync,
+): string => {
+  const store = replica as unknown as { getDocument(uri: string): unknown };
+  const mySession = ow61MySession(replica);
+  const carried = ow61CidsOf(sync);
+  const seenAt = ow61State().conns
+    .filter((conn) =>
+      mySession !== undefined && conn.sessions.has(mySession) &&
+      conn.seen.has(hash)
+    )
+    .map((conn) =>
+      `${conn.label}@frame${conn.seen.get(hash)}/of${conn.frames}`
+    );
+  const heldCids = ow61State().conns.length;
+  return `missing=cid:${hash.slice(5, 12)} session=${mySession?.slice(0, 8)}` +
+    ` frameType=${(sync as { type?: string }).type ?? "?"}` +
+    ` fromSeq=${(sync as { fromSeq?: number }).fromSeq}` +
+    ` toSeq=${sync.toSeq}` +
+    ` frameCarriedCids=${carried.length}` +
+    ` frameCarriesMissing=${carried.includes(hash)}` +
+    ` storeHasMissing=${store.getDocument(`cid:${hash}`) !== undefined}` +
+    ` mySessionSawItAt=[${seenAt.join(",")}]` +
+    ` connsInRealm=${heldCids}`;
 };
 
 const ow61Stages = (replica: SpaceReplica, hash: string): string => {
@@ -5621,6 +5659,13 @@ class SpaceReplica implements ISpaceReplica {
             quarantined.add(referrer);
             overlay.delete(referrer);
             changed = true;
+            if (!ow61FirstFire.has(this)) {
+              ow61FirstFire.add(this);
+              logger.error(
+                "ow61-FIRST-FIRE",
+                () => [ow61First(this, dep, sync)],
+              );
+            }
             logger.error("schema-doc-quarantine-stages", () => [
               `${ow61Stages(this, dep)} ${ow61Why(this, dep, overlay)}`,
             ]);
