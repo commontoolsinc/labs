@@ -2175,6 +2175,16 @@ export class Runtime {
   // doc suffices. Scope is part of the key: scoped instances (user/session)
   // are distinct docs, and a kick for one scope must not suppress another's.
   private missingDocLoadKicks = new Set<string>();
+  // The subset of those kicks whose sync has not settled yet. Distinct from
+  // the permanent dedup above because the two answer different questions:
+  // the dedup answers "has a kick ever been taken", which must stay true for
+  // the manager's lifetime, while a caller asking whether an absence is
+  // still unresolved ("cannot read yet" versus "read as absent") needs a key
+  // that CLEARS when the load settles — a settled load means the replica now
+  // holds the doc's state or its confirmed absence, and treating the doc as
+  // pending past that point turns every confirmed absence into a permanent
+  // postponement.
+  private missingDocLoadsInFlight = new Set<string>();
 
   /**
    * Asynchronously load a link target that a read found absent from the
@@ -2216,7 +2226,12 @@ export class Runtime {
     const key = `${space}\0${
       resolveScopeKey(scope, identity ?? this.scopeKeyIdentity)
     }\0${id}`;
-    if (this.missingDocLoadKicks.has(key)) return true;
+    if (this.missingDocLoadKicks.has(key)) {
+      // Kicked before: pending exactly while that load is still in flight.
+      // Settled means the replica has seen the doc (its state or its
+      // confirmed absence), so the absence a reader found is a judged one.
+      return this.missingDocLoadsInFlight.has(key);
+    }
     // A same-space target the replica already has state for (or a manager
     // without lazy replication) needs no fetch.
     const sameSpace = sourceSpace === space;
@@ -2225,6 +2240,7 @@ export class Runtime {
       mgr.shouldPullDoc?.(space, id, scope, identity) === true;
     if (sameSpace && !reserved) return false;
     this.missingDocLoadKicks.add(key);
+    this.missingDocLoadsInFlight.add(key);
     const load = identity === undefined
       ? this.getCellFromLink(link).sync()
       // The instance-named load: the storage manager names the run's
@@ -2241,6 +2257,8 @@ export class Runtime {
         // not clear a reservation a concurrent same-space read holds.
         this.missingDocLoadKicks.delete(key);
         if (reserved) mgr.retractDocPullKick?.(space, id, scope, identity);
+      }).finally(() => {
+        this.missingDocLoadsInFlight.delete(key);
       }),
     );
     return true;

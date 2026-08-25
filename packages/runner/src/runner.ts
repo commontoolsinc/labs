@@ -1576,17 +1576,29 @@ export class Runner {
       undefined,
       tx,
     );
-    // The bracket that makes the verdict tri-state: the materialization
-    // resolves the argument's whole link graph through this transaction, and
-    // every link target it crosses that the local replica cannot serve is
-    // noted on the transaction (and its load kicked) by the read path. A
-    // validation with no such note is a verdict over data that was read; one
-    // alongside a note is no verdict at all, whichever way it leaned — the
-    // value is unknowable HERE, and judging it would tie the outcome to a
-    // replication state (the 2026-08-21 fleet outage: a profile name's seed
-    // doc sat one value-hop past everything the cold-start closure delivers,
-    // and refusing over the resulting `undefined` bricked every home space).
-    const missedBefore = missingLinkTargetsTx(tx).length;
+    // What makes the verdict tri-state: the materialization resolves the
+    // argument's whole link graph through this transaction, and every link
+    // target any read in this transaction crossed that the local replica
+    // could not serve is noted on the transaction (and its load kicked) by
+    // the read path. A validation with no such note is a verdict over data
+    // that was read; one alongside a note is no verdict at all, whichever
+    // way it leaned — the value is unknowable HERE, and judging it would
+    // tie the outcome to a replication state (the 2026-08-21 fleet outage:
+    // a profile name's seed doc sat one value-hop past everything the
+    // cold-start closure delivers, and refusing over the resulting
+    // `undefined` bricked every home space).
+    //
+    // The notes are consulted TRANSACTION-WIDE, deliberately not bracketed
+    // around this materialization: a read earlier in the same transaction
+    // may have materialized the same cold slot, populating the per-tx read
+    // cache and the resolution memo, and this materialization then replays
+    // the cached `undefined` without re-recording the miss. The note the
+    // earlier read left is the durable record of that unreadability, and
+    // scoping to it is what keeps the verdict independent of read order
+    // within the transaction. The cost is over-breadth — an unrelated cold
+    // read elsewhere in the transaction postpones this validation too — and
+    // that errs in the only safe direction: a postponement retries after
+    // settlement, while a verdict minted over unread bytes is wrong now.
     const materializedArgument = argumentCell.asSchema(undefined).withTx(tx)
       .get();
     const validationArgument: unknown = mergeSchemaDefaults(
@@ -1623,7 +1635,7 @@ export class Runner {
     // pass as absent — while the converged read may find a wrong-typed value
     // there and refuse — so a validation that crossed any unloaded target
     // yields no verdict at all, whichever way the readable subset leaned.
-    const missed = missingLinkTargetsTx(tx).slice(missedBefore);
+    const missed = missingLinkTargetsTx(tx);
     if (missed.length > 0) {
       const keys = [
         ...new Set(missed.map((link) => {

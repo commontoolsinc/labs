@@ -35,6 +35,7 @@ import {
   isStoredArgumentSchemaRefusal,
   isStoredArgumentValidationPending,
 } from "../src/index.ts";
+import { getMetaLink } from "../src/link-utils.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("setup-validation-convergence");
@@ -340,15 +341,31 @@ describe("pattern setup validation convergence", () => {
       });
     });
     expect(stampError?.message).toBeUndefined();
-    return { cell, attempt: () => attemptRun(cell, v2) };
+    return {
+      cell,
+      attempt: (options?: { preReadArgument?: boolean }) =>
+        attemptRun(cell, v2, options),
+    };
   };
 
   const attemptRun = async (
     cell: ReturnType<Runtime["getCell"]>,
     v2: unknown,
+    options?: { preReadArgument?: boolean },
   ): Promise<unknown> => {
     const tx = rtB.edit();
     try {
+      if (options?.preReadArgument) {
+        // The adversarial ordering: materialize the stored argument through
+        // the SAME open transaction before setup runs, so setup's own
+        // materialization replays the per-transaction read cache instead of
+        // re-resolving — the shape where a bracketed miss check sees no new
+        // notes and mints a verdict over unread data. The notes this read
+        // leaves on the transaction are what the validator must consult.
+        const argumentLink = getMetaLink(cell.withTx(tx), "argument")!;
+        rtB.getCellFromLink(argumentLink, undefined, tx).asSchema(undefined)
+          .get();
+      }
       // deno-lint-ignore no-explicit-any
       rtB.run(tx, v2 as any, undefined, cell.withTx(tx));
       const { error } = await tx.commit();
@@ -441,5 +458,98 @@ describe("pattern setup validation convergence", () => {
     expect(getPatternSetupIdentityRef(cell)?.identity).not.toBe(
       v2Ref.identity,
     );
+  });
+
+  it("postpones even when a pre-read in the same transaction cached the cold argument", async () => {
+    // The adversarial ordering, kept as a regression case: a read earlier in
+    // the SAME transaction materializes the cold argument, so setup's own
+    // materialization replays the per-transaction cache and re-records no
+    // miss of its own. The notes the earlier read left on the transaction
+    // are the durable record of the unreadability, and the verdict must not
+    // depend on which read came first — the postponement stands, and the
+    // settled retry completes as in the unordered case.
+    await createNotedInA(
+      "pre-read-cached",
+      "pre-read-cached-registry",
+      "pre-read-cached-note",
+      "fine",
+    );
+    const v2 = await rtB.patternManager.compilePattern(
+      programOf(patternWithNote("v2")),
+      { space },
+    );
+    const v2Ref = rtB.patternManager.getArtifactEntryRef(v2)!;
+    const { cell, attempt } = await setupAttemptInB(
+      "pre-read-cached",
+      "pre-read-cached-registry",
+      v2,
+      v2Ref,
+    );
+
+    const thrown = await attempt({ preReadArgument: true });
+
+    expect(
+      isStoredArgumentValidationPending(thrown),
+      "a pre-read in the same transaction erased the pending verdict — the " +
+        "read order changed what setup concluded about unread data",
+    ).toBe(true);
+    expect(isStoredArgumentSchemaRefusal(thrown)).toBe(false);
+
+    await rtB.storageManager.synced();
+    const retried = await attempt();
+    expect(retried).toBeUndefined();
+    expect(getPatternSetupIdentityRef(cell)?.identity).toBe(v2Ref.identity);
+  });
+
+  it("refuses, classifiably, an ITEM-level linked slot the server confirms absent", async () => {
+    // Links live at any depth: `registry` is supplied as an ARRAY whose item
+    // links a doc that was never written anywhere. The first attempt cannot
+    // read the item (never pulled) and postpones; convergence delivers the
+    // server's confirmed absence, and the retry judges the fully-read value —
+    // a required item type over nothing — as the classifiable refusal, so
+    // the boot repair escalates rather than retrying, and the piece stays on
+    // V1.
+    const tx = rtA.edit();
+    const entry = rtA.getCell<{ name?: string }>(
+      space,
+      "item-absent-entry",
+      undefined,
+      tx,
+    );
+    const v1 = await rtA.patternManager.compilePattern(
+      programOf(patternWithMarker("v1")),
+      { space, tx },
+    );
+    const cell = rtA.getCell<Record<string, unknown>>(
+      space,
+      "item-absent",
+      undefined,
+      tx,
+    );
+    const running = rtA.run(tx, v1, { registry: [entry] }, cell);
+    const { error: createError } = await tx.commit();
+    expect(createError?.message).toBeUndefined();
+    await running.pull();
+    await rtA.patternManager.flushCompileCacheWrites();
+    await rtA.idle();
+    await rtA.storageManager.synced();
+
+    const { cell: updated, error, thrown } = await updateInB("item-absent");
+
+    expect(
+      error,
+      "an update over a required ITEM whose linked doc the server confirms " +
+        "absent must refuse",
+    ).toContain("updated arguments do not match the candidate schema");
+    expect(
+      isStoredArgumentSchemaRefusal(thrown),
+      "the item-level confirmed absence surfaced as something other than " +
+        "the classifiable refusal — a postponement here would hold the " +
+        "update forever instead of judging the data",
+    ).toBe(true);
+    await updated.pull();
+    expect(
+      (updated.getAsQueryResult() as { marker: string }).marker,
+    ).toBe("v1");
   });
 });
