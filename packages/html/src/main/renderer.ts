@@ -264,9 +264,11 @@ export class VDomRenderer {
         rootId: notification.rootId,
       });
 
-      // Track root node ID if provided (for cleanup)
+      // Track the root node for cleanup. An absent `rootId` says nothing
+      // about the root and leaves the tracked one standing; `null` is the
+      // reconciler reporting a tree with no root child, and clears it.
       if (notification.rootId !== undefined) {
-        this.rootNodeId = notification.rootId > 0 ? notification.rootId : null;
+        this.rootNodeId = notification.rootId;
       }
 
       if (notification.mountId !== undefined) {

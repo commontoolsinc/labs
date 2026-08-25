@@ -1,5 +1,6 @@
 import { CompilerStackLoadError } from "../../runner/src/harness/deferred-compiler-stack.ts";
 import { NotificationType, RuntimeErrorCode } from "../protocol/mod.ts";
+import { postToClient } from "./post-to-client.ts";
 
 function runtimeErrorCode(error: Error): RuntimeErrorCode | undefined {
   return error instanceof CompilerStackLoadError
@@ -10,7 +11,7 @@ function runtimeErrorCode(error: Error): RuntimeErrorCode | undefined {
 /** Post an asynchronous renderer error to the shell. */
 export function postRuntimeError(error: Error): void {
   const code = runtimeErrorCode(error);
-  self.postMessage({
+  postToClient({
     type: NotificationType.ErrorReport,
     message: error.message,
     ...(code ? { code } : {}),
@@ -30,7 +31,7 @@ export function postContextualRuntimeError(
   error: ContextualRuntimeError,
 ): void {
   const code = runtimeErrorCode(error);
-  self.postMessage({
+  postToClient({
     type: NotificationType.ErrorReport,
     message: error.message,
     ...(code ? { code } : {}),
