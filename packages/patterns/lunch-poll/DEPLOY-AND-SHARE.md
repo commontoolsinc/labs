@@ -42,8 +42,19 @@ answering, re-establish it (see "Recovering the piece") and update this block.
 
 ### `estuary` — the stately instance, holding the real poll
 
-`estuary.saga-castor.ts.net` carries the team's **populated** poll — real
-participants, options and votes. Treat its state as production data.
+`estuary.saga-castor.ts.net` carries the team's poll as two pieces while the
+identity rollout is in progress. The **current** poll runs the profile-cell
+identity source (fresh piece, joined by creating or picking a profile):
+
+```
+space:  team-lunch
+piece:  fid1:gi7f-G8Z353Q_f_yLs_T3kB7A06TZjUmhf-M59bqvrE
+url:    https://estuary.saga-castor.ts.net/team-lunch/fid1:gi7f-G8Z353Q_f_yLs_T3kB7A06TZjUmhf-M59bqvrE
+```
+
+The **legacy name-keyed** poll still holds the accumulated participants, options
+and votes, and is Option B's migration source. Treat its state as production
+data.
 
 ```
 space:  team-lunch
@@ -104,7 +115,7 @@ on it before running it against a shared space.
 ```bash
 export CF_API_URL=https://estuary.saga-castor.ts.net/   # the populated poll; rapids.saga-castor.ts.net to iterate; http://localhost:8000 for local dev
 export CF_IDENTITY=./your-identity.key
-PIECE=fid1:S2MlU76VbKBRTtFt_hgPyi9MB04ti9yKN08G2IJJUW4   # estuary
+PIECE=fid1:S2MlU76VbKBRTtFt_hgPyi9MB04ti9yKN08G2IJJUW4   # estuary legacy populated poll (the current piece is in "The live pieces")
 SPACE=team-lunch
 
 # Keep this complete set on every source deployment in this guide.
