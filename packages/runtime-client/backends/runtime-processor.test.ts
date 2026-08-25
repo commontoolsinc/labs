@@ -12,6 +12,7 @@ import {
   FabricBytes,
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-primitives";
+import { isValidFabricValue } from "@commonfabric/data-model/fabric-value";
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import { getLogger } from "@commonfabric/utils/logger";
 import { Identity } from "@commonfabric/identity";
@@ -22,6 +23,7 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { siteTableCause, siteTableSchema } from "@commonfabric/home-schemas";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import {
+  type Cell,
   entityIdFrom,
   Runtime,
   type RuntimeFetch,
@@ -46,7 +48,8 @@ import {
   renderConfidentialityResolverFor,
   renderMembershipProviderFor,
   RuntimeProcessor,
-  sanitizeForPostMessage,
+  toConsoleDebugValue,
+  toConsoleWireValue,
 } from "./runtime-processor.ts";
 import {
   assertFabricLoggerFlags,
@@ -1157,228 +1160,468 @@ describe("page slug redirects", () => {
   });
 });
 
-describe("sanitizeForPostMessage", () => {
-  it("shows a twice-reachable value at both of its positions", () => {
-    // Shared, not circular: neither position is inside the other. Reporting
-    // the second as a cycle would misdescribe the data the dump exists to show.
-    const shared = { n: 1 };
-    expect(sanitizeForPostMessage({ x: shared, y: shared }))
-      .toEqual({ x: { n: 1 }, y: { n: 1 } });
+describe("toConsoleDebugValue", () => {
+  /** A cell reference as it is rendered, whatever entity it names. */
+  const CELL_LINK = /^\[Cell: of:fid1:[^\]]+\]$/;
+
+  /**
+   * Makes a runtime and a synced cell holding `{ name, count, self }`, where
+   * `self` is the cell itself, along with the teardown the caller runs when
+   * done with them.
+   */
+  async function withCell(): Promise<
+    { cell: Cell<Record<string, unknown>>; done: () => Promise<void> }
+  > {
+    const storageManager = StorageManager.emulate({ as: cfcSigner });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://toolshed.test"),
+      storageManager,
+    });
+    const cell = runtime.getCell<Record<string, unknown>>(
+      cfcSigner.did(),
+      "console-debug-value",
+    );
+    await cell.sync();
+    const tx = runtime.edit();
+    cell.withTx(tx).set({ name: "test", count: 42, self: cell });
+    await tx.commit();
+
+    return {
+      cell,
+      done: async () => {
+        await runtime.dispose();
+        await storageManager.close();
+      },
+    };
+  }
+
+  describe("what the transport accepts", () => {
+    /**
+     * Puts `value` through the two ends the notification actually uses: the
+     * producer's `toConsoleWireValue()`, `postMessage`'s structured clone, and
+     * the `fabricFromRealmValue()` that `client/connection.ts` decodes with.
+     */
+    function acrossTheWire(value: unknown): unknown {
+      return fabricFromRealmValue(structuredClone(toConsoleWireValue(value)));
+    }
+
+    it("returns a value the realm encoding carries, for each shape it renders", () => {
+      // The postcondition is that the result is a `FabricValue`, which is
+      // what the encoding is defined over -- and that is not expressible as a
+      // type either, since the type admits values a walk can still build
+      // wrong. Each value here is one raw structured clone refuses outright,
+      // or one it accepts only by stripping it to something that misdescribes
+      // it.
+      const cyclic: Record<string, unknown> = { n: 1 };
+      cyclic.self = cyclic;
+      const values: unknown[] = [
+        Symbol("unique"),
+        Symbol.for("interned"),
+        { nested: Symbol.for("interned") },
+        () => {},
+        new FabricBytes(new Uint8Array([1, 2, 3])),
+        new FabricEpochNsec(1_000n),
+        FabricError.fromNativeError(new Error("boom")),
+        cyclic,
+        new WeakMap(),
+        new Map([["a", 1]]),
+      ];
+
+      for (const value of values) {
+        const converted = toConsoleDebugValue(value);
+        expect(isValidFabricValue(converted)).toBe(true);
+        expect(acrossTheWire(value)).toEqual(converted);
+      }
+    });
+
+    it("returns a `FabricPrimitive` that arrives on the far side still live", () => {
+      // The whole point of encoding rather than naming: the receiver hands
+      // these to `console.log()`, and a devtools inspector shows more of a
+      // live value than of a name for one.
+      const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+      const arrived = acrossTheWire({ payload: bytes }) as Record<
+        string,
+        unknown
+      >;
+      expect(arrived.payload).toBeInstanceOf(FabricBytes);
+      expect(arrived.payload).toEqual(bytes);
+    });
+
+    it("returns a value the realm encoding carries, for a cell and a query result", async () => {
+      const { cell, done } = await withCell();
+      try {
+        for (const value of [cell, cell.get(), { held: cell }]) {
+          const converted = toConsoleDebugValue(value);
+          expect(isValidFabricValue(converted)).toBe(true);
+          expect(acrossTheWire(value)).toEqual(converted);
+        }
+      } finally {
+        await done();
+      }
+    });
   });
 
-  it("shows a value shared between siblings after a deep subtree", () => {
-    const shared = { n: 1 };
-    expect(
-      sanitizeForPostMessage({ deep: { a: { b: shared } }, later: shared }),
-    )
-      .toEqual({ deep: { a: { b: { n: 1 } } }, later: { n: 1 } });
-  });
+  describe("cells", () => {
+    it("returns a cell as the link it names", async () => {
+      const { cell, done } = await withCell();
+      try {
+        expect(toConsoleDebugValue(cell)).toMatch(CELL_LINK);
+      } finally {
+        await done();
+      }
+    });
 
-  it("still reports a value that holds itself as circular", () => {
-    const cyclic: Record<string, unknown> = { n: 1 };
-    cyclic.self = cyclic;
-    expect(sanitizeForPostMessage(cyclic))
-      .toEqual({ n: 1, self: "[Circular]" });
+    it("returns a cell held in a record beside the record's other keys", async () => {
+      const { cell, done } = await withCell();
+      try {
+        const result = toConsoleDebugValue({
+          self: cell,
+          name: "test",
+        }) as Record<string, unknown>;
+        expect(result.name).toBe("test");
+        expect(result.self).toMatch(CELL_LINK);
+      } finally {
+        await done();
+      }
+    });
+
+    it("returns a query result as its ref together with its data", async () => {
+      // Both halves matter: the ref says what the proxy stands for, and the
+      // data is what a reader logged it to see.
+      const { cell, done } = await withCell();
+      try {
+        const result = toConsoleDebugValue(cell.get()) as Record<
+          string,
+          unknown
+        >;
+        expect(result.__ref).toMatch(CELL_LINK);
+        expect(result.name).toBe("test");
+        expect(result.count).toBe(42);
+      } finally {
+        await done();
+      }
+    });
+
+    it("returns a query result that holds itself as a cycle", async () => {
+      // A query result is a fresh proxy per read, so the rendering has to be
+      // stable across the reads for the cycle to be seen as one at all.
+      const { cell, done } = await withCell();
+      try {
+        const result = toConsoleDebugValue(cell.get()) as Record<
+          string,
+          unknown
+        >;
+        expect(result.self).toEqual({ "/circle": 0 });
+      } finally {
+        await done();
+      }
+    });
+
+    it("returns the failure at the query-result key whose read threw", async () => {
+      // The ref and the readable keys all survive one key that does not: a
+      // debug dump of a value that is misbehaving is exactly the dump that
+      // must still arrive.
+      const { cell, done } = await withCell();
+      try {
+        const hostile = new Proxy(cell.get() as Record<string, unknown>, {
+          get(target, key) {
+            if (key === "count") throw new Error("read failed");
+            return Reflect.get(target, key);
+          },
+        });
+        const result = toConsoleDebugValue(hostile) as Record<string, unknown>;
+        expect(result.__ref).toMatch(CELL_LINK);
+        expect(result.name).toBe("test");
+        expect(result.count).toEqual({ "/unconvertible": "read failed" });
+      } finally {
+        await done();
+      }
+    });
+
+    it("returns a query result whose keys cannot be listed the same way at each position", async () => {
+      // The rendering a proxy is held under is the finished one, so a proxy
+      // that fails before its keys can be read reports that failure wherever
+      // it appears rather than a half-built record at its later positions.
+      const { cell, done } = await withCell();
+      try {
+        const keysThrow = new Proxy(cell.get() as Record<string, unknown>, {
+          ownKeys() {
+            throw new Error("cannot list keys");
+          },
+          get(target, key) {
+            return Reflect.get(target, key);
+          },
+        });
+        const failure = { "/unconvertible": "cannot list keys" };
+        expect(toConsoleDebugValue({ a: keysThrow, b: keysThrow }))
+          .toEqual({ a: failure, b: failure });
+      } finally {
+        await done();
+      }
+    });
+
+    it("returns a query result reached twice at both of its positions", async () => {
+      const { cell, done } = await withCell();
+      try {
+        // Neither position is inside the other, so both are shown in full.
+        // The rendering is shared between them, which is what makes a cycle
+        // through a query result detectable at all, and this is the sibling
+        // case that has to survive that sharing.
+        const proxy = cell.get();
+        expect(toConsoleDebugValue({ a: proxy, b: { c: proxy } })).toEqual({
+          a: {
+            __ref: expect.stringMatching(CELL_LINK),
+            name: "test",
+            count: 42,
+            self: { "/circle": 1 },
+          },
+          b: {
+            c: {
+              __ref: expect.stringMatching(CELL_LINK),
+              name: "test",
+              count: 42,
+              self: { "/circle": 2 },
+            },
+          },
+        });
+      } finally {
+        await done();
+      }
+    });
   });
 
   describe("special objects", () => {
-    // A `FabricSpecialObject` keeps its state in private fields and has zero
-    // enumerable own properties, so the property walk rebuilds one as `{}` --
-    // a dump that says "empty object" about a value that is nothing of the
-    // kind. Both arms are named rather than descended.
+    // A `FabricValue` is what the realm encoding is defined over, so every
+    // one of these is carried rather than rendered. What the conversion has
+    // to get right is leaving them alone.
 
-    it("names a `FabricBytes` rather than showing an empty record", () => {
-      expect(sanitizeForPostMessage(new FabricBytes(new Uint8Array([1, 2, 3]))))
-        .toBe("/Bytes(...)");
+    it("returns a `FabricPrimitive` unchanged", () => {
+      const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+      expect(toConsoleDebugValue(bytes)).toBe(bytes);
     });
 
-    it("names a `FabricEpochNsec` nested in a record", () => {
-      expect(sanitizeForPostMessage({ when: new FabricEpochNsec(1_000n) }))
-        .toEqual({ when: "/EpochNsec(...)" });
+    it("returns a `FabricPrimitive` unchanged, nested in a record", () => {
+      const when = new FabricEpochNsec(1_000n);
+      expect(toConsoleDebugValue({ when })).toEqual({ when });
+      expect((toConsoleDebugValue({ when }) as { when: unknown }).when)
+        .toBe(when);
     });
 
-    it("names a `FabricError`, the `FabricInstance` arm", () => {
-      // A renderer names an instance too rather than refusing it: a debug dump
-      // that throws is worse than one that elides, and the value it was handed
-      // is the thing being debugged.
-      expect(
-        sanitizeForPostMessage(FabricError.fromNativeError(new Error("boom"))),
-      ).toBe("/Error(...)");
+    it("returns a `FabricInstance` as its codec's encoding", () => {
+      // The conversion descends an instance rather than carrying it, since
+      // its contents are not reachable by property name.
+      const result = toConsoleDebugValue(
+        FabricError.fromNativeError(new Error("boom")),
+      ) as Record<string, Record<string, unknown>>;
+      const [tag] = Object.keys(result);
+      expect(tag).toMatch(/^\/Error@/);
+      expect(result[tag!]!.message).toBe("boom");
+    });
+
+    it("returns an interned symbol unchanged", () => {
+      expect(toConsoleDebugValue(Symbol.for("tag"))).toBe(Symbol.for("tag"));
+      expect(toConsoleDebugValue({ a: Symbol.for("tag") }))
+        .toEqual({ a: Symbol.for("tag") });
+    });
+
+    it("returns a forged `FabricPrimitive` as `/unconvertible`, not a throw", () => {
+      // An object on a `FabricPrimitive`'s prototype passes every membership
+      // check and has no encoding: `isValidFabricValue()` says true and the
+      // encode refuses. The handler must not throw over it, since the throw
+      // would abort the pattern's own `console.log()`. Nothing is said about
+      // what the value was -- it was built to defeat exactly this.
+      const forged = Object.create(FabricBytes.prototype);
+      expect(isValidFabricValue(toConsoleDebugValue(forged))).toBe(true);
+      expect(() => realmFromFabricValue(toConsoleDebugValue(forged)))
+        .toThrow();
+      expect(fabricFromRealmValue(toConsoleWireValue(forged)))
+        .toEqual({ "/unconvertible": "no encoding for value" });
+    });
+
+    it("returns `/unconvertible` for the whole argument a forgery is buried in", () => {
+      // The failure is the argument's, not the position's: nothing of the
+      // surrounding value survives, which is the price of not sifting a
+      // hostile graph for the piece that broke.
+      const forged = Object.create(FabricBytes.prototype);
+      expect(fabricFromRealmValue(toConsoleWireValue({ a: 1, forged })))
+        .toEqual({ "/unconvertible": "no encoding for value" });
+    });
+
+    it("returns a unique symbol as its marker", () => {
+      // Unlike an interned one, this has no encoding: the description is all
+      // that can be said about it on the far side.
+      expect(toConsoleDebugValue(Symbol("x")))
+        .toEqual({ "/uniqueSymbol": "x" });
+    });
+  });
+
+  describe("sharing and cycles", () => {
+    it("returns a twice-reachable value at both of its positions", () => {
+      // Shared, not circular: neither position is inside the other. Reporting
+      // the second as a cycle would misdescribe the data the dump exists to
+      // show.
+      const shared = { n: 1 };
+      expect(toConsoleDebugValue({ x: shared, y: shared }))
+        .toEqual({ x: { n: 1 }, y: { n: 1 } });
+    });
+
+    it("returns a value shared between siblings after a deep subtree", () => {
+      const shared = { n: 1 };
+      expect(toConsoleDebugValue({ deep: { a: { b: shared } }, later: shared }))
+        .toEqual({ deep: { a: { b: { n: 1 } } }, later: { n: 1 } });
+    });
+
+    it("returns a value that holds itself as a cycle", () => {
+      const cyclic: Record<string, unknown> = { name: "test" };
+      cyclic.self = cyclic;
+      expect(toConsoleDebugValue(cyclic))
+        .toEqual({ name: "test", self: { "/circle": 0 } });
+    });
+
+    it("returns an array that holds itself as a cycle", () => {
+      const cyclic: unknown[] = [1, 2];
+      cyclic.push(cyclic);
+      expect(toConsoleDebugValue(cyclic)).toEqual([1, 2, { "/circle": 0 }]);
     });
   });
 
   describe("primitives", () => {
-    it("passes through null and undefined", () => {
-      expect(sanitizeForPostMessage(null)).toBe(null);
-      expect(sanitizeForPostMessage(undefined)).toBe(undefined);
+    it("returns null and undefined unchanged", () => {
+      expect(toConsoleDebugValue(null)).toBe(null);
+      expect(toConsoleDebugValue(undefined)).toBe(undefined);
     });
 
-    it("passes through numbers, strings, and booleans", () => {
-      expect(sanitizeForPostMessage(42)).toBe(42);
-      expect(sanitizeForPostMessage("hello")).toBe("hello");
-      expect(sanitizeForPostMessage(true)).toBe(true);
+    it("returns numbers, strings, and booleans unchanged", () => {
+      expect(toConsoleDebugValue(42)).toBe(42);
+      expect(toConsoleDebugValue("hello")).toBe("hello");
+      expect(toConsoleDebugValue(true)).toBe(true);
     });
   });
 
   describe("functions", () => {
-    it("converts functions to placeholder strings", () => {
-      expect(sanitizeForPostMessage(() => {})).toBe("[Function]");
-      expect(sanitizeForPostMessage(function named() {})).toBe("[Function]");
+    it("returns a function named where it has a name", () => {
+      expect(toConsoleDebugValue(() => {}))
+        .toEqual({ "/function": "<anonymous>(...)" });
+      expect(toConsoleDebugValue(function named() {}))
+        .toEqual({ "/function": "named(...)" });
     });
   });
 
   describe("plain objects", () => {
-    it("passes through simple objects", () => {
-      const obj = { name: "test", count: 42 };
-      expect(sanitizeForPostMessage(obj)).toEqual({ name: "test", count: 42 });
+    it("returns a simple object unchanged", () => {
+      expect(toConsoleDebugValue({ name: "test", count: 42 }))
+        .toEqual({ name: "test", count: 42 });
     });
 
-    it("handles nested objects", () => {
-      const obj = { outer: { inner: { value: 1 } } };
-      expect(sanitizeForPostMessage(obj)).toEqual({
-        outer: { inner: { value: 1 } },
-      });
+    it("returns a nested object with its nesting intact", () => {
+      expect(toConsoleDebugValue({ outer: { inner: { value: new Map() } } }))
+        .toEqual({ outer: { inner: { value: { "/Map": "/..." } } } });
     });
 
-    it("converts function properties to placeholders", () => {
-      const obj = { name: "test", callback: () => {} };
-      expect(sanitizeForPostMessage(obj)).toEqual({
-        name: "test",
-        callback: "[Function]",
-      });
+    it("returns a function-valued property rendered in place", () => {
+      expect(toConsoleDebugValue({ name: "test", callback: () => {} }))
+        .toEqual({ name: "test", callback: { "/function": "callback(...)" } });
     });
   });
 
   describe("arrays", () => {
-    it("handles arrays of primitives", () => {
-      expect(sanitizeForPostMessage([1, 2, 3])).toEqual([1, 2, 3]);
+    it("returns an array of primitives unchanged", () => {
+      expect(toConsoleDebugValue([1, 2, 3])).toEqual([1, 2, 3]);
     });
 
-    it("handles arrays of objects", () => {
-      const arr = [{ a: 1 }, { b: 2 }];
-      expect(sanitizeForPostMessage(arr)).toEqual([{ a: 1 }, { b: 2 }]);
+    it("returns an array of objects with each element converted", () => {
+      expect(toConsoleDebugValue([{ a: 1 }, { b: new Map() }]))
+        .toEqual([{ a: 1 }, { b: { "/Map": "/..." } }]);
     });
 
-    it("converts function elements to placeholders", () => {
-      const arr = [1, () => {}, 3];
-      expect(sanitizeForPostMessage(arr)).toEqual([1, "[Function]", 3]);
-    });
-  });
-
-  describe("circular references", () => {
-    it("detects and handles circular references", () => {
-      const obj: Record<string, unknown> = { name: "test" };
-      obj.self = obj;
-      expect(sanitizeForPostMessage(obj)).toEqual({
-        name: "test",
-        self: "[Circular]",
-      });
-    });
-
-    it("handles circular arrays", () => {
-      const arr: unknown[] = [1, 2];
-      arr.push(arr);
-      expect(sanitizeForPostMessage(arr)).toEqual([1, 2, "[Circular]"]);
+    it("returns a function element rendered in place", () => {
+      expect(toConsoleDebugValue([1, () => {}, 3]))
+        .toEqual([1, { "/function": "<anonymous>(...)" }, 3]);
     });
   });
 
   describe("depth limit", () => {
-    it("stops at max depth", () => {
-      const deepObj = {
-        l1: { l2: { l3: { l4: { l5: { l6: "too deep" } } } } },
+    it("returns the elision marker where the nesting runs past the limit", () => {
+      const deep = {
+        l1: { l2: { l3: { l4: { l5: { l6: { l7: { l8: "too deep" } } } } } } },
       };
-      const result = sanitizeForPostMessage(deepObj) as Record<string, unknown>;
-      // At depth 5, l6 should be "[Max depth exceeded]"
-      expect(
-        (
-          (
-            ((result.l1 as Record<string, unknown>).l2 as Record<
-              string,
-              unknown
-            >)
-              .l3 as Record<string, unknown>
-          ).l4 as Record<string, unknown>
-        ).l5,
-      ).toBe("[Max depth exceeded]");
+      expect(toConsoleDebugValue(deep)).toEqual({
+        l1: { l2: { l3: { l4: { l5: { l6: { "/...": "object" } } } } } },
+      });
+    });
+
+    it("returns a value nested as deep as a reader of plain data needs", () => {
+      // The limit sits above what the old walk reached, because the rendering
+      // spends levels of its own on an instance's tag and a query result's
+      // ref. Plain data is legible past where it used to stop.
+      const deep = { l1: { l2: { l3: { l4: { l5: { l6: "leaf" } } } } } };
+      expect(toConsoleDebugValue(deep)).toEqual(deep);
     });
   });
 
-  describe("objects with throwing property access", () => {
-    it("handles objects with properties that throw on read", () => {
-      // Create an object where reading a specific property throws
-      const obj = {
+  describe("values that resist being read", () => {
+    it("returns the failure at the property whose getter threw", () => {
+      const value = {
         safe: "value",
         get dangerous(): never {
           throw new Error("Cannot read this property");
         },
       };
-
-      const result = sanitizeForPostMessage(obj) as Record<string, unknown>;
-      expect(result.safe).toBe("value");
-      expect(result.dangerous).toBe("[Unreadable]");
+      expect(toConsoleDebugValue(value)).toEqual({
+        safe: "value",
+        dangerous: { "/unconvertible": "Cannot read this property" },
+      });
     });
 
-    it("handles proxies with throwing get trap", () => {
-      const throwingProxy = new Proxy(
-        {},
-        {
-          get() {
-            throw new Error("Cannot access property");
-          },
-          ownKeys() {
-            return ["problematic"];
-          },
-          getOwnPropertyDescriptor() {
-            return { enumerable: true, configurable: true };
-          },
+    it("returns the failure per key for a proxy with a throwing get trap", () => {
+      const throwingProxy = new Proxy({}, {
+        get() {
+          throw new Error("Cannot access property");
         },
-      );
-
-      // isCellResult() probes symbol-backed access first, so a hostile get trap
-      // is treated as an uncloneable object before the plain-object walker runs.
-      const result = sanitizeForPostMessage(throwingProxy);
-      expect(result).toBe("[Object - uncloneable]");
+        ownKeys() {
+          return ["problematic"];
+        },
+        getOwnPropertyDescriptor() {
+          return { enumerable: true, configurable: true };
+        },
+      });
+      expect(toConsoleDebugValue(throwingProxy))
+        .toEqual({
+          problematic: { "/unconvertible": "Cannot access property" },
+        });
     });
 
-    it("handles proxies that throw on Object.keys", () => {
-      const throwingProxy = new Proxy(
-        {},
-        {
-          ownKeys() {
-            throw new Error("Cannot list keys");
-          },
+    it("returns the failure for the whole value when its keys cannot be listed", () => {
+      const throwingProxy = new Proxy({}, {
+        ownKeys() {
+          throw new Error("Cannot list keys");
         },
-      );
-
-      // When we can't iterate, we fall back to placeholder
-      const result = sanitizeForPostMessage(throwingProxy);
-      expect(result).toBe("[Object - uncloneable]");
+      });
+      expect(toConsoleDebugValue(throwingProxy))
+        .toEqual({ "/unconvertible": "Cannot list keys" });
     });
   });
 
   describe("mixed structures", () => {
-    it("handles complex nested structures with various types", () => {
+    it("returns a nested structure with each kind rendered in place", () => {
       const complex = {
         name: "root",
         items: [
           { id: 1, process: () => {} },
           { id: 2, nested: { deep: true } },
         ],
-        metadata: {
-          count: 42,
-          handler: function handle() {},
-        },
+        metadata: { count: 42, handler: function handle() {} },
       };
 
-      expect(sanitizeForPostMessage(complex)).toEqual({
+      expect(toConsoleDebugValue(complex)).toEqual({
         name: "root",
         items: [
-          { id: 1, process: "[Function]" },
+          { id: 1, process: { "/function": "process(...)" } },
           { id: 2, nested: { deep: true } },
         ],
         metadata: {
           count: 42,
-          handler: "[Function]",
+          handler: { "/function": "handle(...)" },
         },
       });
     });

@@ -1140,13 +1140,22 @@ export type ConsoleNotification = {
   type: NotificationType.ConsoleMessage;
   metadata?: { pieceId?: string; patternId?: string; space?: string };
   method: string;
-  // TODO(danfuzz): these arrive pre-flattened to text by
-  // `sanitizeForPostMessage()` (`backends/runtime-processor.ts`), and the
-  // receiver hands them to `console.log()` -- a devtools inspector, which can
-  // show more of a value than a string of it can. A `codec-realm` arm here is
-  // what lets the fabric among them cross whole; see the marker at the producer
-  // for what else has to move first.
-  args: JSONValue[];
+  /**
+   * The arguments, each encoded on its own. `ConsoleMessage` is this same
+   * notification with them decoded, which is what the client emits.
+   *
+   * TODO(danfuzz): once the envelope itself is encoded, this field holds a
+   * `FabricValue[]` and the encoding at each end goes away with it.
+   */
+  args: RealmEncodedValue[];
+};
+
+/**
+ * A console notification as the client emits it, with its arguments decoded
+ * back into the values the pattern logged.
+ */
+export type ConsoleMessage = Omit<ConsoleNotification, "args"> & {
+  args: FabricValue[];
 };
 
 export type NavigateRequestNotification = {

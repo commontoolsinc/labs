@@ -1,3 +1,5 @@
+import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { defer, type Deferred } from "@commonfabric/utils/defer";
 import { getLogger } from "@commonfabric/utils/logger";
 import { unrefTimer } from "@commonfabric/utils/sleep";
@@ -8,6 +10,7 @@ import {
   CommandRequest,
   CommandResponse,
   Commands,
+  ConsoleMessage,
   ConsoleNotification,
   ErrorNotification,
   InitializationData,
@@ -108,8 +111,42 @@ export type SubscriptionDiagnostics = {
   cells: Record<string, CellSubscriptionDiagnostics>;
 };
 
+/**
+ * Decodes the arguments of a console notification, for the client to emit.
+ *
+ * An argument that does not decode is reported in place of itself rather than
+ * thrown over: these are a pattern's `console.*` arguments, and a log line
+ * that arrives damaged beats one that takes the connection's message dispatch
+ * down with it.
+ *
+ * Exported for testing.
+ */
+export function consoleMessageFrom(
+  notification: ConsoleNotification,
+): ConsoleMessage {
+  const args = notification.args.map((arg): FabricValue => {
+    try {
+      return fabricFromRealmValue(arg);
+    } catch (e) {
+      // A thrown value can refuse even to be stringified, and the derivation
+      // of a failure's message must not fail in turn. `/undecodableError` is
+      // the fixed token for that, as `/unconvertibleError` is for the
+      // conversion at the other end.
+      let message: string;
+      try {
+        message = String(e);
+      } catch {
+        message = "/undecodableError";
+      }
+      return { "/undecodable": message };
+    }
+  });
+
+  return { ...notification, args };
+}
+
 export type RuntimeConnectionEvents = {
-  console: [ConsoleNotification];
+  console: [ConsoleMessage];
   navigaterequest: [NavigateRequestNotification];
   error: [ErrorNotification];
   telemetry: [TelemetryNotification];
@@ -500,7 +537,7 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       if (isCellUpdateNotification(message)) {
         this._handleCellUpdate(message);
       } else if (isConsoleNotification(message)) {
-        this.emit("console", message);
+        this.emit("console", consoleMessageFrom(message));
       } else if (isNavigateRequestNotification(message)) {
         this.emit("navigaterequest", message);
       } else if (isErrorNotification(message)) {
