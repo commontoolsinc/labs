@@ -81,6 +81,7 @@ import {
 } from "./exchange-eval.ts";
 import { externalIngestStamp } from "./external-ingest.ts";
 import {
+  CFC_GRANT_ID_PREFIX,
   createTxCfcGrantResolver,
   flushCfcGrantConsumptionClaims,
 } from "./grants.ts";
@@ -111,6 +112,7 @@ import {
   cfcIntegritySatisfiesFloorCoherently,
   uniqueCfcAtoms,
 } from "./observation.ts";
+import { CFC_POLICY_MANIFEST_ID_PREFIX } from "./policy.ts";
 import { createTxCfcModulePolicyResolver } from "./policy-resolver.ts";
 import { cfcSchemaEntries } from "./schema-label-view.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
@@ -1361,6 +1363,25 @@ const schemaEnvelopeForTargetPath = (
   return envelope;
 };
 
+// The reserved CFC document namespaces: the durable policy manifests a
+// consultation installs, and the release grants `writeCfcGrant` authors along
+// with the receipts that spend them. Both hold policy state, and the
+// transaction write chokepoint gates every unprivileged write to them — a
+// manifest write throws, a grant write is recorded and becomes a fail-closed
+// prepare reason. The runtime's own privileged persistence is what remains,
+// and it is not a user value write for schema write policy, flow labels, or
+// writer-fit to measure.
+//
+// A recorded write holds its document out of the exemption, so a forged write
+// is measured like any other value write and carries the join. The recording
+// arms differ: the manifest arm throws, while a forged grant write reaches
+// storage under the non-rejecting modes, and the label it carries is what ties
+// a later read of it back to what the forging transaction observed. Reads of
+// these documents are measured for the same reason.
+const isReservedCfcDocumentId = (id: string): boolean =>
+  id.startsWith(CFC_POLICY_MANIFEST_ID_PREFIX) ||
+  id.startsWith(CFC_GRANT_ID_PREFIX);
+
 const valueWriteTargets = (
   tx: IExtendedStorageTransaction,
 ): Map<
@@ -1411,6 +1432,7 @@ const valueWriteTargets = (
     }
   >();
   const log = tx.getReactivityLog?.();
+  const forgedSystemWrites = tx.getCfcState().unprivilegedSystemWrites ?? [];
   const seenWriteSpaces = new Set<MemorySpace>(
     [...(log?.writes ?? []), ...(log?.attemptedWrites ?? [])].map((write) =>
       write.space
@@ -1432,6 +1454,12 @@ const valueWriteTargets = (
       // carry their labels via the link-write machinery, not here.
       if (
         write.address.id.startsWith("cid:") ||
+        (
+          isReservedCfcDocumentId(write.address.id) &&
+          !forgedSystemWrites.some((recorded) =>
+            recorded.startsWith(`${write.address.id}/`)
+          )
+        ) ||
         rawPath[0] === "cfc" ||
         rawPath[0] === "source" ||
         (
