@@ -87,7 +87,7 @@ import {
   CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON,
   CfcSchemaMigrationError,
 } from "./migration-reason.ts";
-import { unevaluableReason } from "./unevaluable-reason.ts";
+import { verdictReason } from "./verdict-reason.ts";
 import {
   type ReadClassSelection,
   readConsumesEntry,
@@ -4354,13 +4354,11 @@ const derivePersistedLinkLabel = (
     !hasLabelValues(linkSchemaLabel) && !hasCarriedLabel
   ) {
     return {
-      // Not a verdict: the source document's metadata is not available in
-      // this transaction. It loads, and the identical re-run decides.
-      reason: unevaluableReason(
-        `missing link source metadata for ${input.target.id} at /${
-          input.target.path.join("/")
-        }`,
-      ),
+      // Untagged, so retryable: the source document's metadata is not
+      // available in this transaction. It loads, and the re-run decides.
+      reason: `missing link source metadata for ${input.target.id} at /${
+        input.target.path.join("/")
+      }`,
     };
   }
   if (
@@ -4601,13 +4599,12 @@ export const loadStoredCfcEnvelope = (
   } catch (error) {
     return {
       status: "unreadable",
-      // A LOAD failure, not a verdict on the stored envelope: the schema
-      // document could not be read in this transaction.
-      reason: unevaluableReason(
-        error instanceof Error
-          ? error.message
-          : `schema load failed for ${target.id}`,
-      ),
+      // Untagged, so retryable: the schema document could not be read in
+      // this transaction. A CID CONTENT mismatch is a different animal — it
+      // is deterministic, and tagged as a verdict where it is detected.
+      reason: error instanceof Error
+        ? error.message
+        : `schema load failed for ${target.id}`,
     };
   }
 };
@@ -5185,14 +5182,14 @@ export const prepareBoundaryCommit = (
   tx: IExtendedStorageTransaction,
   instrumentation?: CfcPrepareInstrumentation,
 ): string[] => {
-  // WATCH(cfc-unevaluable): every reason recorded here decides whether the
-  // commit is retried. A reason that says policy REFUSED the data is a
-  // verdict and makes the rejection terminal; a reason that says prepare
-  // could not EVALUATE — an input it needed was unavailable in this
-  // transaction — must be wrapped in `unevaluableReason(...)` so the
-  // rejection stays retryable and lands once that input arrives. Untagged is
-  // treated as a verdict; see cfc/unevaluable-reason.ts for why, and for what
-  // getting it wrong looks like from the outside.
+  // WATCH(cfc-verdict): every reason recorded here decides whether the commit
+  // is retried. A reason that says policy REFUSED this data — deterministic,
+  // so an identical re-run refuses identically — must be wrapped in
+  // `verdictReason(...)` to make the rejection terminal. Everything else is
+  // left untagged and stays retryable: an input this transaction did not
+  // have, a resolution that failed, a prepared state that drifted. Untagged
+  // is the safe default deliberately; see cfc/verdict-reason.ts for why, and
+  // for what getting it wrong in each direction costs.
   const reasons: string[] = [];
   const state = tx.getCfcState();
   // D4: per-target last-overlapping-write bounds over the ordered write-
@@ -5213,7 +5210,9 @@ export const prepareBoundaryCommit = (
   // chokepoint; surface one fail-closed reason apiece so it rejects in enforce
   // mode and diagnoses in observe, uniformly with every other reason here.
   for (const target of state.unprivilegedSystemWrites ?? []) {
-    reasons.push(`unprivileged write to protected cfc path ${target}`);
+    reasons.push(
+      verdictReason(`unprivileged write to protected cfc path ${target}`),
+    );
   }
   const identityForInput = (
     input: WritePolicyInput,
@@ -5310,11 +5309,9 @@ export const prepareBoundaryCommit = (
       continue;
     }
     reasons.push(
-      // Not a verdict: the schema's write-policy input is not available in
-      // this transaction yet.
-      unevaluableReason(
-        `missing schema write-policy input for ${target.id}`,
-      ),
+      // Untagged, so retryable: the schema's write-policy input is not
+      // available in this transaction yet.
+      `missing schema write-policy input for ${target.id}`,
     );
   }
   const targetKeys = new Set([...candidates.keys(), ...linkWrites.keys()]);
@@ -5511,7 +5508,7 @@ export const prepareBoundaryCommit = (
     // runtime's mark, never the payload's unverified policy metadata.
     let ingestVerificationFailed = false;
     if (requirementFailure) {
-      reasons.push(requirementFailure);
+      reasons.push(verdictReason(requirementFailure));
       if (!isIngestTarget) continue;
       ingestVerificationFailed = true;
     }
@@ -5521,7 +5518,7 @@ export const prepareBoundaryCommit = (
       verificationSchema,
     );
     if (trustedEventFailure) {
-      reasons.push(trustedEventFailure);
+      reasons.push(verdictReason(trustedEventFailure));
       if (!isIngestTarget) continue;
       ingestVerificationFailed = true;
     }
@@ -5539,7 +5536,7 @@ export const prepareBoundaryCommit = (
       verificationSchema,
     );
     if (exactCopyFailure) {
-      reasons.push(exactCopyFailure);
+      reasons.push(verdictReason(exactCopyFailure));
       if (!isIngestTarget) continue;
       ingestVerificationFailed = true;
     }
@@ -5719,7 +5716,7 @@ export const prepareBoundaryCommit = (
       });
       if (monotonicityViolations.length > 0) {
         if (state.declaredMonotonicityMode === "enforce") {
-          reasons.push(...monotonicityViolations);
+          reasons.push(...monotonicityViolations.map(verdictReason));
           if (!isIngestTarget) continue;
           // Mirror ingestVerificationFailed above: the runtime's ingest mark
           // (appended below) still persists in non-rejecting modes, but the
@@ -6313,7 +6310,7 @@ export const prepareBoundaryCommit = (
               } (canWrite, §8.12.4): ` +
               offending.map((atom) => JSON.stringify(atom)).join(", ");
             if (writerFitRejects) {
-              reasons.push(misfit);
+              reasons.push(verdictReason(misfit));
             } else {
               tx.noteCfcDiagnostic(`writer-fit(persist-and-flag): ${misfit}`);
             }

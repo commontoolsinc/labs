@@ -148,3 +148,31 @@ describe("cfc terminal refusal re-run", () => {
     }
   });
 });
+
+describe("cfc prepared-state drift", () => {
+  it("keeps a read-after-prepare refusal retryable, not terminal", async () => {
+    // `invalidateCfc("read-after-prepare")` says the prepared state no longer
+    // holds — the verdict was never reached, so it is not one. A fresh
+    // attempt prepares against what the transaction actually read. Making it
+    // terminal would strand a write whose only fault was reading late.
+    const { storageManager, runtime, space, source } = await seedSource();
+    try {
+      const tx = runtime.edit();
+      const out = runtime.getCell<{ n?: number }>(space, "drift-out", {
+        type: "object",
+        properties: { n: { type: "number" } },
+      }, tx);
+      out.set({ n: 1 });
+      runtime.prepareTxForCommit(tx);
+      // A read AFTER prepare invalidates the prepared digest.
+      source.withTx(tx).get();
+      const { error } = await tx.commit();
+      expect(error).toBeDefined();
+      expect(error!.name).toBe("StorageTransactionAborted");
+      expect(error!.name).not.toBe("CfcCommitRefusalError");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+});

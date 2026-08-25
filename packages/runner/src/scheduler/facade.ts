@@ -2008,13 +2008,14 @@ export class Scheduler {
         : actionId;
       const identity = (action as Partial<TelemetryAnnotations>)
         .schedulerObservationIdentity;
-      if (identity === undefined) return { label };
-      const separator = identity.pieceId.indexOf(":");
+      // `pieceRootId` is the raw result-cell id; `pieceId` prefixes it with a
+      // scope KEY, and `user:`/`session:` keys carry their own colons, so
+      // slicing at the first one misattributes a scoped piece.
+      const rootId = identity?.pieceRootId;
+      if (identity === undefined || rootId === undefined) return { label };
       return {
         label,
-        pieceId: separator >= 0
-          ? identity.pieceId.slice(separator + 1)
-          : identity.pieceId,
+        pieceId: rootId,
         ...(identity.ownerSpace !== undefined
           ? { space: identity.ownerSpace }
           : {}),

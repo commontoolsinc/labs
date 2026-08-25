@@ -206,10 +206,14 @@ describe("reactive retries", () => {
       (action as {
         schedulerObservationIdentity?: {
           pieceId: string;
+          pieceRootId?: string;
           ownerSpace?: string;
         };
       }).schedulerObservationIdentity = {
-        pieceId: "space:of:fid1:attributed",
+        // A `user:` scope key carries its own colon, so attribution must come
+        // from `pieceRootId` rather than from slicing `pieceId`.
+        pieceId: "user:did:key:zPrincipal:of:fid1:attributed",
+        pieceRootId: "of:fid1:attributed",
         ownerSpace: "did:key:zTest",
       };
       const r = await runWatcher("CfcCommitRefusalError", 3, {

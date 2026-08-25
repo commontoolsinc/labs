@@ -154,10 +154,14 @@ describe("scheduler non-settling telemetry", () => {
           (annotatedAction as {
             schedulerObservationIdentity?: {
               pieceId: string;
+              pieceRootId?: string;
               ownerSpace?: string;
             };
           }).schedulerObservationIdentity = {
-            pieceId: "space:of:fid1:attributed",
+            // A `session:` scope key carries two colons of its own; the raw
+            // id comes from `pieceRootId`, never from slicing `pieceId`.
+            pieceId: "session:did:key:zP:sess-1:of:fid1:attributed",
+            pieceRootId: "of:fid1:attributed",
             ownerSpace: "did:key:zTest",
           };
           scheduler.recordBudgetBackoffTelemetry(

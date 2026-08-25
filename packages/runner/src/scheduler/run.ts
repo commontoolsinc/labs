@@ -874,10 +874,13 @@ function toTerminalRejectionError(error: unknown, action: Action): Error {
     .schedulerObservationIdentity;
   if (identity !== undefined) {
     const context = surfaced as Error & { pieceId?: string; space?: string };
-    const separator = identity.pieceId.indexOf(":");
-    context.pieceId = separator >= 0
-      ? identity.pieceId.slice(separator + 1)
-      : identity.pieceId;
+    // `pieceRootId` is the raw result-cell id. `pieceId` is a SCOPE KEY plus
+    // that id, and a scope key is not one segment — `user:<principal>` and
+    // `session:<principal>:<sessionId>` both carry colons — so slicing at the
+    // first one leaves principal segments on a scoped piece and misattributes
+    // it.
+    const rootId = identity.pieceRootId;
+    if (rootId !== undefined) context.pieceId = rootId;
     if (identity.ownerSpace !== undefined) {
       context.space = identity.ownerSpace;
     }

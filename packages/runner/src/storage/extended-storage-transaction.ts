@@ -99,7 +99,7 @@ import {
   type WritePolicyInput,
 } from "../cfc/mod.ts";
 import { CFC_POLICY_MANIFEST_ID_PREFIX } from "../cfc/policy.ts";
-import { hasUnevaluableReason } from "../cfc/unevaluable-reason.ts";
+import { isTerminalRefusal, plainReason } from "../cfc/verdict-reason.ts";
 import {
   type NormalizedFullLink,
   toMemorySpaceAddress,
@@ -1814,7 +1814,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         status: "invalidated",
         reasons,
       };
-      this.#cfcState.diagnostics.push(...reasons);
+      // Diagnostics are read by people and by matchers; the verdict tag is
+      // a classification channel and does not belong in either.
+      this.#cfcState.diagnostics.push(...reasons.map(plainReason));
       return "";
     }
     const preparedInput = this.buildPreparedDigestInput();
@@ -2397,22 +2399,22 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         const reasons = this.#cfcState.prepare.status === "invalidated"
           ? this.#cfcState.prepare.reasons
           : [];
-        const detail = reasons.length > 0 ? `: ${reasons[0]}` : "";
+        const detail = reasons.length > 0 ? `: ${plainReason(reasons[0])}` : "";
         const message =
           `CFC enforcement rejected commit: relevant transaction was not prepared${detail}`;
-        // WATCH(cfc-unevaluable): a refusal is terminal only when it is a
-        // VERDICT on this transaction's data. When any reason says prepare could not evaluate
-        // — an input it needed was not available here — a fresh attempt can
-        // decide differently once that input loads, so the rejection keeps
-        // the retryable discarded-attempt name. Marking that at the reason's
-        // source is what keeps this decision out of prose-matching; see
-        // cfc/unevaluable-reason.ts, including its note on the default.
-        if (hasUnevaluableReason(reasons)) {
+        // WATCH(cfc-verdict): a refusal is terminal only when EVERY reason is
+        // a VERDICT on this transaction's data. Anything else — an input
+        // prepare could not evaluate, or a prepared state a caller disturbed
+        // (`invalidateCfc`, e.g. read-after-prepare) — can decide differently
+        // on a fresh attempt, so the rejection keeps the retryable
+        // discarded-attempt name. Untagged is retryable; see
+        // cfc/verdict-reason.ts for why the default sits there.
+        if (!isTerminalRefusal(reasons)) {
           return this.rejectCommitBeforeStorage({
             error: {
               name: "StorageTransactionAborted",
               message,
-              reason: new Error("cfc-unevaluable-prepare-input"),
+              reason: new Error("cfc-refusal-not-a-verdict"),
             },
           });
         }
@@ -2420,7 +2422,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           error: {
             name: "CfcCommitRefusalError",
             message,
-            reasons,
+            reasons: reasons.map(plainReason),
           },
         });
       }
