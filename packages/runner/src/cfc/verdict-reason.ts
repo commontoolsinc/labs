@@ -33,8 +33,10 @@
 // every reason was a verdict unless marked. A producer audit found that false
 // in both directions — several families are mixed, and several DISCARD an
 // availability reason they received upstream (`verifyWriteFloor` drops
-// `derivePersistedLinkLabel`'s, the ceiling and `maxConfidentiality` paths
-// collapse `resolutionFailures` into a generic message) — so an untagged
+// `derivePersistedLinkLabel`'s, and the sink-ceiling path collapses
+// `resolutionFailures` into a generic message; the `maxConfidentiality`
+// input gate reports its resolution failures and withholds the tag) — so an
+// untagged
 // reason cannot be assumed deterministic. Tagging the verdicts is the claim a
 // producer can actually make about itself.
 //

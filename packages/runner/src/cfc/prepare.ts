@@ -3393,7 +3393,12 @@ const verifyInputRequirements = (
   // accumulated across the boundary pass. undefined — the default, whenever
   // no onPrefixProvenance hook is installed — skips all measurement.
   provenance?: CfcPrefixProvenanceSummary,
-): string | undefined => {
+  // `verdict` says whether the failure is a VERDICT on the data (see
+  // cfc/verdict-reason.ts): every check here is, except a `maxConfidentiality`
+  // miss whose policy evaluation could not resolve a manifest or grant — the
+  // label was left un-rewritten, so the attempt after the referenced document
+  // syncs can fit, and tagging it terminal would strand that write.
+): { reason: string; verdict: boolean } | undefined => {
   // The labeled reads the per-entry checks below quantify over, each carrying
   // its activity-clock position. Distinct from the egress side's consumed set
   // (collectConsumedLabel), which stays transaction-global — a sink request
@@ -3508,14 +3513,14 @@ const verifyInputRequirements = (
       entry.path,
     );
     if (unsupportedTrustSensitive !== undefined) {
-      return unsupportedTrustSensitive;
+      return { reason: unsupportedTrustSensitive, verdict: true };
     }
     const disallowedClause = disallowedAuthoredClauseReason(
       entry.schema,
       entry.path,
     );
     if (disallowedClause !== undefined) {
-      return disallowedClause;
+      return { reason: disallowedClause, verdict: true };
     }
     const currentPrincipalFailure = currentPrincipalIntegrityReason(
       tx,
@@ -3523,7 +3528,7 @@ const verifyInputRequirements = (
       entry.path,
     );
     if (currentPrincipalFailure !== undefined) {
-      return currentPrincipalFailure;
+      return { reason: currentPrincipalFailure, verdict: true };
     }
     const writeAuthorizedByFailure = writeAuthorizedByReason(
       tx,
@@ -3539,7 +3544,7 @@ const verifyInputRequirements = (
     ) || writeIsPatternSetupInitialization(tx, target, entry.path) ||
       writeIsSeedMaterialization(tx, target);
     if (writeAuthorizedByFailure !== undefined && !setupProjection) {
-      return writeAuthorizedByFailure;
+      return { reason: writeAuthorizedByFailure, verdict: true };
     }
     const requiredIntegrity = ifc?.requiredIntegrity ?? [];
     const maxConfidentiality = ifc?.maxConfidentiality;
@@ -3631,7 +3636,10 @@ const verifyInputRequirements = (
         cfcFloorTrustContext(tx),
       );
       if (!ok) {
-        return `requiredIntegrity failed at /${entry.path.join("/")}`;
+        return {
+          reason: `requiredIntegrity failed at /${entry.path.join("/")}`,
+          verdict: true,
+        };
       }
     }
 
@@ -3664,6 +3672,7 @@ const verifyInputRequirements = (
           )
         );
       const mode = tx.getCfcState().policyEvaluationMode;
+      let ceilingResolutionIncomplete = false;
       const ok = gating.every((read) => {
         const confidentiality = read.label?.confidentiality ?? [];
         if (mode === "off") return fitsLegacy(confidentiality);
@@ -3684,9 +3693,21 @@ const verifyInputRequirements = (
           // Exhaustion fails closed; otherwise subsumption-fit the REWRITTEN
           // label (spec §8.10.3 clause fit — flat ceilings keep their
           // conjunctive meaning through atomsOutsideCeiling).
-          return outcome.exhausted === false &&
+          const fits = outcome.exhausted === false &&
             atomsOutsideCeiling(outcome.confidentiality, maxConfidentiality)
                 .length === 0;
+          if (!fits && outcome.resolutionFailures.length > 0) {
+            // The miss was evaluated over a manifest or grant that did not
+            // resolve, so the label kept atoms a rewrite might have cleared:
+            // not a verdict (see the return-type note above).
+            noteModulePolicyResolutionFailures(
+              tx,
+              `input requirement /${entry.path.join("/")}`,
+              outcome.resolutionFailures,
+            );
+            ceilingResolutionIncomplete = true;
+          }
+          return fits;
         }
         // observe: decide exactly as `off` would, diagnose the divergence.
         noteModulePolicyResolutionFailures(
@@ -3715,7 +3736,10 @@ const verifyInputRequirements = (
         return decision;
       });
       if (!ok) {
-        return `maxConfidentiality failed at /${entry.path.join("/")}`;
+        return {
+          reason: `maxConfidentiality failed at /${entry.path.join("/")}`,
+          verdict: !ceilingResolutionIncomplete,
+        };
       }
     }
   }
@@ -5508,7 +5532,11 @@ export const prepareBoundaryCommit = (
     // runtime's mark, never the payload's unverified policy metadata.
     let ingestVerificationFailed = false;
     if (requirementFailure) {
-      reasons.push(verdictReason(requirementFailure));
+      reasons.push(
+        requirementFailure.verdict
+          ? verdictReason(requirementFailure.reason)
+          : requirementFailure.reason,
+      );
       if (!isIngestTarget) continue;
       ingestVerificationFailed = true;
     }

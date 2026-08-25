@@ -163,13 +163,17 @@ describe("cfc prepared-state drift", () => {
         properties: { n: { type: "number" } },
       }, tx);
       out.set({ n: 1 });
+      // The labeled read makes the transaction CFC-relevant, so prepare
+      // actually prepares it — an irrelevant transaction skips preparation
+      // and would refuse through the unprepared arm instead of the drift one.
+      source.withTx(tx).get();
       runtime.prepareTxForCommit(tx);
       // A read AFTER prepare invalidates the prepared digest.
       source.withTx(tx).get();
       const { error } = await tx.commit();
       expect(error).toBeDefined();
       expect(error!.name).toBe("StorageTransactionAborted");
-      expect(error!.name).not.toBe("CfcCommitRefusalError");
+      expect(error!.message).toContain("read-after-prepare");
     } finally {
       await runtime.dispose();
       await storageManager.close();
