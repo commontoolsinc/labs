@@ -1027,9 +1027,9 @@ The implementation evidence for this table is concentrated in:
 - [`packages/cli/commands/piece.ts`](../../packages/cli/commands/piece.ts) and
   [`packages/cli/lib/piece.ts`](../../packages/cli/lib/piece.ts) for local-file
   creation and source replacement;
-- [`packages/runtime-client/runtime-client.ts`](../../packages/runtime-client/runtime-client.ts)
+- [`packages/runtime-client/src/runtime-client.ts`](../../packages/runtime-client/src/runtime-client.ts)
   and
-  [`packages/runtime-client/backends/runtime-processor.ts`](../../packages/runtime-client/backends/runtime-processor.ts)
+  [`packages/runtime-client/src/backends/runtime-processor.ts`](../../packages/runtime-client/src/backends/runtime-processor.ts)
   for URL-backed page creation with canonical origin and creation-history
   stamping;
 - [`packages/piece/src/ops/pieces-controller.ts`](../../packages/piece/src/ops/pieces-controller.ts)

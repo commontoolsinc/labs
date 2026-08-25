@@ -15,11 +15,14 @@ import { openAgentFabricRuntime } from "../src/fabric-runtime.ts";
 describe("fabric-runtime", () => {
   describe("openAgentFabricRuntime()", () => {
     let identityPath: string;
+    let ownerDid: string;
     let realFetch: typeof globalThis.fetch;
 
     beforeEach(async () => {
       identityPath = await Deno.makeTempFile({ suffix: ".key" });
-      await Deno.writeFile(identityPath, await Identity.generatePkcs8());
+      const identityBytes = await Identity.generatePkcs8();
+      await Deno.writeFile(identityPath, identityBytes);
+      ownerDid = (await Identity.fromPkcs8(identityBytes)).did();
       realFetch = globalThis.fetch;
     });
 
@@ -51,6 +54,7 @@ describe("fabric-runtime", () => {
       await expect(openAgentFabricRuntime({
         apiUrl: "https://deployment.example",
         identityPath,
+        ownerDid,
         space: "a-space-of-its-own",
         signal: controller.signal,
       })).rejects.toThrow("shutting down");
@@ -67,6 +71,7 @@ describe("fabric-runtime", () => {
       await expect(openAgentFabricRuntime({
         apiUrl: "https://deployment.example",
         identityPath: `${identityPath}.absent`,
+        ownerDid,
         space: "a-space-of-its-own",
       })).rejects.toThrow(Deno.errors.NotFound);
       expect(requested).toBe(false);

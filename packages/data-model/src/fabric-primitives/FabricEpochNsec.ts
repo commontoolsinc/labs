@@ -38,7 +38,6 @@ export class FabricEpochNsec extends BaseFabricPrimitive
   constructor(value: bigint) {
     super();
     this.#value = value;
-    Object.freeze(this);
   }
 
   /**

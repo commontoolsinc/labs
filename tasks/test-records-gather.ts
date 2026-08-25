@@ -6,6 +6,7 @@
  *
  *   deno run -A tasks/test-records-gather.ts --out <dir> --job <name>
  *     [--shard <label>]
+ *     [--variant <name>]
  *     [--junit kind=<kind>,scope=<scope>[,prefix=<repo path>],glob=<glob>]...
  *
  * The output directory holds records.ndjson (one record line per test) and
@@ -83,6 +84,7 @@ export interface GatherOptions {
   out: string;
   job: string;
   shard?: string;
+  variant?: string;
   junit: JUnitSpec[];
   spoolDir?: string;
   env?: Environment;
@@ -90,6 +92,9 @@ export interface GatherOptions {
 
 /** Gathers the spool and JUnit files into the artifact directory. */
 export async function gather(options: GatherOptions): Promise<void> {
+  if (options.variant !== undefined && options.variant.length === 0) {
+    throw new Error("--variant must not be empty");
+  }
   const records: TestRecord[] = [];
   if (options.spoolDir !== undefined) {
     const spooled = await readSpool(options.spoolDir);
@@ -126,6 +131,10 @@ export async function gather(options: GatherOptions): Promise<void> {
     if (matched === 0) {
       console.warn(`test records: no JUnit files matched ${spec.glob}`);
     }
+  }
+
+  if (options.variant !== undefined) {
+    for (const record of records) record.test.v = options.variant;
   }
 
   const env = options.env ?? Deno.env.get;
@@ -171,7 +180,7 @@ export async function gather(options: GatherOptions): Promise<void> {
 function usage(): never {
   console.error(
     "usage: test-records-gather.ts --out <dir> --job <name> " +
-      "[--shard <label>] [--junit <spec>]...",
+      "[--shard <label>] [--variant <name>] [--junit <spec>]...",
   );
   Deno.exit(2);
 }
@@ -188,6 +197,7 @@ export function parseGatherArgs(
   let out: string | undefined;
   let job: string | undefined;
   let shard: string | undefined;
+  let variant: string | undefined;
   const junit: JUnitSpec[] = [];
   const args = [...argsIn];
   while (args.length > 0) {
@@ -204,6 +214,10 @@ export function parseGatherArgs(
       case "--shard":
         shard = value;
         break;
+      case "--variant":
+        if (value.length === 0) return undefined;
+        variant = value;
+        break;
       case "--junit":
         try {
           junit.push(parseJUnitSpec(value));
@@ -218,6 +232,7 @@ export function parseGatherArgs(
   if (out === undefined || job === undefined) return undefined;
   const options: GatherOptions = { out, job, junit };
   if (shard !== undefined) options.shard = shard;
+  if (variant !== undefined) options.variant = variant;
   return options;
 }
 

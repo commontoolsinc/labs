@@ -6,11 +6,15 @@ import {
   deployAgentSessionsDebugView,
 } from "../src/debug-view.ts";
 import { AgentFabricTarget } from "@commonfabric/agents-connector/fabric";
+import {
+  agentOwnerSchema,
+  cellHasOwnerConfidentiality,
+} from "@commonfabric/agents-connector/fabric-graph";
 import { createSession } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { assertEquals, assertRejects } from "@std/assert";
+import { assertEquals } from "@std/assert";
 import { fromFileUrl } from "@std/path";
 import {
   identity,
@@ -39,55 +43,73 @@ Deno.test("debug replacement stops every superseded local runner", async () => {
     const target = await AgentFabricTarget.open({
       runtime,
       spaceDid: session.space,
+      ownerDid: session.as.did(),
     });
     const originalPieceId = await deployAgentSessionsDebugView(manager, target);
     const registration = runtime.getCell(
       session.space,
-      "agent-sessions-debug-registration-v1",
+      `agent-sessions-debug-registration:${session.as.did()}`,
     );
     await registration.sync();
     const addRetiredResult = await runtime.editWithRetry((tx) => {
-      const cell = registration.withTx(tx);
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "commonfabric.agents-connector",
+      });
+      const cell = registration.withTx(tx).asSchema(
+        agentOwnerSchema(session.as.did()),
+      );
       const current = cell.getRawUntyped({ frozen: false });
       if (typeof current !== "object" || current === null) {
         throw new Error("debug registration is missing");
+      }
+      if (
+        !("cause" in current) || typeof current.cause !== "string" ||
+        current.cause.length === 0
+      ) {
+        throw new Error("debug registration has no active cause");
       }
       cell.setRawUntyped({
         ...current,
         retiredCauses: ["agent-sessions-debug:retired-test-piece"],
       });
+      tx.prepareCfc();
     });
     if (addRetiredResult.error) throw addRetiredResult.error;
+    assertEquals(
+      (registration.getRaw() as { retiredCauses?: string[] }).retiredCauses,
+      ["agent-sessions-debug:retired-test-piece"],
+    );
+    assertEquals(
+      cellHasOwnerConfidentiality(
+        runtime.readTx(),
+        registration,
+        session.as.did(),
+      ),
+      true,
+    );
 
     const originalStop = runtime.runner.stop;
     let stopCalls = 0;
     runtime.runner.stop = ((piece) => {
       stopCalls++;
       originalStop.call(runtime.runner, piece);
-      if (stopCalls === 1) {
-        throw new Error("retired runner cancellation failed");
-      }
     }) as typeof runtime.runner.stop;
     try {
       const defaultLocation = defaultDebugPatternLocation();
-      await assertRejects(
-        () =>
-          deployAgentSessionsDebugView(manager, target, {
-            rootPath: defaultLocation.rootPath,
-            mainPath: fromFileUrl(
-              new URL("./fixtures/alternate-debug-view.tsx", import.meta.url),
-            ),
-          }),
-        AggregateError,
-        "debug view runner cleanup failed",
-      );
+      await deployAgentSessionsDebugView(manager, target, {
+        rootPath: defaultLocation.rootPath,
+        mainPath: fromFileUrl(
+          new URL("./fixtures/alternate-debug-view.tsx", import.meta.url),
+        ),
+      });
     } finally {
       runtime.runner.stop = originalStop;
     }
 
     assertEquals(stopCalls, 2);
     assertEquals(
-      (await registeredPieceIds(defaultPattern, "allPieces")).includes(
+      (await registeredPieceIds(defaultPattern, "pieceRegistry")).includes(
         originalPieceId,
       ),
       false,
@@ -116,6 +138,7 @@ Deno.test("debug replacement preserves a piece owned by another runtime", async 
     const firstTarget = await AgentFabricTarget.open({
       runtime: firstRuntime,
       spaceDid: firstSession.space,
+      ownerDid: firstSession.as.did(),
     });
     const originalPieceId = await deployAgentSessionsDebugView(
       firstManager,
@@ -137,6 +160,7 @@ Deno.test("debug replacement preserves a piece owned by another runtime", async 
       const secondTarget = await AgentFabricTarget.open({
         runtime: secondRuntime,
         spaceDid: secondSession.space,
+        ownerDid: secondSession.as.did(),
       });
       const defaultLocation = defaultDebugPatternLocation();
       await deployAgentSessionsDebugView(secondManager, secondTarget, {

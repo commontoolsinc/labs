@@ -3,11 +3,11 @@
  * invocation settled: action errors attributed to a piece, and
  * convergence-budget episodes in which the scheduler deferred actions after
  * exhausting a pass's budget. `run_pattern` reads these to name the cause
- * when a piece it created settles to an empty or schema-failing result — the
- * two silent shapes observed live were a computation that throws on every
- * rerun, and a commit the CFC boundary refuses, which the scheduler retries
- * and which surfaces nowhere else — the refusal reason has no channel of
- * its own yet.
+ * when a piece it created settles to an empty or schema-failing result. A
+ * commit the CFC boundary refuses is terminal and arrives on the error
+ * channel as a `CfcCommitRefusalError` naming the refusal; the episode
+ * buffer covers the shapes that still defer — a reactive cycle, a
+ * non-idempotent computation.
  *
  * One observer is installed per runtime, memoized, because the scheduler's
  * `onError` registry has no removal — a per-invocation subscription would
@@ -26,12 +26,26 @@ export interface FabricActionErrorRecord {
   sequence: number;
   pieceId: string;
   patternId: string;
+  /** The error's name — the discriminant that tells a policy refusal
+   * (`CfcCommitRefusalError`) from a thrown computation (`Error`). */
+  name: string;
   message: string;
+}
+
+export interface FabricDeferredActionRecord {
+  label: string;
+  /**
+   * Comparable entity hash of the piece the deferred action serves, from the
+   * marker's observation identity; absent when the action carried none or
+   * its id did not reduce. This is what attributes a builtin coordinator —
+   * whose `raw:` label names no module — to its piece.
+   */
+  pieceId?: string;
 }
 
 export interface FabricDeferredEpisodeRecord {
   sequence: number;
-  deferredActions: readonly string[];
+  deferredActions: readonly FabricDeferredActionRecord[];
   deferredActionCount: number;
 }
 
@@ -59,7 +73,7 @@ const BUFFER_LIMIT = 128;
  * despite the declared type, which is why absence is handled rather than
  * assumed away.
  */
-const comparableEntityHash = (id: unknown): string | undefined => {
+export const comparableEntityHash = (id: unknown): string | undefined => {
   if (typeof id !== "string" || id.length === 0) {
     return undefined;
   }
@@ -100,6 +114,7 @@ export const fabricRuntimeObservations = (
       sequence: ++sequence,
       pieceId: pieceHash,
       patternId: typeof error.patternId === "string" ? error.patternId : "",
+      name: error.name,
       message: error.message,
     });
   });
@@ -121,7 +136,13 @@ export const fabricRuntimeObservations = (
     }
     push(episodes, {
       sequence: ++sequence,
-      deferredActions: marker.deferredActions ?? [],
+      deferredActions: (marker.deferredActions ?? []).map((entry) => {
+        const pieceHash = comparableEntityHash(entry.pieceId);
+        return {
+          label: entry.label,
+          ...(pieceHash !== undefined ? { pieceId: pieceHash } : {}),
+        };
+      }),
       deferredActionCount: marker.deferredActionCount,
     });
   });

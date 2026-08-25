@@ -15,10 +15,11 @@ import {
 } from "@commonfabric/data-model/value-clone";
 import {
   type FabricValue,
+  isFabricPlainContainer,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import { toDebugKindString } from "@commonfabric/data-model/value-debug";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { isObjectOrArray } from "@commonfabric/utils/types";
 import type {
   IMemoryAddress,
   ITypeMismatchError,
@@ -44,10 +45,16 @@ export type MutablePathWriteOptions = {
   delete?: boolean;
 };
 
+/**
+ * Indicates whether a value is one a path key addresses -- an array or a plain
+ * object. A `FabricInstance` is refused: it is a container, but it holds its
+ * state privately, so reading `value[key]` off one finds an inherited member or
+ * nothing, and writing one leaves an own property the instance never reports.
+ */
 export const isContainerValue = (
   value: FabricValue | undefined,
 ): value is Record<string, FabricValue> | FabricValue[] =>
-  Array.isArray(value) || isObjectOrArray(value);
+  isFabricPlainContainer(value);
 
 export const getValueTypeName = (value: FabricValue | undefined): string => {
   if (value === null) {
@@ -146,6 +153,19 @@ export const applyMutablePathWrite = (
       force: false,
     });
     newRoot = result.value;
+    if (!isFabricPlainContainer(result.pathValue)) {
+      // `cloneForMutation()` hands back any container arm at the end of its
+      // path, and `leafKey` addresses none of them but the plain ones. The
+      // offending value is at `parentPath`, whose last key is the one before
+      // the leaf.
+      return {
+        error: TypeMismatchError(
+          { ...address, path: parentPath },
+          toDebugKindString(result.pathValue),
+          "write",
+        ),
+      };
+    }
     parent = result.pathValue as
       | Record<string, FabricValue>
       | FabricValue[];

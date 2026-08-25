@@ -18,6 +18,10 @@ import { extractHashtags } from "@commonfabric/utils/hashtags";
 import { getLogger } from "@commonfabric/utils/logger";
 
 import { h } from "../builder/h.ts";
+// The sidecar instantiation observes its wave settlement (a serving-wave
+// commit can be withdrawn AFTER commit() resolves — runner.ts's pattern-swap
+// settlement precedent) so a withdrawn one-shot is at least named.
+import { waveSettlementOf } from "../executor/wave.ts";
 import {
   type CellScope,
   type JSONSchema,
@@ -32,7 +36,6 @@ import {
   getMetaLink,
   toMemorySpaceAddress,
 } from "../link-utils.ts";
-import { isLegacyPieceRegistryRoot } from "../piece-helpers.ts";
 import { setRunnableName } from "../runner-utils.ts";
 import { type Runtime, spaceCellSchema } from "../runtime.ts";
 import { type Action, type ReactivityLog } from "../scheduler.ts";
@@ -43,6 +46,7 @@ import {
   isConflictRejection,
   isStorageTransactionInconsistent,
 } from "../storage/rejection.ts";
+import { onSchemaRegistryClear } from "../schema-registry.ts";
 import { scopedCell } from "./scope-policy.ts";
 
 const wishFlowLogger = getLogger("runner.wish-flow", {
@@ -1278,13 +1282,9 @@ function resolveSpaceTarget(
       return { cell: spaceCell, pathPrefix: [...pathPrefix!] };
     }
 
-    const defaultPattern = spaceCell.key("defaultPattern").resolveAsCell();
-    const registryKey = isLegacyPieceRegistryRoot(defaultPattern)
-      ? "allPieces"
-      : "pieceRegistry";
     return {
       cell: spaceCell,
-      pathPrefix: ["defaultPattern", registryKey],
+      pathPrefix: ["defaultPattern", "pieceRegistry"],
     };
   };
 
@@ -1592,6 +1592,22 @@ export function createSidecarPatternCache(options: {
     }
   }
 
+  // A compiled pattern's serialized graph embeds `cid:` schema references
+  // minted in the registry epoch that compiled it (`externalizeSchema` at
+  // binding serialization), and both backings of those references die with
+  // that epoch: the registry clears on last-lease-out, and the compile
+  // context's space is not the next session's. A cached pattern handed
+  // across the clear would stage links whose references nothing anywhere
+  // can resolve — the emission gate throws on exactly that shape — so the
+  // cache drops with the epoch and the next wish refetches and recompiles,
+  // minting into the epoch that will use it. (The listener registration is
+  // permanent; a cache abandoned by tests resets as a no-op.)
+  onSchemaRegistryClear(() => {
+    pattern = undefined;
+    fetchPromise = undefined;
+    fetchUrl = undefined;
+  });
+
   return {
     // Pattern from a completed fetch for the current environment's URL.
     cached(): Pattern | undefined {
@@ -1633,6 +1649,69 @@ export function createSidecarPatternCache(options: {
     },
   };
 }
+
+/** What a failed sidecar instantiation attempt does next — the OW45
+ * discrimination, shared verbatim by the commit-error arm and the
+ * thrown-error arm of `runSidecarInOwnTx` (a thrown conflict is the same
+ * object shape as a commit-refused one, so one function decides both):
+ *
+ * - a CONFLICT-CLASS failure (`ConflictError` /
+ *   `StorageTransactionInconsistent`) with the result cell already
+ *   materialized means a racing sibling instantiation won → `"yield"`
+ *   (never clobber the winner with an error UI — the OW45
+ *   profile-starvation defect);
+ * - a conflict-class failure with the cell still EMPTY means an INPUT doc
+ *   moved under the run (no winner exists) → `"retry"` against fresh
+ *   state while attempts remain — abandoning the only instantiation
+ *   leaves the surface permanently blank;
+ * - anything else — and the bounded-retry terminal — → `"error-ui"`, the
+ *   surface's loud account of why it never came up. The winner probe is
+ *   consulted ONLY for conflict-class failures: the real-failure path
+ *   performs no reads.
+ *
+ * Exported for the unit half of `wish-sidecar-duplicate-launch.test.ts`:
+ * the thrown arm is not deterministically drivable through the public
+ * flow (it needs a third-party write between a transaction's snapshot
+ * and its own reads), so the discrimination itself is pinned here and
+ * each arm reduces to a mechanical consume.
+ */
+export async function sidecarRunFailureDisposition(
+  error: { name?: string } | undefined | null,
+  winnerPresent: () => Promise<boolean> | boolean,
+  lastAttempt: boolean,
+): Promise<"yield" | "retry" | "error-ui"> {
+  if (isConflictRejection(error) || isStorageTransactionInconsistent(error)) {
+    if (await winnerPresent()) return "yield";
+    if (!lastAttempt) return "retry";
+  }
+  return "error-ui";
+}
+
+/** Whether a sidecar result cell's raw value is a RACING WINNER a
+ * conflict-class loser may yield to. An error ACCOUNT written by
+ * `commitPatternErrorUI` is NOT a winner (Cubic P2 on the review round:
+ * yielding to a stale error account makes the surface permanently red and
+ * defeats the heal path) — it carries the `sidecarError` marker for exactly
+ * this discrimination. Exported for the unit pin. */
+export function sidecarValueIsWinner(raw: unknown): boolean {
+  if (raw === undefined) return false;
+  return !(typeof raw === "object" && raw !== null && "sidecarError" in raw);
+}
+
+// Test seam (this package has no logger-capture idiom — the OW45 register's
+// F9 note): process-global counts of sidecar launch activity, so a pin that
+// must WITNESS a duplicate launch can assert it happened instead of passing
+// vacuously when a timing window closes early. Monotonic; consumers compare
+// deltas, never absolutes.
+export const wishSidecarDiagnostics = {
+  /** Continuations registered on the profile-create fetch (one per launch
+   * that found no cached pattern — the duplicate-launch producer). */
+  profileCreateFetchContinuations: 0,
+  /** runSidecarInOwnTx invocations (instantiation attempts). */
+  sidecarRunsStarted: 0,
+  /** Conflict-class losers that yielded to a materialized winner. */
+  sidecarRunsRaced: 0,
+};
 
 const suggestionPatternCache = createSidecarPatternCache({
   name: "suggestion.tsx",
@@ -2320,7 +2399,13 @@ export function wish(
       actionId: `wish/pattern-error-ui/${resultCell.sourceURI}`,
       kind: "bookkeeping",
     });
-    resultCell.withTx(errorTx).set({ [UI]: errorUI(message) });
+    // The `sidecarError` marker is the winner predicate's discriminator
+    // (sidecarValueIsWinner): a conflict-class loser must never yield to
+    // this account as if it were a materialized surface.
+    resultCell.withTx(errorTx).set({
+      [UI]: errorUI(message),
+      sidecarError: message,
+    });
     runtime.prepareTxForCommit(errorTx);
     const { error } = await errorTx.commit();
     // The account of the failure failed to land, so the surface stays blank
@@ -2334,37 +2419,137 @@ export function wish(
     }
   }
 
-  // Run a just-fetched sidecar pattern (profile create / picker) into its result
-  // cell on its own committed transaction, surfacing any commit failure as an
-  // error UI in that cell. Shared by launchProfileCreatePattern and
-  // launchProfilePickerPattern so the commit/error lifecycle lives in one place.
+  // Run a just-fetched sidecar pattern (profile create / picker) into its
+  // result cell on its own committed transaction. Shared by
+  // launchProfileCreatePattern and launchProfilePickerPattern so the
+  // commit/failure lifecycle lives in one place. Failure semantics, per arm:
+  // a CONFLICT-CLASS failure with the result cell already materialized means
+  // a racing sibling instantiation won — yield to it (never clobber it with
+  // an error UI; that was the OW45 profile-starvation defect); a
+  // conflict-class failure with the cell still EMPTY means an INPUT doc
+  // moved under the run — re-run against fresh state (bounded), because
+  // abandoning the only instantiation leaves the surface permanently blank;
+  // every other failure writes the error UI into the cell (the surface's
+  // account of why it never came up).
   async function runSidecarInOwnTx(
     resultCell: Cell<any>,
     pattern: Pattern,
     inputForTx: (tx: IExtendedStorageTransaction) => unknown,
   ): Promise<void> {
-    try {
-      const runTx = runtime.edit();
-      // Sidecar run from a cache-fetch continuation — no scheduler run
-      // stamps it; bookkeeping per serving-loop.md §3d.
-      runtime.stampServerRun(runTx, {
-        actionId: `wish/sidecar-run/${resultCell.sourceURI}`,
-        kind: "bookkeeping",
-      });
-      runtime.runner.run(
-        runTx,
-        pattern,
-        inputForTx(runTx),
-        resultCell.withTx(runTx),
-        sidecarRunOptions,
+    wishSidecarDiagnostics.sidecarRunsStarted += 1;
+    // A conflict-class failure means SOME other writer advanced a doc this
+    // run's basis read: a sibling instantiation of the same cause-derived
+    // sidecar (the same node launched again before the fetch resolved —
+    // every pre-resolve launch chains its own continuation on the memoized
+    // fetch — another runtime/instance of the node, or the serving loop's
+    // re-run), or concurrent traffic on an INPUT doc (e.g. the home
+    // `profiles` list). The decision is `sidecarRunFailureDisposition`
+    // (module level, unit-pinned); loudness per serving-loop.md §3d's
+    // failure-arm contract; the flow pin is
+    // wish-sidecar-duplicate-launch.test.ts.
+    const yieldToRacingWinner = (error: { name?: string }) => {
+      wishSidecarDiagnostics.sidecarRunsRaced += 1;
+      wishFlowLogger.warn("sidecar-run-raced", () => [
+        `sidecar run for ${resultCell.sourceURI} lost a same-cell race ` +
+        `and yields to the winner's surface: ${error.name}: ${
+          (error as { message?: string }).message ?? ""
+        }`,
+      ]);
+    };
+    // Whether a sibling's materialization (or its error account) is already
+    // in the cell — read through a fresh handle so no stale bound tx is
+    // consulted; sync errors fall through to the local view.
+    const winnerInCell = async (): Promise<boolean> => {
+      const fresh = runtime.getCellFromLink(
+        resultCell.getAsNormalizedFullLink(),
       );
-      runtime.prepareTxForCommit(runTx);
-      const { error } = await runTx.commit();
-      if (error) {
-        await commitPatternErrorUI(resultCell, toCompactDebugString(error));
+      try {
+        await fresh.sync();
+      } catch {
+        // The local replica view still answers below.
       }
-    } catch (error) {
-      await commitPatternErrorUI(resultCell, errorMessage(error));
+      return sidecarValueIsWinner(fresh.getRaw());
+    };
+    // Bounded: an input-doc conflict converges by re-reading fresh state;
+    // three attempts outlasts any plausible burst, and the terminal arm is
+    // the loud error UI, never a silent drop.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const lastAttempt = attempt === 2;
+      try {
+        const runTx = runtime.edit();
+        // Sidecar run from a cache-fetch continuation — no scheduler run
+        // stamps it; bookkeeping per serving-loop.md §3d.
+        runtime.stampServerRun(runTx, {
+          actionId: `wish/sidecar-run/${resultCell.sourceURI}`,
+          kind: "bookkeeping",
+        });
+        runtime.runner.run(
+          runTx,
+          pattern,
+          inputForTx(runTx),
+          resultCell.withTx(runTx),
+          sidecarRunOptions,
+        );
+        runtime.prepareTxForCommit(runTx);
+        const { error } = await runTx.commit();
+        if (error) {
+          const disposition = await sidecarRunFailureDisposition(
+            error,
+            winnerInCell,
+            lastAttempt,
+          );
+          if (disposition === "yield") {
+            yieldToRacingWinner(error);
+            return;
+          }
+          if (disposition === "retry") continue;
+          await commitPatternErrorUI(resultCell, toCompactDebugString(error));
+          return;
+        }
+        // Under a serving wave, commit() resolving ok is not durability:
+        // the commit step can still withdraw the contribution (runner.ts's
+        // pattern-swap settlement precedent). Nothing re-issues a withdrawn
+        // sidecar instantiation, so at least SAY so — the silent one-shot
+        // loss class this row keeps producing. Observed OUTSIDE this
+        // launch's awaited chain: the launch promise is tracked into
+        // idle(), and a wave's settlement can resolve only at the commit
+        // step — awaiting it here would make idle() wait on the wave that
+        // waits on quiescence (stalling cold sidecars until the flush
+        // deadline). Recovery is deliberately not attempted (re-running
+        // against a withdrawn basis is its own design question, flagged in
+        // the register).
+        const settlement = waveSettlementOf(runTx);
+        if (settlement !== undefined) {
+          void settlement.then((settled) => {
+            if (settled.error !== undefined) {
+              wishFlowLogger.warn("sidecar-run-withdrawn", () => [
+                `sidecar run for ${resultCell.sourceURI} committed but ` +
+                `the wave withdrew it; nothing re-issues this ` +
+                `instantiation: ${settled.error.message}`,
+              ]);
+            }
+          }, () => {
+            // A settlement rejection is the wave's own failure account;
+            // nothing to add here.
+          });
+        }
+        return;
+      } catch (error) {
+        // The same conflict classes surface as THROWS from the run/prepare
+        // path (a stale read met mid-run) — same shared discrimination.
+        const disposition = await sidecarRunFailureDisposition(
+          error as { name?: string },
+          winnerInCell,
+          lastAttempt,
+        );
+        if (disposition === "yield") {
+          yieldToRacingWinner(error as { name?: string });
+          return;
+        }
+        if (disposition === "retry") continue;
+        await commitPatternErrorUI(resultCell, errorMessage(error));
+        return;
+      }
     }
   }
 
@@ -2441,6 +2626,10 @@ export function wish(
       // demander and flips its ready cell; this speculative run only
       // references the served cells (read above for the re-run trigger).
     } else if (!cachedProfileCreatePattern) {
+      // Each entry here chains one instantiation continuation on the
+      // (possibly in-flight, memoized) fetch — the duplicate-launch
+      // producer the pin's witness counts at REGISTRATION time.
+      wishSidecarDiagnostics.profileCreateFetchContinuations += 1;
       const launch = profileCreatePatternCache.fetch(runtime, () => {
         // The pattern arrived: re-arm EVERY demander's create surface —
         // the fetch is node-shared (memoized), so the ready signal must

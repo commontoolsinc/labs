@@ -117,6 +117,36 @@ export interface TopicIndexRow {
 }
 
 /**
+ * The topics that mention `topic`, out of `list` — the pivot's whole join,
+ * lifted out so it can be handed a list a board cannot produce.
+ *
+ * `mentions[i]` is what `list[i]` points at, read once by the caller because
+ * reading it through the reactive array costs a link resolution per topic per
+ * topic.
+ *
+ * The exclusion is asked of IDENTITY, never of array position, and that is the
+ * whole reason this is a named function. A board listing one topic at two
+ * indices must not route its self-mention through the twin and call the result
+ * an inbound edge — and a position comparison passes every test where each
+ * topic appears once, which is every test a board can set up. Handing this
+ * function a duplicated list is what tells the two apart.
+ *
+ * `equals` resolves BOTH sides before comparing, so it answers "do these name
+ * the same document" whether each side arrived as a cell or as the raw link a
+ * read left behind. A method call on the value would depend on which it is.
+ */
+export function mentionedBy<T extends object>(
+  topic: T,
+  list: readonly T[],
+  mentions: readonly (readonly (object | undefined)[] | undefined)[],
+): T[] {
+  return list.filter((other, from) =>
+    !equals(other, topic) &&
+    mentions[from]?.some((mention) => equals(mention, topic))
+  );
+}
+
+/**
  * The board's mention pivot: one row per topic, naming the topics that mention
  * it.
  *
@@ -172,25 +202,17 @@ const crossrefTable = lift(
       // is no id to key a map by — and nothing to mint, keep in step, or
       // migrate when a piece moves. At board scale this is a few hundred
       // comparisons of already-resolved links.
-      const mentionedBy = list.filter((other, from) =>
-        // A topic mentioning itself is not an edge, the rule a self-link has
-        // always had here — asked of the topic rather than of its position, so
-        // a board listing one topic twice cannot route a self-mention through
-        // the twin and call it an inbound edge.
-        !equals(other, topic) &&
-        // `equals` resolves BOTH sides before comparing, so it returns "do
-        // these name the same document" whether each side arrived as a cell or
-        // as the raw link a read left behind. A method call on the value would
-        // depend on which of those it happens to be.
-        mentions[from]?.some((mention) => equals(mention, topic))
-      );
+      const inbound = mentionedBy(topic, list, mentions);
       // Addressed by the topic it describes, so a row keeps its identity
       // wherever it sits and however the board is reordered. That is what lets
       // every topic's lookup re-run freely on any board change and still write
       // nothing: an unchanged row recomputes to the same links at the same
       // address.
       rows.push(
-        Writable.for<TopicCrossrefRow>(topic).set({ topic, mentionedBy }),
+        Writable.for<TopicCrossrefRow>(topic).set({
+          topic,
+          mentionedBy: inbound,
+        }),
       );
     });
     return rows as TopicCrossrefRow[];

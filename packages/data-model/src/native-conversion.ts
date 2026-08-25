@@ -262,14 +262,13 @@ export function shallowFabricFromNativeValue(
 
     case NATIVE_TAGS.RegExp: {
       // `RegExp` instances are converted to `FabricRegExp`, which rejects extra
-      // enumerable properties and self-freezes in its constructor.
+      // enumerable properties and is frozen at construction.
       return new FabricRegExp(value as RegExp);
     }
 
     case NATIVE_TAGS.Uint8Array: {
       // Native `Uint8Array` instances are wrapped in `FabricBytes`.
-      // `FabricBytes` self-freezes in its constructor (`FabricPrimitive`
-      // contract).
+      // `FabricBytes` is frozen at construction (`FabricPrimitive` contract).
       return new FabricBytes(value as Uint8Array);
     }
 

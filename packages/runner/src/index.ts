@@ -98,6 +98,7 @@ export {
 export { effect } from "./reactivity.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
 export {
+  CompilerStackLoadError,
   computeEntryIdentity,
   Console,
   type ConsoleEvent,
@@ -305,7 +306,6 @@ export {
   cellWithScopedLinkRequiredsRelaxed,
   compileAndSavePattern,
   parseCellPath,
-  pieceRegistryKeyForRoot,
   resolveCellPath,
 } from "./piece-helpers.ts";
 export type { ModuleByteCache } from "./runtime.ts";

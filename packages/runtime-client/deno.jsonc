@@ -1,13 +1,17 @@
 {
   // Dependency guide: ../../docs/development/DEPENDENCIES.md
   "name": "@commonfabric/runtime-client",
+  "imports": {
+    // Dependency guide: ../../docs/development/DEPENDENCIES.md
+    "@/": "./src/"
+  },
   "tasks": {
     // --no-check: this package is type-checked by `deno task check` (tasks/check.sh).
-    "test": "deno test --no-check --allow-env --allow-read --allow-ffi *.test.ts backends/*.test.ts client/*.test.ts",
+    "test": "deno test --no-check --allow-env --allow-read --allow-ffi test/",
     "integration": "LOG_LEVEL=warn deno test -A $INTEGRATION_TEST_FLAGS \"./integration/*.test.ts\""
   },
   "exports": {
-    ".": "./mod.ts",
-    "./transports/web-worker": "./client/transports/web-worker/transport-web-worker.ts"
+    ".": "./src/mod.ts",
+    "./transports/web-worker": "./src/client/transports/web-worker/transport-web-worker.ts"
   }
 }

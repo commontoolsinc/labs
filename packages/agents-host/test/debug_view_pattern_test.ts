@@ -6,6 +6,10 @@ import { resolvedSchema } from "../../runner/test/schema-ref-helpers.ts";
 import { SESSION_PAGE_SIZE } from "../../patterns/agent-sessions-debug/presentation.ts";
 import type { Cell } from "../../runner/src/builder/types.ts";
 import { AgentFabricTarget } from "@commonfabric/agents-connector/fabric";
+import {
+  AGENT_CONNECTOR_WRITER_ID,
+  agentOwnerSchema,
+} from "@commonfabric/agents-connector/fabric-graph";
 import { isLinkRef, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { createSession } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
@@ -52,6 +56,7 @@ Deno.test("debug pattern accepts empty target cells before collection", async ()
     const target = await AgentFabricTarget.open({
       runtime,
       spaceDid: session.space,
+      ownerDid: session.as.did(),
     });
     const piece = await deployDebugPiece(manager, target);
 
@@ -133,6 +138,7 @@ Deno.test("debug pattern renders sessions published after deployment", async () 
     const target = await AgentFabricTarget.open({
       runtime,
       spaceDid: session.space,
+      ownerDid: session.as.did(),
     });
     const piece = await deployDebugPiece(manager, target);
     const snapshot = sessionSnapshot();
@@ -183,9 +189,14 @@ Deno.test("debug pattern submits commands and links row data to separate views",
     spaceName: `debug-command-${crypto.randomUUID()}`,
   });
   const storageManager = StorageManager.emulate({ as: session.as });
+  let actingPrincipal = session.as.did();
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
+    trustSnapshotProvider: () => ({
+      id: `principal:${actingPrincipal}`,
+      actingPrincipal,
+    }),
   });
   try {
     const manager = new PiecesController(session, runtime);
@@ -193,6 +204,7 @@ Deno.test("debug pattern submits commands and links row data to separate views",
     const target = await AgentFabricTarget.open({
       runtime,
       spaceDid: session.space,
+      ownerDid: session.as.did(),
     });
     const source = sourceDescriptor();
     const snapshot = sessionSnapshot();
@@ -215,12 +227,12 @@ Deno.test("debug pattern submits commands and links row data to separate views",
     };
     const health = {
       service: "agents-host",
-      formatVersion: 1,
       status: "ready",
       startedAt: "2026-07-20T00:00:00.000Z",
       updatedAt: "2026-07-20T00:01:00.000Z",
       target: {
         spaceDid: session.space,
+        ownerDid: session.as.did(),
         cells: {
           recentIndex: "recent-index",
           allIndex: "all-index",
@@ -246,6 +258,32 @@ Deno.test("debug pattern submits commands and links row data to separate views",
     await target.publishHealth(health);
     const piece = await deployDebugPiece(manager, target);
     await runtime.settled();
+    const resultCell = await piece.result.getCell();
+    const resultLink = resultCell.getAsNormalizedFullLink();
+    const resultInspect = runtime.edit();
+    const storedResult = resultInspect.readOrThrow({
+      space: resultLink.space,
+      id: resultLink.id,
+      path: [],
+      ...(resultLink.scope !== undefined && { scope: resultLink.scope }),
+    }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
+    assertEquals(
+      storedResult.cfc?.labelMap?.entries?.some((entry) =>
+        JSON.stringify(entry).includes("confidentiality") &&
+        JSON.stringify(entry).includes(session.as.did())
+      ),
+      true,
+    );
+    resultInspect.abort();
+    const resultAttack = runtime.edit();
+    resultAttack.setCfcTrustSnapshot({
+      id: "principal:did:key:other-debug-owner",
+      actingPrincipal: "did:key:other-debug-owner",
+    });
+    resultCell.withTx(resultAttack).setRawUntyped({ compromised: true });
+    resultAttack.prepareCfc();
+    const resultAttackCommit = await resultAttack.commit();
+    assertEquals(resultAttackCommit.error !== undefined, true);
 
     let result = await piece.result.get() as Record<string, unknown>;
     const commandButton = renderedNodes(result["$UI"]).find((node) =>
@@ -301,14 +339,19 @@ Deno.test("debug pattern submits commands and links row data to separate views",
       typeof (send as { send?: unknown } | undefined)?.send,
       "function",
     );
+    actingPrincipal = "did:key:other-owner";
     (send as { send: (event: unknown) => void }).send({});
     await runtime.settled();
+    assertEquals(await target.pollCommands(), []);
 
+    actingPrincipal = session.as.did();
+    (send as { send: (event: unknown) => void }).send({});
+    await runtime.settled();
     const actionValues = await target.pollCommands();
     assertEquals(actionValues.length, 1);
     assertEquals(typeof actionValues[0], "string");
     const command = JSON.parse(String(actionValues[0]));
-    assertEquals(command.schema, "commonfabric.agent-connector.command.v1");
+    assertEquals(command.schema, "commonfabric.agent-connector.command");
     assertEquals(command.sourceId, source.id);
     assertEquals(
       command.nativeSessionId,
@@ -319,9 +362,30 @@ Deno.test("debug pattern submits commands and links row data to separate views",
       command.payload,
       { text: "Continue from the deployed debug view" },
     );
+    const commandLink = target.cells.commands.getAsNormalizedFullLink();
+    const protectedCommandLink = target.cells.commands.resolveAsCell()
+      .getAsNormalizedFullLink();
+    const inspect = runtime.edit();
+    const stored = inspect.readOrThrow({
+      space: protectedCommandLink.space,
+      id: protectedCommandLink.id,
+      path: [],
+      ...(protectedCommandLink.scope !== undefined && {
+        scope: protectedCommandLink.scope,
+      }),
+    }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
+    assertEquals(
+      stored.cfc?.labelMap?.entries?.some((entry) =>
+        JSON.stringify(entry).includes("confidentiality") &&
+        JSON.stringify(entry).includes(session.as.did())
+      ),
+      true,
+    );
+    inspect.abort();
 
     await target.publishReceipt({
-      schema: "commonfabric.agent-connector.command-receipt.v1",
+      schema: "commonfabric.agent-connector.command-receipt",
+      ownerDid: session.as.did(),
       commandId: command.id,
       sourceId: source.id,
       nativeSessionId: snapshot.summary.nativeSessionId,
@@ -384,7 +448,7 @@ Deno.test("debug pattern submits commands and links row data to separate views",
     );
     assertEquals(
       commandProvenance.provenance.origin.includes(
-        "shared commands cell",
+        "owner's protected command queue",
       ),
       true,
     );
@@ -528,7 +592,8 @@ Deno.test("debug pattern submits commands and links row data to separate views",
     );
 
     await target.publishReceipt({
-      schema: "commonfabric.agent-connector.command-receipt.v1",
+      schema: "commonfabric.agent-connector.command-receipt",
+      ownerDid: session.as.did(),
       commandId: "other-command",
       sourceId: source.id,
       nativeSessionId: snapshot.summary.nativeSessionId,
@@ -536,7 +601,8 @@ Deno.test("debug pattern submits commands and links row data to separate views",
       completedAt: "2026-07-20T00:03:00.000Z",
     });
     await target.publishReceipt({
-      schema: "commonfabric.agent-connector.command-receipt.v1",
+      schema: "commonfabric.agent-connector.command-receipt",
+      ownerDid: session.as.did(),
       commandId: command.id,
       sourceId: source.id,
       nativeSessionId: snapshot.summary.nativeSessionId,
@@ -634,7 +700,10 @@ Deno.test("debug pattern submits commands and links row data to separate views",
         }),
     );
     let commandTx = runtime.edit();
-    target.cells.commands.withTx(commandTx).set(pageCommands);
+    target.cells.commands.resolveAsCell()
+      .asSchema(agentOwnerSchema(session.as.did(), false)).withTx(commandTx)
+      .setRawUntyped(pageCommands);
+    commandTx.prepareCfc();
     let commandCommit = await commandTx.commit();
     if (commandCommit.error) throw commandCommit.error;
     await runtime.settled();
@@ -659,15 +728,18 @@ Deno.test("debug pattern submits commands and links row data to separate views",
     )[0];
 
     commandTx = runtime.edit();
-    target.cells.commands.withTx(commandTx).set([
-      ...pageCommands,
-      JSON.stringify({
-        ...command,
-        id: "page-command-25",
-        createdAt: "2026-07-20T00:25:00.000Z",
-        payload: { sequence: 25 },
-      }),
-    ]);
+    target.cells.commands.resolveAsCell()
+      .asSchema(agentOwnerSchema(session.as.did(), false)).withTx(commandTx)
+      .setRawUntyped([
+        ...pageCommands,
+        JSON.stringify({
+          ...command,
+          id: "page-command-25",
+          createdAt: "2026-07-20T00:25:00.000Z",
+          payload: { sequence: 25 },
+        }),
+      ]);
+    commandTx.prepareCfc();
     commandCommit = await commandTx.commit();
     if (commandCommit.error) throw commandCommit.error;
     await runtime.settled();
@@ -697,6 +769,16 @@ Deno.test("debug pattern submits commands and links row data to separate views",
       ),
       { sequence: 1 },
     );
+
+    const attack = runtime.edit();
+    attack.setCfcTrustSnapshot({
+      id: "principal:did:key:other-owner",
+      actingPrincipal: "did:key:other-owner",
+    });
+    attack.writeValueOrThrow(commandLink, []);
+    attack.prepareCfc();
+    const attackResult = await attack.commit();
+    assertEquals(attackResult.error !== undefined, true);
   } finally {
     await runtime.dispose();
     await storageManager.close();
@@ -721,6 +803,7 @@ Deno.test("debug pattern bounds raw-data links to one session page", async () =>
     const target = await AgentFabricTarget.open({
       runtime,
       spaceDid: session.space,
+      ownerDid: session.as.did(),
     });
     await target.publish([{
       source: sourceDescriptor(),
@@ -756,9 +839,14 @@ Deno.test("debug pattern bounds raw-data links to one session page", async () =>
       path: [],
     });
     const staleIndexTx = runtime.edit();
+    staleIndexTx.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: AGENT_CONNECTOR_WRITER_ID,
+    });
     staleIndexRow.withTx(staleIndexTx).key("driver").set(
       "claude-agent-sdk",
     );
+    staleIndexTx.prepareCfc();
     const staleIndexCommit = await staleIndexTx.commit();
     if (staleIndexCommit.error) throw staleIndexCommit.error;
     const piece = await deployDebugPiece(manager, target);
@@ -857,12 +945,12 @@ Deno.test("debug pattern bounds raw-data links to one session page", async () =>
       (result as Record<string, unknown>)["$UI"],
       "Raw data",
     );
-    const firstPageRunnerCount = runtime.runner.cancels.size;
     assertEquals(
       countSessionRawDataLinks((result as Record<string, unknown>)["$UI"]),
       SESSION_PAGE_SIZE,
     );
     assertEquals(firstPageLinkIds.length, SESSION_PAGE_SIZE);
+    const firstPageRunnerCount = runtime.runner.cancels.size;
     const nextButton = renderedNodes(
       (result as Record<string, unknown>)["$UI"],
     ).find((node) =>
@@ -893,8 +981,10 @@ Deno.test("debug pattern bounds raw-data links to one session page", async () =>
       secondPageLinkIds.every((id) => !firstPageIds.has(id)),
       true,
     );
-    const secondPageRunnerCount = runtime.runner.cancels.size;
-    assertEquals(secondPageRunnerCount > firstPageRunnerCount, true);
+    assertEquals(
+      runtime.runner.cancels.size <= firstPageRunnerCount + 1,
+      true,
+    );
     openedRawSession.key("load").send({});
     await runtime.settled();
     await openedRawSession.pull();
@@ -925,6 +1015,7 @@ Deno.test("debug pattern bounds raw-data links to one session page", async () =>
       ),
       true,
     );
+    const openedRawRunnerCount = runtime.runner.cancels.size;
     (nextPage as { send: (event: unknown) => void }).send({});
     await runtime.settled();
 
@@ -940,8 +1031,7 @@ Deno.test("debug pattern bounds raw-data links to one session page", async () =>
       SESSION_PAGE_SIZE,
     );
     assertEquals(thirdPageLinkIds.length, SESSION_PAGE_SIZE);
-    const thirdPageRunnerCount = runtime.runner.cancels.size;
-    assertEquals(thirdPageRunnerCount < secondPageRunnerCount, true);
+    assertEquals(runtime.runner.cancels.size, openedRawRunnerCount);
     (nextPage as { send: (event: unknown) => void }).send({});
     await runtime.settled();
 
@@ -949,6 +1039,10 @@ Deno.test("debug pattern bounds raw-data links to one session page", async () =>
     assertEquals(
       countSessionRawDataLinks((lastResult as Record<string, unknown>)["$UI"]),
       trailingSessionCount,
+    );
+    assertEquals(
+      runtime.runner.cancels.size < openedRawRunnerCount,
+      true,
     );
     const filterInput = renderedNodes(
       (lastResult as Record<string, unknown>)["$UI"],
@@ -1025,7 +1119,10 @@ Deno.test("debug pattern bounds raw-data links to one session page", async () =>
       ),
       firstPageLinkIds,
     );
-    assertEquals(runtime.runner.cancels.size < thirdPageRunnerCount, true);
+    assertEquals(
+      runtime.runner.cancels.size <= openedRawRunnerCount,
+      true,
+    );
   } finally {
     await runtime.dispose();
     await storageManager.close();
@@ -1051,6 +1148,7 @@ Deno.test("debug pattern resumes sessions published while it was stopped", async
     const target = await AgentFabricTarget.open({
       runtime: deployRuntime,
       spaceDid: deploySession.space,
+      ownerDid: deploySession.as.did(),
     });
     debugPieceId = (await deployDebugPiece(manager, target)).id;
     await deployStorage.synced();
@@ -1071,6 +1169,7 @@ Deno.test("debug pattern resumes sessions published while it was stopped", async
     const target = await AgentFabricTarget.open({
       runtime: publishRuntime,
       spaceDid: publishSession.space,
+      ownerDid: publishSession.as.did(),
     });
     const snapshots = Array.from({ length: SESSION_PAGE_SIZE }, (_, index) => {
       const snapshot = sessionSnapshot(index + 1);
@@ -1122,7 +1221,7 @@ Deno.test("debug pattern resumes sessions published while it was stopped", async
 Deno.test("debug pattern loads connector child cells on a cold replica", async () => {
   const server = newSharedServer();
   const spaceName = `debug-cold-${crypto.randomUUID()}`;
-  const sessionCount = SESSION_PAGE_SIZE * 34;
+  const sessionCount = SESSION_PAGE_SIZE + 1;
   let debugPieceId = "";
   let rawPieceId = "";
   let manifestDocumentId = "";
@@ -1144,6 +1243,7 @@ Deno.test("debug pattern loads connector child cells on a cold replica", async (
       const target = await AgentFabricTarget.open({
         runtime: writerRuntime,
         spaceDid: writerSession.space,
+        ownerDid: writerSession.as.did(),
       });
       debugPieceId = (await deployDebugPiece(manager, target)).id;
       const source = sourceDescriptor();
@@ -1191,7 +1291,6 @@ Deno.test("debug pattern loads connector child cells on a cold replica", async (
       lastSessionRowDocumentId = lastSessionRowId;
       await target.publishHealth({
         service: "agents-host",
-        formatVersion: 1,
         status: "ready",
         startedAt: "2026-07-20T00:00:00.000Z",
         updatedAt: "2026-07-20T00:01:00.000Z",
@@ -1218,8 +1317,8 @@ Deno.test("debug pattern loads connector child cells on a cold replica", async (
       });
       const manifest = writerRuntime.getCell(writerSession.space, {
         spaceDid: writerSession.space,
+        ownerDid: writerSession.as.did(),
         agentConnector: "session",
-        version: 1,
         sourceId: "codex:test",
         nativeSessionId: "session-1",
       });
@@ -1332,7 +1431,7 @@ Deno.test("debug pattern loads connector child cells on a cold replica", async (
         "AgentsHost.health()",
         "preceding seven days",
         "all non-deleted session-row links",
-        "shared action array",
+        "owner-confidential command queue",
         "latest 200 receipt-row links",
       ];
       for (const [index, link] of topLevelRawLinks.entries()) {

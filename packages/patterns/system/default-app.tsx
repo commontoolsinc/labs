@@ -20,7 +20,6 @@ import BacklinksIndex, { type MentionablePiece } from "./backlinks-index.tsx";
 import SummaryIndex from "./summary-index.tsx";
 import Notebook from "../notes/notebook.tsx";
 import PieceGrid from "./piece-grid.tsx";
-import { migratePieceRegistry } from "./piece-registry-migration.ts";
 
 type MinimalPiece = {
   [NAME]?: string;
@@ -151,26 +150,8 @@ const trackRecent = handler<
 
 export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   // OWN the data cells (not from wish)
-  const legacyPieceRegistry = new Writable<MentionablePiece[]>([]).for(
-    "allPieces",
-  );
   const pieceRegistry = new Writable<MentionablePiece[]>([]);
-  // TODO(2026-08-21): Remove the retired allPieces cell and
-  // pieceRegistryMigrationComplete state.
-  const pieceRegistryMigrationComplete = new Writable(false).for(
-    "pieceRegistryMigrationComplete",
-  );
   const recentPieces = new Writable<MentionablePiece[]>([]);
-
-  // Copy the retired owned cell into the new registry once. Existing canonical
-  // state wins when both cells contain data.
-  computed(() => {
-    migratePieceRegistry(
-      legacyPieceRegistry,
-      pieceRegistry,
-      pieceRegistryMigrationComplete,
-    );
-  });
 
   // Dropdown menu state
   const menuOpen = new Writable(false);

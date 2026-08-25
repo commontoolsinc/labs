@@ -8,6 +8,10 @@
  */
 
 import { assert, assertEquals } from "@std/assert";
+import {
+  dashboardConnectivityConfirmed,
+  setDashboardConnectivityForTest,
+} from "../connectivity.ts";
 import type { Ctx } from "../types.ts";
 import { commonToolsUp } from "./common-tools-up.ts";
 
@@ -42,6 +46,22 @@ const ok = (status: number) => () => new Response(null, { status });
 const unreachable = () => {
   throw new TypeError("error sending request");
 };
+
+Deno.test("common.tools: an HTTP response confirms dashboard connectivity", async () => {
+  const restoreConnectivity = setDashboardConnectivityForTest(false);
+  try {
+    await withFetch(unreachable, () => commonToolsUp.collect(ctx()));
+    assertEquals(dashboardConnectivityConfirmed(), false);
+
+    await withFetch(ok(503), () => commonToolsUp.collect(ctx()));
+    assertEquals(dashboardConnectivityConfirmed(), true);
+
+    await withFetch(unreachable, () => commonToolsUp.collect(ctx()));
+    assertEquals(dashboardConnectivityConfirmed(), true);
+  } finally {
+    restoreConnectivity();
+  }
+});
 
 // Makes Date.now() report the given elapsed span across the two readings the
 // tile takes around fetch.

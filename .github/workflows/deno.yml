@@ -78,7 +78,28 @@ jobs:
 
       - name: 🧹 Lint codebase
         timeout-minutes: *work-timeout
-        run: deno task run-recorded lint repo deno-lint -- deno lint
+        run: |
+          ulimit -c unlimited
+          sudo sysctl -w kernel.core_pattern="$GITHUB_WORKSPACE/deno-core.%p"
+          deno task run-recorded lint repo deno-lint -- deno lint
+
+      - name: 📋 Describe Deno lint core dump
+        if: ${{ failure() }}
+        run: |
+          shopt -s nullglob
+          cores=(deno-core.*)
+          for core in "${cores[@]}"; do
+            file "$core"
+          done
+
+      - name: 📤 Upload Deno lint core dump
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: deno-lint-core-a${{ github.run_attempt }}
+          path: deno-core.*
+          if-no-files-found: ignore
+          retention-days: 14
 
       # This is the only type check for the paths listed in
       # tasks/typecheck.ts: the test jobs in this workflow and the package
@@ -174,6 +195,13 @@ jobs:
         run: >-
           deno task run-recorded gate repo check-cfc-types --
           deno task check-cfc-types
+
+      - name: 🔎 Check generated commonfabric types are up to date
+        timeout-minutes: *work-timeout
+        working-directory: packages/static
+        run: >-
+          deno task run-recorded gate repo check-commonfabric-types --
+          deno task check-commonfabric-types
 
       - name: 🔎 Check type libraries declare no withheld globals
         timeout-minutes: *work-timeout
@@ -987,6 +1015,7 @@ jobs:
         uses: ./.github/actions/test-records-ship
         with:
           artifact: package-integration-server-execution-on-${{ matrix.suite_name }}
+          variant: server-execution
           job: >-
             Package Integration Tests / server-execution ON
             (${{ matrix.suite_name }})
@@ -1491,6 +1520,7 @@ jobs:
         uses: ./.github/actions/test-records-ship
         with:
           artifact: pattern-integration-server-execution-on-${{ matrix.shard }}
+          variant: server-execution
           job: >-
             Pattern Integration Tests / server-execution ON
             (${{ matrix.shard }}/${{ matrix.total }})

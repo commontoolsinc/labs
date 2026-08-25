@@ -72,10 +72,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { prepareSourceClosureVerification } from "../../../runner/src/compilation-cache/cell-cache.ts";
-import {
-  getResultCellWithSourceSchema,
-  isLegacyPieceRegistryRoot,
-} from "../../../runner/src/piece-helpers.ts";
+import { getResultCellWithSourceSchema } from "../../../runner/src/piece-helpers.ts";
 import { pieceId } from "../piece-id.ts";
 // System space-root pattern refs, their derivation, and the source→URL
 // resolution live in ../system-pattern-url.ts; re-exported here for existing
@@ -576,8 +573,7 @@ export class PiecesController<T = unknown> {
   /**
    * Get the cell containing the registered pieces in this space.
    * This is the discovery root, not a list of every stored piece root. Reads
-   * the default pattern's pieceRegistry export. An eligible legacy system root
-   * is read through its retired registry export.
+   * the default pattern's pieceRegistry export.
    */
   async getPieceRegistry(): Promise<Cell<Cell<unknown>[]>> {
     const defaultPattern = await this.getDefaultPattern(true);
@@ -596,20 +592,11 @@ export class PiecesController<T = unknown> {
       type: "object",
       properties: {
         pieceRegistry: pieceListSchema,
-        allPieces: pieceListSchema,
       },
     });
     const pieceRegistry = cell.key("pieceRegistry") as Cell<Cell<unknown>[]>;
     await this.syncPieces(pieceRegistry);
-    if (!isLegacyPieceRegistryRoot(defaultPattern)) {
-      return pieceRegistry;
-    }
-
-    const legacyPieceRegistry = cell.key("allPieces") as Cell<
-      Cell<unknown>[]
-    >;
-    await this.syncPieces(legacyPieceRegistry);
-    return legacyPieceRegistry;
+    return pieceRegistry;
   }
 
   /** Return the piece registry, not every stored piece root. */

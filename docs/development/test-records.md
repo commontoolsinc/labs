@@ -14,11 +14,18 @@ how to opt a workstation in, and how to read the data.
 
 ## What a record is
 
-A test's identity is the triple of **kind** (`unit`, `browser`, `pattern`,
-`integration`, `typecheck`, `lint`, `format`, `gate`), **scope** (the owning
-workspace member, or `repo`), and **name** (whatever the test's own runner
-reports — a bdd describe chain, a pattern file path, a task name, a script
-step). One record is one JSON line; one uploaded object is a run's
+A test's identity has three required parts: **kind** (`unit`, `browser`,
+`pattern`, `integration`, `typecheck`, `lint`, `format`, `gate`), **scope**
+(the owning workspace member, or `repo`), and **name** (whatever the test's
+own runner reports — a bdd describe chain, a pattern file path, a task name,
+a script step). An optional **variant** separates the same test running
+in a non-default configuration. The default configuration is unmarked. The
+server-execution ON jobs use `server-execution` after variant-aware relay
+support is on the default branch. When server execution becomes the default,
+remove that marker from the ON jobs and mark the surviving explicit OFF jobs
+as `server-execution-off`. New default runs then continue the history of
+today's unmarked default jobs. One record is one JSON line; one uploaded
+object is a run's
 context line followed by its record lines. The schema, the line codecs, and
 their validators live in `packages/test-support/src/records/`.
 
@@ -34,7 +41,8 @@ Renaming a test renames its identity and splits its history. When the
 continuity matters, append a line to `tasks/test-identity-aliases.jsonl`
 mapping the old identity (or a whole scope, for a package rename) to the
 new one with the date; `deno task check-test-aliases` holds that file to
-append-only, no-double-mapping, acyclic rules.
+append-only, no-double-mapping, acyclic rules. The same rename applies to
+every variant.
 
 ## The environment surface
 
@@ -213,6 +221,16 @@ members' personal-fork pull requests report while the store accepts
 nothing authored by anyone else; other fork runs still run their tests
 normally and simply ship no records. Re-running the relay, or
 dispatching it with a run id, re-ships idempotently.
+
+The shared `test-records-ship` action accepts an optional `variant` input.
+It applies the value to every spooled and JUnit-derived record in that job.
+Leave it unset for the default configuration.
+
+The relay runs its parser from the default branch. Land parser, relay, reader,
+and action support for a new optional record field before any test workflow
+starts emitting it. Enabling a field in the same change makes the old relay
+drop it from that change's pull-request artifacts before writing them to the
+create-only store.
 
 ## Reading the data
 

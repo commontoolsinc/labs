@@ -35,6 +35,7 @@
     "./traverse": "./src/traverse.ts",
     "./graph-query": "./src/graph-query.ts",
     "./storage/cache": "./src/storage/cache.ts",
+    "./storage/v2": "./src/storage/v2.ts",
     "./storage/cache.deno": "./src/storage/cache.deno.ts",
     "./local-program.deno": "./src/harness/local-program.deno.ts",
     "./toolshed-http-auth": "./src/toolshed-http-auth.ts",

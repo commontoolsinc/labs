@@ -321,6 +321,12 @@ surveillance tool.
 | dau | distinct identities active per UTC day on one named service, counted from the `user.did` attribute on the `memory.transact` and `memory.subscriber.sync` spans in SigNoz. The headline is the last day that ran to the end (today is still filling, and a part-day always reads as a drop); the sparkline is the retained history. Gray while the named service has no such spans — which is the resting state until a deployment's tracing is switched on. It counts keypairs rather than people; see [dau](#dau) below | `SIGNOZ_URL`, `SIGNOZ_API_KEY`; optional `PROD_SERVICE`, `DAU_EXCLUDE_DIDS`, `SIGNOZ_UI_URL` |
 | github users | organization members plus outside collaborators, with each roster's size charted over about two months. The headline counts unique users across both rosters | `GH_TOKEN` (with org Members read) |
 
+The **production** tile starts gray and says `waiting for connectivity` until
+the independent **common.tools** check receives an HTTP response. It performs
+no production host checks before that signal. The confirmation lasts for the
+process lifetime, so an unreachable production host is then reported as an
+outage even when every production host is unreachable together.
+
 The **labs ci** and **loom ci** headlines use the most recent completed
 workflow attempt. While GitHub reruns a workflow, the prior attempt's conclusion
 remains visible and the tile marks the activity as **build rerunning**. A new

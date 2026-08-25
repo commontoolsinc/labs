@@ -647,12 +647,13 @@ describe("run-pattern", () => {
       expect(result.runState.status).toBe("completed");
     });
 
-    it("returns an error naming deferred writes when a policy-refused commit keeps the result from landing", async () => {
+    it("returns an error naming the policy refusal when the commit boundary refuses the result write", async () => {
       // A strict flow-label runtime over a labelled source: the pattern's
-      // description-derived write is refused at the commit boundary, the
-      // scheduler retries it past the convergence budget, and the result
-      // settles to nothing. The tool reports that as an error naming the
-      // deferred-writes shape rather than an ok over an empty value.
+      // secret-derived write is refused at the commit boundary. The refusal
+      // is terminal — the scheduler surfaces it on its error channel rather
+      // than retrying — and the tool reports it as a policy refusal, with
+      // the reason (which names the labels and documents involved) kept in
+      // the artifact channel rather than the model-facing message.
       const strictStorage = StorageManager.emulate({ as: signer });
       const strictRuntime = new Runtime({
         apiUrl: new URL("http://toolshed.test"),
@@ -726,8 +727,15 @@ describe("run-pattern", () => {
         });
         const output = result.output as RunPatternToolErrorOutput;
         expect(output.status).toBe("error");
+        expect(output.message).toContain("policy refused to commit");
         expect(output.message).toContain("result never landed");
-        expect(output.message).toContain("convergence budget");
+        // The refusal reason is a data channel: it stays in the artifact
+        // field the prompt loop strips from model context, never in the
+        // message.
+        expect(output.message).not.toContain("CFC enforcement rejected");
+        expect(output.rawCauseMessage).toContain(
+          "CFC enforcement rejected commit",
+        );
         expect(output.pieceId).toBeDefined();
       } finally {
         await strictRuntime.dispose();
@@ -740,9 +748,9 @@ describe("run-pattern", () => {
       // reads the list raw. With the labelled values inline in that list, the
       // read carries their confidentiality, so under enforce-strict the
       // output write is refused and nothing lands: the labelled text exists
-      // at rest only in the seeded source document. The refusal is silent
-      // today — the tool still answers ok over the absent value (CT-2037) —
-      // so the status is not part of this contract; the store's contents are.
+      // at rest only in the seeded source document, and the tool reports the
+      // refusal — the coordinator carries the piece's observation identity,
+      // which is what attributes a `raw:map` action's refusal to its piece.
       const { runtime, pieces, space, dispose } = await createStrictFabric();
       try {
         const seed = runtime.edit();
@@ -804,7 +812,10 @@ describe("run-pattern", () => {
             ),
           },
         });
-        const pieceId = (result.output as { pieceId?: string }).pieceId;
+        const output = result.output as RunPatternToolErrorOutput;
+        expect(output.status).toBe("error");
+        expect(output.message).toContain("policy refused to commit");
+        const pieceId = output.pieceId;
         expect(pieceId).toBeDefined();
         await runtime.idle();
         await pieces.synced();

@@ -8,6 +8,15 @@
 import type { CellRef, JSONValue } from "@commonfabric/runtime-client";
 
 /**
+ * Reserved node ID for the container element. The main thread registers the
+ * container DOM element under it, and the worker names it as the parent when
+ * inserting a child directly into the container. It lives here, with the rest
+ * of the vocabulary the two sides share, because agreeing on it is the whole
+ * of its job.
+ */
+export const CONTAINER_NODE_ID = 0;
+
+/**
  * Create a new DOM element.
  */
 export type CreateElementOp = {

@@ -2,7 +2,7 @@
  * Shared type definitions for commonfabric module used in tests.
  *
  * Loads types from the same source as production: types/commonfabric.d.ts
- * via the static cache (which is a symlink to packages/api/index.ts).
+ * via the static cache, which is generated from packages/api/index.ts.
  */
 
 import { StaticCache } from "@commonfabric/static";
@@ -11,7 +11,7 @@ const staticCache = StaticCache.fromFileSystem();
 
 /**
  * The commonfabric type definitions, loaded from the same source as production.
- * This is a symlink to packages/api/index.ts.
+ * The file is generated from packages/api/index.ts.
  */
 export const commonfabricTypes = await staticCache.getText(
   "types/commonfabric.d.ts",
