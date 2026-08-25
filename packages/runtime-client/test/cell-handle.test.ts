@@ -15,8 +15,8 @@ import {
   isCellHandle,
   RequestType,
   type RuntimeClient,
-} from "./mod.ts";
-import { cellRefToKey } from "./shared/utils.ts";
+} from "../mod.ts";
+import { cellRefToKey } from "../shared/utils.ts";
 
 describe("CellHandle CFC label IPC", () => {
   it("queries the runtime for the label view behind a cell", async () => {

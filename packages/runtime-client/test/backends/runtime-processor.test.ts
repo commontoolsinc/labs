@@ -33,15 +33,15 @@ import {
 import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
-import { parseLink } from "../../runner/src/link-utils.ts";
-import * as V2Storage from "../../runner/src/storage/v2.ts";
+import { parseLink } from "../../../runner/src/link-utils.ts";
+import * as V2Storage from "../../../runner/src/storage/v2.ts";
 import {
   type CellRef,
   type CfcLabelView,
   ClientNotificationType,
   type GetPatternSourcesRequest,
   RequestType,
-} from "../protocol/mod.ts";
+} from "../../protocol/mod.ts";
 import {
   assertServerExecutionPostureAgreement,
   browserWorkerParamsFromInitializationData,
@@ -50,13 +50,13 @@ import {
   RuntimeProcessor,
   toConsoleDebugValue,
   toConsoleWireValue,
-} from "./runtime-processor.ts";
+} from "../../backends/runtime-processor.ts";
 import {
   assertFabricLoggerFlags,
   cellRefToSigilLink,
   getCell,
   mapCellRefsToSigilLinks,
-} from "./utils.ts";
+} from "../../backends/utils.ts";
 
 const cfcSigner = await Identity.fromPassphrase(
   "runtime-processor-cfc-label-tests",

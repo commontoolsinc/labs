@@ -25,23 +25,23 @@ import type { MemorySpace } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { Runtime } from "@commonfabric/runner";
-import * as V2Storage from "../../runner/src/storage/v2.ts";
-import { RuntimeProcessor } from "./runtime-processor.ts";
-import { createCellRef } from "./utils.ts";
-import { $conn, CellHandle, type RuntimeClient } from "../mod.ts";
-import { RuntimeConnection } from "../client/connection.ts";
-import { EventEmitter } from "../client/emitter.ts";
+import * as V2Storage from "../../../runner/src/storage/v2.ts";
+import { RuntimeProcessor } from "../../backends/runtime-processor.ts";
+import { createCellRef } from "../../backends/utils.ts";
+import { $conn, CellHandle, type RuntimeClient } from "../../mod.ts";
+import { RuntimeConnection } from "../../client/connection.ts";
+import { EventEmitter } from "../../client/emitter.ts";
 import type {
   RuntimeTransport,
   RuntimeTransportEvents,
-} from "../client/transport.ts";
+} from "../../client/transport.ts";
 import {
   type InitializationData,
   type IPCClientMessage,
   type IPCClientNotification,
   type IPCRemoteMessage,
   RequestType,
-} from "../protocol/mod.ts";
+} from "../../protocol/mod.ts";
 
 const signer = await Identity.fromPassphrase("cell-set-echo-race");
 const space = signer.did();
