@@ -5,6 +5,7 @@
 import type { CommitRow, SpaceDb } from "./db.ts";
 import { hasSchedulerBasisTable } from "./db.ts";
 import { decodeStored } from "./decode.ts";
+import { rowLimit } from "./model.ts";
 import { branchReadChain, owningLink } from "./reconstruct.ts";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 
@@ -240,7 +241,7 @@ export function hotEntities(
       b.writes - a.writes || utf8Compare(a.id, b.id) ||
       utf8Compare(a.scope, b.scope)
     )
-    .slice(0, limit);
+    .slice(0, rowLimit(limit));
 }
 
 // Entity classification / listing moved to model.ts (`listEntityModels`),

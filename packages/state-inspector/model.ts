@@ -478,6 +478,22 @@ export const DEFAULT_SCAN_LIMIT = 5000;
  * number: a fractional one no integer count can ever equal is a cap that never
  * takes effect, and the three scans disagreed about which way to round it.
  */
+/**
+ * The end index a row listing slices to, for a limit that may be anything a
+ * caller passed.
+ *
+ * These listings were SQL `LIMIT ?` clauses, where SQLite reads a NEGATIVE as
+ * UNLIMITED, and the CLI still accepts one. A JS `slice` reads the same number
+ * as "drop the last N", so moving the bound out of SQL turns an operator asking
+ * for everything into a silent under-report. Distinct from `scanLimit`, which
+ * governs a reconstruction CAP and floors a negative to zero: nothing to
+ * reconstruct is a coherent answer, while nothing to list is not what a
+ * negative meant here.
+ */
+export function rowLimit(limit: number): number | undefined {
+  return limit < 0 ? undefined : limit;
+}
+
 export function scanLimit(limit: number | undefined): number {
   if (limit === undefined || Number.isNaN(limit)) return DEFAULT_SCAN_LIMIT;
   return Math.max(0, Math.floor(limit));

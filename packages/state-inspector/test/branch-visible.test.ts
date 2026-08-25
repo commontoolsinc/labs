@@ -25,7 +25,7 @@ import { entityTimeline, spaceTimeline } from "../timetravel.ts";
 import { analyzeSpaceSignals } from "../grouping.ts";
 import { spaceParticipants, valueAsIdentity } from "../scopes.ts";
 import { convergenceExact, convergenceScanExact } from "../multispace.ts";
-import { reconstructDocument } from "../reconstruct.ts";
+import { owningLink, reconstructDocument } from "../reconstruct.ts";
 
 const SCHEMA = `
 CREATE TABLE "commit" (
@@ -517,6 +517,51 @@ describe("branch-visible", () => {
           expect(seen.overrides).toBe(true);
         },
       );
+    });
+  });
+
+  describe("owningLink() scope", () => {
+    it("answers about the shared scope by default, not whichever row comes back first", async () => {
+      const MINE = "user:did%3Akey%3AzAlice";
+      await withFork(
+        // Owned by the PARENT in `space`...
+        [{ id: "of:x", value: "parent-space" }],
+        // ...and by the CHILD in a user scope. Different owners for one id.
+        [{ id: "of:x", scope: MINE, value: "child-user" }],
+        (space) => {
+          expect(
+            owningLink(space, { branch: "kid", scope: "space", id: "of:x" })
+              ?.branch,
+          ).toBe("");
+          expect(
+            owningLink(space, { branch: "kid", scope: MINE, id: "of:x" })
+              ?.branch,
+          ).toBe("kid");
+          // Omitting scope must mean `space`, the package's default — not the
+          // first scoped row the enumeration happens to return.
+          expect(owningLink(space, { branch: "kid", id: "of:x" })?.branch)
+            .toBe("");
+        },
+      );
+    });
+  });
+
+  describe("hotEntities() limits", () => {
+    it("treats a negative limit as unlimited, as the SQL it replaced did", async () => {
+      await withFork(CONTENDED_PARENT, [], (space) => {
+        const all = hotEntities(space).map((e) => e.id);
+        expect(all.length).toBe(2);
+        // `slice(0, -1)` would drop the last, under-reporting the hot entities
+        // an operator asked to see all of. Same trap as `contendedEntities`,
+        // in its sibling in the same file.
+        expect(hotEntities(space, { limit: -1 }).map((e) => e.id)).toEqual(all);
+      });
+    });
+
+    it("applies a positive limit", async () => {
+      await withFork(CONTENDED_PARENT, [], (space) => {
+        expect(hotEntities(space, { limit: 1 }).length).toBe(1);
+      });
     });
   });
 

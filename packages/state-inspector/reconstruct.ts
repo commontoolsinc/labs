@@ -283,7 +283,15 @@ export function owningLink(
   space: SpaceDb,
   opts: { branch?: string; scope?: string; id: string },
 ): BranchReadLink | undefined {
-  return visibleRevisionRows(space, opts)[0]?.link;
+  // `scope` is NOT optional in meaning, only in spelling: ownership is a
+  // property of (scope, entity), and the same id can be owned by different
+  // branches in `space` and in a user scope. Left unfiltered, the first scoped
+  // row to come back would decide, so this defaults the way the rest of the
+  // package does rather than answering about an arbitrary scope.
+  return visibleRevisionRows(space, {
+    ...opts,
+    scope: opts.scope ?? "space",
+  })[0]?.link;
 }
 
 /**

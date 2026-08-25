@@ -32,6 +32,8 @@ import {
 } from "@commonfabric/memory/v2/engine";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 
+import { rowLimit } from "./model.ts";
+
 import type { SpaceDb } from "./db.ts";
 import {
   branchReadChain,
@@ -138,10 +140,7 @@ export function contendedEntities(
     .sort((a, b) =>
       b.sessions - a.sessions || b.writes - a.writes || utf8Compare(a.id, b.id)
     )
-    // A negative limit meant UNLIMITED while this was a SQL `LIMIT ?`, and the
-    // conflicts CLI still accepts one; `slice` would read it as "drop the last"
-    // and report one fewer contended entity than there are.
-    .slice(0, limit < 0 ? undefined : limit);
+    .slice(0, rowLimit(limit));
 
   const writersStmt = space.db.prepare(
     `SELECT r.seq, r.commit_seq, r.op, c.session_id, c.created_at
