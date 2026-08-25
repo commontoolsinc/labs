@@ -1739,9 +1739,10 @@ and `return` to the authored expression or `return` it replaces. These nodes
 carry source-map ranges only, so the lineage does not alter printing or checker
 identity.
 
-`CFHelpers.preserveNodeSourceMap` requires separate range and checker-identity
-nodes and is used only where those channels diverge. Helper names, property
-accesses, and calls that need position alone use `preserveSourceMapRange`.
+`CFHelpers.preserveNodeSourceMap` requires explicit range and checker-identity
+nodes; a caller whose targets coincide passes the same node twice to carry
+identity without a text range. Helper names, property accesses, and calls that
+need position alone use `preserveSourceMapRange`.
 The logical-expression helpers keep their asymmetric authored anchors:
 `ifElse` maps to the whole conditional expression, while `when` and `unless`
 map to their left condition. The regression binds all three choices to source

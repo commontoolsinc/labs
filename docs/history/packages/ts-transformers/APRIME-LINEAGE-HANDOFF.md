@@ -1,6 +1,6 @@
 ---
 status: historical
-created: 2026-07-21
+created: 2026-07-07
 archived: 2026-08-25
 reason: "Executed handoff; the CT-1868/1869/1870 authored-lineage arc shipped."
 superseded-by: docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md
@@ -296,8 +296,9 @@ throughout).
   Same move as builder-call-hoisting's `setOriginalNode(name, innerCall)`. The
   identity node is required: source-map-only helper names, property accesses,
   and calls use `ast/utils.ts`'s
-  **`preserveSourceMapRange(node, origin)`** instead. The method therefore
-  represents only genuine identity/position divergence.
+  **`preserveSourceMapRange(node, origin)`** instead. A caller whose two
+  targets coincide passes the same node twice: identity carried without the
+  text range `preserveLineage` would add.
 
 **Hazards (why this isn't a mechanical sweep):**
 
