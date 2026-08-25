@@ -347,6 +347,17 @@ Deno.test("startServers returns when the startup script completes", async () => 
   assertEquals(await completion, 0);
 });
 
+Deno.test("startServers returns the startup script failure", async () => {
+  const code = await startServers(
+    17,
+    "/repo",
+    {},
+    () => Promise.resolve({ success: false, code: 3 }),
+  );
+
+  assertEquals(code, 3);
+});
+
 // Every offset the choice can return, collected by sweeping its random input
 // finely enough that nothing it can produce is missed.
 function generatedPortOffsets(): number[] {
