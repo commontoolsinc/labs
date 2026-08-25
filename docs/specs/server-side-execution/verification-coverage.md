@@ -6108,10 +6108,13 @@ supply; OW29/OW32/OW34 closed):
     and superseded derivations stay quiet; both are expected
     recovery): the r05/p11 cascades each surfaced exactly ONE logged
     symptom before this.
-    Live at the fix head: 6/6 GREEN in 23-27 s (shared-profile ×2,
-    profile-embed ×2, probe ×2; same harness, fresh store + posture
-    probe per run) against 6/11 red pre-fix on the same box — the
-    all-green outcome has ~0.8% probability under the pre-fix rate.
+    Live evidence, by head: 6/6 GREEN in 23-27 s at the ORIGINAL fix
+    head `bcd816b8a` (shared-profile ×2, profile-embed ×2, probe ×2)
+    and 3/3 GREEN in 20-22 s re-run at the review-round head
+    `95734a5b0` (one of each) — same harness, fresh store + posture
+    probe per run, against 6/11 red pre-fix on the same box; the
+    9-green record has well under 1% probability at the pre-fix
+    rate.
     Residuals recorded, NOT owed by this fix: (i) in red r05 the wish
     action held a durable `scheduler_basis` row on its ready-cell
     read (seq 0, user-instance-keyed), the ready flip landed at

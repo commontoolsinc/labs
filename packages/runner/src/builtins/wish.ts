@@ -1633,6 +1633,43 @@ export function createSidecarPatternCache(options: {
   };
 }
 
+/** What a failed sidecar instantiation attempt does next — the OW45
+ * discrimination, shared verbatim by the commit-error arm and the
+ * thrown-error arm of `runSidecarInOwnTx` (a thrown conflict is the same
+ * object shape as a commit-refused one, so one function decides both):
+ *
+ * - a CONFLICT-CLASS failure (`ConflictError` /
+ *   `StorageTransactionInconsistent`) with the result cell already
+ *   materialized means a racing sibling instantiation won → `"yield"`
+ *   (never clobber the winner with an error UI — the OW45
+ *   profile-starvation defect);
+ * - a conflict-class failure with the cell still EMPTY means an INPUT doc
+ *   moved under the run (no winner exists) → `"retry"` against fresh
+ *   state while attempts remain — abandoning the only instantiation
+ *   leaves the surface permanently blank;
+ * - anything else — and the bounded-retry terminal — → `"error-ui"`, the
+ *   surface's loud account of why it never came up. The winner probe is
+ *   consulted ONLY for conflict-class failures: the real-failure path
+ *   performs no reads.
+ *
+ * Exported for the unit half of `wish-sidecar-duplicate-launch.test.ts`:
+ * the thrown arm is not deterministically drivable through the public
+ * flow (it needs a third-party write between a transaction's snapshot
+ * and its own reads), so the discrimination itself is pinned here and
+ * each arm reduces to a mechanical consume.
+ */
+export async function sidecarRunFailureDisposition(
+  error: { name?: string } | undefined | null,
+  winnerPresent: () => Promise<boolean> | boolean,
+  lastAttempt: boolean,
+): Promise<"yield" | "retry" | "error-ui"> {
+  if (isConflictRejection(error) || isStorageTransactionInconsistent(error)) {
+    if (await winnerPresent()) return "yield";
+    if (!lastAttempt) return "retry";
+  }
+  return "error-ui";
+}
+
 // Test seam (this package has no logger-capture idiom — the OW45 register's
 // F9 note): process-global counts of sidecar launch activity, so a pin that
 // must WITNESS a duplicate launch can assert it happened instead of passing
@@ -2372,13 +2409,10 @@ export function wish(
     // every pre-resolve launch chains its own continuation on the memoized
     // fetch — another runtime/instance of the node, or the serving loop's
     // re-run), or concurrent traffic on an INPUT doc (e.g. the home
-    // `profiles` list). Only the sibling case has a winner to yield to;
-    // the input case must re-run, not abandon. Discriminator: the result
-    // cell's own post-conflict state. Loud either way, per
-    // serving-loop.md §3d's failure-arm contract; pinned by
+    // `profiles` list). The decision is `sidecarRunFailureDisposition`
+    // (module level, unit-pinned); loudness per serving-loop.md §3d's
+    // failure-arm contract; the flow pin is
     // wish-sidecar-duplicate-launch.test.ts.
-    const isRaceClass = (error: { name?: string } | undefined | null) =>
-      isConflictRejection(error) || isStorageTransactionInconsistent(error);
     const yieldToRacingWinner = (error: { name?: string }) => {
       wishSidecarDiagnostics.sidecarRunsRaced += 1;
       wishFlowLogger.warn("sidecar-run-raced", () => [
@@ -2425,13 +2459,16 @@ export function wish(
         runtime.prepareTxForCommit(runTx);
         const { error } = await runTx.commit();
         if (error) {
-          if (isRaceClass(error)) {
-            if (await winnerInCell()) {
-              yieldToRacingWinner(error);
-              return;
-            }
-            if (!lastAttempt) continue;
+          const disposition = await sidecarRunFailureDisposition(
+            error,
+            winnerInCell,
+            lastAttempt,
+          );
+          if (disposition === "yield") {
+            yieldToRacingWinner(error);
+            return;
           }
+          if (disposition === "retry") continue;
           await commitPatternErrorUI(resultCell, toCompactDebugString(error));
           return;
         }
@@ -2465,14 +2502,17 @@ export function wish(
         return;
       } catch (error) {
         // The same conflict classes surface as THROWS from the run/prepare
-        // path (a stale read met mid-run) — same discrimination.
-        if (isRaceClass(error as { name?: string })) {
-          if (await winnerInCell()) {
-            yieldToRacingWinner(error as { name?: string });
-            return;
-          }
-          if (!lastAttempt) continue;
+        // path (a stale read met mid-run) — same shared discrimination.
+        const disposition = await sidecarRunFailureDisposition(
+          error as { name?: string },
+          winnerInCell,
+          lastAttempt,
+        );
+        if (disposition === "yield") {
+          yieldToRacingWinner(error as { name?: string });
+          return;
         }
+        if (disposition === "retry") continue;
         await commitPatternErrorUI(resultCell, errorMessage(error));
         return;
       }

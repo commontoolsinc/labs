@@ -5,7 +5,10 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { Runtime } from "../src/runtime.ts";
-import { wishSidecarDiagnostics } from "../src/builtins/wish.ts";
+import {
+  sidecarRunFailureDisposition,
+  wishSidecarDiagnostics,
+} from "../src/builtins/wish.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 import { NAME, UI } from "../src/builder/types.ts";
@@ -173,6 +176,7 @@ describe("wish profile-create sidecar duplicate launch", () => {
       const continuationsBefore =
         wishSidecarDiagnostics.profileCreateFetchContinuations;
       const runsBefore = wishSidecarDiagnostics.sidecarRunsStarted;
+      const racedBefore = wishSidecarDiagnostics.sidecarRunsRaced;
 
       await rt1.patternManager.flushCompileCacheWrites();
       await rt1.storageManager.synced();
@@ -224,6 +228,12 @@ describe("wish profile-create sidecar duplicate launch", () => {
       // single launch that raced nothing.
       expect(wishSidecarDiagnostics.sidecarRunsStarted - runsBefore)
         .toBeGreaterThanOrEqual(2);
+      // And the losing duplicate took the WINNER-CHECKED YIELD path (the
+      // fix's central arm), not a clean serialize or a silent drop: the
+      // raced counter increments exactly when a conflict-class loser
+      // yields to a materialized winner.
+      expect(wishSidecarDiagnostics.sidecarRunsRaced - racedBefore)
+        .toBeGreaterThanOrEqual(1);
 
       const surface = createCell.get() as Record<string | symbol, unknown>;
       const raw = JSON.stringify(createCell.getRaw());
@@ -236,5 +246,74 @@ describe("wish profile-create sidecar duplicate launch", () => {
       await rt2.dispose();
       await rt1.dispose();
     }
+  });
+});
+
+// The discrimination itself, exhaustively — this is the shared decision both
+// the commit-error arm AND the thrown-error arm of runSidecarInOwnTx consume
+// (a thrown conflict carries the same object shape as a commit-refused one).
+// The thrown arm is not deterministically drivable through the public flow
+// (it needs a third-party write to land between a transaction's snapshot and
+// its own reads), so the semantics are pinned here and each arm reduces to a
+// mechanical consume of this function; the flow-level pin above covers the
+// commit arm end to end.
+describe("sidecarRunFailureDisposition", () => {
+  const conflict = { name: "ConflictError" };
+  const inconsistent = { name: "StorageTransactionInconsistent" };
+  const aborted = { name: "StorageTransactionAborted" };
+
+  it("yields to a materialized winner on either conflict spelling", async () => {
+    expect(await sidecarRunFailureDisposition(conflict, () => true, false))
+      .toBe("yield");
+    expect(await sidecarRunFailureDisposition(inconsistent, () => true, false))
+      .toBe("yield");
+    // A winner outranks the attempt budget: yield even on the last attempt.
+    expect(await sidecarRunFailureDisposition(conflict, () => true, true))
+      .toBe("yield");
+    // The probe may be async (the real winnerInCell is).
+    expect(
+      await sidecarRunFailureDisposition(
+        inconsistent,
+        () => Promise.resolve(true),
+        true,
+      ),
+    ).toBe("yield");
+  });
+
+  it("re-runs an input-doc conflict (no winner) while attempts remain", async () => {
+    expect(await sidecarRunFailureDisposition(conflict, () => false, false))
+      .toBe("retry");
+    expect(await sidecarRunFailureDisposition(inconsistent, () => false, false))
+      .toBe("retry");
+  });
+
+  it("ends a winnerless conflict on the last attempt with the error UI", async () => {
+    expect(await sidecarRunFailureDisposition(conflict, () => false, true))
+      .toBe("error-ui");
+    expect(await sidecarRunFailureDisposition(inconsistent, () => false, true))
+      .toBe("error-ui");
+  });
+
+  it("routes real failures to the error UI without consulting the winner probe", async () => {
+    const probeNotConsulted = () => {
+      throw new Error("winner probe must not run for non-conflict failures");
+    };
+    expect(
+      await sidecarRunFailureDisposition(aborted, probeNotConsulted, false),
+    )
+      .toBe("error-ui");
+    expect(
+      await sidecarRunFailureDisposition(
+        { name: "WishError" },
+        probeNotConsulted,
+        true,
+      ),
+    ).toBe("error-ui");
+    expect(
+      await sidecarRunFailureDisposition(undefined, probeNotConsulted, false),
+    ).toBe("error-ui");
+    expect(
+      await sidecarRunFailureDisposition(null, probeNotConsulted, false),
+    ).toBe("error-ui");
   });
 });
