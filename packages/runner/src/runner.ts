@@ -1118,9 +1118,14 @@ export class StoredArgumentValidationPendingError extends Error {
   /** One key per link target the materialization missed, deduplicated. */
   readonly missing: readonly string[];
   constructor(missing: readonly string[], detail: string) {
+    // The first few targets ride the message: a postponement surfaced to a
+    // log or a gate report is otherwise a bare count, and the one question
+    // its reader has is WHICH doc never loaded.
     super(
       `stored argument validation awaits ${missing.length} unloaded link ` +
-        `target(s); strict validation meanwhile reports: ${detail}`,
+        `target(s) [${missing.slice(0, 3).join(", ")}${
+          missing.length > 3 ? ", …" : ""
+        }]; strict validation meanwhile reports: ${detail}`,
     );
     this.name = "StoredArgumentValidationPendingError";
     this.missing = missing;
