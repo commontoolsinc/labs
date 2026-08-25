@@ -1966,27 +1966,30 @@ describe("RuntimeProcessor home pattern IPC", () => {
 });
 
 describe("system-pattern update wiring", () => {
-  it("handleGetSpaceRootPattern returns the root ensured by the controller", async () => {
-    const ref: CellRef = {
-      id: "of:root-result" as CellRef["id"],
-      space: "did:key:test-space" as CellRef["space"],
-      scope: "space",
-      path: [],
-    };
-    const rootCell = { getAsLink: () => cellRefToSigilLink(ref) };
-    const cc = {
-      ensureDefaultPattern: () => Promise.resolve({ getCell: () => rootCell }),
-    };
-    const processor = {
-      getSpaceCtx: () => cc,
-    } as unknown as RuntimeProcessor;
+  describe("handleGetSpaceRootPattern()", () => {
+    it("returns the root ensured by the controller", async () => {
+      const ref: CellRef = {
+        id: "of:root-result" as CellRef["id"],
+        space: "did:key:test-space" as CellRef["space"],
+        scope: "space",
+        path: [],
+      };
+      const rootCell = { getAsLink: () => cellRefToSigilLink(ref) };
+      const cc = {
+        ensureDefaultPattern: () =>
+          Promise.resolve({ getCell: () => rootCell }),
+      };
+      const processor = {
+        getSpaceCtx: () => cc,
+      } as unknown as RuntimeProcessor;
 
-    const result = await RuntimeProcessor.prototype.handleGetSpaceRootPattern
-      .call(processor, {
-        type: RequestType.GetSpaceRootPattern,
-        space: "did:key:test-space",
-      });
-    expect(result.page.cell).toEqual(ref);
+      const result = await RuntimeProcessor.prototype.handleGetSpaceRootPattern
+        .call(processor, {
+          type: RequestType.GetSpaceRootPattern,
+          space: "did:key:test-space",
+        });
+      expect(result.page.cell).toEqual(ref);
+    });
   });
 });
 
@@ -3576,199 +3579,211 @@ describe("RuntimeProcessor per-space piece contexts", () => {
     }
   });
 
-  it("handlePageGet with a space resolves the page in that space", async () => {
-    const { processor, runtime, homeSpace } = makeProcessorState();
-    const spaceB = (await Identity.fromPassphrase(
-      "runtime-processor-space-b",
-    )).did();
-    const handlePageGet = (RuntimeProcessor.prototype as any).handlePageGet;
-    try {
-      const resHome = await handlePageGet.call(processor, {
-        type: RequestType.PageGet,
-        pageId: fid("cross-space-probe"),
-        runIt: false,
-        space: homeSpace,
-      });
-      const resB = await handlePageGet.call(processor, {
-        type: RequestType.PageGet,
-        pageId: fid("cross-space-probe"),
-        runIt: false,
-        space: spaceB,
-      });
-      expect(resHome.page.cell.space).toBe(homeSpace);
-      expect(resB.page.cell.space).toBe(spaceB);
-    } finally {
-      await runtime.dispose();
-    }
+  describe("handlePageGet()", () => {
+    it("resolves the page in the space it is given", async () => {
+      const { processor, runtime, homeSpace } = makeProcessorState();
+      const spaceB = (await Identity.fromPassphrase(
+        "runtime-processor-space-b",
+      )).did();
+      const handlePageGet = (RuntimeProcessor.prototype as any).handlePageGet;
+      try {
+        const resHome = await handlePageGet.call(processor, {
+          type: RequestType.PageGet,
+          pageId: fid("cross-space-probe"),
+          runIt: false,
+          space: homeSpace,
+        });
+        const resB = await handlePageGet.call(processor, {
+          type: RequestType.PageGet,
+          pageId: fid("cross-space-probe"),
+          runIt: false,
+          space: spaceB,
+        });
+        expect(resHome.page.cell.space).toBe(homeSpace);
+        expect(resB.page.cell.space).toBe(spaceB);
+      } finally {
+        await runtime.dispose();
+      }
+    });
   });
 
-  it("handleRuntimeSynced awaits every opened space, naming none", async () => {
-    const { processor, runtime } = makeProcessorState();
-    const spaceB = (await Identity.fromPassphrase(
-      "runtime-processor-space-b",
-    )).did();
-    const handleRuntimeSynced =
-      (RuntimeProcessor.prototype as any).handleRuntimeSynced;
-    try {
-      processor.getSpaceCtx(spaceB);
-      // Resolves across home + spaceB over loopback storage; the request
-      // carries no space at all.
-      await handleRuntimeSynced.call(processor);
-    } finally {
-      await runtime.dispose();
-    }
+  describe("handleRuntimeSynced()", () => {
+    it("awaits every opened space, naming none", async () => {
+      const { processor, runtime } = makeProcessorState();
+      const spaceB = (await Identity.fromPassphrase(
+        "runtime-processor-space-b",
+      )).did();
+      const handleRuntimeSynced =
+        (RuntimeProcessor.prototype as any).handleRuntimeSynced;
+      try {
+        processor.getSpaceCtx(spaceB);
+        // Resolves across home + spaceB over loopback storage; the request
+        // carries no space at all.
+        await handleRuntimeSynced.call(processor);
+      } finally {
+        await runtime.dispose();
+      }
+    });
   });
 
-  it("handleIdle awaits commit-durability quiescence, not plain idle", async () => {
-    // The client reads "idle" as a safe point to navigate or reload, so the
-    // handler must await idleWithPendingCommits() — which includes in-flight
-    // commit durability — rather than runtime.idle() (reactive quiescence
-    // only). A fake exposing ONLY idleWithPendingCommits pins the wiring: a
-    // regression to runtime.idle() throws here.
-    const handleIdle = (RuntimeProcessor.prototype as any).handleIdle;
-    let calls = 0;
-    const fake = {
-      runtime: {
-        scheduler: {
-          idleWithPendingCommits: () => {
-            calls++;
-            return Promise.resolve();
+  describe("handleIdle()", () => {
+    it("awaits commit-durability quiescence, not plain idle", async () => {
+      // The client reads "idle" as a safe point to navigate or reload, so the
+      // handler must await idleWithPendingCommits() — which includes in-flight
+      // commit durability — rather than runtime.idle() (reactive quiescence
+      // only). A fake exposing ONLY idleWithPendingCommits pins the wiring: a
+      // regression to runtime.idle() throws here.
+      const handleIdle = (RuntimeProcessor.prototype as any).handleIdle;
+      let calls = 0;
+      const fake = {
+        runtime: {
+          scheduler: {
+            idleWithPendingCommits: () => {
+              calls++;
+              return Promise.resolve();
+            },
           },
         },
-      },
-    };
-    await handleIdle.call(fake);
-    expect(calls).toBe(1);
+      };
+      await handleIdle.call(fake);
+      expect(calls).toBe(1);
+    });
   });
 
-  it("watchSiteTable uses the last usable entry per space without replacing an accepted route", async () => {
-    const { runtime } = createRuntime();
-    const registered: Array<[string, string]> = [];
-    let resolveRegistered = () => {};
-    const entriesRegistered = new Promise<void>((resolve) => {
-      resolveRegistered = resolve;
-    });
-    const registeredRoute = "did:key:z6Mk-table-b" as MemorySpace;
-    const registerSpaceHost = runtime.registerSpaceHost.bind(runtime);
-    expect(registerSpaceHost(registeredRoute, "http://ipc-host.test/"))
-      .toBe(true);
-    Object.assign(runtime, {
-      registerSpaceHost: (space: string, host: string) => {
-        registered.push([space, host]);
-        if (registered.length === 3) resolveRegistered();
-        return registerSpaceHost(space as MemorySpace, host);
-      },
-    });
-    const userDid = runtime.userIdentityDID;
-    const table = runtime.getCell(
-      userDid,
-      siteTableCause(userDid),
-      siteTableSchema,
-    );
-    const tx = runtime.edit();
-    table.withTx(tx).set([
-      { did: "did:key:z6Mk-table-a", host: "http://host-a.test/" },
-      { did: "not-a-did", host: "http://ignored.test/" },
-      { did: registeredRoute, host: "http://stale-table.test/" },
-      { did: "did:key:z6Mk-table-c", host: "http://host-c.test/" },
-      { did: "did:key:z6Mk-table-a", host: "http://host-a-new.test/" },
-      { did: "did:key:z6Mk-table-a", host: "not a url" },
-      {
-        did: "did:key:z6Mk-table-credentials",
-        host: "http://user@credentials.test/",
-      },
-      { did: "did:key:z6Mk-table-path", host: "http://path.test/api" },
-      {
-        did: "did:key:z6Mk-table-dot-path",
-        host: "http://dot-path.test/api/..",
-      },
-      { did: "did:key:z6Mk-table-query", host: "http://query.test/?x=1" },
-      { did: "did:key:z6Mk-table-fragment", host: "http://hash.test/#x" },
-    ]);
-    await tx.commit();
-
-    const cc = new PiecesController(
-      { as: cfcSigner, space: userDid },
-      runtime,
-    );
-    const ProcessorConstructor = RuntimeProcessor as unknown as new (
-      runtime: Runtime,
-      cc: PiecesController,
-      initSpace: MemorySpace,
-      identity: Identity,
-      telemetry: RuntimeTelemetry,
-    ) => RuntimeProcessor;
-    const processor = new ProcessorConstructor(
-      runtime,
-      cc,
-      userDid,
-      cfcSigner,
-      new RuntimeTelemetry(),
-    );
-    try {
-      processor.watchSiteTable();
-      await entriesRegistered;
-      expect(registered).toEqual([
-        ["did:key:z6Mk-table-a", "http://host-a-new.test/"],
-        [registeredRoute, "http://stale-table.test/"],
-        ["did:key:z6Mk-table-c", "http://host-c.test/"],
-      ]);
-      expect(runtime.mappedHostFor(registeredRoute)).toBe(
-        "http://ipc-host.test/",
-      );
-      const tableRoute = "did:key:z6Mk-table-a" as MemorySpace;
-      expect(registerSpaceHost(tableRoute, "http://late-ipc.test/"))
-        .toBe(false);
-      expect(runtime.mappedHostFor(tableRoute)).toBe(
-        "http://host-a-new.test/",
-      );
-    } finally {
-      await processor.dispose();
-    }
-  });
-
-  it("handleRegisterSpaceHost forwards to the runtime and reports the verdict", () => {
-    const calls: Array<[string, string]> = [];
-    const processor = {
-      runtime: {
+  describe("watchSiteTable()", () => {
+    it("uses the last usable entry per space without replacing an accepted route", async () => {
+      const { runtime } = createRuntime();
+      const registered: Array<[string, string]> = [];
+      let resolveRegistered = () => {};
+      const entriesRegistered = new Promise<void>((resolve) => {
+        resolveRegistered = resolve;
+      });
+      const registeredRoute = "did:key:z6Mk-table-b" as MemorySpace;
+      const registerSpaceHost = runtime.registerSpaceHost.bind(runtime);
+      expect(registerSpaceHost(registeredRoute, "http://ipc-host.test/"))
+        .toBe(true);
+      Object.assign(runtime, {
         registerSpaceHost: (space: string, host: string) => {
-          calls.push([space, host]);
-          return host === "http://accepted.test/";
+          registered.push([space, host]);
+          if (registered.length === 3) resolveRegistered();
+          return registerSpaceHost(space as MemorySpace, host);
         },
-      },
-    } as unknown as RuntimeProcessor;
-    const handle = (RuntimeProcessor.prototype as unknown as {
-      handleRegisterSpaceHost(
-        r: { type: RequestType; space: string; host: string },
-      ): { value: boolean };
-    }).handleRegisterSpaceHost;
-    expect(handle.call(processor, {
-      type: RequestType.RegisterSpaceHost,
-      space: "did:key:z6Mk-ipc-a",
-      host: "http://accepted.test/",
-    })).toEqual({ value: true });
-    expect(handle.call(processor, {
-      type: RequestType.RegisterSpaceHost,
-      space: "did:key:z6Mk-ipc-b",
-      host: "http://refused.test/",
-    })).toEqual({ value: false });
-    expect(calls.length).toBe(2);
+      });
+      const userDid = runtime.userIdentityDID;
+      const table = runtime.getCell(
+        userDid,
+        siteTableCause(userDid),
+        siteTableSchema,
+      );
+      const tx = runtime.edit();
+      table.withTx(tx).set([
+        { did: "did:key:z6Mk-table-a", host: "http://host-a.test/" },
+        { did: "not-a-did", host: "http://ignored.test/" },
+        { did: registeredRoute, host: "http://stale-table.test/" },
+        { did: "did:key:z6Mk-table-c", host: "http://host-c.test/" },
+        { did: "did:key:z6Mk-table-a", host: "http://host-a-new.test/" },
+        { did: "did:key:z6Mk-table-a", host: "not a url" },
+        {
+          did: "did:key:z6Mk-table-credentials",
+          host: "http://user@credentials.test/",
+        },
+        { did: "did:key:z6Mk-table-path", host: "http://path.test/api" },
+        {
+          did: "did:key:z6Mk-table-dot-path",
+          host: "http://dot-path.test/api/..",
+        },
+        { did: "did:key:z6Mk-table-query", host: "http://query.test/?x=1" },
+        { did: "did:key:z6Mk-table-fragment", host: "http://hash.test/#x" },
+      ]);
+      await tx.commit();
+
+      const cc = new PiecesController(
+        { as: cfcSigner, space: userDid },
+        runtime,
+      );
+      const ProcessorConstructor = RuntimeProcessor as unknown as new (
+        runtime: Runtime,
+        cc: PiecesController,
+        initSpace: MemorySpace,
+        identity: Identity,
+        telemetry: RuntimeTelemetry,
+      ) => RuntimeProcessor;
+      const processor = new ProcessorConstructor(
+        runtime,
+        cc,
+        userDid,
+        cfcSigner,
+        new RuntimeTelemetry(),
+      );
+      try {
+        processor.watchSiteTable();
+        await entriesRegistered;
+        expect(registered).toEqual([
+          ["did:key:z6Mk-table-a", "http://host-a-new.test/"],
+          [registeredRoute, "http://stale-table.test/"],
+          ["did:key:z6Mk-table-c", "http://host-c.test/"],
+        ]);
+        expect(runtime.mappedHostFor(registeredRoute)).toBe(
+          "http://ipc-host.test/",
+        );
+        const tableRoute = "did:key:z6Mk-table-a" as MemorySpace;
+        expect(registerSpaceHost(tableRoute, "http://late-ipc.test/"))
+          .toBe(false);
+        expect(runtime.mappedHostFor(tableRoute)).toBe(
+          "http://host-a-new.test/",
+        );
+      } finally {
+        await processor.dispose();
+      }
+    });
   });
 
-  it("piecesFor returns only existing contexts (no lazy create)", async () => {
-    const { processor, runtime, homeSpace } = makeProcessorState();
-    const spaceB = (await Identity.fromPassphrase(
-      "runtime-processor-space-b",
-    )).did();
-    const piecesFor = (RuntimeProcessor.prototype as any).piecesFor;
-    try {
-      expect(piecesFor.call(processor, homeSpace)).toBe(processor.cc);
-      expect(piecesFor.call(processor, spaceB)).toBeUndefined();
-      const ctxB = processor.getSpaceCtx(spaceB);
-      expect(piecesFor.call(processor, spaceB)).toBe(ctxB);
-    } finally {
-      await runtime.dispose();
-    }
+  describe("handleRegisterSpaceHost()", () => {
+    it("forwards to the runtime and reports the verdict", () => {
+      const calls: Array<[string, string]> = [];
+      const processor = {
+        runtime: {
+          registerSpaceHost: (space: string, host: string) => {
+            calls.push([space, host]);
+            return host === "http://accepted.test/";
+          },
+        },
+      } as unknown as RuntimeProcessor;
+      const handle = (RuntimeProcessor.prototype as unknown as {
+        handleRegisterSpaceHost(
+          r: { type: RequestType; space: string; host: string },
+        ): { value: boolean };
+      }).handleRegisterSpaceHost;
+      expect(handle.call(processor, {
+        type: RequestType.RegisterSpaceHost,
+        space: "did:key:z6Mk-ipc-a",
+        host: "http://accepted.test/",
+      })).toEqual({ value: true });
+      expect(handle.call(processor, {
+        type: RequestType.RegisterSpaceHost,
+        space: "did:key:z6Mk-ipc-b",
+        host: "http://refused.test/",
+      })).toEqual({ value: false });
+      expect(calls.length).toBe(2);
+    });
+  });
+
+  describe("piecesFor()", () => {
+    it("returns only existing contexts, and creates none lazily", async () => {
+      const { processor, runtime, homeSpace } = makeProcessorState();
+      const spaceB = (await Identity.fromPassphrase(
+        "runtime-processor-space-b",
+      )).did();
+      const piecesFor = (RuntimeProcessor.prototype as any).piecesFor;
+      try {
+        expect(piecesFor.call(processor, homeSpace)).toBe(processor.cc);
+        expect(piecesFor.call(processor, spaceB)).toBeUndefined();
+        const ctxB = processor.getSpaceCtx(spaceB);
+        expect(piecesFor.call(processor, spaceB)).toBe(ctxB);
+      } finally {
+        await runtime.dispose();
+      }
+    });
   });
 });
 

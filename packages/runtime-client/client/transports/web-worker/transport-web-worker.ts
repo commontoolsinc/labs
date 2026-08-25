@@ -44,6 +44,7 @@ export class WebWorkerRuntimeTransport
     this._worker.addEventListener("error", this._handleError);
   }
 
+  /** @inheritDoc */
   send(data: IPCClientMessage | IPCClientNotification): void {
     // TODO(danfuzz): this send should encode `data` with `codec-realm`, which
     // is what would let the payload carry the whole `FabricValue` domain
@@ -54,6 +55,7 @@ export class WebWorkerRuntimeTransport
     this._worker.postMessage(data);
   }
 
+  /** @inheritDoc */
   dispose(): Promise<void> {
     this.removeAllListeners();
     this._worker.terminate();

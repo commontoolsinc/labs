@@ -219,7 +219,7 @@ describe("RuntimeConnection.attachVDom", () => {
     expect(torn).toBe(true);
   });
 
-  it("detach() unregisters the teardown", async () => {
+  it("does not run the teardown after `detach()`", async () => {
     const transport = new FakeTransport();
     const connection = await initializedConnection(transport);
     let torn = false;

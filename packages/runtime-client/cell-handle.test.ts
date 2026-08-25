@@ -432,7 +432,7 @@ describe("CellHandle reactive CFC label delivery", () => {
     expect(calls.length).toBe(afterValue);
   });
 
-  it("a value-only notification leaves the cached label untouched", () => {
+  it("leaves the cached label untouched on a value-only update", () => {
     const cell = new CellHandle<string>(makeRuntime(), ref);
     cell.subscribe(() => {}, { includeCfcLabel: true });
     cell[$onCellUpdate]("v1", { cfcLabel: labelA });
