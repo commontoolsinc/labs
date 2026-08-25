@@ -60,7 +60,7 @@ import {
   isEventHandler,
   isEventProp,
 } from "../render-utils.ts";
-import type { VDomOp } from "../vdom-ops.ts";
+import { CONTAINER_NODE_ID, type VDomOp } from "../vdom-ops.ts";
 import { generateChildKeys } from "./keying.ts";
 import type {
   ChildNodeState,
@@ -132,12 +132,6 @@ const DEFAULT_RENDER_POLICY: RenderPolicy = {
 // Mirrors CFC_ATOM_TYPE.Caveat in @commonfabric/api/cfc (not a dependency of
 // this package).
 const CFC_CAVEAT_ATOM_TYPE = "https://commonfabric.org/cfc/atom/Caveat";
-
-/**
- * Reserved node ID for the container element.
- * The main thread registers the actual container DOM element with this ID.
- */
-export const CONTAINER_NODE_ID = 0;
 
 const logger = getLogger("worker-reconciler", {
   enabled: false,
