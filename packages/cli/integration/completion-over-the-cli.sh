@@ -513,24 +513,31 @@ check "1" "$(succeeds $CF piece link --quiet $LINE_ARGS \
   "a pair of completed endpoints is a link the command writes"
 step "15. The operator surface completes from the same store"
 # `cf inspect` reads space DBs directly, so it wants the store step 13 looked
-# for. Where none is discoverable there is nothing here to exercise, which is
-# item 8's positional discovery rather than a defect — so the step says which
-# case it saw rather than passing either way.
+# for. Both positionals are probed either way, on the same terms that step
+# holds to: what the listing exits with decides whether its output can be read
+# at all, and where there is nothing to list the slot must still run and come
+# back empty.
 if [ -n "$DISCOVERED" ]; then
-  LOCAL_DID="$DISCOVERED"
-  check "1" "$(complete_at "cf inspect entities ${LOCAL_DID:0:20}" |
-    grep -c "^$LOCAL_DID\$")" "the space positional completes from it"
-  ENTITY=$($CF inspect entities "$LOCAL_DID" --json 2>/dev/null |
-    jq -r '.[0].id // empty')
+  check "1" "$(complete_at "cf inspect entities ${DISCOVERED:0:20}" |
+    grep -c "^$DISCOVERED\$")" "the space positional completes from it"
+  run $CF inspect entities "$DISCOVERED" --json
+  check "0" "$RUN_STATUS" "cf inspect entities runs against it"
+  ENTITY=$(printf '%s\n' "$RUN_OUT" | jq -r '.[0].id // empty' 2>/dev/null)
   if [ -n "$ENTITY" ]; then
-    check "1" "$(complete_at "cf inspect piece $LOCAL_DID ${ENTITY:0:12}" |
+    check "1" "$(complete_at "cf inspect piece $DISCOVERED ${ENTITY:0:12}" |
       grep -c "^$ENTITY\$")" \
       "and the entity positional completes what inspect entities lists"
   else
-    ok "the discovered space holds no entities to complete"
+    probe "cf inspect piece $DISCOVERED "
+    check "0" "$PROBE_STATUS" "the entity slot runs against a space holding none"
+    check "" "$(printf '%s\n' "$PROBE_OUT" | grep -v '^:cf:')" \
+      "and offers nothing, which is all that space holds"
   fi
 else
-  ok "no local space db here, so the operator surface has nothing to offer"
+  probe "cf inspect entities "
+  check "0" "$PROBE_STATUS" "the space positional still runs with no store"
+  check "" "$(printf '%s\n' "$PROBE_OUT" | grep -v '^:cf:')" \
+    "and offers nothing, which is all there is on disk to offer"
 fi
 
 step "16. wish and the enumerated remainder"
