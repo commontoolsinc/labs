@@ -79,7 +79,6 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
     this.#tag = tag;
     this.#justHashString = toUnpaddedBase64url(this.#hash);
     this.#fullStringForm = `${tag}:${this.#justHashString}`;
-    Object.freeze(this);
   }
 
   /** Defensive copy of the raw hash bytes. */

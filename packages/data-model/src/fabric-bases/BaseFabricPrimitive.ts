@@ -35,10 +35,25 @@ export const EXAMPLE_METHOD: unique symbol = Symbol(
  * `FabricPrimitive` is the pure abstract contract that external code is written
  * against, while `BaseFabricPrimitive` is the designated home for shared
  * implementation. Its counterpart `BaseFabricInstance` carries the
- * `shallowClone()` template method; this class currently carries the static
- * invariant guard and a placeholder seed member (see `[EXAMPLE_METHOD]`).
+ * `shallowClone()` template method; this class carries the construction-time
+ * freeze, the static invariant guard, and a placeholder seed member (see
+ * `[EXAMPLE_METHOD]`).
  */
 export abstract class BaseFabricPrimitive extends FabricPrimitive {
+  /** Constructs an instance. */
+  constructor() {
+    super();
+
+    // Freezing here rather than at the end of each concrete constructor is
+    // sound because a primitive's state is entirely private: private fields
+    // are not properties, so a subclass assigns its own after `super()`
+    // returns regardless of this. A primitive is immutable from birth and has
+    // no mutable phase, so a frozen report is simply true of it -- and the
+    // freeze makes it non-extensible too, which is what turns a stray property
+    // addition into a throw.
+    Object.freeze(this);
+  }
+
   //
   // Instance members
   //

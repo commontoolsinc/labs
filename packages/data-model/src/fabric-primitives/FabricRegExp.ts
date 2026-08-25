@@ -108,8 +108,6 @@ export class FabricRegExp extends BaseFabricPrimitive
     this.#value = (this.#flavor === DEFAULT_FLAVOR)
       ? new RegExp(this.#source, this.#flags)
       : undefined;
-
-    Object.freeze(this);
   }
 
   /** The pattern source text. */
