@@ -28,6 +28,7 @@ const DIRS = [
   "packages/cli/support",
   "packages/cli/test",
   "packages/connectors/agents",
+  "packages/connectors/github",
   "packages/content-hash",
   "packages/dashboard",
   "packages/data-model",
@@ -35,6 +36,7 @@ const DIRS = [
   "packages/felt",
   "packages/fuse",
   "packages/generated-patterns",
+  "packages/github-host",
   "packages/home-schemas",
   "packages/html",
   "packages/identity",
@@ -146,7 +148,9 @@ async function uiComponentFiles(root: string): Promise<string[]> {
 export function scopeOfPath(checkPath: string): string {
   const parts = checkPath.split("/");
   if (parts[0] === "packages") {
-    if (parts[1] === "connectors") return "connectors/agents";
+    if (parts[1] === "connectors") {
+      return parts.slice(1, 3).join("/");
+    }
     return parts[1] ?? "repo";
   }
   return parts[0] ?? "repo";

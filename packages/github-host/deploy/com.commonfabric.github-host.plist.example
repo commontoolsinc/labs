@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.commonfabric.github-host</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>&lt;home&gt;/Library/Application Support/CommonFabric/bin/github-host</string>
+    <string>--config</string>
+    <string>&lt;home&gt;/Library/Application Support/CommonFabric/github-host/config.jsonc</string>
+    <string>--api-url</string>
+    <string>&lt;common-fabric-api-url&gt;</string>
+    <string>--identity</string>
+    <string>&lt;absolute-identity-key-path&gt;</string>
+    <string>--space</string>
+    <string>&lt;space-name-or-did&gt;</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>&lt;directory-containing-gh&gt;:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>&lt;home&gt;/Library/Logs/CommonFabric-github-host.log</string>
+  <key>StandardErrorPath</key>
+  <string>&lt;home&gt;/Library/Logs/CommonFabric-github-host.error.log</string>
+</dict>
+</plist>
