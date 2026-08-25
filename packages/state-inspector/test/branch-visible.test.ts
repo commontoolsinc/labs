@@ -456,6 +456,42 @@ describe("branch-visible", () => {
     });
   });
 
+  describe("spaceParticipants() across a chain", () => {
+    it("counts a session that wrote on both branches once, with its commits summed", async () => {
+      await withFork(
+        [{ id: "of:a", session: ALICE, value: 1 }, {
+          id: "of:b",
+          session: ALICE,
+          value: 2,
+        }],
+        [{ id: "of:c", session: ALICE, value: 3 }],
+        (space) => {
+          // Commits add across the chain — parent and child commits are
+          // different commits — while the session that made them is still one
+          // session. Attributing per link counts it twice.
+          const [alice] = spaceParticipants(space, { branch: "kid" });
+          expect(alice.commits).toBe(3);
+          expect(alice.sessions).toBe(1);
+        },
+      );
+    });
+
+    it("counts two sessions on one branch as two", async () => {
+      await withFork(
+        [{ id: "of:a", session: ALICE, value: 1 }, {
+          id: "of:b",
+          session: `session:did%3Akey%3AzAlice:s2`,
+          value: 2,
+        }],
+        [],
+        (space) => {
+          const [alice] = spaceParticipants(space, { branch: "kid" });
+          expect(alice.sessions).toBe(2);
+        },
+      );
+    });
+  });
+
   describe("valueAsIdentity()", () => {
     it("resolves through a scope the child inherited", async () => {
       // The STORED form, which is what `resolveScopeChain` builds and what the

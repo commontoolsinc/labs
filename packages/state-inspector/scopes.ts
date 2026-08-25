@@ -326,16 +326,30 @@ export function spaceParticipants(
     `SELECT session_id, count(*) n FROM "commit"
      WHERE branch = ? AND seq <= ? GROUP BY session_id`,
   );
-  for (
-    const r of branchReadChain(space, branch).flatMap((link) =>
-      perBranch.all<{ session_id: string; n: number }>(link.branch, link.atSeq)
-    )
-  ) {
+  // Totalled per SESSION before anything is attributed, because the two numbers
+  // combine differently across the chain: commits on a parent and on a child
+  // are different commits and add up, while one session that wrote on both is
+  // still one session. Incrementing per link would count it twice.
+  const commitsBySession = new Map<string, number>();
+  for (const link of branchReadChain(space, branch)) {
+    for (
+      const r of perBranch.all<{ session_id: string; n: number }>(
+        link.branch,
+        link.atSeq,
+      )
+    ) {
+      commitsBySession.set(
+        r.session_id,
+        (commitsBySession.get(r.session_id) ?? 0) + r.n,
+      );
+    }
+  }
+  for (const [sessionId, commits] of commitsBySession) {
     // A commit `session_id` has the same shape as a session scope_key.
-    const did = r.session_id ? parseScope(r.session_id).principal : undefined;
+    const did = sessionId ? parseScope(sessionId).principal : undefined;
     if (!did) continue;
     const p = get(did);
-    p.commits += r.n;
+    p.commits += commits;
     p.sessions += 1;
   }
 
