@@ -501,6 +501,55 @@ describe("pattern setup validation convergence", () => {
     expect(getPatternSetupIdentityRef(cell)?.identity).toBe(v2Ref.identity);
   });
 
+  it("postpones when ANOTHER transaction's pull for the same target is in flight", async () => {
+    // The concurrency shape a walk-local flag cannot see: transaction A
+    // resolves the cold slot first, consuming the one pull reservation and
+    // putting the load on the wire; transaction B then resolves the same
+    // dead end, finds no reservation left to take, and — without the
+    // runtime's in-flight tracker — would read the absence as judged and
+    // mint a verdict while the doc is in truth mid-transfer. Nothing is
+    // awaited between A's read and B's attempt, so the pull is still
+    // unsettled when B validates: B must postpone, and the settled retry
+    // completes.
+    await createNotedInA(
+      "in-flight-race",
+      "in-flight-race-registry",
+      "in-flight-race-note",
+      "fine",
+    );
+    const v2 = await rtB.patternManager.compilePattern(
+      programOf(patternWithNote("v2")),
+      { space },
+    );
+    const v2Ref = rtB.patternManager.getArtifactEntryRef(v2)!;
+    const { cell, attempt } = await setupAttemptInB(
+      "in-flight-race",
+      "in-flight-race-registry",
+      v2,
+      v2Ref,
+    );
+
+    // Transaction A: materialize the cold argument and abandon the
+    // transaction. Its kick took the reservation; the pull is in flight.
+    const preTx = rtB.edit();
+    const argumentLink = getMetaLink(cell.withTx(preTx), "argument")!;
+    rtB.getCellFromLink(argumentLink, undefined, preTx).asSchema(undefined)
+      .get();
+    const thrown = await attempt();
+
+    expect(
+      isStoredArgumentValidationPending(thrown),
+      "a concurrent transaction's unsettled pull read as a judged absence — " +
+        "the verdict depended on which transaction took the reservation",
+    ).toBe(true);
+    expect(isStoredArgumentSchemaRefusal(thrown)).toBe(false);
+
+    await rtB.storageManager.synced();
+    const retried = await attempt();
+    expect(retried).toBeUndefined();
+    expect(getPatternSetupIdentityRef(cell)?.identity).toBe(v2Ref.identity);
+  });
+
   it("refuses, classifiably, an ITEM-level linked slot the server confirms absent", async () => {
     // Links live at any depth: `registry` is supplied as an ARRAY whose item
     // links a doc that was never written anywhere. The first attempt cannot
