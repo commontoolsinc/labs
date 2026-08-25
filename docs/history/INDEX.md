@@ -4,6 +4,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [estuary-board-read-cost-2026-08-24.md](estuary-board-read-cost-2026-08-24.md) — why CLI projections over the Estuary topic board did not materialize while the board itself read fine (the cost is an unmemoized schema traverse: 34,826 schema walks and 52,029 `anyOf` branches in one pass), what that ruled out (version skew, a stale generation, a deficient element), and the schema-duplication leads for the OOM that preceded the rollback, August 2026.
 - [2026-08-14-uncovered-code-inventory.md](packages/patterns/2026-08-14-uncovered-code-inventory.md) — where the 232,303 uncovered lines in `packages/patterns` were, what a round of ten pattern tests reached, the patterns that turned out not to build, and what was left, August 2026.
 - [pattern-typecheck-standalone-2026-08-14.md](development/pattern-typecheck-standalone-2026-08-14.md) — why a plain `deno check` over the pattern corpus diverges from the classic-JSX environment patterns compile under, which of the twenty divergences were real defects versus lens artifacts, and the `deno task check` package-coverage gap closed alongside, August 2026.
 - [pattern-test-ci-coverage-investigation-2026-08-17.md](pattern-test-ci-coverage-investigation-2026-08-17.md) — investigation disproving a suspected CI coverage gap for `packages/patterns/**/*.test.tsx` (the Pattern Unit Tests job runs the full corpus) and diagnosing the clamped-import `realpath` failure that made bare `cf test` runs look rotten, August 2026.
