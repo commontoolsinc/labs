@@ -2813,6 +2813,13 @@ class SpaceReplica implements ISpaceReplica {
     // OW61 TEMPORARY: the probe needs this replica's session identity.
     (this as unknown as { ow61Identity: () => ScopeKeyIdentity }).ow61Identity =
       () => this.#scopeKeyIdentity();
+    queueMicrotask(() => {
+      logger.error("ow61-replica-new", () => [
+        `space=${this.#space.slice(-8)} session=${
+          this.#scopeKeyIdentity().sessionId?.slice(0, 8)
+        }`,
+      ]);
+    });
     this.#createSession = options.createSession;
     this.#getTelemetry = options.getTelemetry ?? (() => undefined);
     this.#settings = options.settings;
@@ -4154,6 +4161,13 @@ class SpaceReplica implements ISpaceReplica {
         this.makeLocalRejection(entry.commit, "memory replica reset"),
       );
     }
+    logger.error("ow61-replica-RESET", () => [
+      `space=${this.#space.slice(-8)} session=${
+        this.#scopeKeyIdentity().sessionId?.slice(0, 8)
+      } docsWiped=${this.#docs.size} cidsWiped=${
+        [...this.#docs.keys()].filter((k) => k.includes("cid:")).length
+      }`,
+    ]);
     this.#docs.clear();
     this.#watchedIds.clear();
     this.resetConflictAdmissionState();
