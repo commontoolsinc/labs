@@ -60,7 +60,9 @@ export interface RetargetSessions {
  * is, so the run stops (or never starts). `refused` is a row this run must
  * not apply — a source resolving to a different reference than the row
  * recorded. `failed` is an operational failure, state-checked; and
- * `unattempted` names the rows after a stop.
+ * `unattempted` names the rows a stop leaves untouched — the pieces of a
+ * group whose session never opened among them, nothing having been written
+ * to them.
  */
 export type RetargetVerdict =
   | "landed"
@@ -77,12 +79,20 @@ export interface RetargetRow {
   /** The plan row's phase label, carried as the plan stamped it. */
   phase?: string;
   verdict: RetargetVerdict;
-  /** What a moved, refused, or failed row broke; absent otherwise. */
+  /**
+   * What a moved, refused, or failed row broke; absent otherwise. A row
+   * names its own piece's trouble alone — the run's own, a session that
+   * would not open or close, is the report's `stopReason`.
+   */
   problem?: string;
   /**
-   * The row's wall-clock cost in milliseconds, present on attempted apply
-   * rows. The number the plan wants reported as the run proceeds: a run
-   * whose cost per piece is unknown cannot be improved.
+   * The row's wall-clock cost in milliseconds, present on every row an
+   * apply session began work on: a row reclassified as landed, moved, or
+   * refused cost the reads and resolution that reclassified it, and reports
+   * that cost as an applied row reports its write. Absent on a preflight
+   * classification and on an unattempted row, neither of which an apply
+   * session worked on. The number the plan wants reported as the run
+   * proceeds: a run whose cost per piece is unknown cannot be improved.
    */
   elapsedMs?: number;
 }
@@ -94,10 +104,20 @@ export interface RetargetReport {
   applied: number;
   /**
    * True when every row is `landed` (or, on a dry run, `outstanding` —
-   * that is the dry run's answer, not a defect): nothing moved, nothing
-   * refused, nothing failed, nothing unattempted.
+   * that is the dry run's answer, not a defect) and no session boundary
+   * failed: nothing moved, nothing refused, nothing failed, nothing
+   * unattempted, and every session this run opened was released.
    */
   complete: boolean;
+  /**
+   * Why the run stopped when no piece is at fault: a session that could not
+   * be opened or could not be released. A piece's own trouble rides its
+   * row's `problem`; a boundary failure belongs to the run rather than to
+   * any one piece, so it is reported here — and its presence makes
+   * `complete` false whatever the rows say, since a run whose session
+   * accounting broke did not finish cleanly.
+   */
+  stopReason?: string;
 }
 
 export interface RetargetOptions {
@@ -150,13 +170,38 @@ function classify(
 }
 
 /**
+ * Release a session, handing back what a failure broke instead of throwing
+ * it. Once a run holds outcomes worth reporting, a session boundary that
+ * fails must not throw them away — the rows a partial migration produced
+ * are exactly what its operator needs — so the failure is returned to be
+ * named as the run's stop reason.
+ */
+async function closeSession(
+  sessions: RetargetSessions,
+  pieces: PiecesController,
+): Promise<string | undefined> {
+  try {
+    await sessions.close(pieces);
+    return undefined;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+/**
  * Apply a retarget plan, or — without `apply` — report where every piece
  * stands. Serial in plan order; preflight proves every row's precondition
  * before the first write; grouped sessions bound what stays live; a stop
- * names every unattempted piece. Op-less rows — the pre-state record, a
- * collection's holder among them — carry no work and are left out of the
- * report; a restore or repair row is refused outright, this run applying
- * retargets alone.
+ * names every unattempted piece. The plan's space is held against the
+ * session's, so a plan replayed elsewhere is refused rather than run
+ * against whatever pieces happen to answer to its addresses. A session
+ * boundary that fails once outcomes exist is a stop like any other — the
+ * rows stand, the remainder is named, and `stopReason` says what broke;
+ * only the preflight's own open throws, there being no report to lose.
+ * Op-less rows —
+ * the pre-state record, a collection's holder among them — carry no work
+ * and are left out of the report; a restore or repair row is refused
+ * outright, this run applying retargets alone.
  */
 export async function retargetPieces(
   sessions: RetargetSessions,
@@ -219,13 +264,27 @@ export async function retargetPieces(
     "landed" | "outstanding" | { blocked: RetargetRow }
   >();
   let startBlocked = false;
+  /** The run's own trouble, as opposed to any piece's: see `stopReason`. */
+  let sessionProblem: string | undefined;
   {
     const pieces = await sessions.open();
     try {
+      // A piece address names a piece within a space, so the same address
+      // names a different piece in another one. A plan surveyed elsewhere
+      // is refused here, before any read is classified from it.
+      if (pieces.getSpace() !== plan.header.space) {
+        throw new Error(
+          `The plan names space ${plan.header.space}; this run targets ` +
+            `${pieces.getSpace()}.`,
+        );
+      }
+      // One retained-source cache for the session: a board on one identity
+      // pays its retained load once, not once per row.
+      const retainedByIdentity = new Map<string, boolean>();
       for (const row of work) {
         const phase = row.phase === undefined ? {} : { phase: row.phase };
         try {
-          const pin = await readPiecePin(pieces, row.piece);
+          const pin = await readPiecePin(pieces, row.piece, retainedByIdentity);
           const standing = classify(pin, row);
           if (standing === "moved-elsewhere") {
             preflight.set(row.piece, {
@@ -259,7 +318,16 @@ export async function retargetPieces(
         }
       }
     } finally {
-      await sessions.close(pieces);
+      // The classification exists by now, so a preflight session that will
+      // not release keeps its report rather than losing it to a rejection —
+      // and blocks the start, nothing having been written yet.
+      const problem = await closeSession(sessions, pieces);
+      if (problem !== undefined) {
+        sessionProblem = problem +
+          "; the preflight session could not be released, so nothing was " +
+          "written.";
+        startBlocked = true;
+      }
     }
   }
   if (startBlocked || options.apply !== true) {
@@ -275,17 +343,25 @@ export async function retargetPieces(
         report(standing.blocked);
       }
     }
-    const complete = rows.every((row) =>
-      row.verdict === "landed" ||
-      (options.apply !== true && row.verdict === "outstanding")
-    );
-    return { rows, applied: 0, complete };
+    const complete = sessionProblem === undefined &&
+      rows.every((row) =>
+        row.verdict === "landed" ||
+        (options.apply !== true && row.verdict === "outstanding")
+      );
+    return {
+      rows,
+      applied: 0,
+      complete,
+      ...(sessionProblem === undefined ? {} : { stopReason: sessionProblem }),
+    };
   }
 
-  // The serial apply, in plan order, over bounded session groups. Rows the
-  // preflight saw landed are reported without a write — a resume must not
-  // rewrite them — and each remaining row's precondition is re-proved in
-  // the group's own session immediately before its write.
+  // The serial apply, in plan order, over bounded session groups. Every
+  // row's standing is proved again in its group's own session immediately
+  // before its write, the preflight's verdict deciding nothing here: a row
+  // proved landed there is reported without a write — a resume must not
+  // rewrite one — and a row another writer moved since is caught by the
+  // same read that would have skipped it.
   let applied = 0;
   let stopped = false;
   for (let start = 0; start < work.length; start += groupSize) {
@@ -297,7 +373,27 @@ export async function retargetPieces(
       }
       continue;
     }
-    const pieces = await sessions.open();
+    let pieces: PiecesController;
+    try {
+      pieces = await sessions.open();
+    } catch (error) {
+      // A session that never opened wrote nothing, so its group's pieces
+      // are unattempted rather than failed — their state is known, not
+      // unknown — and no row is at fault, so the reason is the run's. The
+      // stop names the remainder the way every other stop does.
+      sessionProblem =
+        (error instanceof Error ? error.message : String(error)) +
+        "; this group's session could not be opened, so its pieces were " +
+        "not attempted.";
+      for (const row of group) {
+        const phase = row.phase === undefined ? {} : { phase: row.phase };
+        report({ piece: row.piece, ...phase, verdict: "unattempted" });
+      }
+      stopped = true;
+      continue;
+    }
+    // One retained-source cache for this group's session, as in preflight.
+    const retainedByIdentity = new Map<string, boolean>();
     try {
       for (const row of group) {
         const phase = row.phase === undefined ? {} : { phase: row.phase };
@@ -305,19 +401,20 @@ export async function retargetPieces(
           report({ piece: row.piece, ...phase, verdict: "unattempted" });
           continue;
         }
-        if (preflight.get(row.piece) === "landed") {
-          report({ piece: row.piece, ...phase, verdict: "landed" });
-          continue;
-        }
         const startedAt = now();
         try {
           // The precondition again, in this session, immediately before
           // the write: preflight's read has aged by up to a group's worth
           // of work.
-          const pin = await readPiecePin(pieces, row.piece);
+          const pin = await readPiecePin(pieces, row.piece, retainedByIdentity);
           const standing = classify(pin, row);
           if (standing === "landed") {
-            report({ piece: row.piece, ...phase, verdict: "landed" });
+            report({
+              piece: row.piece,
+              ...phase,
+              verdict: "landed",
+              elapsedMs: now() - startedAt,
+            });
             continue;
           }
           if (standing === "moved-elsewhere") {
@@ -327,6 +424,7 @@ export async function retargetPieces(
               verdict: "moved-elsewhere",
               problem: "The piece left its recorded reference after " +
                 "preflight; something other than this plan moved it.",
+              elapsedMs: now() - startedAt,
             });
             stopped = true;
             continue;
@@ -347,6 +445,7 @@ export async function retargetPieces(
               verdict: "refused",
               problem: `The source resolves to ${identity}, not the ` +
                 `${row.op.patternIdentity} this row recorded.`,
+              elapsedMs: now() - startedAt,
             });
             stopped = true;
             continue;
@@ -380,7 +479,11 @@ export async function retargetPieces(
           let state =
             "; the piece could not be re-read, so its state is unknown";
           try {
-            const pin = await readPiecePin(pieces, row.piece);
+            const pin = await readPiecePin(
+              pieces,
+              row.piece,
+              retainedByIdentity,
+            );
             const standing = classify(pin, row);
             state = standing === "landed"
               ? "; the piece is on the row's target reference, so the " +
@@ -402,11 +505,25 @@ export async function retargetPieces(
         }
       }
     } finally {
-      await sessions.close(pieces);
+      // This group's rows have settled, and its writes are committed. A
+      // session that will not release loses none of that: the run stops
+      // here, later groups are named as any stop names its remainder, and
+      // the reason is the run's rather than any piece's.
+      const problem = await closeSession(sessions, pieces);
+      if (problem !== undefined) {
+        sessionProblem = problem +
+          "; the session serving this group could not be released, so the " +
+          "run stopped.";
+        stopped = true;
+      }
     }
   }
-  const complete = rows.every((row) =>
-    row.verdict === "landed" || row.verdict === "applied"
-  );
-  return { rows, applied, complete };
+  const complete = sessionProblem === undefined &&
+    rows.every((row) => row.verdict === "landed" || row.verdict === "applied");
+  return {
+    rows,
+    applied,
+    complete,
+    ...(sessionProblem === undefined ? {} : { stopReason: sessionProblem }),
+  };
 }

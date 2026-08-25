@@ -1,8 +1,11 @@
 /**
  * The retarget apply: preflight classification, the serial plan-order
- * apply over grouped sessions, resume as re-invocation, the stop that
- * names its remainder, and the refusals — a source resolving off its
- * recorded reference, foreign operations, incomplete plans. Sessions come
+ * apply over grouped sessions, the re-proof each row gets in its group's
+ * own session, one retained-source load per session, resume as
+ * re-invocation, the stop that names its remainder — a session boundary
+ * that fails once outcomes exist among the stops — and the refusals — a
+ * plan surveyed against another space, a source resolving off its recorded
+ * reference, foreign operations, incomplete plans. Sessions come
  * from a counting factory whose close defers disposal: the emulated store
  * lives in its runtimes, so the boundaries are observed while the state
  * survives; the drill exercises real disposal against a real server.
@@ -108,6 +111,7 @@ describe("bulk-retarget", () => {
     });
     const v1id = await programEntryIdentity(v1);
     const v2id = await programEntryIdentity(v2);
+    const space = setup.getSpace();
     const ids: string[] = [];
     for (let index = 0; index < count; index += 1) {
       const piece = await setup.create(v1, { input: { seed: `s${index}` } });
@@ -131,7 +135,7 @@ describe("bulk-retarget", () => {
         header: {
           kind: "piece-plan",
           v: 1,
-          space: "did:key:test",
+          space,
           takenAt: "2026-08-25T00:00:00.000Z",
           selector: "collection",
           enumerated: {
@@ -151,6 +155,66 @@ describe("bulk-retarget", () => {
     const pin = await readPiecePin(reader, piece);
     await sessions.close(reader);
     return pin;
+  }
+
+  /**
+   * Sessions whose `nth` close rejects: the boundary failure a run must
+   * survive with the outcomes it already holds, counting the preflight's
+   * close as the first.
+   */
+  function failingCloseAt(nth: number): RetargetSessions {
+    let attempts = 0;
+    return {
+      open: () => sessions.open(),
+      close: (pieces) => {
+        attempts += 1;
+        if (attempts === nth) {
+          return Promise.reject(new Error("the session would not release"));
+        }
+        return sessions.close(pieces);
+      },
+    };
+  }
+
+  /**
+   * Sessions whose first apply-session read of `victim` is preceded by
+   * another writer putting `main` on it — the race a group session's own
+   * read is there to catch.
+   */
+  function raceTo(main: string, victim: string): RetargetSessions {
+    let raced = false;
+    let sessionIndex = 0;
+    return {
+      open: async () => {
+        sessionIndex += 1;
+        const applySession = sessionIndex >= 2;
+        const pieces = await sessions.open();
+        return new Proxy(pieces, {
+          get(target, prop, receiver) {
+            if (prop === "get") {
+              return async (id: string, run?: boolean) => {
+                if (id === victim && !raced && applySession) {
+                  raced = true;
+                  const program = await resolveLocalSourceProgram(
+                    pieces.runtime,
+                    { main },
+                  );
+                  const piece = await target.get(id, false);
+                  await piece.setPattern(program, {
+                    dangerouslyAllowIncompatibleSchema: true,
+                  });
+                  await pieces.synced();
+                }
+                return target.get(id, run);
+              };
+            }
+            const value = Reflect.get(target, prop, receiver);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        }) as PiecesController;
+      },
+      close: (pieces) => sessions.close(pieces),
+    };
   }
 
   it("classifies every row from one preflight read on a dry run", async () => {
@@ -275,6 +339,10 @@ describe("bulk-retarget", () => {
       "unattempted",
     ]);
     expect(report.rows[1].problem).toContain("resolves to");
+    // The refused row was attempted — its reads and resolution ran — so it
+    // reports what it cost; the row after the stop was not.
+    expect(typeof report.rows[1].elapsedMs).toBe("number");
+    expect(report.rows[2].elapsedMs).toBeUndefined();
     expect(report.applied).toBe(1);
     expect(report.complete).toBe(false);
     expect((await pinOf(ids[2]))?.patternIdentity).toBe(
@@ -423,46 +491,143 @@ describe("bulk-retarget", () => {
     expect(report.rows[3].piece).toBe(ids[3]);
   });
 
+  it("names the remainder when a group's session cannot be opened", async () => {
+    const { plan, ids } = await seed(3);
+    const before = { opens, closes };
+    let attempts = 0;
+    // Preflight and the first apply group open; the second group's session
+    // does not, after two writes have already been committed.
+    const failingGroup: RetargetSessions = {
+      open: () => {
+        attempts += 1;
+        if (attempts === 3) {
+          return Promise.reject(new Error("the session could not start"));
+        }
+        return sessions.open();
+      },
+      close: (pieces) => sessions.close(pieces),
+    };
+
+    const report = await retargetPieces(failingGroup, {
+      plan,
+      apply: true,
+      groupSize: 2,
+    });
+
+    expect(report.rows.map((row) => row.verdict)).toEqual([
+      "applied",
+      "applied",
+      "unattempted",
+    ]);
+    expect(report.rows[2].piece).toBe(ids[2]);
+    // No piece is at fault, so the reason is the run's rather than a row's.
+    expect(report.rows[2].problem).toBeUndefined();
+    expect(report.stopReason).toContain("the session could not start");
+    expect(report.stopReason).toContain("could not be opened");
+    // Nothing was written for it, so it carries no cost either.
+    expect(report.rows[2].elapsedMs).toBeUndefined();
+    expect(report.applied).toBe(2);
+    expect(report.complete).toBe(false);
+    // The session that never opened is never closed: the run's two live
+    // sessions are its two closes.
+    expect(opens - before.opens).toBe(2);
+    expect(closes - before.closes).toBe(2);
+    // The writes the first group committed are still committed.
+    expect((await pinOf(ids[0]))?.patternIdentity).toBe(
+      (plan.rows[0].op as RetargetOp).patternIdentity,
+    );
+  });
+
+  it("names the remainder when a group's session cannot be released", async () => {
+    const { plan, ids } = await seed(3);
+
+    // Preflight releases; the first apply group's session does not, its two
+    // writes already committed.
+    const report = await retargetPieces(failingCloseAt(2), {
+      plan,
+      apply: true,
+      groupSize: 2,
+    });
+
+    expect(report.rows.map((row) => row.verdict)).toEqual([
+      "applied",
+      "applied",
+      "unattempted",
+    ]);
+    expect(report.rows[2].piece).toBe(ids[2]);
+    expect(report.stopReason).toContain("the session would not release");
+    expect(report.stopReason).toContain("could not be released");
+    expect(report.applied).toBe(2);
+    expect(report.complete).toBe(false);
+    // The writes the group committed outlive the failure that followed them.
+    expect((await pinOf(ids[0]))?.patternIdentity).toBe(
+      (plan.rows[0].op as RetargetOp).patternIdentity,
+    );
+    expect((await pinOf(ids[1]))?.patternIdentity).toBe(
+      (plan.rows[1].op as RetargetOp).patternIdentity,
+    );
+    // The named piece is untouched: its group never opened.
+    expect((await pinOf(ids[2]))?.patternIdentity).toBe(
+      plan.rows[2].expect.patternIdentity,
+    );
+  });
+
+  it("reports a last group that cannot be released as an incomplete run", async () => {
+    const { plan } = await seed(2);
+
+    // Every row applied, and then the only apply group's session would not
+    // release. There is no remainder to name, so the reason is all that
+    // separates this from a clean completion — and it must.
+    const report = await retargetPieces(failingCloseAt(2), {
+      plan,
+      apply: true,
+    });
+
+    expect(report.rows.map((row) => row.verdict)).toEqual([
+      "applied",
+      "applied",
+    ]);
+    expect(report.applied).toBe(2);
+    expect(report.complete).toBe(false);
+    expect(report.stopReason).toContain("could not be released");
+  });
+
+  it("keeps the classification when the preflight session cannot be released", async () => {
+    const { plan, ids } = await seed(2);
+
+    const dry = await retargetPieces(failingCloseAt(1), { plan });
+
+    expect(dry.rows.map((row) => row.verdict)).toEqual([
+      "outstanding",
+      "outstanding",
+    ]);
+    expect(dry.applied).toBe(0);
+    expect(dry.complete).toBe(false);
+    expect(dry.stopReason).toContain("preflight session could not be released");
+
+    // The same failure on an apply run blocks the start: the classification
+    // is reported and nothing is written.
+    const attempted = await retargetPieces(failingCloseAt(1), {
+      plan,
+      apply: true,
+    });
+
+    expect(attempted.rows.map((row) => row.verdict)).toEqual([
+      "outstanding",
+      "outstanding",
+    ]);
+    expect(attempted.applied).toBe(0);
+    expect(attempted.complete).toBe(false);
+    expect((await pinOf(ids[0]))?.patternIdentity).toBe(
+      plan.rows[0].expect.patternIdentity,
+    );
+  });
+
   it("re-proves each row in its own group session: a race skips or stops", async () => {
     // Between preflight and a row's write, another writer moves pieces:
     // one onto the row's own target (skipped as landed, never rewritten),
     // and — in a second run — one onto a third generation (a stop).
     await Deno.writeTextFile(`${dir}/member-v3.tsx`, memberSource("three"));
-    const raceTo = (main: string, victim: string): RetargetSessions => {
-      let raced = false;
-      let sessionIndex = 0;
-      return {
-        open: async () => {
-          sessionIndex += 1;
-          const applySession = sessionIndex >= 2;
-          const pieces = await sessions.open();
-          return new Proxy(pieces, {
-            get(target, prop, receiver) {
-              if (prop === "get") {
-                return async (id: string, run?: boolean) => {
-                  if (id === victim && !raced && applySession) {
-                    raced = true;
-                    const program = await resolveLocalSourceProgram(
-                      pieces.runtime,
-                      { main },
-                    );
-                    const piece = await target.get(id, false);
-                    await piece.setPattern(program, {
-                      dangerouslyAllowIncompatibleSchema: true,
-                    });
-                    await pieces.synced();
-                  }
-                  return target.get(id, run);
-                };
-              }
-              const value = Reflect.get(target, prop, receiver);
-              return typeof value === "function" ? value.bind(target) : value;
-            },
-          }) as PiecesController;
-        },
-        close: (pieces) => sessions.close(pieces),
-      };
-    };
 
     const landedRace = await seed(2);
     const landed = await retargetPieces(
@@ -474,6 +639,9 @@ describe("bulk-retarget", () => {
       "applied",
     ]);
     expect(landed.applied).toBe(1);
+    // The skipped row was still attempted: the read that reclassified it
+    // cost what it cost, and the row reports it.
+    expect(typeof landed.rows[0].elapsedMs).toBe("number");
 
     const movedRace = await seed(2);
     const moved = await retargetPieces(
@@ -485,7 +653,99 @@ describe("bulk-retarget", () => {
       "unattempted",
     ]);
     expect(moved.rows[0].problem).toContain("after preflight");
+    expect(typeof moved.rows[0].elapsedMs).toBe("number");
+    expect(moved.rows[1].elapsedMs).toBeUndefined();
     expect(moved.applied).toBe(0);
+  });
+
+  it("stops when a row preflight saw landed is moved before its group runs", async () => {
+    // The preflight verdict decides nothing at write time: a row already on
+    // its target when the run started is proved again in its group's
+    // session, so a writer moving it in between is a stop rather than a
+    // report of a completion that never happened.
+    await Deno.writeTextFile(`${dir}/member-v3.tsx`, memberSource("three"));
+    const { plan, ids } = await seed(2);
+    const lander = await sessions.open();
+    const v2 = await resolveLocalSourceProgram(lander.runtime, {
+      main: `${dir}/member-v2.tsx`,
+    });
+    const already = await lander.get(ids[0], false);
+    await already.setPattern(v2);
+    await lander.synced();
+    await sessions.close(lander);
+
+    const report = await retargetPieces(
+      raceTo(`${dir}/member-v3.tsx`, ids[0]),
+      { plan, apply: true },
+    );
+
+    expect(report.rows.map((row) => row.verdict)).toEqual([
+      "moved-elsewhere",
+      "unattempted",
+    ]);
+    expect(report.rows[0].problem).toContain("after preflight");
+    expect(report.applied).toBe(0);
+    expect(report.complete).toBe(false);
+  });
+
+  it("loads a retained source once per session rather than once per row", async () => {
+    // Every row of a board on one generation shares one retained-source
+    // load within a session: the cache is the session's, so the loads a run
+    // pays are its session count, not its row count.
+    let loads = 0;
+    const counted: RetargetSessions = {
+      open: async () => {
+        const pieces = await sessions.open();
+        const patternManager = new Proxy(pieces.runtime.patternManager, {
+          get(target, prop) {
+            if (prop === "getPatternSourceProgramByIdentity") {
+              return (
+                ...args: Parameters<
+                  typeof target.getPatternSourceProgramByIdentity
+                >
+              ) => {
+                loads += 1;
+                return target.getPatternSourceProgramByIdentity(...args);
+              };
+            }
+            const value = Reflect.get(target, prop);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        });
+        const runtime = new Proxy(pieces.runtime, {
+          get(target, prop) {
+            if (prop === "patternManager") return patternManager;
+            const value = Reflect.get(target, prop);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        });
+        return new Proxy(pieces, {
+          get(target, prop, receiver) {
+            if (prop === "runtime") return runtime;
+            const value = Reflect.get(target, prop, receiver);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        }) as PiecesController;
+      },
+      close: (pieces) => sessions.close(pieces),
+    };
+    const { plan } = await seed(3);
+
+    await retargetPieces(counted, { plan });
+    // The dry run is the preflight session alone, and its three rows share
+    // one generation.
+    expect(loads).toBe(1);
+
+    loads = 0;
+    const report = await retargetPieces(counted, {
+      plan,
+      apply: true,
+      groupSize: 2,
+    });
+
+    expect(report.applied).toBe(3);
+    // Preflight plus two apply groups: one load each, not one per row.
+    expect(loads).toBe(3);
   });
 
   it("honors the compatibility override from the row field alone", async () => {
@@ -536,6 +796,29 @@ describe("bulk-retarget", () => {
     });
     expect(allowed.rows[0].verdict).toBe("applied");
     expect((await pinOf(ids[0]))?.patternIdentity).toBe(incompatId);
+  });
+
+  it("refuses a plan surveyed against another space", async () => {
+    // A piece address names a piece within a space; replayed elsewhere, the
+    // same addresses can name pieces the plan's reviewer never saw.
+    const { plan, ids } = await seed(1);
+
+    await expect(
+      retargetPieces(sessions, {
+        plan: {
+          header: { ...plan.header, space: "did:key:somewhere-else" },
+          rows: plan.rows,
+        },
+        apply: true,
+      }),
+    ).rejects.toThrow(
+      `The plan names space did:key:somewhere-else; this run targets ` +
+        `${plan.header.space}.`,
+    );
+
+    expect((await pinOf(ids[0]))?.patternIdentity).toBe(
+      plan.rows[0].expect.patternIdentity,
+    );
   });
 
   it("refuses foreign operations, empty work, and incomplete plans", async () => {
