@@ -73,6 +73,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Shipped or superseded designs and decision records
 
+- [APRIME-LINEAGE-HANDOFF.md](packages/ts-transformers/APRIME-LINEAGE-HANDOFF.md) — the authored-source lineage investigation, per-channel hazards, probes, and execution record for the CT-1868/1869/1870 arc, completed August 2026.
 - [topics-crossref-identity-break.md](topics-crossref-identity-break.md) — decision record for the topics reference-graph contract break shipped in #5921, the first accepted break in the pattern-update registries; backfilled when the registries gained their `record` linkage.
 - [parking-admin-floor-contract-break.md](parking-admin-floor-contract-break.md) — decision record for the parking-coordinator admin-roster contract break shipped in #6091: why correcting a `requiredIntegrity` floor nothing could satisfy had to change the `ifc` at the roster's path, and why a piece holding a roster loses nothing it could have written, August 2026.
 - [lunch-poll-identity-break.md](lunch-poll-identity-break.md) — decision record for the lunch-poll identity contract break: display-name identity replaced by profile cells; stored rows survive the vintage replay, but the root argument contract requires migrating the populated poll to a fresh piece.

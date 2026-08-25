@@ -1,3 +1,11 @@
+---
+status: historical
+created: 2026-07-07
+archived: 2026-08-25
+reason: "Executed handoff; the CT-1868/1869/1870 authored-lineage arc shipped."
+superseded-by: docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md
+---
+
 # A′ Master Handoff — transform-time authored source locations (2026-07-07)
 
 **Read this first.** It is the canonical carry-forward for the **A′ work-line**
@@ -279,22 +287,17 @@ throughout).
 - `preserveLineage(node, origin)` = **provenance**: "in authored text I was born
   there, as that node." For replacement-materialization sites, where the
   provenance target and the checker-identity target are the same node.
-- `preserveNodeSourceMap(node, originalNode, identityNode?)` = the resolution
+- `preserveNodeSourceMap(node, originalNode, identityNode)` = the resolution
   for sites where the two concerns **diverge**: a node has exactly one
   `original` pointer, so when position should map to the authored expression but
   identity must point elsewhere (e.g. `getHelperExpr` pointing a fresh
   `__cfHelpers` identifier's original at the module's helper binding so the
   checker resolves it), position goes via smr and original carries identity.
-  Same move as builder-call-hoisting's `setOriginalNode(name, innerCall)`. Keep
-  the name for now. CT-1868 added a third helper, `ast/utils.ts`
-  **`preserveSourceMapRange(node, origin)`** (smr-only free function, the
-  shipped default carrier — §6a), which functionally overlaps
-  `preserveNodeSourceMap`'s no-`identityNode` mode; the acknowledged follow-up
-  (fold into the hygiene pass or CT-1869) is to migrate
-  `preserveNodeSourceMap`'s non-identity callers onto it, leaving the method
-  only for the genuine identity/position-divergence sites. Reading note:
-  `preserveNodeSourceMap`'s `ts.getSourceMapRange(x) ?? x` has a dead `??` —
-  `getSourceMapRange` never returns undefined.
+  Same move as builder-call-hoisting's `setOriginalNode(name, innerCall)`. The
+  identity node is required: source-map-only helper names, property accesses,
+  and calls use `ast/utils.ts`'s
+  **`preserveSourceMapRange(node, origin)`** instead. The method therefore
+  represents only genuine identity/position divergence.
 
 **Hazards (why this isn't a mechanical sweep):**
 
@@ -341,10 +344,9 @@ inert.** The mechanisms, each observed and root-caused during implementation
 ## 7. Narrow vs broad — decision and pricing
 
 **Decision: narrow-first (the §5 set), then a source-map-range-only broad
-sweep.** The narrow set is complete against direct probe evidence and fully
-unblocks A′. The first broad slice covers the replacement sites whose authored
-anchor is already in scope and unambiguous. More opaque sites remain separate: a
-wrong sourcemap anchor is worse than an absent one.
+sweep.** The narrow set and both broad slices are complete against direct probe
+evidence. A wrong source-map anchor is worse than an absent one, so every broad
+site is content-bound to its authored semantic predecessor.
 
 **Sweep results (read-only Opus survey, 2026-07-07, on 39afdb62b; three claims
 spot-verified exactly — treat the rest as a work list to re-verify at
@@ -361,28 +363,34 @@ implementation):**
   containers, handler attributes and initializers, nested array receiver `key()`
   calls, and module-scope `__cf_data` wrappers carry their authored container or
   expression range. These sites use `preserveSourceMapRange` exclusively.
-- **Remaining judgment work:** destructured-binding declarations in
-  `pattern-body-reactive-root-lowering.ts` do not retain the original binding
-  node in their intermediate representation, so they need an explicit anchor
-  design. The diagnostics replacement audit and `CFHelpers` API cleanup remain
-  independent follow-ups. The `ifelse.ts` when/unless helpers anchor on the
-  condition (left operand), not the whole logical expression; that existing
-  choice remains intentionally unchanged pending a focused sourcemap review.
+- **Judgment broad slice:** `DestructureBinding` retains the binding syntax for
+  each lowered leaf. A synthesized temporary root anchors to the authored
+  initializer; local leaf declarations and destructured-parameter prologue
+  declarations anchor to their binding elements. Assert-diagnostics callback
+  bodies anchor to the authored body, and each replacement record block and
+  `return` anchors to the concise expression or authored return it replaces.
+  `CFHelpers.preserveNodeSourceMap` requires a distinct identity node; its
+  former source-map-only uses call `preserveSourceMapRange` directly. A focused
+  review kept the `ifelse.ts` asymmetry: `ifElse` anchors to the whole
+  conditional, while `when` and `unless` anchor to the left condition.
 - **Excluded correctly** (sweep audit list retained in the session record):
   expression-rewrite emitters (delegate to known sites), reactive-variable-for
   (already fully preserved), type-position construction, additive schema/
   coverage/hardening/shadowing machinery, analysis-only stages.
 
-**Final call:** builder-path lineage stays complete, and the straightforward
-broad slice follows the same source-map-range-only safety rule. Opaque anchors
-remain out of scope until their source identity is represented explicitly.
+**Final call:** builder-path lineage and the broad replacement sweep are
+complete. Both broad slices follow the source-map-range-only safety rule.
+End-to-end map probes place the destructuring temporary at its authored
+initializer, each leaf at its binding element, a concise assert record return
+at its expression, and block assert record returns at their authored `return`
+statements. The fixture corpus remains byte-identical because no text range or
+original-node identity is added.
 
-**CT-1869 implementers, carry §6a:** the implementation proved the per-site
-judgment is not just "is the anchor's span correct" but **"does textRange reach
-the printer here"** and **"does an original reach a marker/typeRegistry consumer
-here."** Default to `preserveSourceMapRange`; escalate to full `preserveLineage`
-only with the emit-invariance check (byte-diff `--show-transformed` on corpus
-patterns) and the full fixture suite green.
+The implementation proves the per-site judgment is not just "is the anchor's
+span correct" but **"does textRange reach the printer here"** and **"does an
+original reach a marker/typeRegistry consumer here."** Default to
+`preserveSourceMapRange`; escalate to full `preserveLineage` only with the
+emit-invariance check and the full fixture suite green.
 
 ## 8. Verification discipline for the fix PR
 
@@ -398,7 +406,7 @@ patterns) and the full fixture suite green.
 - Sourcemap spot-check in a dev shell (positions in devtools land on authored
   lines for a rebuilt callback).
 
-## 9. The A′ line proper — shape of remaining work (post-lineage)
+## 9. The A′ line proper — shipped shape
 
 1. **Lineage fix lands** (§5–§8). Everything below reads positions through it.
 2. **Transform-time injection design** (the next design conversation):

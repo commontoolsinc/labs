@@ -8,7 +8,8 @@ import { batchTypeCheckFixtures } from "./utils.ts";
 
 /**
  * CT-1868 lineage regression — the hermetic, tracked form of the transform-time
- * lineage probe documented in `APRIME-LINEAGE-HANDOFF.md` §3/§11.
+ * lineage probe recorded in
+ * `docs/history/packages/ts-transformers/APRIME-LINEAGE-HANDOFF.md` §3/§11.
  *
  * The transformer pipeline must arrive at BuilderCallHoisting with every
  * hoisted / authored builder call — its inner call AND its callback — still
