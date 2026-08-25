@@ -1434,14 +1434,14 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       return destination.seal(tx);
     };
     expect((await sealBoth()).ok).toBeDefined();
-    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(destination.entryCount(space)).toBe(1);
     // Coverage arrives (W 46 ≥ floor 46). The array doc's cover (50,
     // derived) witnesses above the floor; the cid doc witnesses by
     // identity despite its frozen cover — the entry retires, so its
-    // splice stops replaying over the served array.
+    // splice stops replaying over the served array. Registration
+    // completes before seal() resolves and the watermark callback
+    // sweeps synchronously, so no settling wait exists to await.
     for (const sink of watermarkSinks) sink({ seq: 46 });
-    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(destination.entryCount(space)).toBe(0);
     // The identity witness is NOT a relaxation for an UNSTORED schema
     // document: a cid doc with no confirmed cover still holds the entry
@@ -1449,11 +1449,111 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
     // nothing.
     views.set(cidDoc, { confirmedSeq: 0 });
     expect((await sealBoth()).ok).toBeDefined();
-    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(destination.entryCount(space)).toBe(1);
     for (const sink of watermarkSinks) sink({ seq: 46 });
-    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(destination.entryCount(space)).toBe(1);
+    destination.close();
+  });
+
+  it("renders the STORED value when a stored-cid speculation retires (#6304, real replica): an identical re-set and a divergent layer both retire once covered — the store wins over the divergent bytes — while an unstored cid write keeps its entry and its layer standing", async () => {
+    // The layered half the scripted pin cannot model: real pending
+    // layers over a real confirmed mirror, with values in play. The
+    // speculative seals happen BEFORE this replica pulls the cid docs'
+    // covers — the shape the schema-doc staging path produces (and the
+    // only one a client can produce for an identical value: the
+    // transaction layer elides a write it can compare and find
+    // unchanged).
+    const installer = openClient(spaceSigner);
+    const identicalId = "cid:6304-identical" as never;
+    const divergentId = "cid:6304-divergent" as never;
+    const unstoredId = "cid:6304-unstored" as never;
+    const cellFor = (runtime: Runtime, id: never) =>
+      runtime.getCellFromLink<{ v: string }>({
+        space,
+        id,
+        scope: "space",
+        path: [],
+      });
+    {
+      const installedIdentical = cellFor(installer, identicalId);
+      const installedDivergent = cellFor(installer, divergentId);
+      await installedIdentical.sync();
+      await installedDivergent.sync();
+      const tx = installer.edit();
+      installedIdentical.withTx(tx).set({ v: "stored" });
+      installedDivergent.withTx(tx).set({ v: "stored" });
+      expect((await tx.commit()).error).toBeUndefined();
+      await installer.storageManager.synced();
+    }
+
+    // Alice's floor input commits AFTER the cid installs, so her
+    // speculation's confirmed read basis sits ABOVE their covers — the
+    // configuration whose floor comparison the identity witness exists
+    // to bypass.
+    const alice = openClient(aliceSigner);
+    const input = alice.getCell<{ n: number }>(space, "ag-6304-input");
+    await input.sync();
+    {
+      const tx = alice.edit();
+      input.withTx(tx).set({ n: 1 });
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await alice.storageManager.synced();
+    const view = (
+      alice.storageManager.open(space).replica as unknown as {
+        speculationRetirementView(
+          id: string,
+          scope?: string,
+        ): { confirmedSeq: number };
+      }
+    ).speculationRetirementView.bind(alice.storageManager.open(space).replica);
+    const floorSeq =
+      view(input.getAsNormalizedFullLink().id, "space").confirmedSeq;
+    expect(floorSeq).toBeGreaterThan(0);
+
+    const destination = new SpeculationOverlayDestination(alice);
+    const sealCidWrite = async (id: never, value: { v: string }) => {
+      const tx = alice.edit();
+      // The confirmed read whose seq is the entry's floor.
+      expect(input.withTx(tx).get()?.n).toBe(1);
+      cellFor(alice, id).withTx(tx).set(value);
+      stampSpeculationRunContext(tx, {
+        actionId: `6304-${id}`,
+        kind: "derivation",
+      });
+      expect((await destination.seal(tx)).ok).toBeDefined();
+    };
+    await sealCidWrite(identicalId, { v: "stored" });
+    await sealCidWrite(divergentId, { v: "divergent" });
+    await sealCidWrite(unstoredId, { v: "speculative" });
+    expect(destination.entryCount(space)).toBe(3);
+    // Pre-retirement the layers render, the divergent bytes included.
+    expect(cellFor(alice, identicalId).get()?.v).toBe("stored");
+    expect(cellFor(alice, divergentId).get()?.v).toBe("divergent");
+    expect(cellFor(alice, unstoredId).get()?.v).toBe("speculative");
+
+    // Coverage, then the stored covers: the watermark passes the floor,
+    // and syncing the two installed docs lands their confirmed values
+    // (at seqs BELOW the floor) under the standing layers.
+    const engine = await server.engineForSpace(space);
+    await pushWatermark(installer, Engine.serverSeq(engine));
+    await cellFor(alice, identicalId).sync();
+    await cellFor(alice, divergentId).sync();
+    // The stored-cid entries retire (the identity witness; without it
+    // their covers sit below the floor forever and this wait times
+    // out); the unstored entry is the one that must remain.
+    await waitUntil(
+      () => destination.entryCount(space) === 1,
+      "the stored-cid speculations to retire",
+    );
+    expect(cellFor(alice, identicalId).get()?.v).toBe("stored");
+    // THE PIN: the store wins — retirement replaced the divergent
+    // speculative bytes with the immutable stored value.
+    expect(cellFor(alice, divergentId).get()?.v).toBe("stored");
+    // The unstored write's entry stands and its layer still renders:
+    // nothing has served that document, so dropping it would flip the
+    // read to nothing.
+    expect(cellFor(alice, unstoredId).get()?.v).toBe("speculative");
     destination.close();
   });
 });
