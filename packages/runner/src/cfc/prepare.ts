@@ -1,4 +1,4 @@
-import { isFabricPrimitiveSchemaType, isMetaField } from "@commonfabric/api";
+import { isFabricPrimitiveSchemaType } from "@commonfabric/api";
 import type { FabricValue } from "@commonfabric/api";
 import {
   CFC_ATOM_TYPE,
@@ -1437,16 +1437,18 @@ const valueWriteTargets = (
       ) {
         continue;
       }
-      // Whether this write came in on the raw meta seam. Recorded per
-      // canonical path rather than excluding the write: the meta seam is a
-      // flow-label target like any other write, and only the schema-policy
-      // requirement treats it differently. A meta root and a user field of
-      // the same name canonicalize to one path, so a path counts as meta
-      // only while every write that reached it was a meta write. The depth
-      // test holds this to what `setMetaRaw` addresses — the meta field
-      // itself, whatever the shape of the value it carries — so a write
-      // reaching into a meta field's contents stays policy-governed.
-      const metaWrite = rawPath.length === 1 && isMetaField(rawPath[0]);
+      // Whether this write came in on the meta seam. `value` is the payload
+      // root, and the runtime surfaces that are not payload either returned
+      // above (`cfc`, `source`) or are the meta fields `setMetaRaw`
+      // addresses, so a write rooted anywhere but `value` is envelope
+      // metadata, which no schema describes. Recorded per canonical path
+      // rather than excluding the write: the meta seam is a flow-label
+      // target like any other write, and only the schema-policy requirement
+      // treats it differently. A meta root and a user field of the same
+      // name canonicalize to one path, so a path counts as meta only while
+      // every write that reached it was a meta write. A document-root write
+      // carries the whole envelope, payload included, and is not the seam.
+      const metaWrite = rawPath.length > 0 && rawPath[0] !== "value";
       // A document-root write carries the RAW envelope ({value, source, …}):
       // writeOrThrow's missing-doc retry materializes the whole document in
       // one write at storage path []. `writePath` is already logical, so the

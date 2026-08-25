@@ -6,6 +6,10 @@ import type { URI } from "@commonfabric/memory/interface";
 
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-meta-seam");
 
@@ -48,6 +52,7 @@ describe("cfc-meta-seam-write-policy", () => {
     const id = runtime.getCell(signer.did(), cause)
       .getAsNormalizedFullLink().id as URI;
     const seed = runtime.edit();
+    writeSeedEnvelopeDoc(seed, signer.did());
     seed.writeOrThrow({
       space: signer.did(),
       scope: "space",
@@ -57,7 +62,7 @@ describe("cfc-meta-seam-write-policy", () => {
       value: { note: "labeled" },
       cfc: {
         version: 1,
-        schemaHash: "seed-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [
@@ -142,6 +147,7 @@ describe("cfc-meta-seam-write-policy", () => {
       const secretId = runtime.getCell(signer.did(), "cfc-meta-seam-secret")
         .getAsNormalizedFullLink().id as URI;
       const seedSecret = runtime.edit();
+      writeSeedEnvelopeDoc(seedSecret, signer.did());
       seedSecret.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -151,7 +157,7 @@ describe("cfc-meta-seam-write-policy", () => {
         value: { secret: "classified" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [
