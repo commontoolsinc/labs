@@ -7298,14 +7298,21 @@ supply; OW29/OW32/OW34 closed):
     keeps a session from being sent a closure document twice is the frame
     builders' session-cache diff, NOT the closure pass's
     `tracker.has(key)` staging gate: removing that gate changes no wire
-    frame. RESIDUAL, and what keeps this row open: at the ensure-ON
-    posture the class still fires in continuous integration — run
-    32868098064, nine of ten pattern shards, 245 `schema-doc-quarantine`
-    in shard 1 alone, on this row's own
-    `computed:fid1:7Byc…` — while a local board at the same tip and
-    posture fires none, so the window is timing and it is not yet settled
-    whether those frames are under-delivered or unabsorbed. Deciding it
-    needs the per-session frame probe running inside a CI lane. The
+    frame. THE SHIPPING SIDE IS NOT THE DEFECT, measured rather than
+    argued: the per-session delivery probe was carried into a CI pattern
+    lane at the ensure-ON posture (the class does not reproduce on demand
+    locally), and one run produced both halves at once — 103
+    `schema-doc-quarantine` on the client over 13 distinct missing
+    `cid:` ids, including this row's own `computed:fid1:7Byc…` against
+    `cid:fid1:zgJY…`, against 136 ref-carrying frames on the server with
+    ZERO delivery violations and zero own-write elisions. Every `cid:` a
+    delivered document referenced had been put on the wire for that
+    session. That is the owner's 2026-08-24 ruling in measured form, and
+    it hands the residual to the CLIENT-side absorb/retention
+    investigation. The bound: the probe sees what the server puts in a
+    frame, not what the socket carried or the replica applied, so it
+    rules out the shipping side without separating a lost frame from an
+    unabsorbed one. The
     measurements behind all of this, including the probe results that
     falsify the earlier "the closure pass never completes an iteration"
     localization and the correction to this row's own claim that

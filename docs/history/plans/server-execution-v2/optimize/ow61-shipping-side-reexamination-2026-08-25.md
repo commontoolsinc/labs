@@ -137,11 +137,56 @@ profile when rendering a shared pattern", which times out with the pane
 reading `No profile` and fires no quarantine — a separate question from
 this row's class.
 
-## What this leaves open
+## The window, settled: the server delivers the closure
 
-The shipping side has no demonstrated defect on any path reachable
-without the CI timing window, and a defect in it now fails at the memory
-layer instead of cross-package. What is not settled is the window
-itself: whether the frames CI's replicas receive are under-delivered by
-the server, or delivered and not absorbed. Answering that needs the
-per-session frame probe running inside a CI lane, not a local one.
+The probe was carried into a CI pattern lane (PR #6276, a throwaway
+diagnostic branch: shard 1 only, ensure ON, `OW61_PROBE=1`, and a step
+dumping the verdict from the toolshed log), because the class does not
+reproduce on demand locally. One run answers it.
+
+In that single run, the same lane produced both halves:
+
+| Side | Measurement |
+| --- | --- |
+| client | 103 `schema-doc-quarantine`, 13 distinct missing `cid:` ids |
+| server | 136 ref-carrying frames, **0 delivery violations**, 0 held-cid elisions |
+
+The quarantined pairs include this row's own document —
+`computed:fid1:7BycCyHc2yDDzr17jnXayWZMxpweSGk2JcGKILKguvo` against
+`cid:fid1:zgJY1m9lR0Dh7z3JibtgiCszZhZ2aLfzIC0zPjoIqTQ` — five times,
+alongside seven sibling documents naming the same missing hash.
+
+Zero violations means every `cid:` a delivered document referenced had
+been put on the wire for that session, in that frame or an earlier one,
+and none was elided as an own-write. So the closure WAS shipped and the
+receiving replica still could not resolve it. That is the owner's
+2026-08-24 ruling in measured form: "if we saw this in CI — earlier
+frame delivered cid doc, later frame didn't see it — then that's the
+actual bug", and the bug is client-side absorb or retention, not
+server-side under-delivery.
+
+The bound on that claim: the probe observes what the server puts into a
+frame for a session, not what the socket carried or what the replica
+applied. It therefore locates the loss at or after the client's receipt
+and rules out the shipping side; it does not distinguish a frame lost in
+transport from one received and not absorbed.
+
+A second theory was tested and falsified on the way. Under server
+execution the server computes on behalf of a client session and carries
+that client's session id (`space-server.ts` passes
+`sessionId: record.sessionId` into `noteExecutorCommit`), which would be
+a leak if it reached the dirty-origins table the push path's own-write
+echo elision reads: a document elided from the wire would still commit
+into `session.entities`, the table of what the client holds. It does not
+reach it — `noteExecutorCommit` calls `markSpaceDirty(space, keys)` with
+no origin argument, which actively DELETES any origin on those keys, so
+server-computed writes fan out authoritatively to every session
+including the one they were computed for. Only two call sites set an
+origin, and neither is server-side compute: `transact`, whose session id
+is the committing client's own, and the ingest append, which classifies
+`"patch"` — the never-elide shape. The engine's confinement of `cid:`
+documents to space scope is a third guard. The probe agrees: 0 cid
+documents elided as own-writes across every frame it observed. That
+invariant is implicit today — threading `record.sessionId` through to
+`markSpaceDirty` would read like an improvement and would silently
+create the leak — so it is worth a guard.
