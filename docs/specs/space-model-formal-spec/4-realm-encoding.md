@@ -248,7 +248,7 @@ Where JSON must tag four of the seven primitive types, this format tags one.
 `symbol` is the exception — the transport refuses it outright — so it crosses
 under a tag like any other value a transport cannot carry directly.
 
-### 3.2 Containers
+### 3.2 Plain Containers
 
 Arrays and plain objects are carried directly.
 
@@ -266,14 +266,14 @@ Arrays and plain objects are carried directly.
   of every object.
 - **A `/`-prefixed key is ordinary.** This format reserves no key.
 
-`__proto__` and `constructor` are nonetheless refused on both sides, and that
-is a limit of this implementation rather than of the format. The two are
-refused for different reasons: `__proto__` cannot be rebuilt by the assignment
-this implementation copies records with, while `constructor` copies faithfully
-and is refused because boundaries further on drop it. Section 4 of
-`3-json-encoding.md` gives the fuller account, which is about the host and so
-holds for either format. Like every rule in this section, the refusal applies
-to a container the walk *traverses*; Section 3.3 says which values those are.
+`__proto__` and `constructor` are nonetheless refused on both sides, and that is
+a limit of this implementation rather than of the format. The two are refused
+for different reasons: `__proto__` cannot be rebuilt by the assignment this
+implementation copies records with, while `constructor` copies faithfully and is
+refused because boundaries further on drop it. Section 4 of `3-json-encoding.md`
+gives the fuller account, which is about the host and so holds for either
+format. Like every rule in this section, the refusal applies to a plain
+container the walk *traverses*; Section 3.3 says which values those are.
 
 ### 3.3 The Tagged Form
 
@@ -300,7 +300,7 @@ This is what terminality buys and what it costs. A codec that wants its state
 examined declares itself nonterminal, and then every rule here applies to that
 state, because the walk goes through it.
 
-Three positional slots rather than a container keyed by the tag, because an
+Three positional slots rather than a record keyed by the tag, because an
 array is the cheapest shape the transport carries: no hash table, and a tag
 string that is the codec's own constant rather than a key built per tagged
 form.
@@ -468,7 +468,8 @@ leniency:
   `Date`, a `Map`, a `Set`, or any other class instance. `ArrayBuffer` is worth
   naming: it is the one such type this format's own value union contains, and
   it is legitimate only as the state under a byte-carrying tag.
-- A key this runtime reserves, per Section 3.2, in a container it traverses.
+- A key this runtime reserves, per Section 3.2, in a plain container it
+  traverses.
 - A tag that is not syntactically a tag, per Section 9 of
   [3-json-encoding.md](./3-json-encoding.md), whose tag syntax this format
   shares.

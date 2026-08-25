@@ -16,9 +16,15 @@
 
 import { isInertArray } from "@commonfabric/utils/arrays";
 import { isInertPlainObject } from "@commonfabric/utils/objects";
-import { isPlainObject, unsafeObjectKeyIn } from "@commonfabric/utils/types";
+import {
+  isPlainContainer,
+  isPlainObject,
+  unsafeObjectKeyIn,
+} from "@commonfabric/utils/types";
 
 import {
+  type FabricContainerValue,
+  FabricInstance,
   type FabricPlainObject,
   FabricSpecialObject,
   type FabricValue,
@@ -214,6 +220,20 @@ export function isValidFabricPlainObject(
 }
 
 /**
+ * Narrows to the container arms of `FabricValue` -- a plain object, an array,
+ * or a `FabricInstance` -- that is, the values that hold other `FabricValue`s.
+ *
+ * Contrast `isFabricObjectOrArray()`, which is one arm wider: it also accepts a
+ * `FabricPrimitive`, an object that is not a container. The two are not
+ * interchangeable where the answer decides a descent.
+ */
+export function isFabricContainerValue(
+  value: FabricValue,
+): value is FabricContainerValue {
+  return isPlainContainer(value) || value instanceof FabricInstance;
+}
+
+/**
  * Indicates whether a `FabricValue` is a plain object, an array, or a
  * `FabricSpecialObject` -- everything a `typeof value === "object"` test
  * accepts, minus `null`. The name states the array case because "object" alone
@@ -227,7 +247,8 @@ export function isValidFabricPlainObject(
  *
  * Contrast `isFabricPlainObject()`, which is strictly narrower at RUNTIME: it
  * accepts only plain objects, rejecting arrays and `FabricSpecialObject`s. The
- * two are not interchangeable.
+ * two are not interchangeable. `isFabricContainerValue()` sits between them,
+ * rejecting only the `FabricPrimitive` half of `FabricSpecialObject`.
  */
 export function isFabricObjectOrArray(
   value: FabricValue,
