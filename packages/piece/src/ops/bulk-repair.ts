@@ -72,9 +72,10 @@ export type Fixer = (
  */
 export interface DocumentChange {
   /**
-   * The position: segments joined with `/`, a segment's own `/` escaped
-   * `~1` and `~` escaped `~0` — the JSON Pointer spelling, so a key
-   * containing the separator stays unambiguous. `""` is the root.
+   * The position as a JSON Pointer: `""` is the root, and every non-root
+   * position leads with `/` — so the root and a top-level empty-string key
+   * (`"/"`) stay distinct. A segment's own `/` is escaped `~1` and `~`
+   * escaped `~0`.
    */
   path: string;
   kind: "changed" | "added" | "removed";
@@ -147,10 +148,14 @@ export interface RepairOptions {
    */
   fixerName?: string;
   /**
-   * A previously emitted plan whose document hashes are this run's
-   * preconditions: a row whose stored document no longer hashes to what
-   * the plan recorded is `moved` — something other than this plan changed
-   * it — and an apply stops on it rather than overwriting.
+   * A previously emitted plan, which then IS the execution: its rows run
+   * in its order, each row's recorded document hash is its precondition,
+   * and the plan must agree with this run — same space, same fixer name,
+   * and exactly the selection's pieces, a stale plan being regenerated
+   * rather than silently reconciled. A row whose stored document still
+   * needs the repair but no longer hashes to what the plan recorded is
+   * `moved` — something other than this plan changed it — while a row the
+   * fixer no longer changes is landed, whatever it hashes to now.
    */
   plan?: PiecePlan;
   /**
@@ -191,9 +196,9 @@ function escapeSegment(segment: string): string {
   return segment.replaceAll("~", "~0").replaceAll("/", "~1");
 }
 
-/** Segments joined for display; `""` is the root. */
+/** Segments as a JSON Pointer: `""` for the root, `/`-led otherwise. */
 function displayPath(segments: readonly string[]): string {
-  return segments.map(escapeSegment).join("/");
+  return segments.map((segment) => `/${escapeSegment(segment)}`).join("");
 }
 
 /**
@@ -421,10 +426,14 @@ type RowDecision =
  * document shape, and a holder wanting repair is a one-piece list selection
  * of its own.
  *
- * Under `apply`, each row is evaluated and written in one transaction: the
+ * Under `apply`, every row is classified first, from one read each and
+ * before anything is written — the spine's preflight — and a row that
+ * moved, refuses, or cannot be read stops the run from starting at all,
+ * with every row reporting its classification and nothing applied. The
+ * serial pass then evaluates and writes each row in one transaction: the
  * fixer answers for the document the commit sees, so a concurrent edit
  * re-runs the evaluation rather than being overwritten. A supplied plan's
- * document hash is checked in the same transaction, and a mismatch is
+ * document hash is rechecked in that same transaction, and a mismatch is
  * `moved` — a stop, not an overwrite. The written document is then read
  * back and the fixer asked again — a repair succeeded when re-running the
  * fixer over the stored result is a no-op — and a refusal, a moved row, or
@@ -453,52 +462,229 @@ export async function repairPieces(
         `the failure this refusal prevents:\n${named.join("\n")}`,
     );
   }
-  const expectedHashes = new Map<string, string>();
-  for (const row of options.plan?.rows ?? []) {
-    if (row.expect.documentHash !== undefined) {
-      expectedHashes.set(
-        canonicalPieceAddress(row.piece),
-        row.expect.documentHash,
+  const members = survey.plan.rows.filter((row) => row.phase !== HOLDER_PHASE);
+  // A supplied plan is the execution, not a hint: its rows, in its order,
+  // validated against this run before anything is read further. A plan that
+  // names a piece the selection does not hold, or misses one it does, is
+  // stale — the answer is a regenerated plan, never a run that quietly
+  // reconciles the difference.
+  let executionRows: {
+    piece: string;
+    phase?: string;
+    expect: PiecePlanRow["expect"];
+    expectedHash?: string;
+  }[];
+  if (options.plan === undefined) {
+    executionRows = members.map((row) => ({
+      piece: row.piece,
+      ...(row.phase === undefined ? {} : { phase: row.phase }),
+      expect: row.expect,
+    }));
+  } else {
+    if (options.plan.header.space !== survey.plan.header.space) {
+      throw new Error(
+        `The plan names space ${options.plan.header.space}; this run ` +
+          `targets ${survey.plan.header.space}.`,
       );
     }
+    const unrunnable = options.plan.rows.filter((row) =>
+      row.op?.kind !== "repair"
+    );
+    if (unrunnable.length > 0) {
+      throw new Error(
+        "The plan carries rows with no repair operation, which cannot be " +
+          "executed or precondition-checked: " +
+          unrunnable.map((row) => row.piece).join(", ") + ".",
+      );
+    }
+    if (options.fixerName !== undefined) {
+      const disagreeing = options.plan.rows.filter((row) =>
+        row.op?.kind === "repair" && row.op.fixer !== options.fixerName
+      );
+      if (disagreeing.length > 0) {
+        throw new Error(
+          `The plan records a different fixer than this run supplies ` +
+            `(${options.fixerName}) on: ` +
+            disagreeing.map((row) => row.piece).join(", ") + ".",
+        );
+      }
+    }
+    const surveyByPiece = new Map(members.map((row) => [row.piece, row]));
+    const planPieces = new Set(
+      options.plan.rows.map((row) => canonicalPieceAddress(row.piece)),
+    );
+    const missing = members.filter((row) => !planPieces.has(row.piece));
+    const extra = options.plan.rows.filter((row) =>
+      !surveyByPiece.has(canonicalPieceAddress(row.piece))
+    );
+    if (missing.length > 0 || extra.length > 0) {
+      throw new Error(
+        "The plan and the selection disagree" +
+          (extra.length > 0
+            ? "; the plan names pieces the selection does not hold: " +
+              extra.map((row) => row.piece).join(", ")
+            : "") +
+          (missing.length > 0
+            ? "; the selection holds pieces the plan does not name: " +
+              missing.map((row) => row.piece).join(", ")
+            : "") +
+          ". A stale plan is regenerated, never reconciled silently.",
+      );
+    }
+    executionRows = options.plan.rows.map((planRow) => {
+      const surveyRow = surveyByPiece.get(
+        canonicalPieceAddress(planRow.piece),
+      )!;
+      return {
+        piece: surveyRow.piece,
+        ...(planRow.phase === undefined ? {} : { phase: planRow.phase }),
+        expect: surveyRow.expect,
+        expectedHash: planRow.expect.documentHash,
+      };
+    });
   }
   const rows: RepairRow[] = [];
   const planRows: PiecePlanRow[] = [];
   let applied = 0;
   let stopped = false;
-  for (const surveyRow of survey.plan.rows) {
-    if (surveyRow.phase === HOLDER_PHASE) continue;
-    const phase = surveyRow.phase === undefined
-      ? {}
-      : { phase: surveyRow.phase };
+  // Preflight, before the first write: every row classified from one read,
+  // exactly as the spine documents — a row that moved, or that the fixer
+  // refuses, is found while nothing has been touched, and the run does not
+  // start. The per-row transactional recheck below still guards each write
+  // against what happens after this pass.
+  let startBlocked = false;
+  const preflight = new Map<
+    string,
+    RowDecision | { kind: "read-failed"; problem: string }
+  >();
+  if (options.apply === true) {
+    for (const row of executionRows) {
+      try {
+        const controller = await pieces.get(row.piece, false);
+        const cell = await controller.input.getCell();
+        await cell.pull();
+        const decision = ((): RowDecision => {
+          const stored = cell.getRaw({ lastNode: "value" });
+          if (!isPlainRecord(stored)) return { kind: "not-document" };
+          const documentHash = hashStringOf(stored);
+          const outcome = evaluateFixer(stored, options.fixer);
+          if (outcome.kind === "conforms") {
+            return { kind: "conforms", documentHash };
+          }
+          if (
+            row.expectedHash !== undefined && documentHash !== row.expectedHash
+          ) {
+            return { kind: "moved", documentHash };
+          }
+          if (outcome.kind === "refused") {
+            return { kind: "refused", documentHash, problem: outcome.problem };
+          }
+          return { kind: "change", documentHash, changes: outcome.changes };
+        })();
+        preflight.set(row.piece, decision);
+        if (decision.kind !== "conforms" && decision.kind !== "change") {
+          startBlocked = true;
+        }
+      } catch (error) {
+        preflight.set(row.piece, {
+          kind: "read-failed",
+          problem: error instanceof Error ? error.message : String(error),
+        });
+        startBlocked = true;
+      }
+    }
+  }
+  for (const row of executionRows) {
+    const phase = row.phase === undefined ? {} : { phase: row.phase };
     const preStateRow = {
-      piece: surveyRow.piece,
+      piece: row.piece,
       ...phase,
-      expect: surveyRow.expect,
+      expect: row.expect,
     };
+    if (startBlocked) {
+      // The run did not start: every row reports its preflight
+      // classification, and nothing was written.
+      const decision = preflight.get(row.piece);
+      planRows.push(preStateRow);
+      if (decision === undefined || decision.kind === "read-failed") {
+        rows.push({
+          piece: row.piece,
+          ...phase,
+          verdict: "failed",
+          problem: (decision?.problem ??
+            "The row was never classified.") +
+            "; the run did not start, so nothing was written.",
+        });
+      } else if (decision.kind === "not-document") {
+        rows.push({
+          piece: row.piece,
+          ...phase,
+          verdict: "refused",
+          problem: "The stored input is not a document.",
+        });
+      } else if (decision.kind === "moved") {
+        rows.push({
+          piece: row.piece,
+          ...phase,
+          verdict: "moved",
+          documentHash: decision.documentHash,
+          problem: "The stored document no longer hashes to what the plan " +
+            "recorded: something other than this plan changed it.",
+        });
+      } else if (decision.kind === "refused") {
+        rows.push({
+          piece: row.piece,
+          ...phase,
+          verdict: "refused",
+          documentHash: decision.documentHash,
+          problem: decision.problem,
+        });
+      } else if (decision.kind === "conforms") {
+        rows.push({
+          piece: row.piece,
+          ...phase,
+          verdict: "conforms",
+          documentHash: decision.documentHash,
+        });
+      } else {
+        rows.push({
+          piece: row.piece,
+          ...phase,
+          verdict: "would-change",
+          documentHash: decision.documentHash,
+          changes: decision.changes,
+        });
+      }
+      continue;
+    }
     if (stopped) {
-      rows.push({ piece: surveyRow.piece, ...phase, verdict: "unattempted" });
+      rows.push({ piece: row.piece, ...phase, verdict: "unattempted" });
       planRows.push(preStateRow);
       continue;
     }
-    const expected = expectedHashes.get(surveyRow.piece);
+    const expected = row.expectedHash;
     const decide = (stored: unknown): RowDecision => {
       if (!isPlainRecord(stored)) return { kind: "not-document" };
       const documentHash = hashStringOf(stored);
+      const outcome = evaluateFixer(stored, options.fixer);
+      // Landed before moved: a document the fixer no longer changes is in
+      // the state the operation produces, whatever it hashes to now — a
+      // completed plan re-run must read as landed, not as moved. Only a
+      // document that still needs the repair and no longer matches its
+      // recorded precondition was moved by something else.
+      if (outcome.kind === "conforms") {
+        return { kind: "conforms", documentHash };
+      }
       if (expected !== undefined && documentHash !== expected) {
         return { kind: "moved", documentHash };
       }
-      const outcome = evaluateFixer(stored, options.fixer);
       if (outcome.kind === "refused") {
         return { kind: "refused", documentHash, problem: outcome.problem };
-      }
-      if (outcome.kind === "conforms") {
-        return { kind: "conforms", documentHash };
       }
       return { kind: "change", documentHash, changes: outcome.changes };
     };
     try {
-      const controller = await pieces.get(surveyRow.piece, false);
+      const controller = await pieces.get(row.piece, false);
       const cell = await controller.input.getCell();
       await cell.pull();
       // Initialized only to satisfy definite assignment: a committed edit
@@ -530,10 +716,10 @@ export async function repairPieces(
         // expectation plus the document hash the verdict was computed
         // from, and the repair operation when the run has a name for it.
         planRows.push({
-          piece: surveyRow.piece,
+          piece: row.piece,
           ...phase,
           expect: {
-            ...surveyRow.expect,
+            ...row.expect,
             documentHash: decision.documentHash,
           },
           ...(options.fixerName === undefined ? {} : {
@@ -543,7 +729,7 @@ export async function repairPieces(
       }
       if (decision.kind === "not-document") {
         rows.push({
-          piece: surveyRow.piece,
+          piece: row.piece,
           ...phase,
           verdict: "refused",
           problem: "The stored input is not a document.",
@@ -553,7 +739,7 @@ export async function repairPieces(
       }
       if (decision.kind === "moved") {
         rows.push({
-          piece: surveyRow.piece,
+          piece: row.piece,
           ...phase,
           verdict: "moved",
           documentHash: decision.documentHash,
@@ -565,7 +751,7 @@ export async function repairPieces(
       }
       if (decision.kind === "refused") {
         rows.push({
-          piece: surveyRow.piece,
+          piece: row.piece,
           ...phase,
           verdict: "refused",
           documentHash: decision.documentHash,
@@ -576,7 +762,7 @@ export async function repairPieces(
       }
       if (decision.kind === "conforms") {
         rows.push({
-          piece: surveyRow.piece,
+          piece: row.piece,
           ...phase,
           verdict: "conforms",
           documentHash: decision.documentHash,
@@ -585,7 +771,7 @@ export async function repairPieces(
       }
       if (options.apply !== true) {
         rows.push({
-          piece: surveyRow.piece,
+          piece: row.piece,
           ...phase,
           verdict: "would-change",
           documentHash: decision.documentHash,
@@ -602,7 +788,7 @@ export async function repairPieces(
         : undefined;
       if (verification?.kind === "conforms") {
         rows.push({
-          piece: surveyRow.piece,
+          piece: row.piece,
           ...phase,
           verdict: "repaired",
           documentHash: decision.documentHash,
@@ -611,7 +797,7 @@ export async function repairPieces(
         continue;
       }
       rows.push({
-        piece: surveyRow.piece,
+        piece: row.piece,
         ...phase,
         verdict: "failed",
         documentHash: decision.documentHash,
@@ -630,7 +816,7 @@ export async function repairPieces(
       const problem = error instanceof Error ? error.message : String(error);
       let state = "; the piece could not be re-read, so its state is unknown";
       try {
-        const controller = await pieces.get(surveyRow.piece, false);
+        const controller = await pieces.get(row.piece, false);
         const cell = await controller.input.getCell();
         await cell.pull();
         const stored = cell.getRaw({ lastNode: "value" });
@@ -643,7 +829,7 @@ export async function repairPieces(
         // The re-read failing changes nothing: `state` already says so.
       }
       rows.push({
-        piece: surveyRow.piece,
+        piece: row.piece,
         ...phase,
         verdict: "failed",
         problem: problem + state,

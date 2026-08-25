@@ -85,15 +85,15 @@ describe("bulk-repair", () => {
         { a: 2, nested: { keep: true, flip: "y" } },
       );
       expect(changes).toEqual([
-        { path: "a", kind: "changed", before: 1, after: 2 },
-        { path: "nested/flip", kind: "changed", before: "x", after: "y" },
+        { path: "/a", kind: "changed", before: 1, after: 2 },
+        { path: "/nested/flip", kind: "changed", before: "x", after: "y" },
       ]);
     });
 
     it("reports a replaced container as one change, not its every leaf", () => {
       const changes = documentChanges({ list: [1, 2, 3] }, { list: "gone" });
       expect(changes).toEqual([
-        { path: "list", kind: "changed", before: [1, 2, 3], after: "gone" },
+        { path: "/list", kind: "changed", before: [1, 2, 3], after: "gone" },
       ]);
     });
 
@@ -103,13 +103,22 @@ describe("bulk-repair", () => {
 
     it("reports presence as its own fact, apart from a changed value", () => {
       expect(documentChanges({ a: 1 }, { a: 1, b: 2 })).toEqual([
-        { path: "b", kind: "added", after: 2 },
+        { path: "/b", kind: "added", after: 2 },
       ]);
       expect(documentChanges({ a: 1, b: 2 }, { a: 1 })).toEqual([
-        { path: "b", kind: "removed", before: 2 },
+        { path: "/b", kind: "removed", before: 2 },
       ]);
       expect(documentChanges({ a: undefined }, { a: 3 })).toEqual([
-        { path: "a", kind: "changed", before: undefined, after: 3 },
+        { path: "/a", kind: "changed", before: undefined, after: 3 },
+      ]);
+    });
+
+    it("keeps the root and a top-level empty-string key distinct", () => {
+      expect(documentChanges("x", "y")).toEqual([
+        { path: "", kind: "changed", before: "x", after: "y" },
+      ]);
+      expect(documentChanges({ "": 1 }, { "": 2 })).toEqual([
+        { path: "/", kind: "changed", before: 1, after: 2 },
       ]);
     });
 
@@ -119,7 +128,7 @@ describe("bulk-repair", () => {
       expect(documentChanges(before, before)).toEqual([]);
       const changes = documentChanges(before, after);
       expect(changes.length).toBe(1);
-      expect(changes[0].path).toBe("bytes");
+      expect(changes[0].path).toBe("/bytes");
       expect(changes[0].kind).toBe("changed");
     });
   });
@@ -156,7 +165,9 @@ describe("bulk-repair", () => {
       expect(outcome).toEqual({
         kind: "change",
         document: { seed: "A", keep: 1 },
-        changes: [{ path: "seed", kind: "changed", before: "a", after: "A" }],
+        changes: [
+          { path: "/seed", kind: "changed", before: "a", after: "A" },
+        ],
       });
     });
 
@@ -197,7 +208,7 @@ describe("bulk-repair", () => {
       );
       expect(outcome.kind).toBe("refused");
       if (outcome.kind !== "refused") throw new Error("expected a refusal");
-      expect(outcome.problem).toContain("keep, also");
+      expect(outcome.problem).toContain("/keep, /also");
     });
 
     it("refuses a nested field the answer lost, wherever the container survived", () => {
@@ -231,7 +242,7 @@ describe("bulk-repair", () => {
       expect(outcome.kind).toBe("change");
       if (outcome.kind !== "change") throw new Error("expected a change");
       expect(outcome.changes).toEqual([
-        { path: "wrap", kind: "changed", before: { a: 1, b: 2 }, after: 7 },
+        { path: "/wrap", kind: "changed", before: { a: 1, b: 2 }, after: 7 },
       ]);
     });
 
@@ -291,7 +302,7 @@ describe("bulk-repair", () => {
       expect(outcome.kind).toBe("change");
       if (outcome.kind !== "change") throw new Error("expected a change");
       expect(outcome.changes).toEqual([
-        { path: "title", kind: "changed", before: "t", after: "renamed" },
+        { path: "/title", kind: "changed", before: "t", after: "renamed" },
       ]);
     });
 
@@ -414,7 +425,12 @@ describe("bulk-repair", () => {
           verdict: "would-change",
           documentHash: report.rows[0].documentHash,
           changes: [
-            { path: "seed", kind: "changed", before: "alpha", after: "ALPHA" },
+            {
+              path: "/seed",
+              kind: "changed",
+              before: "alpha",
+              after: "ALPHA",
+            },
           ],
         },
         {
@@ -441,8 +457,8 @@ describe("bulk-repair", () => {
       expect(decodePlan(encodePlan(report.plan))).toEqual(report.plan);
     });
 
-    it("stops an apply on a row whose document moved off its plan hash", async () => {
-      const a = await member("alpha");
+    it("preflights every row, and a moved one keeps the run from starting", async () => {
+      const a = await member("ALPHA");
       const b = await member("bravo");
       const holder = await seedHolder([a, b]);
       const dry = await repairPieces(pieces, {
@@ -451,8 +467,10 @@ describe("bulk-repair", () => {
         fixerName: "upper-seed.ts",
       });
 
-      // Something other than the plan changes the first piece's document.
-      await a.input.set("altered", ["seed"]);
+      // Something other than the plan changes the SECOND piece's document:
+      // preflight must find it before the first piece is written, so the
+      // run does not start and every row reports its classification.
+      await b.input.set("altered", ["seed"]);
       await pieces.runtime.idle();
 
       const report = await repairPieces(pieces, {
@@ -462,14 +480,253 @@ describe("bulk-repair", () => {
         apply: true,
       });
       expect(report.rows.map((row) => row.verdict)).toEqual([
+        "conforms",
         "moved",
-        "unattempted",
       ]);
-      expect(report.rows[0].problem).toContain(
+      expect(report.rows[1].problem).toContain(
         "something other than this plan",
       );
       expect(report.applied).toBe(0);
-      expect((await rawInput(b)).seed).toBe("bravo");
+      expect((await rawInput(a)).seed).toBe("ALPHA");
+    });
+
+    it("reports a preflight read failure and starts nothing", async () => {
+      const a = await member("alpha");
+      const b = await member("bravo");
+      // The connection to the second piece drops after the survey read it:
+      // its preflight read fails, so the run must not start, and the first
+      // piece keeps its classification rather than being written.
+      let bGets = 0;
+      const flaky = new Proxy(pieces, {
+        get(target, prop, receiver) {
+          if (prop === "get") {
+            return (id: string, run?: boolean) => {
+              if (id === b.id && ++bGets >= 2) {
+                // A bare string, deliberately: failures are not all Errors,
+                // and the report must carry this one's text too.
+                return Promise.reject("the connection dropped");
+              }
+              return target.get(id, run);
+            };
+          }
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+
+      const report = await repairPieces(flaky as never, {
+        selector: { kind: "list", pieces: [a.id, b.id] },
+        fixer: upperSeed,
+        apply: true,
+      });
+      expect(report.rows.map((row) => row.verdict)).toEqual([
+        "would-change",
+        "failed",
+      ]);
+      expect(report.rows[1].problem).toContain("the run did not start");
+      expect(report.applied).toBe(0);
+      expect((await rawInput(a)).seed).toBe("alpha");
+    });
+
+    it("classifies a non-document beside the rest when the run cannot start", async () => {
+      const scalarProgram: RuntimeProgram = {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            "import { NAME, pattern } from 'commonfabric';",
+            "export default pattern<string>((text) => ({",
+            "  [NAME]: 'Scalar',",
+            "  text,",
+            "}));",
+            "",
+          ].join("\n"),
+        }],
+      };
+      const scalar = await pieces.create(scalarProgram, {
+        input: "not a document" as never,
+      });
+      const a = await member("alpha");
+
+      const report = await repairPieces(pieces, {
+        selector: { kind: "list", pieces: [scalar.id, a.id] },
+        fixer: upperSeed,
+        apply: true,
+      });
+      expect(report.rows.map((row) => row.verdict)).toEqual([
+        "refused",
+        "would-change",
+      ]);
+      expect(report.rows[0].problem).toContain("not a document");
+      expect(report.applied).toBe(0);
+    });
+
+    it("stops on a move that lands between preflight and the row's transaction", async () => {
+      const a = await member("alpha");
+      const b = await member("bravo");
+      const holder = await seedHolder([a, b]);
+      const dry = await repairPieces(pieces, {
+        selector: collectionOf(holder),
+        fixer: upperSeed,
+        fixerName: "upper-seed.ts",
+      });
+
+      // Preflight sees both rows clean; a concurrent writer then moves the
+      // second piece before its transaction. The wrapper performs that
+      // write when the serial pass fetches the piece — after preflight, so
+      // this is exactly the window the transactional recheck exists for.
+      let gets = 0;
+      const racing = new Proxy(pieces, {
+        get(target, prop, receiver) {
+          if (prop === "get") {
+            return async (id: string, run?: boolean) => {
+              // The survey fetches the piece once and preflight once; the
+              // serial pass's fetch is the third, and the concurrent write
+              // lands there — after preflight passed this row clean.
+              if (id === b.id && ++gets === 3) {
+                await b.input.set("shifted", ["seed"]);
+                await target.runtime.idle();
+              }
+              return target.get(id, run);
+            };
+          }
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+
+      const report = await repairPieces(racing as never, {
+        selector: collectionOf(holder),
+        fixer: upperSeed,
+        plan: dry.plan,
+        apply: true,
+      });
+      expect(report.rows.map((row) => row.verdict)).toEqual([
+        "repaired",
+        "moved",
+      ]);
+      expect(report.applied).toBe(1);
+      expect((await rawInput(b)).seed).toBe("shifted");
+    });
+
+    it("resumes a completed plan: every landed row conforms, whatever it hashes to", async () => {
+      const a = await member("alpha");
+      const b = await member("bravo");
+      const holder = await seedHolder([a, b]);
+      const dry = await repairPieces(pieces, {
+        selector: collectionOf(holder),
+        fixer: upperSeed,
+        fixerName: "upper-seed.ts",
+      });
+
+      const first = await repairPieces(pieces, {
+        selector: collectionOf(holder),
+        fixer: upperSeed,
+        plan: dry.plan,
+        apply: true,
+      });
+      expect(first.rows.map((row) => row.verdict)).toEqual([
+        "repaired",
+        "repaired",
+      ]);
+
+      const again = await repairPieces(pieces, {
+        selector: collectionOf(holder),
+        fixer: upperSeed,
+        plan: dry.plan,
+        apply: true,
+      });
+      expect(again.rows.map((row) => row.verdict)).toEqual([
+        "conforms",
+        "conforms",
+      ]);
+      expect(again.applied).toBe(0);
+      expect(again.complete).toBe(true);
+    });
+
+    it("executes the supplied plan's rows exactly, in the plan's order", async () => {
+      const a = await member("alpha");
+      const b = await member("bravo");
+      const holder = await seedHolder([a, b]);
+      const dry = await repairPieces(pieces, {
+        selector: collectionOf(holder),
+        fixer: upperSeed,
+        fixerName: "upper-seed.ts",
+      });
+
+      const reversed = {
+        header: dry.plan.header,
+        rows: [...dry.plan.rows].reverse(),
+      };
+      const report = await repairPieces(pieces, {
+        selector: collectionOf(holder),
+        fixer: upperSeed,
+        plan: reversed,
+        apply: true,
+      });
+      expect(report.rows.map((row) => row.piece)).toEqual([b.id, a.id]);
+
+      const truncated = {
+        header: dry.plan.header,
+        rows: dry.plan.rows.slice(1),
+      };
+      await expect(
+        repairPieces(pieces, {
+          selector: collectionOf(holder),
+          fixer: upperSeed,
+          plan: truncated,
+          apply: true,
+        }),
+      ).rejects.toThrow("the selection holds pieces the plan does not name");
+    });
+
+    it("refuses a plan that disagrees with the run", async () => {
+      const a = await member("alpha");
+      const holder = await seedHolder([a]);
+      const dry = await repairPieces(pieces, {
+        selector: collectionOf(holder),
+        fixer: upperSeed,
+        fixerName: "upper-seed.ts",
+      });
+
+      await expect(
+        repairPieces(pieces, {
+          selector: collectionOf(holder),
+          fixer: upperSeed,
+          plan: {
+            header: { ...dry.plan.header, space: "did:key:somewhere-else" },
+            rows: dry.plan.rows,
+          },
+          apply: true,
+        }),
+      ).rejects.toThrow("names space");
+
+      await expect(
+        repairPieces(pieces, {
+          selector: collectionOf(holder),
+          fixer: upperSeed,
+          fixerName: "other-fixer.ts",
+          plan: dry.plan,
+          apply: true,
+        }),
+      ).rejects.toThrow("different fixer");
+
+      const opless = {
+        header: dry.plan.header,
+        rows: dry.plan.rows.map((row) => ({
+          piece: row.piece,
+          ...(row.phase === undefined ? {} : { phase: row.phase }),
+          expect: row.expect,
+        })),
+      };
+      await expect(
+        repairPieces(pieces, {
+          selector: collectionOf(holder),
+          fixer: upperSeed,
+          plan: opless,
+          apply: true,
+        }),
+      ).rejects.toThrow("no repair operation");
     });
 
     it("returns a failed row, state-checked, when the write path refuses", async () => {
@@ -568,7 +825,7 @@ describe("bulk-repair", () => {
       expect(survey.plan.rows.map((row) => row.piece)).toContain(a.id);
     });
 
-    it("stops an apply at the first refusal and names the rest unattempted", async () => {
+    it("keeps the run from starting on a preflight refusal, every row classified", async () => {
       const a = await member("alpha");
       const b = await member("bravo");
       const c = await member("charlie");
@@ -583,14 +840,19 @@ describe("bulk-repair", () => {
         apply: true,
       });
 
+      // Preflight classifies all three before anything is written, finds
+      // the refusal, and the run does not start: nothing applied, and the
+      // rows around the refusal keep their classifications rather than
+      // reading as unattempted.
       expect(report.rows.map((row) => row.verdict)).toEqual([
-        "repaired",
+        "would-change",
         "refused",
-        "unattempted",
+        "would-change",
       ]);
-      expect(report.rows[2].piece).toBe(c.id);
-      expect(report.applied).toBe(1);
+      expect(report.rows[1].problem).toContain("this one is beyond me");
+      expect(report.applied).toBe(0);
       expect(report.complete).toBe(false);
+      expect((await rawInput(a)).seed).toBe("alpha");
       expect((await rawInput(c)).seed).toBe("charlie");
     });
 
