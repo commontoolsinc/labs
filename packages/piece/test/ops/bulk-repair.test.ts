@@ -114,6 +114,19 @@ describe("bulk-repair", () => {
       ]);
     });
 
+    it("diffs sparse arrays by position, holes and length included", () => {
+      expect(documentChanges({ a: new Array(1) }, { a: [] })).toEqual([
+        { path: "/a/0", kind: "removed", before: undefined },
+      ]);
+      expect(documentChanges({ a: [, 1] }, { a: [2, 1] })).toEqual([
+        { path: "/a/0", kind: "changed", before: undefined, after: 2 },
+      ]);
+      expect(documentChanges({ a: [1] }, { a: [1, , 3] })).toEqual([
+        { path: "/a/1", kind: "added", after: undefined },
+        { path: "/a/2", kind: "added", after: 3 },
+      ]);
+    });
+
     it("keeps the root and a top-level empty-string key distinct", () => {
       expect(documentChanges("x", "y")).toEqual([
         { path: "", kind: "changed", before: "x", after: "y" },
@@ -563,6 +576,7 @@ describe("bulk-repair", () => {
     });
 
     it("reclassifies a no-write decision from a fresh read before reporting it", async () => {
+      const b = await member("bravo");
       const a = await member("ALPHA");
       // The piece conforms when the transaction reads it, so nothing is
       // written and nothing is conflict-checked; a concurrent writer then
@@ -618,13 +632,115 @@ describe("bulk-repair", () => {
       });
 
       const report = await repairPieces(racing as never, {
+        selector: { kind: "list", pieces: [a.id, b.id] },
+        fixer: upperSeed,
+        apply: true,
+      });
+      // The raced row stops the run: plan order is a correctness
+      // constraint, so the later row must not land while this one is
+      // outstanding.
+      expect(report.rows.map((row) => row.verdict)).toEqual([
+        "would-change",
+        "unattempted",
+      ]);
+      expect(report.applied).toBe(0);
+      expect(report.complete).toBe(false);
+      expect((await rawInput(b)).seed).toBe("bravo");
+    });
+
+    it("reports what the store returned after the write, not the fixer's answer", async () => {
+      const a = await member("alpha");
+      // The write path is free to normalize what it stores — schema-default
+      // hydration is the measured case — so an applied row's changes must
+      // be read back from the store. The verification read is intercepted
+      // to answer with a field the fixer never produced, standing in for
+      // exactly that normalization.
+      let editDone = false;
+      const wrapController = (controller: PieceController) =>
+        new Proxy(controller, {
+          get(c, prop, receiver) {
+            if (prop !== "input") {
+              const value = Reflect.get(c, prop, receiver);
+              return typeof value === "function" ? value.bind(c) : value;
+            }
+            const input = c.input;
+            return new Proxy(input, {
+              get(i, p, r) {
+                if (p === "edit") {
+                  return async (
+                    ...args: Parameters<typeof input.edit>
+                  ) => {
+                    const result = await input.edit(...args);
+                    editDone = true;
+                    return result;
+                  };
+                }
+                if (p === "getCell") {
+                  return async () => {
+                    const cell = await input.getCell();
+                    if (!editDone) return cell;
+                    return new Proxy(cell, {
+                      get(target, cellProp, cellReceiver) {
+                        if (cellProp === "getRaw") {
+                          return (
+                            ...raw: Parameters<typeof cell.getRaw>
+                          ) => ({
+                            ...(cell.getRaw(...raw) as Record<
+                              string,
+                              unknown
+                            >),
+                            hydrated: "by-the-store",
+                          });
+                        }
+                        const value = Reflect.get(
+                          target,
+                          cellProp,
+                          cellReceiver,
+                        );
+                        return typeof value === "function"
+                          ? value.bind(target)
+                          : value;
+                      },
+                    });
+                  };
+                }
+                const value = Reflect.get(i, p, r);
+                return typeof value === "function" ? value.bind(i) : value;
+              },
+            });
+          },
+        });
+      const hydrating = new Proxy(pieces, {
+        get(target, prop, receiver) {
+          if (prop === "get") {
+            return async (id: string, run?: boolean) =>
+              wrapController(await target.get(id, run));
+          }
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+
+      const report = await repairPieces(hydrating as never, {
         selector: { kind: "list", pieces: [a.id] },
         fixer: upperSeed,
         apply: true,
       });
-      expect(report.rows.map((row) => row.verdict)).toEqual(["would-change"]);
-      expect(report.applied).toBe(0);
-      expect(report.complete).toBe(false);
+      expect(report.rows[0].verdict).toBe("repaired");
+      expect(report.rows[0].changes).toEqual([
+        { path: "/seed", kind: "changed", before: "alpha", after: "ALPHA" },
+        { path: "/hydrated", kind: "added", after: "by-the-store" },
+      ]);
+    });
+
+    it("refuses an empty fixer name before reading anything", async () => {
+      await expect(
+        repairPieces(pieces, {
+          selector: { kind: "list", pieces: ["fid1:never-read"] },
+          fixer: upperSeed,
+          fixerName: "",
+        }),
+      ).rejects.toThrow("must be nonempty");
     });
 
     it("reports a preflight read failure and starts nothing", async () => {

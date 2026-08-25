@@ -298,19 +298,46 @@ export function documentChanges(
     out.push({ path: displayPath(path), kind: "changed", before, after });
     return out;
   }
+  if (bothArrays) {
+    // Positions, not enumerable keys: a sparse array is a valid stored
+    // value and its holes are exactly what a key walk skips, so presence
+    // here is "the position exists" (`index < length`, a hole reading
+    // `undefined`) — a lost tail is removals, a grown one additions, and
+    // two unequal arrays can never diff to nothing.
+    const length = Math.max(before.length, after.length);
+    for (let index = 0; index < length; index += 1) {
+      const at = [...path, String(index)];
+      if (index >= after.length) {
+        out.push({
+          path: displayPath(at),
+          kind: "removed",
+          before: before[index],
+        });
+        continue;
+      }
+      if (index >= before.length) {
+        out.push({ path: displayPath(at), kind: "added", after: after[index] });
+        continue;
+      }
+      documentChanges(before[index], after[index], at, out);
+    }
+    return out;
+  }
+  const beforeRecord = before as Record<string, unknown>;
+  const afterRecord = after as Record<string, unknown>;
   const keys = new Set([
-    ...Object.keys(before as object),
-    ...Object.keys(after as object),
+    ...Object.keys(beforeRecord),
+    ...Object.keys(afterRecord),
   ]);
   for (const key of keys) {
-    const hasBefore = Object.hasOwn(before as object, key);
-    const hasAfter = Object.hasOwn(after as object, key);
+    const hasBefore = Object.hasOwn(beforeRecord, key);
+    const hasAfter = Object.hasOwn(afterRecord, key);
     const at = [...path, key];
     if (hasBefore && !hasAfter) {
       out.push({
         path: displayPath(at),
         kind: "removed",
-        before: (before as Record<string, unknown>)[key],
+        before: beforeRecord[key],
       });
       continue;
     }
@@ -318,16 +345,11 @@ export function documentChanges(
       out.push({
         path: displayPath(at),
         kind: "added",
-        after: (after as Record<string, unknown>)[key],
+        after: afterRecord[key],
       });
       continue;
     }
-    documentChanges(
-      (before as Record<string, unknown>)[key],
-      (after as Record<string, unknown>)[key],
-      at,
-      out,
-    );
+    documentChanges(beforeRecord[key], afterRecord[key], at, out);
   }
   return out;
 }
@@ -455,6 +477,10 @@ type RowDecision =
   | {
     kind: "change";
     documentHash: string;
+    /** The stored document the decision was computed from — what an
+     * applied row's changes are measured against, so the write path's own
+     * additions show in the report. */
+    before: Record<string, unknown>;
     /** The evaluated answer — the exact document a write must land, so
      * the report and the write cannot describe two different evaluations
      * of a fixer that lied to the purity probe. */
@@ -496,6 +522,11 @@ export async function repairPieces(
   pieces: PiecesController,
   options: RepairOptions,
 ): Promise<RepairReport> {
+  if (options.fixerName === "") {
+    // Stamped into the artifact it would be an op the codec refuses, so a
+    // successful apply would return a plan nothing can decode or resume.
+    throw new Error("A fixerName must be nonempty when given.");
+  }
   const survey = await surveyPieces(pieces, { selector: options.selector });
   if (!survey.complete) {
     const named = [
@@ -632,6 +663,7 @@ export async function repairPieces(
     return {
       kind: "change",
       documentHash,
+      before: stored,
       document: outcome.document,
       changes: outcome.changes,
     };
@@ -875,8 +907,9 @@ export async function repairPieces(
       if (!wroteThisRow) {
         // The no-write classification did not hold on the re-read: the
         // document changed under a decision that staged nothing. Nothing
-        // was written, so the row is simply not landed — reported as the
-        // work it still is, and a re-run resumes it.
+        // was written, and the run stops — plan order is a correctness
+        // constraint, so a later row must not land while this one is
+        // outstanding. A re-run resumes from here.
         rows.push({
           piece: row.piece,
           ...phase,
@@ -885,6 +918,7 @@ export async function repairPieces(
           changes: decision.changes,
         });
         emitRow(decision, false);
+        stopped = true;
         continue;
       }
       applied += 1;
@@ -905,7 +939,11 @@ export async function repairPieces(
           ...phase,
           verdict: "repaired",
           documentHash: decision.documentHash,
-          changes: decision.changes,
+          // Measured between the stored documents, not restated from the
+          // fixer's answer: the write path hydrates schema defaults into
+          // what it stores, and an addition the report never mentioned is
+          // how a repair quietly widens.
+          changes: documentChanges(decision.before, written),
         });
         emitRow(decision, true);
         continue;

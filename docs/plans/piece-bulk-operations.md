@@ -154,13 +154,13 @@ mid-change is the failure this ordering exists to prevent.
 that exits zero is not a verdict: the source-update path reports success for
 a piece whose source committed but whose running instance failed to refresh.
 The instrument differs by operation: a reference operation is verified by
-the after-survey diff, while a repair is verified by re-reading the stored
+the survey-diff, while a repair is verified by re-reading the stored
 document and re-asking the fixer — a distinct read after each row's write,
 made row by row inside the same invocation, because the fixer is already in
-hand and a reference diff cannot see document work (the survey-diff refuses
-repair rows for exactly that reason). The separate command exists too: a
-dry repair over the same selection re-asks the fixer across the whole set,
-and one that comes back all-conforming is the after-pass.
+hand and the survey-diff cannot see document work, which is why it refuses
+repair rows. The whole-set after-pass is a dry run over the same selection:
+it re-asks the fixer across every piece, and one that comes back
+all-conforming is the verification an operator runs on its own.
 
 **Resume** is the precondition check again: re-running the same command
 re-derives what is outstanding, skips what landed, and stops on what moved
