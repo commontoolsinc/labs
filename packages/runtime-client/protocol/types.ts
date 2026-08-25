@@ -995,11 +995,15 @@ export type IPCClientNotification =
   | VDomBatchAppliedNotification;
 
 /**
- * Response to VDomMount with the root node ID.
+ * Response to VDomMount, naming the tree's root node.
  */
 export type VDomMountResponse = {
-  /** The root node ID for this mount */
-  rootId: number;
+  /**
+   * The root node ID for this mount; `null` when the tree has no root child.
+   * `VDomBatchNotification` spells absence the same way, so a reader maps both
+   * directions with one rule.
+   */
+  rootId: number | null;
 };
 
 /**

@@ -2021,9 +2021,7 @@ export class RuntimeProcessor {
     // Track this mount
     this.vdomMounts.set(mountId, { reconciler, cancel });
 
-    // Return the root node ID
-    const rootId = reconciler.getRootNodeId() ?? 0;
-    return { rootId };
+    return { rootId: reconciler.getRootNodeId() };
   }
 
   /**
