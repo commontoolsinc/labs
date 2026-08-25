@@ -31,6 +31,7 @@ export interface GithubConnectorSource {
   account: string;
 }
 
+/** Metadata committed with the last complete pull-request index. */
 export interface GithubLastCompleteCollection {
   completedAt: string;
   pullRequestCount: number;
@@ -173,6 +174,9 @@ export class GithubFabricTarget {
     source: GithubConnectorSource,
     writeGraph: GithubFabricWriter = writeGithubFabricCells,
   ): Promise<GithubFabricTarget> {
+    if (/\r|\n/.test(source.host) || /\r|\n/.test(source.account)) {
+      throw new Error("GitHub connector source must not contain line breaks");
+    }
     const normalizedSource = {
       host: source.host.trim().toLowerCase(),
       account: source.account.trim().toLowerCase(),
@@ -191,11 +195,15 @@ export class GithubFabricTarget {
   }
 
   /** Publish one complete collection, with the index committed last. */
-  publish(collection: GithubPullRequestCollection): Promise<number> {
+  publish(
+    collection: GithubPullRequestCollection,
+  ): Promise<GithubLastCompleteCollection> {
     return this.#mutations.run(() => this.#publish(collection));
   }
 
-  async #publish(collection: GithubPullRequestCollection): Promise<number> {
+  async #publish(
+    collection: GithubPullRequestCollection,
+  ): Promise<GithubLastCompleteCollection> {
     if (collection.viewer.toLowerCase() !== this.source.account) {
       throw new Error(
         `GitHub viewer ${collection.viewer} does not match configured account ${this.source.account}`,
@@ -226,11 +234,12 @@ export class GithubFabricTarget {
         ),
       );
     }
+    const completedAt = new Date().toISOString();
     const index: GithubPullRequestIndex = {
       schema: GITHUB_CONNECTOR_SCHEMAS.pullRequestIndex,
       formatVersion: 1,
       viewer: collection.viewer,
-      generatedAt: new Date().toISOString(),
+      generatedAt: completedAt,
       lastCompleteCollectionAt: collection.observedAt,
       generation,
       pullRequests: rows
@@ -247,7 +256,7 @@ export class GithubFabricTarget {
       this.conn,
       [graphEntry(this.cells.index, index)],
     );
-    return rows.length;
+    return { completedAt, pullRequestCount: rows.length };
   }
 
   /** Read the pull requests retained by the last complete generation. */
@@ -278,6 +287,7 @@ export class GithubFabricTarget {
     previousGeneration(value);
     if (
       !isRecord(value) || value.formatVersion !== 1 ||
+      typeof value.generatedAt !== "string" ||
       typeof value.lastCompleteCollectionAt !== "string" ||
       !Array.isArray(value.pullRequests) ||
       typeof value.viewer !== "string" ||
@@ -286,7 +296,7 @@ export class GithubFabricTarget {
       throw new Error("GitHub pull-request index has an invalid shape");
     }
     return {
-      completedAt: value.lastCompleteCollectionAt,
+      completedAt: value.generatedAt,
       pullRequestCount: value.pullRequests.length,
     };
   }

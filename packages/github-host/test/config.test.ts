@@ -40,5 +40,21 @@ describe("config", () => {
         })
       ).toThrow("must use HTTPS");
     });
+
+    it("rejects line breaks in identity fields", () => {
+      expect(() =>
+        parseGithubHostConfig({
+          schema: GITHUB_HOST_CONFIG_SCHEMA,
+          account: "Hixie\nother",
+        })
+      ).toThrow("account must not contain line breaks");
+      expect(() =>
+        parseGithubHostConfig({
+          schema: GITHUB_HOST_CONFIG_SCHEMA,
+          account: "Hixie",
+          graphqlEndpoint: "https://api.github.com/\rgraphql",
+        })
+      ).toThrow("graphqlEndpoint must not contain line breaks");
+    });
   });
 });

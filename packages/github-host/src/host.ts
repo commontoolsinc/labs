@@ -114,22 +114,17 @@ export class GithubHost {
         previous,
       );
       signal?.throwIfAborted();
-      const count = await this.#target.publish(collection);
-      const completedAt = this.#now();
+      const lastComplete = await this.#target.publish(collection);
       this.#status = "ready";
       this.#sync = {
         reason,
         status: "complete",
         startedAt,
-        completedAt,
-        pullRequestCount: count,
+        ...lastComplete,
       };
-      this.#lastComplete = {
-        completedAt,
-        pullRequestCount: count,
-      };
+      this.#lastComplete = lastComplete;
       await this.#target.publishHealth(this.health());
-      return count;
+      return lastComplete.pullRequestCount;
     } catch (error) {
       this.#status = "degraded";
       this.#sync = {

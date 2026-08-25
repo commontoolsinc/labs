@@ -111,23 +111,20 @@ describe("GithubFabricTarget", () => {
           expect(await target.readLastComplete()).toBeUndefined();
           expect(target.indexCellId().startsWith("of:")).toBe(false);
           expect(target.healthCellId().startsWith("of:")).toBe(false);
-          expect(
-            await target.publish({
-              viewer: "ianh",
-              observedAt: "2026-08-21T01:00:00.000Z",
-              pullRequests: [pullRequest()],
-            }),
-          ).toBe(1);
+          const firstPublication = await target.publish({
+            viewer: "ianh",
+            observedAt: "2026-08-21T01:00:00.000Z",
+            pullRequests: [pullRequest()],
+          });
+          expect(firstPublication.pullRequestCount).toBe(1);
 
           const first = await readIndex(connection, target.cells.index);
           expect(first.generation).toBe(1);
+          expect(first.generatedAt).toBe(firstPublication.completedAt);
           expect(first.lastCompleteCollectionAt).toBe(
             "2026-08-21T01:00:00.000Z",
           );
-          expect(await target.readLastComplete()).toEqual({
-            completedAt: "2026-08-21T01:00:00.000Z",
-            pullRequestCount: 1,
-          });
+          expect(await target.readLastComplete()).toEqual(firstPublication);
           const rows = first.pullRequests as Array<Record<string, unknown>>;
           expect(rows).toHaveLength(1);
           expect(rows[0].number).toBe(42);
@@ -160,15 +157,17 @@ describe("GithubFabricTarget", () => {
             (await readDetail(connection, unchangedRows[0].detail)).number,
           ).toBe(42);
 
-          expect(
-            await target.publish({
-              viewer: "ianh",
-              observedAt: "2026-08-21T02:00:00.000Z",
-              pullRequests: [],
-            }),
-          ).toBe(0);
+          const secondPublication = await target.publish({
+            viewer: "ianh",
+            observedAt: "2026-08-21T02:00:00.000Z",
+            pullRequests: [],
+          });
+          expect(secondPublication.pullRequestCount).toBe(0);
           const second = await readIndex(connection, target.cells.index);
           expect(second.generation).toBe(2);
+          expect(second.lastCompleteCollectionAt).toBe(
+            "2026-08-21T02:00:00.000Z",
+          );
           expect(second.pullRequests).toEqual([]);
         } finally {
           await fixture.close();
@@ -285,6 +284,22 @@ describe("GithubFabricTarget", () => {
               formatVersion: 1,
               generation: 1,
               viewer: "ianh",
+              lastCompleteCollectionAt: "2026-08-21T01:00:00.000Z",
+              pullRequests: [],
+            },
+          }]);
+          await expect(target.readLastComplete()).rejects.toThrow(
+            "index has an invalid shape",
+          );
+
+          await writeGithubFabricCells(connection, [{
+            cell: target.cells.index,
+            value: {
+              schema: "commonfabric.github-connector.pull-request-index.v1",
+              formatVersion: 1,
+              generation: 1,
+              viewer: "ianh",
+              generatedAt: "2026-08-21T01:01:00.000Z",
               pullRequests: [],
             },
           }]);
@@ -332,6 +347,10 @@ describe("GithubFabricTarget", () => {
         host: " ",
         account: "ianh",
       })).rejects.toThrow("must name a host and account");
+      await expect(GithubFabricTarget.open(connection, {
+        host: "api.github.com",
+        account: "ianh\nother",
+      })).rejects.toThrow("must not contain line breaks");
     });
   });
 });

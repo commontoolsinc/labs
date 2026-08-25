@@ -39,6 +39,9 @@ export function parseGithubHostConfig(value: unknown): GithubHostConfig {
   if (typeof config.account !== "string" || !config.account.trim()) {
     throw new Error("configuration.account must be a non-empty string");
   }
+  if (/\r|\n/.test(config.account)) {
+    throw new Error("configuration.account must not contain line breaks");
+  }
   const collectionIntervalMs = config.collectionIntervalMs ??
     DEFAULT_GITHUB_COLLECTION_INTERVAL_MS;
   if (
@@ -54,6 +57,11 @@ export function parseGithubHostConfig(value: unknown): GithubHostConfig {
     "https://api.github.com/graphql";
   if (typeof graphqlEndpoint !== "string") {
     throw new Error("configuration.graphqlEndpoint must be a URL");
+  }
+  if (/\r|\n/.test(graphqlEndpoint)) {
+    throw new Error(
+      "configuration.graphqlEndpoint must not contain line breaks",
+    );
   }
   let endpoint: URL;
   try {

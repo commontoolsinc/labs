@@ -12,8 +12,9 @@ whole collection.
 The Fabric target writes an immutable detail cell for each observed pull-request
 snapshot. It writes the index after every detail write succeeds. A failed
 collection or publication therefore leaves the last complete index and all of
-its detail links unchanged. Its `lastCompleteCollectionAt` field tells consumers
-how old that current-state observation is.
+its detail links unchanged. Each pull-request row carries the GitHub observation
+time. The index's `lastCompleteCollectionAt` field records when the complete
+scan began. Its `generatedAt` field records when that generation was committed.
 
 ## Published cells
 

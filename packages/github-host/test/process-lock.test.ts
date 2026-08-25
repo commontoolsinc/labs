@@ -54,13 +54,62 @@ describe("GitHub host process-lock paths", () => {
       "github.com/ianh",
       "/locks",
     );
+    const otherApi = await githubTargetProcessLockPath(
+      "https://other.example.com/graphql",
+      "did:key:space",
+      "github.com/ianh",
+      "/locks",
+    );
+    const otherSource = await githubTargetProcessLockPath(
+      "https://example.com/graphql",
+      "did:key:space",
+      "github.com/other",
+      "/locks",
+    );
 
     expect(first).toBe(same);
     expect(other).not.toBe(first);
+    expect(otherApi).not.toBe(first);
+    expect(otherSource).not.toBe(first);
     expect(basename(first)).toBe(
       "target-995ecb2de29f639f6f8e1138044198df1c73f8aab870f137a8bf773e7f12a225.lock",
     );
     expect(basename(first)).toMatch(/^target-[0-9a-f]{64}\.lock$/);
     expect(first.includes("secret")).toBe(false);
+  });
+
+  it("rejects line breaks in lock identity components", () => {
+    expect(() =>
+      githubTargetProcessLockPath(
+        "https://example.com/\nignored",
+        "did:key:space",
+        "github.com/ianh",
+        "/locks",
+      )
+    ).toThrow("must not contain line breaks");
+    expect(() =>
+      githubTargetProcessLockPath(
+        "https://example.com",
+        "did:key:space\nother",
+        "rest",
+        "/locks",
+      )
+    ).toThrow("must not contain line breaks");
+    expect(() =>
+      githubTargetProcessLockPath(
+        "https://example.com",
+        "did:key:space",
+        "other\nrest",
+        "/locks",
+      )
+    ).toThrow("must not contain line breaks");
+    expect(() =>
+      githubTargetProcessLockPath(
+        "https://example.com",
+        "did:key:space",
+        "github.com/ianh\rignored",
+        "/locks",
+      )
+    ).toThrow("must not contain line breaks");
   });
 });

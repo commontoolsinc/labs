@@ -11,14 +11,18 @@ class FakeTarget {
   readonly healthValues: object[] = [];
   priorPullRequests: GithubPullRequest[] = [];
   priorLastComplete?: { completedAt: string; pullRequestCount: number };
+  nextCompletedAt = "2026-08-21T00:00:00.000Z";
 
   readPullRequests(): Promise<GithubPullRequest[]> {
     return Promise.resolve(structuredClone(this.priorPullRequests));
   }
 
-  publish(collection: GithubPullRequestCollection): Promise<number> {
+  publish(collection: GithubPullRequestCollection) {
     this.collections.push(structuredClone(collection));
-    return Promise.resolve(collection.pullRequests.length);
+    return Promise.resolve({
+      completedAt: this.nextCompletedAt,
+      pullRequestCount: collection.pullRequests.length,
+    });
   }
 
   publishHealth(value: object): Promise<void> {
@@ -49,6 +53,7 @@ describe("GithubHost", () => {
           pullRequests: [],
         };
         const target = new FakeTarget();
+        target.nextCompletedAt = "2026-08-21T00:05:00.000Z";
         target.priorPullRequests = [{ id: "prior" }] as GithubPullRequest[];
         target.priorLastComplete = {
           completedAt: "2026-08-20T00:00:00.000Z",
@@ -82,11 +87,12 @@ describe("GithubHost", () => {
         expect(prior).toEqual(target.priorPullRequests);
         expect(host.health().status).toBe("ready");
         expect(host.health().sync?.status).toBe("complete");
+        expect(host.health().sync?.completedAt).toBe(target.nextCompletedAt);
         expect(target.healthValues.at(-1)).toMatchObject({
           status: "ready",
           sync: { status: "complete" },
           lastComplete: {
-            completedAt: "2026-08-21T00:00:00.000Z",
+            completedAt: target.nextCompletedAt,
             pullRequestCount: 0,
           },
         });
