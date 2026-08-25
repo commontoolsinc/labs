@@ -1564,9 +1564,9 @@ for legacy-data migration/import (see the decode-only tag discussion in Section
 ### 2.2 Symbols
 
 The encoding symbols live with the codec vocabulary; the in-process
-lifecycle symbols, along with the one that keys an instance's freeze shield,
-live on the implementation base class `BaseFabricInstance` (Section 2.3), kept
-off the pure-protocol `FabricInstance` interface as implementation plumbing.
+lifecycle symbols live on the implementation base class `BaseFabricInstance`
+(Section 2.3), kept off the pure-protocol `FabricInstance` interface as
+implementation plumbing.
 
 There is one encoding symbol per wire format, plus the format-neutral
 `CODEC` (Section 2.4). A registry reads the format's own symbol through a
@@ -1633,18 +1633,6 @@ export const SHALLOW_UNFROZEN_CLONE: unique symbol = Symbol(
   'data-model.shallowUnfrozenClone',
 );
 
-/**
- * Well-known symbol for the sole own property every fabric instance carries.
- * Unlike the symbols above, this one keys a property rather than a member:
- * it is what keeps `Object.isFrozen()` an honest report of an instance's
- * frozen state, given that an instance is sealed and holds everything else
- * privately (Section 2.3). It is non-enumerable, so no structural view of an
- * instance sees it, and its value is never read.
- */
-export const FREEZE_SHIELD: unique symbol = Symbol(
-  'data-model.freezeShield',
-);
-
 // Protocol evolution: a further exported symbol, e.g.
 // `Symbol('data-model.codec@2')`.
 ```
@@ -1678,13 +1666,12 @@ class-side `[CODEC]` (Section 2.4).
  * scaffolding (such as `shallowClone()`) lives.
  *
  * An instance holds all of its state privately and makes it reachable only
- * through members. Its one own property is the non-enumerable
- * `[FREEZE_SHIELD]` that `BaseFabricInstance` installs, so a structural
- * view of an instance — a spread, `Object.keys()`, a naive walk — still
- * sees nothing. Mutable state is exposed as an accessor pair over a
- * private field, whose setter is responsible for honoring the instance's
- * frozen state: `Object.freeze()` bears only on own properties and so
- * cannot enforce that on its own.
+ * through members, so it has no own properties at all. A structural view
+ * of one — a spread, `Object.keys()`, a naive walk — therefore sees
+ * nothing. Mutable state is exposed as an accessor pair over a private
+ * field, whose setter is responsible for honoring the instance's frozen
+ * state: `Object.freeze()` bears only on own properties and so cannot
+ * enforce that on its own.
  *
  * Subclasses must implement:
  * - `[DEEP_FREEZE](subFreeze)` -- deeply freezes this instance in place.
@@ -1770,34 +1757,6 @@ export abstract class FabricInstance extends FabricSpecialObject {
  */
 export abstract class BaseFabricInstance extends FabricInstance {
   /**
-   * Constructs an instance, installing `[FREEZE_SHIELD]` and sealing.
-   *
-   * The seal is what makes an attempt to add a property to an instance
-   * throw, rather than quietly attach data that no structural view,
-   * encoder, or hash will ever see again. The shield is what keeps
-   * `Object.isFrozen()` honest across that seal: an instance keeps its
-   * state in private fields, and a sealed object with no own properties is
-   * vacuously frozen, so without the shield a freshly built mutable
-   * instance would report as frozen and every thaw would short-circuit to
-   * identity. `Object.freeze()` clears the shield's `writable` bit, so
-   * `Object.isFrozen()` tracks frozen state exactly.
-   *
-   * Private fields are not properties, so a subclass's state is untouched
-   * by the seal. A subclass that declares a public field, or assigns one
-   * after `super()`, throws here by design.
-   */
-  constructor() {
-    super();
-    Object.defineProperty(this, FREEZE_SHIELD, {
-      value: false,
-      writable: true,
-      enumerable: false,
-      configurable: false,
-    });
-    Object.seal(this);
-  }
-
-  /**
    * Returns a new unfrozen copy of this instance with the same data. Called
    * by `shallowClone()` when a new instance is needed.
    */
@@ -1845,6 +1804,20 @@ export abstract class BaseFabricInstance extends FabricInstance {
 > therefore stable against changes to the template-method scaffolding, and the
 > `instanceof FabricInstance` brand check still catches every concrete
 > `FabricInstance` value.
+
+> **An aside on sealing instances.** Nothing in this model requires it, and an
+> implementation is free to skip it, but a JavaScript implementation may want
+> to seal an instance so that adding a property to one throws rather than
+> silently attaching data that no structural view, encoder, or hash will read.
+> Doing so takes one wrinkle. `Object.isFrozen()` reports `true` for any sealed
+> object with no own properties, so an instance holding all of its state
+> privately would report as frozen from the moment it was built, and a request
+> for a mutable copy would hand back the original. Giving the instance a single
+> writable own property, keyed by a symbol and non-enumerable, is enough to fix
+> that: `Object.freeze()` clears the property's `writable` bit, so
+> `Object.isFrozen()` again tracks the instance's frozen state. Such a property
+> is invisible to a spread, `Object.keys()`, and `JSON.stringify()` alike, so
+> instances still present no properties to a client.
 
 ### 2.4 Codec Protocol
 
