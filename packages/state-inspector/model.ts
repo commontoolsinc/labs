@@ -473,12 +473,6 @@ export function isEntityKind(value: string): value is EntityKind {
 export const DEFAULT_SCAN_LIMIT = 5000;
 
 /**
- * The cap a scan will actually apply, for a limit that may be anything a caller
- * passed. Entities are counted one at a time, so a cap has to be a whole
- * number: a fractional one no integer count can ever equal is a cap that never
- * takes effect, and the three scans disagreed about which way to round it.
- */
-/**
  * The end index a row listing slices to, for a limit that may be anything a
  * caller passed.
  *
@@ -494,6 +488,12 @@ export function rowLimit(limit: number): number | undefined {
   return limit < 0 ? undefined : limit;
 }
 
+/**
+ * The cap a scan will actually apply, for a limit that may be anything a caller
+ * passed. Entities are counted one at a time, so a cap has to be a whole
+ * number: a fractional one no integer count can ever equal is a cap that never
+ * takes effect, and the three scans disagreed about which way to round it.
+ */
 export function scanLimit(limit: number | undefined): number {
   if (limit === undefined || Number.isNaN(limit)) return DEFAULT_SCAN_LIMIT;
   return Math.max(0, Math.floor(limit));
