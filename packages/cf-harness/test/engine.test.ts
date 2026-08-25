@@ -247,15 +247,15 @@ Deno.test("CfHarnessEngine seeds the piece-registry grant once and replays the r
   assertEquals(registryReads, 1);
 });
 
-Deno.test("CfHarnessEngine mints operator seeds once and replays the record", async () => {
-  const seedSpace = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
-  const seedRef = `/of:fid1:${"D".repeat(43)}/travellerName`;
+Deno.test("CfHarnessEngine mints operator input cells once and replays the record", async () => {
+  const cellSpace = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+  const cellRef = `/of:fid1:${"D".repeat(43)}/travellerName`;
   let spaceReads = 0;
   const engine = new CfHarnessEngine({
     workspaceHostPath: "/host/project",
-    seedHandles: [{
+    inputCells: [{
       name: "travellerName",
-      ref: seedRef,
+      ref: cellRef,
       schema: { type: "string" },
     }],
     fabricSessionFactory: () =>
@@ -264,7 +264,7 @@ Deno.test("CfHarnessEngine mints operator seeds once and replays the record", as
           pieces: {
             getSpace: () => {
               spaceReads += 1;
-              return seedSpace;
+              return cellSpace;
             },
           },
           // deno-lint-ignore no-explicit-any
@@ -272,42 +272,42 @@ Deno.test("CfHarnessEngine mints operator seeds once and replays the record", as
       ),
   });
 
-  const seeded = await engine.establishSeededHandles();
-  assertEquals(seeded.length, 1);
-  assertEquals(seeded[0]!.name, "travellerName");
-  assertEquals(seeded[0]!.ref, seedRef);
-  assertEquals(engine.getRunState().seededHandles, seeded);
+  const inputCells = await engine.establishInputCells();
+  assertEquals(inputCells.length, 1);
+  assertEquals(inputCells[0]!.name, "travellerName");
+  assertEquals(inputCells[0]!.ref, cellRef);
+  assertEquals(engine.getRunState().inputCells, inputCells);
   const entry = engine.handleTable?.entries.find(
-    (candidate) => candidate.token === seeded[0]!.token,
+    (candidate) => candidate.token === inputCells[0]!.token,
   );
   assertEquals(entry?.schema, { type: "string" });
   assertEquals(entry?.schemaSource, "operator");
 
   // A second establishment answers from the record without another session.
-  assertEquals(await engine.establishSeededHandles(), seeded);
+  assertEquals(await engine.establishInputCells(), inputCells);
   assertEquals(spaceReads, 1);
 });
 
-Deno.test("CfHarnessEngine refuses operator seeds without a fabric session", async () => {
+Deno.test("CfHarnessEngine refuses operator input cells without a fabric session", async () => {
   const engine = new CfHarnessEngine({
     workspaceHostPath: "/host/project",
-    seedHandles: [{
+    inputCells: [{
       name: "travellerName",
       ref: `/of:fid1:${"D".repeat(43)}/travellerName`,
     }],
   });
   await assertRejects(
-    () => engine.establishSeededHandles(),
+    () => engine.establishInputCells(),
     Error,
     "requires a fabric session",
   );
-  assertEquals(engine.getRunState().seededHandles, undefined);
+  assertEquals(engine.getRunState().inputCells, undefined);
 });
 
-Deno.test("CfHarnessEngine refuses an operator seed into another space, recording nothing", async () => {
+Deno.test("CfHarnessEngine refuses an operator input cell into another space, recording nothing", async () => {
   const engine = new CfHarnessEngine({
     workspaceHostPath: "/host/project",
-    seedHandles: [{
+    inputCells: [{
       name: "foreign",
       ref: `/@did:key:z6MkforeignSpaceForEngineSeedTest/of:fid1:${
         "E".repeat(43)
@@ -325,11 +325,11 @@ Deno.test("CfHarnessEngine refuses an operator seed into another space, recordin
       ),
   });
   await assertRejects(
-    () => engine.establishSeededHandles(),
+    () => engine.establishInputCells(),
     Error,
     "targets another space",
   );
-  assertEquals(engine.getRunState().seededHandles, undefined);
+  assertEquals(engine.getRunState().inputCells, undefined);
   assertEquals(engine.handleTable, undefined);
 });
 

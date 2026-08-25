@@ -1370,16 +1370,16 @@ Deno.test("parseCfHarnessCliArgs rejects a handle-value origin that is not one",
   }
 });
 
-Deno.test("parseCfHarnessCliArgs collects operator seed handles, reading each schema file", async () => {
-  const seedRef = `/of:fid1:${"A".repeat(43)}/travellerName`;
+Deno.test("parseCfHarnessCliArgs collects operator input cells, reading each schema file", async () => {
+  const cellRef = `/of:fid1:${"A".repeat(43)}/travellerName`;
   const citiesRef = `/of:fid1:${"B".repeat(43)}/cities`;
   const parsed = await parseCfHarnessCliArgs(
     [
       "--prompt",
       "hi",
-      "--seed-handle",
-      `travellerName=${seedRef}`,
-      "--seed-handle",
+      "--input-cell",
+      `travellerName=${cellRef}`,
+      "--input-cell",
       `cities=${citiesRef};schema=cities.schema.json`,
     ],
     {
@@ -1395,13 +1395,13 @@ Deno.test("parseCfHarnessCliArgs collects operator seed handles, reading each sc
   if ("help" in parsed) {
     throw new Error("expected config result");
   }
-  assertEquals(parsed.seedHandles, [
-    { name: "travellerName", ref: seedRef },
+  assertEquals(parsed.inputCells, [
+    { name: "travellerName", ref: cellRef },
     { name: "cities", ref: citiesRef, schema: { type: "object" } },
   ]);
 });
 
-Deno.test("parseCfHarnessCliArgs seeds no handles by default", async () => {
+Deno.test("parseCfHarnessCliArgs passes no input cells by default", async () => {
   const parsed = await parseCfHarnessCliArgs(
     ["--prompt", "hi"],
     { cwd: "/tmp/project", env: {} },
@@ -1410,29 +1410,29 @@ Deno.test("parseCfHarnessCliArgs seeds no handles by default", async () => {
   if ("help" in parsed) {
     throw new Error("expected config result");
   }
-  assertEquals(parsed.seedHandles, []);
+  assertEquals(parsed.inputCells, []);
 });
 
-Deno.test("parseCfHarnessCliArgs rejects a seed handle that does not fit the grammar", async () => {
+Deno.test("parseCfHarnessCliArgs rejects an input cell that does not fit the grammar", async () => {
   await assertRejects(
     () =>
       parseCfHarnessCliArgs(
-        ["--prompt", "hi", "--seed-handle", "no-reference-here"],
+        ["--prompt", "hi", "--input-cell", "no-reference-here"],
         { cwd: "/tmp/project", env: {} },
       ),
     Error,
-    "--seed-handle must be <name>=<link>",
+    "--input-cell must be <name>=<link>",
   );
 });
 
-Deno.test("parseCfHarnessCliArgs rejects a seed schema file that is not JSON", async () => {
+Deno.test("parseCfHarnessCliArgs rejects an input-cell schema file that is not JSON", async () => {
   await assertRejects(
     () =>
       parseCfHarnessCliArgs(
         [
           "--prompt",
           "hi",
-          "--seed-handle",
+          "--input-cell",
           `cities=/of:fid1:${"B".repeat(43)}/cities;schema=broken.json`,
         ],
         {
@@ -2363,12 +2363,12 @@ Deno.test("runCfHarnessCli announces well-known grants to the model and the oper
   assertEquals(stderr, []);
 });
 
-Deno.test("runCfHarnessCli announces operator seeds to the model and the operator", async () => {
+Deno.test("runCfHarnessCli announces operator input cells to the model and the operator", async () => {
   const { io, stdout, stderr } = createIoBuffers();
-  const seedSpace = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
-  const seedId = `of:fid1:${"E".repeat(43)}`;
-  const seedRef = `/${seedId}/travellerName`;
-  // The seed persists run state, so the workspace must really be writable.
+  const cellSpace = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+  const cellId = `of:fid1:${"E".repeat(43)}`;
+  const cellRef = `/${cellId}/travellerName`;
+  // The input cell persists run state, so the workspace must really be writable.
   const workspace = await Deno.makeTempDir();
   let runPromptOptions: RunHarnessPromptOptions | undefined;
   const exitCode = await runCfHarnessCli(
@@ -2385,8 +2385,8 @@ Deno.test("runCfHarnessCli announces operator seeds to the model and the operato
       "/keys/agent.pkcs8",
       "--fabric-space",
       "demo-space",
-      "--seed-handle",
-      `travellerName=${seedRef}`,
+      "--input-cell",
+      `travellerName=${cellRef}`,
     ],
     {
       io,
@@ -2395,7 +2395,7 @@ Deno.test("runCfHarnessCli announces operator seeds to the model and the operato
         Promise.resolve(
           {
             pieces: {
-              getSpace: () => seedSpace,
+              getSpace: () => cellSpace,
               getDefaultPattern: (_runIt: boolean) =>
                 Promise.resolve(undefined),
             },
@@ -2412,7 +2412,7 @@ Deno.test("runCfHarnessCli announces operator seeds to the model and the operato
               transcript: [],
               modelTurns: 1,
               runState: {
-                runId: "run-seeds",
+                runId: "run-input-cells",
                 status: "completed",
                 createdAt: "2026-04-15T22:00:00.000Z",
                 updatedAt: "2026-04-15T22:00:01.000Z",
@@ -2420,10 +2420,10 @@ Deno.test("runCfHarnessCli announces operator seeds to the model and the operato
                 currentDir: "/workspace",
                 policyEvents: [],
                 toolOutputs: [],
-                seededHandles: [{
+                inputCells: [{
                   name: "travellerName",
-                  token: "cfh:a:seeded01",
-                  ref: seedRef,
+                  token: "cfh:a:cell0001",
+                  ref: cellRef,
                 }],
               },
             }) satisfies HarnessPromptLoopResult,
@@ -2436,26 +2436,26 @@ Deno.test("runCfHarnessCli announces operator seeds to the model and the operato
   );
 
   assertEquals(exitCode, 0);
-  const seedMessages = (runPromptOptions?.contextMessages ?? []).filter((
+  const cellMessages = (runPromptOptions?.contextMessages ?? []).filter((
     message,
-  ) => message.includes("Seeded references"));
-  assertEquals(seedMessages.length, 1);
-  assertEquals(seedMessages[0]!.includes("travellerName"), true);
-  assertEquals(seedMessages[0]!.includes("cfh:a:"), true);
-  assertEquals(seedMessages[0]!.includes(seedId), false);
+  ) => message.includes("Input cells"));
+  assertEquals(cellMessages.length, 1);
+  assertEquals(cellMessages[0]!.includes("travellerName"), true);
+  assertEquals(cellMessages[0]!.includes("cfh:a:"), true);
+  assertEquals(cellMessages[0]!.includes(cellId), false);
   assertEquals(
-    stdout.join("").includes("seededHandles: travellerName cfh:a:seeded01"),
+    stdout.join("").includes("inputCells: travellerName cfh:a:cell0001"),
     true,
   );
   // The grants failed to resolve (no default pattern), which is said on
-  // stderr; the seeds must still be established and announced.
+  // stderr; the input cells must still be established and announced.
   assertEquals(
     stderr.some((line) => line.includes("fabric grants: unavailable")),
     true,
   );
 });
 
-Deno.test("parseCfHarnessCliArgs rejects a seed handle alongside --resume-run", async () => {
+Deno.test("parseCfHarnessCliArgs rejects an input cell alongside --resume-run", async () => {
   await assertRejects(
     () =>
       parseCfHarnessCliArgs(
@@ -2464,19 +2464,19 @@ Deno.test("parseCfHarnessCliArgs rejects a seed handle alongside --resume-run", 
           "/tmp/project/.cf-harness-artifacts/run-1",
           "--prompt",
           "hi",
-          "--seed-handle",
+          "--input-cell",
           `travellerName=/of:fid1:${"A".repeat(43)}/travellerName`,
         ],
         { cwd: "/tmp/project", env: {} },
       ),
     Error,
-    "--seed-handle is not supported with --resume-run",
+    "--input-cell is not supported with --resume-run",
   );
 });
 
-Deno.test("runCfHarnessCli refuses duplicate seed names before any run setup", async () => {
+Deno.test("runCfHarnessCli refuses duplicate input-cell names before any run setup", async () => {
   const { io, stderr } = createIoBuffers();
-  const seedRef = `/of:fid1:${"A".repeat(43)}/travellerName`;
+  const cellRef = `/of:fid1:${"A".repeat(43)}/travellerName`;
   let startupWorkReached = false;
   const exitCode = await runCfHarnessCli(
     [
@@ -2486,10 +2486,10 @@ Deno.test("runCfHarnessCli refuses duplicate seed names before any run setup", a
       "/tmp/project",
       "--prompt",
       "Plan the trip",
-      "--seed-handle",
-      `travellerName=${seedRef}`,
-      "--seed-handle",
-      `travellerName=${seedRef}`,
+      "--input-cell",
+      `travellerName=${cellRef}`,
+      "--input-cell",
+      `travellerName=${cellRef}`,
     ],
     {
       io,
@@ -2509,20 +2509,20 @@ Deno.test("runCfHarnessCli refuses duplicate seed names before any run setup", a
   assertEquals(startupWorkReached, false);
   assertEquals(
     stderr.some((line) =>
-      line.includes("--seed-handle names `travellerName` twice")
+      line.includes("--input-cell names `travellerName` twice")
     ),
     true,
   );
 });
 
-Deno.test("parseCfHarnessCliArgs rejects a seed schema file that cannot be read", async () => {
+Deno.test("parseCfHarnessCliArgs rejects an input-cell schema file that cannot be read", async () => {
   await assertRejects(
     () =>
       parseCfHarnessCliArgs(
         [
           "--prompt",
           "hi",
-          "--seed-handle",
+          "--input-cell",
           `cities=/of:fid1:${"B".repeat(43)}/cities;schema=missing.json`,
         ],
         {

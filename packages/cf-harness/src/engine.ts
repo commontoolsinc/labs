@@ -83,10 +83,10 @@ import {
   resolveWellKnownGrantRefs,
 } from "./well-known-grants.ts";
 import type {
-  HarnessSeededHandle,
-  HarnessSeedHandleSpec,
-} from "./contracts/seeded-handles.ts";
-import { mintSeededHandles } from "./seeded-handles.ts";
+  HarnessInputCell,
+  HarnessInputCellSpec,
+} from "./contracts/input-cells.ts";
+import { mintInputCellHandles } from "./input-cells.ts";
 import {
   appendHarnessCfcModelContextObservations,
   appendHarnessFailureRecord,
@@ -219,11 +219,11 @@ export interface CreateHarnessEngineOptions
    */
   fabricSessionFactory?: HarnessFabricSessionFactory;
   /**
-   * Operator-seeded handles to mint into the run's table at start; see
-   * `establishSeededHandles`. Requires a fabric session — the seeds name
-   * references into its space.
+   * Operator input cells to mint handles for at run start; see
+   * `establishInputCells`. Requires a fabric session — the cells live in
+   * its space.
    */
-  seedHandles?: readonly HarnessSeedHandleSpec[];
+  inputCells?: readonly HarnessInputCellSpec[];
   now?: () => string;
 }
 
@@ -345,7 +345,7 @@ export class CfHarnessEngine {
   #outputSequence: number;
   readonly #now: () => string;
   readonly #fabricSessionFactory?: HarnessFabricSessionFactory;
-  readonly #seedHandles: readonly HarnessSeedHandleSpec[];
+  readonly #inputCells: readonly HarnessInputCellSpec[];
   readonly #hostMounts: readonly HostSandboxMount[];
   readonly #ownedRunscConfig?: DockerRunscSandboxConfig;
   readonly #resumedRun: boolean;
@@ -484,7 +484,7 @@ export class CfHarnessEngine {
     this.#fabricSessionFactory = fabricSessionFactory === undefined
       ? undefined
       : cacheHarnessFabricSessionFactory(fabricSessionFactory);
-    this.#seedHandles = options.seedHandles ?? [];
+    this.#inputCells = options.inputCells ?? [];
     const sandboxConfig = options.sandboxRuntime === undefined
       ? resolveSandboxConfig(this.config, {
         workspaceHostPath: options.workspaceHostPath,
@@ -812,43 +812,43 @@ export class CfHarnessEngine {
   }
 
   /**
-   * Establishes the run's operator-seeded handles: mints a token for each
-   * `--seed-handle` reference into the handle table, records the seeds in
+   * Establishes the run's operator input cells: mints a token for each
+   * `--input-cell` reference into the handle table, records the cells in
    * run state, and returns them. Idempotent across resume, like the
-   * well-known grants: seeds already recorded are returned as they stand.
+   * well-known grants: cells already recorded are returned as they stand.
    *
-   * Unlike a grant, a seed is explicit operator configuration, so failure is
-   * closed and loud rather than tolerated: seeds configured on a run with no
-   * fabric session, a reference that does not parse, and a reference
-   * targeting another space all throw before any seed is recorded.
+   * Unlike a grant, an input cell is explicit operator configuration, so
+   * failure is closed and loud rather than tolerated: cells configured on a
+   * run with no fabric session, a reference that does not parse, and a
+   * reference targeting another space all throw before anything is recorded.
    */
-  async establishSeededHandles(): Promise<HarnessSeededHandle[]> {
-    if (this.#runState.seededHandles !== undefined) {
-      return structuredClone(this.#runState.seededHandles);
+  async establishInputCells(): Promise<HarnessInputCell[]> {
+    if (this.#runState.inputCells !== undefined) {
+      return structuredClone(this.#runState.inputCells);
     }
-    if (this.#seedHandles.length === 0) {
+    if (this.#inputCells.length === 0) {
       return [];
     }
     if (this.#fabricSessionFactory === undefined) {
       throw new Error(
-        "--seed-handle requires a fabric session; configure --fabric-space",
+        "--input-cell requires a fabric session; configure --fabric-space",
       );
     }
     const session = await this.#fabricSessionFactory();
-    const minted = await mintSeededHandles(
+    const minted = await mintInputCellHandles(
       this.handleTable,
       this.#runState.runId,
-      this.#seedHandles,
+      this.#inputCells,
       session.pieces.getSpace(),
     );
     await this.recordHandleTable(minted.table);
     this.#runState = patchHarnessRunState(
       this.#runState,
-      { seededHandles: structuredClone(minted.seeded) },
+      { inputCells: structuredClone(minted.inputCells) },
       this.#now(),
     );
     await this.persistRunState();
-    return minted.seeded;
+    return minted.inputCells;
   }
 
   async ensureRunManifestPersisted(): Promise<string | undefined> {

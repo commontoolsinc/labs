@@ -49,7 +49,7 @@ export interface DescribeHandleToolOutput {
  *
  * Three shapes can answer, in this order:
  *
- * 1. The schema the operator wrote alongside a seeded handle, marked
+ * 1. The schema the operator wrote alongside an input cell, marked
  *    `schemaSource: "operator"` on the entry. It answers without a fabric
  *    read: it is the view the operator bound the handle under, stated ahead
  *    of the run.

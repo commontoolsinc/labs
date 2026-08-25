@@ -135,11 +135,11 @@ import {
   setCurrentProvenance,
   setProvenanceCommand,
 } from "./provenance.ts";
-import type { HarnessSeedHandleSpec } from "./contracts/seeded-handles.ts";
+import type { HarnessInputCellSpec } from "./contracts/input-cells.ts";
 import {
-  parseSeedHandleArgument,
-  seededHandlesContextMessage,
-} from "./seeded-handles.ts";
+  inputCellsContextMessage,
+  parseInputCellArgument,
+} from "./input-cells.ts";
 import {
   HarnessControlError,
   type HarnessControlErrorCode,
@@ -151,7 +151,7 @@ const DEFAULT_ARTIFACT_DIRNAME = ".cf-harness-artifacts";
 const CLI_OUTPUT_MODES = ["operator", "batch"] as const;
 const CLI_STRING_FLAGS = [
   "handle-value-origin",
-  "seed-handle",
+  "input-cell",
   "workspace",
   "cwd",
   "focus-root",
@@ -216,7 +216,7 @@ const CLI_COLLECT_FLAGS = [
   "image",
   "host-mount",
   "handle-value-origin",
-  "seed-handle",
+  "input-cell",
 ] as const;
 
 export type CfHarnessCliOutputMode = (typeof CLI_OUTPUT_MODES)[number];
@@ -258,7 +258,7 @@ export interface CfHarnessCliConfig {
   cfcInvocationContextDir?: string;
   browserAccess?: HarnessBrowserAccessLease;
   handleValueOrigins: readonly string[];
-  seedHandles: readonly HarnessSeedHandleSpec[];
+  inputCells: readonly HarnessInputCellSpec[];
   maxModelTurns: number;
   printTranscript: boolean;
   apiKey?: string;
@@ -522,7 +522,7 @@ Options:
   --browser-access-profile-mode <mode> persistent | transient
   --browser-access-account-access <access> available | none
   --handle-value-origin <origin> Origin a handle's value may be sent to (repeatable; none by default)
-  --seed-handle <name>=<link>[;schema=<file>] Mint a handle for a reference seeded into the fabric space, announced to the model under the operator-authored <name> (repeatable; requires --fabric-space)
+  --input-cell <name>=<link>[;schema=<file>] Pass a cell in the fabric space into the run by reference, announced to the model as a handle under the operator-authored <name> (repeatable; requires --fabric-space)
   --cfc-enforcement-mode <mode> disabled | observe | enforce-explicit | enforce-strict
   --cfc-result-dir <path>       Host dir where runsc writes the CFC result sidecar (required for enforce-* modes)
   --cfc-invocation-context-dir <path> Host dir where the harness writes the CFC invocation-context sidecar (required for enforce-* modes)
@@ -839,32 +839,32 @@ const parseHandleValueOrigins = (
 };
 
 /**
- * The seeds `--seed-handle` names, with each schema file read and parsed.
- * Grammar defects, an unreadable schema file, and a schema that is not a
- * JSON Schema are all refused at parse: a seed is explicit operator
- * configuration, and a run must not start without what it asked for. The
- * references themselves are validated against the session space later, at
- * mint time, where the space is known.
+ * The input cells `--input-cell` names, with each schema file read and
+ * parsed. Grammar defects, an unreadable schema file, and a schema that is
+ * not a JSON Schema are all refused at parse: an input cell is explicit
+ * operator configuration, and a run must not start without what it asked
+ * for. The references themselves are validated against the session space
+ * later, at mint time, where the space is known.
  */
-const parseSeedHandles = async (
+const parseInputCells = async (
   raw: string | readonly string[] | undefined,
   options: {
     cwd: string;
     readTextFile: (path: string) => Promise<string>;
   },
-): Promise<readonly HarnessSeedHandleSpec[]> => {
+): Promise<readonly HarnessInputCellSpec[]> => {
   const values = raw === undefined
     ? []
     : (typeof raw === "string" ? [raw] : raw);
-  const specs: HarnessSeedHandleSpec[] = [];
+  const specs: HarnessInputCellSpec[] = [];
   const names = new Set<string>();
   for (const value of values) {
-    const parsed = parseSeedHandleArgument(value);
+    const parsed = parseInputCellArgument(value);
     // Refused here, at parse, so the defect is classified as the invalid
     // request it is and no model client, session, or run setup is reached;
-    // `mintSeededHandles` keeps its own check for non-CLI callers.
+    // `mintInputCellHandles` keeps its own check for non-CLI callers.
     if (names.has(parsed.name)) {
-      throw new Error(`--seed-handle names \`${parsed.name}\` twice`);
+      throw new Error(`--input-cell names \`${parsed.name}\` twice`);
     }
     names.add(parsed.name);
     let schema: JSONSchema | undefined;
@@ -875,13 +875,13 @@ const parseSeedHandles = async (
         text = await options.readTextFile(path);
       } catch (error) {
         throw new Error(
-          `--seed-handle \`${parsed.name}\` schema file cannot be read: ${
+          `--input-cell \`${parsed.name}\` schema file cannot be read: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
       }
       schema = parseStructuredResultSchema(text, {
-        label: `--seed-handle \`${parsed.name}\` schema`,
+        label: `--input-cell \`${parsed.name}\` schema`,
       })?.schema;
     }
     specs.push({
@@ -1485,15 +1485,15 @@ export const parseCfHarnessCliArgs = async (
     );
   }
   const readTextFile = deps.readTextFile ?? Deno.readTextFile;
-  const seedHandles = await parseSeedHandles(
-    args["seed-handle"] as string | readonly string[] | undefined,
+  const inputCells = await parseInputCells(
+    args["input-cell"] as string | readonly string[] | undefined,
     { cwd, readTextFile },
   );
-  // A resumed run replays the seeds its run state recorded; a new seed on
-  // resume would be silently ignored, so it is refused like --skill and
-  // --image are.
-  if (resumeRun !== undefined && seedHandles.length > 0) {
-    throw new Error("--seed-handle is not supported with --resume-run");
+  // A resumed run replays the input cells its run state recorded; a new
+  // one on resume would be silently ignored, so it is refused like --skill
+  // and --image are.
+  if (resumeRun !== undefined && inputCells.length > 0) {
+    throw new Error("--input-cell is not supported with --resume-run");
   }
   const structuredResult = await parseStructuredResultConfig(args, {
     cwd,
@@ -1733,7 +1733,7 @@ export const parseCfHarnessCliArgs = async (
       : {}),
     ...(browserAccess !== undefined ? { browserAccess } : {}),
     handleValueOrigins,
-    seedHandles,
+    inputCells,
     maxModelTurns: parsePositiveInteger(
       typeof args["max-model-turns"] === "string"
         ? args["max-model-turns"]
@@ -2417,14 +2417,13 @@ export const formatCfHarnessCliResult = (
     );
   }
   if (
-    result.runState.seededHandles !== undefined &&
-    result.runState.seededHandles.length > 0
+    result.runState.inputCells !== undefined &&
+    result.runState.inputCells.length > 0
   ) {
     lines.push(
-      `seededHandles: ${
-        result.runState.seededHandles.map((seed) =>
-          `${seed.name} ${seed.token}`
-        ).join(", ")
+      `inputCells: ${
+        result.runState.inputCells.map((cell) => `${cell.name} ${cell.token}`)
+          .join(", ")
       }`,
     );
   }
@@ -3294,8 +3293,8 @@ export const runCfHarnessCli = async (
           ? { runManifestPath: parsed.runManifestPath }
           : {}),
         ...(additionalMounts.length > 0 ? { additionalMounts } : {}),
-        ...(parsed.seedHandles.length > 0
-          ? { seedHandles: parsed.seedHandles }
+        ...(parsed.inputCells.length > 0
+          ? { inputCells: parsed.inputCells }
           : {}),
       });
       activateEngine(engine);
@@ -3372,13 +3371,13 @@ export const runCfHarnessCli = async (
           );
         }
       }
-      // Operator-seeded handles are explicit configuration, so unlike the
+      // Operator input cells are explicit configuration, so unlike the
       // grants a failure here fails the run rather than proceeding without
       // what the operator asked for.
-      const seeded = await engine.establishSeededHandles();
-      const seededMessage = seededHandlesContextMessage(seeded);
-      if (seededMessage !== undefined) {
-        contextMessages.push(seededMessage);
+      const inputCells = await engine.establishInputCells();
+      const inputCellsMessage = inputCellsContextMessage(inputCells);
+      if (inputCellsMessage !== undefined) {
+        contextMessages.push(inputCellsMessage);
       }
       result = await loop.runPrompt({
         prompt: parsed.prompt!,

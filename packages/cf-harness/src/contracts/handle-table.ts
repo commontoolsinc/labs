@@ -71,7 +71,7 @@ export interface HarnessHandleEntry {
   /**
    * Shape of the value at the referent, when a mint knew it — the compiled
    * pattern's result schema behind a `run_pattern` result reference, or the
-   * shape the operator wrote alongside a seeded handle. Absent means the
+   * shape the operator wrote alongside an input cell. Absent means the
    * shape was never free to capture, not that the referent has none: no mint
    * reads the cell to fill this in.
    */
@@ -80,7 +80,7 @@ export interface HarnessHandleEntry {
    * Where {@link HarnessHandleEntry.schema} came from. `harness` means a
    * harness step supplied it out of its own work — the schema a pattern WE
    * compiled and ran declares. `operator` means the person configuring the
-   * run wrote it, alongside a seeded handle.
+   * run wrote it, alongside an input cell.
    *
    * A schema is disclosed to a model only under one of those provenances.
    * The difference is not fussiness: a schema that arrived with data is

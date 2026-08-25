@@ -721,24 +721,27 @@ session that cannot be established leaves the run to proceed without its grants,
 and the CLI says so on stderr rather than staying silent. The grant list is
 designed to grow; the identity's profile is the expected next entry.
 
-#### Operator-seeded handles
+#### Operator input cells
 
-`--seed-handle <name>=<link>[;schema=<file>]` (repeatable) mints a handle the
-same way for a reference the operator names — a cell seeded into the space
-before the run exists. The model is told the token and the operator's `<name>`
-for it, nothing more: values placed in cells ahead of the run reach the model as
-handles from its first turn, so a prompt never holds a literal it could inline
-or pass on by accident. The optional schema file records the operator's
-statement of the referent's shape on the handle entry
-(`schemaSource: "operator"`), which `describe_handle` answers from without a
-fabric read.
+`--input-cell <name>=<link>[;schema=<file>]` (repeatable) passes a cell into the
+run by reference: a cell populated in the space before the run exists, handed to
+the run as its input. Cells are the runtime's medium of exchange; the handle
+minted for one is only how the harness names a cell to a model that cannot hold
+addresses. The model is told the token and the operator's `<name>` for it,
+nothing more: the run's inputs reach the model from its first turn while their
+values stay in the fabric, so a prompt never holds a literal it could inline or
+pass on by accident. The optional schema file records the operator's statement
+of the cell's shape on the handle entry (`schemaSource: "operator"`), which
+`describe_handle` answers from without a fabric read — the cell declares its own
+schema in the fabric, so this is the operator's pre-stated view of it, often
+deliberately narrower.
 
-Unlike a grant, a seed is explicit configuration, so failure is closed and loud
-rather than tolerated: a malformed argument or unreadable schema file is a usage
-error, and a reference that does not parse, targets another space, or is seeded
-on a run without a fabric session fails the run before the model is involved.
-The seeds are recorded in run state (`seededHandles`), replayed rather than
-re-minted on resume, and reported in the operator summary as `seededHandles:`.
+Unlike a grant, an input cell is explicit configuration, so failure is closed
+and loud rather than tolerated: a malformed argument or unreadable schema file
+is a usage error, and a reference that does not parse, targets another space, or
+arrives on a run without a fabric session fails the run before the model is
+involved. The cells are recorded in run state (`inputCells`), replayed rather
+than re-minted on resume, and reported in the operator summary as `inputCells:`.
 
 #### Inspecting a handle's shape
 
@@ -762,7 +765,7 @@ piece the token names — and never the value.
 ```
 
 Three sources can answer, in this order. First, the schema the operator wrote
-alongside a seeded handle (`schemaSource: "operator"`), which answers without a
+alongside an input cell (`schemaSource: "operator"`), which answers without a
 fabric read: it is the view the operator bound the handle under, stated ahead of
 the run. Then the referent's own declared schema, read through the run's fabric
 session when it has one: a piece's document schema is the result schema of the
