@@ -24,6 +24,30 @@ import {
   GitContextResolver,
 } from "../src/git-context.ts";
 
+Deno.test("Fabric target validates a discovered checkout", async () => {
+  const signer = await Identity.fromPassphrase(
+    "agent connector checkout validation test",
+  );
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const connection = { runtime, spaceDid: signer.did() };
+  const gitContext = new GitContextResolver(
+    () => Promise.resolve({ code: 0, stdout: "/repo\n" }),
+    () => new Date("2026-08-21T00:00:00.000Z"),
+    (path) => Promise.resolve(path),
+  );
+  try {
+    const target = await AgentFabricTarget.open(connection, gitContext);
+    assertEquals(await target.validateCheckout("/repo"), true);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
 Deno.test("Fabric target publishes sessions and command receipts", async () => {
   const signer = await Identity.fromPassphrase("agent connector target test");
   const storageManager = StorageManager.emulate({ as: signer });

@@ -165,6 +165,7 @@ Deno.test("git context falls back to origin and enriches a session snapshot", as
           "helper\text::shell command with secret (fetch)\n" +
           "compact-helper\text::https://account:secret@example.test/repo (fetch)\n" +
           "file\tfile:/private/credential (fetch)\n" +
+          "unsupported\tftp://example.test/repo (fetch)\n" +
           "windows-slash\tC:/private/credential (fetch)\n" +
           "windows-backslash\tC:\\private\\credential (fetch)\n" +
           "windows-relative\tD:private\\credential (fetch)\n" +
@@ -278,6 +279,57 @@ Deno.test("checkout observations skip an invalid worktree marker", async () => {
   assertEquals(
     await resolver.beginObservation().resolveCheckout("/stale-worktree"),
     null,
+  );
+});
+
+Deno.test("checkout validation reports a Git process failure", async () => {
+  const resolver = new GitContextResolver(() =>
+    Promise.reject(new Deno.errors.NotFound("git"))
+  );
+
+  await assertRejects(
+    () => resolver.validateCheckout("/repo"),
+    Error,
+    "Git process failed while validating a discovered checkout",
+  );
+});
+
+Deno.test("checkout observation reports a Git process failure", async () => {
+  const resolver = new GitContextResolver(() =>
+    Promise.reject(new Deno.errors.NotFound("git"))
+  );
+
+  await assertRejects(
+    () => resolver.beginObservation().resolveCheckout("/repo"),
+    Error,
+    "Git process failed while validating a discovered checkout",
+  );
+});
+
+Deno.test("checkout observation rejects a missing worktree root", async () => {
+  const resolver = new GitContextResolver(() => Promise.resolve(result("")));
+
+  await assertRejects(
+    () => resolver.beginObservation().resolveCheckout("/repo"),
+    Error,
+    "Git returned no worktree root for a discovered checkout",
+  );
+});
+
+Deno.test("checkout observation rejects a failed Git command", async () => {
+  const resolver = new GitContextResolver((args) => {
+    const command = args.slice(2).join(" ");
+    return Promise.resolve(
+      command === "rev-parse --show-toplevel"
+        ? result("/repo\n")
+        : result("", 1),
+    );
+  });
+
+  await assertRejects(
+    () => resolver.beginObservation().resolveCheckout("/repo"),
+    Error,
+    "Git command failed while observing checkout: branch --show-current",
   );
 });
 

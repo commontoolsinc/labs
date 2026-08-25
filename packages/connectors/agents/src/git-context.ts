@@ -156,11 +156,10 @@ class CachedGitContextObservation implements GitContextObservation {
         "Git returned no worktree root for a discovered checkout",
       );
     }
-    const branch = await this.#requiredValue(
+    const branch = (await this.#requiredOutput(
       ["-C", root, "branch", "--show-current"],
       signal,
-      true,
-    );
+    )).trim() || null;
     let repo = valueOf(
       await this.#run(
         ["-C", root, "remote", "get-url", "upstream"],
@@ -308,32 +307,6 @@ class CachedGitContextObservation implements GitContextObservation {
     return symbolicHead
       ? { value: null, complete: true }
       : { value: null, complete: false };
-  }
-
-  #requiredValue(
-    args: string[],
-    signal?: AbortSignal,
-  ): Promise<string>;
-  #requiredValue(
-    args: string[],
-    signal: AbortSignal | undefined,
-    allowEmpty: true,
-  ): Promise<string | null>;
-  async #requiredValue(
-    args: string[],
-    signal?: AbortSignal,
-    allowEmpty = false,
-  ): Promise<string | null> {
-    const output = await this.#requiredOutput(args, signal);
-    const value = output.trim();
-    if (!value && !allowEmpty) {
-      throw new Error(
-        `Git returned no value while observing checkout: ${
-          args.slice(2).join(" ")
-        }`,
-      );
-    }
-    return value || null;
   }
 
   async #requiredOutput(
