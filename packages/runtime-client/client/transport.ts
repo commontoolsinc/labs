@@ -20,5 +20,11 @@ export interface RuntimeTransport extends EventEmitter<RuntimeTransportEvents> {
    * does not, and cannot be used as-is.
    */
   send(data: IPCClientMessage | IPCClientNotification): void;
+
+  /**
+   * Closes the transport and releases whatever it holds open. Settles once
+   * the far end is gone, so a caller may stand a replacement up after
+   * awaiting it. Messages sent afterwards are not delivered.
+   */
   dispose(): Promise<void>;
 }
