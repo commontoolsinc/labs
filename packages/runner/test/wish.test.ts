@@ -18,6 +18,7 @@ import {
   getPatternEnvironment,
   setPatternEnvironment,
 } from "../src/builder/env.ts";
+import { acquireSchemaRegistryLease } from "../src/schema-registry.ts";
 
 const signer = await Identity.fromPassphrase("wish built-in tests");
 const space = signer.did();
@@ -4928,5 +4929,57 @@ describe("createSidecarPatternCache", () => {
     // The winning env-b fetch reports through onSuccess; the superseded env-a
     // fetch does not.
     expect(recorded).toEqual([{ source: "source from env-b.test" }]);
+  });
+
+  it("drops the cached pattern when the last schema-registry lease releases", async () => {
+    // A compiled pattern's binding schemas reference `cid:` documents that
+    // live only for the registry epoch that compiled it; a cache entry
+    // surviving the last-lease-out clear is #6303's silent event drop.
+    const { calls } = installFetchMock();
+    const fakeRuntime = makeFakeRuntime();
+    setPatternEnvironment({ apiUrl: new URL("https://env-a.test/") });
+    const cache = createSidecarPatternCache({
+      name: "profile-create.tsx",
+      retryOnFailure: true,
+    });
+
+    const release = acquireSchemaRegistryLease();
+    expect(await cache.fetch(fakeRuntime)).toEqual({
+      source: "source from env-a.test",
+    });
+    expect(cache.cached()).toEqual({ source: "source from env-a.test" });
+
+    release();
+    expect(cache.cached()).toBeUndefined();
+    // The next launch compiles afresh in the new epoch instead of reusing
+    // the pattern whose references died with the old one.
+    expect(await cache.fetch(fakeRuntime)).toEqual({
+      source: "source from env-a.test",
+    });
+    expect(calls).toEqual(["env-a.test", "env-a.test"]);
+  });
+
+  it("resolves a fetch that outlives its registry epoch to undefined", async () => {
+    const { release: releaseGate } = installFetchMock({ gate: "env-a.test" });
+    const fakeRuntime = makeFakeRuntime();
+    setPatternEnvironment({ apiUrl: new URL("https://env-a.test/") });
+    const cache = createSidecarPatternCache({
+      name: "profile-create.tsx",
+      retryOnFailure: true,
+    });
+
+    const recorded: unknown[] = [];
+    const releaseLease = acquireSchemaRegistryLease();
+    const inFlight = cache.fetch(
+      fakeRuntime,
+      (pattern) => recorded.push(pattern),
+    );
+    // The epoch ends while the fetch is pending; when it settles it must
+    // record nothing — its pattern was compiled for a registry that is gone.
+    releaseLease();
+    releaseGate();
+    expect(await inFlight).toBeUndefined();
+    expect(cache.cached()).toBeUndefined();
+    expect(recorded).toEqual([]);
   });
 });

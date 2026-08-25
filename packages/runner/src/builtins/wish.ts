@@ -33,6 +33,7 @@ import {
   toMemorySpaceAddress,
 } from "../link-utils.ts";
 import { setRunnableName } from "../runner-utils.ts";
+import { onSchemaRegistryClear } from "../schema-registry.ts";
 import { type Runtime, spaceCellSchema } from "../runtime.ts";
 import { type Action, type ReactivityLog } from "../scheduler.ts";
 import { RetryImmediately } from "../scheduler/retry-immediately.ts";
@@ -1541,6 +1542,21 @@ export function createSidecarPatternCache(options: {
   let fetchPromise: Promise<Pattern | undefined> | undefined;
   let fetchUrl: string | undefined;
   let pattern: Pattern | undefined;
+
+  // A compiled pattern's binding schemas are externalized to `cid:`
+  // references whose documents live in the realm schema registry for the
+  // epoch that compiled it. This cache outlives runtimes, so on the
+  // registry-clear transition (last lease out) the cached pattern's
+  // references would dangle — every cell its next instantiation minted
+  // would carry a schema nobody can resolve, and the first sync built from
+  // one would be rejected by the server (#6303). Drop the cache with the
+  // epoch; the next launch recompiles (cheap — the compile caches are
+  // content-addressed and survive) and registers its documents afresh.
+  onSchemaRegistryClear(() => {
+    fetchPromise = undefined;
+    fetchUrl = undefined;
+    pattern = undefined;
+  });
 
   // Resolved lazily (not at module load): in the browser worker this module
   // is imported before the runtime calls `setPatternEnvironment` with the

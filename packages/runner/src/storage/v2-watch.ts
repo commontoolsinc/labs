@@ -13,6 +13,7 @@ import type {
 } from "@commonfabric/memory/v2";
 
 import type { JSONSchemaObj } from "@commonfabric/api";
+import { getLogger } from "@commonfabric/utils/logger";
 
 import { pruneCfcSchemaDefinitions } from "../cfc/schema-refs.ts";
 import {
@@ -28,6 +29,11 @@ import {
 } from "../schema-registry.ts";
 import type { PullError, Result, Unit, URI } from "./interface.ts";
 import { SelectorTracker } from "./selector-tracker.ts";
+
+const logger = getLogger("storage.v2-watch", {
+  enabled: true,
+  level: "error",
+});
 
 const DOCUMENT_MIME = "application/json" as const;
 type ScopedWatchAddress = {
@@ -73,10 +79,14 @@ export const normalizeSyncSelector = (
  *   recomposes to the fully inline form through the realm registry, which
  *   holds every document behind a locally created reference.
  *
- * A decomposition refusal keeps the selector exactly as given; so does a
- * ref-bearing schema whose documents the registry cannot supply — that
- * reference was unresolvable locally too, and the server's diagnostic is
- * the loudest signal available.
+ * A decomposition refusal keeps the selector exactly as given. An
+ * inline-only schema goes to the wire inline, which every server accepts.
+ * A ref-bearing schema whose documents the registry cannot supply also
+ * passes through — but that selector names a document this client could
+ * not resolve either, so a current server rejects it and the failed load
+ * surfaces as a dropped event far from this cause. The error log below
+ * names the missing document at the point where the inconsistency is
+ * first detectable (#6303).
  */
 export const externalizeSyncSelector = (
   selector: SchemaPathSelector,
@@ -111,7 +121,17 @@ export const externalizeSyncSelector = (
       ),
     });
   } catch (error) {
-    if (error instanceof SchemaNotDecomposableError) return selector;
+    if (error instanceof SchemaNotDecomposableError) {
+      if (carriesRefs) {
+        logger.error("unresolvable-selector-schema-ref", () => [
+          "sync selector schema carries a `cid:` reference this client",
+          "cannot resolve; the server will reject the query and the",
+          "pending load will fail:",
+          error.message,
+        ]);
+      }
+      return selector;
+    }
     throw error;
   }
 };

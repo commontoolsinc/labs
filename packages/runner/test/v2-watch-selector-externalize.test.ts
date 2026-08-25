@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 
 import type { JSONSchemaObj } from "@commonfabric/api";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import { getLogger } from "@commonfabric/utils/logger";
 
 import { decomposeSchema } from "../src/schema-decompose.ts";
 import { registerSchemaDocument } from "../src/schema-registry.ts";
@@ -128,6 +129,64 @@ describe("v2-watch", () => {
       expect(externalizeSyncSelector(refused as never, () => true)).toBe(
         refused as never,
       );
+    });
+
+    /** Capture `storage.v2-watch` error logs around `fn`, resolving thunked
+     * message parts to their values. */
+    const captureErrorLogs = (fn: () => void): unknown[][] => {
+      const logger = getLogger("storage.v2-watch") as unknown as {
+        error(...args: unknown[]): void;
+      };
+      const captured: unknown[][] = [];
+      logger.error = (...args: unknown[]) => {
+        captured.push(
+          args.map((arg) => (typeof arg === "function" ? arg() : arg)),
+        );
+      };
+      try {
+        fn();
+      } finally {
+        delete (logger as { error?: unknown }).error;
+      }
+      return captured;
+    };
+
+    it("logs the missing document when a ref-bearing selector passes through unresolved", () => {
+      // The pass-through sends the server a selector naming a document this
+      // client could not resolve; without this line the failure surfaces as
+      // a dropped event far from the cause (#6303).
+      setContentAddressedSchemasConfig(true);
+      const doc: JSONSchemaObj = {
+        type: "string",
+        title: "never-registered-6303",
+      };
+      const hash = internSchemaAsTaggedHashString(doc);
+      const selector = { path: [], schema: { $ref: `cid:${hash}` } };
+      const captured = captureErrorLogs(() => {
+        expect(externalizeSyncSelector(selector, () => true)).toBe(selector);
+      });
+      expect(captured.length).toBe(1);
+      expect(captured[0][0]).toBe("unresolvable-selector-schema-ref");
+      expect(JSON.stringify(captured[0])).toContain(hash);
+    });
+
+    it("stays silent when an inline-only schema refuses decomposition", () => {
+      setContentAddressedSchemasConfig(true);
+      const refused = {
+        path: [],
+        schema: {
+          type: "object",
+          properties: {
+            nested: { type: "object", $defs: { Inner: { type: "string" } } },
+          },
+        },
+      } as const;
+      const captured = captureErrorLogs(() => {
+        expect(externalizeSyncSelector(refused as never, () => true)).toBe(
+          refused as never,
+        );
+      });
+      expect(captured).toEqual([]);
     });
   });
 });
