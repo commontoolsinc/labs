@@ -10,13 +10,18 @@
 #
 # What is NOT exercised entry by entry is the rest of the provider table: a
 # dozen slots that hand the shell a constant `files` or `dirs` directive and
-# nothing else — --root, --datafile, --to, `view <file>`, `exec <mountedFile>`,
+# nothing else — --datafile, `view <file>`, `exec <mountedFile>`,
 # `id did <keypath>`, the space-management directories, and the two entries
 # item 16 of the plan records as belonging to commands that declare no options
 # at all. They read no state, so a fabric cannot change what they answer, and
 # they are asserted one by one — kind and glob — in
 # packages/cli/test/completion-providers.test.ts, which is where a constant
 # belongs. Nothing here re-checks them.
+#
+# The exception is an option name that means two things on two commands —
+# --from, --to, --root, --scope. There the answer turns on which command was
+# typed rather than on the name, so both sides of each are asserted below,
+# through the real command line rather than through a resolved slot.
 #
 # The unit tests under packages/cli/test/completion-*.test.ts cover the pure
 # half — line resolution, candidate shaping, and the degrade-to-empty path —
@@ -562,6 +567,15 @@ check ":cf:files" "$(directives_at "cf space clone x --from ")" \
 check "" "$(directives_at "cf inspect diff x y --from ")$(complete_at \
   "cf inspect diff x y --from ")" \
   "and nothing where it names a sequence number"
+check ":cf:dirs" "$(directives_at "cf space clone x --to ")" \
+  "--to offers a clone directory where it names one"
+check "" "$(directives_at "cf inspect diff x y --to ")$(complete_at \
+  "cf inspect diff x y --to ")" \
+  "and nothing where it names a sequence number"
+check ":cf:dirs" "$(directives_at "cf piece new --root ")" \
+  "--root offers a source directory where it names one"
+check "" "$(directives_at "cf inspect graph --root ")" \
+  "and hands the shell no directory where it names an entity"
 
 ELAPSED=$(($(date +%s) - START))
 printf '\n== %d passed, %d failed, %d gaps open — %ds wall clock\n' \

@@ -1,8 +1,10 @@
 import { assert, assertEquals, assertFalse } from "@std/assert";
+import { Database } from "@db/sqlite";
 import { resolveCompletionLine } from "../lib/completion/line.ts";
 import {
   acceptedProjections,
   descendProjection,
+  entityListingView,
   keysOf,
   linkEndpointPrefix,
   liveCandidates,
@@ -186,7 +188,14 @@ Deno.test("live candidates: every path-shaped slot hands the shell its own direc
   const cases: Array<[string, string, string | undefined]> = [
     ["cf piece ls -i ", "files", "*.key"],
     ["cf id did ", "files", "*.key"],
+    // Every command whose `--root` is the directory its sources resolve
+    // against. The set is hand-maintained, so it is asserted whole.
     ["cf piece new --root ", "dirs", undefined],
+    ["cf piece setsrc --root ", "dirs", undefined],
+    ["cf piece survey --root ", "dirs", undefined],
+    ["cf piece set-home --root ", "dirs", undefined],
+    ["cf check --root ", "dirs", undefined],
+    ["cf test --root ", "dirs", undefined],
     ["cf piece new --test ", "files", "*.tsx"],
     ["cf piece new ", "files", "*.tsx"],
     ["cf piece setsrc ", "files", "*.tsx"],
@@ -205,6 +214,116 @@ Deno.test("live candidates: every path-shaped slot hands the shell its own direc
     const directive = result.directives[0] as { kind: string; glob?: string };
     assertEquals(directive.kind, kind, text);
     assertEquals(directive.glob, glob, `${text} glob`);
+  }
+});
+
+Deno.test("live candidates: an option that means two things is completed per command", async () => {
+  // The option table is keyed by long name alone, so a slot answering by name
+  // would hand the shell directory completion for a sequence number and for an
+  // entity id. Offering the wrong set teaches the caller a word the command
+  // rejects, which is worse than offering none.
+  for (
+    const text of [
+      // A clone directory on `space clone`, a sequence number here.
+      "cf inspect diff space entity --to ",
+      // A snapshot file on `space clone`, a sequence number here.
+      "cf inspect diff space entity --from ",
+      // A wish search scope on `wish`, a scope key here.
+      "cf inspect diff space entity --scope ",
+      // A source directory on the commands that compile one, an entity here.
+      // No space is named yet, so the entity provider has nothing to read —
+      // which is the point: the slot reaches that provider, not the directory
+      // one, and reads no disk to find out.
+      "cf inspect graph --root ",
+    ]
+  ) {
+    const result = await liveCandidates(lineFor(text));
+    assertEquals(result.directives.length, 0, `${text} emits no directive`);
+    assertEquals(result.candidates.length, 0, `${text} offers no candidate`);
+  }
+});
+
+Deno.test("an inspect entity slot reads the view its command will read", () => {
+  // `--branch` and `--scope` choose which records the command resolves. A
+  // listing taken from the space's default view would offer entities that read
+  // is not going to find.
+  assertEquals(entityListingView(lineFor("cf inspect diff space ")), {
+    branch: undefined,
+    scope: undefined,
+  });
+  assertEquals(
+    entityListingView(
+      lineFor("cf inspect diff --branch draft --scope of:fid1:owner space "),
+    ),
+    { branch: "draft", scope: "of:fid1:owner" },
+  );
+});
+
+/**
+ * A space DB holding one entity in the default scope and one in another, so a
+ * listing taken from the wrong scope offers the wrong id rather than none.
+ */
+function seedScopedSpace(path: string): void {
+  const db = new Database(path, { create: true });
+  db.exec(`
+CREATE TABLE "commit" (
+  seq INTEGER NOT NULL PRIMARY KEY, branch TEXT NOT NULL DEFAULT '',
+  session_id TEXT NOT NULL, local_seq INTEGER NOT NULL,
+  invocation_ref TEXT, authorization_ref TEXT,
+  original JSON NOT NULL, resolution JSON NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE revision (
+  branch TEXT NOT NULL DEFAULT '', id TEXT NOT NULL,
+  scope_key TEXT NOT NULL DEFAULT 'space', seq INTEGER NOT NULL,
+  op_index INTEGER NOT NULL, op TEXT NOT NULL, data JSON, commit_seq INTEGER NOT NULL,
+  PRIMARY KEY (branch, id, scope_key, seq, op_index)
+);
+CREATE TABLE branch (
+  name TEXT NOT NULL PRIMARY KEY DEFAULT '', parent_branch TEXT,
+  fork_seq INTEGER, created_seq INTEGER NOT NULL DEFAULT 0,
+  head_seq INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active'
+);
+INSERT INTO branch (name, head_seq, status) VALUES ('', 2, 'active');`);
+  const commit = db.prepare(
+    `INSERT INTO "commit" (seq, session_id, local_seq, original, resolution)
+     VALUES (?, 'session:did%3Akey%3AzAlice:s1', ?, '{}', '{"seq":0}')`,
+  );
+  const rev = db.prepare(
+    `INSERT INTO revision (id, scope_key, seq, op_index, op, data, commit_seq)
+     VALUES (?, ?, ?, 0, 'set', ?, ?)`,
+  );
+  const entities: Array<[string, string]> = [
+    ["of:in-space", "space"],
+    ["of:in-other", "other"],
+  ];
+  entities.forEach(([id, scope], index) => {
+    const seq = index + 1;
+    commit.run(seq, seq);
+    rev.run(id, scope, seq, JSON.stringify({ value: id }), seq);
+  });
+  db.close();
+}
+
+Deno.test("live candidates: an entity slot lists the scope the line named", async () => {
+  // The read the command will run is scoped, so the candidates have to be:
+  // an id offered from the default scope is one that read cannot reach.
+  const dir = await Deno.makeTempDir();
+  try {
+    const path = `${dir}/space.sqlite`;
+    seedScopedSpace(path);
+    assertEquals(
+      (await liveCandidates(lineFor(`cf inspect piece ${path} `)))
+        .candidates.map((candidate) => candidate.value),
+      ["of:in-space"],
+    );
+    assertEquals(
+      (await liveCandidates(lineFor(`cf inspect piece ${path} --scope other `)))
+        .candidates.map((candidate) => candidate.value),
+      ["of:in-other"],
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
   }
 });
 

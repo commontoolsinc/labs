@@ -710,6 +710,11 @@ async function spaceCandidates(): Promise<ProviderResult> {
  * Entities in the space a positional already names, as `cf inspect entities`
  * lists them: the label reads, the id is what the next positional takes.
  *
+ * The line's `--branch` and `--scope` are passed through, so the candidates
+ * come from the view the command will read rather than the space's default
+ * one — an entity present on one branch and not another is offered where the
+ * command would find it.
+ *
  * Local stores only. `--remote` fetches a snapshot over the network before it
  * can list anything, which is a round trip a keystroke should not start.
  */
@@ -727,10 +732,27 @@ async function entityCandidates(
     // with no `--limit`, so a completed id is one that command names too. The
     // listing reports its own extent, and a capped one is still every
     // candidate this slot can honestly offer.
-    return values(shapeEntityCandidates(listEntityModels(space).entities));
+    const listing = listEntityModels(space, entityListingView(line));
+    return values(shapeEntityCandidates(listing.entities));
   } finally {
     space.close();
   }
+}
+
+/**
+ * The view of a space an inspect line names: its `--branch` and `--scope`.
+ *
+ * Absent from the line, each is left undefined so the listing applies the same
+ * default the command would. Separated from the read so a test can assert the
+ * view without a space DB.
+ */
+export function entityListingView(
+  line: CompletionLine,
+): { branch?: string; scope?: string } {
+  return {
+    branch: line.options.get("branch"),
+    scope: line.options.get("scope"),
+  };
 }
 
 /** Entity shape used by `shapeEntityCandidates`, structural so tests need no DB. */
@@ -809,6 +831,34 @@ function onlyOn(
     paths.has(line.path.join(" ")) ? provider(line) : Promise.resolve(NOTHING);
 }
 
+/** The commands whose `--root` is the directory their sources resolve against. */
+const ROOT_DIRECTORY_COMMANDS: readonly string[] = [
+  "check",
+  "piece new",
+  "piece set-home",
+  "piece setsrc",
+  "piece survey",
+  "test",
+];
+
+/**
+ * `--root` by what it names: a source directory on the commands that resolve
+ * imports and authored paths against one, and on `cf inspect graph` the entity
+ * whose neighborhood the graph is drawn around.
+ *
+ * The graph's root is a node id, so it takes what the entity positionals take,
+ * read from the space the command already names.
+ */
+function rootCandidates(line: CompletionLine): Promise<ProviderResult> {
+  const command = line.path.join(" ");
+  if (command === "inspect graph") return entityCandidates(line);
+  return Promise.resolve(
+    ROOT_DIRECTORY_COMMANDS.includes(command)
+      ? directive({ kind: "dirs" })
+      : NOTHING,
+  );
+}
+
 /** API URLs worth offering: the environment's, plus the local dev server. */
 function apiUrlCandidates(): ProviderResult {
   const candidates: Candidate[] = [];
@@ -841,13 +891,19 @@ const OPTION_VALUE_PROVIDERS: Readonly<
   // `--remote` takes what `--api-url` takes: the toolshed to read from.
   remote: () => Promise.resolve(apiUrlCandidates()),
   identity: () => Promise.resolve(directive({ kind: "files", glob: "*.key" })),
-  root: () => Promise.resolve(directive({ kind: "dirs" })),
+  // A source directory on the commands that compile one, and an entity on
+  // `inspect graph`.
+  root: rootCandidates,
   test: patternFiles,
   // A data file has no fixed extension; the shell's own file completion is the
   // only honest candidate set.
   datafile: () => Promise.resolve(directive({ kind: "files" })),
-  // `cf space clone --to <dir>` builds a clone directory.
-  to: () => Promise.resolve(directive({ kind: "dirs" })),
+  // A clone directory on `space clone`, and a sequence number on `inspect
+  // diff`.
+  to: onlyOn(
+    ["space clone"],
+    () => Promise.resolve(directive({ kind: "dirs" })),
+  ),
   // `cf inspect --dir` is an extra directory to search for space DBs.
   dir: () => Promise.resolve(directive({ kind: "dirs" })),
   // `cf inspect html --out` and `cf check --output` write a file.

@@ -983,21 +983,21 @@ source <(cf completion bash)
 Completion covers the command tree — subcommands, flags, and enumerated values
 such as `--log-level` — plus live values read from the fabric:
 
-| Slot                                    | Completes to                                                  |
-| --------------------------------------- | ------------------------------------------------------------- |
-| `--piece`                               | the space's slugs, then its piece ids                         |
-| `cf call <callable>`                    | the piece's callables, annotated with the doc comment on each |
-| `cf get`/`cf set <path>`                | cell keys, one path segment at a time                         |
-| `cf get --select`/`--schema`            | field paths into the value, and their `@` form                |
-| `piece set-slug <slug>`                 | the space's slugs                                             |
-| `piece link <source>/<target>`          | `pieceId/path/to/field` endpoints                             |
-| `--space`, a positional space           | space DIDs of local memory-v2 stores                          |
-| `inspect <entity>`                      | that space's entities, as `cf inspect entities` lists them    |
-| `cf wish <target>`, `--scope`           | the vocabulary `cf wish --help` enumerates                    |
-| `--identity`, pattern arguments         | `*.key` / `*.tsx` files, via the shell                        |
-| `--datafile`, `--out`, `--output`       | any file, via the shell                                       |
-| `--dir`, `--to`, `--root`, a mountpoint | a directory, via the shell                                    |
-| `--remote`                              | what `--api-url` takes, in the `--remote=<url>` spelling      |
+| Slot                                                         | Completes to                                                  |
+| ------------------------------------------------------------ | ------------------------------------------------------------- |
+| `--piece`                                                    | the space's slugs, then its piece ids                         |
+| `cf call <callable>`                                         | the piece's callables, annotated with the doc comment on each |
+| `cf get`/`cf set <path>`                                     | cell keys, one path segment at a time                         |
+| `cf get --select`/`--schema`                                 | field paths into the value, and their `@` form                |
+| `piece set-slug <slug>`                                      | the space's slugs                                             |
+| `piece link <source>/<target>`                               | `pieceId/path/to/field` endpoints                             |
+| `--space`, a positional space                                | space DIDs of local memory-v2 stores                          |
+| `inspect <entity>`, `inspect graph --root`                   | that space's entities, as `cf inspect entities` lists them    |
+| `cf wish <target>`, `cf wish --scope`                        | the vocabulary `cf wish --help` enumerates                    |
+| `--identity`, pattern arguments                              | `*.key` / `*.tsx` files, via the shell                        |
+| `--datafile`, `--out`, `--output`, `space clone --from`      | any file, via the shell                                       |
+| `--dir`, a source `--root`, `space clone --to`, a mountpoint | a directory, via the shell                                    |
+| `--remote`                                                   | what `--api-url` takes, in the `--remote=<url>` spelling      |
 
 A callable is annotated with what its author said it is for, falling back to its
 kind where they wrote nothing. A wrapper or deprecated verb — the two
@@ -1023,6 +1023,14 @@ back as a field list, so the two sets cannot drift. `cf call`'s and `cf exec`'s
 projections shape a verb's result rather than the piece's root, and are not
 completed from it; `cf wish`'s resolution writes to the space, and a Tab must
 not.
+
+An option name can mean two things on two commands, so the ones that do are
+completed per command rather than by name. `--root` is a source directory on the
+commands that compile one and an entity on `cf inspect graph`; `--to` is a clone
+directory on `cf space clone` and a sequence number on `cf inspect diff`;
+`--from` and `--scope` divide the same way. Where the value is a sequence number
+the slot offers nothing, which is the honest answer for a word no set can name —
+offering the wrong set is worse than offering none.
 
 An option's value completes the same whether it is written after a space or
 after `=`, and every spelling of a target reaches the same slots behind it: the
