@@ -6,7 +6,10 @@ import {
 import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { toStructuredDebugValue } from "@commonfabric/data-model/value-debug";
+import {
+  toCompactDebugString,
+  toStructuredDebugValue,
+} from "@commonfabric/data-model/value-debug";
 import {
   type SiteTable,
   siteTableCause,
@@ -195,12 +198,14 @@ import {
 } from "./utils.ts";
 
 /**
- * Maximum nesting depth of a console argument's debug rendering. This is a
- * bound on the size of a message that pattern code can emit in a loop, not a
- * crossability measure: the conversion produces a value the transport carries
- * however deep it runs.
+ * Maximum nesting depth of a console argument's debug rendering. The bound is
+ * on the size of a message pattern code can emit in a loop; the transport
+ * imposes none of its own. Two of the levels are the rendering's, spent on the
+ * shapes this bridge exists to carry -- a tag around an instance's encoded
+ * contents, a ref beside a query result's data -- so the depth of the logged
+ * value that survives is smaller than the number here.
  */
-const MAX_CONSOLE_DEBUG_DEPTH = 5;
+const MAX_CONSOLE_DEBUG_DEPTH = 7;
 const blobUploadCodec = newDefaultJsonCodecEngine();
 
 /** Each registered logger's enabled state and level. */
@@ -487,7 +492,16 @@ export function toConsoleDebugValue(value: unknown): FabricValue {
  * Exported for testing.
  */
 export function toConsoleWireValue(value: unknown): RealmEncodedValue {
-  return realmFromFabricValue(toConsoleDebugValue(value));
+  try {
+    return realmFromFabricValue(toConsoleDebugValue(value));
+  } catch {
+    // An object forged onto a `FabricPrimitive`'s prototype is a `FabricValue`
+    // by every check and still has no encoding, so the encode is the one step
+    // here that a hostile argument can stop. Naming it is what the conversion
+    // does for a primitive it cannot descend anyway, and a name always
+    // encodes.
+    return realmFromFabricValue(toCompactDebugString(value));
+  }
 }
 
 export const hasExplicitSubscriptionSchema = (schema: unknown): boolean =>

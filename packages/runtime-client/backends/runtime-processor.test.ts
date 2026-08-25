@@ -1424,6 +1424,19 @@ describe("toConsoleDebugValue", () => {
         .toEqual({ a: Symbol.for("tag") });
     });
 
+    it("returns a forged `FabricPrimitive` named rather than throwing", () => {
+      // An object on a `FabricPrimitive`'s prototype passes every membership
+      // check and has no encoding: `isValidFabricValue()` says true and the
+      // encode refuses. The handler must not throw over it, since a pattern
+      // can build one and the throw would abort its own `console.log()`.
+      const forged = Object.create(FabricBytes.prototype);
+      expect(isValidFabricValue(toConsoleDebugValue(forged))).toBe(true);
+      expect(() => realmFromFabricValue(toConsoleDebugValue(forged)))
+        .toThrow();
+      expect(fabricFromRealmValue(toConsoleWireValue(forged)))
+        .toBe("/Bytes(...)");
+    });
+
     it("returns a unique symbol as its marker", () => {
       // Unlike an interned one, this has no encoding: the description is all
       // that can be said about it on the far side.
@@ -1519,9 +1532,20 @@ describe("toConsoleDebugValue", () => {
 
   describe("depth limit", () => {
     it("returns the elision marker where the nesting runs past the limit", () => {
-      const deep = { l1: { l2: { l3: { l4: { l5: { l6: "too deep" } } } } } };
-      expect(toConsoleDebugValue(deep))
-        .toEqual({ l1: { l2: { l3: { l4: { "/...": "object" } } } } });
+      const deep = {
+        l1: { l2: { l3: { l4: { l5: { l6: { l7: { l8: "too deep" } } } } } } },
+      };
+      expect(toConsoleDebugValue(deep)).toEqual({
+        l1: { l2: { l3: { l4: { l5: { l6: { "/...": "object" } } } } } },
+      });
+    });
+
+    it("returns a value nested as deep as a reader of plain data needs", () => {
+      // The limit sits above what the old walk reached, because the rendering
+      // spends levels of its own on an instance's tag and a query result's
+      // ref. Plain data is legible past where it used to stop.
+      const deep = { l1: { l2: { l3: { l4: { l5: { l6: "leaf" } } } } } };
+      expect(toConsoleDebugValue(deep)).toEqual(deep);
     });
   });
 
