@@ -237,6 +237,34 @@ describe("syncArgumentLinkTargets", () => {
     expect(syncedIds).toContain(id(behindReadable));
   });
 
+  it("treats an `asCell` marker behind a `$ref` as a reference, and an unresolvable `$ref` as readable", async () => {
+    const { make, commit } = docBuilder("ref arms");
+    const behindRef = make("behind ref", { n: 1 });
+    const viaRef = make("via ref", { child: behindRef });
+    const behindMissing = make("behind missing", { n: 2 });
+    const viaMissing = make("via missing", { child: behindMissing });
+    const root = make("root", { r: viaRef, m: viaMissing });
+    await commit();
+    await run(root, {
+      type: "object",
+      properties: {
+        r: { "$ref": "#/$defs/RefCell" },
+        m: { "$ref": "#/$defs/Missing" },
+      },
+      "$defs": {
+        RefCell: { type: "object", asCell: ["cell"] },
+      },
+    } as JSONSchema);
+    // The resolved definition carries `asCell`: target synced, not walked.
+    expect(syncedIds).toContain(id(viaRef));
+    expect(syncedIds).not.toContain(id(behindRef));
+    // An unresolvable reference is not a reference marker; the target is
+    // walked under it (the schema resolves to nothing, so the scan falls
+    // back rather than going opaque).
+    expect(syncedIds).toContain(id(viaMissing));
+    expect(syncedIds).toContain(id(behindMissing));
+  });
+
   it("gives an undeclared subtree below a declared root the two-hop budget", async () => {
     const { make, commit } = docBuilder("budget");
     const third = make("third", { n: 3 });
