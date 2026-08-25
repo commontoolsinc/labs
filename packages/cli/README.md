@@ -983,15 +983,35 @@ source <(cf completion bash)
 Completion covers the command tree — subcommands, flags, and enumerated values
 such as `--log-level` — plus live values read from the fabric:
 
-| Slot                            | Completes to                                |
-| ------------------------------- | ------------------------------------------- |
-| `--piece`                       | piece ids, annotated with each piece's name |
-| `cf call <callable>`            | the piece's callables, as `cf piece verbs`  |
-| `cf get`/`cf set <path>`        | cell keys, one path segment at a time       |
-| `piece link <source>/<target>`  | `pieceId/path/to/field` endpoints           |
-| `--space`                       | space DIDs of local memory-v2 stores        |
-| `--identity`, pattern arguments | `*.key` / `*.tsx` files, via the shell      |
-| `--datafile`                    | any file, via the shell                     |
+| Slot                            | Completes to                                   |
+| ------------------------------- | ---------------------------------------------- |
+| `--piece`                       | the space's slugs, then its piece ids          |
+| `cf call <callable>`            | the piece's callables, as `cf piece verbs`     |
+| `cf get`/`cf set <path>`        | cell keys, one path segment at a time          |
+| `cf get --select`/`--schema`    | field paths into the value, and their `@` form |
+| `piece set-slug <slug>`         | the space's slugs                              |
+| `piece link <source>/<target>`  | `pieceId/path/to/field` endpoints              |
+| `--space`                       | space DIDs of local memory-v2 stores           |
+| `--identity`, pattern arguments | `*.key` / `*.tsx` files, via the shell         |
+| `--datafile`                    | any file, via the shell                        |
+
+A projection's grammar is its own and not the cell path's: a list splits on `,`
+and a path on `.`, and a trailing `@` asks for a position's address rather than
+its value. A path below an array names a field of each element, however many
+array layers deep it sits, because that is what the projection does with one.
+
+A bare `@` asks the read for its own address and is accepted wherever an element
+of the list begins — with one exception `--schema` makes: an argument _starting_
+with `@` is its `@file` form, so `--schema @` is an empty path while
+`--schema revision,@` is the suffix. A field named `true` or `false` is offered
+wherever it is not the whole argument: written alone it is a boolean JSON Schema
+to `--schema` and refused by `--select`, and written as `revision,true` it is an
+ordinary name to both. Completion restates none of that — it puts each
+prospective candidate back through the flag's own parser and offers what comes
+back as a field list, so the two sets cannot drift. `cf call`'s and `cf exec`'s
+projections shape a verb's result rather than the piece's root, and are not
+completed from it; `cf wish`'s resolution writes to the space, and a Tab must
+not.
 
 An option's value completes the same whether it is written after a space or
 after `=`, and every spelling of a target reaches the same slots behind it: the

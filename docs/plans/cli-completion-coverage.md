@@ -80,10 +80,10 @@ read before picking one up; this table is the roll-up.
 | 1 | Inline `--option=value` drops every live candidate | correctness | done |
 | 2 | Flags offered past a `stopEarly()` boundary | correctness | done |
 | 3 | Target resolution lags the reference grammar | correctness | done |
-| 4 | Verb flags do not complete | pattern vocabulary | shaper now, wiring after step 10 |
-| 5 | Result field paths for `get` and `wish` | pattern vocabulary | not started |
+| 4 | Verb flags do not complete | pattern vocabulary | shaper done, wiring after step 10 |
+| 5 | Result field paths for `get` and `wish` | pattern vocabulary | `get` done, `wish` refused |
 | 6 | Result field paths for `call` and `exec` | pattern vocabulary | needs step 10 |
-| 7 | Slugs never complete | pattern vocabulary | not started |
+| 7 | Slugs never complete | pattern vocabulary | done |
 | 8 | `--space` has no source a caller recognizes | first link | partly settled |
 | 9 | A verb's annotation is its kind, not its prose | comprehension | not started |
 | 10 | Wrapper and deprecated verbs are offered unmarked | comprehension | not started |
@@ -93,29 +93,27 @@ read before picking one up; this table is the roll-up.
 | 14 | `wish` targets and scopes | CLI vocabulary | not started |
 | 15 | Remaining path-shaped and enumerable values | CLI vocabulary | not started |
 | 16 | Two provider entries that can never fire | hygiene | not started |
-| 17 | The README table omits the top-level spellings | hygiene | not started |
+| 17 | The README table omits the top-level spellings | hygiene | done |
 | 18 | A live-provider test seam | mechanism | done |
 | 19 | A gate that fails when a new slot has no decision | mechanism | not started |
 
-**What can be picked up today.** Everything except one wiring change and one
-item. Items 5 and 7 are independent of each other and of the surface work. Items
-9, 10, 12, 13, 14, 15, 16 and 17 are mechanical and can be taken at any time.
+**What can be picked up today.** Items 9, 10, 12, 13, 14, 15 and 16 are
+mechanical and can be taken at any time. Item 19 is the other half of the
+mechanism item 18 landed.
 
-Item 4 splits. Turning a verb's `inputSchema` into `--kebab-case` candidates is
-a pure function of the listing, belongs beside `shapeVerbCandidates`, needs no
-fabric to test, and is the same function under either grammar. Build it now.
-Only its wiring — which slot receives it — waits, because step 10 decides
-whether a verb's fields are written before the marker or after it. The position
-offers nothing until then, which is the honest state for one whose vocabulary
-the command cannot yet name.
+Item 4's candidates are built and its wiring waits: step 10 decides whether a
+verb's fields are written before the `--` marker or after it, and the position
+offers nothing until then. That is the honest state for one whose vocabulary the
+command cannot yet name.
 
 Item 6 is the one to leave alone. Under the current grammar it needs the whole
 line read for context, since a projection precedes the verb it shapes; after
 step 10 the verb is already before the cursor and it needs nothing. Building it
 now means building the machinery that step 10 makes unnecessary.
 
-Items 8 and 11 hold open decisions and are not work yet. Item 19 is the other
-half of the mechanism item 18 landed.
+Items 8 and 11 hold open decisions and are not work yet. Item 5's `wish` half is
+closed rather than open: resolving a wish writes, so the slot cannot be
+completed from a resolution as it stands.
 
 ## What this list covers, and what it cannot
 
@@ -262,56 +260,64 @@ cf call --piece <piece> addItem -- --ti<TAB>     # before it
 ```
 
 **The candidates and their slot are separable, and only the slot waits.**
-Turning an `inputSchema` into `--kebab-case` candidates is a pure function of
-the listing. It belongs beside `shapeVerbCandidates`, is testable with no
-fabric, and is the same function whichever position the fields are written in —
-so it can be built and landed before step 10 decides.
+`shapeVerbFlagCandidates` in `lib/completion/verb-flags.ts` turns a listing
+row's `inputSchema` into the flags the parser accepts: one per declared field,
+kebab-cased, both spellings of a boolean, the value flags of a non-object input,
+and the generic ones every verb takes. `--help` is among them, because it falls
+inside the callable's section where it reaches the verb and prints that verb's
+own page.
+
+It reads `declaredVerbFlags` in `lib/exec-schema.ts`, which is the enumeration
+the verb's help page renders. Two readers of one schema is how a flag comes to
+be accepted by the parser and named by neither surface, or the reverse.
+
+The module sits beside the providers rather than inside `providers.ts` because
+reading a declared input resolves `callable.ts`, which costs about a third of a
+whole static completion — and `providers.ts` is resolved on every Tab.
 
 The wiring is what waits. `liveCandidates` dispatches on `option-value` and
-`argument` slots only, so neither position reaches a provider today, and routing
-it to the current position would teach the spelling step 10 retires while the
+`argument` slots only, so neither position reaches a provider, and routing it to
+the current position would teach the spelling step 10 retires while the
 retirement is being taught.
-
-The data needs no new request. `listPieceCallables` — the call
-`callableCandidates` already makes — returns each verb's `inputSchema`, and
-`flagNameForKey` in `lib/exec-schema.ts` is the kebab-case mapping the parser
-itself applies. A verb declaring `title` accepts `--title`, and both halves of
-that sentence are already in the process.
-
-`--help` belongs in this slot too: it falls inside the callable's section, where
-it reaches the verb and prints that verb's own page.
 
 The slot past the marker is not this one. It belongs to the read options, and
 completing it from the verb's declared result is item 6.
 
-### 5. Result field paths for `get` and `wish`
+### 5. Result field paths for `get`, and why not for `wish`
 
 `--select` takes comma-separated, dot-separated field paths into the value a
-read returns, and `--schema` accepts the same spelling. Both complete nothing.
+read returns, and `--schema` accepts the same spelling. On `cf get` and
+`cf piece get` both complete, in the projection's own grammar rather than the
+cell-path one: a list splits on `,` and a path on `.`, where `cellPathCandidates`
+walks `/`. A segment ending in `@` asks for that position's address rather than
+its value, and a bare `@` asks the read for its own, so both spellings of a
+position are offered.
 
-The grammar is its own, and is not the cell-path grammar:
-`parseSelectProjection` in `lib/cell-selection.ts` splits a list on `,` and a
-path on `.`, where `cellPathCandidates` walks `/`. A segment ending in `@`
-asks for that position's address rather than its value, and a bare `@` asks the
-read for its own — so a complete candidate set offers both spellings of a
-position.
+The vocabulary needs no request the slot does not already have: the value being
+projected is the one at the piece and path the line names, which `getCellValue`
+reads. A path below an array names a field of each element rather than an index,
+because that is what a projection does with one and an index there is refused.
+A key the concise grammar cannot carry is left out rather than offered in a form
+that does not work.
 
-For `cf get` the vocabulary needs no new request and no new reachability: the
-value being projected is the one at the piece and path already named, which
-`getCellValue` reads and `keysOf` already turns into keys. That makes this the
-cheapest high-value item on the list, and independent of item 4.
+**`wish` is refused, and the plan's own precondition is what refuses it.**
+Resolving a wish writes. `resolveWish` runs a single-node pattern in the target
+space and commits the cell it lands on, so the first Tab on a query that has not
+been resolved before adds revisions to the space — measured against a local
+server as 5 revisions, 2 commits and 4 heads for a query not seen before, where
+`piece ls`, `get` and `piece verbs` each add none. A second Tab on the same
+query adds nothing, because the cell is keyed by the query; a caller editing a
+query writes once per spelling they pass through.
 
-`cf wish` projects the resolved target the same way. A wish declares no result
-shape the way a verb declares an `outputSchema`, but a shape is not what this
-provider reads: it reads a value and takes its keys, and a wish is a read. So
-the target resolves and its keys are the candidates, the same walk `cf get`
-needs. `wish` is also the one command whose `--space` is optional, so this
-completes from an identity alone.
+That is a keystroke with a side effect, which is the bar this item said to clear
+before building it, and it is not cleared. Completing `wish --select` needs a
+resolution that reads without committing, which is a change to `resolveWish`
+rather than to completion.
 
-Confirm before building it that resolving a wish writes nothing. The profile
-ordering consults a most-recently-used list, and a Tab that reordered it would
-be a keystroke with a side effect — which is a bar completion has to clear
-whatever the candidates are worth.
+`call` and `exec` are the other two commands carrying these flags, and their
+projection names positions in a verb's result rather than in the piece's root.
+Completing them from the root would offer plausible names for a different value,
+which is item 6's subject and not this one.
 
 ### 6. Result field paths for `call` and `exec`
 
@@ -356,14 +362,24 @@ line that completes as it is typed and one that completes however it is edited.
 
 ### 7. Slugs never complete
 
-A slug is a valid `--piece` value — the alias grammar names it alongside the
-bare id — and `listSpaceSlugs` enumerates every slug a space's index records.
-Completion offers ids only. `piece set-slug` takes a slug positionally and
-completes nothing there either.
+The `--piece` slot offers every slug the space's index records, then every piece
+id. Both are values the flag takes, and the slug is the readable half of that
+vocabulary, so it leads. The annotation says which a candidate is and, where the
+slug resolves to a piece the listing named, what it points at.
 
-Offer slugs beside ids in the `--piece` slot, annotated so the two are
-distinguishable. A slug is the readable half of this vocabulary, so it belongs
-above the opaque id in the candidate order.
+`piece set-slug`'s slug positional completes the same set: naming an existing
+slug re-points it, which is the case completion helps with, and a slug being
+coined for the first time is a word nothing can offer.
+
+The listing is bounded by the space's index, which names slugs assigned since it
+existed — so an older slug still resolves and is not offered. Nothing can
+enumerate what it was never told the name of.
+
+The slot asks for both listings, so `loadPieces` is called twice. Measured
+against a local server across cold processes, one listing takes 333–347 ms and
+both together 345–439 ms: the second rides the session the first opened, and
+its cost sits under the run-to-run noise. A combined listing would be a new API
+for no measured gain, so the two calls stay.
 
 ## The first link
 
@@ -512,11 +528,10 @@ internal. Neither entry is reachable.
 
 ### 17. The README table omits the top-level spellings
 
-The completion table in `packages/cli/README.md` lists `piece call`, `piece
-get`, and `piece set`. The top-level `cf call`, `cf get`, and `cf set` complete
-identically and are the spellings the surface leads with. The table also
-predates everything this plan adds, so it is the document to update as each item
-lands.
+The completion table in `packages/cli/README.md` names `call`, `get` and `set`,
+which are the spellings the surface leads with, and says that the `piece `
+spellings complete identically. It is the document each item updates as it
+lands, which is the obligation rather than the one edit.
 
 ## Mechanism
 

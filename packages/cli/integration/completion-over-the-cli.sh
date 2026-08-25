@@ -211,17 +211,19 @@ if [ -n "$SPACE_DID" ]; then ok "the space resolves to $SPACE_DID"; else
   bad "no space DID on the child's stored link"
 fi
 
-step "2. The piece slot offers ids the same command can then read"
-# The chain's second link. An id that completes but which the dispatcher
+step "2. The piece slot offers values the same command can then read"
+# The chain's second link. A value that completes but which the dispatcher
 # cannot reach would be worse than no candidate: it teaches a caller a target
-# that does not exist. Every id offered is read back here rather than assumed.
+# that does not exist. Every one offered is read back here rather than assumed.
 PIECE_SLOT=$(complete_at "cf call $LINE_ARGS --piece ")
-check "$BOARD" "$PIECE_SLOT" "the piece slot offers the deployed board"
+check "board,$BOARD" "$(candidates_at "cf call $LINE_ARGS --piece ")" \
+  "the piece slot offers the deployed board by slug and by id"
 READABLE=0
 UNREADABLE=0
-while IFS= read -r id; do
-  [ -z "$id" ] && continue
-  if [ "$(succeeds $CF get --quiet --piece "$id" $ARGS '$NAME')" = "1" ]; then
+while IFS= read -r target; do
+  [ -z "$target" ] && continue
+  if [ "$(succeeds $CF get --quiet --piece "$target" $ARGS '$NAME')" = "1" ]
+  then
     READABLE=$((READABLE + 1))
   else
     UNREADABLE=$((UNREADABLE + 1))
@@ -229,26 +231,29 @@ while IFS= read -r id; do
 done <<EOF
 $PIECE_SLOT
 EOF
-check "0" "$UNREADABLE" "every completed piece id reads back ($READABLE checked)"
-# The annotation column is what makes an opaque id legible.
+check "0" "$UNREADABLE" "every completed --piece value reads back ($READABLE checked)"
+# The annotation column is what makes an opaque id legible, and what keeps a
+# slug from being read as one.
 check "Completion fixture" \
   "$(annotation_at "cf call $LINE_ARGS --piece " "$BOARD")" \
   "the id is annotated with the piece's name"
+check "slug for Completion fixture" \
+  "$(annotation_at "cf call $LINE_ARGS --piece " board)" \
+  "and the slug says what it is and what it points at"
 
-step "3. The slug the same slot accepts does not complete"
-check "Completion fixture" \
-  "$($CF get --quiet --piece board $ARGS '$NAME' 2>/dev/null | tr -d '"')" \
-  "the slug is a --piece value the command accepts"
-gap "cf call $LINE_ARGS --piece bo" "a slug in the --piece slot"
+step "3. The slug reaches its own positional too"
+check "board" "$(candidates_at "cf piece set-slug $LINE_ARGS ")" \
+  "piece set-slug completes the slugs it can re-point"
 
 step "4. Both spellings of an option complete the same values"
 # `--piece=<TAB>` and `--piece <TAB>` are one slot. The inline spelling is the
 # one `tokenizeLine` exists to serve, and its candidates carry the `--piece=`
 # back so the shell replaces the whole token.
-check "$BOARD" "$(complete_at "cf call $LINE_ARGS --piece ")" \
+check "board,$BOARD" "$(candidates_at "cf call $LINE_ARGS --piece ")" \
   "the spaced spelling completes"
-check "--piece=$BOARD" "$(complete_at "cf call $LINE_ARGS --piece=")" \
-  "the inline spelling completes the same value, prefix attached"
+check "--piece=board,--piece=$BOARD" \
+  "$(candidates_at "cf call $LINE_ARGS --piece=")" \
+  "the inline spelling completes the same values, prefix attached"
 # The directive half of the same slot reaches the shell either way.
 check ":cf:files *.key" "$(directives_at "cf call $LINE_ARGS --identity ")" \
   "the spaced --identity spelling emits its files directive"
@@ -331,13 +336,22 @@ check "1" "$(complete_at "cf call $LINE_ARGS --piece board --" |
   grep -c '^--invocation$')" \
   "--invocation is still offered before the callable name"
 
-step "8. The verb's own fields do not complete"
+step "8. The verb's own fields do not complete yet"
 # The position where a caller has least to go on: these names are the pattern
-# author's vocabulary, not the CLI's.
+# author's vocabulary, not the CLI's. `shapeVerbFlagCandidates` derives them
+# from the listing's `inputSchema` — the same enumeration the help page below
+# renders, so a flag the parser accepts cannot be named by one and not the
+# other. Only the slot waits: step 10 of docs/plans/cli-surface-shape.md
+# decides whether a verb's fields are written before the marker or after it.
 check "pinned,title" "$($CF piece verbs --piece board $ARGS --json 2>/dev/null |
   jq -r '.verbs[] | select(.name == "addItem") | .inputSchema.properties |
     keys | sort | join(",")')" \
   "addItem declares the fields its flags are named for"
+HELP=$($CF call --piece board $ARGS addItem --help 2>/dev/null)
+check "1" "$(printf '%s\n' "$HELP" | grep -c -- '^  --title <string>')" \
+  "and its help page names the flag each one is written as"
+check "1" "$(printf '%s\n' "$HELP" | grep -c -- '^  --pinned | --no-pinned')" \
+  "including both spellings of a boolean field"
 check "1" "$(succeeds $CF call --quiet --piece board $ARGS --invocation flags-1 \
   addItem -- --title 'Flagged item')" "and the parser accepts them as flags"
 gap "cf call $LINE_ARGS --piece board addItem -- --" \
@@ -371,15 +385,47 @@ check "1" "$(complete_at "cf get $LINE_ARGS --piece board " |
   grep -c '^addItem$')" \
   "and the cell-path slot offers it anyway"
 
-step "11. Result field paths do not complete"
+step "11. Result field paths complete in the projection's own grammar"
 # --step because the board carries a computed value and a projection reads
 # through the whole result: the same reason the verb walkthrough steps before
 # it projects.
 check "dark" "$($CF get --quiet --piece board $ARGS --step \
   --select settings.theme 2>/dev/null | jq -r '.settings.theme')" \
   "a --select field path is a projection the command reads"
-gap "cf get $LINE_ARGS --piece board --select " "--select field paths"
-gap "cf get $LINE_ARGS --piece board --schema " "--schema field paths"
+# Both spellings of a position, plus the bare suffix naming the read's own
+# address. The list splits on `,` and a path on `.` — not the `/` a cell path
+# walks — so a candidate carries back everything already typed.
+check "1" "$(complete_at "cf get $LINE_ARGS --piece board --select " |
+  grep -cx '@')" "a bare @ names the read source's own address"
+check "settings.density,settings.density@,settings.theme,settings.theme@" \
+  "$(candidates_at "cf get $LINE_ARGS --piece board --select settings.")" \
+  "a nested position offers its value and its address spellings"
+check "revision,settings,revision,settings@" \
+  "$(candidates_at "cf get $LINE_ARGS --piece board --select revision,set")" \
+  "a second element carries the first one back with it"
+# An array is projected element-wise, so a segment below one names a field of
+# each element. An index there is refused by the command.
+check "1" "$(complete_at "cf get $LINE_ARGS --piece board --select items." |
+  grep -cx 'items.label')" "a position below an array offers the element's fields"
+check "0" "$(succeeds $CF get --quiet --piece board $ARGS --step \
+  --select items.0.label)" "and an index in that position is refused"
+# `--schema` reads the same field list, and reads two other things that are
+# recognized by their first character.
+check "1" "$(complete_at "cf get $LINE_ARGS --piece board --schema set" |
+  grep -cx 'settings')" "--schema completes the same field list"
+check "" "$(complete_at "cf get $LINE_ARGS --piece board --schema @")" \
+  "and offers no field path where the word names a schema file"
+# The projection is relative to the path the line already names, the same way
+# the read is.
+check "@,density,density@,theme,theme@" \
+  "$(candidates_at "cf get $LINE_ARGS --piece board settings --select ")" \
+  "a path positional moves the projection's own root with it"
+check "dark" "$($CF get --quiet --piece board $ARGS settings --select theme \
+  2>/dev/null | jq -r '.theme')" "and the command reads it from there too"
+# A verb's result is a different vocabulary and is not this one; `cf call`'s
+# projection stays empty until the verb before it can be read.
+check "" "$(complete_at "cf call $LINE_ARGS --piece board --select ")" \
+  "a call's projection is not completed from the piece's root"
 
 step "12. A name on two cells completes against the one the dispatcher reaches"
 # The child is handed a callable named `record` in its arguments AND declares
