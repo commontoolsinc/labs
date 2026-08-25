@@ -1,9 +1,20 @@
+---
+status: historical
+created: 2026-08-24
+archived: 2026-08-24
+reason: "Measurement record: the lunch-poll ON-skip lift gate run at merged head f14e44830 — 7/10, NO LIFT, with the b04 client-start class closed on this file's own evidence and the residue isolated as a write-side program-materialization loss whose cause is deliberately not determined; the distilled finding lives in verification-coverage.md OW45."
+---
+
 # lunch-poll ON-skip lift gate — measurement report
 
 *Archived verbatim 2026-08-24; the raw run artifacts it cites — the 11 run
 directories with their logs, stores and stats, the `probes/` runs,
 `final-ledger.txt` and the harness — are not in the repo and live on the
-measuring box at `/Users/berni/labs-worktrees/lunch-lift-evidence/`.*
+measuring box at `/Users/berni/labs-worktrees/lunch-lift-evidence/`; the
+prescribing build report its Method cites (`catchup-start-build-report.md`)
+is off-repo too, and the gate method it fixed is restated in
+`docs/specs/server-side-execution/verification-coverage.md`'s LUNCH-POLL FILE
+ENTRY'S OWN GATE block.*
 
 Seat: run the lunch-poll gate evidence campaign at the merged head and,
 if the bar holds, lift the FILE entry for

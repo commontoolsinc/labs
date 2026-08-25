@@ -1,3 +1,10 @@
+---
+status: historical
+created: 2026-08-24
+archived: 2026-08-24
+reason: "Measurement record: topics tests and benchmarks ON vs OFF at tip 2ea87cea9 — the post-optimize regime confirmed on a growth-dominated workload, with the OW60 echo-drop guard measured at 0 fires in 20 journey runs; the distilled finding lives in verification-coverage.md OW60, and the bar the report declines to rule stays OW38's, the owner's."
+---
+
 # Topics tests + benchmarks, ON vs OFF — measurement report (2026-08-24)
 
 *Archived verbatim 2026-08-24; the raw run artifacts it cites (the per-run
