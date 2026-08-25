@@ -5530,15 +5530,19 @@ class SpaceReplica implements ISpaceReplica {
             overlay.delete(referrer);
             changed = true;
             logger.error("schema-doc-quarantine", () => [
-              `Document ${referrer} was delivered with a broken schema ` +
-              `ref: cid:${dep} is not delivered and verified in this ` +
-              `replica. Every delivered document's refs must resolve ` +
-              `within the delivered set ` +
+              `Document ${referrer} names schema document cid:${dep}, ` +
+              `which is not delivered and verified in this replica ` +
               `(docs/specs/content-addressed-schemas.md). The document ` +
-              `is quarantined — this replica keeps its previous state ` +
-              `for it until the next full evaluation (a watch.set or ` +
-              `reconnect) re-delivers it with its closure. This ` +
-              `indicates a client-side absorb/ordering defect ` +
+              `is HELD, not dropped: this replica keeps its previous ` +
+              `state for it, pulls the named schema document, and — if ` +
+              `the session's delivery cache answers that pull empty — ` +
+              `requests a full re-evaluation; the held document applies ` +
+              `as soon as the reference resolves. A line here is ` +
+              `therefore expected during recovery and is not by itself ` +
+              `a failure. It becomes one if it REPEATS for the same ` +
+              `pair, which means the recovery is not converging: either ` +
+              `a client-side absorb/ordering defect or a schema ` +
+              `document the producer never installed ` +
               `(verification-coverage.md OW61).`,
             ]);
           }
@@ -5708,12 +5712,20 @@ class SpaceReplica implements ISpaceReplica {
       // version, and treating it as one discards a park that is still
       // waiting (the sink's own pull for a not-yet-applied doc).
       if (upsert.seq > 0 && this.#parkedOnSchemaClosure.size > 0) {
-        this.#parkedOnSchemaClosure.delete(
-          docKey(
-            upsert.id as URI,
-            this.instanceKey(upsert.scope, undefined, upsert.scopeKey),
-          ),
+        const parkedKey = docKey(
+          upsert.id as URI,
+          this.instanceKey(upsert.scope, undefined, upsert.scopeKey),
         );
+        const parked = this.#parkedOnSchemaClosure.get(parkedKey);
+        // Supersede only with a revision at least as new as the parked
+        // one. A watch refresh can carry an OLDER seq than a revision
+        // already parked (the monotonicity guard above exists for
+        // exactly that), and dropping the park for it would discard the
+        // newer revision permanently — the schema's later arrival would
+        // then have nothing to release.
+        if (parked !== undefined && upsert.seq >= parked.upsert.seq) {
+          this.#parkedOnSchemaClosure.delete(parkedKey);
+        }
       }
       // The arrival wake fires on a FORWARD move — and on a same-seq
       // frame whose class arrives LATE (undefined -> defined): an entry
