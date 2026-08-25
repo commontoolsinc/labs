@@ -7,6 +7,12 @@ import {
   deployAgentSessionsDebugView,
 } from "../src/debug-view.ts";
 import { AgentFabricTarget } from "@commonfabric/agents-connector/fabric";
+import {
+  AGENT_CONNECTOR_WRITER_ID,
+  agentPrincipalSchema,
+  cellHasOwnerConfidentiality,
+  cellHasOwnerProtection,
+} from "@commonfabric/agents-connector/fabric-graph";
 import { createSession } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { Runtime } from "@commonfabric/runner";
@@ -25,6 +31,47 @@ import {
   sourceDescriptor,
 } from "./debug_view_support.ts";
 
+Deno.test("debug deployment requires verified command authorization", async () => {
+  const session = await createSession({
+    identity,
+    spaceName: `debug-command-authorization-${crypto.randomUUID()}`,
+  });
+  const storageManager = StorageManager.emulate({ as: session.as });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  try {
+    const manager = new PiecesController(session, runtime);
+    await manager.synced();
+    await installDefaultPattern(manager);
+    const target = await AgentFabricTarget.open({
+      runtime,
+      spaceDid: session.space,
+      ownerDid: session.as.did(),
+    });
+    const defaultLocation = defaultDebugPatternLocation();
+    await assertRejects(
+      () =>
+        deployAgentSessionsDebugView(manager, target, {
+          rootPath: defaultLocation.rootPath,
+          mainPath: fromFileUrl(
+            new URL(
+              "./fixtures/debug-view-without-command-authorization.tsx",
+              import.meta.url,
+            ),
+          ),
+        }),
+      Error,
+      "debug view has no verified command writer authorization",
+    );
+    assertEquals(target.commandsAreBound(), false);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
 Deno.test("debug deployment replaces a view when its pattern identity changes", async () => {
   const session = await createSession({
     identity,
@@ -42,6 +89,7 @@ Deno.test("debug deployment replaces a view when its pattern identity changes", 
     const target = await AgentFabricTarget.open({
       runtime,
       spaceDid: session.space,
+      ownerDid: session.as.did(),
     });
     const defaultLocation = defaultDebugPatternLocation();
     const alternateLocation = {
@@ -68,11 +116,7 @@ Deno.test("debug deployment replaces a view when its pattern identity changes", 
       defaultPattern,
       "pieceRegistry",
     );
-    assertEquals(registeredIds.includes(originalPieceId), false);
-    assertEquals(
-      registeredIds.filter((id) => id === alternatePieceId).length,
-      1,
-    );
+    assertEquals(registeredIds, []);
     const originalPiece = await manager.getPieceCell(
       originalPieceId,
       false,
@@ -112,6 +156,7 @@ Deno.test("debug deployment replaces a view when its pattern identity changes", 
           originalPieceId,
         ),
         false,
+        name,
       );
     }
   } finally {
@@ -137,6 +182,7 @@ Deno.test("debug deployment starts and restarts its registered view", async () =
     const target = await AgentFabricTarget.open({
       runtime,
       spaceDid: session.space,
+      ownerDid: session.as.did(),
     });
     const debugPieceId = await deployAgentSessionsDebugView(manager, target);
     const piece = await manager.get(debugPieceId, false);
@@ -189,6 +235,7 @@ Deno.test("debug deployment removes a view that fails to start", async () => {
     const target = await AgentFabricTarget.open({
       runtime,
       spaceDid: session.space,
+      ownerDid: session.as.did(),
     });
     const originalStartPiece = manager.startPiece;
     manager.startPiece = (() =>
@@ -216,6 +263,66 @@ Deno.test("debug deployment removes a view that fails to start", async () => {
   }
 });
 
+Deno.test("debug deployment protects its result before starting", async () => {
+  const session = await createSession({
+    identity,
+    spaceName: `debug-protection-failure-${crypto.randomUUID()}`,
+  });
+  const storageManager = StorageManager.emulate({ as: session.as });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  try {
+    const manager = new PiecesController(session, runtime);
+    await manager.synced();
+    const defaultPattern = await installDefaultPattern(manager);
+    const target = await AgentFabricTarget.open({
+      runtime,
+      spaceDid: session.space,
+      ownerDid: session.as.did(),
+    });
+    const originalSetupPersistent = manager.setupPersistent;
+    const originalStartPiece = manager.startPiece;
+    const originalEdit = runtime.edit;
+    let rejectProtection = false;
+    let startCount = 0;
+    manager.setupPersistent = (async (...args) => {
+      const piece = await originalSetupPersistent.apply(manager, args);
+      rejectProtection = true;
+      return piece;
+    }) as typeof manager.setupPersistent;
+    manager.startPiece = (async (...args) => {
+      startCount++;
+      return await originalStartPiece.apply(manager, args);
+    }) as typeof manager.startPiece;
+    runtime.edit = ((...args) => {
+      if (rejectProtection) {
+        throw new Error("debug result protection rejected");
+      }
+      return originalEdit.apply(runtime, args);
+    }) as typeof runtime.edit;
+    try {
+      await assertRejects(
+        () => deployAgentSessionsDebugView(manager, target),
+        Error,
+        "debug result protection rejected",
+      );
+    } finally {
+      manager.setupPersistent = originalSetupPersistent;
+      manager.startPiece = originalStartPiece;
+      runtime.edit = originalEdit;
+    }
+
+    assertEquals(startCount, 0);
+    assertEquals(await registeredPieceIds(defaultPattern, "pieceRegistry"), []);
+    assertEquals(await registeredPieceIds(defaultPattern, "recentPieces"), []);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
 Deno.test("debug deployment preserves a view when its replacement fails", async () => {
   const session = await createSession({
     identity,
@@ -233,6 +340,7 @@ Deno.test("debug deployment preserves a view when its replacement fails", async 
     const target = await AgentFabricTarget.open({
       runtime,
       spaceDid: session.space,
+      ownerDid: session.as.did(),
     });
     const originalPieceId = await deployAgentSessionsDebugView(
       manager,
@@ -262,7 +370,7 @@ Deno.test("debug deployment preserves a view when its replacement fails", async 
 
     assertEquals(
       await registeredPieceIds(defaultPattern, "pieceRegistry"),
-      [originalPieceId],
+      [],
     );
     await target.publish([{
       source: sourceDescriptor(),
@@ -296,6 +404,7 @@ Deno.test("debug deployment rolls back an aborted registration", async () => {
     const target = await AgentFabricTarget.open({
       runtime,
       spaceDid: session.space,
+      ownerDid: session.as.did(),
     });
     const originalPieceId = await deployAgentSessionsDebugView(
       manager,
@@ -410,7 +519,7 @@ Deno.test("debug deployment rolls back an aborted registration", async () => {
     });
     assertEquals(
       await registeredPieceIds(defaultPattern, "pieceRegistry"),
-      [originalPieceId],
+      [],
     );
     assertEquals(
       await registeredPieceIds(defaultPattern, "recentPieces"),
@@ -436,7 +545,12 @@ Deno.test("debug deployment rolls back an aborted registration", async () => {
     await abortRegistration(defaultLocation);
     assertEquals(
       await registeredPieceIds(defaultPattern, "recentPieces"),
-      [originalPieceId],
+      [],
+    );
+
+    assertEquals(
+      await deployAgentSessionsDebugView(manager, target),
+      originalPieceId,
     );
 
     await target.publish([{
@@ -453,9 +567,75 @@ Deno.test("debug deployment rolls back an aborted registration", async () => {
   }
 });
 
-Deno.test("debug deployment rejects stale registration across runtimes", async () => {
+Deno.test("debug deployment refuses a pre-created unprotected piece", async () => {
+  const session = await createSession({
+    identity,
+    spaceName: `debug-piece-squatting-${crypto.randomUUID()}`,
+  });
+  const storageManager = StorageManager.emulate({ as: session.as });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  try {
+    const manager = new PiecesController(session, runtime);
+    await manager.synced();
+    await installDefaultPattern(manager);
+    const target = await AgentFabricTarget.open({
+      runtime,
+      spaceDid: session.space,
+      ownerDid: session.as.did(),
+    });
+    const originalSetupPersistent = manager.setupPersistent;
+    let debugCause: string | undefined;
+    manager.setupPersistent = ((...args) => {
+      if (typeof args[2] === "string") debugCause = args[2];
+      throw new Error("captured debug view cause");
+    }) as typeof manager.setupPersistent;
+    try {
+      await assertRejects(
+        () => deployAgentSessionsDebugView(manager, target),
+        Error,
+        "captured debug view cause",
+      );
+    } finally {
+      manager.setupPersistent = originalSetupPersistent;
+    }
+    if (debugCause === undefined) {
+      throw new Error("debug view cause was not set");
+    }
+    const squattedPiece = runtime.getCell(
+      session.space,
+      debugCause,
+      SHALLOW_PIECE_SCHEMA,
+    );
+    const seed = runtime.edit();
+    squattedPiece.withTx(seed).setRawUntyped({ spoofed: true });
+    const seeded = await seed.commit();
+    if (seeded.error) throw seeded.error;
+
+    await assertRejects(
+      () => deployAgentSessionsDebugView(manager, target),
+      Error,
+      "refusing to adopt an unprotected debug view",
+    );
+    assertEquals(
+      cellHasOwnerProtection(
+        runtime.readTx(),
+        squattedPiece,
+        session.as.did(),
+      ),
+      false,
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("debug registration rejects writes from another owner", async () => {
   const server = newSharedServer();
-  const spaceName = `debug-registration-race-${crypto.randomUUID()}`;
+  const spaceName = `debug-registration-owner-${crypto.randomUUID()}`;
   const readerSession = await createSession({ identity, spaceName });
   const readerStorage = SharedServerStorageManager.connectTo(server, {
     as: readerSession.as,
@@ -471,118 +651,138 @@ Deno.test("debug deployment rejects stale registration across runtimes", async (
     const target = await AgentFabricTarget.open({
       runtime: readerRuntime,
       spaceDid: readerSession.space,
+      ownerDid: readerSession.as.did(),
     });
-    const originalPieceId = await deployAgentSessionsDebugView(
+    const debugPieceId = await deployAgentSessionsDebugView(
       readerManager,
       target,
     );
     await readerStorage.synced();
-
-    const writerSession = await createSession({ identity, spaceName });
-    const writerStorage = SharedServerStorageManager.connectTo(server, {
-      as: writerSession.as,
+    assertEquals(await registeredPieceIds(defaultPattern, "allPieces"), []);
+    const registration = readerRuntime.getCell(
+      readerSession.space,
+      `agent-sessions-debug-registration:${readerSession.as.did()}`,
+    );
+    assertEquals(
+      cellHasOwnerConfidentiality(
+        readerRuntime.readTx(),
+        registration,
+        readerSession.as.did(),
+      ),
+      true,
+    );
+    const attack = readerRuntime.edit();
+    attack.setCfcTrustSnapshot({
+      id: "principal:did:key:other-owner",
+      actingPrincipal: "did:key:other-owner",
     });
-    const writerRuntime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: writerStorage,
+    attack.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: AGENT_CONNECTOR_WRITER_ID,
     });
-    try {
-      const writerManager = new PiecesController(writerSession, writerRuntime);
-      await writerManager.synced();
-      const registration = writerRuntime.getCell(
-        writerSession.space,
-        "agent-sessions-debug-registration-v1",
-      );
-      await registration.sync();
-      const competingRegistration = {
-        cause: "agent-sessions-debug:competing",
-        pieceId: "fid1:competing-debug-piece",
-        patternIdentity: "fid1:competing-debug-pattern",
-        patternSymbol: "default",
-        retiredCauses: [],
-      };
-      const commitEntered = Promise.withResolvers<void>();
-      const releaseCommit = Promise.withResolvers<void>();
-      const originalStartPiece = readerManager.startPiece;
-      const originalEditWithRetry = readerRuntime.editWithRetry.bind(
-        readerRuntime,
-      );
-      let interceptRegistrationCommit = false;
-      let intercepted = false;
-      readerManager.startPiece = (async (piece, options) => {
-        await originalStartPiece.call(readerManager, piece, options);
-        interceptRegistrationCommit = true;
-      }) as typeof readerManager.startPiece;
-      readerRuntime.editWithRetry = ((action, maxRetries) =>
-        originalEditWithRetry((transaction) => {
-          const result = action(transaction);
-          if (interceptRegistrationCommit && !intercepted) {
-            intercepted = true;
-            const originalCommit = transaction.commit.bind(transaction);
-            transaction.commit = async () => {
-              commitEntered.resolve();
-              await releaseCommit.promise;
-              return await originalCommit();
-            };
-          }
-          return result;
-        }, maxRetries)) as typeof readerRuntime.editWithRetry;
-      try {
-        const defaultLocation = defaultDebugPatternLocation();
-        const deployment = deployAgentSessionsDebugView(
-          readerManager,
-          target,
-          {
-            rootPath: defaultLocation.rootPath,
-            mainPath: fromFileUrl(
-              new URL("./fixtures/alternate-debug-view.tsx", import.meta.url),
-            ),
-          },
-        );
-        await commitEntered.promise;
-        const competingResult = await writerRuntime.editWithRetry((tx) => {
-          registration.withTx(tx).setRawUntyped(competingRegistration);
-        });
-        if (competingResult.error) {
-          throw competingResult.error;
-        }
-        releaseCommit.resolve();
+    registration.withTx(attack).setRawUntyped({
+      cause: "agent-sessions-debug:competing",
+      pieceId: "fid1:competing-debug-piece",
+      patternIdentity: "fid1:competing-debug-pattern",
+      patternSymbol: "default",
+      retiredCauses: [],
+    });
+    attack.prepareCfc();
+    const result = await attack.commit();
+    assertEquals(result.error !== undefined, true);
 
-        await assertRejects(
-          () =>
-            deployment,
-          Error,
-          "debug view registration changed during deployment",
-        );
-        assertEquals(registration.getRaw(), competingRegistration);
-        const registeredIds = await registeredPieceIds(
-          defaultPattern,
-          "pieceRegistry",
-        );
-        assertEquals(registeredIds.includes(originalPieceId), true);
-        assertEquals(registeredIds.length, 1);
-        await target.publish([{
-          source: sourceDescriptor(),
-          sessions: [sessionSnapshot(1)],
-          errors: [],
-          complete: true,
-        }]);
-        await readerRuntime.settled();
-        const originalPiece = await readerManager.get(originalPieceId, false);
-        assertEquals(await originalPiece.result.get(["sessionCount"]), 1);
-      } finally {
-        releaseCommit.resolve();
-        readerManager.startPiece = originalStartPiece;
-        readerRuntime.editWithRetry = originalEditWithRetry;
-      }
-    } finally {
-      await writerRuntime.dispose();
-      await writerStorage.close();
-    }
+    const debugPiece = await readerManager.getPieceCell(
+      debugPieceId,
+      false,
+      SHALLOW_PIECE_SCHEMA,
+    );
+    const argument = readerManager.getArgument(debugPiece);
+    await argument.sync();
+    assertEquals(
+      cellHasOwnerProtection(
+        readerRuntime.readTx(),
+        argument,
+        readerSession.as.did(),
+      ),
+      true,
+    );
+    const argumentAttack = readerRuntime.edit();
+    argumentAttack.setCfcTrustSnapshot({
+      id: "principal:did:key:other-owner",
+      actingPrincipal: "did:key:other-owner",
+    });
+    argumentAttack.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: AGENT_CONNECTOR_WRITER_ID,
+    });
+    argument.withTx(argumentAttack).setRawUntyped({
+      ...(argument.getRaw() as Record<string, unknown>),
+      ownerDid: "did:key:other-owner",
+    });
+    argumentAttack.prepareCfc();
+    const argumentAttackResult = await argumentAttack.commit();
+    assertEquals(argumentAttackResult.error !== undefined, true);
   } finally {
     await readerRuntime.dispose();
     await readerStorage.close();
     await server.close();
+  }
+});
+
+Deno.test("debug registration rejects another owner-scoped writer", async () => {
+  const session = await createSession({
+    identity,
+    spaceName: `debug-registration-writer-${crypto.randomUUID()}`,
+  });
+  const storageManager = StorageManager.emulate({ as: session.as });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const otherWriter = "another-owner-scoped-pattern";
+  try {
+    const manager = new PiecesController(session, runtime);
+    await manager.synced();
+    await installDefaultPattern(manager);
+    const target = await AgentFabricTarget.open({
+      runtime,
+      spaceDid: session.space,
+      ownerDid: session.as.did(),
+    });
+    const registration = runtime.getCell(
+      session.space,
+      `agent-sessions-debug-registration:${session.as.did()}`,
+      agentPrincipalSchema(session.as.did(), [otherWriter]),
+    );
+    const seed = runtime.edit();
+    seed.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: otherWriter,
+    });
+    registration.withTx(seed).set({
+      cause: "agent-sessions-debug:competing",
+      pieceId: "fid1:competing-debug-piece",
+      patternIdentity: "fid1:competing-debug-pattern",
+      patternSymbol: "default",
+      retiredCauses: [],
+    });
+    registration.withTx(seed).applyCfcSchemaToExistingValue();
+    seed.prepareCfc();
+    const seeded = await seed.commit();
+    if (seeded.error) throw seeded.error;
+    assertEquals(
+      cellHasOwnerProtection(runtime.readTx(), registration, session.as.did()),
+      true,
+    );
+
+    await assertRejects(
+      () => deployAgentSessionsDebugView(manager, target),
+      Error,
+      "writeAuthorizedBy cannot be weakened",
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
   }
 });
 
@@ -610,6 +810,7 @@ Deno.test("debug deployment reports malformed registration lists", async () => {
     const target = await AgentFabricTarget.open({
       runtime,
       spaceDid: session.space,
+      ownerDid: session.as.did(),
     });
 
     await assertRejects(
@@ -640,6 +841,7 @@ Deno.test("debug deployment rejects a replaced default pattern", async () => {
     const target = await AgentFabricTarget.open({
       runtime,
       spaceDid: session.space,
+      ownerDid: session.as.did(),
     });
     const replacementRoot = runtime.getCell(
       session.space,

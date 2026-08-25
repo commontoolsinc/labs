@@ -1,17 +1,21 @@
 import {
   action,
   type Cell,
+  Cfc,
   computed,
+  CurrentPrincipal,
   handler,
   lift,
   NAME,
   type OpaqueCell,
   pattern,
+  RepresentsCurrentUser,
   Stream,
   UI,
   type VNode,
   wish,
   Writable,
+  WriteAuthorizedBy,
 } from "commonfabric";
 import {
   conversationState,
@@ -88,7 +92,6 @@ export interface MessagePreview {
 
 export interface SessionChunk {
   schema: string;
-  formatVersion: 1;
   key: string;
   part: number;
   contentHash: string;
@@ -105,7 +108,6 @@ export interface SessionChunkDescriptor {
 
 export interface SessionManifest {
   schema: string;
-  formatVersion: 1;
   key: string;
   sourceId: string;
   driver: string;
@@ -123,7 +125,6 @@ export interface SessionManifest {
 }
 
 export interface SessionRow {
-  formatVersion: 1;
   key: string;
   sourceId: string;
   driver: string;
@@ -227,7 +228,6 @@ export interface HostActivity {
 export interface HostHealth {
   schema: string;
   service: string;
-  formatVersion: number;
   status: string;
   startedAt: string;
   updatedAt: string;
@@ -263,6 +263,7 @@ export type AgentCommandType =
 
 export interface AgentCommand {
   schema: string;
+  ownerDid: string;
   id: string;
   createdAt: string;
   sourceId: string;
@@ -275,6 +276,52 @@ export interface AgentCommand {
 
 // The connector validates each action value before interpreting it as a command.
 export type AgentCommandValue = JsonValue;
+
+export const sendOwnerAgentCommand = handler<
+  void,
+  {
+    commands: Writable<AgentCommandValue[]>;
+    commandAdmission: Cell<boolean>;
+    pendingCommand: Writable<AgentCommand | null>;
+    commandLastSubmission: Writable<string>;
+    commandError: Writable<string>;
+    commandConfirmOpen: Writable<boolean>;
+    commandPromptText: Writable<string>;
+    commandArgument: Writable<string>;
+    commandConfigKey: Writable<string>;
+    commandConfigValue: Writable<string>;
+    commandForce: Writable<boolean>;
+  }
+>((_, state) => {
+  if (state.commandAdmission.get() !== true) {
+    state.commandError.set("The host is not accepting commands.");
+    return;
+  }
+  const command = state.pendingCommand.get();
+  if (command === null || command === undefined) {
+    state.commandError.set("Review the command before sending it.");
+    return;
+  }
+  state.commands.push(JSON.stringify(command));
+  state.commandLastSubmission.set(
+    `Submitted ${command.id}. Watch the receipt index for its outcome.`,
+  );
+  state.commandError.set("");
+  state.commandConfirmOpen.set(false);
+  state.pendingCommand.set(null);
+  state.commandPromptText.set("");
+  state.commandArgument.set("");
+  state.commandConfigKey.set("");
+  state.commandConfigValue.set("");
+  state.commandForce.set(false);
+});
+
+type OwnerCommandQueue = RepresentsCurrentUser<
+  Cfc<
+    WriteAuthorizedBy<AgentCommandValue[], typeof sendOwnerAgentCommand>,
+    { ownerPrincipal: CurrentPrincipal }
+  >
+>;
 
 export interface ReceiptRow {
   commandId: string;
@@ -293,15 +340,15 @@ export interface ReceiptIndex {
 }
 
 export interface DebugInput {
+  ownerDid: string;
   recentIndex: SessionIndexInput | undefined;
   allIndex: SessionIndexInput | undefined;
   health: HostHealth | undefined;
-  commands: Writable<AgentCommandValue[] | undefined>;
   receipts: ReceiptIndex | undefined;
   recentIndexCell: OpaqueCell<DeferredDocument | undefined>;
   allIndexCell: OpaqueCell<DeferredDocument | undefined>;
   healthCell: OpaqueCell<DeferredDocument | undefined>;
-  commandsCell: OpaqueCell<AgentCommandValue[] | undefined>;
+  commandsCell: Writable<AgentCommandValue[]>;
   receiptsCell: OpaqueCell<DeferredDocument | undefined>;
 }
 
@@ -319,6 +366,14 @@ export interface DebugOutput {
   commandCount: number;
   receiptCount: number;
   activityCount: number;
+  commandQueue: OwnerCommandQueue;
+  // The host reads this optional field's schema to label the input command
+  // queue with the verified handler that writes commands. The field has no
+  // stored value.
+  commandAuthorization?: WriteAuthorizedBy<
+    boolean,
+    typeof sendOwnerAgentCommand
+  >;
 }
 
 function stringValue(value: string | null | undefined, fallback = "—"): string {
@@ -431,7 +486,8 @@ function isAgentCommand(value: unknown): value is AgentCommand {
     return false;
   }
   const command = value as Record<string, unknown>;
-  return command.schema === "commonfabric.agent-connector.command.v1" &&
+  return command.schema === "commonfabric.agent-connector.command" &&
+    typeof command.ownerDid === "string" &&
     typeof command.id === "string" &&
     typeof command.createdAt === "string" &&
     typeof command.sourceId === "string" &&
@@ -603,7 +659,7 @@ function sessionIndexJson(
   value: SessionIndexInput | undefined,
 ): SessionIndexInput | undefined {
   if (
-    value?.schema !== "commonfabric.agent-connector.session-index.v1" ||
+    value?.schema !== "commonfabric.agent-connector.session-index" ||
     !Array.isArray(value.sources) ||
     !Array.isArray(value.sessions)
   ) {
@@ -1316,15 +1372,13 @@ const renderCommandTableRow = pattern<
       rawJson,
       source,
       origin: command === undefined
-        ? "This is one unrecognized action value from the connector's shared " +
-          "commands cell. Any Fabric writer with access to that cell can append " +
-          "an action value."
+        ? "This is one unrecognized action value from the owner's protected " +
+          "command queue."
         : `This is the payload field of command ${
           JSON.stringify(command.id)
         }, created at ${JSON.stringify(command.createdAt)}, from the ` +
-          "connector's shared commands cell. The debug composer appends a JSON " +
-          "string. Other Fabric writers can append either a JSON string or an " +
-          "object.",
+          "owner's protected command queue. The debug composer appends a JSON " +
+          "string through its owner-gated sending handler.",
       processing: command === undefined
         ? "The page materializes stable child cells inside the action value and " +
           "formats the complete unrecognized value as JSON."
@@ -1500,7 +1554,7 @@ const commandCellPageFromNewest = lift(
       length,
       page,
     }: {
-      values: OpaqueCell<AgentCommandValue[] | undefined>;
+      values: OpaqueCell<AgentCommandValue[]>;
       length: number;
       page: number;
     },
@@ -1521,15 +1575,17 @@ const DebugView = pattern<DebugInput, DebugOutput>(
       recentIndex,
       allIndex,
       health,
-      commands,
       receipts,
       recentIndexCell,
       allIndexCell,
       healthCell,
       commandsCell,
       receiptsCell,
+      ownerDid,
     },
   ) => {
+    const commands = commandsCell;
+    const protectedCommands: Writable<OwnerCommandQueue> = commandsCell;
     const activeTab = new Writable.perSession<DebugTab>("overview");
     const sessionFilter = new Writable.perSession("");
     const sessionPage = new Writable.perSession(0);
@@ -1600,7 +1656,8 @@ const DebugView = pattern<DebugInput, DebugOutput>(
       if (error) return;
       const createdAt = new Date().toISOString();
       const command: AgentCommand = {
-        schema: "commonfabric.agent-connector.command.v1",
+        schema: "commonfabric.agent-connector.command",
+        ownerDid,
         id: `debug:${createdAt}:${Math.random().toString(36).slice(2, 10)}`,
         createdAt,
         sourceId: fields.sourceId.trim().toLowerCase(),
@@ -1618,28 +1675,18 @@ const DebugView = pattern<DebugInput, DebugOutput>(
       commandConfirmOpen.set(false);
       pendingCommand.set(null);
     });
-    const sendCommand = action(() => {
-      if (!commandAdmission) {
-        commandError.set("The host is not accepting commands.");
-        return;
-      }
-      const command = pendingCommand.get();
-      if (command === null || command === undefined) {
-        commandError.set("Review the command before sending it.");
-        return;
-      }
-      commands.push(JSON.stringify(command));
-      commandLastSubmission.set(
-        `Submitted ${command.id}. Watch the receipt index for its outcome.`,
-      );
-      commandError.set("");
-      commandConfirmOpen.set(false);
-      pendingCommand.set(null);
-      commandPromptText.set("");
-      commandArgument.set("");
-      commandConfigKey.set("");
-      commandConfigValue.set("");
-      commandForce.set(false);
+    const sendCommand = sendOwnerAgentCommand({
+      commands,
+      commandAdmission,
+      pendingCommand,
+      commandLastSubmission,
+      commandError,
+      commandConfirmOpen,
+      commandPromptText,
+      commandArgument,
+      commandConfigKey,
+      commandConfigValue,
+      commandForce,
     });
 
     const recentIndexState = computed(() => sessionIndexState(recentIndex));
@@ -1840,7 +1887,7 @@ const DebugView = pattern<DebugInput, DebugOutput>(
         "source, collection, command, and activity state. " +
         "AgentFabricTarget.publishHealth() stores the snapshot in the " +
         "deterministic top-level health cell whose cause uses " +
-        'agentConnector: "health" and version: 1.',
+        'agentConnector: "health" and the configured owner DID.',
       processing: "The page reads the health cell's stored value when it " +
         "starts and formats it as JSON. Stable child cells remain explicit " +
         "Fabric links. The page does not follow source or activity links.",
@@ -1853,7 +1900,8 @@ const DebugView = pattern<DebugInput, DebugOutput>(
         "top-level index after a provider collection. It contains source rows " +
         "and links to non-deleted sessions updated within the preceding seven " +
         "days. " +
-        'Its cause uses agentConnector: "recent-session-index" and version: 1.',
+        'Its cause uses agentConnector: "recent-session-index" and the ' +
+        "configured owner DID.",
       processing:
         "The page reads the index cell's stored value when it starts " +
         "and formats it as JSON. Session and source child cells remain explicit " +
@@ -1866,7 +1914,8 @@ const DebugView = pattern<DebugInput, DebugOutput>(
       origin: "AgentFabricTarget.publish() rebuilds this deterministic " +
         "top-level index after a provider collection. It contains source rows, " +
         "all non-deleted session-row links, and retained deleted-session rows. " +
-        'Its cause uses agentConnector: "all-session-index" and version: 1.',
+        'Its cause uses agentConnector: "all-session-index" and the ' +
+        "configured owner DID.",
       processing:
         "The page reads the index cell's stored value when it starts " +
         "and formats it as JSON. Session and source child cells remain explicit " +
@@ -1877,10 +1926,9 @@ const DebugView = pattern<DebugInput, DebugOutput>(
       description: "Commands submitted to the connector host",
       value: commandsCell,
       origin:
-        "This is the connector's shared action array. The debug command " +
-        "composer and any other authorized Fabric writer append command values " +
-        "to the deterministic top-level cell whose cause uses " +
-        'agentConnector: "commands" and version: 1. The running host subscribes ' +
+        "This is the owner-confidential command queue supplied by the host. " +
+        "piece. Only the configured owner acting through the debug pattern's " +
+        "command-sending handler can modify it. The running host subscribes " +
         "to this cell.",
       processing: "The page reads the root action array when it starts. It " +
         "formats inline values as JSON and represents linked child cells as " +
@@ -1894,7 +1942,7 @@ const DebugView = pattern<DebugInput, DebugOutput>(
       origin: "AgentFabricTarget.publishReceipt() writes one deterministic " +
         "receipt cell per command. It then updates this deterministic top-level " +
         "index with the latest 200 receipt-row links. The index cause uses " +
-        'agentConnector: "receipts" and version: 1.',
+        'agentConnector: "receipts" and the configured owner DID.',
       processing: "The page reads the receipt index's stored value when it " +
         "starts and formats it as JSON. Receipt rows and individual receipt " +
         "documents remain explicit Fabric links. The page does not follow them.",
@@ -2828,6 +2876,7 @@ const DebugView = pattern<DebugInput, DebugOutput>(
       commandCount,
       receiptCount,
       activityCount,
+      commandQueue: protectedCommands,
     };
   },
 );

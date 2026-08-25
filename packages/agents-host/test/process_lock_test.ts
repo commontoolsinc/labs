@@ -11,21 +11,31 @@ Deno.test("target process locks use the canonical API and resolved space", async
     const first = await defaultTargetProcessLockPath(
       "https://user:secret@FABRIC.example.test:443/",
       "did:key:space",
+      "did:key:owner",
       directory,
     );
     const equivalent = await defaultTargetProcessLockPath(
       "https://fabric.example.test/ignored-api-path",
       "did:key:space",
+      "did:key:owner",
       directory,
     );
     const differentSpace = await defaultTargetProcessLockPath(
       "https://fabric.example.test/",
       "did:key:other-space",
+      "did:key:owner",
+      directory,
+    );
+    const differentOwner = await defaultTargetProcessLockPath(
+      "https://fabric.example.test/",
+      "did:key:space",
+      "did:key:other-owner",
       directory,
     );
 
     assertEquals(first, equivalent);
     assertNotEquals(first, differentSpace);
+    assertNotEquals(first, differentOwner);
   } finally {
     await Deno.remove(directory, { recursive: true });
   }

@@ -19,6 +19,7 @@ export type CommandType =
 
 export interface AgentSessionCommand {
   schema: typeof AGENT_CONNECTOR_SCHEMAS.command;
+  ownerDid: string;
   id: string;
   createdAt: string;
   sourceId: string;
@@ -31,6 +32,7 @@ export interface AgentSessionCommand {
 
 export interface AgentSessionCommandReceipt {
   schema: typeof AGENT_CONNECTOR_SCHEMAS.commandReceipt;
+  ownerDid: string;
   commandId: string;
   sourceId: string;
   nativeSessionId: string;
@@ -132,6 +134,9 @@ export function parseCommandReceipt(
       `${context} schema must be ${AGENT_CONNECTOR_SCHEMAS.commandReceipt}: ${commandId}`,
     );
   }
+  if (!isNonEmptyString(value.ownerDid)) {
+    throw new Error(`${context} ownerDid must be a string: ${commandId}`);
+  }
   if (value.commandId !== commandId) {
     throw new Error(`${context} key does not match commandId: ${commandId}`);
   }
@@ -194,6 +199,7 @@ export function parseCommandReceipt(
   }
   return {
     schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+    ownerDid: value.ownerDid,
     commandId,
     sourceId: value.sourceId,
     nativeSessionId: value.nativeSessionId,
@@ -224,7 +230,7 @@ function requiredString(
   return value.trim();
 }
 
-function parseCommand(value: unknown): AgentSessionCommand {
+function parseCommand(value: unknown, ownerDid: string): AgentSessionCommand {
   if (typeof value === "string") {
     let decoded: unknown;
     try {
@@ -232,7 +238,7 @@ function parseCommand(value: unknown): AgentSessionCommand {
     } catch (error) {
       throw new Error(`command JSON is invalid: ${error}`);
     }
-    return parseCommand(decoded);
+    return parseCommand(decoded, ownerDid);
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("command must be an object");
@@ -240,6 +246,9 @@ function parseCommand(value: unknown): AgentSessionCommand {
   const raw = value as Record<string, unknown>;
   if (raw.schema !== AGENT_CONNECTOR_SCHEMAS.command) {
     throw new Error("unsupported command schema");
+  }
+  if (raw.ownerDid !== ownerDid) {
+    throw new Error("command owner does not match this connector");
   }
   const type = raw.type;
   if (
@@ -265,6 +274,7 @@ function parseCommand(value: unknown): AgentSessionCommand {
   sessionKey(sourceId, nativeSessionId);
   return {
     schema: AGENT_CONNECTOR_SCHEMAS.command,
+    ownerDid,
     id,
     createdAt: requiredString(raw.createdAt, "createdAt", 128),
     sourceId,
@@ -285,6 +295,7 @@ function receiptFromResult(
 ): AgentSessionCommandReceipt {
   return {
     schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+    ownerDid: command.ownerDid,
     commandId: command.id,
     sourceId: command.sourceId,
     nativeSessionId: command.nativeSessionId,
@@ -301,6 +312,7 @@ export class CommandWorker {
   readonly #drivers: Map<string, AgentDriver>;
   readonly #targets: CommandTarget[];
   readonly #ledger: CommandLedger;
+  readonly #ownerDid: string;
   readonly #onReceipt?: (
     receipt: AgentSessionCommandReceipt,
   ) => Promise<void> | void;
@@ -316,6 +328,7 @@ export class CommandWorker {
     drivers: Map<string, AgentDriver>,
     targets: CommandTarget[],
     ledger: CommandLedger,
+    ownerDid: string,
     onReceipt?: (
       receipt: AgentSessionCommandReceipt,
     ) => Promise<void> | void,
@@ -324,6 +337,7 @@ export class CommandWorker {
     this.#drivers = drivers;
     this.#targets = targets;
     this.#ledger = ledger;
+    this.#ownerDid = ownerDid;
     this.#onReceipt = onReceipt;
     this.#onTaskFailure = onTaskFailure;
   }
@@ -355,7 +369,7 @@ export class CommandWorker {
     for (const value of values) {
       let command: AgentSessionCommand;
       try {
-        command = parseCommand(value);
+        command = parseCommand(value, this.#ownerDid);
       } catch (error) {
         console.error(`[agents-connector] invalid command: ${error}`);
         continue;
@@ -369,7 +383,8 @@ export class CommandWorker {
         if (existing) {
           if (
             existing.sourceId !== command.sourceId ||
-            existing.nativeSessionId !== command.nativeSessionId
+            existing.nativeSessionId !== command.nativeSessionId ||
+            existing.ownerDid !== command.ownerDid
           ) {
             throw new Error(
               `command ID belongs to another session: ${command.id}`,
@@ -510,6 +525,7 @@ export class CommandWorker {
     const claimedAt = new Date().toISOString();
     const inFlight: AgentSessionCommandReceipt = {
       schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+      ownerDid: command.ownerDid,
       commandId: command.id,
       sourceId: command.sourceId,
       nativeSessionId: command.nativeSessionId,

@@ -32,7 +32,7 @@ function cellsById(value: unknown): Map<string, FakeCell> {
 }
 
 Deno.test("array object cells keep their causes when their array is reordered", async () => {
-  const scope = { agentConnector: "session-index", version: 1 };
+  const scope = { agentConnector: "session-index" };
   const first = materialize(
     await planStableArrayCells({
       sessions: [
@@ -75,7 +75,7 @@ Deno.test("every array element is materialized as a stable cell", async () => {
         matrix: [[{ id: "nested", value: 1 }]],
       }],
       primitives: ["one", 2, false, null],
-    }, { agentConnector: "health", version: 1 }),
+    }, { agentConnector: "health" }),
   );
 
   const root = value as Record<string, unknown>;
@@ -97,7 +97,7 @@ Deno.test("every array element is materialized as a stable cell", async () => {
 });
 
 Deno.test("primitive array elements keep content-derived causes when reordered", async () => {
-  const scope = { agentConnector: "source", version: 1 };
+  const scope = { agentConnector: "source" };
   const first = materialize(
     await planStableArrayCells({ modes: ["ask", "edit"] }, scope),
   );
@@ -123,7 +123,7 @@ Deno.test("nested ids are scoped to their owning array object", async () => {
         { key: "codex/one", messages: [{ id: "message-1", text: "one" }] },
         { key: "codex/two", messages: [{ id: "message-1", text: "two" }] },
       ],
-    }, { agentConnector: "session-index", version: 1 }),
+    }, { agentConnector: "session-index" }),
   );
 
   const sessions = (value as Record<string, unknown>).sessions as FakeCell[];
@@ -135,7 +135,7 @@ Deno.test("nested ids are scoped to their owning array object", async () => {
 });
 
 Deno.test("unidentified objects use content identity instead of array position", async () => {
-  const scope = { agentConnector: "health", version: 1 };
+  const scope = { agentConnector: "health" };
   const first = materialize(
     await planStableArrayCells({
       errors: [{ message: "first" }, { message: "second" }],
@@ -168,7 +168,7 @@ Deno.test("unidentified objects use content identity instead of array position",
 });
 
 Deno.test("stable structural identity wins over mutable chunk content", async () => {
-  const scope = { agentConnector: "session", version: 1 };
+  const scope = { agentConnector: "session" };
   const first = materialize(
     await planStableArrayCells({
       chunks: [{ part: 0, contentHash: "sha256:old", eventCount: 1 }],
@@ -186,7 +186,7 @@ Deno.test("stable structural identity wins over mutable chunk content", async ()
 });
 
 Deno.test("command identity wins over the shared session identity", async () => {
-  const scope = { agentConnector: "receipt-index", version: 1 };
+  const scope = { agentConnector: "receipt-index" };
   const first = materialize(
     await planStableArrayCells({
       receipts: [

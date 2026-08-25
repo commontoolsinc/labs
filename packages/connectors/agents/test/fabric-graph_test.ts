@@ -69,7 +69,7 @@ Deno.test("stable graph writes keep child identity and hydrate linked values", a
     storageManager,
   });
   const space = signer.did();
-  const connection = { runtime, spaceDid: space };
+  const connection = { runtime, spaceDid: space, ownerDid: space };
   let coldRuntime: Runtime | undefined;
   try {
     const parent = runtime.getCell(space, { graphTest: "parent" });
@@ -130,7 +130,7 @@ Deno.test("stable graph writes preserve native `FabricValue`s", async () => {
     storageManager,
   });
   const space = signer.did();
-  const connection = { runtime, spaceDid: space };
+  const connection = { runtime, spaceDid: space, ownerDid: space };
   try {
     const root = runtime.getCell(space, { graphTest: "native-values" });
     await pushStableCellGraph(connection, [{
@@ -174,7 +174,11 @@ Deno.test("stable graph deletes fields whose names exist on the prototype", asyn
     apiUrl: new URL(import.meta.url),
     storageManager,
   });
-  const connection = { runtime, spaceDid: signer.did() };
+  const connection = {
+    runtime,
+    spaceDid: signer.did(),
+    ownerDid: signer.did(),
+  };
   try {
     const root = runtime.getCell(signer.did(), {
       graphTest: "inherited-fields",
@@ -204,7 +208,7 @@ Deno.test("stable graph reads can preserve links in named fields", async () => {
     storageManager,
   });
   const space = signer.did();
-  const connection = { runtime, spaceDid: space };
+  const connection = { runtime, spaceDid: space, ownerDid: space };
   try {
     const child = runtime.getCell(space, { graphTest: "preserved-child" });
     const parent = runtime.getCell(space, { graphTest: "preserved-parent" });
@@ -243,7 +247,7 @@ Deno.test("stable array planning preserves links to cell subpaths", async () => 
     storageManager,
   });
   const space = signer.did();
-  const connection = { runtime, spaceDid: space };
+  const connection = { runtime, spaceDid: space, ownerDid: space };
   try {
     const referenced = runtime.getCell(space, {
       graphTest: "subpath-reference",
@@ -285,7 +289,7 @@ Deno.test("stable graph field writes preserve document metadata", async () => {
   });
   const space = signer.did();
   const cell = runtime.getCell(space, { graphTest: "field-writes" });
-  const connection = { runtime, spaceDid: space };
+  const connection = { runtime, spaceDid: space, ownerDid: space };
   try {
     await pushStableCellGraph(connection, [{
       cell,
@@ -334,13 +338,16 @@ Deno.test("stable graph field writes preserve document metadata", async () => {
 });
 
 function fakeCell(id = "of:parent") {
-  return {
+  const cell = {
     getAsNormalizedFullLink: () => ({
       space: "did:test:space",
       id,
       path: [],
     }),
+    withTx: () => cell,
+    applyCfcSchemaToExistingValue: () => {},
   };
+  return cell;
 }
 
 Deno.test("stable graph writes await one commit", async () => {
@@ -353,6 +360,8 @@ Deno.test("stable graph writes await one commit", async () => {
     readValueOrThrow: () => undefined,
     writeOrThrow: () => {},
     writeValueOrThrow: () => {},
+    setCfcImplementationIdentity: () => {},
+    prepareCfc: () => {},
     abort: () => ({ ok: {} }),
     commit: () => {
       commitCount++;
@@ -363,6 +372,7 @@ Deno.test("stable graph writes await one commit", async () => {
   const connection = {
     runtime: { edit: () => transaction },
     spaceDid: "did:test:space",
+    ownerDid: "did:test:owner",
   };
   let settled = false;
   const pending = pushStableCellGraph(
@@ -395,6 +405,8 @@ Deno.test("stable graph writes surface a commit failure without retrying", async
         readValueOrThrow: () => undefined,
         writeOrThrow: () => {},
         writeValueOrThrow: () => {},
+        setCfcImplementationIdentity: () => {},
+        prepareCfc: () => {},
         abort: () => ({ ok: {} }),
         commit: () => {
           commitCount++;
@@ -403,6 +415,7 @@ Deno.test("stable graph writes surface a commit failure without retrying", async
       }),
     },
     spaceDid: "did:test:space",
+    ownerDid: "did:test:owner",
   };
   const error = await assertRejects(
     () =>
@@ -453,7 +466,7 @@ Deno.test("stable graph hydration bounds concurrent child syncs", async () => {
   };
   const pending = readStableCellGraphValue(
     // deno-lint-ignore no-explicit-any -- focused runtime fixture.
-    { runtime, spaceDid: space } as any,
+    { runtime, spaceDid: space, ownerDid: space } as any,
     // deno-lint-ignore no-explicit-any -- focused cell fixture.
     parent as any,
   );

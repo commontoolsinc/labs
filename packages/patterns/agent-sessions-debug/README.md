@@ -89,17 +89,19 @@ The debug pattern gives session rows only the shallow fields used by the table.
 Each row keeps its manifest behind an opaque cell link. Opening the table does
 not read transcript chunks; the separate raw-data view loads them when opened.
 
-The host prepares and registers the debug piece without starting it. Its static
-name makes the prepared piece visible in the space home. Opening the piece
-starts the view in the reader's runtime. Host startup therefore does not pull
-the view's complete result graph.
+The host protects the deterministic command queue before it creates or starts
+the debug piece. It starts the piece, labels the rendered result for the owner,
+and stores an owner-confidential registration. It does not add the piece to the
+space-wide home registry. The host reports the piece ID as a local discovery
+handle.
 
-On later starts, the host reuses a prepared piece whose pattern identity still
-matches the bundled debug pattern. The pattern identity is part of the piece's
-stable cause. A new pattern identity therefore creates a new piece. A shallow
-registration record identifies the current piece and retains the causes of
-retired pieces. The host removes stale links on every deployment and erases a
-newly superseded root without traversing its result graph.
+On later starts, the host reuses a prepared piece only when its pattern
+identity, configured owner, and every connector input link match. The pattern
+identity is part of the piece's stable cause. A new pattern identity therefore
+creates a new piece. A shallow owner-confidential registration identifies the
+current piece and retains the causes of retired pieces. The host removes stale
+shared-registry links and stops superseded local runners without traversing
+their result graphs.
 
 The Overview tab reports the recent and complete index generations, generation
 times, row counts, total session counts, and older-session counts. It reads the

@@ -127,18 +127,29 @@ hashes. The returned chunks contain those captured event values.
 
 ### Fabric connection and target
 
-`AgentFabricConnection` contains an initialized Common Fabric `Runtime` and one
-`MemorySpace` DID:
+`AgentFabricConnection` contains an initialized Common Fabric `Runtime`, one
+`MemorySpace` DID, and the DID of the person who owns the local agent data:
 
 ```ts
 interface AgentFabricConnection {
   runtime: Runtime;
   spaceDid: MemorySpace;
+  ownerDid: string;
 }
 ```
 
+The owner DID participates in every connector cause and stored protocol
+envelope. Every connector cell has a Common Fabric confidentiality label for
+that owner. Connector-managed writes also require the owner principal and the
+connector's trusted writer identity. The debug command queue instead requires
+the owner principal and the verified command-submission handler that created it.
+
 `AgentFabricTarget.open(connection)` creates and synchronizes the connector's
-top-level cells. It also waits for the runtime storage manager to finish its
+top-level cells. It atomically initializes empty index, health, and receipt
+roots with owner protection before reading from them. A populated root without
+that owner protection is rejected rather than adopted. The command queue is
+claimed later when the host can bind its verified command-submission handler.
+Opening a target also waits for the runtime storage manager to finish its
 initial synchronization.
 
 The target exposes these orchestration methods:
@@ -148,8 +159,9 @@ The target exposes these orchestration methods:
 | `beginSessionObservation()`               | Allocates the ordering value that a caller records before it begins a full provider collection.         |
 | `publish(collected, options?)`            | Publishes changed session graphs and replaces both indexes. Returns the number of non-deleted sessions. |
 | `publishHealth(value)`                    | Publishes a host-defined health record under the connector-owned health schema.                         |
-| `subscribeCommands(callback)`             | Subscribes to the command action array. Returns a Common Fabric cancellation function.                  |
-| `pollCommands()`                          | Pulls the current command action array.                                                                 |
+| `subscribeCommands(callback)`             | Subscribes after the exact queue has been bound to its owner and verified writer.                       |
+| `pollCommands()`                          | Pulls commands after the exact queue has been bound to its owner and verified writer.                   |
+| `bindCommandCell(cell, writer)`           | Verifies the exact owner-scoped command queue and applies its owner and verified-writer policy.         |
 | `publishReceipt(receipt)`                 | Publishes one durable receipt cell and updates the bounded receipt index.                               |
 | `readReceipt(commandId)`                  | Reads the deterministic individual receipt cell used as the shared command claim.                       |
 | `refreshSession(driver, nativeSessionId)` | Reads and publishes one session without changing untouched session statuses.                            |
@@ -428,24 +440,24 @@ with an ACP prefix.
 
 ### Top-level cell causes
 
-All top-level causes include the destination `spaceDid`. The remaining fields
-are fixed:
+All top-level causes include the destination `spaceDid` and `ownerDid`. The
+remaining fields are fixed:
 
-| Cell                   | Cause fields                                           |
-| ---------------------- | ------------------------------------------------------ |
-| Recent session index   | `agentConnector: "recent-session-index"`, `version: 1` |
-| Complete session index | `agentConnector: "all-session-index"`, `version: 1`    |
-| Health                 | `agentConnector: "health"`, `version: 1`               |
-| Commands               | `agentConnector: "commands"`, `version: 1`             |
-| Receipt index          | `agentConnector: "receipts"`, `version: 1`             |
+| Cell                   | Cause field                              |
+| ---------------------- | ---------------------------------------- |
+| Recent session index   | `agentConnector: "recent-session-index"` |
+| Complete session index | `agentConnector: "all-session-index"`    |
+| Health                 | `agentConnector: "health"`               |
+| Commands               | `agentConnector: "commands"`             |
+| Receipt index          | `agentConnector: "receipts"`             |
 
 Session, chunk, and individual receipt causes add their durable identities:
 
 ```json
 {
   "spaceDid": "did:key:...",
+  "ownerDid": "did:key:...",
   "agentConnector": "session",
-  "version": 1,
   "sourceId": "codex",
   "nativeSessionId": "session-id"
 }
@@ -459,19 +471,21 @@ Chunk causes use `agentConnector: "session-chunk"` and add `part` and
 
 `AGENT_CONNECTOR_SCHEMAS` exports every format discriminator:
 
-| Value              | Schema                                             |
-| ------------------ | -------------------------------------------------- |
-| Session manifest   | `commonfabric.agent-connector.session.v1`          |
-| Event chunk        | `commonfabric.agent-connector.session-chunk.v1`    |
-| Session index      | `commonfabric.agent-connector.session-index.v1`    |
-| Health             | `commonfabric.agent-connector.health.v1`           |
-| Command            | `commonfabric.agent-connector.command.v1`          |
-| Individual receipt | `commonfabric.agent-connector.command-receipt.v1`  |
-| Receipt index      | `commonfabric.agent-connector.command-receipts.v1` |
-| Local ledger       | `commonfabric.agent-connector.command-ledger.v2`   |
+| Value              | Schema                                          |
+| ------------------ | ----------------------------------------------- |
+| Session manifest   | `commonfabric.agent-connector.session`          |
+| Event chunk        | `commonfabric.agent-connector.session-chunk`    |
+| Session index      | `commonfabric.agent-connector.session-index`    |
+| Health             | `commonfabric.agent-connector.health`           |
+| Command            | `commonfabric.agent-connector.command`          |
+| Individual receipt | `commonfabric.agent-connector.command-receipt`  |
+| Receipt index      | `commonfabric.agent-connector.command-receipts` |
+| Local ledger       | `commonfabric.agent-connector.command-ledger`   |
 
-The connector recognizes only these current values. It does not read earlier
-names or publish compatibility aliases.
+The schema names and deterministic causes are not versioned. Future readers must
+remain compatible with stored values and cell identities. New fields must be
+optional because older writers omit fields they do not know. Readers permit
+additional fields while continuing to validate the fields they use.
 
 ### Session key
 
@@ -494,8 +508,8 @@ A chunk value has this form:
 
 ```json
 {
-  "schema": "commonfabric.agent-connector.session-chunk.v1",
-  "formatVersion": 1,
+  "schema": "commonfabric.agent-connector.session-chunk",
+  "ownerDid": "did:key:...",
   "key": "codex/session-id",
   "part": 0,
   "contentHash": "sha256:...",
@@ -517,7 +531,6 @@ does not change the chunk graph reachable from the retained manifest.
 
 A session manifest contains:
 
-- `formatVersion: 1`
 - `key`, `sourceId`, `driver`, and `nativeSessionId`
 - `metadata`, which repeats the provider-native summary object
 - `summary`, which contains normalized summary fields
@@ -548,11 +561,11 @@ the connector marks their synchronization status as `deleted`.
 
 Each index records generation time, monotonically increasing generation,
 non-deleted session count, older session count, source status rows, and session
-entries. A session entry includes `formatVersion: 1`, the producing `driver`,
-normalized metadata, nullable `archived` and `active` lifecycle fields, provider
-capabilities, up to 12 recent normalized message previews, a live manifest cell
-link, content hash, and synchronization status. The lifecycle fields describe
-provider state. Synchronization status describes the connector's published copy.
+entries. A session entry includes the producing `driver`, normalized metadata,
+nullable `archived` and `active` lifecycle fields, provider capabilities, up to
+12 recent normalized message previews, a live manifest cell link, content hash,
+and synchronization status. The lifecycle fields describe provider state.
+Synchronization status describes the connector's published copy.
 
 Each index also contains one shallow `checkouts` row per non-deleted worktree.
 The row records its root, current branch, current commit, selected repository
@@ -575,8 +588,8 @@ inventory.
 The manifest and chunk fields are stored as `FabricLink`s rather than copied
 objects. A consumer whose schema declares those fields as `Cell` values can read
 one session graph without hydrating every session represented by the index. The
-target rejects an index containing an entry without `formatVersion: 1`. It does
-not convert older entries or manifest link representations.
+target validates the fields it reads and permits additional fields so compatible
+protocol additions do not require a new format.
 
 TODO(@ianh): Add a shallow session directory containing each row link and its
 sortable title, update-time, and worktree keys. The current stable-cell layout
@@ -594,11 +607,10 @@ child cause is independent of the element's array position:
 ```json
 {
   "agentConnector": "array-element",
-  "version": 1,
   "scope": {
     "spaceDid": "did:key:...",
-    "agentConnector": "session-index-array-elements",
-    "version": 1
+    "ownerDid": "did:key:...",
+    "agentConnector": "session-index-array-elements"
   },
   "path": ["sessions"],
   "identity": { "field": "key", "value": "codex/session-id" }
@@ -616,8 +628,8 @@ The publisher assigns one base scope to each stored value:
 | Individual command receipt  | `command-receipt-array-elements`       | `commandId`                                          |
 | Receipt index               | `command-receipt-index-array-elements` | None                                                 |
 
-Every base scope also contains the destination `spaceDid` and `version: 1`.
-These fields and the additional identity participate in the child cell ID.
+Every base scope also contains the destination `spaceDid` and `ownerDid`. These
+fields and the additional identity participate in the child cell ID.
 
 A schema-aware Fabric consumer must declare every array item as
 `Cell<T> | undefined`, not as inline `T`. The `undefined` branch represents a
@@ -699,7 +711,7 @@ as complete cell values. Root values are plain objects.
 ordering also prevents a provider snapshot read earlier from overwriting a
 session refresh that finished sooner. The repository's command-line host takes a
 target process lock. Hosts on different machines need equivalent single-instance
-coordination for each API and space pair.
+coordination for each API, space, and owner.
 
 `pushStableCellGraph()` reports transaction commit errors and does not retry.
 The callback must finish synchronously and return a plain record. Causes and
@@ -723,7 +735,8 @@ preserved-field set, so callers can safely reuse a cache across different read
 policies.
 
 `subscribeStableActions()` treats a non-array cell value as an empty action
-list. `readStableActions()` has the same convention for polling.
+list. `readStableActions()` has the same convention for polling and fully
+hydrates linked action values.
 
 ## Command and receipt formats
 
@@ -734,7 +747,8 @@ JSON string containing one command object.
 
 ```ts
 interface AgentSessionCommand {
-  schema: "commonfabric.agent-connector.command.v1";
+  schema: "commonfabric.agent-connector.command";
+  ownerDid: string;
   id: string;
   createdAt: string;
   sourceId: string;
@@ -764,8 +778,15 @@ Payloads are:
 their behavior based on it. `requestedBy` is retained on the parsed command but
 is not copied to receipts.
 
+The worker rejects a command whose `ownerDid` differs from its configured owner.
 Invalid values are logged and skipped. A command ID already present in the
 ledger or already scheduled in the process is skipped.
+
+Before command processing starts, the host binds the compiled debug handler to
+the deterministic owner-scoped command cell. Binding rejects another cell and
+rejects a populated queue that does not already carry the configured owner's
+confidentiality and integrity labels. The debug pattern receives that protected
+cell as an input; the host never selects a queue from pattern output.
 
 ### Receipt
 
@@ -813,11 +834,11 @@ rewritten index.
 
 ```json
 {
-  "schema": "commonfabric.agent-connector.command-ledger.v2",
+  "schema": "commonfabric.agent-connector.command-ledger",
   "generation": 12,
   "receipts": {
     "command-id": {
-      "schema": "commonfabric.agent-connector.command-receipt.v1",
+      "schema": "commonfabric.agent-connector.command-receipt",
       "commandId": "command-id",
       "sourceId": "codex",
       "nativeSessionId": "session-id",

@@ -1,14 +1,34 @@
 import {
   assertEquals,
   assertFalse,
+  assertNotEquals,
   assertRejects,
   assertStrictEquals,
 } from "@std/assert";
-import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
-import { Identity } from "@commonfabric/identity";
-import { Runtime } from "@commonfabric/runner";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { AgentFabricTarget } from "../src/fabric.ts";
+import {
+  isLinkRef,
+  linkRefFrom,
+  linkRefPayload,
+} from "@commonfabric/data-model/cell-rep";
+import { createSession, Identity } from "@commonfabric/identity";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import { type Cell, Runtime } from "@commonfabric/runner";
+import {
+  EmulatedStorageManager,
+  type Options,
+  StorageManager,
+} from "@commonfabric/runner/storage/cache.deno";
+import {
+  agentFabricCauses,
+  AgentFabricTarget,
+  createAgentFabricCells,
+} from "../src/fabric.ts";
+import {
+  AGENT_CONNECTOR_WRITER_ID,
+  agentOwnerSchema,
+  agentPrincipalSchema,
+  cellHasOwnerProtection,
+} from "../src/fabric-graph.ts";
 import {
   pushStableCellGraph,
   readStableCellGraphValue,
@@ -76,6 +96,78 @@ Deno.test("Fabric target validates a discovered checkout", async () => {
   }
 });
 
+const EMULATED_AUDIENCE = "did:key:z6Mk-agent-connector-isolation-test";
+
+class SharedServerStorageManager extends EmulatedStorageManager {
+  static override connectTo(
+    server: MemoryV2Server.Server,
+    options: Omit<Options, "memoryHost" | "spaceHostMap">,
+  ): SharedServerStorageManager {
+    const manager = new SharedServerStorageManager(
+      { ...options, memoryHost: new URL("memory://") },
+      () => server,
+    );
+    manager.#sharedServer = server;
+    return manager;
+  }
+
+  #sharedServer!: MemoryV2Server.Server;
+
+  protected override server(): MemoryV2Server.Server {
+    return this.#sharedServer;
+  }
+}
+
+async function assertOwnerProtectedGraph(
+  runtime: Runtime,
+  root: Cell<unknown>,
+  ownerDid: string,
+): Promise<number> {
+  const pending = [root];
+  const seen = new Set<string>();
+  while (pending.length > 0) {
+    const cell = pending.shift()!;
+    const cellLink = cell.getAsNormalizedFullLink();
+    const key = JSON.stringify({
+      space: cellLink.space,
+      id: cellLink.id,
+      scope: cellLink.scope,
+    });
+    if (seen.has(key)) continue;
+    seen.add(key);
+    await cell.sync();
+    await runtime.storageManager.synced();
+    assertEquals(
+      cellHasOwnerProtection(runtime.readTx(), cell, ownerDid),
+      true,
+      String(cellLink.id),
+    );
+    const visit = (value: unknown): void => {
+      if (isLinkRef(value)) {
+        const link = linkRefPayload(value);
+        if (typeof link.id === "string") {
+          pending.push(runtime.getCellFromLink(
+            {
+              ...link,
+              space: link.space ?? cellLink.space,
+              scope: link.scope ?? cellLink.scope,
+              path: [],
+            } as Parameters<Runtime["getCellFromLink"]>[0],
+          ));
+        }
+        return;
+      }
+      if (Array.isArray(value)) {
+        value.forEach(visit);
+      } else if (value && typeof value === "object") {
+        Object.values(value).forEach(visit);
+      }
+    };
+    visit(cell.getRaw());
+  }
+  return seen.size;
+}
+
 Deno.test("Fabric target publishes sessions and command receipts", async () => {
   const signer = await Identity.fromPassphrase("agent connector target test");
   const storageManager = StorageManager.emulate({ as: signer });
@@ -84,14 +176,13 @@ Deno.test("Fabric target publishes sessions and command receipts", async () => {
     storageManager,
   });
   const space = signer.did();
-  const connection = { runtime, spaceDid: space };
+  const connection = { runtime, spaceDid: space, ownerDid: space };
   try {
     const target = await AgentFabricTarget.open(connection);
     const writeReceiptIndex = async (value: Record<string, unknown>) => {
-      const plan = await planStableArrayCells(value, {
+      const plan = await planStableArrayCells({ ownerDid: space, ...value }, {
         spaceDid: space,
         agentConnector: "receipt-index-test-array-elements",
-        version: 1,
       });
       await pushStableCellGraph(connection, [{
         cell: target.cells.receipts,
@@ -236,6 +327,7 @@ Deno.test("Fabric target publishes sessions and command receipts", async () => {
 
     await target.publishReceipt({
       schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+      ownerDid: space,
       commandId: "command-1",
       sourceId: source.id,
       nativeSessionId: snapshot.summary.nativeSessionId,
@@ -259,16 +351,24 @@ Deno.test("Fabric target publishes sessions and command receipts", async () => {
 
     const malformedReceipt = runtime.getCell(
       space,
-      commandReceiptCause(space, "malformed-command"),
+      commandReceiptCause(space, space, "malformed-command"),
+      agentOwnerSchema(space),
     );
     const malformedReceiptTx = runtime.edit();
+    malformedReceiptTx.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: AGENT_CONNECTOR_WRITER_ID,
+    });
     malformedReceipt.withTx(malformedReceiptTx).set({
       schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+      ownerDid: space,
       commandId: "malformed-command",
       sourceId: source.id,
       nativeSessionId: snapshot.summary.nativeSessionId,
       status: "not-a-status",
     });
+    malformedReceipt.withTx(malformedReceiptTx).applyCfcSchemaToExistingValue();
+    malformedReceiptTx.prepareCfc();
     const malformedReceiptCommit = await malformedReceiptTx.commit();
     if (malformedReceiptCommit.error) throw malformedReceiptCommit.error;
     await assertRejects(
@@ -277,8 +377,31 @@ Deno.test("Fabric target publishes sessions and command receipts", async () => {
       "command receipt status is invalid",
     );
 
+    const unprotectedReceipt = runtime.getCell(
+      space,
+      commandReceiptCause(space, space, "unprotected-command"),
+      undefined,
+    );
+    const unprotectedReceiptTx = runtime.edit();
+    unprotectedReceipt.withTx(unprotectedReceiptTx).setRawUntyped({
+      schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+      ownerDid: space,
+      commandId: "unprotected-command",
+      sourceId: source.id,
+      nativeSessionId: snapshot.summary.nativeSessionId,
+      status: "succeeded",
+    });
+    const unprotectedReceiptCommit = await unprotectedReceiptTx.commit();
+    if (unprotectedReceiptCommit.error) throw unprotectedReceiptCommit.error;
+    await assertRejects(
+      () => target.readReceipt("unprotected-command"),
+      Error,
+      "refusing to trust an unprotected command receipt",
+    );
+
     const malformedIndex = {
       schema: AGENT_CONNECTOR_SCHEMAS.commandReceipts,
+      ownerDid: space,
       receipts: "not-an-array",
       updatedAt: "2026-07-20T00:00:00.000Z",
     };
@@ -287,6 +410,7 @@ Deno.test("Fabric target publishes sessions and command receipts", async () => {
       () =>
         target.publishReceipt({
           schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+          ownerDid: space,
           commandId: "command-2",
           sourceId: source.id,
           nativeSessionId: snapshot.summary.nativeSessionId,
@@ -323,10 +447,15 @@ Deno.test("Fabric target publishes sessions and command receipts", async () => {
         value: { ...validRow, nativeSessionId: " session-1 " },
         message: "nativeSessionId is not normalized",
       },
+      {
+        value: { ...validRow, ownerDid: "did:key:another-owner" },
+        message: "command receipt index row belongs to another owner",
+      },
     ];
     for (const malformed of malformedRows) {
       const malformedRowIndex = {
         schema: AGENT_CONNECTOR_SCHEMAS.commandReceipts,
+        ownerDid: space,
         receipts: [malformed.value],
         updatedAt: "2026-07-20T00:00:00.000Z",
       };
@@ -335,6 +464,7 @@ Deno.test("Fabric target publishes sessions and command receipts", async () => {
         () =>
           target.publishReceipt({
             schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+            ownerDid: space,
             commandId: "command-2",
             sourceId: source.id,
             nativeSessionId: snapshot.summary.nativeSessionId,
@@ -351,6 +481,7 @@ Deno.test("Fabric target publishes sessions and command receipts", async () => {
 
     const malformedTimestampIndex = {
       schema: AGENT_CONNECTOR_SCHEMAS.commandReceipts,
+      ownerDid: space,
       receipts: [validRow],
       updatedAt: "not-a-timestamp",
     };
@@ -359,6 +490,7 @@ Deno.test("Fabric target publishes sessions and command receipts", async () => {
       () =>
         target.publishReceipt({
           schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+          ownerDid: space,
           commandId: "command-2",
           sourceId: source.id,
           nativeSessionId: snapshot.summary.nativeSessionId,
@@ -370,6 +502,7 @@ Deno.test("Fabric target publishes sessions and command receipts", async () => {
 
     const oversizedIndex = {
       schema: AGENT_CONNECTOR_SCHEMAS.commandReceipts,
+      ownerDid: space,
       receipts: Array.from({ length: 201 }, () => structuredClone(validRow)),
       updatedAt: "2026-07-20T00:00:00.000Z",
     };
@@ -378,6 +511,7 @@ Deno.test("Fabric target publishes sessions and command receipts", async () => {
       () =>
         target.publishReceipt({
           schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+          ownerDid: space,
           commandId: "command-2",
           sourceId: source.id,
           nativeSessionId: snapshot.summary.nativeSessionId,
@@ -388,16 +522,36 @@ Deno.test("Fabric target publishes sessions and command receipts", async () => {
     );
 
     const receivedCommands = Promise.withResolvers<unknown[]>();
+    const commandWriterAuthorization = {
+      __ctWriterIdentityOf: {
+        file: "agent-sessions-debug/main.tsx",
+        moduleIdentity: "fid1:target-test-command-writer",
+        path: ["sendOwnerAgentCommand"],
+      },
+    };
+    await target.bindCommandCell(
+      target.cells.commands,
+      commandWriterAuthorization,
+    );
     const cancel = await target.subscribeCommands((commands) => {
       if (commands.length > 0) receivedCommands.resolve(commands);
     });
     try {
+      const command = JSON.stringify({ id: "command-2" });
       const tx = runtime.edit();
-      target.cells.commands.withTx(tx).set([{ id: "command-2" }]);
+      tx.setCfcImplementationIdentity({
+        kind: "verified",
+        moduleIdentity:
+          commandWriterAuthorization.__ctWriterIdentityOf.moduleIdentity,
+        sourceFile: commandWriterAuthorization.__ctWriterIdentityOf.file,
+        bindingPath: commandWriterAuthorization.__ctWriterIdentityOf.path,
+      });
+      target.cells.commands.withTx(tx).set([command]);
+      tx.prepareCfc();
       const result = await tx.commit();
       if (result.error) throw result.error;
-      assertEquals(await receivedCommands.promise, [{ id: "command-2" }]);
-      assertEquals(await target.pollCommands(), [{ id: "command-2" }]);
+      assertEquals(await receivedCommands.promise, [command]);
+      assertEquals(await target.pollCommands(), [command]);
     } finally {
       cancel();
     }
@@ -454,10 +608,12 @@ Deno.test("Fabric target publishes sessions and command receipts", async () => {
     const invalidIndexScope = {
       spaceDid: space,
       agentConnector: "invalid-index-test-array-elements",
-      version: 1,
     };
-    const writeInvalidIndex = async (session: Record<string, unknown>) => {
-      const invalidIndex = { ...index, sessions: [session] };
+    const writeInvalidIndex = async (
+      session: Record<string, unknown>,
+      sources = index.sources,
+    ) => {
+      const invalidIndex = { ...index, sources, sessions: [session] };
       const [invalidRecentPlan, invalidAllPlan] = await Promise.all([
         planStableArrayCells(
           { ...invalidIndex, bucket: "recent" },
@@ -491,14 +647,466 @@ Deno.test("Fabric target publishes sessions and command receipts", async () => {
       Error,
       "agent session index row 0 has no driver",
     );
-    const { formatVersion: _formatVersion, ...unversionedSession } =
-      publishedSession;
-    await writeInvalidIndex(unversionedSession);
+    await writeInvalidIndex({
+      ...publishedSession,
+      ownerDid: "did:key:another-owner",
+    });
     await assertRejects(
       () => target.publish(collected),
       Error,
-      "agent session index row 0 has an invalid formatVersion",
+      "agent session index row 0 has an invalid shape",
     );
+    await writeInvalidIndex({ ...publishedSession, key: "wrong/session" });
+    await assertRejects(
+      () => target.publish(collected),
+      Error,
+      "agent session index row 0 has an invalid shape",
+    );
+    await writeInvalidIndex(publishedSession, [{
+      ...(index.sources as Array<Record<string, unknown>>)[0],
+      id: "Codex:Test",
+    }]);
+    await assertRejects(
+      () => target.publish(collected),
+      Error,
+      "agent session index source 0 has an invalid shape",
+    );
+    await writeInvalidIndex({
+      ...publishedSession,
+      sourceId: "Codex:Test",
+    });
+    await assertRejects(
+      () => target.publish(collected),
+      Error,
+      "agent session index row 0 has an invalid shape",
+    );
+    await writeInvalidIndex({
+      ...publishedSession,
+      nativeSessionId: " session-1 ",
+    });
+    await assertRejects(
+      () => target.publish(collected),
+      Error,
+      "agent session index row 0 has an invalid shape",
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("Fabric target data is owner-scoped and owner-confidential", async () => {
+  const owner = await Identity.fromPassphrase("agent connector data owner");
+  const otherOwner = await Identity.fromPassphrase(
+    "agent connector other data owner",
+  );
+  const storageManager = StorageManager.emulate({ as: owner });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const space = owner.did();
+  try {
+    const connection = { runtime, spaceDid: space, ownerDid: owner.did() };
+    const ownerCells = createAgentFabricCells(connection);
+    const otherCells = createAgentFabricCells({
+      runtime,
+      spaceDid: space,
+      ownerDid: otherOwner.did(),
+    });
+    assertNotEquals(
+      ownerCells.health.getAsNormalizedFullLink().id,
+      otherCells.health.getAsNormalizedFullLink().id,
+    );
+
+    const target = await AgentFabricTarget.open(connection);
+    for (
+      const cell of [
+        target.cells.index,
+        target.cells.allIndex,
+        target.cells.health,
+        target.cells.receipts,
+      ]
+    ) {
+      assertEquals(
+        cellHasOwnerProtection(runtime.readTx(), cell, owner.did()),
+        true,
+      );
+    }
+    await target.publishHealth({
+      status: "ready",
+      localWorkspace: "/private/owner/worktree",
+    });
+    const healthLink = target.cells.health.getAsNormalizedFullLink();
+    const inspect = runtime.edit();
+    const stored = inspect.readOrThrow({
+      space: healthLink.space,
+      id: healthLink.id,
+      path: [],
+      ...(healthLink.scope !== undefined && { scope: healthLink.scope }),
+    }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
+    assertEquals(
+      stored.cfc?.labelMap?.entries?.some((entry) =>
+        JSON.stringify(entry).includes("confidentiality") &&
+        JSON.stringify(entry).includes(owner.did())
+      ),
+      true,
+    );
+    inspect.abort();
+
+    const attack = runtime.edit();
+    attack.setCfcTrustSnapshot({
+      id: `principal:${otherOwner.did()}`,
+      actingPrincipal: otherOwner.did(),
+    });
+    attack.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: AGENT_CONNECTOR_WRITER_ID,
+    });
+    attack.writeValueOrThrow(healthLink, {
+      status: "compromised",
+    });
+    attack.prepareCfc();
+    const attackResult = await attack.commit();
+    assertEquals(attackResult.error !== undefined, true);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("shared-space agent discovery and commands are owner-isolated", async () => {
+  const server = new MemoryV2Server.Server({
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string" ? principal : undefined;
+    },
+    sessionOpenAuth: { audience: EMULATED_AUDIENCE },
+  });
+  const owner = await Identity.fromPassphrase("shared agent graph owner");
+  const otherOwner = await Identity.fromPassphrase(
+    "shared agent graph other owner",
+  );
+  const ownerSession = await createSession({
+    identity: owner,
+    spaceName: `shared-agent-graph-${crypto.randomUUID()}`,
+  });
+  const ownerStorage = SharedServerStorageManager.connectTo(server, {
+    as: ownerSession.as,
+  });
+  const ownerRuntime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: ownerStorage,
+  });
+  let otherRuntime: Runtime | undefined;
+  let otherStorage: SharedServerStorageManager | undefined;
+  try {
+    const target = await AgentFabricTarget.open({
+      runtime: ownerRuntime,
+      spaceDid: ownerSession.space,
+      ownerDid: owner.did(),
+    });
+    await target.bindCommandCell(target.cells.commands, {
+      __ctWriterIdentityOf: {
+        file: "agent-sessions-debug/main.tsx",
+        moduleIdentity: "fid1:owner-command-writer",
+        path: ["sendOwnerAgentCommand"],
+      },
+    });
+    const source: SourceDescriptor = {
+      id: "codex:test",
+      driver: "codex-app-server",
+      capabilities: {
+        inventory: true,
+        read: true,
+        prompt: true,
+        cancel: true,
+        rename: true,
+        setMode: false,
+        setConfigOption: false,
+      },
+    };
+    const snapshot: NativeSessionSnapshot = {
+      summary: {
+        nativeSessionId: "private-session",
+        title: "Private session",
+        cwd: "/private/owner/workspace",
+        createdAt: "2026-08-25T00:00:00.000Z",
+        updatedAt: "2026-08-25T00:01:00.000Z",
+        archived: false,
+        active: true,
+        raw: {},
+      },
+      events: [{
+        type: "message",
+        id: "private-message",
+        role: "user",
+        content: "private prompt",
+      }],
+      normalizedMessages: [{
+        id: "private-message",
+        role: "user",
+        kind: "text",
+        createdAt: "2026-08-25T00:01:00.000Z",
+        textPreview: "private prompt",
+        rawIndex: 0,
+      }],
+      complete: true,
+    };
+    await target.publish([{
+      source,
+      sessions: [snapshot],
+      errors: [],
+      complete: true,
+    }]);
+    await ownerStorage.synced();
+    assertEquals(
+      (await assertOwnerProtectedGraph(
+        ownerRuntime,
+        target.cells.allIndex,
+        owner.did(),
+      )) > 5,
+      true,
+    );
+
+    const otherSession = await createSession({
+      identity: otherOwner,
+      spaceDid: ownerSession.space,
+    });
+    otherStorage = SharedServerStorageManager.connectTo(server, {
+      as: otherSession.as,
+    });
+    otherRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: otherStorage,
+    });
+    const otherTarget = await AgentFabricTarget.open({
+      runtime: otherRuntime,
+      spaceDid: otherSession.space,
+      ownerDid: otherOwner.did(),
+    });
+    const otherIndex = await readStableCellGraphValue(
+      {
+        runtime: otherRuntime,
+        spaceDid: otherSession.space,
+        ownerDid: otherOwner.did(),
+      },
+      otherTarget.cells.allIndex,
+    ) as Record<string, unknown>;
+    assertEquals(otherIndex.sessions, []);
+    assertNotEquals(
+      target.cells.allIndex.getAsNormalizedFullLink().id,
+      otherTarget.cells.allIndex.getAsNormalizedFullLink().id,
+    );
+
+    const causes = agentFabricCauses(ownerSession.space, owner.did());
+    const ownerCommands = otherRuntime.getCell(
+      ownerSession.space,
+      causes.commands,
+    );
+    await ownerCommands.sync();
+    await otherStorage.synced();
+
+    const attack = otherRuntime.edit();
+    ownerCommands.withTx(attack).setRawUntyped([{
+      schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: owner.did(),
+      id: "other-owner-command",
+    }]);
+    let rejected = false;
+    try {
+      attack.prepareCfc();
+      rejected = (await attack.commit()).error !== undefined;
+    } catch {
+      rejected = true;
+      attack.abort();
+    }
+    assertEquals(rejected, true);
+  } finally {
+    await otherRuntime?.dispose();
+    await otherStorage?.close();
+    await ownerRuntime.dispose();
+    await ownerStorage.close();
+    await server.close();
+  }
+});
+
+Deno.test("Fabric target refuses an unprotected owner root", async () => {
+  const owner = await Identity.fromPassphrase("agent connector root owner");
+  const storageManager = StorageManager.emulate({ as: owner });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const space = (await Identity.fromPassphrase(
+    "shared agent connector root space",
+  )).did();
+  try {
+    const connection = { runtime, spaceDid: space, ownerDid: owner.did() };
+    const cells = createAgentFabricCells(connection);
+    const unprotectedIndex = runtime.getCell(
+      space,
+      agentFabricCauses(space, owner.did()).index,
+      undefined,
+    );
+    const seed = runtime.edit();
+    unprotectedIndex.withTx(seed).setRawUntyped({
+      schema: AGENT_CONNECTOR_SCHEMAS.sessionIndex,
+      ownerDid: owner.did(),
+      bucket: "recent",
+      generatedAt: "2026-08-25T00:00:00.000Z",
+      generation: 0,
+      sources: [],
+      sessions: [],
+    });
+    const committed = await seed.commit();
+    if (committed.error) throw committed.error;
+
+    await assertRejects(
+      () => AgentFabricTarget.open(connection),
+      Error,
+      "refusing to adopt an unprotected recent session index",
+    );
+    assertEquals(cells.allIndex.getRaw(), undefined);
+    assertEquals(cells.health.getRaw(), undefined);
+    assertEquals(cells.receipts.getRaw(), undefined);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("Fabric target refuses an owner root with another writer", async () => {
+  const owner = await Identity.fromPassphrase(
+    "agent connector wrong writer owner",
+  );
+  const storageManager = StorageManager.emulate({ as: owner });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const otherWriter = "another-owner-scoped-pattern";
+  try {
+    const connection = {
+      runtime,
+      spaceDid: owner.did(),
+      ownerDid: owner.did(),
+    };
+    const root = runtime.getCell(
+      owner.did(),
+      agentFabricCauses(owner.did(), owner.did()).index,
+      agentPrincipalSchema(owner.did(), [otherWriter]),
+    );
+    const seed = runtime.edit();
+    seed.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: otherWriter,
+    });
+    root.withTx(seed).set({
+      schema: AGENT_CONNECTOR_SCHEMAS.sessionIndex,
+      ownerDid: owner.did(),
+      bucket: "recent",
+      generatedAt: "2026-08-25T00:00:00.000Z",
+      generation: 0,
+      sources: [],
+      sessions: [],
+    });
+    root.withTx(seed).applyCfcSchemaToExistingValue();
+    seed.prepareCfc();
+    const seeded = await seed.commit();
+    if (seeded.error) throw seeded.error;
+
+    assertEquals(
+      cellHasOwnerProtection(runtime.readTx(), root, owner.did()),
+      true,
+    );
+    await assertRejects(
+      () => AgentFabricTarget.open(connection),
+      Error,
+      "writeAuthorizedBy cannot be weakened",
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("Fabric target binds only an empty owner command queue", async () => {
+  const owner = await Identity.fromPassphrase("command queue binding owner");
+  const storageManager = StorageManager.emulate({ as: owner });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const writerAuthorization = {
+    __ctWriterIdentityOf: {
+      file: "agent-sessions-debug/main.tsx",
+      moduleIdentity: "fid1:verified-command-writer",
+      path: ["sendOwnerAgentCommand"],
+    },
+  };
+  try {
+    const rawCommandCell = runtime.getCell(
+      owner.did(),
+      agentFabricCauses(owner.did(), owner.did()).commands,
+      undefined,
+    );
+    const seed = runtime.edit();
+    rawCommandCell.withTx(seed).setRawUntyped(["pre-seeded-command"]);
+    const seeded = await seed.commit();
+    if (seeded.error) throw seeded.error;
+    const first = await AgentFabricTarget.open({
+      runtime,
+      spaceDid: owner.did(),
+      ownerDid: owner.did(),
+    });
+    await assertRejects(
+      () => first.bindCommandCell(first.cells.commands, writerAuthorization),
+      Error,
+      "refusing to adopt a populated command queue",
+    );
+    await assertRejects(
+      () =>
+        first.bindCommandCell(
+          runtime.getCell(owner.did(), "redirected-command-queue"),
+          writerAuthorization,
+        ),
+      Error,
+      "not the connector's owner-scoped queue",
+    );
+
+    const secondOwner = await Identity.fromPassphrase(
+      "empty command queue binding owner",
+    );
+    const secondStorage = StorageManager.emulate({ as: secondOwner });
+    const secondRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: secondStorage,
+    });
+    try {
+      const second = await AgentFabricTarget.open({
+        runtime: secondRuntime,
+        spaceDid: secondOwner.did(),
+        ownerDid: secondOwner.did(),
+      });
+      await assertRejects(
+        () => second.pollCommands(),
+        Error,
+        "owner command cell has not been bound",
+      );
+      await assertRejects(
+        () => second.subscribeCommands(() => {}),
+        Error,
+        "owner command cell has not been bound",
+      );
+      await second.bindCommandCell(second.cells.commands, writerAuthorization);
+      assertEquals(second.commandsAreBound(), true);
+      assertEquals(await second.pollCommands(), []);
+    } finally {
+      await secondRuntime.dispose();
+      await secondStorage.close();
+    }
   } finally {
     await runtime.dispose();
     await storageManager.close();
@@ -833,7 +1441,7 @@ Deno.test("an interrupted publication leaves the prior session graph intact", as
     storageManager,
   });
   const space = signer.did();
-  const connection = { runtime, spaceDid: space };
+  const connection = { runtime, spaceDid: space, ownerDid: space };
   const source: SourceDescriptor = {
     id: "codex:test",
     driver: "codex-app-server",
@@ -884,7 +1492,7 @@ Deno.test("an interrupted publication leaves the prior session graph intact", as
     }]);
     const manifest = runtime.getCell(
       space,
-      sessionCause(space, source.id, "session-1"),
+      sessionCause(space, space, source.id, "session-1"),
     );
 
     const originalEdit = runtime.edit;
@@ -972,7 +1580,7 @@ Deno.test("session publication captures native values once", async () => {
     storageManager,
   });
   const space = signer.did();
-  const connection = { runtime, spaceDid: space };
+  const connection = { runtime, spaceDid: space, ownerDid: space };
   let conversions = 0;
   const sharedNativeValue = {
     toJSON() {
@@ -1024,7 +1632,7 @@ Deno.test("session publication captures native values once", async () => {
 
     const manifest = runtime.getCell(
       space,
-      sessionCause(space, source.id, "session-1"),
+      sessionCause(space, space, source.id, "session-1"),
     );
     const published = await readStableCellGraphValue(
       connection,
@@ -1055,7 +1663,7 @@ Deno.test("newer session refresh wins over an older full collection", async () =
     storageManager,
   });
   const space = signer.did();
-  const connection = { runtime, spaceDid: space };
+  const connection = { runtime, spaceDid: space, ownerDid: space };
   try {
     const target = await AgentFabricTarget.open(connection);
     const source: SourceDescriptor = {

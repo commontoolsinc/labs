@@ -67,6 +67,7 @@ export interface AgentsHostSyncHealth {
 
 export interface AgentsHostTargetDescription {
   spaceDid: string;
+  ownerDid: string;
   debugPieceId?: string;
   cells: {
     recentIndex: string;
@@ -79,7 +80,6 @@ export interface AgentsHostTargetDescription {
 
 export interface AgentsHostHealth {
   service: "agents-host";
-  formatVersion: 1;
   status: AgentsHostStatus;
   startedAt: string;
   updatedAt: string;
@@ -212,7 +212,6 @@ export class AgentsHost {
   health(): AgentsHostHealth {
     return structuredClone({
       service: "agents-host",
-      formatVersion: 1,
       status: this.#status,
       startedAt: this.#startedAt,
       updatedAt: this.#updatedAt,
@@ -309,6 +308,7 @@ export class AgentsHost {
       this.#drivers,
       [observedTarget],
       this.#ledger,
+      this.#targetDescription.ownerDid,
       (receipt) => this.#recordReceipt(receipt),
       (failure) => this.#recordCommandFailure(failure),
     );

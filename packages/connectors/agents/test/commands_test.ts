@@ -48,9 +48,11 @@ Deno.test("command worker claims before execution and deduplicates command ids",
     new Map([[driver.source.id, driver]]),
     [target],
     ledger,
+    "did:key:test-owner",
   );
   const command = {
     schema: AGENT_CONNECTOR_SCHEMAS.command,
+    ownerDid: "did:key:test-owner",
     id: "command-1",
     createdAt: "2026-07-09T00:00:00.000Z",
     sourceId: "fake:default",
@@ -68,6 +70,58 @@ Deno.test("command worker claims before execution and deduplicates command ids",
   await worker.handle([command]);
   assertEquals(renameCalls, 1);
   await Deno.remove(dir, { recursive: true });
+});
+
+Deno.test("command worker ignores commands for another owner", async () => {
+  const dir = await Deno.makeTempDir();
+  const ledger = await CommandLedger.open(`${dir}/ledger.json`);
+  let renameCalls = 0;
+  const driver = {
+    source: {
+      id: "fake:default",
+      driver: "acp",
+      capabilities: {
+        inventory: true,
+        read: true,
+        prompt: true,
+        cancel: true,
+        rename: true,
+        setMode: false,
+        setConfigOption: false,
+      },
+    },
+    renameSession: () => {
+      renameCalls++;
+      return Promise.resolve({ status: "succeeded" as const });
+    },
+  } as unknown as AgentDriver;
+  const worker = new CommandWorker(
+    new Map([[driver.source.id, driver]]),
+    [{
+      publishReceipt: () => Promise.resolve(),
+      refreshSession: () => Promise.resolve(),
+    }],
+    ledger,
+    "did:key:test-owner",
+  );
+
+  try {
+    await worker.handle([{
+      schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:another-owner",
+      id: "foreign-command",
+      createdAt: "2026-07-09T00:00:00.000Z",
+      sourceId: driver.source.id,
+      nativeSessionId: "session-1",
+      type: "rename",
+      payload: { title: "Do not run" },
+    }]);
+    await worker.drain();
+    assertEquals(renameCalls, 0);
+    assertEquals(ledger.get("foreign-command"), undefined);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
 });
 
 Deno.test("commands run concurrently across sessions and cancel bypasses the session queue", async () => {
@@ -118,9 +172,11 @@ Deno.test("commands run concurrently across sessions and cancel bypasses the ses
     new Map([[driver.source.id, driver]]),
     [target],
     ledger,
+    "did:key:test-owner",
   );
   const command = (id: string, sessionId: string, type = "prompt") => ({
     schema: AGENT_CONNECTOR_SCHEMAS.command,
+    ownerDid: "did:key:test-owner",
     id,
     createdAt: "2026-07-09T00:00:00.000Z",
     sourceId: "fake:default",
@@ -186,9 +242,11 @@ Deno.test("cancel waits for an earlier admitted prompt to become active", async 
     new Map([[driver.source.id, driver]]),
     [target],
     ledger,
+    "did:key:test-owner",
   );
   const command = (id: string, type: "prompt" | "cancel") => ({
     schema: AGENT_CONNECTOR_SCHEMAS.command,
+    ownerDid: "did:key:test-owner",
     id,
     createdAt: "2026-07-09T00:00:00.000Z",
     sourceId: driver.source.id,
@@ -270,9 +328,11 @@ Deno.test("cancel reaches a prompt while provider metadata is pending", async ()
     new Map([[driver.source.id, driver]]),
     [target],
     ledger,
+    "did:key:test-owner",
   );
   const command = (id: string, type: "prompt" | "cancel") => ({
     schema: AGENT_CONNECTOR_SCHEMAS.command,
+    ownerDid: "did:key:test-owner",
     id,
     createdAt: "2026-07-09T00:00:00.000Z",
     sourceId: driver.source.id,
@@ -356,11 +416,13 @@ Deno.test("prompt commands publish session state while running and after complet
     new Map([[driver.source.id, driver]]),
     [target],
     ledger,
+    "did:key:test-owner",
   );
 
   try {
     await worker.handle([{
       schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
       id: "prompt-activity",
       createdAt: "2026-07-09T00:00:00.000Z",
       sourceId: "fake:default",
@@ -431,11 +493,13 @@ Deno.test("failed prompts publish terminal session state", async () => {
     new Map([[driver.source.id, driver]]),
     [target],
     ledger,
+    "did:key:test-owner",
   );
 
   try {
     await worker.handle([{
       schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
       id: "failed-prompt-activity",
       createdAt: "2026-07-09T00:00:00.000Z",
       sourceId: driver.source.id,
@@ -457,6 +521,7 @@ Deno.test("in-flight commands from a prior process become unknown", async () => 
   const ledger = await CommandLedger.open(path);
   await ledger.put({
     schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+    ownerDid: "did:key:test-owner",
     commandId: "orphan",
     sourceId: "fake:default",
     nativeSessionId: "session-1",
@@ -515,9 +580,11 @@ Deno.test("terminal receipts that failed to publish are replayed after restart",
       new Map([[driver.source.id, driver]]),
       [firstTarget],
       ledger,
+      "did:key:test-owner",
     );
     await firstWorker.handle([{
       schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
       id: "command-with-unpublished-terminal",
       createdAt: "2026-07-09T00:00:00.000Z",
       sourceId: "fake:default",
@@ -549,6 +616,7 @@ Deno.test("terminal receipts that failed to publish are replayed after restart",
         refreshSession: () => Promise.resolve(),
       }],
       reopened,
+      "did:key:test-owner",
     );
     await recoveringWorker.recoverUnpublishedReceipts();
     assertEquals(replayedStatuses, ["succeeded"]);
@@ -573,6 +641,7 @@ Deno.test("overlapping ledger writes all survive reopen", async () => {
   await Promise.all(commandIds.map((commandId) =>
     ledger.put({
       schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+      ownerDid: "did:key:test-owner",
       commandId,
       sourceId: "fake:default",
       nativeSessionId: `session-${commandId}`,
@@ -589,14 +658,14 @@ Deno.test("overlapping ledger writes all survive reopen", async () => {
   await Deno.remove(dir, { recursive: true });
 });
 
-Deno.test("command ledger rejects obsolete formats", async () => {
+Deno.test("command ledger rejects an unknown schema", async () => {
   const dir = await Deno.makeTempDir();
   const path = `${dir}/ledger.json`;
   try {
     await Deno.writeTextFile(
       path,
       JSON.stringify({
-        schema: "commonfabric.agent-connector.command-ledger.v1",
+        schema: "commonfabric.agent-connector.command-ledger.unknown",
         receipts: {},
       }),
       { mode: 0o600 },
@@ -604,7 +673,7 @@ Deno.test("command ledger rejects obsolete formats", async () => {
     await assertRejects(
       () => CommandLedger.open(path),
       Error,
-      "command ledger schema must be commonfabric.agent-connector.command-ledger.v2",
+      "command ledger schema must be commonfabric.agent-connector.command-ledger",
     );
   } finally {
     await Deno.remove(dir, { recursive: true });
@@ -623,6 +692,7 @@ Deno.test("command ledger validates receipt keys and contents", async () => {
         receipts: {
           "stored-key": {
             schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+            ownerDid: "did:key:test-owner",
             commandId: "different-command",
             sourceId: "fake:default",
             nativeSessionId: "session-1",
@@ -647,6 +717,7 @@ Deno.test("command ledger validates receipt keys and contents", async () => {
         receipts: {
           command: {
             schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+            ownerDid: "did:key:test-owner",
             commandId: "command",
             sourceId: "fake:default",
             nativeSessionId: "session-1",
@@ -670,6 +741,7 @@ Deno.test("command ledger validates receipt keys and contents", async () => {
 Deno.test("command receipts require canonical identities and timestamps", () => {
   const receipt: AgentSessionCommandReceipt = {
     schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+    ownerDid: "did:key:test-owner",
     commandId: "command",
     sourceId: "fake:default",
     nativeSessionId: "session-1",
@@ -705,6 +777,7 @@ Deno.test("command ledger writes private files in a private directory", async ()
     const ledger = await CommandLedger.open(path);
     await ledger.put({
       schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+      ownerDid: "did:key:test-owner",
       commandId: "command",
       sourceId: "fake:default",
       nativeSessionId: "session-1",
@@ -757,6 +830,7 @@ Deno.test("a published receipt prevents execution with a fresh local ledger", as
     } as unknown as AgentDriver;
     const command = {
       schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
       id: "shared-command",
       createdAt: "2026-07-20T00:00:00.000Z",
       sourceId: "fake:default",
@@ -769,6 +843,7 @@ Deno.test("a published receipt prevents execution with a fresh local ledger", as
       new Map([[driver.source.id, driver]]),
       [target],
       await CommandLedger.open(`${directory}/first/ledger.json`),
+      "did:key:test-owner",
     );
     await first.handle([command]);
     await first.drain();
@@ -778,6 +853,7 @@ Deno.test("a published receipt prevents execution with a fresh local ledger", as
       new Map([[driver.source.id, driver]]),
       [target],
       await CommandLedger.open(`${directory}/second/ledger.json`),
+      "did:key:test-owner",
     );
     await second.handle([command]);
     await second.drain();
@@ -793,6 +869,7 @@ Deno.test("equivalent target receipts do not depend on object key order", async 
   try {
     const receipt: AgentSessionCommandReceipt = {
       schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+      ownerDid: "did:key:test-owner",
       commandId: "shared-command",
       sourceId: "fake:default",
       nativeSessionId: "session-1",
@@ -808,6 +885,7 @@ Deno.test("equivalent target receipts do not depend on object key order", async 
       sourceId: "fake:default",
       commandId: "shared-command",
       schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+      ownerDid: "did:key:test-owner",
     };
     const published: AgentSessionCommandReceipt[] = [];
     const target = (
@@ -825,10 +903,12 @@ Deno.test("equivalent target receipts do not depend on object key order", async 
       new Map(),
       [target(receipt), target(reordered)],
       ledger,
+      "did:key:test-owner",
     );
 
     await worker.handle([{
       schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
       id: "shared-command",
       createdAt: "2026-07-20T00:00:00.000Z",
       sourceId: "fake:default",
@@ -850,9 +930,15 @@ Deno.test("commands reject control characters before creating a claim", async ()
   const directory = await Deno.makeTempDir();
   try {
     const ledger = await CommandLedger.open(`${directory}/ledger.json`);
-    const worker = new CommandWorker(new Map(), [], ledger);
+    const worker = new CommandWorker(
+      new Map(),
+      [],
+      ledger,
+      "did:key:test-owner",
+    );
     await worker.handle([{
       schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
       id: "bad\ncommand",
       createdAt: "2026-07-20T00:00:00.000Z",
       sourceId: "fake:default",
@@ -861,6 +947,7 @@ Deno.test("commands reject control characters before creating a claim", async ()
       payload: {},
     }, {
       schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
       id: "bad-session-command",
       createdAt: "2026-07-20T00:00:00.000Z",
       sourceId: "fake:default",
@@ -880,9 +967,15 @@ Deno.test("commands reject non-record payloads before claiming", async () => {
   const directory = await Deno.makeTempDir();
   try {
     const ledger = await CommandLedger.open(`${directory}/ledger.json`);
-    const worker = new CommandWorker(new Map(), [], ledger);
+    const worker = new CommandWorker(
+      new Map(),
+      [],
+      ledger,
+      "did:key:test-owner",
+    );
     const base = {
       schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
       createdAt: "2026-07-20T00:00:00.000Z",
       sourceId: "fake:default",
       nativeSessionId: "session-1",
@@ -944,9 +1037,11 @@ Deno.test("synchronous driver failures publish a terminal receipt", async () => 
       new Map([[driver.source.id, driver]]),
       [target],
       ledger,
+      "did:key:test-owner",
     );
     await worker.handle([{
       schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
       id: "sync-failure",
       createdAt: "2026-07-20T00:00:00.000Z",
       sourceId: "fake:default",
@@ -971,6 +1066,7 @@ Deno.test("receipt ownership compares `FabricValue`s", async () => {
     const ledger = await CommandLedger.open(`${directory}/ledger.json`);
     const receipt: AgentSessionCommandReceipt = {
       schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+      ownerDid: "did:key:test-owner",
       commandId: "fabric-receipt",
       sourceId: "fake:default",
       nativeSessionId: "session-1",
@@ -986,9 +1082,11 @@ Deno.test("receipt ownership compares `FabricValue`s", async () => {
       new Map(),
       [target({ value: undefined }), target({})],
       ledger,
+      "did:key:test-owner",
     );
     await worker.handle([{
       schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
       id: "fabric-receipt",
       createdAt: "2026-07-20T00:00:00.000Z",
       sourceId: "fake:default",
@@ -1009,6 +1107,7 @@ Deno.test("command ledger preserves Fabric receipt results across reopen", async
   try {
     const receipt: AgentSessionCommandReceipt = {
       schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+      ownerDid: "did:key:test-owner",
       commandId: "fabric-ledger-result",
       sourceId: "fake:default",
       nativeSessionId: "session-1",

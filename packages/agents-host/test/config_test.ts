@@ -8,10 +8,24 @@ import {
 } from "../src/config.ts";
 import { parseAgentsHostCliOptions } from "../src/cli-options.ts";
 import { basename, join } from "@std/path";
+import { Identity } from "@commonfabric/identity";
+import { assertConfiguredOwner } from "../src/fabric-runtime.ts";
+
+Deno.test("configured owner must match the signing identity", async () => {
+  const owner = await Identity.fromPassphrase("agents host configured owner");
+  const other = await Identity.fromPassphrase("agents host other owner");
+  assertConfiguredOwner(owner, owner.did());
+  assertThrows(
+    () => assertConfiguredOwner(owner, other.did()),
+    Error,
+    "does not match identity",
+  );
+});
 
 Deno.test("parseAgentsHostConfig validates and preserves provider options", () => {
   const config = parseAgentsHostConfig({
     schema: AGENTS_HOST_CONFIG_SCHEMA,
+    ownerDid: "did:key:test-owner",
     collectionIntervalMs: 1_234,
     checkoutRoots: ["/workspace/checkouts"],
     sources: [
@@ -85,6 +99,7 @@ Deno.test("parseAgentsHostConfig rejects ambiguous source identities", () => {
     () =>
       parseAgentsHostConfig({
         schema: AGENTS_HOST_CONFIG_SCHEMA,
+        ownerDid: "did:key:test-owner",
         sources: [
           {
             id: "Codex",
@@ -103,6 +118,7 @@ Deno.test("parseAgentsHostConfig requires commands for enabled ACP sources", () 
     () =>
       parseAgentsHostConfig({
         schema: AGENTS_HOST_CONFIG_SCHEMA,
+        ownerDid: "did:key:test-owner",
         sources: [{ id: "acp", driver: "acp", enabled: true }],
       }),
     Error,
@@ -119,6 +135,7 @@ Deno.test("loadAgentsHostConfig accepts JSONC", async () => {
       `{
         // One source is enough for a host.
         "schema": "${AGENTS_HOST_CONFIG_SCHEMA}",
+        "ownerDid": "did:key:test-owner",
         "sources": [
           { "id": "claude", "driver": "claude-agent-sdk", "enabled": true }
         ]
@@ -149,6 +166,7 @@ Deno.test("parseAgentsHostConfig rejects invalid collection intervals", () => {
       () =>
         parseAgentsHostConfig({
           schema: AGENTS_HOST_CONFIG_SCHEMA,
+          ownerDid: "did:key:test-owner",
           collectionIntervalMs,
           sources: [{
             id: "codex",

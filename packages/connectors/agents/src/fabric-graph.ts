@@ -2,14 +2,103 @@ import { isLinkRef, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import {
   type Cancel,
   type Cell,
+  cfcAtom,
+  type JSONSchema,
   type MemorySpace,
   type Runtime,
 } from "@commonfabric/runner";
+import { readStoredCfcMetadata } from "@commonfabric/runner/cfc";
 import { stableFabricValue } from "./stable-fabric-value.ts";
 
 export interface AgentFabricConnection {
   runtime: Runtime;
   spaceDid: MemorySpace;
+  ownerDid: string;
+}
+
+export const AGENT_CONNECTOR_WRITER_ID = "commonfabric.agents-connector";
+
+export function cellHasOwnerConfidentiality(
+  tx: Parameters<typeof readStoredCfcMetadata>[0],
+  cell: Cell<unknown>,
+  ownerDid: string,
+): boolean {
+  const ownerAtom = cfcAtom.user(ownerDid);
+  return readStoredCfcMetadata(
+    tx,
+    cell.getAsNormalizedFullLink(),
+  )?.labelMap.entries.some((entry) =>
+    entry.label.confidentiality?.some((clause) =>
+      typeof clause === "object" && clause !== null &&
+      !Array.isArray(clause) && "type" in clause &&
+      clause.type === ownerAtom.type && "subject" in clause &&
+      clause.subject === ownerDid
+    )
+  ) ?? false;
+}
+
+export function cellHasOwnerProtection(
+  tx: Parameters<typeof readStoredCfcMetadata>[0],
+  cell: Cell<unknown>,
+  ownerDid: string,
+): boolean {
+  const metadata = readStoredCfcMetadata(
+    tx,
+    cell.getAsNormalizedFullLink(),
+  );
+  const ownerAtom = cfcAtom.user(ownerDid);
+  return metadata?.labelMap.entries.some((entry) =>
+    entry.path.length === 0 &&
+    entry.label.confidentiality?.some((clause) =>
+        typeof clause === "object" && clause !== null &&
+        !Array.isArray(clause) && "type" in clause &&
+        clause.type === ownerAtom.type && "subject" in clause &&
+        clause.subject === ownerDid
+      ) === true &&
+    entry.label.integrity?.some((atom) =>
+        typeof atom === "object" && atom !== null &&
+        "kind" in atom && atom.kind === "represents-principal" &&
+        "subject" in atom && atom.subject === ownerDid
+      ) === true
+  ) ?? false;
+}
+
+export function agentPrincipalSchema(
+  ownerDid: string,
+  writerAuthorization: unknown,
+): JSONSchema {
+  return {
+    ifc: {
+      confidentiality: [cfcAtom.user(ownerDid)],
+      ownerPrincipal: ownerDid,
+      addIntegrity: [{
+        kind: "represents-principal",
+        subject: ownerDid,
+      }],
+      writeAuthorizedBy: writerAuthorization,
+    },
+  } as JSONSchema;
+}
+
+export function agentOwnerSchema(
+  ownerDid: string,
+  connectorWritable = true,
+): JSONSchema {
+  return {
+    ifc: {
+      confidentiality: [cfcAtom.user(ownerDid)],
+      ...(connectorWritable
+        ? {
+          ownerPrincipal: ownerDid,
+          addIntegrity: [{
+            kind: "represents-principal",
+            subject: ownerDid,
+          }],
+          writeAuthorizedBy: [AGENT_CONNECTOR_WRITER_ID],
+        }
+        : {}),
+    },
+  };
 }
 
 export type StableCellMaterializer = (
@@ -55,16 +144,22 @@ export async function pushStableCellGraph(
 ): Promise<void> {
   if (entries.length === 0) return;
   const tx = connection.runtime.edit();
+  tx.setCfcImplementationIdentity({
+    kind: "builtin",
+    builtinId: AGENT_CONNECTOR_WRITER_ID,
+  });
   try {
     const writeCellValue = (cell: Cell<unknown>, value: unknown) => {
       const link = cell.getAsNormalizedFullLink();
       if (!isPlainRecord(value)) {
         tx.writeValueOrThrow(link, stableFabricValue(value));
+        cell.withTx(tx).applyCfcSchemaToExistingValue();
         return cell;
       }
       const priorValue = tx.readValueOrThrow(link);
       if (!isPlainRecord(priorValue)) {
         tx.writeValueOrThrow(link, stableFabricValue(value));
+        cell.withTx(tx).applyCfcSchemaToExistingValue();
         return cell;
       }
       for (const key of Object.keys(priorValue)) {
@@ -92,6 +187,7 @@ export async function pushStableCellGraph(
           stableFabricValue(fieldValue),
         );
       }
+      cell.withTx(tx).applyCfcSchemaToExistingValue();
       return cell;
     };
     const materializeCell: StableCellMaterializer = (cause, value) =>
@@ -99,7 +195,7 @@ export async function pushStableCellGraph(
         connection.runtime.getCell(
           connection.spaceDid,
           cause,
-          undefined,
+          agentOwnerSchema(connection.ownerDid),
           tx,
         ),
         value,
@@ -111,6 +207,7 @@ export async function pushStableCellGraph(
     tx.abort(error);
     throw error;
   }
+  tx.prepareCfc();
   const result = await tx.commit();
   if (result.error) {
     throw new Error(commitErrorMessage(result.error), { cause: result.error });
@@ -231,8 +328,9 @@ export async function subscribeStableActions(
 }
 
 export async function readStableActions(
+  connection: AgentFabricConnection,
   cell: Cell<unknown>,
 ): Promise<unknown[]> {
-  const value = await cell.pull();
+  const value = await readStableCellGraphValue(connection, cell);
   return Array.isArray(value) ? [...value] : [];
 }
