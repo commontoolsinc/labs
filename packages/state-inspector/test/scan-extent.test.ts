@@ -22,6 +22,7 @@ import {
   isCompleteScan,
   isEntityKind,
   listEntityModels,
+  rowLimit,
   scanLimit,
   visibleEntityRows,
 } from "../model.ts";
@@ -597,6 +598,22 @@ describe("scan-extent", () => {
       expect(scanLimit(-3)).toBe(0);
       expect(scanLimit(undefined)).toBe(DEFAULT_SCAN_LIMIT);
       expect(scanLimit(NaN)).toBe(DEFAULT_SCAN_LIMIT);
+    });
+  });
+
+  describe("rowLimit()", () => {
+    it("returns undefined for a negative, which a row listing reads as unlimited", () => {
+      expect(rowLimit(-1)).toBeUndefined();
+      expect(rowLimit(0)).toBe(0);
+      expect(rowLimit(20)).toBe(20);
+    });
+
+    it("refuses a limit no SQL LIMIT would have accepted", () => {
+      // SQLite answers each of these with a datatype mismatch; `slice` would
+      // read them as one row, no rows, and every row.
+      for (const bad of [1.5, NaN, Infinity, -Infinity]) {
+        expect(() => rowLimit(bad)).toThrow("whole number of rows");
+      }
     });
   });
 
