@@ -302,16 +302,18 @@ export function shapeVerbCandidates(
   verbs: readonly VerbListingLike[],
 ): Candidate[] {
   return verbs.map((verb) => {
-    const mark = verb.tier === "wrapper"
-      ? "wrapper"
-      : verb.deprecated === true
-      ? "deprecated"
-      : undefined;
+    // Both marks, in the order and the join `cf piece verbs` renders them
+    // with. They can coexist, and picking one would put the two surfaces back
+    // into the silent disagreement this item is about.
+    const marks = [
+      ...(verb.tier === "wrapper" ? ["wrapper"] : []),
+      ...(verb.deprecated === true ? ["deprecated"] : []),
+    ].join(",");
     const said = verb.description?.split("\n")[0].trim();
     const body = said && said.length > 0 ? said : verb.kind;
     return {
       value: verb.name,
-      description: mark ? `[${mark}] ${body}` : body,
+      description: marks ? `[${marks}] ${body}` : body,
     };
   });
 }

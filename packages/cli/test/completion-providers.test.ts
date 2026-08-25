@@ -402,6 +402,24 @@ Deno.test("shaping: a callable takes the first line of a multi-line comment", ()
   );
 });
 
+Deno.test("shaping: a verb carrying both marks is offered with both", () => {
+  // The marks can coexist, and `cf piece verbs` renders them joined — so
+  // picking one would put the two surfaces back into the silent disagreement
+  // this mark exists to end.
+  assertEquals(
+    shapeVerbCandidates([
+      {
+        name: "openLegacy",
+        kind: "handler",
+        tier: "wrapper",
+        deprecated: true,
+        description: "Open it.",
+      },
+    ]),
+    [{ value: "openLegacy", description: "[wrapper,deprecated] Open it." }],
+  );
+});
+
 Deno.test("shaping: a verb the listing holds back is offered marked", () => {
   // `cf piece verbs` hides both unless --all. Both are callable, so hiding
   // them here would put a working name out of reach; the mark is what keeps

@@ -434,8 +434,12 @@ word back to them and calls it documentation.
 `cf piece verbs` hides `tier: "wrapper"` and `deprecated` rows unless `--all`,
 and prints a note saying how many it held back. Completion offers them, because
 both are callable and a name that works should be reachable — and marks them,
-because two surfaces disagreeing silently is what is not defensible. The mark
-leads the annotation: `[deprecated] Add one item.`
+because two surfaces disagreeing silently is what is not defensible. The marks
+lead the annotation: `[deprecated] Add one item.`
+
+The two can coexist, and the listing joins them, so completion joins them the
+same way — `[wrapper,deprecated]`. Picking one would be the same disagreement
+in a narrower place.
 
 ## Felt cost
 

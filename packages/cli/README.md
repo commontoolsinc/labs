@@ -997,8 +997,9 @@ such as `--log-level` — plus live values read from the fabric:
 
 A callable is annotated with what its author said it is for, falling back to its
 kind where they wrote nothing. A wrapper or deprecated verb — the two
-`cf piece verbs` holds back unless `--all` — is offered with that mark leading
-its annotation, since both are callable and a name that works should be
+`cf piece verbs` holds back unless `--all` — is offered with its marks leading
+that annotation, joined the way the listing joins them and both shown where a
+verb carries both, since either is callable and a name that works should be
 reachable.
 
 A projection's grammar is its own and not the cell path's: a list splits on `,`
