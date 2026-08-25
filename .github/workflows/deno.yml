@@ -196,6 +196,13 @@ jobs:
           deno task run-recorded gate repo check-cfc-types --
           deno task check-cfc-types
 
+      - name: 🔎 Check generated commonfabric types are up to date
+        timeout-minutes: *work-timeout
+        working-directory: packages/static
+        run: >-
+          deno task run-recorded gate repo check-commonfabric-types --
+          deno task check-commonfabric-types
+
       - name: 🔎 Check type libraries declare no withheld globals
         timeout-minutes: *work-timeout
         working-directory: packages/static
@@ -1008,6 +1015,7 @@ jobs:
         uses: ./.github/actions/test-records-ship
         with:
           artifact: package-integration-server-execution-on-${{ matrix.suite_name }}
+          variant: server-execution
           job: >-
             Package Integration Tests / server-execution ON
             (${{ matrix.suite_name }})
@@ -1512,6 +1520,7 @@ jobs:
         uses: ./.github/actions/test-records-ship
         with:
           artifact: pattern-integration-server-execution-on-${{ matrix.shard }}
+          variant: server-execution
           job: >-
             Pattern Integration Tests / server-execution ON
             (${{ matrix.shard }}/${{ matrix.total }})

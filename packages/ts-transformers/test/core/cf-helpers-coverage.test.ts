@@ -161,9 +161,19 @@ Deno.test("getHelperExpr with an original node preserves source map ranges and i
 
   const expr = helpers.getHelperExpr("lift", original);
   assert(ts.isPropertyAccessExpression(expr));
+  const helperImport = sf.statements[0];
+  assert(ts.isImportDeclaration(helperImport));
+  const namedBindings = helperImport.importClause?.namedBindings;
+  assert(namedBindings && ts.isNamedImports(namedBindings));
+  const helperIdentity = namedBindings.elements[0]?.name;
+  assert(helperIdentity);
   // The whole property-access is anchored to the original node's source map
   // range (its position), distinguishing this branch from the no-original one.
   assertEquals(ts.getSourceMapRange(expr).pos, original.pos);
+  assert(ts.isIdentifier(expr.expression));
+  assert(ts.getOriginalNode(expr.expression) === helperIdentity);
+  assert(ts.getOriginalNode(expr.name) === expr.name);
+  assert(ts.getOriginalNode(expr) === expr);
   assertEquals(printExpr(expr, sf), "__cfHelpers.lift");
 });
 

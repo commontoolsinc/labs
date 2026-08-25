@@ -16,6 +16,7 @@ export function parseAgentFabricApiUrl(
 export async function agentTargetKey(
   apiUrl: string,
   spaceDid: string,
+  ownerDid: string,
 ): Promise<string> {
   const endpoint = parseAgentFabricApiUrl(apiUrl);
   endpoint.username = "";
@@ -23,7 +24,7 @@ export async function agentTargetKey(
   endpoint.hash = "";
   endpoint.search = "";
   endpoint.pathname = "/";
-  const identity = `${endpoint.href}\n${spaceDid}`;
+  const identity = `${endpoint.href}\n${spaceDid}\n${ownerDid}`;
   const digest = new Uint8Array(
     await crypto.subtle.digest("SHA-256", new TextEncoder().encode(identity)),
   );
@@ -67,10 +68,15 @@ export function defaultAgentsHostStateDirectory(
 export async function defaultTargetLedgerPath(
   apiUrl: string,
   spaceDid: string,
+  ownerDid: string,
   stateDirectory = defaultAgentsHostStateDirectory(),
 ): Promise<string> {
   return join(
     resolve(stateDirectory),
-    `target-${await agentTargetKey(apiUrl, spaceDid)}.command-ledger.json`,
+    `target-${await agentTargetKey(
+      apiUrl,
+      spaceDid,
+      ownerDid,
+    )}.command-ledger.json`,
   );
 }

@@ -260,7 +260,7 @@ Start with these locations when traces or logs point to worker churn:
   (`events.ts`), action execution/resubscribe timing (`run.ts`), and trigger
   matching (`invalidation.ts`, `trigger-index.ts`, `scheduling-writes.ts`,
   `dependency-graph.ts`)
-- `packages/runtime-client/backends/web-worker/index.ts` — worker message
+- `packages/runtime-client/src/backends/web-worker/index.ts` — worker message
   entrypoint — and `runtime-processor.ts` — console-facing scheduler IPC
 - `packages/runner/src/storage/cache.ts` — socket event dispatch
 - `packages/html/src/worker/reconciler.ts` — worker flush scheduling

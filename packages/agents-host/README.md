@@ -35,8 +35,8 @@ options. Command-line values take precedence.
 
 The program prints the destination space DID, command cell ID, receipt cell ID,
 durable command ledger path, and debug piece ID after the initial collection.
-The debug piece is registered with the space's default app, so it appears with
-the other pieces in that space.
+The owner-confidential debug registration is not added to the space-wide default
+app registry. The printed piece ID is its local discovery handle.
 
 ## Command-line interface
 
@@ -51,16 +51,16 @@ the other pieces in that space.
 | `-h`, `--help`      | Print usage                                                             |
 
 The command ledger lives in the operating system's durable per-user state
-directory. Its filename is derived from the Fabric API URL origin and the
-resolved space DID. Credentials, paths, queries, and fragments do not create
-separate histories. Configurations in different directories, and a space name
-and its equivalent DID, therefore use the same command history. The host locks
-the ledger file and also takes a target lock using the same target identity. The
-target locks for one user are kept below the operating system's runtime
-directory. `CF_AGENTS_HOST_LOCK_DIR` overrides the runtime lock directory.
-Windows also keeps a `.previous` ledger generation beside the printed path. The
-connector alternates between those files so an interrupted write cannot destroy
-the newest valid command history.
+directory. Its filename is derived from the Fabric API URL origin, the resolved
+space DID, and the configured owner DID. Credentials, paths, queries, and
+fragments do not create separate histories. Configurations in different
+directories, and a space name and its equivalent DID, therefore use the same
+command history for one owner. The host locks the ledger file and also takes a
+target lock using the same target identity. The target locks for one user are
+kept below the operating system's runtime directory. `CF_AGENTS_HOST_LOCK_DIR`
+overrides the runtime lock directory. Windows also keeps a `.previous` ledger
+generation beside the printed path. The connector alternates between those files
+so an interrupted write cannot destroy the newest valid command history.
 
 The host creates its state and lock directories for the current user only. On
 systems with Unix permissions, it rejects a directory or existing file owned by
@@ -89,12 +89,13 @@ failure.
 
 ## Configuration file
 
-The configuration format is strict. Unknown fields are errors so misspelled
-options do not silently change provider behavior.
+The configuration uses one unversioned schema and remains strict. Unknown fields
+are errors so misspelled options do not silently change provider behavior.
 
 ```jsonc
 {
-  "schema": "commonfabric.agents-host.config.v1",
+  "schema": "commonfabric.agents-host.config",
+  "ownerDid": "did:key:replace-with-the-identity-did",
   "collectionIntervalMs": 900000,
   "checkoutRoots": ["/workspace/checkouts"],
   "sources": [
@@ -112,6 +113,17 @@ options do not silently change provider behavior.
   ]
 }
 ```
+
+`ownerDid` identifies the person whose local sessions and workspaces this host
+publishes. It must match the DID in the PKCS#8 file selected by `--identity`.
+Startup fails before opening Fabric storage when they differ.
+
+Every connector cause and stored protocol envelope includes this owner DID.
+Session graphs, indexes, health, commands, and receipts carry a Common Fabric
+confidentiality label for that owner. Connector-managed cells also require the
+owner principal and the connector writer identity for changes. The debug command
+queue requires the owner principal and its compiled, verified command submission
+handler. A different principal cannot write commands into it.
 
 Source IDs must already be trimmed and lowercase. They are durable identities in
 session keys and command routing. Duplicate IDs are rejected.
@@ -162,18 +174,26 @@ flowchart LR
 ### Startup
 
 1. The CLI validates its flags and parses the JSONC configuration.
-2. `openAgentFabricRuntime()` reads the identity, creates the requested session,
-   opens remote storage, checks API health, and opens an `AgentFabricTarget` in
+2. `openAgentFabricRuntime()` reads the identity and verifies that its DID
+   matches `ownerDid`. It then creates the requested session, opens remote
+   storage, checks API health, and opens an owner-scoped `AgentFabricTarget` in
    the resolved space DID.
-3. The process derives one target identity from the API URL origin and resolved
-   space DID. It uses that identity to locate the durable command ledger and the
-   runtime target lock.
+3. The process derives one target identity from the API URL origin, resolved
+   space DID, and owner DID. It uses that identity to locate the durable command
+   ledger and the runtime target lock.
 4. The process takes exclusive operating-system locks for the target and ledger.
    A second command executor for that target under the same operating-system
    user fails immediately.
-5. `deployAgentSessionsDebugView()` compiles the repository pattern, links its
-   five inputs directly to the target's cells, and registers the stable debug
-   piece with the default app. `--no-debug-view` skips this step.
+5. `deployAgentSessionsDebugView()` compiles the repository pattern and links
+   its owner-confidential inputs to the target's cells. The pattern owns the
+   command composer, while the host supplies the deterministic owner-scoped
+   command queue before the pattern starts. The host labels the rendered result
+   for the same owner. The queue's write policy accepts only the configured
+   owner through the pattern's command-sending handler. The host binds command
+   processing to that exact protected queue. It stores the debug registration
+   under the owner label and does not add the piece to the space-wide default
+   app registry. `--no-debug-view` skips this step and disables command
+   acceptance.
 6. The host opens the command ledger.
 7. `AgentsHost.start()` creates and starts every enabled driver. A failed source
    remains visible in health while successful sources continue. A source whose
@@ -181,7 +201,8 @@ flowchart LR
    host then publishes recovered and previously unpublished receipts from the
    ledger.
 8. The host performs and publishes one complete collection. It then subscribes
-   to the Fabric command cell unless `--once` was used.
+   to the owner-protected Fabric command cell unless `--once` or
+   `--no-debug-view` was used.
 
 The command-line host keeps startup health local until it has completed these
 steps and owns a ready or degraded host. Its first health publication includes
@@ -193,7 +214,7 @@ which publishes terminal health.
 
 Operating-system locks coordinate processes owned by one user. Deployments that
 run this host under multiple users or on more than one machine must provide
-external single-instance coordination for each Fabric API and space pair. The
+external single-instance coordination for each Fabric API, space, and owner. The
 connector also reads each command's deterministic Fabric receipt before a
 provider call. This prevents sequential failover from repeating an operation
 when the replacement host does not share the earlier host's local ledger.
@@ -252,8 +273,8 @@ No part of this lifecycle uses an elapsed-time limit, sleep, or retry loop.
 
 ## Debug data
 
-The host publishes `commonfabric.agent-connector.health.v1` with these
-host-owned fields:
+The host publishes `commonfabric.agent-connector.health` with these host-owned
+fields:
 
 - overall status and timestamps;
 - destination space, debug piece, and all five top-level cell IDs;
@@ -271,14 +292,23 @@ The host does not copy configured commands, provider environment values, or
 identity bytes into health. Provider error messages remain visible and can
 contain provider-supplied context. The debug pattern shows the actual Fabric
 command values, including prompt payloads, because it is an inspection tool.
-Access to the destination space therefore grants access to sensitive session and
-command content.
+Common Fabric permits those reads only for the configured owner. Membership in
+the destination space without the owner identity does not grant access to
+session, workspace, health, command, or receipt content.
+
+The connector has one owner-scoped storage layout. Protocol schema names and
+deterministic cell causes are not versioned. Future readers must keep existing
+stored values and causes readable. New fields must be optional so older writers
+can omit them without changing the meaning of existing fields or identities.
 
 The debug pattern's inspection surfaces cannot change connector data. Its
 command composer can append a validated command after showing the exact value in
-a confirmation modal. It cannot write indexes, health, receipts, session
-manifests, or event chunks. Drafts, confirmation state, tab selection, and
-filters are session-scoped and are not shared between viewers.
+a confirmation modal. The command queue requires the configured owner and the
+debug pattern's command-sending handler. Another principal cannot modify that
+queue, including by reusing the pattern handler. The pattern cannot write
+indexes, health, receipts, session manifests, or event chunks. Drafts,
+confirmation state, tab selection, and filters are session-scoped and are not
+shared between viewers.
 
 ## Programmatic API
 
@@ -290,12 +320,12 @@ The package root exports the following orchestration surfaces:
 | `loadAgentsHostConfig(path)`          | Reads JSONC and then applies the same validation                                                |
 | `parseAgentsHostCliOptions(argv)`     | Resolves flags and supported environment fallbacks                                              |
 | `openAgentFabricRuntime(options)`     | Opens the identity session, remote runtime, piece manager, and connector target                 |
-| `deployAgentSessionsDebugView(...)`   | Creates or updates the stable debug piece and registers it with the default app                 |
+| `deployAgentSessionsDebugView(...)`   | Creates or updates the owner-confidential debug piece and its private registration              |
 | `AgentsHost`                          | Owns driver, collection, command, health, activity, and shutdown lifecycle                      |
 | `startAgentsHost(options)`            | Takes both process locks, opens every dependency, starts the host, and returns a running handle |
 | `RunningAgentsHost.stop(reason?)`     | Performs one idempotent graceful shutdown and runtime disposal                                  |
 | `AgentsHostProcessLock.acquire(path)` | Takes one non-blocking operating-system lock                                                    |
-| `defaultTargetProcessLockPath(...)`   | Derives the local executor lock from the API URL origin and resolved space DID                  |
+| `defaultTargetProcessLockPath(...)`   | Derives the local executor lock from the API URL origin, resolved space DID, and owner DID      |
 | `parseAgentFabricApiUrl(value)`       | Parses an API URL and reports a credential-free error when the value is invalid                 |
 
 `startAgentsHost()` is the main embedding API. Its caller supplies connection

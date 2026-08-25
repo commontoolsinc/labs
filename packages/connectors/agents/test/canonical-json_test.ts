@@ -81,7 +81,7 @@ Deno.test("deeply nested arrays are hashed without repeated planning", async () 
   for (let depth = 0; depth < 16; depth++) value = [value];
   assertEquals(
     await hashStableArrayValue(value),
-    "sha256:088140b43d654712acb10e8d3db4b785b2036384b2943e1a2ca908b62d078f47",
+    "sha256:f318e21ba296a8e09bbaaf1083630d431a24082450a0ecac115a135fa2f26f72",
   );
 });
 

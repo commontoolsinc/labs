@@ -89,6 +89,7 @@ export async function runAgentsHostCli(
       running = await dependencies.start({
         apiUrl: options.apiUrl,
         identityPath: options.identityPath,
+        ownerDid: config.ownerDid,
         space: options.space,
         sources: config.sources,
         checkoutRoots: config.checkoutRoots,

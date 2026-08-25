@@ -1970,7 +1970,7 @@ red-first-evidenced where the batch required it):
   `event-append-client.test.ts`); the browser-adapter follow-up
   carries the remaining debts as OW20.
 - m7 — worker/host flag-posture AGREEMENT
-  (`runtime-client/backends/runtime-processor.ts`):
+  (`runtime-client/src/backends/runtime-processor.ts`):
   `InitializationData.experimental` now types `serverExecution` (it
   rode as an untyped excess property), and the worker asserts the
   constructed runtime's resolved posture matches the host's
@@ -6051,6 +6051,97 @@ supply; OW29/OW32/OW34 closed):
     program-materialization loss. The lift bar is UNCHANGED: this
     entry's own gate evidence at the merged head, 10/10, never by
     inference from the default-app gate.**
+    **THE ENSURE-ON PROFILE-SURFACE MEMBER ROOT-CAUSED AND FIXED
+    2026-08-25 (PR #6312) — the n=3 side probe's "create surface never renders"
+    shape and the #6248 board's profile-shard family, reproduced
+    locally: a WRITE-side SELF-CLOBBER of the wish's create-surface
+    sidecar — neither recorded read-side member, and not a
+    provisioning loss.** Reproduced 6/11 at main `35ab29c38` (true
+    topology, ensure defaulting ON, fresh store + posture probe per
+    run; shared-profile, profile-embed, and a probe driver): every
+    red's store shows the served `#profile` wish's profile-create
+    sidecar materialize DURABLY and then — inside the SAME wave
+    commit — a patch removing `/value/$NAME` and
+    `/value/createProfile` and replacing `$UI` with an error span
+    carrying a conflict message. Mechanism: every pre-resolve launch
+    of the sidecar chains its OWN instantiation continuation on the
+    memoized fetch (`createSidecarPatternCache.fetch` — by design,
+    for cross-slot joiners), so a wish node that runs twice before
+    the fetch resolves instantiates the sidecar twice into the same
+    cause-derived result cell; the losing duplicate's commit fails on
+    the conflict class (`StorageTransactionInconsistent` /
+    `ConflictError` — its snapshot predates the winner) and
+    `runSidecarInOwnTx`'s error arm wrote the ERROR UI over the
+    winner's surface (`commitPatternErrorUI`). Nothing re-issues (the
+    continuation is one-shot; the wish never re-ran — residual (i)
+    below), the client faithfully renders the durable error box, the
+    create input never exists, and the run is SILENT — the register's
+    "fail EARLIER at the host's create" prediction, mechanized. FIX
+    (red-first): a conflict-class failure (commit-refused or thrown
+    mid-run) now checks the RESULT CELL — a materialized value there
+    means a sibling instantiation won, and the loser YIELDS, loudly
+    (`sidecar-run-raced`, serving-loop.md §3d's failure-arm
+    contract); an EMPTY cell means the conflict came from an input
+    doc (e.g. the home `profiles` list moving), and the run RE-RUNS
+    against fresh state (bounded, three attempts) rather than
+    abandoning the only instantiation; the error UI is reserved for
+    real fetch/compile/run failures and the bounded-retry terminal.
+    No local dedupe latch: the pin drives the duplicate from a
+    second runtime instance of the same node (cause-derived
+    convergence is the design), so yield-on-conflict — the OCC
+    discipline `createSpaceRootIfAbsent` already uses — is the fix,
+    not dedupe. Pin: `wish-sidecar-duplicate-launch.test.ts` (two
+    runtimes, one store, the same compiled `#profile` piece → one
+    wish-node cause → one sidecar cell; a gated fetch holds the
+    duplicate window open, a registration-counted witness — the
+    `wishSidecarDiagnostics` test seam, this package's stand-in for
+    the missing logger-capture idiom — proves the duplicate
+    continuation is chained before release, and a runs-delta
+    assertion kills the vacuous-green path; watched red at `$NAME`
+    undefined with the conflict text durable; removing only the
+    conflict-class yield reds it again). The sidecar run also now
+    observes its wave settlement OUTSIDE the tracked launch (an
+    awaited settlement would make `idle()` wait on the wave that
+    waits on quiescence) and warns (`sidecar-run-withdrawn`) when a
+    committed instantiation is withdrawn, and the wave accumulator
+    names DROPPED contributions (`contribution-dropped` — requeues
+    and superseded derivations stay quiet; both are expected
+    recovery): the r05/p11 cascades each surfaced exactly ONE logged
+    symptom before this.
+    Live evidence, by head: 6/6 GREEN in 23-27 s at the ORIGINAL fix
+    head `bcd816b8a` (shared-profile ×2, profile-embed ×2, probe ×2)
+    and 3/3 GREEN in 20-22 s re-run at the review-round head
+    `95734a5b0` (one of each) — same harness, fresh store + posture
+    probe per run, against 6/11 red pre-fix on the same box; the
+    9-green record has well under 1% probability at the pre-fix
+    rate.
+    Residuals recorded, NOT owed by this fix: (i) in red r05 the wish
+    action held a durable `scheduler_basis` row on its ready-cell
+    read (seq 0, user-instance-keyed), the ready flip landed at
+    commit 31, waves kept running through 44 — and the wish action
+    provably never re-ran (wish-state doc frozen; greens re-run it
+    within 60 ms and heal everything). When that re-run fires, every
+    one-shot loss heals; when it does not, any one-shot loss is
+    permanent. Gear undetermined — its own seat. Related, from code
+    reading: a DROPPED contribution leaves NO basis rows
+    (`#basisRowsFor` covers survivors only), so "its own reads re-run
+    it when fresh state lands" is structurally false for a first-ever
+    run that gets dropped. (ii) The client and server auto-updaters
+    ping-pong the ensure-created root's summary-index child between
+    its closure-embedded pattern identity and the standalone compile
+    of the same source (alternating authored/derived
+    `pieceSourceHistory` + `/value` replaces;
+    `pattern-swap-setup-withdrawn` fires in greens and reds alike) —
+    the contention population that multiplies pre-resolve wish
+    re-runs; its own defect, untouched. (iii) The lunch FILE entry's
+    third member (ensure-OFF: the guest's ~98-101-op
+    program-materialization commit never landing) is a DIFFERENT,
+    post-click stage and is untouched — the entry and its lift bar
+    stand exactly as written. (iv) Whether the #6248 board's
+    POST-fill shape (shards 2/6: fill succeeded, click landed,
+    `#profile` never resolved) is this same clobber on a later
+    surface or another member is undetermined — re-measure on that
+    board at a head carrying this fix.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:

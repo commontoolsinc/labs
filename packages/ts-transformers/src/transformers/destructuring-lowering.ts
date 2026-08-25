@@ -15,6 +15,8 @@ export interface DestructureBinding {
   readonly localName: string;
   readonly path: readonly PathSegment[];
   readonly directKeyExpression?: ts.Expression;
+  /** Binding syntax represented by the lowered declaration. */
+  readonly bindingNode: ts.Identifier | ts.BindingElement;
 }
 
 export interface DefaultDestructureBinding {
@@ -183,6 +185,7 @@ export function collectDestructureBindings(
     bindings.push({
       localName: name.text,
       path,
+      bindingNode: name,
     });
     return;
   }
@@ -231,6 +234,7 @@ export function collectDestructureBindings(
         bindings.push({
           localName: element.name.text,
           path: nextPath,
+          bindingNode: element,
         });
         continue;
       }
@@ -323,6 +327,7 @@ export function collectDestructureBindings(
         localName: element.name.text,
         path: nextPath,
         directKeyExpression,
+        bindingNode: element,
       });
       continue;
     }

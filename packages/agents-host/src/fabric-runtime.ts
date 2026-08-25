@@ -16,12 +16,26 @@ export interface AgentFabricRuntime {
   manager: PiecesController;
   spaceDid: MemorySpace;
   target: AgentFabricTarget;
+  ownerDid: string;
+}
+
+export function assertConfiguredOwner(
+  identity: Identity,
+  ownerDid: string,
+): void {
+  if (identity.did() !== ownerDid) {
+    throw new Error(
+      `configured owner ${ownerDid} does not match identity ${identity.did()}`,
+    );
+  }
 }
 
 export async function openAgentFabricRuntime(options: {
   apiUrl: string;
   identityPath: string;
+  ownerDid: string;
   space: string;
+  deferStorageClaim?: boolean;
   signal?: AbortSignal;
 }): Promise<AgentFabricRuntime> {
   options.signal?.throwIfAborted();
@@ -29,6 +43,7 @@ export async function openAgentFabricRuntime(options: {
   const identityBytes = await Deno.readFile(options.identityPath);
   options.signal?.throwIfAborted();
   const identity = await Identity.fromPkcs8(identityBytes);
+  assertConfiguredOwner(identity, options.ownerDid);
   options.signal?.throwIfAborted();
   const session =
     await (isDID(options.space)
@@ -89,14 +104,24 @@ export async function openAgentFabricRuntime(options: {
     const manager = new PiecesController(session, runtime);
     await stage(manager.synced());
     options.signal?.throwIfAborted();
+    const connection = {
+      runtime,
+      spaceDid: session.space,
+      ownerDid: options.ownerDid,
+    };
     const target = await stage(
-      AgentFabricTarget.open({
-        runtime,
-        spaceDid: session.space,
-      }),
+      options.deferStorageClaim
+        ? AgentFabricTarget.connect(connection)
+        : AgentFabricTarget.open(connection),
     );
     options.signal?.throwIfAborted();
-    return { runtime, manager, spaceDid: session.space, target };
+    return {
+      runtime,
+      manager,
+      spaceDid: session.space,
+      target,
+      ownerDid: options.ownerDid,
+    };
   } catch (error) {
     try {
       await dispose();

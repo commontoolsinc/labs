@@ -136,5 +136,12 @@ installFakeClock({
     // interval and flush deadline; auto-advance turns the renew cadence
     // into a runaway (the guard names SpaceServer.activate's timers).
     "executor-warm-request",
+    // Holds the sidecar pattern fetch on an explicit test-side gate while
+    // the duplicate launch registers, with a short test-armed pump inside
+    // the held window (the gate, not the pump, carries correctness). A
+    // test-armed wall-clock sleep deadlocks under auto-advance, so this
+    // file stays on the real clock; it waits on the gate and on
+    // runtime.idle(), never on a bare delay for its verdict.
+    "wish-sidecar-duplicate-launch",
   ],
 });

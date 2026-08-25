@@ -1805,6 +1805,20 @@ export abstract class BaseFabricInstance extends FabricInstance {
 > `instanceof FabricInstance` brand check still catches every concrete
 > `FabricInstance` value.
 
+> **An aside on sealing instances.** Nothing in this model requires it, and an
+> implementation is free to skip it, but a JavaScript implementation may want
+> to seal an instance so that adding a property to one throws rather than
+> silently attaching data that no structural view, encoder, or hash will read.
+> Doing so takes one wrinkle. `Object.isFrozen()` reports `true` for any sealed
+> object with no own properties, so an instance holding all of its state
+> privately would report as frozen from the moment it was built, and a request
+> for a mutable copy would hand back the original. Giving the instance a single
+> writable own property, keyed by a symbol and non-enumerable, is enough to fix
+> that: `Object.freeze()` clears the property's `writable` bit, so
+> `Object.isFrozen()` again tracks the instance's frozen state. Such a property
+> is invisible to a spread, `Object.keys()`, and `JSON.stringify()` alike, so
+> instances still present no properties to a client.
+
 ### 2.4 Codec Protocol
 
 Encoding participation is class-level, not instance-level: a class hosts a

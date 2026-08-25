@@ -74,7 +74,7 @@ export default pattern<TodoInput>(({ items }) => {
 
 **Why this matters:**
 - **Testing requires Output types** - To test via `instance.action.send()`, actions must be typed as `Stream<T>` in the Output interface
-- **Sub-patterns require `[UI]` in Output** - When rendering a sub-pattern via `.map()`, the Output type must include `[UI]: VNode`
+- **Sub-patterns require `[UI]` in Output** - When rendering a sub-pattern via `.map()`, the Output type must include `[UI]: VNode`, unless what it returns under `[UI]` is itself a composed sub-pattern (see below)
 - **TypeScript verification** - Explicit Output types catch mismatches at compile time
 
 ### Output Types for Sub-Patterns
@@ -93,6 +93,8 @@ interface ColumnOutput {
 ```
 
 The runtime reads a set of reserved keys off the returned object, and `pattern()` types each one at its return position. `[NAME]` (a string) names the piece; `[UI]` and its `[TILE_UI]`/`[CHIP_UI]` variants are a `VNode` or a `JSXElement` (which admits a renderable sub-piece); `[FS]` is an `FsProjection`. Each also accepts a reactive value in place of a plain one. A value of the wrong shape under one — a non-string `[NAME]`, a `[UI]` that is not renderable — is a compile error at the pattern, whether or not the Output type lists that key.
+
+Which is why the Output type lists `[UI]` only when the pattern builds a view node of its own. A pattern that returns a composed sub-pattern under `[UI]` — `return { [UI]: picker }` — leaves the key out. Two things follow from listing it there. `[UI]: VNode` describes a view node, and a sub-pattern instance is not one, so the field reads back `undefined` rather than as the tree. `[UI]: unknown` reads back as an opaque value, and it also puts `$UI` in the result schema, which the runtime takes as covering the view tree: it then skips the resume pre-sync that keeps a view from flashing and losing its write, while an `unknown` schema descends into nothing and syncs no tree of its own. Omitting the key leaves the pre-sync in place, and the reserved-key check above still enforces the shape.
 
 ## See Also
 

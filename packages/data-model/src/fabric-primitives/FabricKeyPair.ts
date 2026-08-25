@@ -139,8 +139,6 @@ export class FabricKeyPair extends BaseFabricPrimitive {
       this.#publicKey = pub;
       this.#privateKey = priv;
     }
-
-    Object.freeze(this);
   }
 
   //

@@ -19,120 +19,122 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { setPropDefault, styleObjectToCssString } from "../src/render-utils.ts";
 
-describe("setPropDefault", () => {
-  it("does not re-assign an unchanged NaN property", () => {
-    // The write guard uses `Object.is` semantics: an incoming `NaN` over a
-    // stored `NaN` is unchanged, and must not trigger a property set (custom
-    // elements often re-render on any property assignment).
-    let sets = 0;
-    const target = {
-      _value: NaN,
-      get value(): number {
-        return this._value;
-      },
-      set value(v: number) {
-        sets++;
-        this._value = v;
-      },
-    };
-    setPropDefault(target, "value", NaN);
-    expect(sets).toBe(0);
+describe("render-utils", () => {
+  describe("setPropDefault", () => {
+    it("does not re-assign an unchanged NaN property", () => {
+      // The write guard uses `Object.is` semantics: an incoming `NaN` over a
+      // stored `NaN` is unchanged, and must not trigger a property set (custom
+      // elements often re-render on any property assignment).
+      let sets = 0;
+      const target = {
+        _value: NaN,
+        get value(): number {
+          return this._value;
+        },
+        set value(v: number) {
+          sets++;
+          this._value = v;
+        },
+      };
+      setPropDefault(target, "value", NaN);
+      expect(sets).toBe(0);
+    });
+
+    it("assigns `-0` over a `0` property (distinct values)", () => {
+      const target = { value: 0 };
+      setPropDefault(target, "value", -0);
+      expect(Object.is(target.value, -0)).toBe(true);
+    });
   });
 
-  it("assigns `-0` over a `0` property (distinct values)", () => {
-    const target = { value: 0 };
-    setPropDefault(target, "value", -0);
-    expect(Object.is(target.value, -0)).toBe(true);
-  });
-});
+  describe("styleObjectToCssString", () => {
+    it("converts camelCase property names to kebab-case", () => {
+      expect(
+        styleObjectToCssString({
+          backgroundColor: "red",
+          fontSize: "16px",
+          marginTop: "10px",
+        }),
+      ).toBe("background-color: red; font-size: 16px; margin-top: 10px");
+    });
 
-describe("styleObjectToCssString", () => {
-  it("converts camelCase property names to kebab-case", () => {
-    expect(
-      styleObjectToCssString({
-        backgroundColor: "red",
-        fontSize: "16px",
-        marginTop: "10px",
-      }),
-    ).toBe("background-color: red; font-size: 16px; margin-top: 10px");
-  });
+    it("adds px to numeric values", () => {
+      expect(styleObjectToCssString({ width: 100, marginTop: 10 })).toBe(
+        "width: 100px; margin-top: 10px",
+      );
+    });
 
-  it("adds px to numeric values", () => {
-    expect(styleObjectToCssString({ width: 100, marginTop: 10 })).toBe(
-      "width: 100px; margin-top: 10px",
-    );
-  });
+    it("leaves unitless properties without px", () => {
+      expect(
+        styleObjectToCssString({
+          opacity: 0.5,
+          zIndex: 10,
+          fontWeight: 700,
+          lineHeight: 1.5,
+          flexGrow: 2,
+        }),
+      ).toBe(
+        "opacity: 0.5; z-index: 10; font-weight: 700; line-height: 1.5; " +
+          "flex-grow: 2",
+      );
+    });
 
-  it("leaves unitless properties without px", () => {
-    expect(
-      styleObjectToCssString({
-        opacity: 0.5,
-        zIndex: 10,
-        fontWeight: 700,
-        lineHeight: 1.5,
-        flexGrow: 2,
-      }),
-    ).toBe(
-      "opacity: 0.5; z-index: 10; font-weight: 700; line-height: 1.5; " +
-        "flex-grow: 2",
-    );
-  });
+    it("writes zero without a unit", () => {
+      expect(styleObjectToCssString({ margin: 0, padding: 0, width: 0 })).toBe(
+        "margin: 0; padding: 0; width: 0",
+      );
+    });
 
-  it("writes zero without a unit", () => {
-    expect(styleObjectToCssString({ margin: 0, padding: 0, width: 0 })).toBe(
-      "margin: 0; padding: 0; width: 0",
-    );
-  });
+    it("expands vendor prefixes into leading-dash form", () => {
+      expect(
+        styleObjectToCssString({
+          WebkitTransform: "rotate(45deg)",
+          webkitBoxShadow: "0 0 5px black",
+          mozAppearance: "none",
+        }),
+      ).toBe(
+        "-webkit-transform: rotate(45deg); -webkit-box-shadow: 0 0 5px black; " +
+          "-moz-appearance: none",
+      );
+    });
 
-  it("expands vendor prefixes into leading-dash form", () => {
-    expect(
-      styleObjectToCssString({
-        WebkitTransform: "rotate(45deg)",
-        webkitBoxShadow: "0 0 5px black",
-        mozAppearance: "none",
-      }),
-    ).toBe(
-      "-webkit-transform: rotate(45deg); -webkit-box-shadow: 0 0 5px black; " +
-        "-moz-appearance: none",
-    );
-  });
+    it("drops null and undefined values", () => {
+      expect(
+        styleObjectToCssString({
+          color: "red",
+          backgroundColor: null,
+          fontSize: undefined,
+          margin: "10px",
+        }),
+      ).toBe("color: red; margin: 10px");
+    });
 
-  it("drops null and undefined values", () => {
-    expect(
-      styleObjectToCssString({
-        color: "red",
-        backgroundColor: null,
-        fontSize: undefined,
-        margin: "10px",
-      }),
-    ).toBe("color: red; margin: 10px");
-  });
+    it("leaves custom properties uppercased and unitless", () => {
+      expect(
+        styleObjectToCssString({
+          "--myColor": "blue",
+          "--spacing": 16,
+          "--Custom-Prop": "value",
+        }),
+      ).toBe("--myColor: blue; --spacing: 16; --Custom-Prop: value");
+    });
 
-  it("leaves custom properties uppercased and unitless", () => {
-    expect(
-      styleObjectToCssString({
-        "--myColor": "blue",
-        "--spacing": 16,
-        "--Custom-Prop": "value",
-      }),
-    ).toBe("--myColor: blue; --spacing: 16; --Custom-Prop: value");
-  });
+    it("passes complex values through unchanged", () => {
+      expect(
+        styleObjectToCssString({
+          background: "linear-gradient(to right, red, blue)",
+          transform: "translateX(10px) rotate(45deg)",
+          gridTemplateColumns: "repeat(3, 1fr)",
+        }),
+      ).toBe(
+        "background: linear-gradient(to right, red, blue); " +
+          "transform: translateX(10px) rotate(45deg); " +
+          "grid-template-columns: repeat(3, 1fr)",
+      );
+    });
 
-  it("passes complex values through unchanged", () => {
-    expect(
-      styleObjectToCssString({
-        background: "linear-gradient(to right, red, blue)",
-        transform: "translateX(10px) rotate(45deg)",
-        gridTemplateColumns: "repeat(3, 1fr)",
-      }),
-    ).toBe(
-      "background: linear-gradient(to right, red, blue); " +
-        "transform: translateX(10px) rotate(45deg); " +
-        "grid-template-columns: repeat(3, 1fr)",
-    );
-  });
-
-  it("produces the empty string for an empty object", () => {
-    expect(styleObjectToCssString({})).toBe("");
+    it("produces the empty string for an empty object", () => {
+      expect(styleObjectToCssString({})).toBe("");
+    });
   });
 });
