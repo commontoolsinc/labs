@@ -296,9 +296,8 @@ throughout).
   Same move as builder-call-hoisting's `setOriginalNode(name, innerCall)`. The
   identity node is required: source-map-only helper names, property accesses,
   and calls use `ast/utils.ts`'s
-  **`preserveSourceMapRange(node, origin)`** instead. A caller whose two
-  targets coincide passes the same node twice: identity carried without the
-  text range `preserveLineage` would add.
+  **`preserveSourceMapRange(node, origin)`** instead. The method therefore
+  represents only genuine identity/position divergence.
 
 **Hazards (why this isn't a mechanical sweep):**
 

@@ -330,9 +330,9 @@ export function setParentPointers(node: ts.Node, parent?: ts.Node): void {
  *     identity-sensitive classifiers — e.g. a compute wrapper whose original
  *     points into the subtree `markSyntheticComputeOwnedSubtree` just marked
  *     reads as compute-owned itself. Use {@link preserveSourceMapRange} there.
- *   - Where position and checker-identity must point at DIFFERENT nodes (a
- *     node has one `original` pointer), use `CFHelpers.preserveNodeSourceMap`
- *     instead; use this where the two coincide.
+ *   - Where a node needs source-map position and checker identity but must not
+ *     acquire a text range, use `CFHelpers.preserveNodeSourceMap` instead. Its
+ *     range and identity nodes may differ or coincide.
  */
 export function preserveLineage<T extends ts.Node>(
   node: T,

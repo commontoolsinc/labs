@@ -45,8 +45,9 @@ export class CFHelpers {
   }
 
   /**
-   * Carries the range of `originalNode` and the distinct checker identity of
-   * `identityNode` onto `node`.
+   * Carries the source-map range of `originalNode` and the checker identity of
+   * `identityNode` onto `node` without assigning a text range. The range and
+   * identity nodes may differ or coincide.
    */
   preserveNodeSourceMap<T extends ts.Node>(
     node: T,
