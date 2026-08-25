@@ -14,12 +14,15 @@ import {
   type EntityDocument,
   type SessionSync,
   type SessionSyncUpsert,
+  type WatchSpec,
 } from "@commonfabric/memory/v2";
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import type { IStorageProvider } from "../src/storage/interface.ts";
 import {
   ScriptedSessionTransport,
   type ScriptedTransportMessage,
   SingleSessionFactory,
+  testSessionOpenAuthFactory,
   TestStorageManager,
 } from "./memory-v2-test-utils.ts";
 
@@ -107,6 +110,61 @@ class PreWatchEffectTransport extends ScriptedSessionTransport {
   }
 }
 
+class ReplacingPreWatchEffectTransport extends ScriptedSessionTransport {
+  watchAddCount = 0;
+
+  constructor(
+    space: MemorySpace,
+    private readonly schemaId: URI,
+    private readonly schema: JSONSchemaObj,
+  ) {
+    super({
+      name: "replacing-pre-watch-effect",
+      sessionId: "session:replacing-pre-watch-effect",
+      space,
+    });
+  }
+
+  protected override ackServerSeq(): number {
+    return 2;
+  }
+
+  protected override handle(message: ScriptedTransportMessage): void {
+    if (message.type !== "session.watch.add") {
+      throw new Error(`Unhandled scripted message: ${message.type}`);
+    }
+
+    this.watchAddCount += 1;
+    if (this.watchAddCount === 1) {
+      this.emitSync(sync(0, 1, [
+        upsert(this.schemaId, 1, { value: this.schema }),
+      ]));
+      this.disconnect(new Error("scripted session replacement"));
+      return;
+    }
+
+    this.respond({
+      type: "response",
+      requestId: message.requestId!,
+      ok: {
+        serverSeq: 2,
+        sync: sync(1, 2, []),
+      },
+    });
+  }
+}
+
+const watch = (id: URI): WatchSpec => ({
+  id,
+  kind: "graph",
+  query: {
+    roots: [{
+      id,
+      selector: { path: [], schema: false },
+    }],
+  },
+});
+
 describe("memory-v2-pre-watch-effect", () => {
   it("stores a schema effect received before the first watch response", async () => {
     const signer = await Identity.fromPassphrase("memory-v2-pre-watch-effect");
@@ -144,6 +202,40 @@ describe("memory-v2-pre-watch-effect", () => {
       expect(provider.get(referrerId)?.value).toBeDefined();
     } finally {
       await storageManager.close();
+    }
+  });
+
+  it("discards a pre-watch effect when reconnect replaces the session", async () => {
+    const signer = await Identity.fromPassphrase(
+      "memory-v2-replaced-pre-watch-effect",
+    );
+    const space = signer.did();
+    const schema: JSONSchemaObj = { type: "string" };
+    const schemaId = `cid:${internSchemaAsTaggedHashString(schema)}` as URI;
+    const watchedId = "of:replaced-pre-watch-effect" as URI;
+    const transport = new ReplacingPreWatchEffectTransport(
+      space,
+      schemaId,
+      schema,
+    );
+    const client = await MemoryV2Client.Client.connect({ transport });
+    const session = await client.mount(
+      space,
+      {},
+      testSessionOpenAuthFactory,
+    );
+
+    try {
+      await expect(session.watchAddSync([watch(watchedId)]))
+        .rejects.toThrow("scripted session replacement");
+      await client.restoreConnection();
+
+      const result = await session.watchAddSync([watch(watchedId)]);
+
+      expect(transport.watchAddCount).toBe(2);
+      expect(result.precedingSyncs).toEqual([]);
+    } finally {
+      await client.close();
     }
   });
 });
