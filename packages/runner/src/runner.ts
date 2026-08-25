@@ -5053,18 +5053,21 @@ export class Runner {
         // true` makes an unstructured object read fall back to the
         // undeclared scan above, since such a read is unbounded.
         for (const key in value) {
-          collect(
-            value[key],
-            base,
-            ContextualFlowControl.schemaAtPath(
+          let narrowed: JSONSchema;
+          try {
+            narrowed = ContextualFlowControl.schemaAtPath(
               schema,
               [key],
               undefined,
               true,
               false,
-            ),
-            hopsLeft,
-          );
+            );
+          } catch {
+            // A declaration that cannot resolve (an unresolvable reference,
+            // say) is one that ran out: scan rather than skip.
+            narrowed = true;
+          }
+          collect(value[key], base, narrowed, hopsLeft);
         }
       };
       for (const [index, entry] of frontier.entries()) {
