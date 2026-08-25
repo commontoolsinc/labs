@@ -305,7 +305,6 @@ export {
   cellWithScopedLinkRequiredsRelaxed,
   compileAndSavePattern,
   parseCellPath,
-  pieceRegistryKeyForRoot,
   resolveCellPath,
 } from "./piece-helpers.ts";
 export type { ModuleByteCache } from "./runtime.ts";

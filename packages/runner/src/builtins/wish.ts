@@ -32,7 +32,6 @@ import {
   getMetaLink,
   toMemorySpaceAddress,
 } from "../link-utils.ts";
-import { isLegacyPieceRegistryRoot } from "../piece-helpers.ts";
 import { setRunnableName } from "../runner-utils.ts";
 import { type Runtime, spaceCellSchema } from "../runtime.ts";
 import { type Action, type ReactivityLog } from "../scheduler.ts";
@@ -1278,13 +1277,9 @@ function resolveSpaceTarget(
       return { cell: spaceCell, pathPrefix: [...pathPrefix!] };
     }
 
-    const defaultPattern = spaceCell.key("defaultPattern").resolveAsCell();
-    const registryKey = isLegacyPieceRegistryRoot(defaultPattern)
-      ? "allPieces"
-      : "pieceRegistry";
     return {
       cell: spaceCell,
-      pathPrefix: ["defaultPattern", registryKey],
+      pathPrefix: ["defaultPattern", "pieceRegistry"],
     };
   };
 

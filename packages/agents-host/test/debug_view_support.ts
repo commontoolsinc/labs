@@ -336,7 +336,7 @@ export async function installDefaultPattern(
   const { handler, pattern } = createBuilder().commonfabric;
   const addPiece = handler<
     { piece: Cell<unknown> },
-    { allPieces: Cell<Cell<unknown>[]> }
+    { pieceRegistry: Cell<Cell<unknown>[]> }
   >(
     {
       type: "object",
@@ -348,30 +348,30 @@ export async function installDefaultPattern(
     {
       type: "object",
       properties: {
-        allPieces: {
+        pieceRegistry: {
           ...SHALLOW_PIECE_LIST_SCHEMA,
           asCell: ["cell"],
         },
       },
-      required: ["allPieces"],
+      required: ["pieceRegistry"],
     },
-    ({ piece }, { allPieces }) => {
-      allPieces.push(piece);
+    ({ piece }, { pieceRegistry }) => {
+      pieceRegistry.push(piece);
     },
   );
   const defaultPattern = pattern<{
-    allPieces: Cell<unknown>[];
+    pieceRegistry: Cell<unknown>[];
     recentPieces: Cell<unknown>[];
   }>(
-    ({ allPieces, recentPieces }) => ({
-      allPieces,
+    ({ pieceRegistry, recentPieces }) => ({
+      pieceRegistry,
       recentPieces,
-      addPiece: addPiece({ allPieces }),
+      addPiece: addPiece({ pieceRegistry }),
     }),
   );
   const piece = await manager.runPersistent(
     defaultPattern,
-    { allPieces: [], recentPieces: [] },
+    { pieceRegistry: [], recentPieces: [] },
     "agents-host-debug-test-default-pattern",
   );
   await manager.linkDefaultPattern(piece);
@@ -382,7 +382,7 @@ export async function installDefaultPattern(
 
 export async function registeredPieceIds(
   defaultPattern: Cell<unknown>,
-  name: "allPieces" | "recentPieces",
+  name: "pieceRegistry" | "recentPieces",
 ): Promise<string[]> {
   const slot = defaultPattern.asSchema(undefined).key(name);
   if (slot.getRaw() === undefined) return [];

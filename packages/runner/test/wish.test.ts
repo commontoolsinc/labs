@@ -432,7 +432,7 @@ describe("wish built-in", () => {
   });
 
   describe("object-based wish syntax", () => {
-    it("resolves only the canonical registry target", async () => {
+    it("resolves the piece registry target", async () => {
       const canonicalRegistryCell = runtime.getCellFromEntityId<unknown[]>(
         space,
         pieceRegistryEntityId,
@@ -452,9 +452,6 @@ describe("wish built-in", () => {
       (defaultPatternCell as any).key("pieceRegistry").set(
         canonicalRegistryCell.withTx(tx),
       );
-      (defaultPatternCell as any).key("allPieces").set(
-        canonicalRegistryCell.withTx(tx),
-      );
       (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
       await tx.commit();
@@ -463,11 +460,9 @@ describe("wish built-in", () => {
 
       const wishPattern = pattern(() => ({
         pieceRegistry: wish<unknown[]>({ query: "#pieceRegistry" }),
-        retiredTarget: wish<unknown[]>({ query: "#allPieces" }),
       }));
       const resultCell = runtime.getCell<{
         pieceRegistry?: { result?: unknown[] };
-        retiredTarget?: { result?: unknown[]; error?: string };
       }>(space, "wish canonical registry result", undefined, tx);
       const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
@@ -477,10 +472,6 @@ describe("wish built-in", () => {
       await result.pull();
 
       expect(result.key("pieceRegistry").get()?.result).toEqual(piecesData);
-      expect(result.key("retiredTarget").get()?.result).toBeUndefined();
-      expect(result.key("retiredTarget").get()?.error).toMatch(
-        /No favorites found matching/,
-      );
 
       const canonicalResult = result.key("pieceRegistry").key("result")
         .resolveAsCell();
@@ -492,115 +483,6 @@ describe("wish built-in", () => {
         ...piecesData,
         { name: "Beta", title: "Beta" },
       ]);
-    });
-
-    it("resolves pieceRegistry through a sourced legacy default root", async () => {
-      const legacyRegistryCell = runtime.getCellFromEntityId<unknown[]>(
-        space,
-        pieceRegistryEntityId,
-        [],
-        undefined,
-        tx,
-      );
-      const piecesData = [{ name: "Alpha", title: "Alpha" }];
-      legacyRegistryCell.withTx(tx).set(piecesData);
-
-      const spaceCell = runtime.getCell<{ allPieces?: unknown[] }>(space, space)
-        .withTx(tx);
-      const defaultPatternCell = runtime.getCell(space, "default-pattern")
-        .withTx(tx);
-      (defaultPatternCell as any).key("allPieces").set(
-        legacyRegistryCell.withTx(tx),
-      );
-      (defaultPatternCell as any).key("addPiece").setRaw({ $stream: true });
-      defaultPatternCell.setMetaRaw("patternIdentity", {
-        identity: "legacy-default-app",
-        symbol: "default",
-      });
-      defaultPatternCell.setMetaRaw(
-        "patternSource",
-        "/api/patterns/system/default-app.tsx",
-      );
-      (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
-
-      await tx.commit();
-      await runtime.idle();
-      tx = runtime.edit();
-
-      const wishPattern = pattern(() => ({
-        pieceRegistry: wish<unknown[]>({ query: "#pieceRegistry" }),
-      }));
-      const resultCell = runtime.getCell<{
-        pieceRegistry?: { result?: unknown[] };
-      }>(space, "wish legacy registry result", undefined, tx);
-      const result = runtime.run(tx, wishPattern, {}, resultCell);
-      await tx.commit();
-      tx = runtime.edit();
-
-      await runtime.idle();
-      await result.pull();
-
-      expect(result.key("pieceRegistry").get()?.result).toEqual(piecesData);
-
-      const registryResult = result.key("pieceRegistry").key("result")
-        .resolveAsCell();
-      registryResult.withTx(tx).push({ name: "Beta", title: "Beta" });
-      await tx.commit();
-      tx = runtime.edit();
-      await runtime.idle();
-      expect(legacyRegistryCell.get()).toEqual([
-        ...piecesData,
-        { name: "Beta", title: "Beta" },
-      ]);
-    });
-
-    it("does not treat a custom allPieces output as the registry", async () => {
-      const customListCell = runtime.getCellFromEntityId<unknown[]>(
-        space,
-        pieceRegistryEntityId,
-        [],
-        undefined,
-        tx,
-      );
-      const customData = [{ name: "Unrelated", title: "Unrelated" }];
-      customListCell.withTx(tx).set(customData);
-
-      const spaceCell = runtime.getCell(space, space).withTx(tx);
-      const defaultPatternCell = runtime.getCell(
-        space,
-        "custom-default-pattern",
-      )
-        .withTx(tx);
-      (defaultPatternCell as any).key("allPieces").set(
-        customListCell.withTx(tx),
-      );
-      (defaultPatternCell as any).key("addPiece").setRaw({ $stream: true });
-      defaultPatternCell.setMetaRaw("patternIdentity", {
-        identity: "custom-app",
-        symbol: "default",
-      });
-      defaultPatternCell.setMetaRaw("patternSource", "/custom-app.tsx");
-      (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
-
-      await tx.commit();
-      await runtime.idle();
-      tx = runtime.edit();
-
-      const wishPattern = pattern(() => ({
-        pieceRegistry: wish<unknown[]>({ query: "#pieceRegistry" }),
-      }));
-      const resultCell = runtime.getCell<{
-        pieceRegistry?: { result?: unknown[] };
-      }>(space, "wish custom registry result", undefined, tx);
-      const result = runtime.run(tx, wishPattern, {}, resultCell);
-      await tx.commit();
-      tx = runtime.edit();
-
-      await runtime.idle();
-      await result.pull();
-
-      expect(result.key("pieceRegistry").get()?.result).toBeUndefined();
-      expect(customListCell.get()).toEqual(customData);
     });
 
     it("resolves nested paths using tag and path parameters", async () => {

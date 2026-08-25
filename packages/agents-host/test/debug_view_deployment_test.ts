@@ -64,9 +64,15 @@ Deno.test("debug deployment replaces a view when its pattern identity changes", 
       ),
       alternatePieceId,
     );
-    const allIds = await registeredPieceIds(defaultPattern, "allPieces");
-    assertEquals(allIds.includes(originalPieceId), false);
-    assertEquals(allIds.filter((id) => id === alternatePieceId).length, 1);
+    const registeredIds = await registeredPieceIds(
+      defaultPattern,
+      "pieceRegistry",
+    );
+    assertEquals(registeredIds.includes(originalPieceId), false);
+    assertEquals(
+      registeredIds.filter((id) => id === alternatePieceId).length,
+      1,
+    );
     const originalPiece = await manager.getPieceCell(
       originalPieceId,
       false,
@@ -80,7 +86,7 @@ Deno.test("debug deployment replaces a view when its pattern identity changes", 
     );
     assertEquals(alternatePiece.name(), "Alternate agent sessions");
     const reinsertResult = await runtime.editWithRetry((tx) => {
-      for (const name of ["allPieces", "recentPieces"] as const) {
+      for (const name of ["pieceRegistry", "recentPieces"] as const) {
         const list = defaultPattern.asSchema(undefined).key(name)
           .resolveAsCell().asSchema(SHALLOW_PIECE_LIST_SCHEMA) as Cell<
             Cell<unknown>[]
@@ -100,7 +106,7 @@ Deno.test("debug deployment replaces a view when its pattern identity changes", 
       await deployAgentSessionsDebugView(manager, target, alternateLocation),
       alternatePieceId,
     );
-    for (const name of ["allPieces", "recentPieces"] as const) {
+    for (const name of ["pieceRegistry", "recentPieces"] as const) {
       assertEquals(
         (await registeredPieceIds(defaultPattern, name)).includes(
           originalPieceId,
@@ -199,7 +205,10 @@ Deno.test("debug deployment removes a view that fails to start", async () => {
       manager.startPiece = originalStartPiece;
     }
 
-    assertEquals(await registeredPieceIds(defaultPattern, "allPieces"), []);
+    assertEquals(
+      await registeredPieceIds(defaultPattern, "pieceRegistry"),
+      [],
+    );
     assertEquals(await registeredPieceIds(defaultPattern, "recentPieces"), []);
   } finally {
     await runtime.dispose();
@@ -252,7 +261,7 @@ Deno.test("debug deployment preserves a view when its replacement fails", async 
     }
 
     assertEquals(
-      await registeredPieceIds(defaultPattern, "allPieces"),
+      await registeredPieceIds(defaultPattern, "pieceRegistry"),
       [originalPieceId],
     );
     await target.publish([{
@@ -400,7 +409,7 @@ Deno.test("debug deployment rolls back an aborted registration", async () => {
       abortAfterCommit: true,
     });
     assertEquals(
-      await registeredPieceIds(defaultPattern, "allPieces"),
+      await registeredPieceIds(defaultPattern, "pieceRegistry"),
       [originalPieceId],
     );
     assertEquals(
@@ -548,7 +557,7 @@ Deno.test("debug deployment rejects stale registration across runtimes", async (
         assertEquals(registration.getRaw(), competingRegistration);
         const registeredIds = await registeredPieceIds(
           defaultPattern,
-          "allPieces",
+          "pieceRegistry",
         );
         assertEquals(registeredIds.includes(originalPieceId), true);
         assertEquals(registeredIds.length, 1);
@@ -659,6 +668,58 @@ Deno.test("debug deployment rejects a replaced default pattern", async () => {
       );
     } finally {
       manager.getDefaultPattern = originalGetDefaultPattern;
+    }
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("debug deployment rejects an in-place registry change", async () => {
+  const session = await createSession({
+    identity,
+    spaceName: `debug-registry-race-${crypto.randomUUID()}`,
+  });
+  const storageManager = StorageManager.emulate({ as: session.as });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  try {
+    const manager = new PiecesController(session, runtime);
+    await manager.synced();
+    const defaultPattern = await installDefaultPattern(manager);
+    const target = await AgentFabricTarget.open({
+      runtime,
+      spaceDid: session.space,
+    });
+    const originalStartPiece = manager.startPiece;
+    const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+    let injectRegistryChange = false;
+    let registryChangeInjected = false;
+    manager.startPiece = (async (piece, options) => {
+      await originalStartPiece.call(manager, piece, options);
+      injectRegistryChange = true;
+    }) as typeof manager.startPiece;
+    runtime.editWithRetry = (async (action, maxRetries) => {
+      if (injectRegistryChange && !registryChangeInjected) {
+        registryChangeInjected = true;
+        const change = await originalEditWithRetry((tx) => {
+          defaultPattern.withTx(tx).key("pieceRegistry").setRawUntyped([]);
+        });
+        if (change.error) throw change.error;
+      }
+      return await originalEditWithRetry(action, maxRetries);
+    }) as typeof runtime.editWithRetry;
+    try {
+      await assertRejects(
+        () => deployAgentSessionsDebugView(manager, target),
+        Error,
+        "default pattern registry changed during debug view deployment",
+      );
+    } finally {
+      manager.startPiece = originalStartPiece;
+      runtime.editWithRetry = originalEditWithRetry;
     }
   } finally {
     await runtime.dispose();

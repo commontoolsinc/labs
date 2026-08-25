@@ -119,15 +119,7 @@ and writes to the owned `pieceRegistry` Writable. The runtime infrastructure
 (`PiecesController.add()`) also uses this handler — patterns should follow the
 same approach.
 
-The `#allPieces` wish target and `allPieces` output have been removed. Use
-`pieceRegistry` and `#pieceRegistry`.
-
-The default app retains the old `allPieces` owned-cell cause for a one-time
-migration. When `pieceRegistry` is empty, it copies the legacy list and marks
-the migration complete. Existing canonical data wins when both cells contain
-data. `#pieceRegistry` and `PiecesController` can read the retired registry
-from a
-provenance-free legacy default-app root that remains pinned to its old source.
+Use `pieceRegistry` and `#pieceRegistry` for direct registry access.
 
 See [handler()](../concepts/handler.md) for handler mechanics and
 [wish()](wish.md) for wish usage.
