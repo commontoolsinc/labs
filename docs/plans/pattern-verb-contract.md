@@ -735,7 +735,7 @@ and the message is the whole signal.
 An agent holding a piece URL must be able to ask "what can I call here?"
 without reading pattern source. The pieces exist:
 
-- **Per verb**, `cf call <piece> <verb> --help --json` already emits the
+- **Per verb**, `cf call --piece <piece> <verb> --help --json` already emits the
   machine-readable command spec — kind, default verb, input schema — derived
   from the pattern's own types (`callableCommandSpec`,
   `packages/cli/lib/callable.ts`).
@@ -794,16 +794,16 @@ $ cf call --url "$TOPICS_BOARD_URL" addTopic \
 # even when its wait times out. Retrying the pair returns the original
 # outcome: the body re-runs and loses the create-only receipt race, so
 # nothing commits twice. An --invocation named without a session is refused.
-$ cf call --url "$TOPICS_BOARD_URL" addTopic \
-    --title "Verb contract" --invocation inv_7f3a
+$ cf call --url "$TOPICS_BOARD_URL" --invocation inv_7f3a addTopic \
+    --title "Verb contract"
 { "invocation": "inv_7f3a", "status": "settled",
   "result": { "topic": "fid1:abc" } }
 
 # The caller chooses whether to wait: a detached call exits at the commit
 # acknowledgment with the receipt's address, and collecting the outcome
 # later is an ordinary read of that address.
-$ cf call --url "$TOPICS_BOARD_URL" summarize \
-    --topic fid1:abc --no-wait
+$ cf call --url "$TOPICS_BOARD_URL" --no-wait summarize \
+    --topic fid1:abc
 { "invocation": "inv_9c1b", "status": "committed",
   "receipt": "/of:fid1:…" }
 $ cf get --piece /of:fid1:… summary
