@@ -140,13 +140,16 @@ naming the `FabricPrimitive` subclasses individually — describes exactly the
 same set while saying more about it. Read the split as this document's
 elaboration of one implementation arm.
 
-Arms (c) and (d) are the **containers** — the values that hold other
-`FabricValue`s, and so the values a walk descends into. The implementation
-names that set `FabricContainerValue`. What divides the two arms is where the
-contents live, not whether there are any: a plain container's contents are its
-own indices and keys, while a `FabricInstance` holds its contents privately and
-reaches them through the protocol of Section 2.3. Arms (a) and (b) are the
-non-containers, holding no `FabricValue` at all.
+Arms (c) and (d) are the **containers** — the values that expose other
+`FabricValue`s for a walk to descend into. The implementation names that set
+`FabricContainerValue`. What divides the two arms is where the contents live,
+not whether there are any: a plain container's contents are its own indices and
+keys, while a `FabricInstance` holds its contents privately and exposes them
+through the protocol of Section 2.3. Arms (a) and (b) are the non-containers. A
+`FabricPrimitive` may hold `FabricValue`s of its own — a `FabricRegExp` its
+source and flags, a `FabricKeyPair` holding material two `FabricBytes` — but
+holds them privately and self-freezes at construction, so it exposes none of
+them and a walk stops there (Section 8.6).
 
 > **Fabric values are deeply read-only, with one intentional hole.** The plain
 > container arms are read-only, and because their element and property types are

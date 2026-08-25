@@ -653,8 +653,9 @@ describe("type-check", () => {
 
     describe("given a non-container `FabricValue`", () => {
       // The whole of the difference from `isFabricObjectOrArray()`, which
-      // accepts these: a `FabricPrimitive` is an object that holds no
-      // `FabricValue`, so there is nothing in one to descend into.
+      // accepts these: a `FabricPrimitive` self-freezes at construction and
+      // exposes no `FabricValue` for a walk to descend into, whatever it holds
+      // privately.
       it("returns `false` for a `FabricPrimitive`", () => {
         expect(isFabricContainerValue(new FabricBytes(new Uint8Array([1]))))
           .toBe(false);
