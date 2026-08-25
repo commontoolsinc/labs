@@ -57,8 +57,10 @@ export type PageRef = {
 
 /**
  * The requests a client sends the worker. Every one is answered, whether or
- * not it carries data back; the `Set*` and `Reset*` members answer with
- * nothing and are acked.
+ * not it carries data back: a request whose handler returns nothing is acked
+ * with a bare envelope, which many members here do -- the `Set*` and `Reset*`
+ * ones, and others besides. {@link Commands} is where a given request's
+ * answer is settled.
  */
 export enum RequestType {
   // Lifecycle
@@ -192,7 +194,9 @@ export enum RequestType {
   /** Sets one named logger's level, or every logger's when none is named. */
   SetLoggerLevel = "runtime:setLoggerLevel",
 
-  /** Enables or disables one named logger, or every logger when none is named. */
+  /**
+   * Enables or disables one named logger, or every logger when none is named.
+   */
   SetLoggerEnabled = "runtime:setLoggerEnabled",
 
   /** Turns telemetry notifications on or off. */
@@ -309,7 +313,10 @@ export enum RequestType {
   /** Stops a running piece. */
   PageStop = "page:stop",
 
-  /** Answers with every piece in a space. */
+  /**
+   * Answers with a ref to the cell holding a space's piece registry. The
+   * pieces themselves are read from that cell, not carried here.
+   */
   PageGetAll = "page:getAll",
 
   /**
@@ -369,8 +376,10 @@ export enum ClientNotificationType {
 
   /**
    * Reports that a batch reached the DOM, by mount and batch id. The worker
-   * uses it to pace what it sends: a renderer that has not acked is one whose
-   * main thread is behind.
+   * holds back the retirement of an event handler whose node a batch removed
+   * until that batch is acked, so an event dispatched against a node the
+   * client had not yet stopped showing still finds its handler. Nothing about
+   * this paces what the worker sends -- ops flush on a microtask regardless.
    */
   VDomBatchApplied = "vdom:batch-applied",
 }
@@ -536,23 +545,17 @@ export type BaseRequest = {
  * lifetime -- nothing here can be changed by a later request.
  */
 export type InitializationData = {
-  // URL of backend server. Also the default host for spaces absent from
-  // `spaceHostMap`.
   /**
-   * The backend server, and the default host for any space
-   * `spaceHostMap` does not list.
+   * The backend server, and the default host for any space `spaceHostMap`
+   * does not list.
    */
   apiUrl: string;
-  // Optional map from space DIDs to HTTP or HTTPS origins. A listed space has
-  // its storage resolved against that host instead of `apiUrl`. Absent map or
-  // absent entry ⇒ `apiUrl`, byte-identical to the single-host behavior.
-  // Plain record: structured-clone-safe — no functions cross the worker
-  // IPC boundary. Fixed for the connection's lifetime.
   /**
-   * Per-space storage hosts. A listed space resolves against its own
-   * host; an absent map or entry falls back to `apiUrl`, byte-identical
-   * to single-host behavior. A plain record, so nothing here needs to
-   * survive structured cloning as anything else.
+   * Per-space storage hosts, by space DID, as HTTP or HTTPS origins. A listed
+   * space resolves against its own host instead of `apiUrl`; an absent map or
+   * an absent entry falls back to `apiUrl`, byte-identical to the single-host
+   * behavior. A plain record, since no function crosses the worker boundary.
+   * Fixed for the connection's lifetime.
    */
   spaceHostMap?: Record<string, string>;
   /**
@@ -562,28 +565,24 @@ export type InitializationData = {
    * boundary whole.
    */
   identity: RealmEncodedValue;
-  // Identity of space.
   /**
    * The space this connection opens on.
    */
   spaceDid: DID;
-  // Temporary space name
   /**
-   * The space's name, where the client knows it.
+   * The space's name, where the client knows it. Temporary.
    */
   spaceName?: string;
   /** Temporary identity of space, encoded as `identity` above is. */
   spaceIdentity?: RealmEncodedValue;
-  // Default timeout in milliseconds.
   /**
-   * How long a request may go unanswered before the client gives up on
-   * it.
+   * How long a request may go unanswered before the client gives up on it.
    */
   timeoutMs?: number;
-  // Experimental space-model feature flags.
   /**
-   * Feature flags the host declares. The worker runs the arm named here
-   * rather than resolving its own, so that the two realms cannot diverge.
+   * Experimental space-model feature flags, declared by the host. The worker
+   * runs the arm named here rather than resolving its own, so that the two
+   * realms cannot diverge.
    */
   experimental?: {
     modernCellRep?: boolean;
@@ -609,81 +608,67 @@ export type InitializationData = {
     | "observe"
     | "enforce-explicit"
     | "enforce-strict";
-  // Flow-label propagation dial for the worker runtime (S16 default
-  // transition; docs/history/plans/cfc-future-work-implementation.md Epic H1):
-  // "off" = no derivation; "observe" = compute the per-tx conservative
-  // join and emit diagnostics, persist nothing; "persist" = write derived
-  // label components. Propagation never rejects by itself. Absent =
-  // the runner's default ("off").
   /**
-   * Whether CFC flow labels are ignored, recorded for observation, or
-   * persisted.
+   * The flow-label propagation dial. `off` derives nothing; `observe`
+   * computes the per-transaction conservative join and emits diagnostics
+   * while persisting nothing; `persist` writes the derived label components.
+   * Propagation never rejects a write by itself. Absent leaves the runner's
+   * default, which is `off`.
    */
   cfcFlowLabels?: "off" | "observe" | "persist";
-  // Whether author-supplied render-boundary declassification is honored.
-  // Defaults to "allow" (current behavior). "deny" ignores author-supplied
-  // `declassifyConfidentiality` so a pattern can't release a secret upward
-  // through a render boundary (audit S15).
   /**
-   * Whether a render may declassify what it shows.
+   * Whether author-supplied render-boundary declassification is honored.
+   * `allow` is the default. `deny` ignores an author's
+   * `declassifyConfidentiality`, so that a pattern cannot release a secret
+   * upward through a render boundary.
    */
   renderDeclassificationPolicy?: "allow" | "deny";
-  // Host-supplied default render ceiling (spec §8.10.6, S16 phase D):
-  // confidentiality a display surface admits by default — exact `atoms`
-  // (the place for acting-user identity atoms) plus Caveat `caveatKinds`
-  // (display-dischargeable classes). Undefined = no ceiling (current
-  // behavior).
   /**
-   * The highest confidentiality a render may reach. A render above it is
-   * refused rather than redacted.
+   * The confidentiality a display surface admits by default: exact `atoms`,
+   * which is where an acting user's identity atoms go, plus the Caveat
+   * `caveatKinds` a display can discharge. Absent means no ceiling.
    */
   renderConfidentialityCeiling?: {
     atoms?: readonly CfcConfClause[];
     caveatKinds?: readonly string[];
   };
-  // Static trust snapshot applied to worker-owned transactions.
   /**
-   * The trust state the host resolved, declared so the worker runs against
-   * the same one rather than resolving its own.
+   * A static trust snapshot applied to worker-owned transactions, declared by
+   * the host so the worker runs against the same one rather than resolving
+   * its own.
    */
   trustSnapshot?: {
     id: string;
     actingPrincipal?: string;
     revision?: string;
   };
-  // When true, the worker mirrors its own console output (log/warn/error)
-  // to the main thread, which re-emits it on the page console prefixed
-  // with `[worker]`, so runtime-internal logs reach devtools and
-  // integration-test console capture. Off by default: each forwarded call
-  // costs one postMessage, so it is enabled only for diagnostic runs.
   /**
-   * Start with the worker's console bridge on.
+   * Mirror the worker's own console output to the main thread, which re-emits
+   * it on the page console prefixed with `[worker]`, so runtime-internal logs
+   * reach devtools and integration-test console capture. Off by default: each
+   * forwarded call costs one `postMessage`, so it is for diagnostic runs.
    * {@link RequestType.SetForwardWorkerConsole} changes it later.
    */
   forwardWorkerConsole?: boolean;
-  // When true, the worker runtime instruments every pattern compile for
-  // statement coverage and accumulates hits, which the integration harness
-  // pulls at teardown via GetPatternCoverage. Test/CI only (the coverage shell
-  // build sets it); off by default. See docs/development/COVERAGE.md.
   /**
-   * Collect pattern coverage. A worker built without a collector reports
-   * `null` rather than an empty report.
+   * Instrument every pattern compile for statement coverage and accumulate
+   * hits, which the integration harness pulls at teardown through
+   * {@link RequestType.GetPatternCoverage}. Test and CI only -- the coverage
+   * shell build sets it -- and off by default.
    */
   patternCoverage?: boolean;
-  // When true, the worker's remote storage overlaps watch-refresh round trips
-  // up to a bounded window instead of the default strict single-flight
-  // (`experimentalConcurrentWatchRefresh`, docs/development/EXPERIMENTAL_OPTIONS.md).
-  // Fixed at StorageManager.open time, so like the render ceiling it takes
-  // effect on the next runtime (reload), not live. Off by default; the shell
-  // dogfood toggle `commonfabric.concurrentWatchRefresh()` sets it.
   /**
-   * Refresh watched cells concurrently rather than one at a time.
+   * Let the worker's remote storage overlap watch-refresh round trips up to a
+   * bounded window, rather than the default strict single-flight. Fixed at
+   * `StorageManager.open` time, so like the render ceiling it takes effect on
+   * the next runtime rather than live. Off by default.
    */
   concurrentWatchRefresh?: boolean;
 };
 
 /**
- * The {@link RequestType.Initialize} request. Its `data` is fixed for the connection's lifetime.
+ * The {@link RequestType.Initialize} request. Its `data` is fixed for the
+ * connection's lifetime.
  */
 export type InitializeRequest = BaseRequest & {
   type: RequestType.Initialize;
@@ -699,7 +684,9 @@ export type DisposeRequest = BaseRequest & {
 };
 
 /**
- * The {@link RequestType.CellGet} request. `meta` reads a metadata field in place of the cell's value, and each `include*` flag adds a field to the answer.
+ * The {@link RequestType.CellGet} request. `meta` reads a metadata field in
+ * place of the cell's value, and each `include*` flag adds a field to the
+ * answer.
  */
 export type CellGetRequest = BaseRequest & {
   type: RequestType.CellGet;
@@ -711,21 +698,18 @@ export type CellGetRequest = BaseRequest & {
    * Reads this metadata field instead of the cell's value.
    */
   meta?: MetaField;
-  // Opt in to having the cell's display CFC label returned alongside the value,
-  // so a caller that needs both pays one round-trip instead of a separate
-  // CellGetCfcLabel request.
   /**
-   * Answer with the cell's display label too.
+   * Have the cell's display label returned alongside the value, so a caller
+   * needing both pays one round trip instead of a separate
+   * {@link RequestType.CellGetCfcLabel}.
    */
   includeCfcLabel?: boolean;
-  // Opt in to having the read cell's own schema-bearing ref returned. Useful
-  // when `meta` names a link field (pattern/argument/result): the resolved
-  // cell's ref lets the caller subscribe to it or read it again directly,
-  // and its schema carries the declarations (e.g. stream fields) that the
-  // value alone does not.
   /**
-   * Answer with a ref to the cell the read resolved to, which a meta
-   * read following a link is not the cell asked for.
+   * Have the read cell's own schema-bearing ref returned. Useful where `meta`
+   * names a link field -- pattern, argument, result -- since the resolved
+   * cell is then not the one asked for: its ref lets the caller subscribe to
+   * it or read it again directly, and its schema carries declarations such as
+   * stream fields that the value alone does not.
    */
   includeRef?: boolean;
 };
@@ -761,7 +745,8 @@ export type WireCellValue =
   | CellRef;
 
 /**
- * The {@link RequestType.CellSet} request. `value` is the whole already-resolved value rather than a delta.
+ * The {@link RequestType.CellSet} request. `value` is the whole
+ * already-resolved value rather than a delta.
  */
 export type CellSetRequest = BaseRequest & {
   type: RequestType.CellSet;
@@ -775,12 +760,12 @@ export type CellSetRequest = BaseRequest & {
   value: WireCellValue;
 };
 
-// A read-modify-write append (`CellHandle.push`). Same wire shape as CellSet —
-// it carries the whole already-appended array — but routed as its own request so
-// the runtime keeps the read-target as a commit precondition (compare-and-set),
-// rather than the blind last-write-wins of CellSet.
 /**
- * The {@link RequestType.CellPush} request. `value` is the whole already-resolved value rather than a delta, as {@link CellSetRequest}'s is; the two differ in how it is applied, not in what they carry.
+ * The {@link RequestType.CellPush} request: a read-modify-write append.
+ * The same wire shape as {@link CellSetRequest}, carrying the whole
+ * already-appended array rather than a delta, but routed as its own request
+ * so the runtime keeps the read target as a commit precondition. That is
+ * the compare-and-set a blind set gives up.
  */
 export type CellPushRequest = BaseRequest & {
   type: RequestType.CellPush;
@@ -795,7 +780,8 @@ export type CellPushRequest = BaseRequest & {
 };
 
 /**
- * The {@link RequestType.CellSend} request. `event` is delivered rather than stored.
+ * The {@link RequestType.CellSend} request. `event` is delivered rather than
+ * stored.
  */
 export type CellSendRequest = BaseRequest & {
   type: RequestType.CellSend;
@@ -810,7 +796,8 @@ export type CellSendRequest = BaseRequest & {
 };
 
 /**
- * The {@link RequestType.CellSubscribe} request. `includeCfcLabel` makes every update carry the cell's label too.
+ * The {@link RequestType.CellSubscribe} request. `includeCfcLabel` makes every
+ * update carry the cell's label too.
  */
 export type CellSubscribeRequest = BaseRequest & {
   type: RequestType.CellSubscribe;
@@ -818,13 +805,12 @@ export type CellSubscribeRequest = BaseRequest & {
    * The cell to watch.
    */
   cell: CellRef;
-  // Opt in to reactive CFC-label delivery: each CellUpdate then carries the
-  // cell's current display label, and the worker reads that label as a tracked
-  // dependency of the sink, so a label-only write (value unchanged) re-fires
-  // the subscription. Off by default — only label-displaying callers pay it.
   /**
-   * Carry the cell's display label with every update, so that a label
-   * change re-renders without a second round trip.
+   * Opt in to reactive label delivery: every update then carries the cell's
+   * current display label, and the worker reads that label as a tracked
+   * dependency of the sink, so a label-only write with the value unchanged
+   * re-fires the subscription. Off by default -- only a label-displaying
+   * caller pays for it.
    */
   includeCfcLabel?: boolean;
 };
@@ -856,9 +842,9 @@ export type CellGetCfcLabelRequest = BaseRequest & {
   cell: CellRef;
 };
 
-// unused?
 /**
- * The {@link RequestType.GetCell} request. `cause` is what derives the cell: the same space and cause always name the same one.
+ * The {@link RequestType.GetCell} request. `cause` is what derives the
+ * cell: the same space and cause always name the same one.
  */
 export type GetCellRequest = BaseRequest & {
   type: RequestType.GetCell;
@@ -877,12 +863,17 @@ export type GetCellRequest = BaseRequest & {
   schema?: JSONSchema;
 };
 
-/** The {@link RequestType.GetHomeSpaceCell} request, which carries no payload. */
+/**
+ * The {@link RequestType.GetHomeSpaceCell} request, which carries no payload.
+ */
 export type GetHomeSpaceCellRequest = BaseRequest & {
   type: RequestType.GetHomeSpaceCell;
 };
 
-/** The {@link RequestType.EnsureHomePatternRunning} request, which carries no payload. */
+/**
+ * The {@link RequestType.EnsureHomePatternRunning} request, which carries no
+ * payload.
+ */
 export type EnsureHomePatternRunningRequest = BaseRequest & {
   type: RequestType.EnsureHomePatternRunning;
 };
@@ -948,17 +939,23 @@ export type FlushCompileCacheWritesRequest = BaseRequest & {
   type: RequestType.FlushCompileCacheWrites;
 };
 
-/** The {@link RequestType.GetGraphSnapshot} request, which carries no payload. */
+/**
+ * The {@link RequestType.GetGraphSnapshot} request, which carries no payload.
+ */
 export type GetGraphSnapshotRequest = BaseRequest & {
   type: RequestType.GetGraphSnapshot;
 };
 
-/** The {@link RequestType.GetLoggerCounts} request, which carries no payload. */
+/**
+ * The {@link RequestType.GetLoggerCounts} request, which carries no payload.
+ */
 export type GetLoggerCountsRequest = BaseRequest & {
   type: RequestType.GetLoggerCounts;
 };
 
-/** The {@link RequestType.GetPatternCoverage} request, which carries no payload. */
+/**
+ * The {@link RequestType.GetPatternCoverage} request, which carries no payload.
+ */
 export type GetPatternCoverageRequest = BaseRequest & {
   type: RequestType.GetPatternCoverage;
 };
@@ -967,7 +964,8 @@ export type GetPatternCoverageRequest = BaseRequest & {
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 /**
- * The {@link RequestType.SetLoggerLevel} request. An absent `loggerName` addresses every logger.
+ * The {@link RequestType.SetLoggerLevel} request. An absent `loggerName`
+ * addresses every logger.
  */
 export type SetLoggerLevelRequest = BaseRequest & {
   type: RequestType.SetLoggerLevel;
@@ -980,7 +978,8 @@ export type SetLoggerLevelRequest = BaseRequest & {
 };
 
 /**
- * The {@link RequestType.SetLoggerEnabled} request. An absent `loggerName` addresses every logger.
+ * The {@link RequestType.SetLoggerEnabled} request. An absent `loggerName`
+ * addresses every logger.
  */
 export type SetLoggerEnabledRequest = BaseRequest & {
   type: RequestType.SetLoggerEnabled;
@@ -1010,7 +1009,10 @@ export type SetForwardWorkerConsoleRequest = BaseRequest & {
   enabled: boolean;
 };
 
-/** The {@link RequestType.ResetLoggerBaselines} request, which carries no payload. */
+/**
+ * The {@link RequestType.ResetLoggerBaselines} request, which carries no
+ * payload.
+ */
 export type ResetLoggerBaselinesRequest = BaseRequest & {
   type: RequestType.ResetLoggerBaselines;
 };
@@ -1030,12 +1032,17 @@ export type SetSettleStatsEnabledRequest = BaseRequest & {
   enabled: boolean;
 };
 
-/** The {@link RequestType.GetSettleStatsHistory} request, which carries no payload. */
+/**
+ * The {@link RequestType.GetSettleStatsHistory} request, which carries no
+ * payload.
+ */
 export type GetSettleStatsHistoryRequest = BaseRequest & {
   type: RequestType.GetSettleStatsHistory;
 };
 
-/** The {@link RequestType.GetActionRunTrace} request, which carries no payload. */
+/**
+ * The {@link RequestType.GetActionRunTrace} request, which carries no payload.
+ */
 export type GetActionRunTraceRequest = BaseRequest & {
   type: RequestType.GetActionRunTrace;
 };
@@ -1050,7 +1057,9 @@ export type SetActionRunTraceEnabledRequest = BaseRequest & {
   enabled: boolean;
 };
 
-/** The {@link RequestType.GetTriggerTrace} request, which carries no payload. */
+/**
+ * The {@link RequestType.GetTriggerTrace} request, which carries no payload.
+ */
 export type GetTriggerTraceRequest = BaseRequest & {
   type: RequestType.GetTriggerTrace;
 };
@@ -1065,13 +1074,16 @@ export type SetTriggerTraceEnabledRequest = BaseRequest & {
   enabled: boolean;
 };
 
-/** The {@link RequestType.GetWriteStackTrace} request, which carries no payload. */
+/**
+ * The {@link RequestType.GetWriteStackTrace} request, which carries no payload.
+ */
 export type GetWriteStackTraceRequest = BaseRequest & {
   type: RequestType.GetWriteStackTrace;
 };
 
 /**
- * The {@link RequestType.SetWriteStackTraceMatchers} request. The matchers replace the current set rather than adding to it.
+ * The {@link RequestType.SetWriteStackTraceMatchers} request. The matchers
+ * replace the current set rather than adding to it.
  */
 export type SetWriteStackTraceMatchersRequest = BaseRequest & {
   type: RequestType.SetWriteStackTraceMatchers;
@@ -1083,7 +1095,8 @@ export type SetWriteStackTraceMatchersRequest = BaseRequest & {
 };
 
 /**
- * The {@link RequestType.DetectNonIdempotent} request. `durationMs` bounds how long the diagnosis runs.
+ * The {@link RequestType.DetectNonIdempotent} request. `durationMs` bounds how
+ * long the diagnosis runs.
  */
 export type DetectNonIdempotentRequest = BaseRequest & {
   type: RequestType.DetectNonIdempotent;
@@ -1145,7 +1158,9 @@ export type DetectNonIdempotentResponse = {
   result: SchedulerDiagnosisResult;
 };
 
-/** The {@link RequestType.GetPatternSources} request, which carries no payload. */
+/**
+ * The {@link RequestType.GetPatternSources} request, which carries no payload.
+ */
 export type GetPatternSourcesRequest = BaseRequest & {
   type: RequestType.GetPatternSources;
 };
@@ -1186,7 +1201,8 @@ export type PatternSourcesResponse = {
 };
 
 /**
- * The {@link RequestType.SetBreakpoints} request. The ids replace the current breakpoints rather than adding to them.
+ * The {@link RequestType.SetBreakpoints} request. The ids replace the current
+ * breakpoints rather than adding to them.
  */
 export type SetBreakpointsRequest = BaseRequest & {
   type: RequestType.SetBreakpoints;
@@ -1197,7 +1213,9 @@ export type SetBreakpointsRequest = BaseRequest & {
 };
 
 /**
- * The {@link RequestType.UploadBlob} request. `space` is required, and decides which host the upload targets; `suffix` names the extension the stored blob is served under.
+ * The {@link RequestType.UploadBlob} request. `space` is required, and decides
+ * which host the upload targets; `suffix` names the extension the stored blob
+ * is served under.
  */
 export type UploadBlobRequest = BaseRequest & {
   type: RequestType.UploadBlob;
@@ -1234,10 +1252,10 @@ export type UploadBlobResponse = {
   url: string;
 };
 
-// Logger count types for IPC (matches @commonfabric/utils/logger types)
 /**
- * How many messages were recorded at each level, with `total` alongside so a
- * reader need not sum the four.
+ * How many messages were recorded at each level, with `total` alongside so
+ * a reader need not sum the four. Mirrors the shape
+ * `@commonfabric/utils/logger` uses, this being that data on the wire.
  */
 export type LogCounts = {
   /**
@@ -1303,10 +1321,10 @@ export type LoggerInfo = {
 /** Every logger's enabled state and level, by logger name. */
 export type LoggerMetadata = Record<string, LoggerInfo>;
 
-// Timing stats types for IPC (matches @commonfabric/utils/logger types)
 /**
  * One point of a cumulative distribution: a latency, and the fraction of
- * samples at or below it.
+ * samples at or below it. Mirrors the shape
+ * `@commonfabric/utils/logger` uses.
  */
 export type CDFPoint = {
   /**
@@ -1392,7 +1410,8 @@ export type LoggerFlagsData = Record<
 >;
 
 /**
- * The {@link RequestType.PageCreate} request. `source` names a URL or a program, never both.
+ * The {@link RequestType.PageCreate} request. `source` names a URL or a
+ * program, never both.
  */
 export type PageCreateRequest = BaseRequest & {
   type: RequestType.PageCreate;
@@ -1407,13 +1426,14 @@ export type PageCreateRequest = BaseRequest & {
   } | {
     program: Program;
   };
-  // TODO(danfuzz): a piece's argument is a `FabricValue`, and `JSONValue`
-  // narrows it to the JSON-compatible subset with nothing carrying the rest.
-  // The same gap `WireCellValue` is marked with, at the other request that
-  // sends a value into the worker, and closed by the same mechanism
-  // (`codec-realm`).
   /**
    * The argument the piece is created with.
+   *
+   * TODO(danfuzz): a piece's argument is a `FabricValue`, and `JSONValue`
+   * narrows it to the JSON-compatible subset with nothing carrying the rest.
+   * The same gap `WireCellValue` is marked with, at the other request that
+   * sends a value into the worker, and closed by the same mechanism
+   * (`codec-realm`).
    */
   argument?: JSONValue;
   /**
@@ -1451,7 +1471,8 @@ export type RecreateSpaceRootPatternRequest = BaseRequest & {
 };
 
 /**
- * The {@link RequestType.PageGet} request. `runIt` starts the piece as part of the read.
+ * The {@link RequestType.PageGet} request. `runIt` starts the piece as part of
+ * the read.
  */
 export type PageGetRequest = BaseRequest & {
   type: RequestType.PageGet;
@@ -1654,7 +1675,7 @@ export type PieceSourceRevisionView = {
    */
   pattern: PiecePatternRefView;
   /**
-   * Where that pattern came from, where it came from anywhere.
+   * Where that pattern came from, for a pattern that came from anywhere.
    */
   origin?: PieceOriginView;
   /**
@@ -1769,7 +1790,9 @@ export type PieceSourceAction =
   | { kind: "follow"; revisionId: string };
 
 /**
- * The {@link RequestType.PieceUpdateSource} request. `confirmationToken` is the token an incompatibility warning returned; sending it back is what confirms the update.
+ * The {@link RequestType.PieceUpdateSource} request. `confirmationToken` is the
+ * token an incompatibility warning returned; sending it back is what confirms
+ * the update.
  */
 export type PieceUpdateSourceRequest = BaseRequest & {
   type: RequestType.PieceUpdateSource;
@@ -2058,8 +2081,8 @@ export type IPCClientNotification =
 export type VDomMountResponse = {
   /**
    * The root node ID for this mount; `null` when the tree has no root child.
-   * `VDomBatchNotification` spells absence the same way, so a reader maps both
-   * directions with one rule.
+   * `VDomBatchNotification` represents absence the same way, so a reader maps
+   * both directions with one rule.
    */
   rootId: number | null;
 };
@@ -2177,17 +2200,16 @@ export type JSONValueResponse = {
  * metadata read has none to name.
  */
 export type CellGetResponse = JSONValueResponse & {
-  // Present only when the request set `includeCfcLabel`. `undefined` is a valid
-  // value (the cell carries no label); the field is omitted when not requested.
   /**
-   * The cell's display label, present only where the request asked.
+   * The cell's display label, present only where the request set
+   * `includeCfcLabel`. `undefined` is a valid value, the cell carrying no
+   * label; the field is omitted rather than undefined when not requested.
    */
   cfcLabel?: CfcLabelView | undefined;
-  // Present only when the request set `includeRef` and the read resolved to a
-  // cell (a raw-metadata read has no cell to reference).
   /**
-   * A ref to the cell the read resolved to, present only where the
-   * request asked and the read reached one.
+   * A ref to the cell the read resolved to, present only where the request
+   * set `includeRef` and the read reached a cell -- a raw metadata read has
+   * none to reference.
    */
   cell?: CellRef;
 };
@@ -2290,17 +2312,17 @@ export type CellUpdateNotification = {
    * The cell that changed.
    */
   cell: CellRef;
-  // TODO(danfuzz): the same gap `JSONValueResponse` is marked with. This is
-  // the push form of the same read, produced by the same conversion.
   /**
    * Its new value.
+   *
+   * TODO(danfuzz): the same gap `JSONValueResponse` is marked with. This is
+   * the push form of the same read, produced by the same conversion.
    */
   value: JSONValue;
-  // Present only for subscriptions that opted in via `includeCfcLabel`. Carries
-  // the cell's current display label so the client re-renders on label changes
-  // without a separate getCfcLabel round-trip.
   /**
-   * Its display label, carried only for a subscription that opted in.
+   * The cell's current display label, present only for a subscription that
+   * opted in through `includeCfcLabel`, so the client re-renders on a label
+   * change without a separate round trip.
    */
   cfcLabel?: CfcLabelView | undefined;
 };
@@ -2356,8 +2378,8 @@ export type NavigateRequestNotification = {
 
 /**
  * An error with no request to fail -- a renderer error, or one a pattern
- * raised between requests. Every field but `message` is context the raising
- * site had and may not.
+ * raised between requests. Every field but `message` is context that the
+ * raising site may or may not have had.
  */
 export type ErrorNotification = {
   type: NotificationType.ErrorReport;

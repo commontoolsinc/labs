@@ -151,10 +151,11 @@ export function isIPCRemoteNotification(
 }
 
 /**
- * Is `value` a {@link CellUpdateNotification}? Requires `cell` to be an object
- * and `value` to be *present* rather than of any particular shape, since
- * `undefined` is a value a cell can hold and the absent case has to stay
- * distinguishable from it.
+ * Is `value` a {@link CellUpdateNotification}? Requires `value` to be
+ * *present* rather than of any particular shape, since `undefined` is a value
+ * a cell can hold and the absent case has to stay distinguishable from it.
+ * `cell` is tested with `typeof`, which `null` passes, so a `null` cell gets
+ * through here and fails further in.
  */
 export function isCellUpdateNotification(
   value: unknown,
@@ -214,9 +215,10 @@ export function isErrorNotification(
 }
 
 /**
- * Is `value` a {@link TelemetryNotification}? The `marker` is checked for
- * being an object and not for which marker it is, that being a discrimination
- * the telemetry consumer makes.
+ * Is `value` a {@link TelemetryNotification}? Which marker it is, is a
+ * discrimination the telemetry consumer makes rather than this one. The
+ * `marker` is tested with `typeof`, which `null` passes, so a `null` marker
+ * gets through here.
  */
 export function isTelemetryNotification(
   value: unknown,
