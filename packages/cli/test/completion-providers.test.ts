@@ -238,7 +238,7 @@ Deno.test("command: bash and zsh subcommands emit their scripts", async () => {
   const bash = await captureStdout(async () => {
     await main.parse(["completion", "bash"]);
   });
-  assert(bash.includes("complete -F _cf_complete cf"));
+  assert(bash.includes("complete -o nospace -F _cf_complete cf"));
 
   const zsh = await captureStdout(async () => {
     await main.parse(["completion", "zsh"]);
@@ -250,7 +250,7 @@ Deno.test("command: --no-deno-task reaches the script generator", async () => {
   const bash = await captureStdout(async () => {
     await main.parse(["completion", "bash", "--no-deno-task"]);
   });
-  assert(bash.includes("complete -F _cf_complete cf"));
+  assert(bash.includes("complete -o nospace -F _cf_complete cf"));
   assert(!bash.includes("complete -F _cf_complete deno"));
 });
 

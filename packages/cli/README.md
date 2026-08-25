@@ -1044,6 +1044,13 @@ yields nothing — it never prints an error into the command line. Each request
 costs one CLI invocation plus one round trip, so value completion is as fast as
 the fabric it queries.
 
+A path-shaped slot — a cell path, a link endpoint, a projection path — completes
+one segment at a time and holds the cursor for the next separator. bash gets
+that by having the binding registered `complete -o nospace`, with a candidate
+that should end the word carrying its own space: `compopt` is the per-completion
+switch and it is bash 4 and later, while macOS ships bash 3.2, so the space is
+inverted rather than suppressed. zsh does it natively.
+
 ### `deno task cf` and other invocations
 
 The scripts bind `deno` as well as `cf`, so `deno task cf piece <TAB>` completes

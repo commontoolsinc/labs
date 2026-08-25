@@ -88,7 +88,7 @@ read before picking one up; this table is the roll-up.
 | 9 | A verb's annotation is its kind, not its prose | comprehension | done |
 | 10 | Wrapper and deprecated verbs are offered unmarked | comprehension | done |
 | 11 | Every Tab costs two process starts | felt cost | needs a decision |
-| 12 | `nospace` is inert on the stock macOS bash | felt cost | remedy disproven |
+| 12 | `nospace` is inert on the stock macOS bash | felt cost | done |
 | 13 | Space and entity positionals across `inspect` | operator surface | done |
 | 14 | `wish` targets and scopes | CLI vocabulary | done |
 | 15 | Remaining path-shaped and enumerable values | CLI vocabulary | done |
@@ -468,36 +468,40 @@ where state lives rather than about how fast a process starts.
 Worth sizing before it is scheduled: it may be that the correctness and
 vocabulary items above change the experience more than a faster Tab would.
 
-### 12. `nospace` is inert on the stock macOS bash, and the remedy does not work
+### 12. The trailing space is inverted, not suppressed
 
 Cell paths, link endpoints and projection paths complete one segment at a time
 and emit a `nospace` directive so the cursor stays attached for the next
-separator. The bash function applies it through `compopt`, which is bash 4 and
-later; macOS ships bash 3.2. It is a keystroke *per segment*, on the default
-shell of the platform most of this repository is developed on, and it lands on
-the deepest and most useful completion there is.
+separator. `compopt` is the per-completion switch and it is bash 4 and later;
+macOS ships bash 3.2, where the directive was simply inert. It cost a keystroke
+*per segment*, on the deepest and most useful completion there is.
 
-The remedy this item proposed — a candidate carrying its own trailing separator
-— was measured against bash 3.2 through a pty and does not work. Three
-behaviours, all of them of one unique match:
+The space is now taken away by default and given back instead. The binding is
+registered `complete -o nospace`, and a candidate that should END the word
+carries its own trailing space, which bash inserts verbatim. One mechanism
+serves bash 3.2 and bash 4 alike.
 
-- A reply of `items` inserts `items ` — the space this item is about.
-- A reply of `items/` inserts `items/ `. The space falls after the separator
-  rather than inside the path, and the caller still has to delete it before
-  typing the next segment.
-- `complete -o filenames` does not change that. It suppresses a trailing space
-  only where the candidate names a directory that exists on disk, which a cell
-  path does not, and it adds filename escaping to every candidate: `#profile`
-  reaches the line as `\#profile`.
+Three measurements against bash 3.2 through a pty decided the shape, and the
+first two are why it is not the shape this item first proposed:
 
-What does suppress the space is the match not being unique: two candidates
-sharing the prefix `items/` insert that prefix and stop. So the lever is a
-phantom candidate in the menu, which costs a caller more than the keystroke it
-saves. `complete -o nospace` at registration is the other lever, and it takes
-the space away from every slot rather than the path-shaped ones.
+- A candidate carrying its own trailing **separator** does not help. `items/`
+  inserts `items/ `, so the space falls after the separator rather than inside
+  the path and the caller still deletes it. `complete -o filenames` does not
+  change that — it suppresses the space only where the candidate names a
+  directory that exists on disk — and it adds filename escaping to every
+  candidate, so `#profile` reaches the line as `\#profile`.
+- Re-registering the compspec from inside the completion function, the usual
+  stand-in for `compopt`, takes effect one completion LATE. The first Tab gets
+  a space and the second does not, which puts the option on the wrong slot.
+- A candidate carrying its own trailing **space** under `-o nospace` inserts
+  verbatim, colons and all, and an ambiguous set still inserts only the common
+  prefix.
 
-The item stays open with its remedy closed. What would settle it is a bash the
-directive works on, which is what `compopt` already reaches.
+`$1` is the command word the compspec fired for, and it decides who gets the
+space: the `deno` binding is registered without `-o nospace` and adds nothing,
+because a line handed back to another completion has to keep that completion's
+spacing. `compopt` is still called where it exists, since it is the only thing
+that reaches that binding.
 
 ## Operator surface and CLI vocabulary
 
