@@ -169,6 +169,9 @@ const addPiece = handler<
   pieceRegistry.addUnique(piece);
 });
 
+// Retained stream cell for existing default-app roots. Events have no effect.
+const retiredAction = handler<unknown, Record<string, never>>(() => {});
+
 const recordSuggestion = handler<
   SuggestionHistoryEntry,
   { suggestionHistory: Writable<SuggestionHistoryEntry[]> }
@@ -504,6 +507,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
 
     // Exported handlers (bound to state cells for external callers)
     addPiece: addPiece({ pieceRegistry }),
+    trackRecent: retiredAction({}),
     recordSuggestion: recordSuggestion({ suggestionHistory }),
     pinToChat: fab.pinToChat,
   };

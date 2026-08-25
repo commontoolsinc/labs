@@ -131,6 +131,9 @@ const addPiece = handler<
   pieceRegistry.addUnique(piece);
 });
 
+// Retained stream cell for existing default-app roots. Events have no effect.
+const retiredAction = handler<unknown, Record<string, never>>(() => {});
+
 export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   // OWN the data cells (not from wish)
   const pieceRegistry = new Writable<MentionablePiece[]>([]);
@@ -319,5 +322,6 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     pieceRegistry,
     // Exported handlers (bound to state cells for external callers)
     addPiece: addPiece({ pieceRegistry }),
+    trackRecent: retiredAction({}),
   };
 });
