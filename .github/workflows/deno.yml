@@ -21,6 +21,9 @@ concurrency:
 # variables holding the numbers are how a workflow declares a value an anchor
 # can name; nothing reads them.
 env:
+  # GitHub's Ubuntu image includes Chrome. Astral uses it directly instead of
+  # downloading another browser when the first browser test starts.
+  ASTRAL_BIN_PATH: /usr/bin/google-chrome
   WORK_TIMEOUT_MINUTES: &work-timeout 30
   JOB_TIMEOUT_MINUTES: &job-timeout 40
   CLI_WORK_TIMEOUT_MINUTES: &cli-work-timeout 10
