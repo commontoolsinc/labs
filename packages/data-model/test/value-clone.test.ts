@@ -25,6 +25,7 @@ import {
   cloneWithValueAtPath,
 } from "@/fabric-value.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
+import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -100,6 +101,36 @@ describe("value-clone", () => {
       expect(result.value.keep).toBe(hash);
       expect(result.value.keep).toBeInstanceOf(FabricHash);
       expect(result.value.keep.tag).toBe("sha256");
+    });
+
+    it("throws when the parent of the path is a `FabricInstance`", () => {
+      const root = deepFreeze({
+        err: FabricError.fromNativeError(new Error("boom")),
+      });
+
+      expect(() => cloneWithValueAtPath(root, ["err", "extra"], 42))
+        .toThrow(CloneForMutationError);
+    });
+
+    it("reports a `FabricInstance` parent as a failed descent", () => {
+      // Not `non-mutable-*`: an instance IS mutable and IS a container. What
+      // it is not is addressable by a key, which is what the descent kinds
+      // report. (An own property assigned through one would be invisible to
+      // every reading of it as a `FabricValue` -- the codec's included.)
+      const root = deepFreeze({
+        err: FabricError.fromNativeError(new Error("boom")),
+      });
+
+      try {
+        cloneWithValueAtPath(root, ["err", "extra"], 42);
+        throw new Error("expected throw");
+      } catch (e) {
+        expect(e).toBeInstanceOf(CloneForMutationError);
+        const err = e as CloneForMutationError;
+        expect(err.kind).toBe("non-container-descent");
+        expect(err.pathIndex).toBe(0);
+        expect(err.valueKind).toBe("FabricInstance (FabricError)");
+      }
     });
   });
 

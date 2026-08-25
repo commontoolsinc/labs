@@ -23,6 +23,7 @@ import {
 } from "@commonfabric/utils/types";
 
 import {
+  type FabricArray,
   type FabricContainerValue,
   FabricInstance,
   type FabricPlainObject,
@@ -234,6 +235,23 @@ export function isFabricContainerValue(
 }
 
 /**
+ * Narrows to the two *plain* container arms of `FabricValue` -- an array or a
+ * plain object -- the values whose contents are reachable by index or property
+ * name. This is the question to ask before addressing into a value by key.
+ *
+ * Contrast `isFabricContainerValue()`, which is one arm wider: a
+ * `FabricInstance` is a container, but it holds its contents privately, so a
+ * key means nothing against one. Assigning through a value this rejects and
+ * that one accepts puts an own property on an instance, which is a state no
+ * `FabricInstance` has.
+ */
+export function isFabricPlainContainer(
+  value: FabricValue,
+): value is FabricArray | FabricPlainObject {
+  return isPlainContainer(value);
+}
+
+/**
  * Indicates whether a `FabricValue` is a plain object, an array, or a
  * `FabricSpecialObject` -- everything a `typeof value === "object"` test
  * accepts, minus `null`. The name states the array case because "object" alone
@@ -247,8 +265,10 @@ export function isFabricContainerValue(
  *
  * Contrast `isFabricPlainObject()`, which is strictly narrower at RUNTIME: it
  * accepts only plain objects, rejecting arrays and `FabricSpecialObject`s. The
- * two are not interchangeable. `isFabricContainerValue()` sits between them,
- * rejecting only the `FabricPrimitive` half of `FabricSpecialObject`.
+ * two are not interchangeable. Between them sit
+ * `isFabricContainerValue()`, which rejects only the `FabricPrimitive` half of
+ * `FabricSpecialObject`, and `isFabricPlainContainer()`, which rejects all of
+ * it.
  */
 export function isFabricObjectOrArray(
   value: FabricValue,

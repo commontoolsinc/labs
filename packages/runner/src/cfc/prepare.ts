@@ -10,6 +10,7 @@ import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-pri
 import {
   cloneForMutation,
   type CloneForMutationResult,
+  FabricInstance,
   FabricPrimitive,
   isFabricObjectOrArray,
   valueEqual,
@@ -27,6 +28,7 @@ import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { encodePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { refuseFabricInstance } from "../fabric-special-object.ts";
 import {
   containsExternalSchemaRef,
   decomposeSchema,
@@ -2577,6 +2579,17 @@ export const writeDetailValueForTarget = (
   // pre-write subtree.
   if (key !== "value" || descendants.length === 0) {
     return baseValue;
+  }
+
+  if (baseValue instanceof FabricInstance) {
+    // An instance is a container, but its state is private, so an overlay path
+    // addresses nothing in it. Falling through would either put own properties
+    // on it or, via the branch below, replace it with a plain object -- two
+    // ways of losing the value silently.
+    //
+    // TODO(danfuzz): descend by codec-mediated traversal into instance state,
+    // at which point an overlay onto one becomes a walk rather than a refusal.
+    refuseFabricInstance(baseValue, "when overlaying deeper CFC field-writes");
   }
 
   if (!isFabricObjectOrArray(baseValue)) {

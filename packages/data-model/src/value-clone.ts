@@ -28,7 +28,10 @@ import {
 } from "./interface.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { deepFreeze, isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
-import { isFabricContainerValue } from "./type-check.ts";
+import {
+  isFabricContainerValue,
+  isFabricPlainContainer,
+} from "./type-check.ts";
 import { toDebugKindString } from "./value-debug.ts";
 
 /** Options for `cloneIfNecessary()`. */
@@ -693,8 +696,10 @@ const hasChildAt = (
  * Like `cloneForMutation`, descent through a *present* value that is not a
  * plain container -- a primitive, or a `FabricInstance`/`FabricPrimitive` --
  * throws a `CloneForMutationError` rather than silently replacing that leaf
- * with fresh spine structure. Cyclic values are not yet supported (see
- * `cloneIfNecessary`).
+ * with fresh spine structure. That reaches the *parent* of `path` as well: a
+ * `FabricInstance` there is a container but not one a key addresses, so it is
+ * refused rather than given an own property. Cyclic values are not yet
+ * supported (see `cloneIfNecessary`).
  */
 export function cloneWithValueAtPath(
   root: FabricValue,
@@ -710,6 +715,22 @@ export function cloneWithValueAtPath(
     path.slice(0, -1),
     { createMissing: true, nextKeyAfterPath: lastKey },
   );
+  if (!isFabricPlainContainer(pathValue)) {
+    // `cloneForMutation()` admits any container arm at the end of its path,
+    // and a `FabricInstance` is one. `lastKey` means nothing against an
+    // instance, whose state is private, so assigning through it would leave an
+    // own property that no reading of the instance as a `FabricValue` sees.
+    const pathIndex = path.length - 2;
+    throw new CloneForMutationError(
+      (pathIndex < 0) ? "non-container-root" : "non-container-descent",
+      pathIndex,
+      toDebugKindString(pathValue),
+      `\`cloneWithValueAtPath()\`: cannot set ${backtickQuote(lastKey)} in ${
+        backtickQuote(toDebugKindString(pathValue))
+      }`,
+    );
+  }
+
   // A canonical array-index `lastKey` indexes (and extends) an array
   // `pathValue` directly; otherwise it's a plain object key.
   (pathValue as Record<string, FabricValue>)[lastKey] = cloneIfNecessary(value);
