@@ -165,6 +165,62 @@ Deno.test("VDomRenderer - takes the mount response's rootId as the root", async 
   });
 });
 
+Deno.test("VDomRenderer - tearing down leaves the caller's container", async (t) => {
+  const setup = (mountRootId: number | null) => {
+    const connection = new MockConnection();
+    connection.mountRootId = mountRootId;
+    const mock = new MockDoc(
+      '<!DOCTYPE html><html><body><div id="root"></div></body></html>',
+    );
+    const renderer = new VDomRenderer({
+      runtimeClient: {} as any,
+      connection: connection as any,
+      document: mock.document,
+    });
+    const cellRef = {
+      space: "did:key:test",
+      id: "cell-id",
+      path: [],
+      type: "application/json",
+    } as unknown as CellRef;
+    const container = mock.document.getElementById("root")!;
+    return { renderer, cellRef, container };
+  };
+
+  await t.step("when the mount reported no root", async () => {
+    const { renderer, cellRef, container } = setup(null);
+    await renderer.render(container as unknown as HTMLElement, cellRef);
+
+    await renderer.stopRendering();
+
+    expect((container as any).parentNode).not.toBe(null);
+    await renderer.dispose();
+  });
+
+  await t.step("and removes the root it did report", async () => {
+    const { renderer, cellRef, container } = setup(1);
+    await renderer.render(container as unknown as HTMLElement, cellRef);
+    renderer.getApplicator().applyBatch({
+      batchId: 1,
+      ops: [
+        { op: "create-element", nodeId: 1, tagName: "button" },
+        { op: "insert-child", parentId: 0, childId: 1, beforeId: null },
+      ],
+    });
+    const root = renderer.getApplicator().getNode(1);
+    expect((container as any).childNodes.length).toBe(1);
+
+    await renderer.stopRendering();
+
+    // The root goes and the container stays: teardown reaches into the
+    // container rather than removing it, which is the distinction the two
+    // steps together pin.
+    expect((root as any).parentNode).toBe(null);
+    expect((container as any).parentNode).not.toBe(null);
+    await renderer.dispose();
+  });
+});
+
 Deno.test("VDomRenderer - forwards trusted event provenance through delivery", async () => {
   const connection = new MockConnection();
   const mock = new MockDoc(
