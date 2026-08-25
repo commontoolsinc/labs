@@ -1411,18 +1411,26 @@ export function validateAndTransform(
       options?.traverseCells ?? false,
       undefined,
       undefined,
-      // Absent link targets get an async load kicked (cross-space always;
-      // same-space only when the replica has never seen the doc); the
-      // tracked read re-runs the reader on arrival. A served per-instance
+      // An absent link target's miss is noted on the transaction exactly
+      // when its absence is PROVISIONAL — the one verdict
+      // `Runtime.missingDocAbsenceIsProvisional` centralizes (loads in
+      // flight from any kick path in any transaction; otherwise
+      // kick-once-and-answer by seen-ness, which also schedules the load
+      // that heals the miss). A confirmed absence is a judged read and
+      // leaves no note, so a caller that judges the materialized value
+      // (setup's argument validation — see `Runner.validateArgument`) can
+      // tell an absence it must wait out from the data as it stands. The
+      // tracked read re-runs the reader on arrival; a served per-instance
       // run's absent target loads AS that run's instance (stage A — the
-      // runner's explicit-instance read). When a load is warranted or in
-      // flight, the miss is also noted on the transaction, so a caller
-      // that judges the materialized value can tell an absence it must
-      // wait out from one the replica has CONFIRMED (setup's argument
-      // validation — see `Runner.validateArgument`); a confirmed absence
-      // is a judged read and leaves no note.
+      // runner's explicit-instance read).
       (missing, sourceSpace) => {
-        if (runtime.ensureLinkedDocLoaded(missing, sourceSpace, runIdentity)) {
+        if (
+          runtime.missingDocAbsenceIsProvisional(
+            missing,
+            sourceSpace,
+            runIdentity,
+          )
+        ) {
           noteMissingLinkTargetTx(tx!, missing);
         }
       },

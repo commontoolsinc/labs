@@ -231,15 +231,23 @@ const kickDocPull = (
 ): void => {
   const mgr = runtime.storageManager;
   const { space, id, scope } = link;
-  // Registered with the runtime's in-flight tracker, like every kick path:
-  // a concurrent transaction resolving the same dead end finds the
-  // reservation already consumed, and the tracker is what still tells it
-  // the absence is being waited out rather than confirmed.
-  const settled = runtime.trackMissingDocLoadInFlight(space, id, scope);
+  // A RESERVED kick — the one same-space fetch a never-seen doc gets — is
+  // registered with the runtime's in-flight tracker: a concurrent
+  // transaction resolving the same dead end finds the reservation already
+  // consumed, and the tracker is what still tells it the absence is being
+  // waited out rather than confirmed. The unreserved cross-space kick is a
+  // LIVENESS refresh that fires on every resolution, present targets and
+  // settled absences alike, so it must not register — it would re-mark a
+  // confirmed absence as provisional forever. Cross-space dead ends get
+  // their tracked, once-deduplicated fetch from
+  // `Runtime.missingDocAbsenceIsProvisional` at the classification site.
+  const settled = reserved
+    ? runtime.trackMissingDocLoadInFlight(space, id, scope)
+    : undefined;
   mgr.trackUntilSettled(
     runtime.getCellFromLink(link).sync().catch(() => {
       if (reserved) mgr.retractDocPullKick?.(space, id, scope);
-    }).finally(settled),
+    }).finally(() => settled?.()),
   );
 };
 
@@ -467,6 +475,13 @@ export function resolveLinkTracingDereferences(
   // else = a present doc without this path).
   let followedHop = false;
   let pendingDeadEnd = false;
+  // The space of the doc that HELD the link a dead end was reached through
+  // — the walk's input's own space until a hop moves it. Seen-ness for a
+  // dead-end target means different things by referrer: a same-space target
+  // may be a selector-delivered confirmed absence, while a target reached
+  // from another space never rides this space's watch and warrants its own
+  // (once-deduplicated) fetch before its absence is judged.
+  let deadEndReferrerSpace = link.space;
   // The input handle's own provenance (link-types.ts `viaLinkHop`): a
   // handle minted from a stored sigil starts AT its hop target, so a
   // first-probe dead-end there is still a dead-end behind a hop — the
@@ -652,6 +667,7 @@ export function resolveLinkTracingDereferences(
         // so the shift reduces to target-path length minus our own.
         nextHop.link.path.length - link.path.length,
       );
+      deadEndReferrerSpace = link.space;
       if (
         schemaConstrainsNothing(nextLink.schema) && link.schema !== undefined
       ) {
@@ -703,23 +719,19 @@ export function resolveLinkTracingDereferences(
         pendingDeadEnd = true;
         // The dead end is noted on the transaction — for callers that judge
         // materialized values (setup's argument validation) — exactly when
-        // some load for this doc is still in flight, whichever read or
-        // transaction kicked it: a followed hop registers its own kick with
-        // the runtime's in-flight tracker synchronously before this
-        // iteration probes, and a concurrent transaction's unsettled pull
-        // answers through the same tracker even though it consumed the
-        // reservation first. A first-probe dead end (a data-derived handle
-        // whose own doc is missing — no hop followed in THIS walk, so no
-        // kick ran) asks `ensureLinkedDocLoaded` instead: seen means a
-        // judged absence and no note, never-seen kicks the load that makes
-        // the pending state healable at all. A dead end at a doc the
-        // replica has SEEN — its confirmed absence — leaves no note and is
-        // judged as the data it is. The ordinary first-write idiom never
-        // reaches this branch — a plain handle has neither `followedHop`
-        // nor `viaLinkHop`.
+        // the absence is PROVISIONAL rather than the replica's settled
+        // knowledge, and that verdict comes from ONE place:
+        // `Runtime.missingDocAbsenceIsProvisional`, which sees loads in
+        // flight from any kick path in any transaction and otherwise
+        // kicks-once and answers by seen-ness (its doc comment carries the
+        // full contract). `deadEndReferrerSpace` is what makes seen-ness
+        // mean the right thing: a target reached from another space never
+        // rides this space's watch, so its first dead end warrants a fetch
+        // where a same-space one may already be a confirmed absence. The
+        // ordinary first-write idiom never reaches this branch — a plain
+        // handle has neither `followedHop` nor `viaLinkHop`.
         if (
-          runtime.isMissingDocLoadInFlight(link.space, link.id, link.scope) ||
-          (!followedHop && runtime.ensureLinkedDocLoaded(link, link.space))
+          runtime.missingDocAbsenceIsProvisional(link, deadEndReferrerSpace)
         ) {
           noteMissingLinkTargetTx(tx, link);
         }

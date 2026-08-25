@@ -2246,6 +2246,38 @@ export class Runtime {
   }
 
   /**
+   * The one verdict every miss-classification site consults: whether a read
+   * that found `link`'s doc missing is looking at a PROVISIONAL absence — a
+   * load is in flight, or this call just warranted and kicked one — rather
+   * than the replica's settled knowledge (the doc's state, or its confirmed
+   * absence, with nothing on the wire). A provisional absence must be
+   * waited out, never judged; a settled one is the data as it stands.
+   *
+   * Centralized because the two halves come from different bookkeeping and
+   * every partial answer has been wrong somewhere: the in-flight tracker
+   * covers loads kicked by ANY path in ANY transaction (a reservation
+   * consumed by a concurrent kick reads as "seen" to `shouldPullDoc` while
+   * the doc is mid-transfer), and {@link ensureLinkedDocLoaded} owns the
+   * permanent-dedup-versus-seen distinction and kicks the load that makes a
+   * provisional verdict healable. Liveness refresh syncs (the resolver's
+   * per-resolution cross-space kick) deliberately do not register with the
+   * tracker, so a doc whose absence one fetch already confirmed stays
+   * settled however often a hop re-syncs it.
+   */
+  missingDocAbsenceIsProvisional(
+    link: NormalizedFullLink,
+    sourceSpace?: MemorySpace,
+    identity?: ScopeKeyIdentity,
+  ): boolean {
+    if (
+      this.isMissingDocLoadInFlight(link.space, link.id, link.scope, identity)
+    ) {
+      return true;
+    }
+    return this.ensureLinkedDocLoaded(link, sourceSpace, identity);
+  }
+
+  /**
    * Asynchronously load a link target that a read found absent from the
    * local replica. Cross-space targets (CT-1667): per-space server queries
    * cannot follow links across space boundaries, so the client must fetch

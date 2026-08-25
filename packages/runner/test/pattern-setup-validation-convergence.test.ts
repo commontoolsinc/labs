@@ -550,6 +550,62 @@ describe("pattern setup validation convergence", () => {
     expect(getPatternSetupIdentityRef(cell)?.identity).toBe(v2Ref.identity);
   });
 
+  it("refuses, classifiably, a CROSS-SPACE linked slot once its absence is confirmed", async () => {
+    // The registry cell lives in ANOTHER space and was never written
+    // anywhere. A cross-space target never rides the home space's watch, so
+    // the first attempt warrants a fetch and postpones; that fetch settles
+    // with the other space's word that the doc does not exist, and the
+    // retry judges the fully-read value as the classifiable refusal. What
+    // this pins beyond the same-space case: the resolver's per-resolution
+    // cross-space liveness re-sync must not re-mark the confirmed absence
+    // as provisional, or the update would postpone forever instead of ever
+    // being judged.
+    const otherSigner = await Identity.fromPassphrase(
+      "setup-validation-convergence-other-space",
+    );
+    const otherSpace = otherSigner.did();
+    const tx = rtA.edit();
+    const foreignRegistry = rtA.getCell<{ name?: string }[]>(
+      otherSpace,
+      "cross-space-absent-registry",
+      undefined,
+      tx,
+    );
+    const v1 = await rtA.patternManager.compilePattern(
+      programOf(patternWithMarker("v1")),
+      { space, tx },
+    );
+    const cell = rtA.getCell<Record<string, unknown>>(
+      space,
+      "cross-space-absent",
+      undefined,
+      tx,
+    );
+    const running = rtA.run(tx, v1, { registry: foreignRegistry }, cell);
+    const { error: createError } = await tx.commit();
+    expect(createError?.message).toBeUndefined();
+    await running.pull();
+    await rtA.patternManager.flushCompileCacheWrites();
+    await rtA.idle();
+    await rtA.storageManager.synced();
+
+    const { cell: updated, error, thrown } = await updateInB(
+      "cross-space-absent",
+    );
+
+    expect(
+      error,
+      "an update over a required slot linking a confirmed-absent doc in " +
+        "another space must refuse — a liveness re-sync kept re-marking " +
+        "the absence as provisional",
+    ).toContain("updated arguments do not match the candidate schema");
+    expect(isStoredArgumentSchemaRefusal(thrown)).toBe(true);
+    await updated.pull();
+    expect(
+      (updated.getAsQueryResult() as { marker: string }).marker,
+    ).toBe("v1");
+  });
+
   it("refuses, classifiably, an ITEM-level linked slot the server confirms absent", async () => {
     // Links live at any depth: `registry` is supplied as an ARRAY whose item
     // links a doc that was never written anywhere. The first attempt cannot
