@@ -664,6 +664,383 @@ describe("schema-doc-sync", () => {
     expect(replica.getDocument("of:heal-carrier")).toEqual(carrierDoc);
   });
 
+  it("absorbs a doc whose cid arrives in a LATER frame, with no re-delivery of the doc (the elision shape)", () => {
+    const depSchema = {
+      type: "string",
+      title: "absorbs-late-cid",
+    } as const;
+    const depHash = internSchemaAsTaggedHashString(depSchema);
+    const provider = readerStorage.open(space);
+    const replica = provider.replica as unknown as {
+      applySessionSync(sync: unknown, type: string): void;
+      getDocument(uri: string): unknown;
+    };
+    const carrierDoc = {
+      value: {
+        linked: {
+          "/": {
+            [LINK_V1_TAG]: {
+              id: "of:absorb-target",
+              path: [],
+              schema: { $ref: `cid:${depHash}` },
+            },
+          },
+        },
+      },
+    };
+    // Frame 1: the mentioning doc arrives BEFORE the cid it names. The
+    // client's contract is to ABSORB every frame the server sends —
+    // never to dismiss one (OW61's owner ruling, 2026-08-24). Holding
+    // the doc back from the visible state is fail-closed and correct;
+    // DISCARDING it is the defect, because of what frame 2 cannot do.
+    replica.applySessionSync({
+      type: "sync",
+      fromSeq: 900_000,
+      toSeq: 900_001,
+      upserts: [
+        {
+          branch: "",
+          id: "of:absorb-carrier",
+          scope: "space",
+          seq: 1,
+          doc: carrierDoc,
+        },
+      ],
+      removes: [],
+    }, "integrate");
+    // Frame 2: the cid sibling ALONE. The server elides an already-
+    // delivered cid doc and never re-sends an unchanged carrier, so
+    // this is the only further information this session will ever
+    // carry about the pair — there is no full evaluation coming. The
+    // carrier must become resident off the client's own retained copy.
+    replica.applySessionSync({
+      type: "sync",
+      fromSeq: 900_001,
+      toSeq: 900_002,
+      upserts: [
+        {
+          branch: "",
+          id: `cid:${depHash}`,
+          scope: "space",
+          seq: 2,
+          doc: { value: depSchema },
+        },
+      ],
+      removes: [],
+    }, "integrate");
+    expect(replica.getDocument("of:absorb-carrier")).toEqual(carrierDoc);
+  });
+
+  it("parks two instances of one id separately, so neither delivery is lost", () => {
+    // The park is keyed by the full document address, not the bare id:
+    // the quarantine unit IS the id (branch- and instance-blind, by
+    // design), but one frame may carry the same id under more than one
+    // address, and an id-keyed park drops all but the last on the
+    // floor. Exercised here with two SCOPES of one id; the keyed
+    // frame's `scopeKey` instances are the other shape the same park
+    // key covers and are not exercised. Found in review of this
+    // change.
+    const depSchema = { type: "string", title: "two-instances" } as const;
+    const depHash = internSchemaAsTaggedHashString(depSchema);
+    const provider = readerStorage.open(space);
+    const replica = provider.replica as unknown as {
+      applySessionSync(sync: unknown, type: string): void;
+      getDocument(uri: string, scope?: string): unknown;
+    };
+    const carrierFor = (marker: string) => ({
+      value: {
+        marker,
+        linked: {
+          "/": {
+            [LINK_V1_TAG]: {
+              id: "of:dual-target",
+              path: [],
+              schema: { $ref: `cid:${depHash}` },
+            },
+          },
+        },
+      },
+    });
+    replica.applySessionSync({
+      type: "sync",
+      fromSeq: 970_000,
+      toSeq: 970_001,
+      upserts: [
+        {
+          branch: "",
+          id: "of:dual-carrier",
+          scope: "space",
+          seq: 1,
+          doc: carrierFor("space-instance"),
+        },
+        {
+          branch: "",
+          id: "of:dual-carrier",
+          scope: "user",
+          seq: 1,
+          doc: carrierFor("user-instance"),
+        },
+      ],
+      removes: [],
+    }, "integrate");
+
+    replica.applySessionSync({
+      type: "sync",
+      fromSeq: 970_001,
+      toSeq: 970_002,
+      upserts: [
+        {
+          branch: "",
+          id: `cid:${depHash}`,
+          scope: "space",
+          seq: 2,
+          doc: { value: depSchema },
+        },
+      ],
+      removes: [],
+    }, "integrate");
+
+    // BOTH instances come back. An id-keyed park returns only the
+    // second, having overwritten the first.
+    expect(replica.getDocument("of:dual-carrier", "space")).toEqual(
+      carrierFor("space-instance"),
+    );
+    expect(replica.getDocument("of:dual-carrier", "user")).toEqual(
+      carrierFor("user-instance"),
+    );
+  });
+
+  it("keeps a parked NEWER revision when an older refresh for the same doc applies", () => {
+    // A watch refresh can carry an older seq than a revision already
+    // parked — the monotonicity guard in the apply loop exists for
+    // exactly that. Superseding the park on any arrival would discard
+    // the newer revision permanently, and the schema's later arrival
+    // would have nothing to release. Found in review of this change.
+    const depSchema = { type: "string", title: "stale-refresh" } as const;
+    const depHash = internSchemaAsTaggedHashString(depSchema);
+    const provider = readerStorage.open(space);
+    const replica = provider.replica as unknown as {
+      applySessionSync(sync: unknown, type: string): void;
+      getDocument(uri: string): unknown;
+    };
+    const newer = {
+      value: {
+        revision: "newer",
+        linked: {
+          "/": {
+            [LINK_V1_TAG]: {
+              id: "of:stale-target",
+              path: [],
+              schema: { $ref: `cid:${depHash}` },
+            },
+          },
+        },
+      },
+    };
+    // seq 5, deferred on the missing schema.
+    replica.applySessionSync({
+      type: "sync",
+      fromSeq: 980_000,
+      toSeq: 980_001,
+      upserts: [
+        {
+          branch: "",
+          id: "of:stale-carrier",
+          scope: "space",
+          seq: 5,
+          doc: newer,
+        },
+      ],
+      removes: [],
+    }, "integrate");
+    expect(replica.getDocument("of:stale-carrier")).toBeUndefined();
+
+    // seq 3 — an OLDER refresh, no ref of its own, so it applies.
+    replica.applySessionSync({
+      type: "sync",
+      fromSeq: 980_001,
+      toSeq: 980_002,
+      upserts: [
+        {
+          branch: "",
+          id: "of:stale-carrier",
+          scope: "space",
+          seq: 3,
+          doc: { value: { revision: "older" } },
+        },
+      ],
+      removes: [],
+    }, "integrate");
+
+    // The schema lands; the parked seq-5 revision is still there and
+    // wins on seq. Superseding on the stale arrival would leave the
+    // replica pinned to "older" forever.
+    replica.applySessionSync({
+      type: "sync",
+      fromSeq: 980_002,
+      toSeq: 980_003,
+      upserts: [
+        {
+          branch: "",
+          id: `cid:${depHash}`,
+          scope: "space",
+          seq: 6,
+          doc: { value: depSchema },
+        },
+      ],
+      removes: [],
+    }, "integrate");
+    expect(replica.getDocument("of:stale-carrier")).toEqual(newer);
+  });
+
+  it("PULLS the cid a parked doc waits on and applies it, with nothing re-delivered (the OW61 board's shape)", async () => {
+    // #6248's ensure-ON board: the cid document IS installed in the
+    // space — the server elides it because this session already
+    // received it — and the replica that lacks it holds a mentioning
+    // doc it can never be re-sent. Absorbing is only half the answer;
+    // the client has to go GET what it is missing, or the parked doc
+    // waits for a full evaluation that never comes mid-session.
+    const depSchema: JSONSchemaObj = {
+      type: "object",
+      properties: { pulledLeaf: { type: "string" } },
+      title: "pulled-by-the-park",
+    };
+    const decomposed = decomposeSchema(depSchema);
+    await writeSchemaDocs(decomposed);
+    const depHash = parseExternalSchemaRef(decomposed.rootRef)!.taggedHash;
+
+    const provider = readerStorage.open(space);
+    const replica = provider.replica as unknown as {
+      applySessionSync(sync: unknown, type: string): void;
+      getDocument(uri: string): unknown;
+    };
+    const carrierDoc = {
+      value: {
+        linked: {
+          "/": {
+            [LINK_V1_TAG]: {
+              id: "of:pull-target",
+              path: [],
+              schema: { $ref: `cid:${depHash}` },
+            },
+          },
+        },
+      },
+    };
+    const released = defer<void>();
+    const cancel = (provider as unknown as {
+      sink: (uri: URI, callback: (doc: unknown) => void) => () => void;
+    }).sink("of:pull-carrier" as URI, (doc: unknown) => {
+      if (doc !== undefined) released.resolve();
+    });
+
+    // The elision shape: the mentioning doc alone, naming a cid this
+    // replica has never received. Nothing will re-deliver either one.
+    replica.applySessionSync({
+      type: "sync",
+      fromSeq: 950_000,
+      toSeq: 950_001,
+      upserts: [
+        {
+          branch: "",
+          id: "of:pull-carrier",
+          scope: "space",
+          seq: 1,
+          doc: carrierDoc,
+        },
+      ],
+      removes: [],
+    }, "integrate");
+    // Held, not visible — fail-closed survives.
+    expect(replica.getDocument("of:pull-carrier")).toBeUndefined();
+
+    // The park's own pull fetches the cid from the space and releases
+    // the carrier: absorbed, healed IN SESSION, no re-delivery. Waited
+    // on the release itself — the sink fires when the carrier becomes
+    // visible, which is the event under test.
+    await released.promise;
+    expect(replica.getDocument(`cid:${depHash}`)).toBeDefined();
+    expect(replica.getDocument("of:pull-carrier")).toEqual(carrierDoc);
+    cancel();
+  });
+
+  it("ESCALATES to a full evaluation when the session cache claims the cid was delivered and the pull comes back empty", async () => {
+    // The floor under OW61, found on #6260's board: a pull issues
+    // `session.watch.add`, and watchAdd DIFFS its answer against the
+    // session's delivery cache — so a document the cache already
+    // claims delivered is elided even when the request names it as a
+    // root. A replica that does not hold it therefore cannot get it by
+    // asking; the frame comes back empty every time (the board showed
+    // one cid missing 48 times in a single shard). Only a full
+    // evaluation re-ships it, because buildFullSync maps every entry.
+    const depSchema: JSONSchemaObj = {
+      type: "object",
+      properties: { escalatedLeaf: { type: "string" } },
+      title: "escalates-past-the-cache",
+    };
+    const decomposed = decomposeSchema(depSchema);
+    await writeSchemaDocs(decomposed);
+    const depHash = parseExternalSchemaRef(decomposed.rootRef)!.taggedHash;
+    const carrierValue = {
+      linked: {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: "of:escalate-target",
+            path: [],
+            schema: { $ref: `cid:${depHash}` },
+          },
+        },
+      },
+    };
+    await writeDocs({ "of:escalate-carrier": carrierValue });
+
+    const provider = readerStorage.open(space);
+    const replica = provider.replica as unknown as {
+      applySessionSync(sync: unknown, type: string): void;
+      getDocument(uri: string): unknown;
+    };
+    // The absorb defect, transient: the FIRST frame loses its cid
+    // upserts, every later one is intact. The session cache on the
+    // server counts that first frame as delivered regardless — which is
+    // the disagreement this step exists to escape. (The register
+    // sanctions this instance-patch seam for standing in for whichever
+    // interleaving drops a delivery.)
+    let framesSeen = 0;
+    const originalApply = replica.applySessionSync.bind(replica);
+    replica.applySessionSync = (sync: unknown, type: string) => {
+      const frame = sync as { upserts?: Array<{ id?: unknown }> };
+      const upserts = Array.isArray(frame?.upserts) ? frame.upserts : [];
+      framesSeen += 1;
+      if (framesSeen > 1) return originalApply(sync, type);
+      const kept = upserts.filter((upsert) =>
+        typeof upsert?.id !== "string" || !upsert.id.startsWith("cid:")
+      );
+      return originalApply({ ...(sync as object), upserts: kept }, type);
+    };
+
+    const healed = defer<void>();
+    const cancel = (provider as unknown as {
+      sink: (uri: URI, callback: (doc: unknown) => void) => () => void;
+    }).sink("of:escalate-carrier" as URI, (doc: unknown) => {
+      if (doc !== undefined) healed.resolve();
+    });
+
+    await provider.sync("of:escalate-carrier" as URI, {
+      path: [],
+      schema: false,
+    });
+
+    // The pull for the missing cid is answered EMPTY by the cache, so
+    // re-asking is futile; the escalation's full evaluation re-ships
+    // the closure and the parked carrier applies.
+    await healed.promise;
+    expect(replica.getDocument(`cid:${depHash}`)).toBeDefined();
+    expect(replica.getDocument("of:escalate-carrier")).toEqual({
+      value: carrierValue,
+    });
+    cancel();
+  });
+
   it("the background consumer survives a frame that fails to apply and keeps consuming", async () => {
     const provider = readerStorage.open(space);
     const replica = provider.replica as unknown as {
