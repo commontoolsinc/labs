@@ -85,8 +85,8 @@ read before picking one up; this table is the roll-up.
 | 6 | Result field paths for `call` and `exec` | pattern vocabulary | needs step 10 |
 | 7 | Slugs never complete | pattern vocabulary | done |
 | 8 | `--space` has no source a caller recognizes | first link | partly settled |
-| 9 | A verb's annotation is its kind, not its prose | comprehension | not started |
-| 10 | Wrapper and deprecated verbs are offered unmarked | comprehension | not started |
+| 9 | A verb's annotation is its kind, not its prose | comprehension | done |
+| 10 | Wrapper and deprecated verbs are offered unmarked | comprehension | done |
 | 11 | Every Tab costs two process starts | felt cost | needs a decision |
 | 12 | `nospace` is inert on the stock macOS bash | felt cost | not started |
 | 13 | Space and entity positionals across `inspect` | operator surface | not started |
@@ -97,9 +97,9 @@ read before picking one up; this table is the roll-up.
 | 18 | A live-provider test seam | mechanism | done |
 | 19 | A gate that fails when a new slot has no decision | mechanism | not started |
 
-**What can be picked up today.** Items 9, 10, 12, 13, 14, 15 and 16 are
-mechanical and can be taken at any time. Item 19 is the other half of the
-mechanism item 18 landed.
+**What can be picked up today.** Items 12, 13, 14, 15 and 16 are mechanical and
+can be taken at any time. Item 19 is the other half of the mechanism item 18
+landed.
 
 Item 4's candidates are built and its wiring waits: step 10 decides whether a
 verb's fields are written before the `--` marker or after it, and the position
@@ -419,28 +419,27 @@ reached for.
 
 ## Comprehension
 
-### 9. A verb's annotation is its kind, not its prose
+### 9. A verb's annotation is its prose, falling back to its kind
 
-`shapeVerbCandidates` annotates every candidate with `handler` or `tool`. The
-listing row carries `description` — the doc comment the author wrote on the
-property, the same sentence the verb's help page opens with. The annotation
-column is where that sentence belongs; the kind is a two-value fact that rarely
-decides anything at the prompt.
+`shapeVerbCandidates` annotates a candidate with the doc comment the author
+wrote on the property — the same sentence `cf piece verbs` prints under the row
+and the verb's help page opens with — taking its first line, which is what one
+column of one row holds. The kind is the fallback where the author documented
+nothing, so a candidate is never unannotated, and it is never derived from the
+name: a listing that restates `addItem` as "add item" reports a caller's own
+word back to them and calls it documentation.
 
-Fall back to the kind where a verb carries no prose, so a candidate is never
-unannotated.
-
-### 10. Wrapper and deprecated verbs are offered unmarked
+### 10. Wrapper and deprecated verbs are marked
 
 `cf piece verbs` hides `tier: "wrapper"` and `deprecated` rows unless `--all`,
-and prints a note saying how many it held back. `shapeVerbCandidates` maps the
-full array, so completion offers what the listing hides, and offers it looking
-like everything else.
+and prints a note saying how many it held back. Completion offers them, because
+both are callable and a name that works should be reachable — and marks them,
+because two surfaces disagreeing silently is what is not defensible. The marks
+lead the annotation: `[deprecated] Add one item.`
 
-Both are callable, so offering them is defensible and hiding them is defensible.
-What is not defensible is the two surfaces disagreeing silently. Marking them in
-the annotation column is the cheapest way to agree — it keeps a name reachable
-while saying what it is.
+The two can coexist, and the listing joins them, so completion joins them the
+same way — `[wrapper,deprecated]`. Picking one would be the same disagreement
+in a narrower place.
 
 ## Felt cost
 

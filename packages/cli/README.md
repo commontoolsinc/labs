@@ -983,17 +983,24 @@ source <(cf completion bash)
 Completion covers the command tree — subcommands, flags, and enumerated values
 such as `--log-level` — plus live values read from the fabric:
 
-| Slot                            | Completes to                                   |
-| ------------------------------- | ---------------------------------------------- |
-| `--piece`                       | the space's slugs, then its piece ids          |
-| `cf call <callable>`            | the piece's callables, as `cf piece verbs`     |
-| `cf get`/`cf set <path>`        | cell keys, one path segment at a time          |
-| `cf get --select`/`--schema`    | field paths into the value, and their `@` form |
-| `piece set-slug <slug>`         | the space's slugs                              |
-| `piece link <source>/<target>`  | `pieceId/path/to/field` endpoints              |
-| `--space`                       | space DIDs of local memory-v2 stores           |
-| `--identity`, pattern arguments | `*.key` / `*.tsx` files, via the shell         |
-| `--datafile`                    | any file, via the shell                        |
+| Slot                            | Completes to                                                  |
+| ------------------------------- | ------------------------------------------------------------- |
+| `--piece`                       | the space's slugs, then its piece ids                         |
+| `cf call <callable>`            | the piece's callables, annotated with the doc comment on each |
+| `cf get`/`cf set <path>`        | cell keys, one path segment at a time                         |
+| `cf get --select`/`--schema`    | field paths into the value, and their `@` form                |
+| `piece set-slug <slug>`         | the space's slugs                                             |
+| `piece link <source>/<target>`  | `pieceId/path/to/field` endpoints                             |
+| `--space`                       | space DIDs of local memory-v2 stores                          |
+| `--identity`, pattern arguments | `*.key` / `*.tsx` files, via the shell                        |
+| `--datafile`                    | any file, via the shell                                       |
+
+A callable is annotated with what its author said it is for, falling back to its
+kind where they wrote nothing. A wrapper or deprecated verb — the two
+`cf piece verbs` holds back unless `--all` — is offered with its marks leading
+that annotation, joined the way the listing joins them and both shown where a
+verb carries both, since either is callable and a name that works should be
+reachable.
 
 A projection's grammar is its own and not the cell path's: a list splits on `,`
 and a path on `.`, and a trailing `@` asks for a position's address rather than
