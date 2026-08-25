@@ -2581,17 +2581,6 @@ export const writeDetailValueForTarget = (
     return baseValue;
   }
 
-  if (baseValue instanceof FabricInstance) {
-    // An instance is a container, but its state is private, so an overlay path
-    // addresses nothing in it. Falling through would either put own properties
-    // on it or, via the branch below, replace it with a plain object -- two
-    // ways of losing the value silently.
-    //
-    // TODO(danfuzz): descend by codec-mediated traversal into instance state,
-    // at which point an overlay onto one becomes a walk rather than a refusal.
-    refuseFabricInstance(baseValue, "when overlaying deeper CFC field-writes");
-  }
-
   if (!isFabricObjectOrArray(baseValue)) {
     // Base isn't a container yet deeper writes exist (rare/incoherent): build a
     // fresh container and overlay onto it (it's freshly mutable -- no COW).
@@ -2620,6 +2609,20 @@ export const writeDetailValueForTarget = (
       rel.slice(0, -1),
       { createMissing: true, nextKeyAfterPath: leaf },
     );
+    if (thawed.pathValue instanceof FabricInstance) {
+      // An instance is a container, but its state is private, so `leaf`
+      // addresses nothing in it: assigning through one would leave an own
+      // property the codec cannot persist. This is every overlay path's
+      // parent, the base's own included, so it is the only check needed.
+      //
+      // TODO(danfuzz): descend by codec-mediated traversal into instance
+      // state, at which point an overlay onto one becomes a walk rather than
+      // a refusal.
+      refuseFabricInstance(
+        thawed.pathValue,
+        "when overlaying deeper CFC field-writes",
+      );
+    }
     setValueAtPath(
       thawed.pathValue as Record<PropertyKey, unknown> | unknown[],
       [leaf],
