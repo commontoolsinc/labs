@@ -145,7 +145,11 @@ describe("bulk-plan", () => {
         rows: [{
           piece: plan.rows[0].piece,
           expect: { ...plan.rows[0].expect, documentHash: "9f2c" },
-          op: { kind: "repair" as const, fixer: "fix-titles.ts" },
+          op: {
+            kind: "repair" as const,
+            fixer: "fix-titles.ts",
+            fixerIdentity: "impl-v1",
+          },
         }],
       };
       expect(() => deriveRollbackPlan(withRepair, "later")).toThrow(
@@ -244,12 +248,17 @@ describe("bulk-plan", () => {
         piece: plan.rows[0].piece,
         phase: plan.rows[0].phase,
         expect: { ...plan.rows[0].expect, documentHash: "9f2c" },
-        op: { kind: "repair", fixer: "fix-titles.ts" },
+        op: {
+          kind: "repair",
+          fixer: "fix-titles.ts",
+          fixerIdentity: "impl-v1",
+        },
       };
       const good = JSON.stringify(header) + "\n" + JSON.stringify(repairRow);
       expect(decodePlan(good).rows[0].op).toEqual({
         kind: "repair",
         fixer: "fix-titles.ts",
+        fixerIdentity: "impl-v1",
       });
       const hashless = {
         ...repairRow,
@@ -260,10 +269,19 @@ describe("bulk-plan", () => {
       ).toThrow("row 1");
       const nameless = {
         ...repairRow,
-        op: { kind: "repair", fixer: "" },
+        op: { kind: "repair", fixer: "", fixerIdentity: "impl-v1" },
       };
       expect(() =>
         decodePlan(JSON.stringify(header) + "\n" + JSON.stringify(nameless))
+      ).toThrow("row 1");
+      // A repair op without its implementation pin is the bypass the codec
+      // exists to refuse: nothing could hold the run to what was reviewed.
+      const pinless = {
+        ...repairRow,
+        op: { kind: "repair", fixer: "fix-titles.ts" },
+      };
+      expect(() =>
+        decodePlan(JSON.stringify(header) + "\n" + JSON.stringify(pinless))
       ).toThrow("row 1");
     });
 

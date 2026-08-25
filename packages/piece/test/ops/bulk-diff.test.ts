@@ -59,7 +59,11 @@ describe("bulk-diff", () => {
             retained: true,
             documentHash: "9f2c",
           },
-          op: { kind: "repair" as const, fixer: "fix-titles.ts" },
+          op: {
+            kind: "repair" as const,
+            fixer: "fix-titles.ts",
+            fixerIdentity: "impl-v1",
+          },
         }],
       };
       expect(() => diffPlan(plan, plan)).toThrow(

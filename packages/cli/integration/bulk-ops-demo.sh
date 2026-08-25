@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Bulk piece operations as something to watch. What runs today is stage 1 of
-# docs/plans/piece-bulk-operations.md — a board of 113 members surveyed in
-# one process, the plan it emits, the retarget stamp, and the containment
-# refusal — live rather than asserted. What the later stages add appears as
+# Bulk piece operations as something to watch. What runs today is stages 1
+# and 2 of docs/plans/piece-bulk-operations.md — a board of 113 members
+# surveyed in one process, the plan it emits, the retarget stamp, the
+# containment refusal, and a repair: a fixer run dry, applied from its own
+# plan, and resumed as landed — live rather than asserted. What the later
+# stages add appears as
 # PENDING acts at the end: the eventual shape of the mechanism stays visible
 # in the transcript, and each stage's checklist in the plan carries the item
 # that converts its act from pending to run, so a landed stage cannot leave
@@ -181,7 +183,7 @@ refused() {
 # against until the stage lands. What keeps a pending act from going stale is
 # the plan document instead — each later stage's checklist carries the item
 # that converts its act here from pending to run, the same per-change tick
-# discipline stage 1 used.
+# discipline stages 1 and 2 used.
 pending() {
   printf '\n%s   » %s%s\n' "$Y" "$1" "$N"
   printf '%s     PENDING — %s%s\n' "$Y" "$2" "$N"
@@ -250,7 +252,39 @@ run cf call -q -s "$SPACE" --piece board addMember '{"title":"delta"}'
 run_loud cf piece survey -s "$SPACE" --piece board --path items --out "$WORK/after.jsonl"
 run sh -c "head -1 '$WORK/after.jsonl' | jq -c .enumerated"
 
-act "7 · The refusal the survey exists to make"
+act "7 · A repair: the fixer is the work, the spine is the tooling"
+say "Stage 2, live. A fixer is a TypeScript module default-exporting a pure"
+say "transform from a piece's stored document to the document it should"
+say "hold. The tooling owns selection, ordering, the write, the stop, and"
+say "resume; the fixer owns only what the change is."
+cat > "$WORK/fix-titles.ts" <<'FIXER'
+export default (document: Readonly<Record<string, unknown>>) => ({
+  ...document,
+  ...(typeof document.title === "string"
+    ? { title: (document.title as string).toUpperCase() }
+    : {}),
+});
+FIXER
+run cat "$WORK/fix-titles.ts"
+say "Dry by default: the exact per-piece diff, and no write at all. Every"
+say "plan row records the document hash its verdict was computed from — the"
+say "repair row's precondition — and the fixer it was evaluated for."
+run_loud cf piece repair -s "$SPACE" --piece board --path items \
+  --fixer "$WORK/fix-titles.ts" --out "$WORK/repair.jsonl"
+run sh -c "sed -n 2p '$WORK/repair.jsonl' | jq '{piece, hash: .expect.documentHash, op}'"
+say "The plan drives the apply: its rows, in its order, each row checked"
+say "against its recorded hash in the same transaction that writes it."
+run_loud cf piece repair -s "$SPACE" --piece board --path items \
+  --fixer "$WORK/fix-titles.ts" --plan "$WORK/repair.jsonl" --apply \
+  --out "$WORK/applied.jsonl"
+say "Resume is the same command again: a repaired document is one the fixer"
+say "no longer changes, so a completed plan re-runs as landed and writes"
+say "nothing."
+run_loud cf piece repair -s "$SPACE" --piece board --path items \
+  --fixer "$WORK/fix-titles.ts" --plan "$WORK/repair.jsonl" --apply \
+  --out "$WORK/applied.jsonl"
+
+act "8 · The refusal the survey exists to make"
 say "Deploy a member directly, so the registry knows a piece the board's"
 say "collection does not hold. A silent subset is the failure bulk operations"
 say "die of, so the survey stops and names it rather than emitting a plan"
@@ -263,7 +297,7 @@ say "The plan the later stages consume is therefore complete by construction:"
 say "an incomplete survey refuses to produce one, and a serialized plan"
 say "carries the incompleteness so no write stage can consume it either."
 
-act "8 · A list survey claims only what it read"
+act "9 · A list survey claims only what it read"
 say "Naming pieces directly skips the containment check — and says so: the"
 say "header records the selector, so a reader of the plan knows no"
 say "containment claim was made. The orphan is still out there; this survey"
@@ -271,20 +305,14 @@ say "just never claimed otherwise."
 run_loud cf piece survey -s "$SPACE" --list board --out "$WORK/list.jsonl"
 run sh -c "head -1 '$WORK/list.jsonl' | jq -c '{selector, enumerated}'"
 
-act "9 · The rest of the mechanism, by what it waits on"
+act "10 · The rest of the mechanism, by what it waits on"
 say "The plan files this transcript produced are the input to every later"
 say "stage; nothing below needs a different artifact — the paths are the"
 say "ones written above. Each act shows the command a stage adds and what"
-say "it will print — spelled provisionally, since decision 1 of the plan"
-say "owns where bulk writes live, and prefixed » because nothing runs it."
-say "A stage that lands converts its act from PENDING to run; the plan's"
-say "checklist for that stage says so, the way stage 1's did."
-
-pending "cf piece repair -s $SPACE --plan $WORK/plan.jsonl --fixer fix-titles.ts" \
-  "stage 2: a caller-supplied fixer, iterated by the spine, dry by default" \
-"fid1:cey7Ro... title: 'seed-0' -> 'Seed 0'
-112 more member rows would change; the holder already conforms.
---apply writes the 113 in plan order"
+say "it will print — spelled provisionally per the plan, and prefixed »"
+say "because nothing runs it. A stage that lands converts its act from"
+say "PENDING to run; the plan's checklist for that stage says so, the way"
+say "stages 1 and 2 did."
 
 pending "cf piece apply -s $SPACE $WORK/retarget.jsonl" \
   "stage 3: the retarget apply — serial, precondition-checked, resumable" \

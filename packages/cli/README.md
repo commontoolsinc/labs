@@ -131,11 +131,18 @@ in-scope identity that the collection lacks makes the survey exit nonzero,
 naming the piece. A `--list` survey reads exactly the pieces named and makes no
 containment claim; each entry takes either reference form, and a canonical
 entry's embedded space composes the way it does on `--piece` — supplying the
-space when `--space` is absent, agreeing with it otherwise. Read-only; the
-spelling is provisional until the bulk write operations get a home. To watch the
-surface work rather than read about it, `integration/bulk-ops-demo.sh` narrates
-a board-sized survey end to end against a running server, with the unbuilt write
-stages shown as pending acts.
+space when `--space` is absent, agreeing with it otherwise. Read-only. To watch
+the surface work rather than read about it, `integration/bulk-ops-demo.sh`
+narrates a board-sized survey and repair end to end against a running server,
+with the unbuilt write stages shown as pending acts.
+
+`cf piece repair` runs a caller-supplied fixer — a TypeScript module whose
+default export is a pure transform from a piece's stored input document to the
+document it should hold — over the same selection surface the survey takes. Dry
+by default, reporting the exact per-piece diff and writing nothing; under
+`--apply` it writes each row in its own transaction, and a plan from a dry run
+drives the apply row for row under its document-hash preconditions (`--plan`).
+The design is `docs/plans/piece-bulk-operations.md`, stage 2.
 
 `cf piece slugs` lists the space's slug index: every name assigned through
 `--slug` or `set-slug`, each resolved to the piece it names. The index records
@@ -793,12 +800,16 @@ The supported output switches are:
 - `cf inspect ... --json` serializes an inspector result. `inspect html` does
   not have a JSON representation, so `html` and `--json` are mutually exclusive.
   `inspect graph --dot` and `--json` are also mutually exclusive.
-- `cf piece ls`, `piece search`, `piece inspect`, `piece survey`, `piece view`,
-  and `piece render` use `--json` as an output switch. `piece survey` reserves
-  stdout for the plan it emits (or, under `--json`, the full survey result); its
-  tally and findings go to stderr. `piece render --watch --json` writes only
-  JSON render records to stdout; watch status goes to stderr. Rendering a piece
-  without a UI fails instead of returning an empty successful JSON stream.
+- `cf piece ls`, `piece search`, `piece inspect`, `piece survey`,
+  `piece repair`, `piece view`, and `piece render` use `--json` as an output
+  switch. `piece survey` reserves stdout for the plan it emits (or, under
+  `--json`, the full survey result); its tally and findings go to stderr.
+  `piece repair` reserves stdout the same way — the emitted plan, or under
+  `--json` the full report in the canonical FabricValue encoding — with its
+  verdict tally and dry-run diff going to stderr. `piece render --watch --json`
+  writes only JSON render records to stdout; watch status goes to stderr.
+  Rendering a piece without a UI fails instead of returning an empty successful
+  JSON stream.
 - `cf get` and `cf wish` always return JSON. Their `--json` options are
   accepted, documented no-ops for callers that select JSON explicitly.
 - `cf check --json` compiles without evaluating and prints one object with a
