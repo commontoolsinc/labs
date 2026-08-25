@@ -96,8 +96,8 @@ These are not new policy decisions by themselves, but they preserve type informa
   Registers synthetic lift-applied parameters with unwrapped types for the same reason.
 
 - `src/transformers/pattern-body-reactive-root-lowering.ts`
-  - `registerReplacementType(...)`
-  Copies original types onto replacement nodes so downstream behavior checks still see the intended type.
+  - `registerReplacement(...)`
+  Copies original types onto replacement nodes, and the authored source-map range, so downstream behavior checks still see the intended type.
 
 - `src/transformers/expression-rewrite/rewrite-helpers.ts`
   - `createReactiveWrapperForExpression(...)`

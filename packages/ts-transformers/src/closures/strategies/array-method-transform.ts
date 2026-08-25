@@ -5,6 +5,7 @@ import {
   getLoweredArrayMethodName,
   getTypeAtLocationWithFallback,
   preserveLineage,
+  preserveSourceMapRange,
   registerSyntheticCallType,
   typeToTypeNodeWithRegistry,
 } from "../../ast/mod.ts";
@@ -91,13 +92,16 @@ function lowerMapReceiverMemberAccess(
     return expression;
   }
 
-  return context.factory.createCallExpression(
-    context.factory.createPropertyAccessExpression(
-      context.factory.createIdentifier(current.text),
-      context.factory.createIdentifier("key"),
+  return preserveSourceMapRange(
+    context.factory.createCallExpression(
+      context.factory.createPropertyAccessExpression(
+        context.factory.createIdentifier(current.text),
+        context.factory.createIdentifier("key"),
+      ),
+      undefined,
+      segments,
     ),
-    undefined,
-    segments,
+    expression,
   );
 }
 
