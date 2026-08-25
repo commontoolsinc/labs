@@ -263,22 +263,55 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
       // CATCH-UP-AND-START block), so this entry's lift condition is
       // now concretely testable; it lifts on its own gate evidence at
       // the merged head, never by inference from the default-app gate.
+      // THAT GATE RAN 2026-08-24 — 10 runs at merged head f14e44830
+      // (ON binary sha256 ce65782063f4f14a1…, fresh store + posture
+      // probe per run, ensure-off, 5 quiet / 5 loaded interleaved):
+      // 7/10, NO LIFT, and the b04 class above is CLOSED on this
+      // file's own evidence (catchup activations in 10/10 runs,
+      // deferred-start-catchup-failed 0, terminal "Error committing
+      // deferred …" 0, pattern-load-error 0 — the "dies terminally"
+      // mechanism did not reproduce once). The three reds are ONE
+      // shape and a THIRD residue member, on the WRITE side: the
+      // GUEST browser's mid-session profile piece never lands its
+      // ~98-101-op program-materialization commit, so its space holds
+      // exactly 4 commits (byte-identical across all three reds), no
+      // patternIdentity anywhere, and appears in ZERO toolshed log
+      // lines — greens reach 14-21 commits with patternIdentity named
+      // 57-216 times. Refused vs dropped vs never issued is NOT
+      // determined: the space is absent even from the 50-73 per-run
+      // foreign-write refusals, which name other spaces and fire as
+      // often in greens. Flagged there, not here: S-B's barrier
+      // cannot cover a write that is never in flight, and the S-C
+      // skip ruling's premise (waitForRuntimeIdle before any reload)
+      // does not reach a surface with no reload. Recorded so nobody
+      // re-derives them: piece-start-commit-failed is NOT the
+      // discriminator (13 occurrences, green runs included) and
+      // OW46's structure-load-stuck is blind here (fires in both
+      // arms, names only the host's space). Full evidence in
+      // verification-coverage.md OW45's LUNCH-POLL FILE ENTRY'S OWN
+      // GATE block.
       file: "integration/lunch-poll-vote.test.ts",
       phase: "phase-7",
-      reason: "Same OW45 arm-B client-start class as the default-app " +
-        "entry (fork memo: optimize/ow45-armb-client-start-fork.md): " +
-        "the profile-first join creates the viewer's profile piece " +
-        "mid-test, and the flag-ON client's deferred start of the " +
-        "freshly created piece dies terminally on a " +
-        "stale-confirmed-read ConflictError against the serving side's " +
-        "own materialization (the first-hydration race; recorded before " +
-        "the catch-up-and-start recovery landed), " +
-        "killing the client's piece context for the session — the wish " +
-        "#profile never resolves and #lp-join-button never renders, " +
-        "while the serving side's materialization of the piece is what " +
-        "won the race. Every later step depends on that join, so the " +
-        "whole file waits. Lifts when the client-start class closes " +
-        "and the file greens ON.",
+      reason: "OW45 arm B, charge NARROWED 2026-08-24 by this entry's " +
+        "OWN 10-run gate at merged head f14e44830 — 7/10 green, no " +
+        "lift (verification-coverage.md OW45's LUNCH-POLL FILE " +
+        "ENTRY'S OWN GATE block). The b04 client-start class this " +
+        "entry was minted for (fork memo: " +
+        "optimize/ow45-armb-client-start-fork.md) is CLOSED at that " +
+        "head: catch-up activations in 10/10 runs, zero terminal " +
+        "deferred-start deaths, zero recovery failures, zero " +
+        "pattern-load-error. The entry now stands on a THIRD, " +
+        "WRITE-SIDE residue member: the GUEST browser's mid-session " +
+        "profile piece never lands its program-materialization " +
+        "commit (~98-101 ops), so its space holds 4 commits with NO " +
+        "patternIdentity and is named zero times in the server log " +
+        "while greens reach 14-21 — the serving loop never engages, " +
+        "the wish #profile never resolves, and #lp-join-button never " +
+        "renders. Whether that commit was refused, dropped, or never " +
+        "issued is NOT determined. Every later step depends on that " +
+        "join, so the whole file waits. Lift bar UNCHANGED: this " +
+        "entry's own gate evidence at the merged head, 10/10, never " +
+        "by inference from the default-app gate.",
     },
     // The sqlite identity pair's two FILE entries were LIFTED (OW53
     // CLOSED, 2026-08-22): the sqlite builtins consumed the RUNTIME's

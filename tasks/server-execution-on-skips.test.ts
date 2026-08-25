@@ -137,7 +137,7 @@ Deno.test("main: empty lists print the report on stderr and nothing on stdout", 
   assertMatch(err[0], /shell: no skips — full suite runs/);
 });
 
-Deno.test("main: the patterns list = the default-app STEP entry (its charge NARROWED 2026-08-24) + the lunch-poll-vote FILE entry, both under OW45 arm B. The b04 client-start death — the flag-ON client's navigate-deferred piece start dying terminally on a stale-confirmed-read ConflictError — is CLOSED by the RULED catch-up-and-start recovery (the refusal is 'the server won the race'; the client awaits the conflict's readiness and starts from the served documents through the ordinary load walk, committing nothing; OW45's CATCH-UP-AND-START block, serving-loop.md §3d RULED 2026-08-24), and the fix-head gate watched the recovery resurrect the notebook space's refused root start in the GREEN runs. What keeps the STEP entry is the gate's 7/10: the arm-B residue is READ-SIDE — a silent sticky readCell of the argument's redirect-linked notes with the piece context fully live (r01), and a stranded whole-piece mid-session read death behind a keyless pattern-load-error, with zero start deaths (r06/r09) — both store-verified zero-loss, neither reachable from the deferred-start error arm. The lunch-poll-vote FILE entry is #5744's 2026-08-24 deliberate re-skip: its profile-first join creates the viewer's profile piece mid-test and the deferred start died on exactly the b04 class this recovery closes (its reds predate the recovery landing); it lifts on its own gate evidence at the merged head, a FILE entry because every later step depends on that join. An EMPTY list is the flip PR's bar; any change here is a deliberate edit that reddens this pin", async () => {
+Deno.test("main: the patterns list = the default-app STEP entry (its charge NARROWED 2026-08-24) + the lunch-poll-vote FILE entry, both under OW45 arm B. The b04 client-start death — the flag-ON client's navigate-deferred piece start dying terminally on a stale-confirmed-read ConflictError — is CLOSED by the RULED catch-up-and-start recovery (the refusal is 'the server won the race'; the client awaits the conflict's readiness and starts from the served documents through the ordinary load walk, committing nothing; OW45's CATCH-UP-AND-START block, serving-loop.md §3d RULED 2026-08-24), and the fix-head gate watched the recovery resurrect the notebook space's refused root start in the GREEN runs. What keeps the STEP entry is the gate's 7/10: the arm-B residue is READ-SIDE — a silent sticky readCell of the argument's redirect-linked notes with the piece context fully live (r01), and a stranded whole-piece mid-session read death behind a keyless pattern-load-error, with zero start deaths (r06/r09) — both store-verified zero-loss, neither reachable from the deferred-start error arm. The lunch-poll-vote FILE entry is #5744's 2026-08-24 deliberate re-skip, and its OWN 10-run gate has now RUN at the merged head — 7/10, no lift: the b04 class it was minted for is closed there too (catch-up activations 10/10 runs, zero terminal deferred-start deaths), and the entry now stands on a THIRD, WRITE-SIDE residue member — the guest browser's mid-session profile piece never landing its program-materialization commit, its space stuck at 4 commits with no patternIdentity and zero server-log mentions against the greens' 14-21; refused vs dropped vs never issued is NOT determined. It still lifts only on its own gate evidence at the merged head, a FILE entry because every later step depends on that join. An EMPTY list is the flip PR's bar; any change here is a deliberate edit that reddens this pin", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
   // The step entry never drops its file; the lunch-poll-vote FILE entry
@@ -172,9 +172,13 @@ Deno.test("main: the patterns list = the default-app STEP entry (its charge NARR
   );
   assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[1].step, undefined);
   assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[1].phase, "phase-7");
+  // Its reason names the NARROWED charge the entry's own gate found
+  // (2026-08-24) — the guest profile piece's program materialization
+  // never landing — not the b04 client-start class that gate closed,
+  // whose fork memo the reason keeps as history.
   assertMatch(
     SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
-    /client-start|first-hydration/,
+    /program-materialization|patternIdentity/,
   );
   assertMatch(
     SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
