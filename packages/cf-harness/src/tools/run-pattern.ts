@@ -557,12 +557,43 @@ export const runPatternTool: HarnessToolDefinition<
         `run_pattern input "${key}" does not match the pattern's argument schema: ${failure}`,
       );
     };
+    // A property schema referring into the argument schema's `$defs` leaves
+    // its root behind when it becomes a cell's whole schema, so the read
+    // schema carries those definitions along. The property's own `$defs`,
+    // when it has one, shadows the root's — the same precedence a nested
+    // `$defs` scope has in place.
+    const argumentDefs = isObjectNotArray(argumentSchema) &&
+        isObjectNotArray((argumentSchema as { $defs?: unknown }).$defs)
+      ? (argumentSchema as { $defs: Record<string, JSONSchema> }).$defs
+      : undefined;
+    const readSchemaForKey = (key: string): JSONSchema | undefined => {
+      const propertySchema = argumentSchemaForKey(key);
+      if (
+        propertySchema === undefined || argumentDefs === undefined ||
+        !isObjectNotArray(propertySchema)
+      ) {
+        return propertySchema;
+      }
+      return {
+        ...propertySchema,
+        $defs: {
+          ...argumentDefs,
+          ...(propertySchema as { $defs?: Record<string, JSONSchema> }).$defs,
+        },
+      };
+    };
     for (const { key, cell } of liveCellInputs) {
-      if (argumentSchemaForKey(key) === undefined) {
+      const readSchema = readSchemaForKey(key);
+      if (readSchema === undefined) {
         continue;
       }
-      await cell.sync();
-      const mismatch = argumentMismatch(key, cell.get());
+      // The read goes through the argument schema: a schema-less sync can
+      // complete without data for a referent that needs schema-driven
+      // materialization (a registry grant is one), and its `undefined` would
+      // be measured here as the cell's value.
+      const typedCell = cell.asSchema(readSchema);
+      await typedCell.sync();
+      const mismatch = argumentMismatch(key, typedCell.get());
       if (mismatch !== undefined) {
         return mismatch;
       }
