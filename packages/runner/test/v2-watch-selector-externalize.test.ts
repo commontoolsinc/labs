@@ -137,14 +137,12 @@ describe("v2-watch", () => {
       );
     });
 
-    it("passes a structurally refused schema through when its references resolve", () => {
+    it("passes a structurally refused schema through when its references are persisted", () => {
       // Decomposition refuses structural constructs — here an `$anchor` —
       // and that refusal says nothing about the `cid:` refs the schema
-      // carries. With every reference's closure in the registry there is
-      // nothing unemittable about the selector: it goes to the wire as
-      // given, and the server's persistence validation stays its arbiter.
-      // The throw below is reserved for references the registry cannot
-      // supply.
+      // carries. What decides emittability is the server's store: with
+      // every reference confirmed persisted in the target space, the
+      // selector goes to the wire as given and the server can answer it.
       setContentAddressedSchemasConfig(true);
       const release = acquireSchemaRegistryLease();
       try {
@@ -163,9 +161,41 @@ describe("v2-watch", () => {
             },
           },
         } as const;
-        expect(externalizeSyncSelector(refused as never, () => false)).toBe(
+        expect(externalizeSyncSelector(refused as never, () => true)).toBe(
           refused as never,
         );
+      } finally {
+        release();
+      }
+    });
+
+    it("throws for a structurally refused schema whose references are only local", () => {
+      // The nuance the pass-through above must not blur: the server
+      // validates a selector reference against what the target space
+      // persists, so a document the local registry resolves but the space
+      // does not hold backs nothing on the wire. Recomposing inline is
+      // ruled out by the same structural refusal, so the selector is
+      // unemittable and the throw says which references are unconfirmed.
+      setContentAddressedSchemasConfig(true);
+      const release = acquireSchemaRegistryLease();
+      try {
+        const refForm = externalizeSchema({
+          type: "object",
+          properties: { label: { type: "string" } },
+        }) as JSONSchemaObj;
+        expect(typeof refForm.$ref).toBe("string");
+        const refused = {
+          path: [],
+          schema: {
+            type: "object",
+            properties: {
+              linked: refForm,
+              anchored: { $anchor: "a", type: "string" },
+            },
+          },
+        } as const;
+        expect(() => externalizeSyncSelector(refused as never, () => false))
+          .toThrow(SelectorClosureUnavailableError);
       } finally {
         release();
       }

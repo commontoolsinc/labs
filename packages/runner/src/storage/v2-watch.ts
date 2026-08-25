@@ -24,7 +24,6 @@ import {
 } from "../schema-decompose.ts";
 import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
 import {
-  isSchemaDocumentClosureComplete,
   lookupSchemaDocument,
   registerSchemaDocument,
 } from "../schema-registry.ts";
@@ -57,13 +56,16 @@ export const normalizeSyncSelector = (
 
 /**
  * Thrown instead of emitting a selector whose schema carries `cid:` refs
- * the realm registry cannot back — see {@link externalizeSyncSelector}.
+ * the target space is not confirmed to persist — see
+ * {@link externalizeSyncSelector}.
  */
 export class SelectorClosureUnavailableError extends Error {
   constructor(readonly refs: readonly string[], cause: unknown) {
     super(
-      `Selector schema references ${refs.length} schema document(s) the ` +
-        `realm registry cannot supply [${refs.slice(0, 3).join(", ")}${
+      `Selector schema references ${refs.length} schema document(s) not ` +
+        `confirmed persisted in the target space [${
+          refs.slice(0, 3).join(", ")
+        }${
           refs.length > 3 ? ", …" : ""
         }]; emitting the reference form would only move this failure to ` +
         `the server. ${cause instanceof Error ? cause.message : ""}`,
@@ -95,19 +97,19 @@ export class SelectorClosureUnavailableError extends Error {
  * A decomposition refusal keeps the selector exactly as given when the
  * schema carries no references — inline is inline, and the server accepts
  * it. Refusal is structural as often as it is a missing document, so a
- * ref-bearing refusal splits on what the registry can actually supply: a
- * schema whose every reference resolves passes through as given, with the
- * server's persistence validation the arbiter for it, while a reference
- * whose closure the registry cannot supply throws
- * {@link SelectorClosureUnavailableError} — emitting it would violate the
- * client's send-only-what-you-can-back obligation and spend a round trip
- * on the server's refusal, while the local registry is where the miss
- * actually is. A reference dies with the registry epoch that minted it,
- * and every retainer of externalized forms drops them on the registry
- * clear (the wish sidecar pattern caches, the sanitize memo), so reaching
- * that throw means a retainer outlived its epoch or a reference crossed
- * from another process without its closure — a bug to surface at its
- * source, not to forward.
+ * ref-bearing refusal splits on what the SERVER can answer: a schema
+ * whose every reference the target space is confirmed to persist passes
+ * through as given, and any other throws
+ * {@link SelectorClosureUnavailableError} — a document held only in the
+ * local registry backs nothing on the wire, the structural refusal rules
+ * out recomposing inline, and emitting would violate the client's
+ * send-only-what-you-can-back obligation while spending a round trip on
+ * the server's refusal. The retainer invariant is one instance: a
+ * reference dies with the registry epoch that minted it, and every
+ * retainer of externalized forms drops them on the registry clear (the
+ * wish sidecar pattern caches, the sanitize memo), so a cross-epoch
+ * reference reaches this gate with nothing confirmed anywhere — a bug to
+ * surface at its source, not to forward.
  */
 export const externalizeSyncSelector = (
   selector: SchemaPathSelector,
@@ -146,17 +148,22 @@ export const externalizeSyncSelector = (
       if (!carriesRefs) return selector;
       // Decomposition refuses for structural reasons too — a nested
       // `$defs`, a `$id`, an unsupported `$ref` form — and those say
-      // nothing about whether the `cid:` refs the schema carries resolve.
-      // Only a reference whose closure the registry cannot supply is
-      // unemittable; when every ref resolves, the selector goes to the
-      // wire as given (rebuilding the inline form needs the decomposition
-      // that just refused), and the server's persistence validation stays
-      // the arbiter for it, as it was before the gate existed.
-      const missing = [
+      // nothing about whether the `cid:` refs the schema carries are
+      // emittable. What decides emittability is the server's store, not
+      // the local registry: the server validates a selector reference
+      // against what the target space persists, so a document held only
+      // locally backs nothing on the wire. The selector goes out as given
+      // exactly when every reference is confirmed persisted there — a
+      // persisted document's closure persisted with it, the same
+      // write-side guarantee the decomposing arm leans on — and otherwise
+      // this throws: rebuilding the inline form needs the decomposition
+      // that just refused, and emitting would only move the failure to
+      // the server's refusal.
+      const unemittable = [
         ...collectExternalSchemaRefHashes(schema as JSONSchemaObj),
-      ].filter((hash) => !isSchemaDocumentClosureComplete(hash));
-      if (missing.length === 0) return selector;
-      throw new SelectorClosureUnavailableError(missing, error);
+      ].filter((hash) => !isSchemaDocPersisted(hash));
+      if (unemittable.length === 0) return selector;
+      throw new SelectorClosureUnavailableError(unemittable, error);
     }
     throw error;
   }
