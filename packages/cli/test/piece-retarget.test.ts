@@ -177,7 +177,7 @@ describe("piece-retarget", () => {
           runRetarget: (_config, request) => {
             // A single document cannot stream, so no row reporter is handed
             // to the library at all.
-            expect(request.onRow).toBeUndefined();
+            expect(Object.keys(request).sort()).toEqual(["planPath"]);
             return Promise.resolve(REPORT);
           },
           printHint: () => {},
@@ -193,7 +193,7 @@ describe("piece-retarget", () => {
       const out = await captureStdout(() =>
         retargetFromCommand({ ...OPTIONS, out: "report.json" }, {
           runRetarget: (_config, request) => {
-            expect(request.onRow).toBeUndefined();
+            expect(Object.keys(request).sort()).toEqual(["planPath"]);
             return Promise.resolve(REPORT);
           },
           writeTextFile: (path, text) => {
@@ -287,7 +287,10 @@ describe("piece-retarget", () => {
       const out = await captureStdout(() =>
         retargetFromCommand(OPTIONS, {
           runRetarget: (_config, request) => {
-            expect(request.apply).toBeUndefined();
+            expect(Object.keys(request).sort()).toEqual([
+              "onRow",
+              "planPath",
+            ]);
             const dry: RetargetReport = {
               rows: [{
                 piece: "fid1:aaa",
@@ -395,9 +398,12 @@ describe("piece-retarget", () => {
           return Promise.resolve(REPORT);
         },
       });
-      expect(options?.apply).toBeUndefined();
-      expect(options?.groupSize).toBeUndefined();
-      expect(options?.onRow).toBeUndefined();
+      // The key set, not each value: an `apply: undefined` riding along is
+      // a key the library still has to reason about, and every matcher that
+      // asks about one property — `toBeUndefined`, and `toHaveProperty` in
+      // this library too — reads a present-but-undefined key as an absent
+      // one. Only the keys themselves tell the two apart.
+      expect(Object.keys(options ?? {})).toEqual(["plan"]);
     });
 
     it("settles and disposes each session it is handed back", async () => {
@@ -435,6 +441,76 @@ describe("piece-retarget", () => {
       });
       expect(opened.length).toBe(2);
       expect(disposed).toEqual(opened);
+    });
+
+    it("disposes a session whose settle failed, and reports the stop", async () => {
+      let disposed = 0;
+      const report = await runRetarget(
+        {} as never,
+        { planPath: "/plans/upgrade.jsonl" },
+        {
+          readTextFile: () => Promise.resolve(PLAN_TEXT),
+          loadPieces: () =>
+            Promise.resolve(
+              {
+                getSpace: () => "did:key:test",
+                get: () =>
+                  Promise.reject(new Error("this session reads no pieces")),
+                synced: () =>
+                  Promise.reject(new Error("the group's writes never landed")),
+                dispose: () => {
+                  disposed += 1;
+                  return Promise.resolve();
+                },
+              } as unknown as PiecesController,
+            ),
+        },
+      );
+      // A settle that rejects must not take the disposal with it: the
+      // library turns the boundary's failure into a stop rather than a
+      // crash, so a session skipped here would stay open for the rest of
+      // the process.
+      expect(disposed).toBe(1);
+      expect(report.complete).toBe(false);
+      expect(report.applied).toBe(0);
+      expect(report.stopReason).toContain("the group's writes never landed");
+      expect(report.stopReason).toContain(
+        "the preflight session could not be released",
+      );
+      expect(report.stopReason).not.toContain("could not be disposed");
+    });
+
+    it("names the settle failure ahead of a disposal that failed too", async () => {
+      const report = await runRetarget(
+        {} as never,
+        { planPath: "/plans/upgrade.jsonl" },
+        {
+          readTextFile: () => Promise.resolve(PLAN_TEXT),
+          loadPieces: () =>
+            Promise.resolve(
+              {
+                getSpace: () => "did:key:test",
+                get: () =>
+                  Promise.reject(new Error("this session reads no pieces")),
+                synced: () =>
+                  Promise.reject(new Error("the group's writes never landed")),
+                dispose: () =>
+                  Promise.reject(new Error("the runtime would not shut down")),
+              } as unknown as PiecesController,
+            ),
+        },
+      );
+      // The settle failure leads: it is why the boundary cannot be trusted.
+      // The disposal that failed after it is named too, never instead.
+      const stop = report.stopReason ?? "";
+      expect(stop).toContain("the group's writes never landed");
+      expect(stop).toContain(
+        "Its session could not be disposed either: the runtime would not " +
+          "shut down.",
+      );
+      expect(stop.indexOf("never landed")).toBeLessThan(
+        stop.indexOf("could not be disposed"),
+      );
     });
   });
 });

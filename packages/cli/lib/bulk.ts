@@ -236,6 +236,22 @@ export interface RetargetRunDependencies {
 }
 
 /**
+ * Run one teardown step, handing back what it broke instead of throwing it.
+ * A session boundary runs every step it has, so an early failure must not
+ * take the later ones with it; what each broke is composed afterwards.
+ */
+async function teardownProblem(
+  step: () => Promise<void>,
+): Promise<string | undefined> {
+  try {
+    await step();
+    return undefined;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+/**
  * Run the retarget: decode the plan file and hand the library a session
  * supply that opens a real session per group and disposes its runtime when
  * the group ends, which closes that session's storage — so a group's pieces
@@ -261,8 +277,26 @@ export async function runRetarget(
       // without draining it, so a read still in flight would come back
       // against a closed client — a failure belonging to a session already
       // being released, reported over the rows the group just produced.
-      await pieces.synced();
-      await pieces.dispose();
+      //
+      // The disposal happens whether or not the settling did. A failed
+      // settle is reported as a stop rather than crashing the run, so a
+      // session skipped over here would stay open — with its runtime and
+      // its storage — for as long as the process lives, which is the whole
+      // cost the grouping exists to avoid.
+      const settleProblem = await teardownProblem(() => pieces.synced());
+      const disposeProblem = await teardownProblem(() => pieces.dispose());
+      if (settleProblem === undefined && disposeProblem === undefined) return;
+      // The settle failure leads when both fail: it is why this boundary
+      // cannot be trusted, and the disposal that followed it is named after
+      // it rather than instead of it — the composition the library uses for
+      // a wrong-space stop whose session also would not release. Only the
+      // message survives, which is all the library reads off this throw.
+      throw new Error(
+        settleProblem === undefined ? disposeProblem : settleProblem +
+          (disposeProblem === undefined
+            ? ""
+            : ` Its session could not be disposed either: ${disposeProblem}.`),
+      );
     },
   };
   return await (deps.retargetPieces ?? retargetPieces)(sessions, {
