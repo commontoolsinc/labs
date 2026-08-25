@@ -244,6 +244,43 @@ Deno.test("CI browser tests use the runner's installed Chrome", async () => {
   }
 });
 
+Deno.test("Check preserves a native crash from Deno lint", async () => {
+  const contents = await workflow("deno.yml");
+  const check = jobBlock(contents, "check");
+  const lint = stepBlock(check, "🧹 Lint codebase");
+  const describe = stepBlock(check, "📋 Describe Deno lint core dump");
+  const upload = stepBlock(check, "📤 Upload Deno lint core dump");
+
+  assertStringIncludes(lint, "ulimit -c unlimited");
+  assertStringIncludes(
+    lint,
+    'sudo sysctl -w kernel.core_pattern="$GITHUB_WORKSPACE/deno-core.%p"',
+  );
+  assertStringIncludes(
+    lint,
+    "deno task run-recorded lint repo deno-lint -- deno lint",
+  );
+  assertStringIncludes(describe, "if: ${{ failure() }}");
+  assertStringIncludes(describe, 'file "$core"');
+  assertStringIncludes(upload, "if: ${{ failure() }}");
+  assertStringIncludes(upload, "uses: actions/upload-artifact@v7");
+  assertStringIncludes(
+    upload,
+    "name: deno-lint-core-a${{ github.run_attempt }}",
+  );
+  assertStringIncludes(upload, "path: deno-core.*");
+  assertStringIncludes(upload, "if-no-files-found: ignore");
+  assert(
+    check.indexOf("🧹 Lint codebase") <
+        check.indexOf("📋 Describe Deno lint core dump") &&
+      check.indexOf("📋 Describe Deno lint core dump") <
+        check.indexOf("📤 Upload Deno lint core dump") &&
+      check.indexOf("📤 Upload Deno lint core dump") <
+        check.indexOf("🔎 Type check codebase"),
+    "the lint crash report must run immediately after the lint step",
+  );
+});
+
 Deno.test("Status waits for every pull request validation job", async () => {
   const contents = await workflow("deno.yml");
   const gate = jobBlock(contents, "status");
