@@ -1036,13 +1036,16 @@ stripped from `argv` before Cliffy parses, in `lib/log-level.ts` and
 
 The tests divide the same way. `test/completion-*.test.ts` cover everything
 answerable without a fabric — line resolution, candidate shaping, and the
-degrade-to-empty path. Every provider in `lib/completion/providers.ts` is
-exercised by `integration/completion-over-the-cli.sh`, which deploys a fixture
-and asserts what a Tab offers at each slot of the chain — including the two that
-answer from the environment rather than from a server, and `--space`, which
-reads what is on disk and so is exercised as far as a run has a local store to
-discover. That split is not tidiness: a provider that reaches a fabric and comes
-back with the wrong set is invisible to a unit test and invisible at the prompt,
-because failure here is silent by design. The script also carries `gap`
-assertions for slots that answer nothing today, so one starting to answer fails
-loudly rather than passing quietly.
+degrade-to-empty path. Every provider that reads state — a fabric, the local
+memory-v2 stores, or the environment — is exercised by
+`integration/completion-over-the-cli.sh`, which deploys a fixture and asserts
+what a Tab offers at each slot of the chain. The remaining table entries hand
+the shell a constant `files` or `dirs` directive and read nothing, so one probe
+stands for them; `deno task check-completion-slots` is what keeps such an entry
+from naming a slot that does not exist.
+
+That split is not tidiness: a provider that reaches a fabric and comes back with
+the wrong set is invisible to a unit test and invisible at the prompt, because
+failure here is silent by design. The script also carries `gap` assertions for
+slots that answer nothing today, so one starting to answer fails loudly rather
+than passing quietly.
