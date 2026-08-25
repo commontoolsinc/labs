@@ -188,7 +188,7 @@ Deno.test("a deno task cf line completes as cf", async () => {
 
 Deno.test("generated scripts bind both the CLI name and deno", () => {
   const bash = bashCompletionScript("cf");
-  assert(bash.includes("complete -F _cf_complete cf"));
+  assert(bash.includes("complete -o nospace -F _cf_complete cf"));
   assert(bash.includes("complete -F _cf_complete deno"));
 
   const zsh = zshCompletionScript("cf");
@@ -197,7 +197,7 @@ Deno.test("generated scripts bind both the CLI name and deno", () => {
 
 Deno.test("--no-deno-task omits the deno binding", () => {
   const bash = bashCompletionScript("cf", { denoTask: false });
-  assert(bash.includes("complete -F _cf_complete cf"));
+  assert(bash.includes("complete -o nospace -F _cf_complete cf"));
   assertFalse(bash.includes("complete -F _cf_complete deno"));
   assertFalse(bash.includes("complete -p deno"));
 
@@ -270,6 +270,82 @@ Deno.test("generated zsh script moves an inline flag prefix out of the way", () 
   assert(compset < pathFiles, "compset must precede the file completion");
 });
 
+Deno.test("generated bash script inverts the trailing space rather than suppressing it", () => {
+  // `compopt` is bash 4+ and macOS ships 3.2, so the space cannot be taken
+  // away per completion. The binding is registered `-o nospace` and a
+  // candidate that should end the word carries its own space instead, which
+  // is one mechanism for both bash versions.
+  const bash = bashCompletionScript("cf");
+  const code = bash.split("\n").filter((line) => !line.trim().startsWith("#"));
+  assert(
+    code.some((line) => /^complete -o nospace -F \S+ cf$/.test(line.trim())),
+    "the cf binding must register -o nospace",
+  );
+  assert(
+    code.some((line) => line.includes('COMPREPLY[k]="${COMPREPLY[k]} "')),
+    "a candidate ending the word must carry its own space",
+  );
+});
+
+Deno.test("generated bash script leaves the deno binding's spacing alone", () => {
+  // A line handed back to another completion keeps that completion's spacing,
+  // so the deno binding is registered without `-o nospace` and the function
+  // adds nothing for it.
+  const code = bashCompletionScript("cf").split("\n")
+    .filter((line) => !line.trim().startsWith("#"));
+  assert(
+    code.some((line) => /^complete -F \S+ deno$/.test(line.trim())),
+    "the deno binding must not register -o nospace",
+  );
+  assert(
+    code.some((line) => line.includes('"${1##*/}" == "cf"')),
+    "the space must be added only for the binding that asked for it",
+  );
+});
+
+Deno.test("generated bash script escapes a candidate that would open a comment", async () => {
+  // `#profile` written into an interactive bash is a comment: the word, and
+  // the rest of the line with it, never reaches the command. `\#profile` is
+  // one word to the shell and the bare target to the CLI, and completing it
+  // again reads back the same target — so the candidate carries the escape
+  // rather than the caller having to remember it. Run through a real bash,
+  // because what is being asserted is what bash does with the script.
+  const dir = await Deno.makeTempDir();
+  try {
+    await Deno.writeTextFile(
+      `${dir}/cf`,
+      "#!/bin/sh\nprintf '#profileName\\n/\\nplain\\n'\n",
+    );
+    await Deno.chmod(`${dir}/cf`, 0o755);
+    await Deno.writeTextFile(`${dir}/cf.bash`, bashCompletionScript("cf"));
+    const { stdout } = await new Deno.Command("/bin/bash", {
+      args: [
+        "--norc",
+        "--noprofile",
+        "-c",
+        [
+          `PATH="${dir}:$PATH"`,
+          `. "${dir}/cf.bash"`,
+          `COMP_LINE='cf wish #profileN'`,
+          "COMP_POINT=17",
+          `COMP_WORDS=(cf wish '#profileN')`,
+          "COMP_CWORD=2",
+          "_cf_complete cf",
+          `printf '[%s]' "\${COMPREPLY[@]}"`,
+        ].join("\n"),
+      ],
+    }).output();
+    // Only the hashtag is escaped, and the trailing space each candidate
+    // carries is outside the escape.
+    assertEquals(
+      new TextDecoder().decode(stdout),
+      "[\\#profileName ][/ ][plain ]",
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("generated bash script avoids bash 4 builtins", () => {
   // macOS ships bash 3.2: `mapfile` does not exist at all, and `compopt` is
   // absent so it must be probed before use. Match on invocations rather than
@@ -292,5 +368,5 @@ Deno.test("generated bash script avoids bash 4 builtins", () => {
 Deno.test("the CLI name flows into the generated function names", () => {
   const script = bashCompletionScript("mycf");
   assert(script.includes("_mycf_complete()"));
-  assert(script.includes("complete -F _mycf_complete mycf"));
+  assert(script.includes("complete -o nospace -F _mycf_complete mycf"));
 });
