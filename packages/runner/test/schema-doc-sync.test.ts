@@ -802,6 +802,83 @@ describe("schema-doc-sync", () => {
     cancel();
   });
 
+  it("ESCALATES to a full evaluation when the session cache claims the cid was delivered and the pull comes back empty", async () => {
+    // The floor under OW61, found on #6260's board: a pull issues
+    // `session.watch.add`, and watchAdd DIFFS its answer against the
+    // session's delivery cache — so a document the cache already
+    // claims delivered is elided even when the request names it as a
+    // root. A replica that does not hold it therefore cannot get it by
+    // asking; the frame comes back empty every time (the board showed
+    // one cid missing 48 times in a single shard). Only a full
+    // evaluation re-ships it, because buildFullSync maps every entry.
+    const depSchema: JSONSchemaObj = {
+      type: "object",
+      properties: { escalatedLeaf: { type: "string" } },
+      title: "escalates-past-the-cache",
+    };
+    const decomposed = decomposeSchema(depSchema);
+    await writeSchemaDocs(decomposed);
+    const depHash = parseExternalSchemaRef(decomposed.rootRef)!.taggedHash;
+    const carrierValue = {
+      linked: {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: "of:escalate-target",
+            path: [],
+            schema: { $ref: `cid:${depHash}` },
+          },
+        },
+      },
+    };
+    await writeDocs({ "of:escalate-carrier": carrierValue });
+
+    const provider = readerStorage.open(space);
+    const replica = provider.replica as unknown as {
+      applySessionSync(sync: unknown, type: string): void;
+      getDocument(uri: string): unknown;
+    };
+    // The absorb defect, transient: the FIRST frame loses its cid
+    // upserts, every later one is intact. The session cache on the
+    // server counts that first frame as delivered regardless — which is
+    // the disagreement this step exists to escape. (The register
+    // sanctions this instance-patch seam for standing in for whichever
+    // interleaving drops a delivery.)
+    let framesSeen = 0;
+    const originalApply = replica.applySessionSync.bind(replica);
+    replica.applySessionSync = (sync: unknown, type: string) => {
+      const frame = sync as { upserts?: Array<{ id?: unknown }> };
+      const upserts = Array.isArray(frame?.upserts) ? frame.upserts : [];
+      framesSeen += 1;
+      if (framesSeen > 1) return originalApply(sync, type);
+      const kept = upserts.filter((upsert) =>
+        typeof upsert?.id !== "string" || !upsert.id.startsWith("cid:")
+      );
+      return originalApply({ ...(sync as object), upserts: kept }, type);
+    };
+
+    const healed = defer<void>();
+    const cancel = (provider as unknown as {
+      sink: (uri: URI, callback: (doc: unknown) => void) => () => void;
+    }).sink("of:escalate-carrier" as URI, (doc: unknown) => {
+      if (doc !== undefined) healed.resolve();
+    });
+
+    await provider.sync("of:escalate-carrier" as URI, {
+      path: [],
+      schema: false,
+    });
+
+    // The pull for the missing cid is answered EMPTY by the cache, so
+    // re-asking is futile; the escalation's full evaluation re-ships
+    // the closure and the parked carrier applies.
+    await healed.promise;
+    expect(replica.getDocument(`cid:${depHash}`)).toBeDefined();
+    expect(replica.getDocument("of:escalate-carrier")).toEqual({
+      value: carrierValue,
+    });
+    cancel();
+  });
+
   it("the background consumer survives a frame that fails to apply and keeps consuming", async () => {
     const provider = readerStorage.open(space);
     const replica = provider.replica as unknown as {
