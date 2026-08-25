@@ -701,7 +701,7 @@ Deno.test("test-records-ship forwards its optional variant input", async () => {
   assertStringIncludes(action, 'args+=(--variant "$SHIP_VARIANT")');
 });
 
-Deno.test("server-execution variant rollout waits for relay support", async () => {
+Deno.test("server-execution ON jobs ship records under their variant", async () => {
   const contents = withoutComments(await workflow("deno.yml"));
   const packageJob = jobBlock(
     contents,
@@ -730,17 +730,22 @@ Deno.test("server-execution variant rollout waits for relay support", async () =
   );
 
   for (
+    const jobId of ["package-integration-test", "pattern-integration-test"]
+  ) {
+    const ship = stepBlock(jobBlock(contents, jobId), "📤 Ship test records");
+    assert(
+      !ship.includes("variant:"),
+      `${jobId}: the default configuration must remain unmarked`,
+    );
+  }
+
+  for (
     const jobId of [
-      "package-integration-test",
-      "pattern-integration-test",
       "package-integration-test-server-execution-on",
       "pattern-integration-test-server-execution-on",
     ]
   ) {
     const ship = stepBlock(jobBlock(contents, jobId), "📤 Ship test records");
-    assert(
-      !ship.includes("variant:"),
-      `${jobId}: variants start only after relay support reaches main`,
-    );
+    assertStringIncludes(ship, "variant: server-execution");
   }
 });
