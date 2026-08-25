@@ -1,7 +1,9 @@
 # Bulk piece operations
 
 **Status:** proposed; stage 1 — the survey library, its `cf` entry points,
-and its CI drill — is built, and every later stage is unbuilt. This is the design and build sequence for changing
+and its CI drill — is built. Stage 2's repair library — the fixer runner,
+the dry-run diff, and the refusals — is built; its `cf` entry point and
+demo act follow in a stacked change. Every later stage is unbuilt. This is the design and build sequence for changing
 many pieces in one space as one reviewable, resumable operation. Driven by
 recurring Topics board upgrades.
 
@@ -573,18 +575,18 @@ stands alone as a read-only "what would change" report; and the
 complete-document and links-intact refusals as library checks, which the
 Topics restore script hand-rolls today and should import instead.
 
-- [ ] A fixer is supplied by the caller, and adding a new kind of repair
+- [x] A fixer is supplied by the caller, and adding a new kind of repair
       requires no change to the tooling.
-- [ ] Selection, resume, and verification all derive from the fixer being a
+- [x] Selection, resume, and verification all derive from the fixer being a
       no-op, with no separately maintained predicate.
-- [ ] A dry run reports the exact per-piece document diff, and writes
+- [x] A dry run reports the exact per-piece document diff, and writes
       nothing. For a whole-document write this is a requirement, not a
       convenience.
-- [ ] A fixer that returns an incomplete document is refused rather than
+- [x] A fixer that returns an incomplete document is refused rather than
       applied, and a test proves the refusal.
-- [ ] References survive a repair that does not mention them, and a fixer
+- [x] References survive a repair that does not mention them, and a fixer
       that would rewrite one as a value is refused.
-- [ ] Re-running a completed repair writes nothing.
+- [x] Re-running a completed repair writes nothing.
 - [ ] The repair act in `packages/cli/integration/bulk-ops-demo.sh` stops
       being pending: the transcript runs a fixer live where it now shows
       the provisional spelling.
@@ -726,14 +728,13 @@ Topics rehearsal remains the place where the real pattern is exercised.
 Each is named with the stage that forces it, so none of them has to be
 settled before work starts.
 
-1. **How bulk is spelled** — *stage 3*. Whether the existing per-piece
-   commands grow a plan-file target, or bulk operations get their own group,
-   decides whether the word for "one piece" stays consistent across the
-   command surface. This interacts with
-   [CLI surface shape](cli-surface-shape.md). It is deferred on purpose: the
-   core is library code, so nothing in stage 1 waits on it, and it is settled
-   when the first write operation needs a home. Until then the survey and
-   the identity read surface wherever the thin wrapper finds cheapest.
+1. ~~**How bulk is spelled.**~~ **Resolved: the `piece` group holds every
+   piece operation, single or bulk.** The first write operation is stage 2's
+   repair, and it lands as `cf piece repair` beside `cf piece survey` and
+   `cf piece inspect`: one group, one word for "one piece", and the later
+   write stages follow the same shape. A separate bulk group would buy a
+   second home at the cost of the consistency
+   [CLI surface shape](cli-surface-shape.md) exists to protect.
 2. ~~**Where preconditions are evaluated.**~~ **Resolved: over the API, and
    stage 1 builds the read.** A piece's pattern identity is readable from a
    live deployment without running the piece — the piece inspection path
@@ -750,17 +751,18 @@ settled before work starts.
    risk from the same flag used many times. The row field keeps the record
    per row and the plan-time flag keeps the decision single; the apply reads
    only the row. See the plan encoding above.
-4. **Whether repair gets a narrow write** — *stage 2*. Two writes reach a
-   piece's stored input today. One replaces the whole document and re-runs
-   the piece against it. The other writes at a path inside the document, but
-   validates the document it lands in against the piece's schema before
-   committing — which is exactly what a document in need of repair fails, so
-   it refuses the pieces a repair exists for. That leaves "change one
-   property" as a whole-document read-modify-write per piece: a large blast
-   radius for a small change, and the same path that has been observed
-   freezing a stale schema into a live board. Either repair gets a path write
-   that can be told to skip that validation, or the design accepts the wide
-   one and says why.
+4. ~~**Whether repair gets a narrow write.**~~ **Resolved: the wide write,
+   guarded.** The fixer contract already produces a whole document, so the
+   wide write is the one that matches it, and the blast radius is held by
+   refusals rather than by narrowing: an incomplete document is refused
+   before any write, a reference either round-trips untouched or the
+   document is refused, and purity is probed on every evaluation. What made
+   the narrow write attractive — sparing untouched fields and references —
+   the guards deliver at the document level: a raw read written back whole
+   carries its sigil links intact, measured at the library seam. A narrow
+   path write remains available as a later addition if rehearsal shows the
+   wide write's cost, but it would be a new runner write primitive and is
+   not what repair waits on.
 5. ~~**How a fixer is supplied.**~~ **Resolved: a validator is a JSON
    schema; a fixer is a TypeScript module the run imports.** A module can be
    type-checked against the document shape, tested without a space, and
