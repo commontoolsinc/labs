@@ -5681,6 +5681,15 @@ class SpaceReplica implements ISpaceReplica {
             quarantined.add(referrer);
             overlay.delete(referrer);
             changed = true;
+            logger.error("ow61-FRAME-FAIL", () => [
+              `dep=cid:${dep.slice(5, 12)} frameCarried=${
+                ow61CidsOf(sync).length
+              } depIsInThisFrame=${ow61CidsOf(sync).includes(dep)} ` +
+              `referrer=${referrer.slice(0, 24)} ` +
+              `carried=${
+                ow61CidsOf(sync).map((h) => h.slice(5, 12)).join(",")
+              }`,
+            ]);
             if (!ow61FirstFire.has(this)) {
               ow61FirstFire.add(this);
               logger.error(
