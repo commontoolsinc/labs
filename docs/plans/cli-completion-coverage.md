@@ -553,13 +553,20 @@ lands.
 
 ### 18. A live-provider test seam
 
-`packages/cli/integration/completion-over-the-cli.sh` is where every provider in
-`lib/completion/providers.ts` is exercised — those that read a fabric, the one
-that reads local stores, and the two that answer from the environment.
-`--space` is the one that cannot be held to it everywhere: it reads what is on
-disk, so a run with no store discoverable exercises it only as far as saying
-so, and that step reports which case it saw. It deploys
-`pattern/completion-target.tsx`,
+`packages/cli/integration/completion-over-the-cli.sh` is where every provider
+that reads state is exercised — the four that reach a fabric, the one that
+reads local stores, the one that reads the environment, and the pattern-file
+glob. The rest of the table hands the shell a constant directive and reads
+nothing, so one probe stands for it; item 19's gate is what keeps such an entry
+from naming a slot that does not exist.
+
+`--space` is the one whose candidates depend on the machine, since it reads
+what is on disk. That step reads `cf inspect spaces`' exit status as well as
+its output — a command that failed and a machine with no store print the same
+nothing — and probes the provider either way: with a store it must offer the
+DID, without one it must come back empty and successful.
+
+It deploys `pattern/completion-target.tsx`,
 then asserts what a Tab offers at each slot of the chain, and runs in CI through
 `integration.sh`'s `piece-call` section (`completion` is the standalone
 selector). `test/completion-*.test.ts` stay the home for everything answerable

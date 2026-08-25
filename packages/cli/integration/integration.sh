@@ -1086,7 +1086,8 @@ run_verb_session_gaps() {
 # two above; it deploys its own fixture and takes its own space.
 #
 # It is the only thing that drives a completion provider against real state,
-# and it reaches every provider the completion layer declares:
+# and it reaches every provider that reads any — the fabric, the local stores,
+# or the environment. Its own header draws the boundary exactly:
 # the unit tests cover the pure half, and a provider that reaches a fabric and
 # returns the WRONG set looks exactly like one that returned nothing, because
 # completion swallows every error on purpose. It also carries `gap` assertions

@@ -3,21 +3,26 @@
 # a Tab offers at each slot of space -> piece -> verb -> verb fields -> cell
 # path -> result shape.
 #
-# Every provider in lib/completion/providers.ts is exercised here: the ones
-# that read a fabric (pieces, callables, cell paths, link endpoints), the one
-# that reads local memory-v2 stores (--space), and the two that answer from the
-# environment (--api-url, pattern files). The unit tests under
-# packages/cli/test/completion-*.test.ts cover the pure half — line resolution,
-# candidate shaping, and the degrade-to-empty path — and by construction cannot
-# see a provider that reaches a fabric and comes back with the wrong set.
-# Completion swallows every error on purpose, so a provider that throws and a
-# provider that has nothing to say are one experience at the prompt: silence.
-# This script is what tells them apart.
+# Every provider that reads state is exercised here: the four that reach a
+# fabric (pieces, callables, cell paths, link endpoints), the one that reads
+# local memory-v2 stores (--space, and the `space` positionals sharing it), the
+# one that reads the environment (--api-url), and the pattern-file glob.
 #
-# One provider cannot be held to that everywhere: --space reads what is on
-# disk, so a run with no local store discoverable exercises it only as far as
-# saying so. That step reports which case it saw rather than passing either
-# way.
+# What is NOT exercised entry by entry is the rest of the provider table: a
+# dozen slots that hand the shell a constant `files` or `dirs` directive and
+# nothing else — --root, --datafile, --to, `view <file>`, `exec <mountedFile>`,
+# `id did <keypath>`, the space-management directories, and the two entries
+# item 16 of the plan records as belonging to commands that declare no options
+# at all. They read no state, so there is nothing here that could come back
+# wrong; --identity stands for them, and `deno task check-completion-slots` is
+# what keeps such an entry from naming a slot that does not exist.
+#
+# The unit tests under packages/cli/test/completion-*.test.ts cover the pure
+# half — line resolution, candidate shaping, and the degrade-to-empty path —
+# and by construction cannot see a provider that reaches a fabric and comes
+# back with the wrong set. Completion swallows every error on purpose, so a
+# provider that throws and a provider that has nothing to say are one
+# experience at the prompt: silence. This script is what tells them apart.
 #
 # Two rules follow from that silence, and both are held to below. A slot is
 # judged only after the equivalent `cf` command has been run against the same
@@ -80,6 +85,19 @@ probe() {
   PROBE_OUT=$($CF completion complete --shell bash --line "$1" \
     --point "${#1}" 2>/dev/null)
   PROBE_STATUS=$?
+}
+
+# The same discipline for the auxiliary commands this script branches on.
+#
+# `probe` keeps the completion command honest; every OTHER command whose empty
+# output decides a branch needs it too, or the branch reads a broken CLI as a
+# fact about the fabric. That is the same defect twice in one file, so it is
+# the shape that is fixed rather than the instance.
+RUN_OUT=""
+RUN_STATUS=0
+run() {
+  RUN_OUT=$("$@" 2>/dev/null)
+  RUN_STATUS=$?
 }
 
 # A gap we expect to be there, named by the line that probes it. When it closes
@@ -367,18 +385,31 @@ check "1" "$(complete_at "cf piece ls $CONN_ARGS --api-url http" |
 check ":cf:files *.tsx" "$(directives_at "cf piece new $LINE_ARGS --test ")" \
   "a pattern-file slot hands the shell the glob it filters by"
 # `--space` completes from local memory-v2 stores rather than from the server,
-# so it has nothing to offer where none is discoverable — which is item 8's
-# positional discovery rather than a defect here. The step says which it saw,
-# so a run that could not exercise the provider does not read as one that did.
-DISCOVERED=$($CF inspect spaces 2>/dev/null |
-  grep -oE '^did:key:[A-Za-z0-9]+' | head -1)
+# so what it can offer depends on what is on disk — which is item 8's
+# positional discovery rather than a defect here.
+#
+# Two things that follow, and the second is what a bare `if -n` gets wrong.
+# Whether a store was found is read from `cf inspect spaces`' exit status as
+# well as its output, since a command that failed and a machine with no store
+# print the same nothing. And the provider is probed in BOTH branches: with a
+# store it must offer the DID, and without one it must come back empty AND
+# successful, which is the case a skipped probe could not tell from a broken
+# CLI.
+run $CF inspect spaces
+check "0" "$RUN_STATUS" "cf inspect spaces runs, so its output can be read"
+DISCOVERED=$(printf '%s\n' "$RUN_OUT" | grep -oE '^did:key:[A-Za-z0-9]+' |
+  head -1)
 if [ -n "$DISCOVERED" ]; then
   ok "a local space db is discoverable: $DISCOVERED"
   check "1" "$(complete_at "cf piece ls $CONN_ARGS --space ${DISCOVERED%??????????}" |
     grep -c "^$DISCOVERED\$")" \
     "the --space slot offers a DID discovered on disk"
 else
-  ok "no local space db here, so --space has nothing to discover"
+  ok "no local space db is discoverable here"
+  probe "cf piece ls $CONN_ARGS --space "
+  check "0" "$PROBE_STATUS" "the --space slot still runs"
+  check "" "$(printf '%s\n' "$PROBE_OUT" | grep -v '^:cf:')" \
+    "and offers nothing, which is all there is on disk to offer"
 fi
 
 step "14. Both halves of a link endpoint"
