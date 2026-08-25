@@ -108,6 +108,7 @@ describe("GithubFabricTarget", () => {
             account: "ianh",
           });
           expect(await target.readPullRequests()).toEqual([]);
+          expect(await target.readLastComplete()).toBeUndefined();
           expect(target.indexCellId().startsWith("of:")).toBe(false);
           expect(target.healthCellId().startsWith("of:")).toBe(false);
           expect(
@@ -261,6 +262,34 @@ describe("GithubFabricTarget", () => {
           }]);
           await expect(target.readPullRequests()).rejects.toThrow(
             "pull-request row is invalid: 0",
+          );
+
+          await writeGithubFabricCells(connection, [{
+            cell: target.cells.index,
+            value: {
+              schema: "commonfabric.github-connector.pull-request-index.v1",
+              formatVersion: 1,
+              generation: 1,
+              viewer: "someone-else",
+              pullRequests: [],
+            },
+          }]);
+          await expect(target.readPullRequests()).rejects.toThrow(
+            "index has an invalid shape",
+          );
+
+          await writeGithubFabricCells(connection, [{
+            cell: target.cells.index,
+            value: {
+              schema: "commonfabric.github-connector.pull-request-index.v1",
+              formatVersion: 1,
+              generation: 1,
+              viewer: "ianh",
+              pullRequests: [],
+            },
+          }]);
+          await expect(target.readLastComplete()).rejects.toThrow(
+            "index has an invalid shape",
           );
 
           await writeGithubFabricCells(connection, [{

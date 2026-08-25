@@ -397,6 +397,33 @@ describe("createGithubGraphqlTransport", () => {
     );
   });
 
+  it("reads JSON from a response without a stream body", async () => {
+    let jsonCalls = 0;
+    const response = {
+      ok: true,
+      status: 200,
+      body: null,
+      json: () => {
+        jsonCalls++;
+        return Promise.resolve({ data: { viewer: "ianh" } });
+      },
+    } as unknown as Response;
+    const transport = createGithubGraphqlTransport({
+      token: "secret",
+      fetch: () => Promise.resolve(response),
+    });
+
+    await expect(transport({ query: "query", variables: {} })).resolves
+      .toEqual({ data: { viewer: "ianh" } });
+
+    const controller = new AbortController();
+    controller.abort(new Error("shutdown"));
+    await expect(
+      transport({ query: "query", variables: {} }, controller.signal),
+    ).rejects.toThrow("shutdown");
+    expect(jsonCalls).toBe(1);
+  });
+
   it("cancels a pending response body when the request is aborted", async () => {
     let bodyCancelled = false;
     const bodyRead = Promise.withResolvers<void>();

@@ -254,8 +254,8 @@ async function readJsonResponse(
   response: Response,
   signal?: AbortSignal,
 ): Promise<unknown> {
-  if (response.body === null) return await response.json();
   signal?.throwIfAborted();
+  if (response.body === null) return await response.json();
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let text = "";
@@ -374,9 +374,7 @@ export class GithubClient {
     );
     pullRequests.push(...await this.#retainUnknownMissing(missing, signal));
     return {
-      viewer: viewer ?? (() => {
-        throw new Error("GitHub collection returned no viewer");
-      })(),
+      viewer: viewer!,
       observedAt,
       pullRequests,
     };
