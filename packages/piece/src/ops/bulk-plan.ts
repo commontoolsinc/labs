@@ -77,6 +77,14 @@ export interface PieceExpect {
    * transition appends a baseline revision, so a survey cannot read one for it.
    */
   revisionId?: string;
+  /**
+   * The hash of the piece's stored input document, recorded by a repair's
+   * dry run. It is the repair row's precondition the way the reference pair
+   * is a retarget row's: the apply refuses a row whose stored document no
+   * longer hashes to it, because a document something else moved is a stop,
+   * not an overwrite.
+   */
+  documentHash?: string;
 }
 
 /** Replace a piece's source with the program a local source closure produces. */
@@ -142,8 +150,21 @@ export interface RestoreOp {
   revisionId?: string;
 }
 
+/**
+ * Run a caller-supplied fixer over the piece's stored input document. The
+ * fixer itself is a TypeScript module the run imports, so the plan records
+ * only its name for readers and for diffing — the row's enforceable half is
+ * `expect.documentHash`, which pins the document the fixer's answer was
+ * computed from.
+ */
+export interface RepairOp {
+  kind: "repair";
+  /** The fixer's name as supplied — a module path or label; never resolved. */
+  fixer: string;
+}
+
 /** What a plan row does to its piece, absent on a survey-only row. */
-export type PieceOp = RetargetOp | RestoreOp;
+export type PieceOp = RetargetOp | RestoreOp | RepairOp;
 
 /** One piece in a plan: the piece, its precondition, and its operation. */
 export interface PiecePlanRow {
@@ -276,6 +297,16 @@ export function deriveRollbackPlan(
         "names pieces the survey did not account for.",
     );
   }
+  const repairs = plan.rows.filter((row) => row.op?.kind === "repair");
+  if (repairs.length > 0) {
+    // A repair's reversal would be the inverse fixer, which does not exist;
+    // silently dropping the rows would launder a partial rollback into a
+    // complete-looking one.
+    throw new Error(
+      "No rollback can be derived: repair rows have no derivable " +
+        "reversal — " + repairs.map((row) => row.piece).join(", ") + ".",
+    );
+  }
   const unretained = plan.rows.filter((row) =>
     row.op?.kind === "retarget" && !row.expect.retained
   );
@@ -402,10 +433,18 @@ function isPlanRow(value: unknown): value is PiecePlanRow {
     expect.patternIdentity === "" ||
     typeof expect.symbol !== "string" || expect.symbol === "" ||
     typeof expect.retained !== "boolean" ||
-    !isOptionalName(expect.revisionId)
+    !isOptionalName(expect.revisionId) ||
+    !isOptionalName(expect.documentHash)
   ) return false;
   if (value.op === undefined) return true;
   if (!isPieceOp(value.op)) return false;
+  if (value.op.kind === "repair") {
+    // A repair row's verifiable half is the document hash: without one the
+    // row cannot be resumed or verified from the artifact, so the codec
+    // requires it rather than carrying a row no run could check.
+    return typeof expect.documentHash === "string" &&
+      expect.documentHash !== "";
+  }
   // A row whose operation produces the reference the row already records is
   // unverifiable: a diff could not tell "landed" from "never ran". Such a
   // row is a no-op to drop, not an operation to carry.
@@ -415,6 +454,9 @@ function isPlanRow(value: unknown): value is PiecePlanRow {
 
 function isPieceOp(value: unknown): value is PieceOp {
   if (!isRecord(value)) return false;
+  if (value.kind === "repair") {
+    return typeof value.fixer === "string" && value.fixer !== "";
+  }
   if (
     typeof value.patternIdentity !== "string" ||
     value.patternIdentity === "" ||

@@ -6,12 +6,15 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "@commonfabric/runner";
 
 import type { Cell as BuilderCell } from "../../../runner/src/builder/types.ts";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+
 import {
   collectLinkPaths,
   documentChanges,
   evaluateFixer,
   repairPieces,
 } from "../../src/ops/bulk-repair.ts";
+import { decodePlan, encodePlan } from "../../src/ops/bulk-plan.ts";
 import type { PieceController } from "../../src/ops/piece-controller.ts";
 import { PiecesController } from "../../src/ops/pieces-controller.ts";
 import { surveyPieces } from "../../src/ops/bulk-survey.ts";
@@ -82,20 +85,42 @@ describe("bulk-repair", () => {
         { a: 2, nested: { keep: true, flip: "y" } },
       );
       expect(changes).toEqual([
-        { path: "a", before: 1, after: 2 },
-        { path: "nested/flip", before: "x", after: "y" },
+        { path: "a", kind: "changed", before: 1, after: 2 },
+        { path: "nested/flip", kind: "changed", before: "x", after: "y" },
       ]);
     });
 
     it("reports a replaced container as one change, not its every leaf", () => {
       const changes = documentChanges({ list: [1, 2, 3] }, { list: "gone" });
       expect(changes).toEqual([
-        { path: "list", before: [1, 2, 3], after: "gone" },
+        { path: "list", kind: "changed", before: [1, 2, 3], after: "gone" },
       ]);
     });
 
     it("returns no rows for equal documents", () => {
       expect(documentChanges({ a: [1] }, { a: [1] })).toEqual([]);
+    });
+
+    it("reports presence as its own fact, apart from a changed value", () => {
+      expect(documentChanges({ a: 1 }, { a: 1, b: 2 })).toEqual([
+        { path: "b", kind: "added", after: 2 },
+      ]);
+      expect(documentChanges({ a: 1, b: 2 }, { a: 1 })).toEqual([
+        { path: "b", kind: "removed", before: 2 },
+      ]);
+      expect(documentChanges({ a: undefined }, { a: 3 })).toEqual([
+        { path: "a", kind: "changed", before: undefined, after: 3 },
+      ]);
+    });
+
+    it("treats a Fabric special value as one atomic leaf", () => {
+      const before = { bytes: new FabricBytes(new Uint8Array([1])) };
+      const after = { bytes: new FabricBytes(new Uint8Array([2])) };
+      expect(documentChanges(before, before)).toEqual([]);
+      const changes = documentChanges(before, after);
+      expect(changes.length).toBe(1);
+      expect(changes[0].path).toBe("bytes");
+      expect(changes[0].kind).toBe("changed");
     });
   });
 
@@ -131,7 +156,7 @@ describe("bulk-repair", () => {
       expect(outcome).toEqual({
         kind: "change",
         document: { seed: "A", keep: 1 },
-        changes: [{ path: "seed", before: "a", after: "A" }],
+        changes: [{ path: "seed", kind: "changed", before: "a", after: "A" }],
       });
     });
 
@@ -206,7 +231,7 @@ describe("bulk-repair", () => {
       expect(outcome.kind).toBe("change");
       if (outcome.kind !== "change") throw new Error("expected a change");
       expect(outcome.changes).toEqual([
-        { path: "wrap", before: { a: 1, b: 2 }, after: 7 },
+        { path: "wrap", kind: "changed", before: { a: 1, b: 2 }, after: 7 },
       ]);
     });
 
@@ -266,7 +291,7 @@ describe("bulk-repair", () => {
       expect(outcome.kind).toBe("change");
       if (outcome.kind !== "change") throw new Error("expected a change");
       expect(outcome.changes).toEqual([
-        { path: "title", before: "t", after: "renamed" },
+        { path: "title", kind: "changed", before: "t", after: "renamed" },
       ]);
     });
 
@@ -288,6 +313,21 @@ describe("bulk-repair", () => {
       expect(outcome.kind).toBe("refused");
       if (outcome.kind !== "refused") throw new Error("expected a refusal");
       expect(outcome.problem).toContain("<root>");
+    });
+
+    it("carries a Fabric special value through an identity fixer untouched", () => {
+      // The failure this guards: a structural clone reads a bytes value as
+      // an empty shell, so an identity fixer would "return" a corrupted
+      // document with an empty diff and the write would destroy the value.
+      const document = { bytes: new FabricBytes(new Uint8Array([1, 2])) };
+      expect(evaluateFixer(document, (d) => ({ ...d }))).toEqual({
+        kind: "conforms",
+      });
+      const changed = evaluateFixer(document, (d) => ({
+        ...d,
+        bytes: new FabricBytes(new Uint8Array([9])),
+      }));
+      expect(changed.kind).toBe("change");
     });
 
     it("is safe against a fixer that mutates its argument", () => {
@@ -364,6 +404,7 @@ describe("bulk-repair", () => {
       const report = await repairPieces(pieces, {
         selector: collectionOf(holder),
         fixer: upperSeed,
+        fixerName: "upper-seed.ts",
       });
 
       expect(report.rows).toEqual([
@@ -371,12 +412,87 @@ describe("bulk-repair", () => {
           piece: a.id,
           phase: "members",
           verdict: "would-change",
-          changes: [{ path: "seed", before: "alpha", after: "ALPHA" }],
+          documentHash: report.rows[0].documentHash,
+          changes: [
+            { path: "seed", kind: "changed", before: "alpha", after: "ALPHA" },
+          ],
         },
-        { piece: b.id, phase: "members", verdict: "conforms" },
+        {
+          piece: b.id,
+          phase: "members",
+          verdict: "conforms",
+          documentHash: report.rows[1].documentHash,
+        },
       ]);
+      expect(report.rows[0].documentHash).toBeDefined();
       expect(report.applied).toBe(0);
       expect(report.complete).toBe(true);
+      expect((await rawInput(a)).seed).toBe("alpha");
+
+      // The run's record is a plan artifact: each evaluated row carries its
+      // document-hash precondition and the named repair, and the codec
+      // round-trips it.
+      expect(report.plan.rows.map((row) => row.op)).toEqual([
+        { kind: "repair", fixer: "upper-seed.ts" },
+        { kind: "repair", fixer: "upper-seed.ts" },
+      ]);
+      expect(report.plan.rows[0].expect.documentHash)
+        .toBe(report.rows[0].documentHash);
+      expect(decodePlan(encodePlan(report.plan))).toEqual(report.plan);
+    });
+
+    it("stops an apply on a row whose document moved off its plan hash", async () => {
+      const a = await member("alpha");
+      const b = await member("bravo");
+      const holder = await seedHolder([a, b]);
+      const dry = await repairPieces(pieces, {
+        selector: collectionOf(holder),
+        fixer: upperSeed,
+        fixerName: "upper-seed.ts",
+      });
+
+      // Something other than the plan changes the first piece's document.
+      await a.input.set("altered", ["seed"]);
+      await pieces.runtime.idle();
+
+      const report = await repairPieces(pieces, {
+        selector: collectionOf(holder),
+        fixer: upperSeed,
+        plan: dry.plan,
+        apply: true,
+      });
+      expect(report.rows.map((row) => row.verdict)).toEqual([
+        "moved",
+        "unattempted",
+      ]);
+      expect(report.rows[0].problem).toContain(
+        "something other than this plan",
+      );
+      expect(report.applied).toBe(0);
+      expect((await rawInput(b)).seed).toBe("bravo");
+    });
+
+    it("returns a failed row, state-checked, when the write path refuses", async () => {
+      const a = await member("alpha");
+      const b = await member("bravo");
+      const holder = await seedHolder([a, b]);
+
+      const report = await repairPieces(pieces, {
+        // The answer breaks the piece's own input schema, so the write path
+        // refuses it — an operational failure the report must carry rather
+        // than escape with.
+        selector: collectionOf(holder),
+        fixer: (d) => ({ ...d, seed: 7 }),
+        apply: true,
+      });
+
+      expect(report.rows.map((row) => row.verdict)).toEqual([
+        "failed",
+        "unattempted",
+      ]);
+      expect(report.rows[0].problem).toContain("schema");
+      expect(report.rows[0].problem).toContain("still needs the repair");
+      expect(report.applied).toBe(0);
       expect((await rawInput(a)).seed).toBe("alpha");
     });
 

@@ -10,6 +10,7 @@ export {
   type PiecePlanRow,
   type PlanEnumeration,
   type RegisteredOutside,
+  type RepairOp,
   type RestoreOp,
   type RetargetOp,
   type RetargetSource,

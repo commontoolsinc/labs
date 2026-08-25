@@ -73,6 +73,10 @@ import { compileProgram } from "./utils.ts";
 interface PieceCellIo {
   get(path?: CellPath): Promise<unknown>;
   set(value: unknown, path?: CellPath): Promise<void>;
+  edit(
+    produce: (stored: unknown) => { value: unknown } | undefined,
+    path?: CellPath,
+  ): Promise<{ wrote: boolean }>;
   getCell(): Promise<Cell<unknown>>;
 }
 
@@ -2800,10 +2804,28 @@ class PiecePropIo implements PieceCellIo {
   }
 
   async set(value: unknown, path?: CellPath) {
+    await this.edit(() => ({ value }), path);
+  }
+
+  /**
+   * Compute-and-set in one transaction. `produce` receives the value stored
+   * at `path`, read raw inside the transaction, and answers with the value
+   * to write — or `undefined`, which leaves the document unwritten while
+   * still committing the read, so a decision made on what was read holds
+   * against concurrent writers. On a commit conflict the whole closure
+   * re-runs against fresh state, `produce` included: what lands is always
+   * a function of the document the commit saw, never of an earlier read.
+   * `produce` must therefore be a pure function of its argument — it runs
+   * any number of times, and only its last answer is written.
+   */
+  async edit(
+    produce: (stored: unknown) => { value: unknown } | undefined,
+    path?: CellPath,
+  ): Promise<{ wrote: boolean }> {
     const pieces = this.#cc.pieces();
     let committedTargetCell: Cell<unknown> | undefined;
 
-    const { error } = await pieces.runtime.editWithRetry((tx) => {
+    const { ok, error } = await pieces.runtime.editWithRetry((tx) => {
       // Resolve the target from the piece metadata inside every retry. A
       // concurrent setsrc may replace the argument link/schema after this
       // write starts; reusing a cell captured before the retry would then
@@ -2825,6 +2847,10 @@ class PiecePropIo implements PieceCellIo {
 
       // Build the path with transaction context
       const txCell = targetCell.withTx(tx).key(...(path ?? []));
+
+      const decision = produce(txCell.getRaw({ lastNode: "value" }));
+      if (decision === undefined) return { wrote: false };
+      const value = decision.value;
 
       const writePath = path ?? [];
       const writeTargetDiffers = (
@@ -3298,6 +3324,7 @@ class PiecePropIo implements PieceCellIo {
         }
         setTerminalValue(value);
       }
+      return { wrote: true };
     });
     if (error) {
       if ("reason" in error && error.reason instanceof Error) {
@@ -3305,6 +3332,8 @@ class PiecePropIo implements PieceCellIo {
       }
       throw error;
     }
+    // A committed decision not to write leaves nothing to pull.
+    if (ok !== undefined && !ok.wrote) return { wrote: false };
 
     const targetCell = committedTargetCell ?? await this.#getTargetCell();
 
@@ -3314,6 +3343,7 @@ class PiecePropIo implements PieceCellIo {
       await targetCell.pull();
     }
     await pieces.synced();
+    return { wrote: true };
   }
 
   #getTargetCell(): Promise<Cell<unknown>> {

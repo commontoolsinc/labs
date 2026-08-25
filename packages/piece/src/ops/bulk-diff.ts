@@ -93,9 +93,13 @@ export function diffPlan(plan: PiecePlan, after: PiecePlan): PlanDiff {
       patternIdentity: row.expect.patternIdentity,
       symbol: row.expect.symbol,
     };
-    const target: PatternRef | undefined = row.op === undefined
-      ? undefined
-      : { patternIdentity: row.op.patternIdentity, symbol: row.op.symbol };
+    // A repair op carries no target reference: it moves the document, not
+    // the pattern, and its verification is the fixer's no-op rather than a
+    // reference comparison — so a reference diff reads it as op-less.
+    const target: PatternRef | undefined =
+      row.op === undefined || row.op.kind === "repair"
+        ? undefined
+        : { patternIdentity: row.op.patternIdentity, symbol: row.op.symbol };
     const key = canonicalPieceAddress(row.piece);
     const seen = afterById.get(key);
     afterById.delete(key);
