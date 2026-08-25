@@ -85,6 +85,12 @@ The mutation check removed only the new ordered-prefix apply in
 quarantine and failed at the missing schema-document assertion. Restoring that
 loop made it green again.
 
+The same pin also disconnects after buffering an effect, lets reconnect replace
+the session without resuming it, and inspects the next watch mutation. The
+first implementation returned the retired session's effect in the new
+session's ordered prefix. Clearing the buffer in the existing session-epoch
+reset made the test green; removing only that clear returns the retired frame.
+
 The pin exercises the memory client's encode/decode, reserved-schema
 expansion, message dispatch, `SpaceSession`, `WatchView`, the runner's
 `SpaceReplica` validator, and the replica document store. Its transport is a
@@ -100,7 +106,9 @@ it still emits its four expected quarantines with the fix present.
 wire order and returns them as `WatchMutationResult.precedingSyncs`. The runner
 applies that ordered prefix to its replica before it applies the response sync,
 then begins the live sync subscription. Multiple effects in the window stay in
-arrival order.
+arrival order. A successful resume keeps the same delivery epoch and its
+buffer; a non-resumed or changed session clears the buffer before the new
+session re-establishes its watches.
 
 No server frame construction or session-cache rule changes. In particular,
 the fix does not resend content-addressed schema documents: the server remains

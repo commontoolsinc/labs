@@ -7324,7 +7324,10 @@ supply; OW29/OW32/OW34 closed):
     server session had delivered and cached it. `SpaceSession` now returns
     those pre-response effects in wire order as
     `WatchMutationResult.precedingSyncs`, and `SpaceReplica` applies that
-    prefix before the response sync. No server retransmission changes.
+    prefix before the response sync. The buffer belongs to the session's
+    delivery epoch: a successful resume retains it, while a replaced
+    session clears it before re-establishing watches. No server
+    retransmission changes.
     The runner pin sends a valid schema document before the first
     `watch.add` response and a referrer in that response; it quarantines
     before the fix, stores both afterward, and reds again when only the
