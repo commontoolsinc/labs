@@ -29,10 +29,20 @@ export interface RecordIconModuleInput {
   icon: string | Default<"">;
 }
 
+// The module returns the emoji picker under `[UI]` as well. That key is left
+// out here: a result schema that names `$UI` is one the runner takes as
+// covering the view tree, and it stops pre-syncing that tree on resume.
+export interface RecordIconModuleOutput {
+  /** The palette emoji, then the chosen icon, or `(auto)` when none is set. */
+  [NAME]: string;
+  /** Custom emoji/icon */
+  icon: string;
+}
+
 // ===== The Pattern =====
 export const RecordIconModule = pattern<
   RecordIconModuleInput,
-  RecordIconModuleInput
+  RecordIconModuleOutput
 >(({ icon }) => {
   // Compose the emoji picker pattern
   const picker = EmojiPicker({ selectedEmoji: icon });
