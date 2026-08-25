@@ -7287,6 +7287,79 @@ supply; OW29/OW32/OW34 closed):
     true never-fires net), and any live `schema-doc-quarantine` log
     — each occurrence is evidence for that investigation, not a
     server-side hole.
+    ABSORB-CONTRACT FIX (the investigation session, this row's
+    second closing PR): the dismissal is LOCATED and CLOSED, and it
+    is not an interleaving — it is unconditional. The arrival
+    validator met a document naming an unresolved `cid:` schema by
+    DROPPING it, and the only heal on offer was a re-delivery of that
+    document (the FULL evaluation: watch.set, reconnect). Under the
+    elision the owner's reversal restored, an unchanged document is
+    never re-sent mid-session, so the drop was permanent for the
+    session: the client had dismissed information the server had sent
+    and would never send again. That is the owner's contract broken
+    on the plain path, with no race required — the reason CI's
+    delivery-window timing decided whether it fired is only that the
+    timing decides whether a mention ever precedes its cid, not
+    whether the drop is recoverable. Watched red at `4ac3b2e70` by
+    the register's new pin
+    (`runner/test/schema-doc-sync.test.ts`, "absorbs a doc whose cid
+    arrives in a LATER frame, with no re-delivery of the doc"): frame
+    one carries the mentioning doc, frame two carries ONLY the cid —
+    the elision shape, the sole further information the session ever
+    gets — and the doc stayed absent. The fix ABSORBS instead: an
+    entry whose refs cannot resolve yet is PARKED verbatim
+    (`#parkedOnSchemaClosure`) against the hashes it waits on, and
+    RELEASED — re-entering `applySessionSync`, so it is re-validated
+    and a stale park can never install unverified content — as soon
+    as those hashes resolve from any later frame; the drain is
+    iterative (a released entry may be the schema document that frees
+    the next) and bounded by the park's size. What stays parked names
+    a document this replica has never seen, so it is PULLED
+    (`hydrateParkedSchemaClosures`) — the answer
+    `hydrateArrivedCfcSchemaRefs` already gave for the `/cfc`
+    metadata refs these link-position refs sit beside, which is why
+    the two ref classes had opposite answers to one question. A
+    FORGED replacement for a content-addressed id stays a hard drop
+    (no later arrival makes it applicable). Fail-closed is UNCHANGED:
+    a parked doc is not visible, and the `schema-doc-quarantine`
+    diagnostic stands. CONSEQUENCE FOR THE CONTAINMENT: it is NOT
+    retired and must not be — the park makes the compliant path
+    self-healing rather than dependent on perfect retention, so the
+    containment is now the net under a genuinely absent document (a
+    hash the server never installed) and under any future producer
+    bug. Its ensure-driven pin still passes unchanged, because that
+    simulation drops cid upserts on EVERY frame including the
+    hydration pull's answer. RETENTION, examined and NOT patched: no
+    path was found by which a cid this replica applied later
+    disappears from it — `applySessionSync`'s
+    `upsert.seq < record.confirmed.seq` skip is harmless for content-
+    addressed docs (the content cannot differ), and `reset()`'s
+    `#docs.clear()` has one caller (`replaceProvisionalReplica`),
+    which builds the replacement replica on a FRESH session whose
+    delivery cache re-ships the closure. Retention hardening was
+    therefore left unbuilt rather than added without a red pin; the
+    park+pull makes it moot for correctness either way. RULED OUT as
+    the OW61 mechanism, each with evidence:
+    `experimentalConcurrentWatchRefresh`'s deferred watch-response
+    apply (a real ordering inversion, but the flag is DEFAULT OFF and
+    was off on the board); `handleEffect` with a null `#watchView`
+    (`WatchView.fromSync` absorbs with `emit:false`, so the frame
+    reaches no consumer — but both nulling sites set `#closed` first
+    and `handleEffect` returns early on it, so it is unreachable
+    while open); and the runner's `#updatePromises.size === 0`
+    consumer gate (harmless, because `watchAddSync` REUSES
+    `#watchView` rather than handing back a fresh instance).
+    STANDING HAZARD, reported not fixed (outside this row's fix and
+    deliberately pinned as-is today): `refreshWatchSet`'s
+    `view.close()` on a failed frame closes the SHARED WatchView —
+    its comment reasons about a per-refresh view that the client's
+    reuse means does not exist — which would silence every later push
+    frame for the session. The quarantine and the park together mean
+    `applySessionSync` no longer throws for the schema class, so the
+    path is far less reachable; it wants the coordinator's call
+    because `runner/test/schema-doc-sync.test.ts`'s "closes the
+    staged watch view when a frame fails validation" pins the current
+    behavior on purpose.
 
   - **OW62 — adopt-not-start: the piece-open seam is where the ON
     execution model's "one starter per piece" has to land. POST-FLIP
