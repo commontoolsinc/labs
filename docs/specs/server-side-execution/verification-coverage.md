@@ -7433,6 +7433,41 @@ supply; OW29/OW32/OW34 closed):
     whole closure where one document would do; it was built that way
     only because the investigation's mandate fenced the server side
     off.
+    BOARD 3 (the resync made UPSERTS-ONLY): EIGHT of ten pattern
+    shards green and 3/3 package lanes — the ON lanes' progression
+    across four boards at the true topology is 2 -> 2 -> 4 -> 8
+    shards, 1/3 -> 3/3 -> 3/3 -> 3/3 package lanes. Board 2 had
+    caught the escalation HARMING what it was meant to help: pattern
+    shard 7, green on board 1, failed on board 2 inside
+    `shopping-list.tsx` (`hasTags is not a function`, destructured
+    undefined) — data vanishing under a live pattern, because
+    `buildFullSync` derives its removes by diffing the session cache
+    against the freshly evaluated closure, so a legitimately
+    different closure carries removes for documents a running
+    consumer still reads. The resync is a REPAIR and never a
+    watch-set authority; it now applies upserts only, and shard 7
+    returned to green with 4, 5 and 9 joining it. TWO RESIDUALS, both
+    diagnosed, neither closed:
+    (a) SHARD 6 is STILL THIS DEFECT — `cid:fid1:zgJY1m9lR0…` missing
+    64 times in one run with ZERO `schema-closure-resync-failed`, so
+    the escalation fires and still does not obtain the document. The
+    suspected floor beneath the floor is the GRAPH-level staging this
+    row already describes ("stages a closure doc only while the
+    tracked graph has never delivered it"): a second elision layer
+    that a full `watch.set` does not clear either, which would mean
+    NO request a client can make recovers the document. Unverified —
+    it is the next thing to pin.
+    (b) SHARD 10 is NOT this defect: its degradation gate fails
+    because `PatternManager.writeBackCompileCache`
+    (`runner/src/pattern-manager.ts` :2208) throws the `/sourceMap`
+    CFC prepare abort — #6248's third signature, outside the delivery
+    path, and its own scope decision.
+    The other two signatures #6248 recorded are GONE from every
+    failing shard (`Failed to create or find default pattern` and
+    `No data at cell` both at zero), which retires #6248's
+    attribution of its whole board to the quarantine: part of that
+    residue was a second blast radius, and part of it — shard 7's —
+    was this fix's own.
 
   - **OW62 — adopt-not-start: the piece-open seam is where the ON
     execution model's "one starter per piece" has to land. POST-FLIP
