@@ -297,17 +297,27 @@ describe("piece-repair", () => {
         fixerPath: "/repairs/fix-seeds.ts",
         fixerName: "fix-seeds.ts",
       };
+      // One snapshot serves identity and execution alike; the stubs stand
+      // in for both halves of that single resolution.
+      const snapshot = {
+        main: "/fix-seeds.ts",
+        files: [{ name: "/fix-seeds.ts", contents: "// stub" }],
+      };
       const deps = {
         loadPieces: () => Promise.resolve(pieces),
         resolvePieceAddress: (_pieces: unknown, token: string) =>
           Promise.resolve(token),
-        importModule: (path: string) => {
+        resolveFixerProgram: (path: string) => {
           expect(path).toBe("/repairs/fix-seeds.ts");
-          return Promise.resolve(upperSeed);
+          return Promise.resolve(snapshot);
         },
-        computeFixerIdentity: (path: string) => {
-          expect(path).toBe("/repairs/fix-seeds.ts");
+        programIdentity: (program: unknown) => {
+          expect(program).toBe(snapshot);
           return Promise.resolve("impl-v1");
+        },
+        importProgram: (program: unknown) => {
+          expect(program).toBe(snapshot);
+          return Promise.resolve(upperSeed);
         },
       };
 
@@ -340,8 +350,8 @@ describe("piece-repair", () => {
       expect(applied.rows[0].verdict).toBe("repaired");
       expect(applied.complete).toBe(true);
 
-      // An edited fixer file resolves to a different closure identity, and
-      // the reviewed plan refuses before the module is even imported — a
+      // An edited fixer resolves to a different closure identity, and the
+      // reviewed plan refuses before the module is even imported — a
       // dynamic import runs top-level code nobody reviewed.
       let imported = false;
       await expect(
@@ -351,11 +361,11 @@ describe("piece-repair", () => {
           apply: true,
         }, {
           ...deps,
-          importModule: () => {
+          importProgram: () => {
             imported = true;
             return Promise.resolve(upperSeed);
           },
-          computeFixerIdentity: () => Promise.resolve("impl-v2"),
+          programIdentity: () => Promise.resolve("impl-v2"),
           readTextFile: () =>
             Promise.resolve(
               [
@@ -366,6 +376,34 @@ describe("piece-repair", () => {
         } as never),
       ).rejects.toThrow("different fixer implementation");
       expect(imported).toBe(false);
+
+      // A plan that cannot run any fixer — an op-less row — refuses before
+      // the import too, for the same reason.
+      let importedOpless = false;
+      await expect(
+        runRepair({} as never, {
+          ...base,
+          planPath: "/plans/repair.jsonl",
+          apply: true,
+        }, {
+          ...deps,
+          importProgram: () => {
+            importedOpless = true;
+            return Promise.resolve(upperSeed);
+          },
+          readTextFile: () =>
+            Promise.resolve(
+              [
+                JSON.stringify(dry.plan.header),
+                ...dry.plan.rows.map((row) => {
+                  const { op: _, ...survey } = row;
+                  return JSON.stringify(survey);
+                }),
+              ].join("\n"),
+            ),
+        } as never),
+      ).rejects.toThrow("no repair operation");
+      expect(importedOpless).toBe(false);
 
       const cell = await member.input.getCell();
       await cell.pull();
@@ -427,8 +465,13 @@ describe("piece-repair", () => {
           loadPieces: () => Promise.resolve(pieces),
           resolvePieceAddress: (_pieces: unknown, token: string) =>
             Promise.resolve(token),
-          importModule: () => Promise.resolve({}),
-          computeFixerIdentity: () => Promise.resolve("impl-v1"),
+          resolveFixerProgram: () =>
+            Promise.resolve({
+              main: "/empty.ts",
+              files: [{ name: "/empty.ts", contents: "" }],
+            }),
+          programIdentity: () => Promise.resolve("impl-v1"),
+          importProgram: () => Promise.resolve({}),
         } as never),
       ).rejects.toThrow("must default-export the fixer function");
     });

@@ -800,12 +800,16 @@ The supported output switches are:
 - `cf inspect ... --json` serializes an inspector result. `inspect html` does
   not have a JSON representation, so `html` and `--json` are mutually exclusive.
   `inspect graph --dot` and `--json` are also mutually exclusive.
-- `cf piece ls`, `piece search`, `piece inspect`, `piece survey`, `piece view`,
-  and `piece render` use `--json` as an output switch. `piece survey` reserves
-  stdout for the plan it emits (or, under `--json`, the full survey result); its
-  tally and findings go to stderr. `piece render --watch --json` writes only
-  JSON render records to stdout; watch status goes to stderr. Rendering a piece
-  without a UI fails instead of returning an empty successful JSON stream.
+- `cf piece ls`, `piece search`, `piece inspect`, `piece survey`,
+  `piece repair`, `piece view`, and `piece render` use `--json` as an output
+  switch. `piece survey` reserves stdout for the plan it emits (or, under
+  `--json`, the full survey result); its tally and findings go to stderr.
+  `piece repair` reserves stdout the same way — the emitted plan, or under
+  `--json` the full report in the canonical FabricValue encoding — with its
+  verdict tally and dry-run diff going to stderr. `piece render --watch --json`
+  writes only JSON render records to stdout; watch status goes to stderr.
+  Rendering a piece without a UI fails instead of returning an empty successful
+  JSON stream.
 - `cf get` and `cf wish` always return JSON. Their `--json` options are
   accepted, documented no-ops for callers that select JSON explicitly.
 - `cf check --json` compiles without evaluating and prints one object with a

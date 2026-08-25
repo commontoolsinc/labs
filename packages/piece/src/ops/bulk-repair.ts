@@ -176,6 +176,52 @@ export interface RepairOptions {
   apply?: boolean;
 }
 
+/**
+ * Hold a plan's rows to the run's fixer — every row must carry a repair
+ * operation, its recorded name must match, and its implementation pin must
+ * match. Exported apart from execution so a command seam can hold the pin
+ * BEFORE the fixer module is imported: a dynamic import runs top-level
+ * code, and an implementation the plan's reviewer never saw must not run
+ * even that much. `repairPieces` applies the same gate behind the seam.
+ */
+export function assertPlanRunsFixer(
+  plan: PiecePlan,
+  fixerName: string,
+  fixerIdentity: string,
+): void {
+  const unrunnable = plan.rows.filter((row) => row.op?.kind !== "repair");
+  if (unrunnable.length > 0) {
+    throw new Error(
+      "The plan carries rows with no repair operation, which cannot be " +
+        "executed or precondition-checked: " +
+        unrunnable.map((row) => row.piece).join(", ") + ".",
+    );
+  }
+  const disagreeing = plan.rows.filter((row) =>
+    row.op?.kind === "repair" && row.op.fixer !== fixerName
+  );
+  if (disagreeing.length > 0) {
+    throw new Error(
+      `The plan records a different fixer than this run supplies ` +
+        `(${fixerName}) on: ` +
+        disagreeing.map((row) => row.piece).join(", ") + ".",
+    );
+  }
+  const repinned = plan.rows.filter((row) =>
+    row.op?.kind === "repair" && row.op.fixerIdentity !== fixerIdentity
+  );
+  if (repinned.length > 0) {
+    // The name matching is not the pin: the file behind it may have
+    // changed since the plan was reviewed, and a reviewed plan must not
+    // execute an implementation nobody reviewed.
+    throw new Error(
+      "The plan pins a different fixer implementation than this run " +
+        "supplies, on: " + repinned.map((row) => row.piece).join(", ") +
+        ".",
+    );
+  }
+}
+
 /** How one evaluation of the fixer over one document came out. */
 export type FixerOutcome =
   | { kind: "conforms" }
@@ -611,41 +657,10 @@ export async function repairPieces(
           `targets ${survey.plan.header.space}.`,
       );
     }
-    const unrunnable = plan.rows.filter((row) => row.op?.kind !== "repair");
-    if (unrunnable.length > 0) {
-      throw new Error(
-        "The plan carries rows with no repair operation, which cannot be " +
-          "executed or precondition-checked: " +
-          unrunnable.map((row) => row.piece).join(", ") + ".",
-      );
-    }
-    const disagreeing = plan.rows.filter((row) =>
-      row.op?.kind === "repair" && row.op.fixer !== options.fixerName
-    );
-    if (disagreeing.length > 0) {
-      throw new Error(
-        `The plan records a different fixer than this run supplies ` +
-          `(${options.fixerName}) on: ` +
-          disagreeing.map((row) => row.piece).join(", ") + ".",
-      );
-    }
-    // No separate has-identity check: the pair rule above means a run with
-    // a fixerName carries the identity too, and the fixerName requirement
-    // for plans has already fired for a run with neither.
-    const repinned = plan.rows.filter((row) =>
-      row.op?.kind === "repair" &&
-      row.op.fixerIdentity !== options.fixerIdentity
-    );
-    if (repinned.length > 0) {
-      // The name matching is not the pin: the file behind it may have
-      // changed since the plan was reviewed, and a reviewed plan must not
-      // execute an implementation nobody reviewed.
-      throw new Error(
-        "The plan pins a different fixer implementation than this run " +
-          "supplies, on: " + repinned.map((row) => row.piece).join(", ") +
-          ".",
-      );
-    }
+    // The pair rule above means a run with a fixerName carries the
+    // identity too, and the fixerName requirement for plans has already
+    // fired for a run with neither.
+    assertPlanRunsFixer(plan, options.fixerName, options.fixerIdentity!);
     const surveyByPiece = new Map(members.map((row) => [row.piece, row]));
     const planPieces = new Set(plan.rows.map((row) => row.piece));
     const missing = members.filter((row) => !planPieces.has(row.piece));

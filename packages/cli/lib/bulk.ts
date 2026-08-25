@@ -7,10 +7,11 @@
  * above it stay seams.
  */
 
-import { toFileUrl } from "@std/path";
+import { dirname, join, toFileUrl } from "@std/path";
 
 import { resolvePieceAddress } from "@commonfabric/piece";
 import {
+  assertPlanRunsFixer,
   decodePlan,
   type Fixer,
   type PiecePin,
@@ -29,7 +30,7 @@ import {
   programEntryIdentity,
   resolveLocalSourceProgram,
 } from "@commonfabric/piece/ops/bulk-local";
-import type { JSONSchema } from "@commonfabric/runner";
+import type { JSONSchema, RuntimeProgram } from "@commonfabric/runner";
 
 import { loadPieces, type PieceConfig, type SpaceConfig } from "./piece.ts";
 
@@ -95,10 +96,15 @@ export interface RepairRunDependencies {
   loadPieces?: typeof loadPieces;
   resolvePieceAddress?: typeof resolvePieceAddress;
   readTextFile?: (path: string) => Promise<string>;
-  /** The module import, injectable so tests supply a fixer without disk. */
-  importModule?: (path: string) => Promise<unknown>;
-  /** The closure-identity computation, injectable the same way. */
-  computeFixerIdentity?: (path: string) => Promise<string>;
+  /**
+   * Resolve the fixer's closure snapshot — the one read of the authored
+   * sources that both the identity and the execution come from.
+   */
+  resolveFixerProgram?: (path: string) => Promise<RuntimeProgram>;
+  /** The snapshot's closure identity. */
+  programIdentity?: (program: RuntimeProgram) => Promise<string>;
+  /** Execute the snapshot — never the path it was read from. */
+  importProgram?: (program: RuntimeProgram) => Promise<unknown>;
 }
 
 /**
@@ -115,39 +121,29 @@ export async function runRepair(
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
   const resolve = deps.resolvePieceAddress ?? resolvePieceAddress;
   const selector = await resolveSelector(pieces, request.selector, resolve);
-  // The identity of the fixer module's authored closure, computed the way a
-  // retarget's source identity is — without compiling, and so without
-  // running anything — so the plan pins the implementation reviewed rather
-  // than a path whose file can change.
-  const computeIdentity = deps.computeFixerIdentity ??
-    (async (path: string) =>
-      await programEntryIdentity(
-        await resolveLocalSourceProgram(pieces.runtime, { main: path }),
-      ));
-  const fixerIdentity = await computeIdentity(request.fixerPath);
+  // One closure snapshot serves the whole run: the identity is computed
+  // from it and the execution imports it, so nothing on disk can change
+  // between the hash and the code — the path is read exactly once. The
+  // resolution and the hash are reads, never executions.
+  const program = await (deps.resolveFixerProgram ??
+    ((path: string) =>
+      resolveLocalSourceProgram(pieces.runtime, { main: path })))(
+      request.fixerPath,
+    );
+  const fixerIdentity = await (deps.programIdentity ?? programEntryIdentity)(
+    program,
+  );
   const plan = request.planPath === undefined ? undefined : decodePlan(
     await (deps.readTextFile ?? Deno.readTextFile)(request.planPath),
   );
   if (plan !== undefined) {
-    // The pin is held before the module is imported: a dynamic import
-    // evaluates the module's top-level code, and an implementation the
-    // plan's reviewer never saw must not run even that much. The library
-    // re-checks the same pin behind the seam.
-    const repinned = plan.rows.filter((row) =>
-      row.op?.kind === "repair" && row.op.fixerIdentity !== fixerIdentity
-    );
-    if (repinned.length > 0) {
-      throw new Error(
-        "The plan pins a different fixer implementation than " +
-          `${request.fixerName} resolves to, on: ` +
-          repinned.map((row) => row.piece).join(", ") +
-          ". Nothing was imported.",
-      );
-    }
+    // Every row is held to the run's fixer — operation, name, and pin —
+    // before the module is imported: a dynamic import evaluates top-level
+    // code, and a plan that cannot run this fixer must not run any of it.
+    // The library applies the same gate again behind the seam.
+    assertPlanRunsFixer(plan, request.fixerName, fixerIdentity);
   }
-  const importModule = deps.importModule ??
-    ((path: string) => import(toFileUrl(path).href));
-  const module = await importModule(request.fixerPath);
+  const module = await (deps.importProgram ?? importProgramSnapshot)(program);
   const fixer = (module as { default?: unknown }).default;
   if (typeof fixer !== "function") {
     throw new Error(
@@ -163,6 +159,29 @@ export async function runRepair(
     ...(plan === undefined ? {} : { plan }),
     ...(request.apply === true ? { apply: true } : {}),
   });
+}
+
+/**
+ * Execute a resolved closure snapshot: its files land in a fresh temporary
+ * directory — relative imports resolving among themselves exactly as they
+ * did on disk — and the entry is imported from there, so the code that runs
+ * is the code that was hashed, whatever happened to the original path
+ * since. The directory is removed once the module is loaded.
+ */
+async function importProgramSnapshot(
+  program: RuntimeProgram,
+): Promise<unknown> {
+  const dir = await Deno.makeTempDir({ prefix: "cf-fixer-snapshot" });
+  try {
+    for (const file of program.files) {
+      const target = join(dir, file.name);
+      await Deno.mkdir(dirname(target), { recursive: true });
+      await Deno.writeTextFile(target, file.contents);
+    }
+    return await import(toFileUrl(join(dir, program.main)).href);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
 }
 
 /** One `--retarget` flag, parsed: which phase, what source, what label. */

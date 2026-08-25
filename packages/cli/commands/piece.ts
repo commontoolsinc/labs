@@ -2286,7 +2286,7 @@ export const piece = targetOptions(
   /* piece survey */
   .command(
     "survey",
-    "Survey a holder's collection into a plan: one cheap read per piece, cross-checked against the piece registry (a --list survey claims no containment and is not cross-checked). Read-only. Provisional spelling — the bulk entry point may move when the write operations get a home (docs/plans/piece-bulk-operations.md, decision 1).",
+    "Survey a holder's collection into a plan: one cheap read per piece, cross-checked against the piece registry (a --list survey claims no containment and is not cross-checked). Read-only.",
   )
   .usage(pieceUsage)
   .example(
