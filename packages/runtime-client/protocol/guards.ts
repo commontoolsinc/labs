@@ -1,3 +1,12 @@
+/**
+ * Runtime shape tests for the IPC protocol's message types.
+ *
+ * Each one answers what its name asks and stops there. They test the fields a
+ * receiver dispatches on -- a discriminant, a message id -- and not the payload
+ * underneath, so a value passing one of these is routable rather than vetted.
+ * Each doc below says where its particular guarantee stops.
+ */
+
 import { isDID } from "@commonfabric/identity";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
@@ -26,6 +35,11 @@ import {
   WorkerReadyNotification,
 } from "./types.ts";
 
+/**
+ * Is `value` a {@link CellRef}? Checks that `path` is an array, `id` a
+ * non-empty string, and `space` a DID. The path's own entries are not
+ * examined, and nothing here says the cell it addresses exists.
+ */
 export function isCellRef(value: unknown): value is CellRef {
   if (!isObjectNotArray(value)) return false;
   return Array.isArray(value.path) && typeof value.id === "string" &&
@@ -33,6 +47,13 @@ export function isCellRef(value: unknown): value is CellRef {
     isDID(value.space);
 }
 
+/**
+ * Is `value` an {@link InitializationData}? The shallowest guard here: it
+ * checks `apiUrl` and `spaceDid` are strings and that `identity` is present at
+ * all, and looks at nothing else the type declares. What it establishes is
+ * that initialization has something to work with, not that the worker will
+ * accept it.
+ */
 export function isInitializationData(
   value: unknown,
 ): value is InitializationData {
@@ -43,6 +64,11 @@ export function isInitializationData(
   );
 }
 
+/**
+ * Is `value` an {@link IPCClientRequest}? Recognized by its `type` naming a
+ * {@link RequestType} member, which is what dispatch turns on. The fields that
+ * request type goes on to require are the handler's to check.
+ */
 export function isIPCClientRequest(value: unknown): value is IPCClientRequest {
   return (
     isObjectNotArray(value) &&
@@ -53,6 +79,11 @@ export function isIPCClientRequest(value: unknown): value is IPCClientRequest {
   );
 }
 
+/**
+ * Is `value` an {@link IPCClientMessage}? The request envelope: a numeric
+ * `msgId` wrapping something {@link isIPCClientRequest} accepts. Carries that
+ * guard's bound with it -- the request is routable, not vetted.
+ */
 export function isIPCClientMessage(value: unknown): value is IPCClientMessage {
   return (
     isObjectNotArray(value) &&
@@ -61,6 +92,11 @@ export function isIPCClientMessage(value: unknown): value is IPCClientMessage {
   );
 }
 
+/**
+ * Is `value` an {@link IPCClientNotification}? These carry no `msgId` and get
+ * no response, so the `type` naming a {@link ClientNotificationType} member is
+ * the whole of what distinguishes one.
+ */
 export function isIPCClientNotification(
   value: unknown,
 ): value is IPCClientNotification {
@@ -73,12 +109,23 @@ export function isIPCClientNotification(
   );
 }
 
+/**
+ * Is `value` anything the worker sends the connection -- a response or a
+ * notification? The transport's own traffic is not included: a ready or
+ * worker-console notification is handled before dispatch reaches here.
+ */
 export function isIPCRemoteMessage(
   value: unknown,
 ): value is IPCRemoteMessage {
   return isIPCRemoteResponse(value) || isIPCRemoteNotification(value);
 }
 
+/**
+ * Is `value` an {@link IPCRemoteResponse}? A numeric `msgId` identifies one,
+ * and a present `error` must be a string. A bare `{ msgId }` therefore
+ * qualifies, that being how the worker acks a request whose handler returned
+ * nothing. The `data` a successful response carries is not examined.
+ */
 export function isIPCRemoteResponse(
   value: unknown,
 ): value is IPCRemoteResponse {
@@ -89,6 +136,11 @@ export function isIPCRemoteResponse(
   );
 }
 
+/**
+ * Is `value` an {@link IPCRemoteNotification}? The disjunction of the seven
+ * per-notification guards below, so this admits exactly what one of them
+ * admits and adds nothing of its own.
+ */
 export function isIPCRemoteNotification(
   value: unknown,
 ): value is IPCRemoteNotification {
@@ -98,6 +150,12 @@ export function isIPCRemoteNotification(
     isVDomBatchNotification(value) || isPendingWritesNotification(value);
 }
 
+/**
+ * Is `value` a {@link CellUpdateNotification}? Requires `cell` to be an object
+ * and `value` to be *present* rather than of any particular shape, since
+ * `undefined` is a value a cell can hold and the absent case has to stay
+ * distinguishable from it.
+ */
 export function isCellUpdateNotification(
   value: unknown,
 ): value is CellUpdateNotification {
@@ -109,6 +167,11 @@ export function isCellUpdateNotification(
   );
 }
 
+/**
+ * Is `value` a {@link ConsoleNotification}? Checks `method` is a string and
+ * `args` an array; what the arguments themselves are is the decoder's
+ * question, not this one's.
+ */
 export function isConsoleNotification(
   value: unknown,
 ): value is ConsoleNotification {
@@ -120,6 +183,11 @@ export function isConsoleNotification(
   );
 }
 
+/**
+ * Is `value` a {@link NavigateRequestNotification}? `targetCellRef` is checked
+ * for being an object rather than through {@link isCellRef}, so a malformed
+ * target reaches the client and fails there instead.
+ */
 export function isNavigateRequestNotification(
   value: unknown,
 ): value is NavigateRequestNotification {
@@ -130,6 +198,11 @@ export function isNavigateRequestNotification(
   );
 }
 
+/**
+ * Is `value` an {@link ErrorNotification}? Only `message` is required; the
+ * context fields an error may carry -- its piece, space, pattern, and stack --
+ * are all optional and unchecked.
+ */
 export function isErrorNotification(
   value: unknown,
 ): value is ErrorNotification {
@@ -140,6 +213,11 @@ export function isErrorNotification(
   );
 }
 
+/**
+ * Is `value` a {@link TelemetryNotification}? The `marker` is checked for
+ * being an object and not for which marker it is, that being a discrimination
+ * the telemetry consumer makes.
+ */
 export function isTelemetryNotification(
   value: unknown,
 ): value is TelemetryNotification {
@@ -150,6 +228,10 @@ export function isTelemetryNotification(
   );
 }
 
+/**
+ * Is `value` a {@link PendingWritesNotification}? `pending` must be a boolean,
+ * which is the whole of what this notification carries.
+ */
 export function isPendingWritesNotification(
   value: unknown,
 ): value is PendingWritesNotification {
@@ -160,6 +242,11 @@ export function isPendingWritesNotification(
   );
 }
 
+/**
+ * Is `value` a {@link VDomBatchNotification}? Checks `batchId` is a number and
+ * `ops` an array, and looks inside neither `ops` nor `rootId`. A batch passing
+ * this can still carry an operation the applicator rejects.
+ */
 export function isVDomBatchNotification(
   value: unknown,
 ): value is VDomBatchNotification {
