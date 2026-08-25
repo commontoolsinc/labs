@@ -2,7 +2,7 @@
 // Do not edit by hand.
 //
 // The type module the pattern compiler serves for `commonfabric`, built
-// from packages/api/index.ts.
+// from packages/api/index.ts with each workspace module it re-exports inlined.
 //
 // To regenerate after changing the pattern API, run (from packages/static):
 //   deno task gen-commonfabric-types
@@ -36,18 +36,32 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
 // Fabric Value Types
 // ============================================================================
 //
-// Pattern-visible declarations for the fabric value type system. Canonical
-// implementations live in data-model submodule files (interface.ts,
-// fabric-primitives/FabricHash.ts, fabric-primitives/FabricEpochNsec.ts, etc.)
-// — these inline declarations mirror the public surface so the pattern compiler
-// can resolve them without relative imports.
-//
-// SYNC NOTE: These declarations must stay in sync with the canonical
-// definitions in the submodule files. If they drift, pattern type-checking
-// will diverge from runtime behavior.
-//
-// Every concrete FabricPrimitive subclass must have an instanceof-capable
-// declaration here (interface + constructor + declare-const with `new`).
+// Declared by `@commonfabric/data-model`, and re-exported here. The pattern
+// compiler resolves no bare specifier, so `generate-commonfabric-types.ts`
+// inlines this module's text when it builds the type file the sandbox is
+// served.
+
+/**
+ * Pattern-visible declarations for the fabric value type system, in the form
+ * that `@commonfabric/api` re-exports to patterns. Everything here is an
+ * interface, a type, or a `declare const`, except for the one brand-key
+ * constant, so the module's only runtime footprint is that constant.
+ *
+ * The canonical implementations live in this module's siblings --
+ * `interface.ts`, `fabric-primitives/FabricHash.ts`,
+ * `fabric-primitives/FabricEpochNsec.ts`, and the rest -- and these
+ * declarations mirror their public surface. The two must agree: where they
+ * drift, pattern type-checking diverges from runtime behavior.
+ *
+ * Every concrete `FabricPrimitive` subclass needs an instanceof-capable
+ * declaration here, that being an interface, a constructor interface, and a
+ * `declare const` combining the two.
+ *
+ * This module has no imports, and can have none. `@commonfabric/api`
+ * re-exports it to patterns, and the script that builds the type file the
+ * sandbox is served inlines this text rather than following a specifier out of
+ * it, so a specifier named here would reach a compiler that resolves none.
+ */
 
 /**
  * The nominal brand key declared on `FabricSpecialObject`. It exists only in

@@ -32,8 +32,9 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
 // ============================================================================
 //
 // Declared by `@commonfabric/data-model`, and re-exported here. The pattern
-// compiler resolves no bare specifier, so `generate-api-types.ts` inlines this
-// module's text when it builds the type file the sandbox is served.
+// compiler resolves no bare specifier, so `generate-commonfabric-types.ts`
+// inlines this module's text when it builds the type file the sandbox is
+// served.
 
 export * from "@commonfabric/data-model/api";
 

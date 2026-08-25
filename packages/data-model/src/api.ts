@@ -4,9 +4,9 @@
  * interface, a type, or a `declare const`, except for the one brand-key
  * constant, so the module's only runtime footprint is that constant.
  *
- * The canonical implementations live in this package's submodules --
- * `src/interface.ts`, `src/fabric-primitives/FabricHash.ts`,
- * `src/fabric-primitives/FabricEpochNsec.ts`, and their siblings -- and these
+ * The canonical implementations live in this module's siblings --
+ * `interface.ts`, `fabric-primitives/FabricHash.ts`,
+ * `fabric-primitives/FabricEpochNsec.ts`, and the rest -- and these
  * declarations mirror their public surface. The two must agree: where they
  * drift, pattern type-checking diverges from runtime behavior.
  *
@@ -14,9 +14,10 @@
  * declaration here, that being an interface, a constructor interface, and a
  * `declare const` combining the two.
  *
- * This module has no imports, and can have none: the pattern compiler serves
- * it to the sandbox as a single text keyed by name, and each further module it
- * named would have to be served the same way.
+ * This module has no imports, and can have none. `@commonfabric/api`
+ * re-exports it to patterns, and the script that builds the type file the
+ * sandbox is served inlines this text rather than following a specifier out of
+ * it, so a specifier named here would reach a compiler that resolves none.
  */
 
 /**
