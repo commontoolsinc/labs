@@ -731,6 +731,77 @@ describe("schema-doc-sync", () => {
     expect(replica.getDocument("of:absorb-carrier")).toEqual(carrierDoc);
   });
 
+  it("PULLS the cid a parked doc waits on and applies it, with nothing re-delivered (the OW61 board's shape)", async () => {
+    // #6248's ensure-ON board: the cid document IS installed in the
+    // space — the server elides it because this session already
+    // received it — and the replica that lacks it holds a mentioning
+    // doc it can never be re-sent. Absorbing is only half the answer;
+    // the client has to go GET what it is missing, or the parked doc
+    // waits for a full evaluation that never comes mid-session.
+    const depSchema: JSONSchemaObj = {
+      type: "object",
+      properties: { pulledLeaf: { type: "string" } },
+      title: "pulled-by-the-park",
+    };
+    const decomposed = decomposeSchema(depSchema);
+    await writeSchemaDocs(decomposed);
+    const depHash = parseExternalSchemaRef(decomposed.rootRef)!.taggedHash;
+
+    const provider = readerStorage.open(space);
+    const replica = provider.replica as unknown as {
+      applySessionSync(sync: unknown, type: string): void;
+      getDocument(uri: string): unknown;
+    };
+    const carrierDoc = {
+      value: {
+        linked: {
+          "/": {
+            [LINK_V1_TAG]: {
+              id: "of:pull-target",
+              path: [],
+              schema: { $ref: `cid:${depHash}` },
+            },
+          },
+        },
+      },
+    };
+    const released = defer<void>();
+    const cancel = (provider as unknown as {
+      sink: (uri: URI, callback: (doc: unknown) => void) => () => void;
+    }).sink("of:pull-carrier" as URI, (doc: unknown) => {
+      if (doc !== undefined) released.resolve();
+    });
+
+    // The elision shape: the mentioning doc alone, naming a cid this
+    // replica has never received. Nothing will re-deliver either one.
+    replica.applySessionSync({
+      type: "sync",
+      fromSeq: 950_000,
+      toSeq: 950_001,
+      upserts: [
+        {
+          branch: "",
+          id: "of:pull-carrier",
+          scope: "space",
+          seq: 1,
+          doc: carrierDoc,
+        },
+      ],
+      removes: [],
+    }, "integrate");
+    // Held, not visible — fail-closed survives.
+    expect(replica.getDocument("of:pull-carrier")).toBeUndefined();
+
+    // The park's own pull fetches the cid from the space and releases
+    // the carrier: absorbed, healed IN SESSION, no re-delivery. Waited
+    // on the release itself — the sink fires when the carrier becomes
+    // visible, which is the event under test.
+    await released.promise;
+    expect(replica.getDocument(`cid:${depHash}`)).toBeDefined();
+    expect(replica.getDocument("of:pull-carrier")).toEqual(carrierDoc);
+    cancel();
+  });
+
   it("the background consumer survives a frame that fails to apply and keeps consuming", async () => {
     const provider = readerStorage.open(space);
     const replica = provider.replica as unknown as {
