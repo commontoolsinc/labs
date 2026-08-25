@@ -9,6 +9,10 @@ import {
   assertRejects,
   assertStringIncludes,
 } from "@std/assert";
+import {
+  confirmDashboardConnectivity,
+  setDashboardConnectivityForTest,
+} from "../connectivity.ts";
 import type { Ctx, TileView } from "../types.ts";
 import type { ProxyStream } from "./prod-uptime.ts";
 import {
@@ -17,6 +21,9 @@ import {
   setProdUptimeHttpClientFactoryForTest,
   setProdUptimeProxyStreamOpenerForTest,
 } from "./prod-uptime.ts";
+
+// Most tests exercise host checks after public connectivity is established.
+confirmDashboardConnectivity();
 
 type ProxyFetchInit = RequestInit & { client?: Deno.HttpClient };
 type DnsReply = readonly string[] | Error;
@@ -167,6 +174,49 @@ async function withLatency(ms: number): Promise<TileView> {
     restore();
   }
 }
+
+Deno.test("prod uptime: waits for public connectivity before checking hosts", async () => {
+  let dnsReachable = true;
+  let fetches = 0;
+  let resolutions = 0;
+  const restoreConnectivity = setDashboardConnectivityForTest(false);
+  const restore = stub(
+    () => {
+      fetches++;
+      throw new TypeError("unreachable");
+    },
+    () => {
+      resolutions++;
+      return dnsReachable
+        ? ["100.64.0.1"]
+        : new Deno.errors.NotFound("no record");
+    },
+  );
+  try {
+    const waiting = await prodUptime.collect(ctx());
+    assertEquals(waiting.status, "unknown");
+    assertEquals(waiting.value, "—");
+    assertEquals(waiting.sub, "waiting for connectivity");
+    assertEquals(waiting.extra, undefined);
+    assertEquals(fetches, 0);
+    assertEquals(resolutions, 0);
+
+    confirmDashboardConnectivity();
+    const partialOutage = await prodUptime.collect(ctx());
+    assertEquals(partialOutage.status, "bad");
+    assertEquals(partialOutage.value, "2 hosts down");
+    assertEquals(fetches, 2);
+    assertEquals(resolutions, 14);
+
+    dnsReachable = false;
+    const outage = await prodUptime.collect(ctx());
+    assertEquals(outage.status, "bad");
+    assertEquals(outage.value, "7 hosts down");
+  } finally {
+    restore();
+    restoreConnectivity();
+  }
+});
 
 Deno.test("prod uptime: healthy servers keep pings while DNS-only hosts disappear", async () => {
   const fetched: string[] = [];
