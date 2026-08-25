@@ -62,8 +62,8 @@ Each construct family is classified as one of:
 | Reactive property access in JSX or helper-owned expressions | Supported | Authored reactive reads like `state.user.name` should remain natural and lower to explicit reactive access as needed |
 | Reactive element access with static or known-symbol keys | Supported | Forms like `items[0]`, `item[NAME]`, `state["foo"]` should lower predictably when the access path is statically representable |
 | Reactive ternary control flow in supported lowered value-expression sites | Supported | Authored `cond ? x : y` should preserve JavaScript branch meaning in JSX, top-level pattern-body value sites, and callback-local values inside supported collection callbacks |
-| Callback-local value bindings inside a supported synchronous plain-array `map` callback | Supported | A standard-library plain-array `map` callback runs during pattern build and collects its result. A render-collecting callback — one returning JSX, nullish or literal constants, or conditional/logical selections over those — embeds every lowered value in its view nodes, so its result may flow anywhere ordinary data flows, and its value-expression sites are pattern-body value sites: a binding such as `const isToday = weekDates?.[colIdx] === todayDate` inside `COLUMN_INDICES.map(...)` lowers to a per-iteration lift-applied computation. A value-collecting callback keeps the same sites when the map call is the JSX child itself or the direct return of a synchronous JSX-local IIFE, concise or block-bodied |
-| Reactive callback-local values inside an escaping value-collecting, async, or generator plain-array `map` | Unsupported | A value-collecting callback returns lowered values, so the mapped array holds cells that only direct JSX-child rendering can read: an ordinary consumer of the array interprets the cell objects, including after the array flows through a local. Async callbacks resume outside pattern construction, and generator callbacks are not executed by `map`. Return JSX from the callback, keep the map result as the JSX child, or move the whole computation into an explicit supported owner |
+| Callback-local value bindings inside a supported synchronous plain-array `map` callback | Supported | A standard-library plain-array `map` callback runs during pattern build and collects its result. A render-collecting callback — one directly returning JSX, `null`, the global `undefined` value, or a literal constant — embeds every lowered value in its view nodes, so its result may flow anywhere ordinary data flows, and its value-expression sites are pattern-body value sites: a binding such as `const isToday = weekDates?.[colIdx] === todayDate` inside `COLUMN_INDICES.map(...)` lowers to a per-iteration lift-applied computation. A conditional or logical return root is value-collecting because expression-site lowering rewrites the selection itself to a reactive helper cell. A value-collecting callback keeps the same sites when the map call is the JSX child itself or the direct return of a synchronous JSX-local IIFE, concise or block-bodied |
+| Reactive callback-local values inside an escaping value-collecting, async, or generator plain-array `map` | Unsupported | A value-collecting callback returns lowered values, so the mapped array holds cells that only direct JSX-child rendering can read: an ordinary consumer of the array interprets the cell objects, including after the array flows through a local. Async callbacks resume outside pattern construction, and generator callbacks are not executed by `map`. Keep the map result as the JSX child, move conditional/logical selection inside a concrete returned JSX node, or move the whole computation into an explicit supported owner |
 | Callback-local value bindings inside a result-interpreting array callback | Unsupported | `filter`, `find`, `some`, `every`, `sort`, `flatMap`, and `reduce` read what their callback returns while they run — as a boolean, a number, an array test, or the next accumulator. A lifted binding returned from one of those is a cell rather than the value the method expects, so these callbacks carry no pattern-owned wrapper site and a reactive computation in one still moves into `computed(...)` |
 | Reactive logical control flow in supported lowered pattern-owned expression sites (`&&`, `||`, `??`) | Supported | Reactive short-circuiting should preserve authored JavaScript meaning where the expression-site policy admits lowering |
 | Authored helper control flow (`ifElse`, `when`, `unless`) | Supported | These are first-class reactive control-flow forms, not mere implementation helpers |
@@ -281,12 +281,15 @@ expression context. A synchronous standard-library plain-array `map` callback
 shares it: it runs during pattern build, `map` collects what it returns
 without reading it, and a value site in one is a pattern-body value site. What
 the callback returns decides how far the collected result may travel. A
-render-collecting callback — returning JSX, nullish or literal constants, or
-conditional/logical selections over those — embeds every lowered value in its
+render-collecting callback — directly returning JSX, `null`, the global
+`undefined` value, or a literal constant — embeds every lowered value in its
 view nodes, so the collected array is ordinary data and may flow anywhere. A
-value-collecting callback can return a lowered value, so its collected array
-holds cells and must itself be the JSX child — directly, or as the direct
-return of a synchronous JSX-local IIFE, concise or block-bodied.
+conditional or logical return root is value-collecting even when its branches
+are JSX or nullish, because expression-site lowering rewrites the selection
+itself to a reactive helper cell. A value-collecting callback can return a
+lowered value, so its collected array holds cells and must itself be the JSX
+child — directly, or as the direct return of a synchronous JSX-local IIFE,
+concise or block-bodied.
 
 **Good here**
 

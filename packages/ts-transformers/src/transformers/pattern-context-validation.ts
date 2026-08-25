@@ -358,9 +358,9 @@ export class PatternContextValidationTransformer
           `collected array holds cells rather than values, and only a ` +
           `direct JSX child rendering can read them. An ordinary consumer ` +
           `of the mapped array would interpret the cell objects instead. ` +
-          `Make the map the JSX child, return JSX from the callback so ` +
-          `lowered values stay inside the view nodes, or move the whole ` +
-          `consuming computation into computed(() => ...).`
+          `Make the map the JSX child, move conditional or logical selection ` +
+          `inside a concrete returned JSX node, or move the whole consuming ` +
+          `computation into computed(() => ...).`
         : decision.reason === "async-callback"
         ? `An async plain-array map callback resumes outside pattern ` +
           `construction, so it cannot own reactive computations. Keep the ` +

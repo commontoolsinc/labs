@@ -91,12 +91,12 @@ landed after the snapshot above:
 A synchronous `map` callback on an ordinary JavaScript array inside a pattern
 body carries pattern-owned expression sites when its collected values stay on
 the render path. What the callback returns decides how far the result may
-travel: a render-collecting callback — returning JSX, nullish or literal
-constants, or conditional/logical selections over those — embeds every
-lowered value in its view nodes, so its result may flow anywhere; a
-value-collecting callback can return a lowered value, so its map call must be
-the JSX child itself or the direct return of a synchronous IIFE — concise
-arrow body or explicit `return` — whose call is the child.
+travel: a render-collecting callback — directly returning JSX, `null`, the
+global `undefined` value, or a literal constant — embeds every lowered value in
+its view nodes, so its result may flow anywhere; a value-collecting callback
+can return a lowered value, so its map call must be the JSX child itself or the
+direct return of a synchronous IIFE — concise arrow body or explicit `return`
+— whose call is the child.
 `supportsPatternOwnedWrapperCallbackSite`
 (`policy/callback-boundary.ts`) admits the `plain-array-value` boundary for
 that callback and result-flow shape, which
@@ -128,9 +128,10 @@ therefore has to stay on the uninterpreted render path rather than become an
 operand of a later call or a stored intermediate, and each unsupported map
 call reports one `pattern-context:computation` diagnostic, anchored on the
 call. A render-collecting callback has no such exposure — its collected view
-nodes are ordinary data — so no flow restriction applies to it; a conditional
-branch that is a bare literal counts as value-collecting, because under a
-reactive condition it lowers to a cell of plain data. Async
+nodes are ordinary data — so no flow restriction applies to it. Conditional
+and logical return roots are value-collecting even when their branches are JSX
+or nullish, because expression-site lowering rewrites the selection itself to a
+reactive helper cell. Async
 callbacks are excluded because their reactive work resumes after the
 construction frame, and generator callbacks because `map` never executes
 their bodies.

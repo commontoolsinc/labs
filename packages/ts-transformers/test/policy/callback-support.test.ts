@@ -562,7 +562,7 @@ Deno.test(
 );
 
 Deno.test(
-  "Callback support policy: a logical selection over JSX counts as render-collecting",
+  "Callback support policy: a logical selection over JSX stays on the direct render path",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(
       `
@@ -577,7 +577,70 @@ Deno.test(
     const semantics = getCallbackBoundarySemantics(callback, checker, context);
 
     assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a conditional selection over JSX stays on the direct render path",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const rows = items.map((item) => item > 1 ? <span>{item}</span> : null);
+      const result = <div>{rows}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findMapCallback(sourceFile);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+  },
+);
+
+Deno.test(
+  "Callback support policy: the global undefined value is render-collecting",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const rows = items.map(() => undefined).filter(Boolean);
+      const result = <div>{rows}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findMapCallback(sourceFile);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
     assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, true);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a local named undefined is value-collecting",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const rows = items.map((item) => {
+        const undefined = item + 1;
+        return undefined;
+      }).filter(Boolean);
+      const result = <div>{rows}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findMapCallback(sourceFile);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
   },
 );
 

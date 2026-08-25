@@ -3720,6 +3720,120 @@ Deno.test("Reactive .get() Validation", async (t) => {
   );
 
   await t.step(
+    "errors when a conditional map return flows to an ordinary consumer",
+    async () => {
+      const source = `      import { pattern, UI } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ target: string }>(({ target }) => {
+        const rows = VALUES.map((value) => {
+          const matches = value === target;
+          return matches ? <span>{value}</span> : null;
+        }).filter(Boolean);
+        return { [UI]: <div>{rows}</div> };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
+      assertStringIncludes(
+        errors.map((error) => error.message).join("\n"),
+        "ordinary consumer of the mapped array",
+      );
+    },
+  );
+
+  await t.step(
+    "errors when a logical map return flows to an ordinary consumer",
+    async () => {
+      const source = `      import { pattern, UI } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ target: string }>(({ target }) => {
+        const rows = VALUES.map((value) => {
+          const matches = value === target;
+          return matches && <span>{value}</span>;
+        }).filter(Boolean);
+        return { [UI]: <div>{rows}</div> };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
+      assertStringIncludes(
+        errors.map((error) => error.message).join("\n"),
+        "ordinary consumer of the mapped array",
+      );
+    },
+  );
+
+  await t.step(
+    "allows a conditional map return as the direct JSX child",
+    async () => {
+      const source = `      import { pattern, UI } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ target: string }>(({ target }) => ({
+        [UI]: (
+          <div>
+            {VALUES.map((value) => {
+              const matches = value === target;
+              return matches ? <span>{value}</span> : null;
+            })}
+          </div>
+        ),
+      }));
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "the JSX-child renderer may read the conditional helper cell",
+      );
+    },
+  );
+
+  await t.step(
+    "errors when a shadowed undefined binding carries a cell off the render path",
+    async () => {
+      const source = `      import { pattern } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ target: string }>(({ target }) => {
+        const selected = VALUES.map((value) => {
+          const undefined = value === target;
+          return undefined;
+        }).filter(Boolean);
+        return { selected };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
+      assertStringIncludes(
+        errors.map((error) => error.message).join("\n"),
+        "ordinary consumer of the mapped array",
+      );
+    },
+  );
+
+  await t.step(
     "allows a value-collecting map returned from a concise-body JSX-local IIFE",
     async () => {
       const source = `      import { pattern, UI } from "commonfabric";

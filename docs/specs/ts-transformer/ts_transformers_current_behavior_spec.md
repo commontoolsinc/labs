@@ -605,8 +605,9 @@ Diagnostics emitted in all modes:
     callback holds:
     - a value-collecting callback whose result leaves the direct JSX-child
       flow ("returns a reactive value…"; guidance: make the map the JSX
-      child, return JSX from the callback, or move the whole consuming
-      computation into `computed(() => ...)`)
+      child, move conditional/logical selection inside a concrete returned
+      JSX node, or move the whole consuming computation into
+      `computed(() => ...)`)
     - an async callback ("resumes outside pattern construction…")
     - a generator callback ("does not execute a generator callback body…")
   - validation first checks the shared lowerable-expression-site policy; only
@@ -723,12 +724,11 @@ so neither is admitted.
 
 What the callback returns then decides how far its result may travel:
 
-- A **render-collecting** callback returns view content — JSX, a nullish or
-  literal constant, or a conditional/logical selection over those. Every
-  lowered value it creates is embedded in the returned view nodes, so the
-  collected array holds view nodes and plain values, and the result may flow
-  anywhere ordinary data flows: through a local, a filter, a JSX attribute,
-  or a conditional.
+- A **render-collecting** callback directly returns JSX, `null`, the global
+  `undefined` value, or a literal constant. Every lowered value it creates is
+  embedded in the returned view nodes, so the collected array holds view nodes
+  and plain values, and the result may flow anywhere ordinary data flows:
+  through a local, a filter, a JSX attribute, or a conditional.
 - A **value-collecting** callback can return a lowered value itself, so the
   collected array holds bare cells. Only the JSX-child rendering path knows
   how to read those, so the map call must be the JSX child expression itself,
@@ -736,10 +736,10 @@ What the callback returns then decides how far its result may travel:
   `return` — whose call is the child. A subsequent ordinary `filter`, `find`,
   `some`, `every`, sort, or reduction would interpret the cell objects, and
   the same mistake survives when the array flows through a local first, so
-  those flows report `pattern-context:computation` instead. A conditional
-  branch that is a bare literal (`cond ? "T" : "-"`) counts as
-  value-collecting: under a reactive condition it lowers to a cell of plain
-  data.
+  those flows report `pattern-context:computation` instead. Conditional and
+  logical return roots count as value-collecting even when every branch is JSX
+  or nullish: expression-site lowering rewrites the selection itself to a
+  reactive helper cell.
 
 This restriction applies when the callback inherits a pattern context. A
 plain-array map in a standalone or explicit compute-owned helper keeps

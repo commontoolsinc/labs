@@ -898,11 +898,10 @@ const COLLECTING_ARRAY_METHOD_NAMES = new Set(["map"]);
  * `map` stores each callback result without reading it, so what the collected
  * array can safely feed depends on what the callback returns:
  *
- * - A render-collecting callback returns view content: JSX, a nullish or
- *   literal constant, or a conditional/logical selection over those. Every
- *   lowered value it creates is embedded in the returned view nodes, so the
- *   collected array holds view nodes and plain values — ordinary data whose
- *   result may flow anywhere.
+ * - A render-collecting callback directly returns JSX, `null`, the global
+ *   `undefined` value, or a literal constant. Every lowered value it creates is
+ *   embedded in returned view nodes, so the collected array holds view nodes
+ *   and plain values — ordinary data whose result may flow anywhere.
  * - A value-collecting callback can return a lowered value itself. The
  *   collected array then holds reactive cells, and only the JSX-child
  *   lowering path knows how to read those: an ordinary consumer (`filter`,
@@ -977,7 +976,13 @@ export function classifyPlainArrayMapWrapperSite(
   ) {
     return "generator-callback";
   }
-  if (plainArrayMapCallbackCollectsRenderValues(callback)) {
+  if (
+    plainArrayMapCallbackCollectsRenderValues(
+      callback,
+      checker,
+      isSourceFileDefaultLibrary,
+    )
+  ) {
     return "supported";
   }
   return flowsDirectlyToJsxChild(call) ? "supported" : "result-not-direct-jsx";
@@ -997,36 +1002,52 @@ export function isRenderSafePlainArrayMapCallback(
 
 /**
  * True when every value the callback can hand to `map` is render content: a
- * JSX element or fragment, a nullish value, a literal constant, or a
- * conditional/logical selection over those. A lowered computation inside such
- * a callback is embedded in the returned view nodes, so the collected array
- * never holds a bare cell and the map result needs no flow restriction.
+ * JSX element or fragment, `null`, the global `undefined` value, or a literal
+ * constant. A lowered computation inside such a callback is embedded in the
+ * returned view nodes, so the collected array never holds a bare cell and the
+ * map result needs no flow restriction.
  *
- * A conditional or logical selection can itself lower to a cell when its
- * condition is reactive, but that cell carries view content and is read by the
- * same child-rendering path that reads any other cell-valued child. Literal
- * branches are excluded below the top level for exactly that reason:
- * `cond ? "T" : "-"` under a reactive condition lowers to a cell of plain
- * data, which only the JSX-child path may collect.
+ * Conditional and logical return roots are value-collecting even when their
+ * branches are view content: expression-site lowering rewrites the selection
+ * itself to a reactive helper, so `map` collects a cell. Only the JSX-child
+ * path may collect that cell.
  */
 function plainArrayMapCallbackCollectsRenderValues(
   callback: ts.ArrowFunction | ts.FunctionExpression,
+  checker: ts.TypeChecker,
+  isSourceFileDefaultLibrary: (sourceFile: ts.SourceFile) => boolean,
 ): boolean {
   const body = callback.body;
   if (!ts.isBlock(body)) {
-    return isRenderCollectedValue(body, true);
+    return isRenderCollectedValue(
+      body,
+      checker,
+      isSourceFileDefaultLibrary,
+    );
   }
-  return !hasValueCollectingReturn(body);
+  return !hasValueCollectingReturn(
+    body,
+    checker,
+    isSourceFileDefaultLibrary,
+  );
 }
 
-function hasValueCollectingReturn(body: ts.Block): boolean {
+function hasValueCollectingReturn(
+  body: ts.Block,
+  checker: ts.TypeChecker,
+  isSourceFileDefaultLibrary: (sourceFile: ts.SourceFile) => boolean,
+): boolean {
   const visit = (node: ts.Node): boolean | undefined => {
     if (ts.isFunctionLike(node)) {
       return undefined;
     }
     if (ts.isReturnStatement(node)) {
       return node.expression !== undefined &&
-          !isRenderCollectedValue(node.expression, true)
+          !isRenderCollectedValue(
+            node.expression,
+            checker,
+            isSourceFileDefaultLibrary,
+          )
         ? true
         : undefined;
     }
@@ -1037,7 +1058,8 @@ function hasValueCollectingReturn(body: ts.Block): boolean {
 
 function isRenderCollectedValue(
   expression: ts.Expression,
-  topLevel: boolean,
+  checker: ts.TypeChecker,
+  isSourceFileDefaultLibrary: (sourceFile: ts.SourceFile) => boolean,
 ): boolean {
   let current = expression;
   while (
@@ -1059,37 +1081,50 @@ function isRenderCollectedValue(
   if (current.kind === ts.SyntaxKind.NullKeyword) {
     return true;
   }
-  if (ts.isIdentifier(current) && current.text === "undefined") {
-    return true;
-  }
   if (
-    topLevel &&
-    (ts.isStringLiteralLike(current) || ts.isNumericLiteral(current) ||
-      current.kind === ts.SyntaxKind.TrueKeyword ||
-      current.kind === ts.SyntaxKind.FalseKeyword)
+    ts.isIdentifier(current) && current.text === "undefined" &&
+    isGlobalUndefinedIdentifier(
+      current,
+      checker,
+      isSourceFileDefaultLibrary,
+    )
   ) {
     return true;
   }
-  if (ts.isConditionalExpression(current)) {
-    return isRenderCollectedValue(current.whenTrue, false) &&
-      isRenderCollectedValue(current.whenFalse, false);
+  if (
+    ts.isStringLiteralLike(current) || ts.isNumericLiteral(current) ||
+    current.kind === ts.SyntaxKind.TrueKeyword ||
+    current.kind === ts.SyntaxKind.FalseKeyword
+  ) {
+    return true;
   }
-  if (ts.isBinaryExpression(current)) {
-    const operator = current.operatorToken.kind;
-    if (operator === ts.SyntaxKind.AmpersandAmpersandToken) {
-      // `cond && <jsx/>` collects either the falsy left value, which is
-      // plain data, or the right operand.
-      return isRenderCollectedValue(current.right, false);
-    }
-    if (
-      operator === ts.SyntaxKind.BarBarToken ||
-      operator === ts.SyntaxKind.QuestionQuestionToken
-    ) {
-      return isRenderCollectedValue(current.left, false) &&
-        isRenderCollectedValue(current.right, false);
-    }
+  // Conditional and logical roots lower to reactive helper calls at supported
+  // pattern-owned expression sites. The returned map element is therefore a
+  // cell regardless of whether its branches are render content.
+  if (ts.isConditionalExpression(current) || ts.isBinaryExpression(current)) {
+    return false;
   }
   return false;
+}
+
+function isGlobalUndefinedIdentifier(
+  identifier: ts.Identifier,
+  checker: ts.TypeChecker,
+  isSourceFileDefaultLibrary: (sourceFile: ts.SourceFile) => boolean,
+): boolean {
+  const symbol = checker.getSymbolAtLocation(identifier);
+  if (!symbol) {
+    // `undefined` is intrinsic in no-lib/minimal programs and may have no
+    // declaration. A shadowing binding always has a source symbol.
+    return true;
+  }
+  const declarations = symbol.declarations ?? [];
+  if (declarations.length === 0) {
+    return true;
+  }
+  return declarations.some((declaration) =>
+    isSourceFileDefaultLibrary(declaration.getSourceFile())
+  );
 }
 
 function flowsDirectlyToJsxChild(expression: ts.Expression): boolean {

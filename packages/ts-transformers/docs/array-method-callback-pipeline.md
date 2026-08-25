@@ -66,15 +66,16 @@ admits only a synchronous argument-zero callback of a `map` whose owner symbol
 includes the configured TypeScript default-library `Array`/`ReadonlyArray`
 declaration. Same-named source and ambient types do not qualify, and neither do
 async or generator callbacks. The callback's returns then set the flow rule: a
-render-collecting callback (JSX, nullish or literal constants, or
-conditional/logical selections over those) embeds every lowered value in its
-view nodes, so its result may flow anywhere; a value-collecting callback can
-return a lowered value, so its map call must be the JSX child itself or the
-direct return of a synchronous JSX-local IIFE, and a result stored or consumed
-by ordinary JavaScript carries no sites. The result-interpreting methods such as
-`filter`, `find`, `sort`, `flatMap`, and `reduce` remain excluded too. This
-restriction applies to pattern-owned wrapper sites; maps inside standalone or
-explicit compute-owned helpers remain ordinary JavaScript.
+render-collecting callback directly returns JSX, `null`, the global `undefined`
+value, or a literal constant and embeds every lowered value in its view nodes,
+so its result may flow anywhere. A value-collecting callback can return a
+lowered value — including a conditional or logical helper cell — so its map call
+must be the JSX child itself or the direct return of a synchronous JSX-local
+IIFE, and a result stored or consumed by ordinary JavaScript carries no sites.
+The result-interpreting methods such as `filter`, `find`, `sort`, `flatMap`, and
+`reduce` remain excluded too. This restriction applies to pattern-owned wrapper
+sites; maps inside standalone or explicit compute-owned helpers remain ordinary
+JavaScript.
 
 ## What `ClosureTransformer` does for `.map`s
 
