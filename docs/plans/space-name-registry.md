@@ -4,10 +4,17 @@
 
 Proposed. Not started.
 
-If selected, this plan is implemented and landed enabled in one pull request. It
-has no feature flag or opt-out mode. Selecting the plan remains optional: it
-does not participate in space creation, authorization, or storage, and it can be
-implemented before or after
+If selected, this plan is delivered as one coordinated, enabled cutover. It has
+no product feature flag, opt-out mode, or partially usable phase. The registry
+code belongs in labs, while database provisioning and the current and future
+deployment-wide routes belong in their infrastructure repositories. Those repo
+boundaries require linked implementation changes. Infrastructure may land
+inert, with no public route or accepted registry traffic, but no alias is seeded
+and no user-visible behavior changes until the complete implementation passes
+the compatibility barrier and performs the ordered cutover.
+
+Selecting the plan remains optional: it does not participate in space creation,
+authorization, or storage, and it can be implemented before or after
 [random space identities](random-space-identities.md), or not implemented at
 all.
 
@@ -177,6 +184,11 @@ wins even when it routes that space through a different admitted host.
     current host-admission policy. Removing a host immediately makes aliases
     routed through it unavailable without exposing their names to shell
     fallback.
+15. Every request for one registry origin observes one logical transactional
+    database. The toolshed process or registry frontend that receives the
+    request cannot change the result. Process-local files, caches, and
+    asynchronously replicated databases are never authoritative registry
+    state.
 
 The third invariant is deliberate. Making registration depend on a target
 space's ACL would couple this plan to space authorization. It would also make a
@@ -207,15 +219,16 @@ built-ins. A valid DID segment and fixed prefixes such as `api`, `static`, and
 lookup and uses the shared reserved-name module.
 
 Keep the reserved-name list in one shared module used by validation, API
-documentation, and tests. The initial database migration inserts matching
-`reserved` namespace rows before registry mutations are enabled.
+documentation, and tests. The cutover seed transaction inserts matching
+`reserved` namespace rows after name-route convergence and before registry
+mutations are enabled.
 
 Adding a fixed route is a namespace mutation. Its database migration inserts a
 create-only `reserved` row before the route serves. The same unique constraint
-serializes that insert against every claim, including claims from an older
-registry instance. If an `alias` row wins, the migration fails and the product
-must choose another route. If the reservation wins, every claim sees an existing
-namespace row and fails. A claimed path is permanent.
+serializes that insert against every claim, including claims accepted by
+another registry frontend. If an `alias` row wins, the migration fails and the
+product must choose another route. If the reservation wins, every claim sees an
+existing namespace row and fails. A claimed path is permanent.
 
 A space's display name is not subject to these restrictions. It remains a
 user-owned label in Home and may contain Unicode or duplicate another display
@@ -273,18 +286,63 @@ matching registry owner.
 
 ## Service boundary
 
-The registry is a small service owned by the toolshed deployment. Store its
-records and audit rows in one Toolshed-private SQLite database, separate from
-Common Memory's per-space storage and the service Fabric space. The
-authoritative registry process owns that file, runs schema migration before
-accepting traffic, and provides the narrow storage interface. Other front ends
-proxy registry requests to that authority.
+The registry is a deployment-level service, not state owned by any toolshed
+process. Run a bounded pool of stateless registry frontends and store all
+namespace rows, entries, permits, operation results, and audit rows in one
+PostgreSQL database for the registry origin. Every frontend uses that database's
+current primary. Toolshed processes and per-user toolshed shards call the
+registry service; they do not open the database or retain an authoritative
+copy.
 
-This gives one authoritative toolshed origin with serializable transactions and
-read-your-writes behavior without inventing a distributed database. Lookup is
-not served from file copies or asynchronous replicas. Backup and restore move
-the database as one unit and must preserve its monotonic registration-sequence
-state. Cross-provider federation is outside this plan.
+This boundary is required by the existing deployment. Rapids currently runs
+[21 toolshed processes](https://github.com/commontoolsinc/infra/blob/802ac91ab0e64a427f0fc54d164e7392f1789b10/ansible/vars/toolshed-binary.yml)
+on one VM, while
+[Nginx distributes ordinary HTTP requests among five of them and storage
+connections among another sixteen](https://github.com/commontoolsinc/infra/blob/802ac91ab0e64a427f0fc54d164e7392f1789b10/ansible/roles/nginx/templates/toolshed.conf.j2).
+That co-location makes a shared local file possible today, but does not make one
+process a stable authority. It also does not survive horizontal scaling to
+another host. The planned cluster instead gives
+[each stateful toolshed shard one process and one volume](https://github.com/commontoolsinc/common-cluster/blob/dc70d63f2ce44930a1b23793a998e78eeac863bf/docs/design.md#3-the-serving-model-one-toolshed-per-user),
+so a deployment-wide registry cannot live in a shard's storage.
+
+The database is the one serialization point for a registry origin. Unique
+constraints decide namespace races. Transactions atomically consume permits,
+record operation results, mutate entries, and append audit rows. A database
+sequence assigns a total registration order; gaps from aborted transactions are
+valid, and concurrently started claims may receive either order. After one
+claim has returned success, every subsequently started successful claim receives
+a greater sequence.
+
+Registry frontends may be added or removed without moving registry state. Give
+each frontend a bounded connection pool. Put a deployment-level connection
+pooler between the frontends and PostgreSQL when the sum of their pools would
+exceed the database connection budget. Reject excess work with the registry's
+unavailable response instead of building an unbounded in-process queue.
+
+Serve authoritative forward and reverse lookups from the current primary. Do
+not put asynchronous database replicas or frontend caches in the correctness
+path. Exact indexed lookup is the expected high-volume operation; claims and
+other mutations are comparatively rare. Scale stateless frontends separately
+from the database, and scale the primary for indexed lookup throughput before
+introducing a consistency protocol for caches.
+
+Use a single-primary high-availability database configuration whose failover
+does not acknowledge a transaction before it is durable on the failover path.
+Promotion must fence the former primary from writes before the new primary
+accepts them. Frontends connect through the elected-primary endpoint, and a
+failover invalidates connections to the former primary instead of allowing two
+writable pools. An unavailable or uncertain primary makes registry operations
+unavailable; it never permits a frontend to use a local fallback. Continuous
+database recovery records must cover the last acknowledged transaction. If
+disaster recovery cannot establish that fact, put the whole registry origin in
+recovery mode. Recovery mode serves no lookup, fallback decision, or mutation
+until the missing interval has been reconciled. Canonical DID URLs remain
+usable. This prevents a lost claim or repoint from making an old public URL
+resolve incorrectly or become available to a new owner.
+
+Cross-provider federation is outside this plan. Different registry origins may
+use separate databases or isolated databases in one PostgreSQL service, but
+each origin has separate credentials and one logical primary.
 
 For reverse canonicalization, the registry service first makes an authenticated
 server-to-server read to the opened space's validated storage origin. The
@@ -292,24 +350,48 @@ response binds the space DID, ACL revision, and complete concrete `OWNER` set.
 Accept only origins admitted by the existing space-routing policy, and do not
 follow redirects.
 
-The registry then takes one authoritative database snapshot and reads active
-same-DID rows owned by that concrete owner set in descending registration
-sequence. A row routed through the opened host is already validated. For a row
-routed through another host, make the same authenticated exact read and require
-the same DID, ACL revision, and concrete owner set. Skip a row only when current
-policy excludes its host or an authoritative response proves that the host
-redirects or serves different state. If the highest remaining candidate cannot
-answer, stop canonicalization and retain the safe DID URL. Do not choose an
-older name based on a transient failure. Evaluating the next authoritatively
-disqualified candidate is part of one bounded selection, not a retry of a failed
-request. The finite owner set and existing per-account lifetime quota bound the
-candidate count.
+Reject an ACL response above the configured body or concrete-owner limit as an
+incomplete canonicalization. Otherwise, take one authoritative database
+snapshot and materialize active same-DID rows owned by that concrete owner set
+in descending registration sequence, up to one more than the configured
+candidate limit. End the transaction and release its connection before making
+any host request.
 
-The first validated row wins. If every candidate is authoritatively
-disqualified, return the canonical DID fallback with the opened ACL revision. A
-named result also carries the selected entry revision. A host-read failure
-returns an incomplete result, which also retains the DID URL but is not evidence
-that no name qualifies. Do not cache owner sets or retry a host read.
+A row routed through the opened host is already validated. For a row routed
+through another host, make the same authenticated exact read and require the
+same DID, ACL revision, and concrete owner set. Apply hard per-request limits to
+both examined candidates and distinct contacted hosts. Skip a row only when
+the versioned current policy excludes its host. If a newer candidate's admitted
+host redirects, serves different state, or cannot answer, stop canonicalization
+and retain the safe DID URL as an incomplete result. Do the same if the next
+candidate or host would exceed a limit. Do not choose an older name based on a
+mutable cross-host observation or truncated candidate set. Evaluating the next
+policy-excluded candidate is part of one bounded selection, not a retry of a
+failed request. The first validated row wins.
+
+If every examined candidate is excluded by the versioned host policy and the
+snapshot contained no additional candidate, return the canonical DID fallback
+with the opened ACL revision. An additional candidate beyond the examination
+limit makes the result incomplete.
+
+After the host reads, take a second short primary transaction before returning a
+named or DID result. Repeat the same bounded ordered candidate query. For a named
+result, require the prefix through the selected row, including every row's
+identity, revision, registration sequence, owner, DID, host, and state, to match
+the materialized prefix. For a DID result, require the whole bounded result and
+the absence of an additional candidate to match. Any database change returns an
+incomplete result and retains the DID URL. End the second transaction before
+returning. Carry the opened ACL revision in the response; the shell applies the
+result only while its current opened revision still matches. This check makes
+the registry rows stable across the host observation that selected the name.
+Because no mutable host result disqualifies a newer candidate, that observation
+is the selection's consistency point. A later registry, ACL, policy, or host
+change affects the next navigation. No database connection is held during a host
+read.
+
+A named result carries the selected entry revision. A host-read failure returns
+an incomplete result, which also retains the DID URL but is not evidence that no
+name qualifies. Do not cache owner sets or retry a host read.
 
 Use the existing signed first-party HTTP request format for mutations. The
 signed material binds:
@@ -356,11 +438,14 @@ next canonicalization.
 Alias navigation has three outcomes. An active alias on an admitted host
 supplies its target. An inactive alias, reserved name, or alias on a removed
 host is terminally unavailable. An absent namespace row allows ordinary shell
-fallback. Every fresh navigation reads the authoritative database. A successful
-mutation and the following authoritative lookup are read-your-writes, and
-revisions never decrease across backup restore or authority failover.
-Registration sequences are never reused and do not move backward across restore
-or failover. Operator inspection also sees the stored audit state.
+fallback. Every fresh navigation reads the current database primary. A
+successful mutation and the following authoritative lookup are read-your-writes
+even when different frontend instances handle them. Revisions never decrease
+across ordinary primary failover. Registration sequences are never reused and
+do not move backward across ordinary primary failover. Operator inspection also
+sees the stored audit state. Disaster recovery follows the fail-closed recovery
+rule in the service boundary when it cannot prove that it includes the last
+acknowledged transaction.
 
 Before returning an active target, forward lookup reapplies the configured host
 admission policy. A row whose host is no longer admitted returns a terminal
@@ -374,11 +459,14 @@ Do not add a public list endpoint. Exact forward lookup and the single-result
 reverse lookup are sufficient for navigation. Enumeration would turn the
 registry into a deployment inventory and make scraping its default use.
 
-Apply body limits and mutation rate limits keyed by the client network address
-before signature verification. Rate limiting limits load; the allocation permit
-and account quota limit permanent namespace use. Require the signed request's
-ordinary expiry and audience checks in addition to the operation identifier.
-Apply a separate, generous lookup limit.
+Apply body limits and coarse network rate limits at the deployment ingress
+before frontend selection and signature verification. A limit intended to apply
+across the registry origin must use ingress state or another shared counter; a
+frontend-local counter is only an in-flight resource bound and never an abuse or
+allocation boundary. Rate limiting limits load. The allocation permit and the
+transactional account quota limit permanent namespace use. Require the signed
+request's ordinary expiry and audience checks in addition to the operation
+identifier. Apply a separate, generous lookup limit.
 
 ## Shell and navigation
 
@@ -431,6 +519,30 @@ or change its address bar, but the resulting target never resolves. The terminal
 incompatibility response instructs the user to reload; it does not assume the
 old client can reload itself. This one-shot cutoff prevents an already-open old
 shell from reading a registered name through `common user`.
+
+The deployment-wide HTTP entry point routes every name-shaped first segment and
+every registry API request through the registry frontend pool before any
+per-user toolshed selection. Fixed routes and explicit DIDs retain their earlier
+precedence. The entry point does not route registry traffic to a particular
+frontend by name, user, or operation identifier; any healthy frontend must
+produce the same result.
+
+The one-shot deployment uses one ordered compatibility barrier and cutover. It
+first migrates the empty database and deploys the registry frontends without a
+public route or accepted mutations. It then drains every old shell session and
+replaces every ordinary and storage toolshed process. Each replacement rejects
+old shell protocol versions before any space read.
+
+After every process passes the version barrier, install the name and registry
+API route at every deployment entry point while the namespace remains empty and
+the mutation route remains denied. A name miss still reaches the ordinary shell
+fallback, so this changes no name's meaning. Verify route convergence from every
+entry point. Then commit the initial reservations and aliases. Only after that
+transaction succeeds may the entry point admit mutations. Continuously enforce
+the required toolshed, storage, registry schema, registry protocol,
+reserved-route, and host-admission-policy versions. Once any namespace row is
+live, deployment policy prohibits rollback to an incompatible binary or route;
+recovery rolls forward.
 
 The shell treats the DID and host selected by the URL as authoritative for the
 navigation. It ignores conflicting Home hints, closes or isolates an existing
@@ -524,16 +636,27 @@ verified owner, target DID, and host. Only names that already satisfy the
 registry grammar may be seeded. Product links with invalid names are rewritten
 to canonical DID-and-host URLs instead of being silently transformed. The
 current negligible population makes this a finite reviewed manifest. The
-implementation seeds valid aliases, including product-operated names, in the
-same pull request. An unowned or invalid name is not imported and returns the
-shell's ordinary result to every viewer. There is no later cutover.
+coordinated cutover seeds valid aliases, including product-operated names. An
+unowned or invalid name is not imported and returns the shell's ordinary result
+to every viewer. There is no later migration phase.
 
 ## Preparation
 
-- Select the Toolshed-private registry-database path, single-authority routing,
-  schema migration, backup and restore procedure, and the same-origin forward
-  lookup, single-result reverse lookup, alias-navigation, and mutation API
-  routes.
+- Select the PostgreSQL service for each registry origin. Record
+  its high-availability, synchronous-durability, former-primary fencing, and
+  elected-primary endpoint behavior. Record its connection budget, frontend pool
+  size, credentials boundary, schema migration procedure, continuous recovery
+  procedure, and fail-closed disaster-recovery rule.
+- Record an explicit capacity target for exact lookups, reverse lookups, and
+  mutations at projected peak load with launch headroom. Size the database,
+  connection pooler, and stateless frontend pool against that target. Select
+  hard ACL-owner, reverse-candidate, and distinct-host limits that keep one
+  reverse request within its capacity allocation.
+- Select the deployment-wide route that sends name-shaped first segments and
+  registry APIs to the registry frontend pool before per-user toolshed routing.
+  Specify how a registry miss reaches the ordinary shell fallback and how the
+  route remains unavailable until every serving frontend has the required
+  schema and protocol version.
 - Identify the stable deployment account boundary that issues claim permits. If
   none exists, specify the operator approval procedure used at launch.
 - Inventory every known legacy and product alias. Record its canonical spelling,
@@ -553,7 +676,8 @@ compatibility path.
 
 ## Implementation
 
-- Add the registry as one enabled feature in one pull request:
+- Add the registry as one enabled feature in one coordinated change set. Linked
+  infrastructure changes remain inert until the final compatibility barrier:
   - Define canonical name validation and the reserved-name set in one package
     shared by the service and clients.
   - Seed permanent namespace reservations for the initial fixed routes before
@@ -565,9 +689,21 @@ compatibility path.
     permits.
   - Connect permit issuance to the prepared deployment account quota or operator
     approval boundary.
-  - Add the private SQLite registry database, schema migration, and routing to
-    its single authoritative process. Keep it independent of Common Memory and
-    the service Fabric space.
+  - Provision the selected PostgreSQL service and isolated database credentials
+    for each registry origin as part of the enabled deployment.
+  - Add the private PostgreSQL schema, one-run schema migration, bounded database
+    access layer, and stateless registry frontend service. Keep it independent
+    of Common Memory, per-toolshed storage, and the service Fabric space.
+  - Run schema migration as a dedicated deployment task under a PostgreSQL
+    advisory lock and record the resulting schema version. Frontends never run
+    migrations; they refuse readiness when the recorded version differs from
+    the version they implement.
+  - Add deployment-wide routing through the registry frontend pool before
+    per-user toolshed selection. Do not use path affinity or process-local
+    registry state.
+  - Make frontend readiness report the schema, protocol, reserved-route, and
+    host-admission-policy versions. Route traffic only to the homogeneous
+    version selected by the deployment entry point.
   - Add the durable storage implementation with atomic create-only claim, unique
     namespace rows, compare-and-set mutation, consumed permits, append-only
     audit rows, and an index that selects the greatest registration sequence by
@@ -580,17 +716,24 @@ compatibility path.
     removed from policy; never redirect it or let its name fall through.
   - Make reverse lookup read the current validated ACL and revision directly
     from the admitted host where the target was opened. Reject redirects. Check
-    same-DID rows in descending registration sequence and validate a different
-    candidate host against the opened DID, ACL revision, and concrete owner set.
-    Skip removed, redirected, or divergent candidates. If the highest remaining
-    candidate is unavailable, return an incomplete result and retain the DID
-    URL. Otherwise return the first validated entry and its revision, or the
-    canonical DID result, with the opened ACL revision.
+    bounded same-DID rows in descending registration sequence and validate a
+    different candidate host against the opened DID, ACL revision, and concrete
+    owner set. Release the database snapshot before making host reads. Skip
+    only candidates excluded by the versioned host policy. If an admitted newer
+    candidate redirects, diverges, or is unavailable, or if the owner,
+    candidate, or distinct-host limit is exceeded, return an incomplete result
+    and retain the DID URL. Otherwise repeat the bounded ordered database query
+    in a new short transaction. Return the first validated entry and its
+    revision, or the canonical DID result with the opened ACL revision, only if
+    the relevant candidate rows still match. Return incomplete on any database
+    change.
   - Reuse first-party request verification; bind every mutation field into the
     signature; validate DID; require the same configured host admission used by
     reverse ACL reads; and reject expired or wrong-audience requests.
-  - Apply body and client-network rate limits before expensive verification,
-    with the permit and account quota enforcing permanent allocation limits.
+  - Apply body and client-network rate limits before expensive verification.
+    Enforce origin-wide limits before frontend selection or through shared
+    state. Use frontend-local limits only to bound concurrent work. Enforce
+    permits and account quotas transactionally in PostgreSQL.
   - Return the active, inactive, route-unavailable, reserved, and absent
     navigation states needed to keep a claimed name out of legacy derivation.
     Expose mutation history only to operators.
@@ -607,29 +750,57 @@ compatibility path.
   - Register the resolved host hint live and optionally persist it through the
     existing Home site-table flow only after the URL-bound space opens.
   - Gate every same-document name navigation on the same resolver before history
-    mutation or session open. Drain old servers and sessions, reject missing or
-    pre-registry shell protocol versions before reads, and return a terminal
-    incompatibility error instructing those users to reload.
+    mutation or session open. Implement the ordered deployment barrier across
+    every ordinary and storage toolshed process. Drain old servers and sessions,
+    reject missing or pre-registry shell protocol versions before reads, and
+    return a terminal incompatibility error instructing those users to reload.
+    After the barrier passes, install and verify the name route everywhere with
+    an empty namespace and denied mutation route. Then seed reservations and
+    aliases, admit mutations, and prohibit rollback to an incompatible binary or
+    route.
   - Perform reverse lookup by DID and host after open, then replace browser
     history with the returned latest-registered name or the DID fallback without
-    reloading. Treat a failed ACL or registry read as incomplete
-    canonicalization and retain the DID URL.
+    reloading. Apply the result only while the shell's current opened ACL revision
+    equals the revision in the response. Treat a changed ACL revision or failed
+    ACL or registry read as incomplete canonicalization and retain the DID URL.
   - Make Home navigation, intra-space navigation, reload, and copy-link actions
     use the same canonicalization function.
   - Add explicit FUSE resolution that records the DID and host in `.spaces.json`
     without network lookup during traversal.
-  - Create the database schema, seed valid reviewed product aliases, and rewrite
-    managed links with invalid legacy names to canonical DID-and-host URLs as
-    the in-pull-request data migration.
+  - Run the cutover seed transaction for permanent route reservations and valid
+    reviewed product aliases. Rewrite managed links with invalid legacy names to
+    canonical DID-and-host URLs in the same coordinated data migration.
   - Add dashboards for lookup outcomes, mutation conflicts, and rate-limit
     decisions without logging private request material.
-  - Document backup, restore, and authoritative-origin recovery without revision
-    rollback.
+  - Document primary failover, continuous recovery through the last acknowledged
+    transaction, and fail-closed disaster recovery when that point cannot be
+    proven. Document how operators reconcile the missing interval before any
+    registry traffic resumes.
   - Test claim races, registration ordering, permit consumption, account quotas,
     stale revisions, idempotent replay, transfer, repoint, deactivation,
     reactivation, host routing, authoritative reads, process restart, registry
     unavailability, and identical redirects for anonymous and differently
     authenticated viewers.
+  - Test simultaneous claims through different registry frontends, mutation
+    through one frontend followed by lookup through another, frontend removal
+    and replacement, bounded database connections, and primary failover while
+    the former primary remains network-reachable. Verify that the former primary
+    is fenced and its pooled connections cannot accept writes. Test refusal to
+    resolve or mutate names from an uncertain disaster-recovery state.
+  - Test that distributing requests among frontends cannot multiply a network
+    limit, account quota, permit, or operation identifier, and that a frontend
+    with a mismatched schema, protocol, route, or host-policy version receives
+    no traffic.
+  - Load-test exact and reverse lookup at the prepared peak target while claims
+    and owner mutations are occurring. Verify that overload returns unavailable
+    without divergent redirects, lost audit rows, duplicate permits, or an
+    unbounded queue.
+  - Test the ACL-owner, candidate, and distinct-host limits with more rows and
+    hosts than each limit. Verify that database connections are released before
+    host reads and that truncation returns an incomplete result with the DID URL.
+  - Block a reverse lookup in a host read, then repoint, deactivate, transfer, or
+    supersede a materialized candidate through another frontend. Verify that the
+    second database check detects every change and retains the DID URL.
   - Test direct DID canonicalization, several current ACL owners, owner
     mismatch, several aliases for one target, alias and ACL ownership changes,
     piece-suffix preservation, admitted non-default hosts, rejection of a host
@@ -640,11 +811,19 @@ compatibility path.
     fixed routes retain precedence, future routes cannot take any claimed name,
     and landing this plan alone leaves never-registered legacy name creation
     unchanged.
+  - Test the one-shot deployment barrier against all ordinary and storage
+    processes in the current multi-process topology. Verify that no alias is
+    seeded while an old process or shell session can still serve. Verify the
+    empty-namespace route at every entry point before seeding, keep mutations
+    denied until after the seed transaction, and reject an incompatible binary
+    or route after activation.
 
-The pull request lands with the registry API and all clients enabled on the
-existing toolshed deployment. It has no disabled state: if the registry is
-unavailable, alias resolution fails while canonical DID URLs and space creation
-continue to work.
+The coordinated release activates with the registry API and all clients enabled
+on the existing toolshed deployment. It has no disabled product state: if the
+registry is unavailable, alias resolution fails while canonical DID URLs and
+space creation continue to work. Inert database and routing resources are
+deployment prerequisites, not an alternative runtime mode, and accept no
+traffic before activation.
 
 ## Acceptance criteria
 
@@ -661,10 +840,11 @@ continue to work.
   their target hosts serve the same validated space state, every navigation
   converges on the one with the greatest immutable registration sequence, even
   when it names another host.
-- A newer same-DID alias at a removed, redirected, or divergent host is
+- A newer same-DID alias at a host excluded by the versioned policy is
   disqualified, so canonicalization may use the next qualifying alias. If its
-  admitted host is merely unavailable, canonicalization remains incomplete and
-  keeps the safe DID URL rather than choosing an older alias.
+  admitted host redirects, serves divergent state, or is unavailable,
+  canonicalization remains incomplete and keeps the safe DID URL rather than
+  choosing an older alias.
 - If no active alias owner is a current ACL owner, every navigation converges on
   `/<space-did>`, retaining the host query when required.
 - An alias whose owner does not own its target still resolves to that target but
@@ -674,9 +854,32 @@ continue to work.
 - If authoritative ACL or registry lookup fails, the navigation remains on its
   safe DID URL and is explicitly not considered canonically named. It never uses
   a stale alias.
+- An ACL owner set or reverse candidate list above its configured limit, or a
+  selection that would contact too many distinct hosts, produces an incomplete
+  result and retains the DID URL. No database transaction remains open during a
+  target-host read.
+- A repoint, transfer, deactivation, or newer qualifying registration committed
+  while reverse lookup is reading target hosts is detected by its final short
+  database check. A changed opened ACL revision is detected before the shell
+  changes browser history. The stale candidate is never returned as canonical.
 - A claim without a valid allocation permit fails, and generating more DIDs does
   not increase one deployment account's lifetime quota.
-- Two identities racing to claim one name produce one owner and one conflict.
+- Two identities racing through different registry frontends to claim one name
+  produce one owner and one conflict.
+- A mutation acknowledged by one registry frontend is visible to the next
+  authoritative lookup through any other frontend.
+- Adding, removing, replacing, or load-balancing registry frontends does not
+  change a lookup result or permit two successful uses of one operation
+  identifier.
+- Sustained traffic at the prepared peak capacity target preserves lookup and
+  mutation correctness. Overload fails explicitly and does not create an
+  unbounded in-process queue.
+- Loss of the database primary never causes a frontend to serve process-local,
+  cached, or asynchronously replicated registry state. Lookup, fallback
+  decisions, and mutation remain disabled after an uncertain disaster recovery.
+- A primary promotion fences the former primary before accepting writes. A
+  network-reachable former primary and its existing pooled connections cannot
+  accept a claim, mutation, or authoritative lookup after promotion.
 - An entry owner may repoint or transfer with the current revision.
 - A stale or differently signed mutation changes nothing.
 - An inactive name cannot be claimed by a new identity.
@@ -700,11 +903,17 @@ continue to work.
 - Same-document navigation in a pre-registry shell is rejected before it reads a
   space. Its locally derived URL does not resolve, and the terminal error
   instructs its user to reload.
+- No alias is seeded and no mutation is accepted until every ordinary toolshed,
+  storage toolshed, registry frontend, and old shell session has crossed the
+  compatibility barrier. The empty-namespace name route is verified at every
+  entry point before the seed transaction. Mutations remain denied until that
+  transaction succeeds. An incompatible binary or route cannot be deployed
+  after activation.
 - Removing a host from policy makes every alias routed through it unavailable on
   the next lookup without exposing the name to legacy derivation.
 - A future fixed route cannot take a segment whose namespace row is an alias.
-- A newly inserted reservation returns not found on old and new registry servers
-  until its fixed route begins serving.
+- A newly inserted reservation returns not found on every serving registry
+  frontend until its fixed route begins serving.
 - Invalid legacy names are migrated to canonical DID-and-host links rather than
   normalized into registry claims.
 - Removing all registry client and server code requires no change to space
