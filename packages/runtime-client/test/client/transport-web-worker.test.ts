@@ -37,102 +37,104 @@ function handlerOf(
   })._handleMessage;
 }
 
-describe("WebWorkerRuntimeTransport ready handshake", () => {
-  it("settles `ready()` on the worker's ready notification", async () => {
-    const transport = makeTransport();
-    let settled = false;
-    const ready = transport.ready().then(() => {
-      settled = true;
-    });
+describe("WebWorkerRuntimeTransport", () => {
+  describe("ready handshake", () => {
+    it("settles `ready()` on the worker's ready notification", async () => {
+      const transport = makeTransport();
+      let settled = false;
+      const ready = transport.ready().then(() => {
+        settled = true;
+      });
 
-    const handle = handlerOf(transport);
-
-    // Anything else leaves it pending, the notification being the one message
-    // that says the worker's entry has run.
-    handle(new MessageEvent("message", { data: { msgId: 1 } }));
-    await Promise.resolve();
-    expect(settled).toBe(false);
-
-    handle(
-      new MessageEvent("message", {
-        data: { type: TransportNotificationType.WorkerReady },
-      }),
-    );
-    await ready;
-    expect(settled).toBe(true);
-
-    await transport.dispose();
-  });
-});
-
-describe("WebWorkerRuntimeTransport worker-console re-emit", () => {
-  it("re-emits forwarded worker console at the matching level and stops", async () => {
-    const transport = makeTransport();
-    const emitted: unknown[] = [];
-    transport.on("message", (m) => emitted.push(m));
-
-    const calls: Array<[string, string]> = [];
-    const realConsole = {
-      log: console.log,
-      warn: console.warn,
-      error: console.error,
-    };
-    console.log = (m: string) => calls.push(["log", m]);
-    console.warn = (m: string) => calls.push(["warn", m]);
-    console.error = (m: string) => calls.push(["error", m]);
-
-    try {
       const handle = handlerOf(transport);
 
+      // Anything else leaves it pending, the notification being the one message
+      // that says the worker's entry has run.
+      handle(new MessageEvent("message", { data: { msgId: 1 } }));
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
       handle(
         new MessageEvent("message", {
-          data: {
-            type: TransportNotificationType.WorkerConsole,
-            level: "error",
-            text: "kaboom",
-          },
+          data: { type: TransportNotificationType.WorkerReady },
         }),
       );
-      handle(
-        new MessageEvent("message", {
-          data: {
-            type: TransportNotificationType.WorkerConsole,
-            level: "warn",
-            text: "careful",
-          },
-        }),
-      );
+      await ready;
+      expect(settled).toBe(true);
 
-      expect(calls).toEqual([
-        ["error", "[worker] kaboom"],
-        ["warn", "[worker] careful"],
-      ]);
-      // Neither was treated as an IPC message.
-      expect(emitted).toEqual([]);
+      await transport.dispose();
+    });
+  });
 
-      // A level outside the forwarded roster is not this transport's traffic,
-      // so it is forwarded on rather than logged. The roster is one constant
-      // that the worker's bridge posts from and this transport recognizes by,
-      // so nothing the bridge sends can land here.
-      const offRoster = {
-        type: TransportNotificationType.WorkerConsole,
-        level: "fatal",
-        text: "not console traffic",
+  describe("worker-console re-emit", () => {
+    it("re-emits forwarded worker console at the matching level and stops", async () => {
+      const transport = makeTransport();
+      const emitted: unknown[] = [];
+      transport.on("message", (m) => emitted.push(m));
+
+      const calls: Array<[string, string]> = [];
+      const realConsole = {
+        log: console.log,
+        warn: console.warn,
+        error: console.error,
       };
-      handle(new MessageEvent("message", { data: offRoster }));
-      expect(calls).toHaveLength(2);
-      expect(emitted).toEqual([offRoster]);
-    } finally {
-      console.log = realConsole.log;
-      console.warn = realConsole.warn;
-      console.error = realConsole.error;
-    }
+      console.log = (m: string) => calls.push(["log", m]);
+      console.warn = (m: string) => calls.push(["warn", m]);
+      console.error = (m: string) => calls.push(["error", m]);
 
-    // A non-console message still flows through as an emitted IPC message.
-    const ipc = { msgId: 7, data: { value: true } };
-    handlerOf(transport)(new MessageEvent("message", { data: ipc }));
-    expect(emitted).toContainEqual(ipc);
+      try {
+        const handle = handlerOf(transport);
 
-    await transport.dispose();
+        handle(
+          new MessageEvent("message", {
+            data: {
+              type: TransportNotificationType.WorkerConsole,
+              level: "error",
+              text: "kaboom",
+            },
+          }),
+        );
+        handle(
+          new MessageEvent("message", {
+            data: {
+              type: TransportNotificationType.WorkerConsole,
+              level: "warn",
+              text: "careful",
+            },
+          }),
+        );
+
+        expect(calls).toEqual([
+          ["error", "[worker] kaboom"],
+          ["warn", "[worker] careful"],
+        ]);
+        // Neither was treated as an IPC message.
+        expect(emitted).toEqual([]);
+
+        // A level outside the forwarded roster is not this transport's traffic,
+        // so it is forwarded on rather than logged. The roster is one constant
+        // that the worker's bridge posts from and this transport recognizes by,
+        // so nothing the bridge sends can land here.
+        const offRoster = {
+          type: TransportNotificationType.WorkerConsole,
+          level: "fatal",
+          text: "not console traffic",
+        };
+        handle(new MessageEvent("message", { data: offRoster }));
+        expect(calls).toHaveLength(2);
+        expect(emitted).toEqual([offRoster]);
+      } finally {
+        console.log = realConsole.log;
+        console.warn = realConsole.warn;
+        console.error = realConsole.error;
+      }
+
+      // A non-console message still flows through as an emitted IPC message.
+      const ipc = { msgId: 7, data: { value: true } };
+      handlerOf(transport)(new MessageEvent("message", { data: ipc }));
+      expect(emitted).toContainEqual(ipc);
+
+      await transport.dispose();
+    });
   });
 });
