@@ -103,6 +103,10 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
   ["spaces", "a comma-separated list of the tokens --space takes"],
   ["stats-include", "a comma-separated list of timing categories"],
   ["import", "an import specifier"],
+  [
+    "retarget",
+    "a `<phase>=<main.tsx>[@rev]` spec, composed rather than chosen",
+  ],
   // Values naming something outside the fabric.
   ["url", "a browser URL; its parts complete as --api-url, --space, --piece"],
   ["app-url", "a shell origin, which is not the api-url --api-url names"],

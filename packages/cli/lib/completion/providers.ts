@@ -945,6 +945,12 @@ const OPTION_VALUE_PROVIDERS: Readonly<
     ["space clone"],
     () => Promise.resolve(directive({ kind: "dirs" })),
   ),
+  // `cf piece survey --list` names a piece to survey instead of a collection,
+  // so it takes what `--piece` takes. Scoped, because a `--list` elsewhere
+  // would mean something else entirely.
+  list: onlyOn(["piece survey"], pieceCandidates),
+  // `cf piece survey --validator` reads a JSON-schema file.
+  validator: () => Promise.resolve(directive({ kind: "files" })),
   // `cf inspect --dir` is an extra directory to search for space DBs.
   dir: () => Promise.resolve(directive({ kind: "dirs" })),
   // `cf inspect html --out` and `cf check --output` write a file.

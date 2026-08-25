@@ -37,6 +37,8 @@ const ENUMERATED_OPTION_VALUES: Readonly<Record<string, readonly string[]>> = {
   "cfc-mode": ["off", "warn", "enforce"],
   // `cf piece map --format`.
   "format": ["ascii", "dot"],
+  // `cf piece survey --side`: which document holds the collection.
+  "side": ["input", "result"],
   // `cf inspect entities --kind`, the seven its help enumerates.
   "kind": [
     "piece",
