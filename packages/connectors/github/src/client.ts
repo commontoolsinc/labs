@@ -404,10 +404,10 @@ export function createGithubGraphqlTransport(options: {
       body: JSON.stringify(body),
       signal,
     });
-    const value: unknown = await response.json();
     if (!response.ok) {
       throw new Error(`GitHub GraphQL request failed with ${response.status}`);
     }
+    const value: unknown = await response.json();
     const root = record(value, "GitHub GraphQL response");
     if (Array.isArray(root.errors) && root.errors.length > 0) {
       const messages = root.errors.map((item, index) => {

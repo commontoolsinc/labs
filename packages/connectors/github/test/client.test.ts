@@ -1,6 +1,6 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
-import { GithubClient } from "../src/client.ts";
+import { createGithubGraphqlTransport, GithubClient } from "../mod.ts";
 
 function pullRequest(number: number, checkState = "SUCCESS") {
   return {
@@ -156,6 +156,226 @@ describe("GithubClient", () => {
           status: "visibility-unknown",
         }]);
       });
+
+      it("parses nullable repository, review, and check fields", async () => {
+        const node: Record<string, unknown> = pullRequest(1);
+        node.headRepository = null;
+        node.reviewDecision = null;
+        node.statusCheckRollup = null;
+        const client = new GithubClient(() =>
+          Promise.resolve(response([node], false, null))
+        );
+
+        const [result] = (await client.collectOpenPullRequests()).pullRequests;
+
+        expect(result.headRepository).toBeNull();
+        expect(result.headRepositoryUrl).toBeNull();
+        expect(result.reviewDecision).toBeNull();
+        expect(result.checkState).toBeNull();
+      });
+
+      it("rejects malformed pull-request fields", async () => {
+        const cases: Array<[string, (node: Record<string, unknown>) => void]> =
+          [
+            ["repository must be an object", (node) => {
+              node.repository = null;
+            }],
+            ["id must be a non-empty string", (node) => {
+              node.id = "";
+            }],
+            ["number must be a positive safe integer", (node) => {
+              node.number = 0;
+            }],
+            ["isDraft must be a boolean", (node) => {
+              node.isDraft = "false";
+            }],
+            ["mergeable has an unsupported value", (node) => {
+              node.mergeable = "MAYBE";
+            }],
+            ["reviewDecision has an unsupported value", (node) => {
+              node.reviewDecision = "WAITING";
+            }],
+            ["statusCheckRollup.state has an unsupported value", (node) => {
+              node.statusCheckRollup = { state: "QUEUED" };
+            }],
+          ];
+        for (const [message, mutate] of cases) {
+          const node: Record<string, unknown> = pullRequest(1);
+          mutate(node);
+          const client = new GithubClient(() =>
+            Promise.resolve(response([node], false, null))
+          );
+          await expect(client.collectOpenPullRequests()).rejects.toThrow(
+            message,
+          );
+        }
+      });
+
+      it("rejects malformed page metadata", async () => {
+        const invalidPages: Array<[string, unknown]> = [
+          ["GraphQL response must be an object", null],
+          ["invalid hasNextPage", {
+            data: {
+              viewer: {
+                login: "ianh",
+                pullRequests: {
+                  totalCount: 0,
+                  pageInfo: { hasNextPage: "false", endCursor: null },
+                  nodes: [],
+                },
+              },
+            },
+          }],
+          ["invalid nodes", {
+            data: {
+              viewer: {
+                login: "ianh",
+                pullRequests: {
+                  totalCount: 0,
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                  nodes: null,
+                },
+              },
+            },
+          }],
+          ["invalid totalCount", response([], false, null, -1)],
+        ];
+        for (const [message, page] of invalidPages) {
+          const client = new GithubClient(() => Promise.resolve(page));
+          await expect(client.collectOpenPullRequests()).rejects.toThrow(
+            message,
+          );
+        }
+      });
+
+      it("rejects inconsistent pagination", async () => {
+        const viewerChanged = response([pullRequest(1)], false, null, 2);
+        viewerChanged.data.viewer.login = "someone-else";
+        const cases: Array<[string, unknown[]]> = [
+          ["viewer changed", [
+            response([pullRequest(1)], true, "next", 2),
+            viewerChanged,
+          ]],
+          ["count changed", [
+            response([pullRequest(1)], true, "next", 2),
+            response([pullRequest(2)], false, null, 3),
+          ]],
+          ["exceeds safety limit", [response([], false, null, 100_001)]],
+          ["pagination exceeded its total", [
+            response([pullRequest(1)], true, "next", 1),
+            response([pullRequest(2)], false, null, 1),
+          ]],
+          ["empty pull-request page", [response([], true, "next", 1)]],
+          ["duplicate pull request", [
+            response([pullRequest(1)], true, "next", 2),
+            response([pullRequest(1)], false, null, 2),
+          ]],
+          ["pages exceed their total", [
+            response([pullRequest(1), pullRequest(2)], false, null, 1),
+          ]],
+          ["returned 1 of 2", [response([pullRequest(1)], false, null, 2)]],
+        ];
+        for (const [message, pages] of cases) {
+          const client = new GithubClient(() => Promise.resolve(pages.shift()));
+          await expect(client.collectOpenPullRequests()).rejects.toThrow(
+            message,
+          );
+        }
+      });
+
+      it("rejects malformed known pull-request state responses", async () => {
+        const prior = await new GithubClient(() =>
+          Promise.resolve(response([pullRequest(1)], false, null))
+        ).collectOpenPullRequests();
+        const replies = [
+          response([], false, null),
+          { data: { nodes: [] } },
+        ];
+        const client = new GithubClient(() => Promise.resolve(replies.shift()));
+
+        await expect(client.collectOpenPullRequests(
+          undefined,
+          prior.pullRequests,
+        )).rejects.toThrow("known pull-request response has invalid nodes");
+      });
+
+      it("honors cancellation before starting collection", async () => {
+        const controller = new AbortController();
+        controller.abort(new Error("cancelled"));
+        let called = false;
+        const client = new GithubClient(() => {
+          called = true;
+          return Promise.resolve(response([], false, null));
+        });
+
+        await expect(client.collectOpenPullRequests(controller.signal))
+          .rejects.toThrow("cancelled");
+        expect(called).toBe(false);
+      });
     });
+  });
+});
+
+describe("createGithubGraphqlTransport", () => {
+  it("posts authenticated GraphQL requests and returns their body", async () => {
+    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    const fetch: typeof globalThis.fetch = (input, init) => {
+      calls.push({ input, init });
+      return Promise.resolve(Response.json({ data: { viewer: "ianh" } }));
+    };
+    const transport = createGithubGraphqlTransport({
+      token: "  secret  ",
+      endpoint: "https://github.example/graphql",
+      fetch,
+    });
+    const controller = new AbortController();
+    const request = {
+      query: "query Viewer { viewer { login } }",
+      variables: {},
+    };
+
+    await expect(transport(request, controller.signal)).resolves.toEqual({
+      data: { viewer: "ianh" },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].input).toBe("https://github.example/graphql");
+    expect(calls[0].init?.method).toBe("POST");
+    expect(calls[0].init?.headers).toEqual({
+      accept: "application/vnd.github+json",
+      authorization: "Bearer secret",
+      "content-type": "application/json",
+      "user-agent": "commonfabric-github-host",
+    });
+    expect(calls[0].init?.body).toBe(JSON.stringify(request));
+    expect(calls[0].init?.signal).toBe(controller.signal);
+  });
+
+  it("rejects empty credentials and unsuccessful HTTP responses", async () => {
+    expect(() => createGithubGraphqlTransport({ token: "  " })).toThrow(
+      "GitHub token must not be empty",
+    );
+    const transport = createGithubGraphqlTransport({
+      token: "secret",
+      fetch: () =>
+        Promise.resolve(new Response("Unauthorized", { status: 401 })),
+    });
+
+    await expect(transport({ query: "query", variables: {} })).rejects.toThrow(
+      "GitHub GraphQL request failed with 401",
+    );
+  });
+
+  it("reports every GraphQL error returned by GitHub", async () => {
+    const transport = createGithubGraphqlTransport({
+      token: "secret",
+      fetch: () =>
+        Promise.resolve(Response.json({
+          errors: [{ message: "first failure" }, {}],
+        })),
+    });
+
+    await expect(transport({ query: "query", variables: {} })).rejects.toThrow(
+      "GitHub GraphQL request failed: first failure; unknown GraphQL error",
+    );
   });
 });

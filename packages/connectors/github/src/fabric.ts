@@ -88,6 +88,52 @@ function previousGeneration(value: unknown): number {
   return Number(value.generation);
 }
 
+const STORED_PULL_REQUEST_STRING_FIELDS = [
+  "id",
+  "url",
+  "title",
+  "repository",
+  "repositoryUrl",
+  "baseRefName",
+  "baseRefOid",
+  "headRefName",
+  "headRefOid",
+  "mergeable",
+  "mergeState",
+  "createdAt",
+  "updatedAt",
+  "observedAt",
+  "visibility",
+  "status",
+] as const;
+
+function storedPullRequest(
+  row: Record<string, unknown>,
+  index: number,
+): GithubPullRequest {
+  const { detail: _detail, ...pullRequest } = row;
+  const nullableStrings = [
+    pullRequest.headRepository,
+    pullRequest.headRepositoryUrl,
+    pullRequest.reviewDecision,
+    pullRequest.checkState,
+  ];
+  if (
+    !STORED_PULL_REQUEST_STRING_FIELDS.every((field) =>
+      typeof pullRequest[field] === "string"
+    ) ||
+    !Number.isSafeInteger(pullRequest.number) ||
+    Number(pullRequest.number) < 1 ||
+    typeof pullRequest.isDraft !== "boolean" ||
+    !nullableStrings.every((value) =>
+      value === null || typeof value === "string"
+    )
+  ) {
+    throw new Error(`GitHub pull-request row is invalid: ${index}`);
+  }
+  return structuredClone(pullRequest) as unknown as GithubPullRequest;
+}
+
 function detailValue(pullRequest: GithubPullRequest) {
   return {
     schema: GITHUB_CONNECTOR_SCHEMAS.pullRequest,
@@ -203,8 +249,10 @@ export class GithubFabricTarget {
   async readPullRequests(): Promise<GithubPullRequest[]> {
     const value = await readGithubFabricCell(this.conn, this.cells.index);
     if (value === undefined || value === null) return [];
+    previousGeneration(value);
     if (
-      !isRecord(value) || !Array.isArray(value.pullRequests) ||
+      !isRecord(value) || value.formatVersion !== 1 ||
+      !Array.isArray(value.pullRequests) ||
       typeof value.viewer !== "string" ||
       value.viewer.toLowerCase() !== this.source.account
     ) {
@@ -214,8 +262,7 @@ export class GithubFabricTarget {
       if (!isRecord(row)) {
         throw new Error(`GitHub pull-request row is invalid: ${index}`);
       }
-      const { detail: _detail, ...pullRequest } = row;
-      return structuredClone(pullRequest) as unknown as GithubPullRequest;
+      return storedPullRequest(row, index);
     });
   }
 
