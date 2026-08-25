@@ -70,9 +70,10 @@ export interface HarnessHandleEntry {
   addressKey: string;
   /**
    * Shape of the value at the referent, when a mint knew it — the compiled
-   * pattern's result schema behind a `run_pattern` result reference. Absent
-   * means the shape was never free to capture, not that the referent has none:
-   * no mint reads the cell to fill this in.
+   * pattern's result schema behind a `run_pattern` result reference, or the
+   * shape the operator wrote alongside a seeded handle. Absent means the
+   * shape was never free to capture, not that the referent has none: no mint
+   * reads the cell to fill this in.
    */
   schema?: JSONSchema;
   /**

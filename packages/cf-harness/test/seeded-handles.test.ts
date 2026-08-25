@@ -113,6 +113,20 @@ describe("seeded-handles", () => {
       expect(entry?.schemaSource).toBe("operator");
     });
 
+    it("records the table entry's canonical spelling as the seed's ref", async () => {
+      const { table, seeded } = await mintSeededHandles(
+        undefined,
+        "run-7",
+        [{
+          name: "travellerName",
+          ref: `/@${SPACE_DID}/${SEED_ID}/travellerName`,
+        }],
+        SPACE_DID,
+      );
+      const entry = resolveHandleToken(table, seeded[0]!.token);
+      expect(seeded[0]!.ref).toBe(entry!.ref);
+    });
+
     it("extends an existing table without disturbing its entries", async () => {
       const existing = await mintAddressHandle(
         createHarnessHandleTable("run-3"),

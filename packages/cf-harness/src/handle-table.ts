@@ -533,6 +533,11 @@ export const assertValidHarnessHandleTable = (
         }\``,
       );
     }
+    if (entry.schemaSource !== undefined && entry.schema === undefined) {
+      throw new Error(
+        `invalid handle table: entry \`${entry.token}\` claims schema provenance \`${entry.schemaSource}\` with no schema`,
+      );
+    }
     if (tokens.has(entry.token)) {
       throw new Error(
         `invalid handle table: duplicate token \`${entry.token}\``,

@@ -132,7 +132,12 @@ export const mintSeededHandles = async (
         : {}),
     });
     current = minted.table;
-    seeded.push({ name: spec.name, token: minted.token, ref: spec.ref });
+    // The record carries the entry's canonical spelling, not the operator's
+    // raw one, so the run-state record and the table entry agree on one ref.
+    const entry = current.entries.find(
+      (candidate) => candidate.token === minted.token,
+    )!;
+    seeded.push({ name: spec.name, token: minted.token, ref: entry.ref });
   }
   return { table: current, seeded };
 };
@@ -151,6 +156,6 @@ export const seededHandlesContextMessage = (
   return [
     "Seeded references for this run, named by the operator:",
     ...seeded.map((seed) => `- ${seed.token} — ${seed.name}`),
-    "You cannot read what a seeded reference holds; wire it into run_pattern `inputs` to compute over it, and use describe_handle to see its shape.",
+    "You cannot read what a seeded reference holds. Wire it into run_pattern `inputs` to compute over it, or into any other tool input that accepts a handle; use describe_handle to see its shape.",
   ].join("\n");
 };

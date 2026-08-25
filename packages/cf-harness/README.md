@@ -761,17 +761,20 @@ piece the token names — and never the value.
 }
 ```
 
-Two sources can answer, in this order. The referent's own declared schema, read
-through the run's fabric session when it has one: a piece's document schema is
-the result schema of the pattern behind it, which is exactly what an agent
-holding a handle to that piece would be wiring into a pattern of its own.
-Failing that, the schema the mint recorded out of the harness's own work — a
-`run_pattern` result reference carries the compiled pattern's result schema,
-which compilation produced anyway, and the entry is marked
-`schemaSource: "harness"`. A run with no session still answers from its own
-table, so shape stays inspectable in every run that has handles at all. A token
-the run's table does not hold comes back `known: false` rather than as an error,
-since a token from another run simply names nothing here.
+Three sources can answer, in this order. First, the schema the operator wrote
+alongside a seeded handle (`schemaSource: "operator"`), which answers without a
+fabric read: it is the view the operator bound the handle under, stated ahead of
+the run. Then the referent's own declared schema, read through the run's fabric
+session when it has one: a piece's document schema is the result schema of the
+pattern behind it, which is exactly what an agent holding a handle to that piece
+would be wiring into a pattern of its own. Failing that, the schema the mint
+recorded out of the harness's own work — a `run_pattern` result reference
+carries the compiled pattern's result schema, which compilation produced anyway,
+and the entry is marked `schemaSource: "harness"`. A run with no session still
+answers from its own table, so shape stays inspectable in every run that has
+handles at all. A token the run's table does not hold comes back `known: false`
+rather than as an error, since a token from another run simply names nothing
+here.
 
 **What is disclosed is structure and only structure**: property names, types,
 nesting, required-ness, array and object composition, a `type` from the schema

@@ -2363,6 +2363,119 @@ Deno.test("runCfHarnessCli announces well-known grants to the model and the oper
   assertEquals(stderr, []);
 });
 
+Deno.test("runCfHarnessCli announces operator seeds to the model and the operator", async () => {
+  const { io, stdout, stderr } = createIoBuffers();
+  const seedSpace = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+  const seedId = `of:fid1:${"E".repeat(43)}`;
+  const seedRef = `/${seedId}/travellerName`;
+  // The seed persists run state, so the workspace must really be writable.
+  const workspace = await Deno.makeTempDir();
+  let runPromptOptions: RunHarnessPromptOptions | undefined;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--model-provider",
+      "openai-compatible-gateway",
+      "--workspace",
+      workspace,
+      "--prompt",
+      "Plan the trip",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "/keys/agent.pkcs8",
+      "--fabric-space",
+      "demo-space",
+      "--seed-handle",
+      `travellerName=${seedRef}`,
+    ],
+    {
+      io,
+      env: { CF_HARNESS_API_KEY: "test-key" },
+      fabricSessionFactory: () =>
+        Promise.resolve(
+          {
+            pieces: {
+              getSpace: () => seedSpace,
+              getDefaultPattern: (_runIt: boolean) =>
+                Promise.resolve(undefined),
+            },
+            // deno-lint-ignore no-explicit-any
+          } as any,
+        ),
+      createPromptLoop: () => ({
+        runPrompt: (options) => {
+          runPromptOptions = options;
+          return Promise.resolve(
+            ({
+              model: "gpt-5.4",
+              finalAssistantText: "Done.",
+              transcript: [],
+              modelTurns: 1,
+              runState: {
+                runId: "run-seeds",
+                status: "completed",
+                createdAt: "2026-04-15T22:00:00.000Z",
+                updatedAt: "2026-04-15T22:00:01.000Z",
+                cfcEnforcementMode: "enforce-explicit",
+                currentDir: "/workspace",
+                policyEvents: [],
+                toolOutputs: [],
+                seededHandles: [{
+                  name: "travellerName",
+                  token: "cfh:a:seeded01",
+                  ref: seedRef,
+                }],
+              },
+            }) satisfies HarnessPromptLoopResult,
+          );
+        },
+        runTranscript: () =>
+          Promise.reject(new Error("unexpected resume path")),
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  const seedMessages = (runPromptOptions?.contextMessages ?? []).filter((
+    message,
+  ) => message.includes("Seeded references"));
+  assertEquals(seedMessages.length, 1);
+  assertEquals(seedMessages[0]!.includes("travellerName"), true);
+  assertEquals(seedMessages[0]!.includes("cfh:a:"), true);
+  assertEquals(seedMessages[0]!.includes(seedId), false);
+  assertEquals(
+    stdout.join("").includes("seededHandles: travellerName cfh:a:seeded01"),
+    true,
+  );
+  // The grants failed to resolve (no default pattern), which is said on
+  // stderr; the seeds must still be established and announced.
+  assertEquals(
+    stderr.some((line) => line.includes("fabric grants: unavailable")),
+    true,
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects a seed schema file that cannot be read", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--seed-handle",
+          `cities=/of:fid1:${"B".repeat(43)}/cities;schema=missing.json`,
+        ],
+        {
+          cwd: "/tmp/project",
+          env: {},
+          readTextFile: () => Promise.reject(new Error("no such file")),
+        },
+      ),
+    Error,
+    "schema file cannot be read",
+  );
+});
+
 Deno.test("runCfHarnessCli says so when the well-known grants cannot be established", async () => {
   const { io, stderr } = createIoBuffers();
   let runPromptOptions: RunHarnessPromptOptions | undefined;

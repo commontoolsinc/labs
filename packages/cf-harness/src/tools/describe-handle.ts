@@ -17,9 +17,12 @@ export interface DescribeHandleToolOutput {
   token: string;
   /** Whether this run's handle table holds the token. */
   known: boolean;
-  /** Whether the entry carries a harness-derived schema to report. */
+  /** Whether a schema was found to report, from any of the three sources. */
   hasSchema: boolean;
-  /** The recorded schema, when the entry carries a harness-derived one. */
+  /**
+   * The reported schema: operator-recorded, fabric-declared, or
+   * harness-derived, whichever answered first in that order.
+   */
   schema?: JSONSchema;
   /**
    * Path segments of the referent within its piece — which field of which
