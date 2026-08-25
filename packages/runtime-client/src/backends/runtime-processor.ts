@@ -178,6 +178,7 @@ import {
   type VDomMountRequest,
   type VDomMountResponse,
   type VDomUnmountRequest,
+  type WireCellValue,
   type WriteStackTraceResponse,
 } from "@/protocol/mod.ts";
 import type { VDomOp } from "@/protocol/types.ts";
@@ -953,15 +954,9 @@ export class RuntimeProcessor {
     // persists nor re-imports inbound views, so the redacted copies cannot
     // round-trip into under-labeled state.
     //
-    // TODO(danfuzz): `convertCellsToLinks` preserves a `FabricPrimitive` by
-    // identity, so despite the `as JSONValue` cast below the response can
-    // hold live `FabricSpecialObject`s, and `postMessage`'s structured clone
-    // silently strips their prototype and private state to `{}` on the way
-    // to the main thread. The inbound direction throws instead
-    // (`CellHandle.serialize`; see the `WireCellValue` marker in
-    // `protocol/types.ts`) — this outbound direction loses silently. The
-    // subscription-update path below posts the same conversion.
-    // `codec-realm` is the mechanism for both directions.
+    // `convertCellsToLinks()` preserves a `FabricPrimitive` by identity, and
+    // the envelope's encoding carries one to the main thread with its class,
+    // so what the response holds is what the cell held.
     const converted = redactSigilCfcLabelViewsForDisplay(
       convertCellsToLinks(value, {
         includeSchema: true,
@@ -969,7 +964,7 @@ export class RuntimeProcessor {
         doNotConvertCellResults: true,
         includeCfcLabelView: true,
       }),
-    ) as JSONValue | undefined;
+    ) as WireCellValue;
     // The resolved cell's own schema-bearing ref, when asked for — for a meta
     // link read this addresses the linked cell itself, so the caller can
     // subscribe to it or consult its schema's declarations.

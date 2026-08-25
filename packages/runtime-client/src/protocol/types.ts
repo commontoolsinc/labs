@@ -718,33 +718,16 @@ export type CellGetRequest = BaseRequest & {
 
 /**
  * A cell's value as this connection carries it: the data a cell holds, with a
- * `CellRef` wherever a cell sits.
+ * `CellRef` wherever a cell sat.
  *
- * Distinct from `JSONValue` in the two ways the traffic actually differs: a
- * present `undefined` is a value a cell can hold, and the containers are
- * readonly.
- *
- * TODO(danfuzz): this still cannot carry the whole `FabricValue` domain. A
- * `FabricSpecialObject` has no representation here, and neither does a
- * `bigint` or a `symbol`, both of which are `FabricValue` arms. The transport
- * is `postMessage` rather than JSON, so that is a gap rather than a limit --
- * though structured clone alone does not close it, a class instance arriving
- * with its prototype and private fields gone. `codec-realm` is the mechanism,
- * being the format written for this crossing: a `bigint` travels as itself, a
- * `symbol` under a tag, and a `FabricBytes` as an `ArrayBuffer` a send can
- * transfer. Until then
- * `CellHandle.serialize()` refuses all three, so what the gap costs is a throw
- * rather than silent loss.
+ * `FabricValue` is the whole of what it can be, the envelope's encoding
+ * carrying that domain entire -- a `bigint` as itself, a `symbol` under a tag,
+ * a `FabricBytes` as bytes. The name survives the widening because it states
+ * the one thing the type cannot: that a cell is replaced by a reference to it
+ * rather than serialized, which is what `CellHandle.serialize()` does going
+ * out and `CellHandle.deserialize()` undoes coming back.
  */
-export type WireCellValue =
-  | null
-  | undefined
-  | boolean
-  | number
-  | string
-  | readonly WireCellValue[]
-  | { readonly [key: string]: WireCellValue }
-  | CellRef;
+export type WireCellValue = FabricValue;
 
 /**
  * The {@link RequestType.CellSet} request. `value` is the whole
@@ -1427,16 +1410,8 @@ export type PageCreateRequest = BaseRequest & {
   } | {
     program: Program;
   };
-  /**
-   * The argument the piece is created with.
-   *
-   * TODO(danfuzz): a piece's argument is a `FabricValue`, and `JSONValue`
-   * narrows it to the JSON-compatible subset with nothing carrying the rest.
-   * The same gap `WireCellValue` is marked with, at the other request that
-   * sends a value into the worker, and closed by the same mechanism
-   * (`codec-realm`).
-   */
-  argument?: JSONValue;
+  /** The argument the piece is created with. */
+  argument?: FabricValue;
   /**
    * What derives the piece's identity, so that the same cause names the
    * same piece.
@@ -2089,14 +2064,12 @@ export type VDomMountResponse = {
 };
 
 /**
- * TODO(danfuzz): This type should be made compatible with `FabricValue`, for
- * transport implemented using `codec-realm`. Note that an `interface` never
- * satisfies `FabricPlainObject` -- TypeScript grants an implicit index
- * signature to an anonymous object type and not to an interface -- so every
- * arm here has to become a type alias. The two ends of the crossing carry the
- * matching markers: `WebWorkerRuntimeTransport.send()` in
- * `../client/transports/web-worker/transport-web-worker.ts`, and the `message`
- * listener in `../backends/web-worker/index.ts`.
+ * Every request a client can send.
+ *
+ * Each arm is a type alias rather than an `interface`, and must stay one: the
+ * envelope is encoded as a `FabricValue`, and TypeScript grants the implicit
+ * index signature that `FabricPlainObject` needs to an anonymous object type
+ * and not to an interface.
  */
 export type IPCClientRequest =
   | InitializeRequest
@@ -2177,22 +2150,16 @@ export type BooleanResponse = {
 
 /**
  * A cell's value on its way _out_ of the worker, which `WireCellValue` is on
- * its way in.
- *
- * TODO(danfuzz): the two directions want the same type and do not have it.
- * `JSONValue` cannot carry the whole `FabricValue` domain either, and this
- * direction loses where the inbound one throws: the producer hands over a
- * value with its `FabricPrimitive`s intact and structured clone strips each to
- * `{}` (see `handleCellGet` in `backends/runtime-processor.ts`).
- * `codec-realm` is the mechanism, and closing this gap and `WireCellValue`'s
- * is one change.
+ * its way in. The two directions carry the same domain, which they did not
+ * before the envelope was encoded: outbound lost a `FabricPrimitive` to
+ * structured clone where inbound refused one outright.
  */
 export type JSONValueResponse = {
   /**
    * The value read. `undefined` is a value a cell can hold, so it is not
    * the same as the read having found nothing.
    */
-  value: JSONValue | undefined;
+  value: WireCellValue;
 };
 
 /**
@@ -2313,13 +2280,8 @@ export type CellUpdateNotification = {
    * The cell that changed.
    */
   cell: CellRef;
-  /**
-   * Its new value.
-   *
-   * TODO(danfuzz): the same gap `JSONValueResponse` is marked with. This is
-   * the push form of the same read, produced by the same conversion.
-   */
-  value: JSONValue;
+  /** Its new value, as {@link JSONValueResponse} carries the pulled form. */
+  value: WireCellValue;
   /**
    * The cell's current display label, present only for a subscription that
    * opted in through `includeCfcLabel`, so the client re-renders on a label

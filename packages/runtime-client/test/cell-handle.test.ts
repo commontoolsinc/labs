@@ -17,6 +17,10 @@ import {
   type RuntimeClient,
 } from "@/mod.ts";
 import { cellRefToKey } from "@/shared/utils.ts";
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 
 describe("cell-handle", () => {
   describe("CellHandle CFC label IPC", () => {
@@ -770,65 +774,79 @@ describe("cell-handle", () => {
     });
   });
 
-  describe("CellHandle special-object refusal", () => {
+  describe("CellHandle carries a special object", () => {
     // A `FabricSpecialObject` is a `ClientCellValue` -- a cell holds one like
-    // any other value -- and `WireCellValue` has no representation for it.
-    // Without the refusal, serializing one rebuilds it from its enumerable own
-    // properties, putting `{}` on the wire in place of the bytes.
+    // any other value -- and it now crosses as itself. What this pins is that
+    // `serialize()` hands it on WHOLE rather than walking it: rebuilding one
+    // from its enumerable own properties would put `{}` on the wire in place
+    // of the bytes, which is what the ordering of the checks prevents.
 
-    it("throws for a `FabricBytes` rather than sending an empty record", () => {
-      expect(() =>
-        CellHandle.serialize(new FabricBytes(new Uint8Array([1, 2, 3])))
-      ).toThrow(
-        "Cannot yet handle `FabricBytes` (a `FabricSpecialObject`) on this " +
-          "connection.",
-      );
+    it("returns a `FabricBytes` as itself, not as a record", () => {
+      const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+
+      const wire = CellHandle.serialize(bytes);
+
+      expect(wire).toBe(bytes);
+      expect(wire).toBeInstanceOf(FabricBytes);
     });
 
-    it("throws for a `FabricSpecialObject` nested in a record", () => {
-      // The branch it has to precede is the record one, so the nested position
-      // is the case that pins the ordering rather than merely the check.
-      expect(() => CellHandle.serialize({ a: { b: new FabricEpochNsec(1n) } }))
-        .toThrow(
-          "Cannot yet handle `FabricEpochNsec` (a `FabricSpecialObject`) on this " +
-            "connection.",
-        );
+    it("returns one nested in a record as itself", () => {
+      // The branch this has to precede is the record one, so the nested
+      // position is the case that pins the ordering rather than the check.
+      const nsec = new FabricEpochNsec(1n);
+
+      const wire = CellHandle.serialize({ a: { b: nsec } }) as {
+        a: { b: unknown };
+      };
+
+      expect(wire.a.b).toBe(nsec);
     });
 
-    it("throws for a `FabricSpecialObject` nested in an array", () => {
-      expect(() => CellHandle.serialize([new FabricBytes(new Uint8Array([7]))]))
-        .toThrow(
-          "Cannot yet handle `FabricBytes` (a `FabricSpecialObject`) on this " +
-            "connection.",
-        );
+    it("returns one nested in an array as itself", () => {
+      const bytes = new FabricBytes(new Uint8Array([7]));
+
+      const wire = CellHandle.serialize([bytes]) as unknown[];
+
+      expect(wire[0]).toBe(bytes);
+    });
+
+    it("returns a `bigint` and a `symbol` as themselves", () => {
+      // Both are `FabricValue` arms that the connection used to refuse
+      // outright, for want of anywhere to put them.
+      const marker = Symbol.for("a-marker");
+
+      expect(CellHandle.serialize(7n)).toBe(7n);
+      expect(CellHandle.serialize(marker)).toBe(marker);
     });
 
     it("serializes an ordinary record unchanged", () => {
-      // The refusal must not claim a plain record on its way past.
+      // The special-object branch must not claim a plain record on its way
+      // past.
       //
-      // `toStrictEqual`, because `toEqual` ignores an `undefined`-valued key in
-      // both directions -- so it would pass just as well if `c` were dropped
-      // entirely. Carrying a _present_ `undefined` is one of the two properties
-      // `WireCellValue` exists to have over `JSONValue`, which makes it the half
-      // of this fixture most worth actually asserting.
+      // `toStrictEqual`, because `toEqual` ignores an `undefined`-valued key
+      // in both directions -- so it would pass just as well if `c` were
+      // dropped entirely. Carrying a _present_ `undefined` is one of the
+      // properties `WireCellValue` exists to have over `JSONValue`, which
+      // makes it the half of this fixture most worth actually asserting.
       expect(CellHandle.serialize({ a: 1, b: [true, null], c: undefined }))
         .toStrictEqual({ a: 1, b: [true, null], c: undefined });
     });
   });
 
-  describe("CellHandle refused writes", () => {
+  describe("CellHandle write that cannot cross", () => {
     const ref: CellRef = {
-      id: "of:refused-cell" as CellRef["id"],
+      id: "of:uncrossable-cell" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
       scope: "space",
       path: [],
     };
 
-    const runtimeCapturing = (requests: unknown[]): RuntimeClient =>
+    /** A connection that encodes, as the real transport does when it sends. */
+    const encodingRuntime = (): RuntimeClient =>
       ({
         [$conn]: () => ({
           request: (request: unknown) => {
-            requests.push(request);
+            realmFromFabricValue(request as never);
             return Promise.resolve({});
           },
           subscribe: () => Promise.resolve(),
@@ -837,48 +855,20 @@ describe("cell-handle", () => {
         }),
       }) as unknown as RuntimeClient;
 
-    // The local update is optimistic about the _write_ landing, not about
-    // whether the value can be sent at all. A value the connection refuses is
-    // one the runtime will never hold, so it must not become the cached value or
-    // reach a subscriber -- that would show state that does not exist anywhere.
+    it("surfaces the failure to the caller rather than swallowing it", async () => {
+      // An object forged onto a `FabricPrimitive`'s prototype is a
+      // `FabricValue` by every check and still has no encoding, so it is what
+      // can fail a send now that the domain's real members all cross. The
+      // caller has to learn that their write never happened; the alternative
+      // is a `set()` that resolves over a value the runtime never saw.
+      const cell = new CellHandle<unknown>(encodingRuntime(), ref);
 
-    it("keeps the prior value after a refused set", async () => {
-      const cell = new CellHandle<unknown>(runtimeCapturing([]), ref);
-      cell[$onCellUpdate]("before");
-
-      await expect(cell.set(new FabricBytes(new Uint8Array([1])))).rejects
-        .toThrow("Cannot yet handle `FabricBytes`");
-
-      expect(cell.get()).toBe("before");
-    });
-
-    it("notifies no subscriber of a refused set", async () => {
-      const cell = new CellHandle<unknown>(runtimeCapturing([]), ref);
-      cell[$onCellUpdate]("before");
-      const seen: unknown[] = [];
-      cell.subscribe((value) => {
-        seen.push(value);
-      });
-      seen.length = 0; // Drop any initial delivery; what follows is the point.
-
-      await expect(cell.set(new FabricBytes(new Uint8Array([1])))).rejects
-        .toThrow("Cannot yet handle `FabricBytes`");
-
-      expect(seen).toEqual([]);
-    });
-
-    it("sends nothing over the connection for a refused set", async () => {
-      const requests: unknown[] = [];
-      const cell = new CellHandle<unknown>(runtimeCapturing(requests), ref);
-
-      await expect(cell.set(new FabricBytes(new Uint8Array([1])))).rejects
-        .toThrow("Cannot yet handle `FabricBytes`");
-
-      expect(requests).toEqual([]);
+      await expect(cell.set(Object.create(FabricBytes.prototype))).rejects
+        .toThrow();
     });
   });
 
-  describe("CellHandle refusal reaches every write path", () => {
+  describe("CellHandle carries a value on every write path", () => {
     const ref: CellRef = {
       id: "of:paths-cell" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
@@ -886,11 +876,19 @@ describe("cell-handle", () => {
       path: [],
     };
 
+    /**
+     * A runtime whose connection encodes each request as the real transport
+     * does, so what a test reads back is what would actually have crossed. A
+     * double that merely captured the object would report a fidelity this
+     * connection might not have.
+     */
     const runtimeCapturing = (requests: unknown[]): RuntimeClient =>
       ({
         [$conn]: () => ({
           request: (request: unknown) => {
-            requests.push(request);
+            requests.push(
+              fabricFromRealmValue(realmFromFabricValue(request as never)),
+            );
             return Promise.resolve({});
           },
           subscribe: () => Promise.resolve(),
@@ -899,44 +897,45 @@ describe("cell-handle", () => {
         }),
       }) as unknown as RuntimeClient;
 
-    // Three methods serialize, and each refuses through a different caller
-    // contract: `set()` rejects, `send()` rejects, and `push()` throws
-    // synchronously out of a `void` return. Pinning all three is what keeps a
-    // later refactor from moving the check somewhere only `set()` reaches.
+    // Three methods serialize, and each used to refuse a `FabricSpecialObject`
+    // through a different caller contract. All three carry one now, and
+    // pinning all three is what keeps a later refactor from carrying it on
+    // only the path `set()` takes.
 
-    it("throws synchronously out of `push()`, which returns void", () => {
-      const requests: unknown[] = [];
+    it("carries one through `push()`", () => {
+      const requests: Array<{ value?: unknown }> = [];
       const cell = new CellHandle<unknown[]>(runtimeCapturing(requests), ref);
       cell[$onCellUpdate]([1, 2]);
 
-      expect(() => cell.push(new FabricBytes(new Uint8Array([1])))).toThrow(
-        "Cannot yet handle `FabricBytes`",
-      );
-      expect(requests).toEqual([]);
-      // The read-modify-write left the cached array alone.
-      expect(cell.get()).toEqual([1, 2]);
+      cell.push(new FabricBytes(new Uint8Array([1])));
+
+      expect(requests).toHaveLength(1);
+      const pushed = requests[0].value as unknown[];
+      expect(pushed[2]).toBeInstanceOf(FabricBytes);
+      expect((pushed[2] as FabricBytes).slice()).toEqual(new Uint8Array([1]));
     });
 
-    it("rejects from `send()` without reaching the connection", async () => {
-      const requests: unknown[] = [];
+    it("carries one through `send()`", async () => {
+      const requests: Array<{ event?: unknown }> = [];
       const cell = new CellHandle<unknown>(runtimeCapturing(requests), ref);
 
-      await expect(cell.send(new FabricBytes(new Uint8Array([1])))).rejects
-        .toThrow("Cannot yet handle `FabricBytes`");
-      expect(requests).toEqual([]);
+      await cell.send(new FabricBytes(new Uint8Array([1])));
+
+      expect(requests).toHaveLength(1);
+      expect(requests[0].event).toBeInstanceOf(FabricBytes);
     });
 
-    it("rejects a `bigint`, which no arm of the wire type carries", async () => {
-      // Not an object, so the `FabricSpecialObject` check cannot catch it. It is
-      // a `FabricValue` arm all the same, so a cell holds one and
-      // `ClientCellValue` admits one -- the same gap, for an arm that is not an
-      // object. The message names the kind, since `1n` prints as `1` and would
-      // otherwise read as a number refused for no reason.
-      const cell = new CellHandle<unknown>(runtimeCapturing([]), ref);
+    it("carries a `bigint` through `set()`", async () => {
+      // Not an object, so the `FabricSpecialObject` branch never sees it. It
+      // is a `FabricValue` arm all the same, and the encoding carries one as
+      // itself rather than as the `1` its text would suggest.
+      const requests: Array<{ value?: unknown }> = [];
+      const cell = new CellHandle<unknown>(runtimeCapturing(requests), ref);
 
-      await expect(cell.set(1n)).rejects.toThrow(
-        "Cannot send a `bigint` on this connection",
-      );
+      await cell.set(1n);
+
+      expect(requests).toHaveLength(1);
+      expect(requests[0].value).toBe(1n);
     });
   });
 });

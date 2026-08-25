@@ -7,6 +7,10 @@ import {
   defaultRenderConfidentialityCeiling,
   RuntimeInternals,
 } from "@commonfabric/lib-shell";
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 import { TransportNotificationType } from "@commonfabric/runtime-client";
 
 type MockRuntimeClientEvents = {
@@ -489,12 +493,17 @@ describe("RuntimeInternals", () => {
           queueMicrotask(() =>
             this.dispatchEvent(
               new MessageEvent("message", {
-                data: { type: TransportNotificationType.WorkerReady },
+                // Encoded, as a real worker posts it: the transport decodes
+                // every arriving envelope, so a raw object reads as damaged.
+                data: realmFromFabricValue({
+                  type: TransportNotificationType.WorkerReady,
+                }),
               }),
             )
           );
         }
-        postMessage(message: unknown): void {
+        postMessage(encoded: unknown): void {
+          const message = fabricFromRealmValue(encoded as never);
           const msg = message as {
             msgId?: number;
             data?: { type?: string; data?: CapturedInitData };
@@ -506,7 +515,10 @@ describe("RuntimeInternals", () => {
           queueMicrotask(() =>
             this.dispatchEvent(
               new MessageEvent("message", {
-                data: { msgId: msg.msgId, error: "stub init failure" },
+                data: realmFromFabricValue({
+                  msgId: msg.msgId!,
+                  error: "stub init failure",
+                }),
               }),
             )
           );

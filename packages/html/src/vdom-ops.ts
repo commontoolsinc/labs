@@ -5,6 +5,7 @@
  * on the main thread. They are batched and sent as a single message.
  */
 
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type { CellRef, JSONValue } from "@commonfabric/runtime-client";
 
 /**
@@ -58,14 +59,13 @@ export type SetPropOp = {
   op: "set-prop";
   nodeId: number;
   key: string;
-  // TODO(danfuzz): a prop is whatever a pattern put on a render node, so its
-  // value is a `FabricValue`, and `JSONValue` narrows that to the
-  // JSON-compatible subset. The producer (`transformPropValue()` in
-  // `worker/reconciler.ts`) does not narrow to match: it hands over a
-  // `FabricPrimitive` whole, and structured clone strips one to `{}` on the
-  // way here. `codec-realm` is the mechanism, this batch crossing by
-  // `postMessage` rather than as JSON text.
-  value: JSONValue;
+  /**
+   * The value to set, which is whatever a pattern put on a render node and so
+   * is a `FabricValue` entire. The batch crosses inside the envelope's
+   * encoding, which carries a `FabricPrimitive` with its class where a bare
+   * structured clone stripped one to `{}`.
+   */
+  value: FabricValue;
 };
 
 /**
