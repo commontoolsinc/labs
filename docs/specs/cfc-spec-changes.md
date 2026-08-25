@@ -300,8 +300,61 @@ string) under every lower mode, with the stable SC-18c reason
 <offending clauses>`. Contract text in
 `docs/specs/cfc-enforcement-matrix.md` §4; implementation in
 `prepareBoundaryCommit` (runner `cfc/prepare.ts`) sharing the egress gates'
-clause-subsumption predicate; tests `cfc-writer-fit.test.ts`. Only (a) — the
-standard-profile default — stays open on the confidentiality side.
+clause-subsumption predicate; tests `cfc-writer-fit.test.ts`. Two items stay
+open on the confidentiality side: (a) the standard-profile default, and (d)
+the residency half of the write ceiling, recorded next.
+
+(d) **[normative] Residency fit — the ceiling a document carries by living
+where it lives.** The fit measurement joins the target's declared policy with
+one RESIDENCY clause, `Space(<the space the document resides in>)`. A flow
+clause listing that space among its alternatives therefore fits the document
+whatever it declares. The soundness argument is that writing into the space
+the clause already names discloses nothing: the `Space` atom's audience is
+that space's reader set — §4.9.3 resolves it by dereferencing its id against
+the space's ACL, the same document that decides who receives a replica — so
+every principal holding the target is inside the audience the alternative
+names, and the write reaches no reader the data had not already reached. The
+guarantee is therefore exactly as strong as the deployment's ACL posture, the
+same bound the §4.9.3 membership lookup carries.
+
+The rule is confined to `Space` deliberately. §3.6.4 gives a personal space
+fixed membership — its owner alone — and says sharing happens by moving the
+data to a shared space or by converting the personal space into one, so
+`PersonalSpace(<owner>)` names a single principal rather than a container with
+a reader set. The runtime agrees: no exchange rule maps a space reader onto a
+`PersonalSpace` clause, the display ceiling admits it only by exact match
+against the acting user, and the deployment's §4.6.4.2 field classification
+commits `PersonalSpace.owner` alongside `User.subject` while keeping
+`Space.id` public precisely so §4.9.3's point query can dereference it. A
+space grants reader roles its owner does not hold in person, so admitting
+those forms would place data readable by one principal into a store its
+co-readers sync.
+
+One spec question this exposes and should settle: §4.9.4 describes
+`HasRole(user, PersonalSpace(User), reader)` as minted by a §4.9.3 point query
+against that space's own ACL record, and calls it one of "the two `Space(...)`
+atoms", which reads `PersonalSpace` as an ACL-dereferenced container atom. That
+sits in tension with §3.6.4's fixed membership, and with a deployment
+classification that commits the very field such a point query would have to
+read. If `PersonalSpace` is genuinely ACL-dereferenced, its audience is the
+space's reader set and residency admits it on the same footing as `Space`;
+if membership is fixed, it names one principal and residency must not. The
+implementation takes the second reading, which is the fail-closed one. Reading
+back is unaffected in every case: the derived stamp persists the full join, so
+the egress and display ceilings fit the unchanged label, and the space
+principal there resolves to a reader only through the §4.3.3
+`SpaceReaderAccess` exchange rule on verified `HasRole` membership. The
+ungrantable read-failed marker stays outside the residency clause as it stays
+outside every ceiling.
+
+Spec home: §8.12.4's `canWrite`, alongside the declared-policy measurement.
+Two points the spec should settle explicitly. Residency is a property of the
+store rather than a carve-out for an atom family: a store satisfies a clause
+whose audience already contains everyone the store's bytes reach. And
+residency holds over a declared policy rather than only in its absence — a
+declaration narrower than the physical audience of the space cannot be
+enforced by the store anyway, and making residency a fallback would mean that
+adding a narrow declaration newly breaks space-internal flows.
 
 The **integrity direction** is genuinely unstated (§8.12.4's `canWrite`
 checks confidentiality only; §8.10.3's `requiredIntegrity` is consume-side)
