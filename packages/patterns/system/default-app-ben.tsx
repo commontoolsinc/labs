@@ -169,11 +169,6 @@ const addPiece = handler<
   pieceRegistry.addUnique(piece);
 });
 
-const retiredAction = handler<
-  { piece: unknown },
-  Record<string, never>
->(() => {});
-
 const recordSuggestion = handler<
   SuggestionHistoryEntry,
   { suggestionHistory: Writable<SuggestionHistoryEntry[]> }
@@ -205,7 +200,6 @@ Knowledge graph:
 export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   // OWN the data cells (not from wish)
   const pieceRegistry = new Writable<MentionablePiece[]>([]);
-  const recentPieces = new Writable<MentionablePiece[]>([]);
   const suggestionHistory = new Writable<SuggestionHistoryEntry[]>([]);
   const suggestionHistoryViewer = SuggestionHistory({});
 
@@ -506,14 +500,10 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
 
     // Exported data
     pieceRegistry,
-    // Preserve stored state while the retired surface ages out of deployments.
-    recentPieces,
     suggestionHistory,
 
     // Exported handlers (bound to state cells for external callers)
     addPiece: addPiece({ pieceRegistry }),
-    // Keep the retired action slot non-empty while older roots update.
-    trackRecent: retiredAction({}),
     recordSuggestion: recordSuggestion({ suggestionHistory }),
     pinToChat: fab.pinToChat,
   };

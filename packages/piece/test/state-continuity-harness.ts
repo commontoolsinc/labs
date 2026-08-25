@@ -714,10 +714,9 @@ export function comparableState(value: unknown): unknown {
  * declared `unknown` field and an INDEX SIGNATURE both lower to — the second
  * as `additionalProperties: {"type": "unknown"}` — and `default-app.tsx`
  * declares `[key: string]: unknown` on its output. Its root holds
- * `recentPieces`, an inert state tombstone, `summaryIndex`, a whole nested
- * pattern result, and an inert compatibility action. Under the stored schema
- * verbatim all three read back carrying none of their contents, and a change
- * that stranded any of them would have replayed clean.
+ * `summaryIndex`, a whole nested pattern result. Under the stored schema
+ * verbatim it reads back carrying none of its contents, and a change that
+ * stranded it would have replayed clean.
  *
  * `required` goes for a different reason, measured on the committed topics
  * fixture. A schema-driven read returns `undefined` for the WHOLE object when a
@@ -938,10 +937,9 @@ export function isReduction(value: unknown): boolean {
  *   for a key the document does hold. It could, before
  *   `schemaRelaxedForComparison`: an `unknown` position resolves to `undefined`
  *   whatever is stored there, and measured on the committed `default-app.tsx`
- *   fixture that hid the inert `recentPieces` tombstone, `summaryIndex`, and an
- *   inert compatibility action — keys holding real state, indistinguishable
- *   here from keys holding nothing. Whatever else changes, the two must not be
- *   allowed to collapse again.
+ *   fixture that hid `summaryIndex`, which held real state and was
+ *   indistinguishable here from a key holding nothing. Whatever else changes,
+ *   the two must not be allowed to collapse again.
  */
 /**
  * Whether one side is a schema written as a content-addressed reference and

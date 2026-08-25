@@ -26,6 +26,7 @@ class MockRuntimeClient extends EventEmitter<MockRuntimeClientEvents> {
   idleCalls = 0;
   syncedCalls = 0;
   spaceRootPatternCalls = 0;
+  registryWriteCalls = 0;
   slugByPageId = new Map<string, string | undefined>();
 
   idle(): Promise<void> {
@@ -42,9 +43,19 @@ class MockRuntimeClient extends EventEmitter<MockRuntimeClientEvents> {
     return Promise.resolve(this.slugByPageId.get(pageId));
   }
 
-  getSpaceRootPattern(): Promise<never> {
+  getSpaceRootPattern() {
     this.spaceRootPatternCalls += 1;
-    return new Promise(() => {});
+    return Promise.resolve({
+      cell: () => ({
+        key: () => ({
+          send: () => {
+            this.registryWriteCalls += 1;
+            return Promise.resolve();
+          },
+        }),
+        sync: () => Promise.resolve(),
+      }),
+    });
   }
 
   dispose(): Promise<void> {
@@ -135,6 +146,7 @@ describe("RuntimeInternals navigation", () => {
       expect(client.idleCalls).toBe(1);
       expect(client.syncedCalls).toBe(1);
       expect(client.spaceRootPatternCalls).toBe(0);
+      expect(client.registryWriteCalls).toBe(0);
       expect(navigation).toEqual({
         spaceDid: nextSpace,
         pieceId: "piece-456",

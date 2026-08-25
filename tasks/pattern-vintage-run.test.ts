@@ -241,9 +241,8 @@ const NESTED_ROW_ARGS_TIGHTENED = nestedSource()
 /**
  * A subject that returns a key its declared output type never NAMES, riding an
  * index signature instead — the shape `system/default-app.tsx` declares
- * (`[key: string]: unknown`), and the reason its root's inert `recentPieces`
- * tombstone, `summaryIndex`, and inert compatibility action are stored under
- * `additionalProperties: {"type": "unknown"}`.
+ * (`[key: string]: unknown`), and the reason its root's `summaryIndex` is
+ * stored under `additionalProperties: {"type": "unknown"}`.
  *
  * A schema-driven read resolves nothing at an `unknown` position, so such a key
  * came back `undefined` however much state it held — indistinguishable from a
