@@ -348,14 +348,15 @@ Deno.test("startServers returns when the startup script completes", async () => 
 });
 
 Deno.test("startServers returns the startup script failure", async () => {
+  const failureCode = 42;
   const code = await startServers(
     17,
     "/repo",
     {},
-    () => Promise.resolve({ success: false, code: 3 }),
+    () => Promise.resolve({ success: false, code: failureCode }),
   );
 
-  assertEquals(code, 3);
+  assertEquals(code, failureCode);
 });
 
 // Every offset the choice can return, collected by sweeping its random input
