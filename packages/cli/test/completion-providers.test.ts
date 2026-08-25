@@ -281,6 +281,25 @@ function shellHandoff(
 }
 
 /**
+ * The spelling that puts the cursor on an option's own value.
+ *
+ * An option whose value may be omitted never swallows the next word, so after
+ * `--remote ` the cursor is on a positional and the slot being probed would be
+ * somebody else's. `--remote=` is the spelling that reaches it, and the
+ * declaration is what says which of the two an option needs.
+ */
+function optionProbeLine(
+  name: string,
+  where: string,
+  optionalValues: ReadonlySet<string>,
+): string {
+  const path = where === "<root>" ? "" : `${where} `;
+  return optionalValues.has(`${where}:--${name}`)
+    ? `cf ${path}--${name}=`
+    : `cf ${path}--${name} `;
+}
+
+/**
  * A line that puts the cursor on each slot the command tree declares. Only the
  * text: the key comes from the resolved line, so `providerKeyOf` is the one
  * place that says what a case has to name.
@@ -290,8 +309,7 @@ function probeLines(): string[] {
   const probes: string[] = [];
   for (const [name, paths] of slots.options) {
     for (const where of paths) {
-      const path = where === "<root>" ? "" : `${where} `;
-      probes.push(`cf ${path}--${name} `);
+      probes.push(optionProbeLine(name, where, slots.optionalValues));
     }
   }
   for (const slot of slots.positionals) {
@@ -351,6 +369,38 @@ Deno.test("provider keys report which commands each option provider answers on",
   assertFalse(positionals.has("callable"));
 });
 
+Deno.test("live candidates: every probe reaches the slot it was built for", () => {
+  // What both nets below rest on. A probe that lands on a neighbouring slot
+  // tests that neighbour and reports nothing about the slot it named, so the
+  // net would pass over a whole class of options while looking exhaustive —
+  // which is what the spaced spelling did to every optional-valued option,
+  // whose flag does not swallow the word after it.
+  const slots = declaredSlots(main);
+  const wrong: string[] = [];
+  for (const [name, paths] of slots.options) {
+    for (const where of paths) {
+      const text = optionProbeLine(name, where, slots.optionalValues);
+      const line = lineFor(text);
+      const reached = line.slot?.kind === "option-value" &&
+        longName(line.slot.option) === name &&
+        (line.path.join(" ") || "<root>") === where;
+      if (!reached) wrong.push(`${text.trim()} misses ${where}:--${name}`);
+    }
+  }
+  for (const slot of slots.positionals) {
+    const path = slot.where === "<root>" ? "" : `${slot.where} `;
+    const filled = Array.from({ length: slot.index }, (_, i) => `x${i} `).join(
+      "",
+    );
+    const text = `cf ${path}${filled}`;
+    const line = lineFor(text);
+    const reached = line.slot?.kind === "argument" &&
+      `${line.path.join(" ")}:${line.slot.argument.name}` === slot.key;
+    if (!reached) wrong.push(`${text.trim()} misses ${slot.key}`);
+  }
+  assertEquals(wrong, []);
+});
+
 Deno.test("live candidates: no slot hands the shell a directive the cases miss", async () => {
   // The case table above is hand-maintained, and a hand-maintained table falls
   // behind the thing it describes without saying so — which is what it did
@@ -387,13 +437,15 @@ Deno.test("live candidates: an unscoped option provider answers the same everywh
   // before they said where they applied, and the state a single case cannot
   // pin.
   const answers = new Map<string, Map<string, string[]>>();
+  const slots = declaredSlots(main);
   await withEnv({}, async () => {
-    for (const [name, paths] of declaredSlots(main).options) {
+    for (const [name, paths] of slots.options) {
       if ((PROVIDER_SCOPES.get(name) ?? null) !== null) continue;
       const byAnswer = new Map<string, string[]>();
       for (const where of paths) {
-        const path = where === "<root>" ? "" : `${where} `;
-        const result = await liveCandidates(lineFor(`cf ${path}--${name} `));
+        const result = await liveCandidates(
+          lineFor(optionProbeLine(name, where, slots.optionalValues)),
+        );
         const handoff = shellHandoff(result);
         const answer = handoff
           ? handoffLabel(handoff)

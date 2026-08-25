@@ -330,3 +330,20 @@ Deno.test("declaredSlots skips the help Cliffy propagates to every command", () 
     ["piece call:callable", "piece call:tail"],
   );
 });
+
+Deno.test("declaredSlots names the option slots whose value may be omitted", () => {
+  // An option written `[value]` is legal as a bare flag, so it never swallows
+  // the word after it: the cursor there is on a positional, and `--name=` is
+  // the only spelling that reaches the option's own value. Anything driving a
+  // line at these slots has to know which they are.
+  const tree = new Command()
+    .name("cf")
+    .command(
+      "go",
+      new Command()
+        .description("somewhere")
+        .option("--maybe [url:string]", "a value that may be omitted")
+        .option("--must <dir:string>", "a value the flag requires"),
+    );
+  assertEquals([...declaredSlots(tree).optionalValues], ["go:--maybe"]);
+});

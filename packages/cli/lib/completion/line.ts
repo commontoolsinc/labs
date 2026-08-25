@@ -563,6 +563,16 @@ export interface DeclaredSlots {
   /** Option long name -> the command paths declaring it. */
   readonly options: ReadonlyMap<string, readonly string[]>;
   readonly positionals: readonly DeclaredPositional[];
+  /**
+   * The option slots whose value may be omitted, as
+   * `<command path>:--<long name>`.
+   *
+   * Such an option never swallows the next word, so the cursor after
+   * `--name ` is on a positional and only `--name=` reaches the option's own
+   * value. Anything walking these slots to drive a line has to spell them that
+   * way or it drives a different slot.
+   */
+  readonly optionalValues: ReadonlySet<string>;
 }
 
 /**
@@ -577,6 +587,7 @@ export interface DeclaredSlots {
 export function declaredSlots(root: AnyCommand): DeclaredSlots {
   const options = new Map<string, string[]>();
   const positionals: DeclaredPositional[] = [];
+  const optionalValues = new Set<string>();
   const walk = (command: AnyCommand, path: readonly string[]): void => {
     const where = path.join(" ") || "<root>";
     for (const option of command.getOptions(false)) {
@@ -584,6 +595,9 @@ export function declaredSlots(root: AnyCommand): DeclaredSlots {
       const seen = options.get(longName(option)) ?? [];
       if (!seen.includes(where)) seen.push(where);
       options.set(longName(option), seen);
+      if (valueIsOptional(option)) {
+        optionalValues.add(`${where}:--${longName(option)}`);
+      }
     }
     command.getArguments().forEach((argument: Argument, index: number) => {
       positionals.push({
@@ -597,5 +611,5 @@ export function declaredSlots(root: AnyCommand): DeclaredSlots {
     }
   };
   walk(root, []);
-  return { options, positionals };
+  return { options, positionals, optionalValues };
 }
