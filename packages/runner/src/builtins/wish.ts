@@ -18,8 +18,9 @@ import { extractHashtags } from "@commonfabric/utils/hashtags";
 import { getLogger } from "@commonfabric/utils/logger";
 
 import { h } from "../builder/h.ts";
-// DIAGNOSTIC import (profile-starvation seat, 2026-08-25): observe the wave
-// settlement of the sidecar instantiation commit.
+// The sidecar instantiation observes its wave settlement (a serving-wave
+// commit can be withdrawn AFTER commit() resolves — runner.ts's pattern-swap
+// settlement precedent) so a withdrawn one-shot is at least named.
 import { waveSettlementOf } from "../executor/wave.ts";
 import {
   type CellScope,
@@ -2341,6 +2342,27 @@ export function wish(
     pattern: Pattern,
     inputForTx: (tx: IExtendedStorageTransaction) => unknown,
   ): Promise<void> {
+    // A conflict-class failure means ANOTHER instantiation of the same
+    // cause-derived sidecar won the race on these very docs — the same
+    // node launched again before the fetch resolved (every pre-resolve
+    // launch chains its own continuation on the memoized fetch), another
+    // runtime/instance of the node converged on the same cause, or the
+    // serving loop re-ran the wish. The winner's surface IS the outcome:
+    // yield and leave it standing. Writing the error UI here instead
+    // REPLACED the winner's materialized create surface with a dead
+    // error box — the profile-resolution starvation's reproduced member
+    // (OW45; the create surface is the only route to a first profile,
+    // and nothing re-issues it). Loud per serving-loop.md §3d's
+    // failure-arm contract; pinned by
+    // wish-sidecar-duplicate-launch.test.ts.
+    const yieldToRacingWinner = (error: { name?: string }) => {
+      wishFlowLogger.warn("sidecar-run-raced", () => [
+        `sidecar run for ${resultCell.sourceURI} lost a same-cell race ` +
+        `and yields to the winner's surface: ${error.name}: ${
+          (error as { message?: string }).message ?? ""
+        }`,
+      ]);
+    };
     try {
       const runTx = runtime.edit();
       // Sidecar run from a cache-fetch continuation — no scheduler run
@@ -2358,28 +2380,44 @@ export function wish(
       );
       runtime.prepareTxForCommit(runTx);
       const { error } = await runTx.commit();
-      // DIAGNOSTIC (profile-starvation seat, 2026-08-25).
-      wishFlowLogger.warn("sidecar-run-committed", () => [
-        `sidecar run for ${resultCell.sourceURI}: commit ` +
-        `${error ? `ERROR ${toCompactDebugString(error)}` : "ok"}`,
-      ]);
       if (error) {
+        if (
+          isConflictRejection(error) || isStorageTransactionInconsistent(error)
+        ) {
+          yieldToRacingWinner(error);
+          return;
+        }
         await commitPatternErrorUI(resultCell, toCompactDebugString(error));
         return;
       }
+      // Under a serving wave, commit() resolving ok is not durability: the
+      // commit step can still withdraw the contribution (runner.ts's
+      // pattern-swap settlement precedent). Nothing re-issues a withdrawn
+      // sidecar instantiation, so at least SAY so — the silent one-shot
+      // loss class this row keeps producing. Recovery is deliberately not
+      // attempted here (re-running against a withdrawn basis is its own
+      // design question, flagged in the register).
       const settlement = waveSettlementOf(runTx);
       if (settlement !== undefined) {
         const settled = await settlement;
-        wishFlowLogger.warn("sidecar-run-settled", () => [
-          `sidecar run for ${resultCell.sourceURI}: wave settlement ` +
-          `${
-            settled.error !== undefined
-              ? `WITHDRAWN ${settled.error.message}`
-              : "durable"
-          }`,
-        ]);
+        if (settled.error !== undefined) {
+          wishFlowLogger.warn("sidecar-run-withdrawn", () => [
+            `sidecar run for ${resultCell.sourceURI} committed but the ` +
+            `wave withdrew it; nothing re-issues this instantiation: ` +
+            `${settled.error.message}`,
+          ]);
+        }
       }
     } catch (error) {
+      // The same conflict classes surface as THROWS from the run/prepare
+      // path (a stale read met mid-run) — same race, same yield.
+      if (
+        isConflictRejection(error as { name?: string }) ||
+        isStorageTransactionInconsistent(error as { name?: string })
+      ) {
+        yieldToRacingWinner(error as { name?: string });
+        return;
+      }
       await commitPatternErrorUI(resultCell, errorMessage(error));
     }
   }
@@ -2452,14 +2490,6 @@ export function wish(
     };
 
     const cachedProfileCreatePattern = profileCreatePatternCache.cached();
-    // DIAGNOSTIC (profile-starvation seat, 2026-08-25).
-    if (!sidecarIsServed && runtime.servingPosture === true) {
-      wishFlowLogger.warn("profile-create-launch", () => [
-        `profile-create launch for ${sidecarUser}: cached=` +
-        `${cachedProfileCreatePattern !== undefined} cancelled=${cancelled} ` +
-        `resultCell=${slot.resultCell?.sourceURI ?? "<none>"}`,
-      ]);
-    }
     if (sidecarIsServed) {
       // The SpaceServer fetches/instantiates the create surface for this
       // demander and flips its ready cell; this speculative run only
@@ -2491,14 +2521,6 @@ export function wish(
         }
       }, runtime.servingPosture ? parentCell.space : undefined).then(
         (pattern) => {
-          // DIAGNOSTIC (profile-starvation seat, 2026-08-25).
-          if (runtime.servingPosture === true) {
-            wishFlowLogger.warn("profile-create-fetch-resolved", () => [
-              `profile-create fetch resolved for ${sidecarUser}: pattern=` +
-              `${pattern !== undefined} cancelled=${cancelled} resultCell=` +
-              `${slot.resultCell?.sourceURI ?? "<none>"}`,
-            ]);
-          }
           if (cancelled || !slot.resultCell) return;
           if (pattern) {
             return runSidecarInOwnTx(

@@ -1,0 +1,218 @@
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { fromFileUrl } from "@std/path";
+import { Identity } from "@commonfabric/identity";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import type { RuntimeProgram } from "../src/harness/types.ts";
+import { Runtime } from "../src/runtime.ts";
+import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { NAME, UI } from "../src/builder/types.ts";
+import {
+  getPatternEnvironment,
+  setPatternEnvironment,
+} from "../src/builder/env.ts";
+
+// The profile-resolution starvation family's reproduced member (2026-08-25,
+// OW45 residue): when the `#profile` wish node's create-surface sidecar is
+// launched MORE THAN ONCE before its pattern fetch resolves, every launch
+// chains its own instantiation continuation on the module-global memoized
+// fetch, and the resolve runs the sidecar repeatedly into the SAME
+// cause-derived result cell. One run wins; a duplicate's commit fails on the
+// conflict class (StorageTransactionInconsistent / ConflictError — its
+// snapshot predates the winner), and its error arm then REPLACED the winner's
+// materialized surface with an error UI (`commitPatternErrorUI`), removing
+// `$NAME`/`createProfile` and leaving the only route to a first profile a
+// dead error box. On a serving runtime the wave folds winner-then-clobber
+// into one commit, so the durable state is the error box from birth; live
+// evidence: the #6248 ensure-ON board's profile shards and 6/11 local reds at
+// main 35ab29c38 — every red store carries the `remove /value/$NAME` +
+// error-span patch on the create surface's cell.
+//
+// The duplicate here is driven the way the live one is: two runs of the same
+// content-addressed pattern (two runtimes over one store — the serving loop's
+// re-runs of one wish node are the same shape) share the module-global fetch
+// AND the cause-derived sidecar cell, so both continuations instantiate into
+// one address. The contract pinned: the materialized create surface survives
+// the losing duplicate.
+const signer = await Identity.fromPassphrase("wish-sidecar-duplicate-launch");
+const homeSpace = signer.did();
+
+const read = (name: string) =>
+  Deno.readTextFileSync(
+    fromFileUrl(new URL("../../patterns/system/", import.meta.url)) + name,
+  );
+
+const WISH_SRC = [
+  "import { pattern, wish } from 'commonfabric';",
+  "export default pattern(() => ({",
+  "  profile: wish({ query: '#profile' }),",
+  "}));",
+].join("\n");
+
+const PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [{ name: "/main.tsx", contents: WISH_SRC }],
+};
+
+const RESULT_CAUSE = "wish-sidecar-duplicate-launch-result";
+
+describe("wish profile-create sidecar duplicate launch", () => {
+  let server: MemoryV2Server.Server;
+  let managerA: EmulatedStorageManager;
+  let managerB: EmulatedStorageManager;
+  let originalFetch: typeof globalThis.fetch;
+  let originalEnvironment: ReturnType<typeof getPatternEnvironment>;
+
+  beforeEach(() => {
+    server = newSharedServer();
+    managerA = EmulatedStorageManager.connectTo(server, { as: signer });
+    managerB = EmulatedStorageManager.connectTo(server, { as: signer });
+    originalFetch = globalThis.fetch;
+    originalEnvironment = getPatternEnvironment();
+  });
+
+  afterEach(async () => {
+    globalThis.fetch = originalFetch;
+    setPatternEnvironment(originalEnvironment);
+    await managerA?.close();
+    await managerB?.close();
+    await server?.close();
+  });
+
+  it("a duplicate pre-fetch launch does not clobber the materialized create surface", async () => {
+    // A unique pattern-environment origin keys this test's entry in the
+    // module-global sidecar cache (the cache memoizes per URL).
+    setPatternEnvironment({
+      apiUrl: new URL("https://sidecar-duplicate-launch.test/"),
+    });
+
+    // Serve the REAL profile-create.tsx (+ its profile-home.tsx import). The
+    // ENTRY response is gated: it signals when the first launch's fetch is in
+    // flight and releases only once BOTH runtimes' launches have registered
+    // their continuations on the shared memoized fetch — the duplicate-launch
+    // window, held open deterministically.
+    const entryRequested = Promise.withResolvers<void>();
+    const entryGate = Promise.withResolvers<void>();
+    globalThis.fetch = ((input: Request | URL | string) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.includes("profile-create.tsx")) {
+        entryRequested.resolve();
+        return entryGate.promise.then(() =>
+          new Response(read("profile-create.tsx"), { status: 200 })
+        );
+      }
+      if (url.includes("profile-home.tsx")) {
+        return Promise.resolve(
+          new Response(read("profile-home.tsx"), { status: 200 }),
+        );
+      }
+      return Promise.resolve(new Response("not found", { status: 404 }));
+    }) as typeof fetch;
+
+    const rt1 = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager: managerA,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager: managerB,
+    });
+    try {
+      // Home space with a profile-less default pattern: `#profile` resolves
+      // to the missing-profile state, whose UI is the create surface.
+      const setupTx = rt1.edit();
+      const homeSpaceCell = rt1.getSpaceCell(homeSpace);
+      const homeDefault = rt1.getCell(
+        homeSpace,
+        "duplicate-launch-home-default",
+        undefined,
+        setupTx,
+      );
+      homeDefault.key("marker").set("home");
+      // deno-lint-ignore no-explicit-any
+      (homeSpaceCell.withTx(setupTx) as any).key("defaultPattern").set(
+        homeDefault,
+      );
+      rt1.prepareTxForCommit(setupTx);
+      const setupCommit = await setupTx.commit();
+      expect(setupCommit.error).toBeUndefined();
+      await rt1.storageManager.synced();
+
+      // Both runtimes compile the same source — content-addressed, so the
+      // wish node (and with it the sidecar slot cells) shares one cause.
+      const tx1 = rt1.edit();
+      const pattern1 = await rt1.patternManager.compilePattern(PROGRAM, {
+        space: homeSpace,
+        tx: tx1,
+      });
+      const result1 = rt1.getCell<Record<string, unknown>>(
+        homeSpace,
+        RESULT_CAUSE,
+        undefined,
+        tx1,
+      );
+      // deno-lint-ignore no-explicit-any
+      const run1 = rt1.run(tx1, pattern1 as any, {}, result1);
+      rt1.prepareTxForCommit(tx1);
+      const commit1 = await tx1.commit();
+      expect(commit1.error).toBeUndefined();
+
+      // Demand drives the compiled piece's wish action (which fires the
+      // launch); the pull itself may then park behind the gated fetch, so it
+      // is raced against the entry witness rather than awaited.
+      const demand1 = run1.pull().catch(() => {});
+      await Promise.race([demand1, entryRequested.promise]);
+      // The first launch's fetch is in flight (the entry request is the
+      // witness); the gate keeps the window open while the SAME piece —
+      // hence the same wish node, the same cause-derived sidecar cells —
+      // starts in the second runtime. Its launch joins the shared memoized
+      // fetch and registers the duplicate continuation.
+      await entryRequested.promise;
+
+      await rt1.patternManager.flushCompileCacheWrites();
+      await rt1.storageManager.synced();
+      const piece2 = rt2.getCellFromLink(run1.getAsNormalizedFullLink());
+      await piece2.sync();
+      const started = await rt2.start(piece2);
+      expect(started).toBe(true);
+      // Demand drives rt2's wish action too (the launch that registers the
+      // duplicate continuation); its pull may also park behind the gate, so
+      // it is left racing. The pump is generosity for rt2's scheduler — the
+      // held gate means it cannot lose a race.
+      const demand2 = piece2.pull().catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      void demand2;
+
+      // Release the fetch: every registered continuation instantiates into
+      // the same cause-derived cell; idle() covers the tracked launches.
+      entryGate.resolve();
+      await Promise.all([rt1.idle(), rt2.idle()]);
+      await run1.pull();
+      await rt1.idle();
+      await rt2.idle();
+
+      // The wish UI names the create-surface cell the launches filled.
+      await run1.pull();
+      const createCell = run1.key("profile").key(UI).key("props").key("$cell")
+        .resolveAsCell();
+      await createCell.sync();
+      await createCell.pull();
+
+      // The contract: the materialized create surface survives the duplicate.
+      // Pre-fix, the losing duplicate's conflict-class commit error wrote an
+      // error UI over the winner (remove $NAME/createProfile, $UI -> an error
+      // span carrying "Transaction consistency violated").
+      const surface = createCell.get() as Record<string | symbol, unknown>;
+      const raw = JSON.stringify(createCell.getRaw());
+      // Both conflict-class spellings the loser's error arm can carry.
+      expect(raw).not.toContain("Transaction consistency violated");
+      expect(raw).not.toContain("stale confirmed read");
+      expect(surface?.[NAME]).toBe("Create Profile");
+      expect(Object.keys(surface ?? {})).toContain("createProfile");
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+});
