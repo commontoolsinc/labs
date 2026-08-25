@@ -22,14 +22,44 @@ import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value"
 import { Identity } from "@commonfabric/identity";
 import { join } from "@std/path";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
+import { experimentalOptionsFromEnv } from "@commonfabric/runner";
 import {
   initializePiecesController,
   type PieceController,
   type PiecesController,
 } from "./pieces-controller.ts";
 import { topicAt } from "./topic-board-fixture.ts";
+import { serverExecutionOnStepSkip } from "../../../tasks/server-execution-on-skips.ts";
 
 const { API_URL, SPACE_NAME } = env;
+
+// The server-execution v2 posture this test process runs (testing.md §2):
+// the CI ON lane sets EXPERIMENTAL_SERVER_EXECUTION=true; unset = OFF.
+const SERVER_EXECUTION_FROM_ENV = experimentalOptionsFromEnv(Deno.env.get)
+  .serverExecution;
+
+// The ON arm's STEP-level skip guard (tasks/server-execution-on-skips.ts):
+// a step listed there for this file is skipped ONLY under the ON posture,
+// loudly (its reason is printed), and only while the entry exists — the OFF
+// arm and an unlisted step always run. The pivot baseline case is listed
+// under #6304 (the served pivot carries a duplicated row under server
+// execution while the durable store holds three); removing that entry
+// re-enables the case, which is that issue's acceptance test.
+function onArmStepSkip(step: string): { ignore: boolean } {
+  if (SERVER_EXECUTION_FROM_ENV !== true) return { ignore: false };
+  const entry = serverExecutionOnStepSkip(
+    "patterns",
+    "integration/topic-board-child-contract.test.ts",
+    step,
+  );
+  if (entry === undefined) return { ignore: false };
+  console.warn(
+    `[server-execution ON arm] patterns: SKIPPING STEP ${
+      JSON.stringify(step)
+    } (until ${entry.phase}) — ${entry.reason}`,
+  );
+  return { ignore: true };
+}
 
 /**
  * Held across both suites: a live controller keeps a lease on the runner's
@@ -49,10 +79,9 @@ const { API_URL, SPACE_NAME } = env;
  *
  * This guard settles only that. A second symptom — `crossrefs` serving four
  * rows for three topics, while the durable store holds exactly three — is
- * #6304, not covered here: the pivot suite's baseline case observes it (the
- * exact topic titles beside the row count say which side an extra element
- * came from) and is skipped in the server-execution lane until that issue
- * is fixed.
+ * #6304, not covered here: the pivot suite's baseline case observes it and
+ * carries a registered ON-arm step skip
+ * (tasks/server-execution-on-skips.ts) until that issue is fixed.
  */
 let epochHolder: PiecesController | undefined;
 
@@ -291,12 +320,9 @@ describe("topic-board-pivot-contract", () => {
   it({
     name:
       "builds one pivot row per topic, claiming no edges before any mention",
-    // Skipped in the server-execution lane for #6304: the served pivot
-    // carries a duplicated row there (four rows for three topics, while the
-    // durable store holds three), so the row-count assertion below fails on
-    // that known defect. Fixing #6304 re-enables this case by removing the
-    // ignore — the case is that issue's acceptance test.
-    ignore: Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION") === "true",
+    ...onArmStepSkip(
+      "builds one pivot row per topic, claiming no edges before any mention",
+    ),
     fn: async () => {
       // Waits on the three topics this suite filed, which `addTopic` produces
       // directly, rather than on the pivot's row count — the pivot is
@@ -317,9 +343,12 @@ describe("topic-board-pivot-contract", () => {
       ]);
       // The pivot's rows are opaque through this projection — the demand
       // carries no title through a row's `topic` — so the row COUNT is the
-      // observable here, and the exact titles above are what say which side a
-      // wrong count came from: four rows over exactly these three titles is a
-      // duplicated row, while a doubled title is a duplicated topic.
+      // observable here, and the clean titles above are what pin a wrong
+      // count to the row side: four rows over exactly these three titles is
+      // a duplicated row. The titles cannot name a duplicated TOPIC — one
+      // present by the wait above leaves `topics` at four and hangs that
+      // wait (it has no deadline); only a duplicate landing after the wait
+      // matched would surface here as a doubled title.
       expect(((await board.result.get(["crossrefs"])) as unknown[]).length)
         .toBe(3);
       // The pivot has served three rows, so the topics behind them have

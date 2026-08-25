@@ -137,7 +137,7 @@ Deno.test("main: empty lists print the report on stderr and nothing on stdout", 
   assertMatch(err[0], /shell: no skips — full suite runs/);
 });
 
-Deno.test("main: the patterns list = the default-app STEP entry (its charge NARROWED 2026-08-24) + the lunch-poll-vote FILE entry, both under OW45 arm B. The b04 client-start death — the flag-ON client's navigate-deferred piece start dying terminally on a stale-confirmed-read ConflictError — is CLOSED by the RULED catch-up-and-start recovery (the refusal is 'the server won the race'; the client awaits the conflict's readiness and starts from the served documents through the ordinary load walk, committing nothing; OW45's CATCH-UP-AND-START block, serving-loop.md §3d RULED 2026-08-24), and the fix-head gate watched the recovery resurrect the notebook space's refused root start in the GREEN runs. What keeps the STEP entry is the gate's 7/10: the arm-B residue is READ-SIDE — a silent sticky readCell of the argument's redirect-linked notes with the piece context fully live (r01), and a stranded whole-piece mid-session read death behind a keyless pattern-load-error, with zero start deaths (r06/r09) — both store-verified zero-loss, neither reachable from the deferred-start error arm. The lunch-poll-vote FILE entry is #5744's 2026-08-24 deliberate re-skip, and its OWN 10-run gate has now RUN at the merged head — 7/10, no lift: the b04 class it was minted for is closed there too (catch-up activations 10/10 runs, zero terminal deferred-start deaths), and the entry now stands on a THIRD, WRITE-SIDE residue member — the guest browser's mid-session profile piece never landing its program-materialization commit, its space stuck at 4 commits with no patternIdentity and zero server-log mentions against the greens' 14-21; refused vs dropped vs never issued is NOT determined. It still lifts only on its own gate evidence at the merged head, a FILE entry because every later step depends on that join. An EMPTY list is the flip PR's bar; any change here is a deliberate edit that reddens this pin", async () => {
+Deno.test("main: the patterns list = the default-app STEP entry (its charge NARROWED 2026-08-24) + the lunch-poll-vote FILE entry (both under OW45 arm B) + the topic-board pivot-baseline STEP entry under issue #6304 (2026-08-25). The b04 client-start death — the flag-ON client's navigate-deferred piece start dying terminally on a stale-confirmed-read ConflictError — is CLOSED by the RULED catch-up-and-start recovery (the refusal is 'the server won the race'; the client awaits the conflict's readiness and starts from the served documents through the ordinary load walk, committing nothing; OW45's CATCH-UP-AND-START block, serving-loop.md §3d RULED 2026-08-24), and the fix-head gate watched the recovery resurrect the notebook space's refused root start in the GREEN runs. What keeps the STEP entry is the gate's 7/10: the arm-B residue is READ-SIDE — a silent sticky readCell of the argument's redirect-linked notes with the piece context fully live (r01), and a stranded whole-piece mid-session read death behind a keyless pattern-load-error, with zero start deaths (r06/r09) — both store-verified zero-loss, neither reachable from the deferred-start error arm. The lunch-poll-vote FILE entry is #5744's 2026-08-24 deliberate re-skip, and its OWN 10-run gate has now RUN at the merged head — 7/10, no lift: the b04 class it was minted for is closed there too (catch-up activations 10/10 runs, zero terminal deferred-start deaths), and the entry now stands on a THIRD, WRITE-SIDE residue member — the guest browser's mid-session profile piece never landing its program-materialization commit, its space stuck at 4 commits with no patternIdentity and zero server-log mentions against the greens' 14-21; refused vs dropped vs never issued is NOT determined. It still lifts only on its own gate evidence at the merged head, a FILE entry because every later step depends on that join. The topic-board entry skips ONE step — the pivot baseline case — because the ON arm's served crossrefs pivot diverges from the durable store (four rows for three topics; the store holds exactly three adds and the topics side is clean), a real serving/delivery defect the case exists to observe; it lifts when #6304 closes and the case greens ON. An EMPTY list is the flip PR's bar; any change here is a deliberate edit that reddens this pin", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
   // The step entry never drops its file; the lunch-poll-vote FILE entry
@@ -152,9 +152,13 @@ Deno.test("main: the patterns list = the default-app STEP entry (its charge NARR
     err[0],
     /patterns: SKIP integration\/lunch-poll-vote\.test\.ts \(until phase-7\)/,
   );
-  // …and the list holds EXACTLY these two entries — a third entry or a
-  // silent lift both redden this pin.
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 2);
+  assertMatch(
+    err[0],
+    /patterns: SKIP-STEP integration\/topic-board-child-contract\.test\.ts :: builds one pivot row per topic/,
+  );
+  // …and the list holds EXACTLY these three entries — a fourth entry or
+  // a silent lift both redden this pin.
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 3);
   assertEquals(
     SERVER_EXECUTION_ON_SKIPS.patterns[0].file,
     "integration/default-app.test.ts",
@@ -183,6 +187,34 @@ Deno.test("main: the patterns list = the default-app STEP entry (its charge NARR
   assertMatch(
     SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
     /ow45-armb-client-start-fork\.md/,
+  );
+  // The topic-board entry is STEP-level under issue #6304: the pivot
+  // baseline case's row-count assertion fails on the ON arm's served-view
+  // divergence (four rows for three topics; the durable store holds
+  // three), so the case waits on that issue — it is #6304's acceptance
+  // test, and the entry lifts when it greens ON.
+  assertEquals(
+    SERVER_EXECUTION_ON_SKIPS.patterns[2].file,
+    "integration/topic-board-child-contract.test.ts",
+  );
+  assertEquals(
+    SERVER_EXECUTION_ON_SKIPS.patterns[2].step,
+    "builds one pivot row per topic, claiming no edges before any mention",
+  );
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[2].phase, "phase-7");
+  assertMatch(SERVER_EXECUTION_ON_SKIPS.patterns[2].reason, /#6304/);
+  assertMatch(
+    SERVER_EXECUTION_ON_SKIPS.patterns[2].reason,
+    /four rows for three topics/,
+  );
+  const pivotEntry = serverExecutionOnStepSkip(
+    "patterns",
+    "integration/topic-board-child-contract.test.ts",
+    "builds one pivot row per topic, claiming no edges before any mention",
+  );
+  assert(
+    pivotEntry !== undefined,
+    "the pivot baseline step's guard entry must resolve",
   );
   // The guard lookup RESOLVES for the guarded step (the in-file
   // onArmStepSkip guard binds it under the ON posture), and the reason
