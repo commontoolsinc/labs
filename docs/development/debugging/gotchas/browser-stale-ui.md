@@ -24,9 +24,9 @@ mutation style. Don't.
    written to a different piece (or the UI may be rendering a different
    instance) than the one you're inspecting.
 
-3. **Check recompute.** Via the CLI, `piece set` does not trigger computed
+3. **Check recompute.** Via the CLI, `cf set` does not trigger computed
    re-evaluation — run `piece step` first (see
-   [cli-debugging](../cli-debugging.md#stale-computed-values-after-piece-set)).
+   [cli-debugging](../cli-debugging.md#stale-computed-values-after-cf-set)).
 
 4. **Only then isolate the rendering issue.** If state changed but the UI did
    not, build a minimal repro of the render path (missing `computed()`,

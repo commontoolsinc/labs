@@ -106,7 +106,7 @@ compiled graph rather than sitting in reach the way a tool's pattern does — an
 it cost one structural match and no change to `callableCommandSpec`'s
 signature. The command surface followed: #5680 stopped the help page's false
 no-output claim, and #5717 serves the declared result at
-`cf piece call <verb> --help` — text and `--json` alike — through the
+`cf call <verb> --help` — text and `--json` alike — through the
 resolution's `declaredResult` thunk, so the pattern load is priced onto
 exactly the callers that ask (help, and a readback bounding a cycle), never
 onto an ordinary dispatch.
@@ -269,7 +269,7 @@ named no invocation, so the handling filed under no receipt and the command
 printed nothing at all — a read option there could only ever have answered
 nothing, which is the silence this item exists to remove. `cf exec` now mints
 an invocation per call, the same pair `resolveInvocationIdentity` mints for a
-`cf piece call` that names neither, and prints the Invocation JSON that call
+`cf call` that names neither, and prints the Invocation JSON that call
 declares. A tool's stdout is unchanged; its result cell's address moves to the
 address-argument spelling, which is what removes the third spelling rather than
 adding a fourth.
@@ -361,7 +361,7 @@ includes the shape a read emits.
 *CFC gets a notification, not a ruling* — an existing capability widening from
 the user's own model session to external principals.
 
-*Exit, met by #5880:* `cf piece call --piece <root> addPiece
+*Exit, met by #5880:* `cf call --piece <root> addPiece
 '{"piece": <address>}'` registers the piece. That verb was reachable by
 `pieces.add` from inside the runtime and by a model through the dialog builtin,
 and by no other caller; a CLI caller now reaches it too, and the edge that comes
@@ -538,7 +538,7 @@ stops paying, since `cf` exits before convergence on purpose rather than hold a
 committed write hostage to every recomputation it triggered.
 
 Keep `--show-links` meanwhile; retire it when a replacement exists or the need
-is confirmed dead. Note that `cf piece get` has never had an equivalent, so
+is confirmed dead. Note that `cf get` has never had an equivalent, so
 bulk resolution on a *read* is a gap that predates all of this.
 
 **Running beside all of the above.** A caller naming a reference (item 11,

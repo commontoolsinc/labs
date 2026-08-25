@@ -78,7 +78,7 @@ roots.
 
 ### 3. CLI Verification (call -> step -> inspect)
 
-Test each handler via the CLI. **Always run `piece step` after `piece call`** —
+Test each handler via the CLI. **Always run `piece step` after `cf call`** —
 without it, computed values remain stale.
 
 ```bash

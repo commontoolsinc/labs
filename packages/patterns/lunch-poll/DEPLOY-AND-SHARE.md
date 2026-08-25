@@ -348,10 +348,10 @@ path ANSWERS rather than silently doing nothing:
 
 ```bash
 # joinAs takes no arguments: it joins as the calling identity's own profile.
-deno task cf piece call --piece "$PIECE" -s "$SPACE" joinAs '{}'
+deno task cf call --piece "$PIECE" -s "$SPACE" joinAs '{}'
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
 # Read the verdict — do NOT assume the join landed:
-deno task cf piece get --piece "$PIECE" -s "$SPACE" joinMessage
+deno task cf get --piece "$PIECE" -s "$SPACE" joinMessage
 ```
 
 - **`""` (empty)** — the join landed: this identity's `#profile` resolved.
@@ -365,12 +365,12 @@ deno task cf piece get --piece "$PIECE" -s "$SPACE" joinMessage
 With a joined identity, exercise the host-gated flow end to end:
 
 ```bash
-deno task cf piece call --piece "$PIECE" -s "$SPACE" addOption '{"title":"Test Cafe"}'
+deno task cf call --piece "$PIECE" -s "$SPACE" addOption '{"title":"Test Cafe"}'
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
-deno task cf piece call --piece "$PIECE" -s "$SPACE" logVisit '{"title":"Test Cafe"}'
+deno task cf call --piece "$PIECE" -s "$SPACE" logVisit '{"title":"Test Cafe"}'
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
 # Confirm the entry landed (no browser needed):
-deno task cf piece get --piece "$PIECE" -s "$SPACE" visits --input -q
+deno task cf get --piece "$PIECE" -s "$SPACE" visits --input -q
 ```
 
 Put the inline JSON argument last: a flag after it makes `cf call` report
@@ -420,17 +420,17 @@ and they are the only path the browser also takes:
 - **History:** use the **`clearHistory` handler** (host-gated) — it empties the
   `visits` log and its embedded vote snapshots:
   ```bash
-  deno task cf piece call --piece "$PIECE" -s "$SPACE" clearHistory '{}'
+  deno task cf call --piece "$PIECE" -s "$SPACE" clearHistory '{}'
   deno task cf piece step --piece "$PIECE" -s "$SPACE"
   ```
   Or, since `visits` is an ordinary `PerSpace` cell, write it directly (below).
 - **PerSpace cells:** write the input cells directly:
   ```bash
-  echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" users     --input -q
-  echo '{}' | deno task cf piece set --piece "$PIECE" -s "$SPACE" host      --input -q
-  echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" options   --input -q
-  echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" votes     --input -q
-  echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" visits    --input -q
+  echo '[]' | deno task cf set --piece "$PIECE" -s "$SPACE" users     --input -q
+  echo '{}' | deno task cf set --piece "$PIECE" -s "$SPACE" host      --input -q
+  echo '[]' | deno task cf set --piece "$PIECE" -s "$SPACE" options   --input -q
+  echo '[]' | deno task cf set --piece "$PIECE" -s "$SPACE" votes     --input -q
+  echo '[]' | deno task cf set --piece "$PIECE" -s "$SPACE" visits    --input -q
   deno task cf piece step --piece "$PIECE" -s "$SPACE"
   ```
   After this, the first person to join in the browser becomes host as their own

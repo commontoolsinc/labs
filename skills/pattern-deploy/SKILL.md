@@ -97,8 +97,8 @@ deno task cf piece step --piece PIECE_ID    # Required! Triggers recomputation
 deno task cf piece inspect --piece PIECE_ID  # Now shows updated state
 ```
 
-**Important:** Always run `piece step` after `piece call` or `piece set`.
-Without it, computed values remain stale and `inspect`/`get` return old data.
+**Important:** Always run `piece step` after `cf call` or `cf set`. Without it,
+computed values remain stale and `inspect`/`get` return old data.
 
 ## When Deploy Fails
 
