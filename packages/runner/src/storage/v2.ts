@@ -2454,7 +2454,12 @@ type LocalDocAddress = { id: URI; scope?: CellScope; scopeKey?: ScopeKey };
 // memory/v2/client.ts. S1 records what the socket saw; these say what the
 // frame carried on entry to apply, what the store held before and after,
 // and — at a quarantine — how far the missing document actually got.
-type Ow61Conn = { seen: Set<string>; frames: number; label: string };
+type Ow61Conn = {
+  seen: Set<string>;
+  frames: number;
+  label: string;
+  sessions: Set<string>;
+};
 type Ow61State = { conns: Ow61Conn[]; seq: number };
 const ow61State = (): Ow61State => {
   const g = globalThis as unknown as { __ow61?: Ow61State };
@@ -2462,8 +2467,8 @@ const ow61State = (): Ow61State => {
 };
 /** Which connections' sockets saw `hash` delivered — by label, so a
  *  realm-wide hit is no longer reported as this replica's. */
-const ow61ConnsSeeing = (hash: string): string[] =>
-  ow61State().conns.filter((conn) => conn.seen.has(hash)).map((c) => c.label);
+const ow61ConnsSeeing = (hash: string): Ow61Conn[] =>
+  ow61State().conns.filter((conn) => conn.seen.has(hash));
 
 const ow61CidsOf = (sync: SessionSync): string[] => {
   const ids: string[] = [];
@@ -2549,11 +2554,30 @@ const ow61Stages = (replica: SpaceReplica, hash: string): string => {
     isSchemaDocPersisted(h: string): boolean;
     getDocument(uri: string): unknown;
   };
+  const mySession = ow61MySession(replica);
   const seenBy = ow61ConnsSeeing(hash);
-  const inStore = store.getDocument(`cid:${hash}`) !== undefined;
-  const confirmed = store.isSchemaDocPersisted(hash);
-  return `cid:${hash.slice(5, 12)} socketConns=[${seenBy.join(",")}]` +
-    ` ofConns=${state.conns.length} store=${inStore} confirmed=${confirmed}`;
+  // The discriminator: a connection of MY OWN session saw this hash
+  // delivered, and my store no longer holds it — the server will never
+  // re-offer it, because for that session it counts as delivered.
+  const sameSession = seenBy.filter((conn) =>
+    mySession !== undefined && conn.sessions.has(mySession)
+  );
+  return `cid:${hash.slice(5, 12)} mySession=${mySession?.slice(0, 8)}` +
+    ` seenByConns=[${seenBy.map((c) => c.label).join(",")}]` +
+    ` seenBySAMEsession=[${sameSession.map((c) => c.label).join(",")}]` +
+    ` ofConns=${state.conns.length}` +
+    ` store=${store.getDocument(`cid:${hash}`) !== undefined}` +
+    ` confirmed=${store.isSchemaDocPersisted(hash)}`;
+};
+
+const ow61MySession = (replica: SpaceReplica): string | undefined => {
+  try {
+    return (replica as unknown as {
+      ow61Identity(): { sessionId?: string };
+    }).ow61Identity().sessionId;
+  } catch {
+    return undefined;
+  }
 };
 // ---- end OW61 TEMPORARY DIAGNOSTIC ----
 
@@ -2786,6 +2810,9 @@ class SpaceReplica implements ISpaceReplica {
     this.#space = options.space;
     this.#subscription = options.subscription;
     this.#scopeKeyIdentity = options.scopeKeyIdentity;
+    // OW61 TEMPORARY: the probe needs this replica's session identity.
+    (this as unknown as { ow61Identity: () => ScopeKeyIdentity }).ow61Identity =
+      () => this.#scopeKeyIdentity();
     this.#createSession = options.createSession;
     this.#getTelemetry = options.getTelemetry ?? (() => undefined);
     this.#settings = options.settings;

@@ -165,7 +165,12 @@ const runWithAbortSignal = async <T>(
 // saw it" when the question is "did THIS replica's socket see it". The
 // per-connection sets are published on globalThis only so the arrival
 // validator in runner/src/storage/v2.ts can read them back.
-type Ow61Conn = { seen: Set<string>; frames: number; label: string };
+type Ow61Conn = {
+  seen: Set<string>;
+  frames: number;
+  label: string;
+  sessions: Set<string>;
+};
 type Ow61State = { conns: Ow61Conn[]; seq: number };
 const ow61State = (): Ow61State => {
   const g = globalThis as unknown as { __ow61?: Ow61State };
@@ -178,11 +183,19 @@ const ow61NewConn = (): Ow61Conn => {
     seen: new Set(),
     frames: 0,
     label: `c${++state.seq}`,
+    sessions: new Set(),
   };
   state.conns.push(conn);
   return conn;
 };
+const OW61_SESSION = /"sessionId":"([^"]+)"/g;
 const ow61Socket = (conn: Ow61Conn, payload: string): void => {
+  // The session a connection speaks for: a StorageManager keeps one
+  // sessionId across socket reconnects, so a hash delivered on an EARLIER
+  // connection of the same session is one the server will never re-offer.
+  for (const match of payload.matchAll(OW61_SESSION)) {
+    conn.sessions.add(match[1]);
+  }
   if (!payload.includes("cid:")) return;
   conn.frames += 1;
   const mentioned = new Set<string>();
@@ -197,7 +210,9 @@ const ow61Socket = (conn: Ow61Conn, payload: string): void => {
     }
   }
   console.error(
-    `[ow61-S1-socket] conn=${conn.label} frame=${conn.frames}` +
+    `[ow61-S1-socket] conn=${conn.label}` +
+      `/${[...conn.sessions].map((id) => id.slice(0, 8)).join("|")}` +
+      ` frame=${conn.frames}` +
       ` delivered=${delivered.map((h) => h.slice(5, 12)).join(",")}` +
       ` mentioned=${[...mentioned].map((h) => h.slice(5, 12)).join(",")}`,
   );
