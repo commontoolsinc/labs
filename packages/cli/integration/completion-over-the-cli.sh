@@ -13,9 +13,10 @@
 # nothing else — --root, --datafile, --to, `view <file>`, `exec <mountedFile>`,
 # `id did <keypath>`, the space-management directories, and the two entries
 # item 16 of the plan records as belonging to commands that declare no options
-# at all. They read no state, so there is nothing here that could come back
-# wrong; --identity stands for them, and `deno task check-completion-slots` is
-# what keeps such an entry from naming a slot that does not exist.
+# at all. They read no state, so a fabric cannot change what they answer, and
+# they are asserted one by one — kind and glob — in
+# packages/cli/test/completion-providers.test.ts, which is where a constant
+# belongs. Nothing here re-checks them.
 #
 # The unit tests under packages/cli/test/completion-*.test.ts cover the pure
 # half — line resolution, candidate shaping, and the degrade-to-empty path —
@@ -401,13 +402,14 @@ DISCOVERED=$(printf '%s\n' "$RUN_OUT" | grep -oE '^did:key:[A-Za-z0-9]+' |
   head -1)
 if [ -n "$DISCOVERED" ]; then
   ok "a local space db is discoverable: $DISCOVERED"
-  check "1" "$(complete_at "cf piece ls $CONN_ARGS --space ${DISCOVERED%??????????}" |
-    grep -c "^$DISCOVERED\$")" \
-    "the --space slot offers a DID discovered on disk"
+  probe "cf piece ls $CONN_ARGS --space ${DISCOVERED%??????????}"
+  check "0" "$PROBE_STATUS" "the --space slot runs"
+  check "1" "$(printf '%s\n' "$PROBE_OUT" | grep -c "^$DISCOVERED\$")" \
+    "and offers a DID discovered on disk"
 else
   ok "no local space db is discoverable here"
   probe "cf piece ls $CONN_ARGS --space "
-  check "0" "$PROBE_STATUS" "the --space slot still runs"
+  check "0" "$PROBE_STATUS" "the --space slot runs"
   check "" "$(printf '%s\n' "$PROBE_OUT" | grep -v '^:cf:')" \
     "and offers nothing, which is all there is on disk to offer"
 fi

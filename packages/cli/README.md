@@ -1040,9 +1040,9 @@ degrade-to-empty path. Every provider that reads state — a fabric, the local
 memory-v2 stores, or the environment — is exercised by
 `integration/completion-over-the-cli.sh`, which deploys a fixture and asserts
 what a Tab offers at each slot of the chain. The remaining table entries hand
-the shell a constant `files` or `dirs` directive and read nothing, so one probe
-stands for them; `deno task check-completion-slots` is what keeps such an entry
-from naming a slot that does not exist.
+the shell a constant `files` or `dirs` directive, which a fabric cannot change:
+those are asserted one by one, kind and glob, in
+`test/completion-providers.test.ts`.
 
 That split is not tidiness: a provider that reaches a fabric and comes back with
 the wrong set is invisible to a unit test and invisible at the prompt, because

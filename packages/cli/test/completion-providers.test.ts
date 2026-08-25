@@ -136,20 +136,35 @@ Deno.test("live candidates: unmapped slots ask for nothing", async () => {
   }
 });
 
-Deno.test("live candidates: path-shaped slots defer to the shell", async () => {
-  const cases: Array<[string, string]> = [
-    ["cf piece ls -i ", "files"],
-    ["cf piece new --root ", "dirs"],
-    ["cf piece new --test ", "files"],
-    ["cf piece new --datafile ", "files"],
-    ["cf check ", "files"],
-    ["cf space verify ", "dirs"],
-    ["cf space clone --to ", "dirs"],
-    ["cf id did ", "files"],
+Deno.test("live candidates: every path-shaped slot hands the shell its own directive", async () => {
+  // One entry per reachable directive in the provider tables, asserting the
+  // glob as well as the kind. A wrong glob is the "wrong set" defect in its
+  // quietest form: the slot still answers, with the wrong files, and nothing
+  // upstream can tell. These read no state, so this is where they belong —
+  // the integration walkthrough covers the providers that reach a fabric and
+  // deliberately does not re-check these.
+  const cases: Array<[string, string, string | undefined]> = [
+    ["cf piece ls -i ", "files", "*.key"],
+    ["cf id did ", "files", "*.key"],
+    ["cf piece new --root ", "dirs", undefined],
+    ["cf piece new --test ", "files", "*.tsx"],
+    ["cf piece new ", "files", "*.tsx"],
+    ["cf piece setsrc ", "files", "*.tsx"],
+    ["cf check ", "files", "*.tsx"],
+    ["cf test ", "files", "*.tsx"],
+    ["cf piece new --datafile ", "files", undefined],
+    ["cf view ", "files", undefined],
+    ["cf exec ", "files", undefined],
+    ["cf space clone --to ", "dirs", undefined],
+    ["cf space verify ", "dirs", undefined],
+    ["cf space reset ", "dirs", undefined],
   ];
-  for (const [text, kind] of cases) {
+  for (const [text, kind, glob] of cases) {
     const result = await liveCandidates(lineFor(text));
-    assertEquals(result.directives[0]?.kind, kind, text);
+    assertEquals(result.directives.length, 1, `${text} emits one directive`);
+    const directive = result.directives[0] as { kind: string; glob?: string };
+    assertEquals(directive.kind, kind, text);
+    assertEquals(directive.glob, glob, `${text} glob`);
   }
 });
 
