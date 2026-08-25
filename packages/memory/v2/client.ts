@@ -155,6 +155,55 @@ const runWithAbortSignal = async <T>(
   }
 };
 
+// ---- OW61 TEMPORARY DIAGNOSTIC (not for commit) ----
+// Stage S1: what physically arrived, read off the raw payload text before
+// any decode, so a loss inside parsing, schema expansion, or dispatch is
+// separable from a frame that never came.
+//
+// Keyed PER CONNECTION, not on globalThis: the pattern lanes run every
+// replica in one browser realm, so a realm-wide set answers "some socket
+// saw it" when the question is "did THIS replica's socket see it". The
+// per-connection sets are published on globalThis only so the arrival
+// validator in runner/src/storage/v2.ts can read them back.
+type Ow61Conn = { seen: Set<string>; frames: number; label: string };
+type Ow61State = { conns: Ow61Conn[]; seq: number };
+const ow61State = (): Ow61State => {
+  const g = globalThis as unknown as { __ow61?: Ow61State };
+  return (g.__ow61 ??= { conns: [], seq: 0 });
+};
+const OW61_CID = /cid:(fid1:[A-Za-z0-9_-]+)/g;
+const ow61NewConn = (): Ow61Conn => {
+  const state = ow61State();
+  const conn: Ow61Conn = {
+    seen: new Set(),
+    frames: 0,
+    label: `c${++state.seq}`,
+  };
+  state.conns.push(conn);
+  return conn;
+};
+const ow61Socket = (conn: Ow61Conn, payload: string): void => {
+  if (!payload.includes("cid:")) return;
+  conn.frames += 1;
+  const mentioned = new Set<string>();
+  for (const match of payload.matchAll(OW61_CID)) mentioned.add(match[1]);
+  // An id appearing as an UPSERT id is a delivered schema document; a bare
+  // mention inside a `$ref` is only a demand.
+  const delivered: string[] = [];
+  for (const hash of mentioned) {
+    if (payload.includes(`"id":"cid:${hash}"`)) {
+      delivered.push(hash);
+      conn.seen.add(hash);
+    }
+  }
+  console.error(
+    `[ow61-S1-socket] conn=${conn.label} frame=${conn.frames}` +
+      ` delivered=${delivered.map((h) => h.slice(5, 12)).join(",")}` +
+      ` mentioned=${[...mentioned].map((h) => h.slice(5, 12)).join(",")}`,
+  );
+};
+// ---- end OW61 TEMPORARY DIAGNOSTIC ----
+
 export class Client {
   #pending = new Map<string, PromiseWithResolvers<unknown>>();
   #spaces = new Set<SpaceSession>();
@@ -370,7 +419,10 @@ export class Client {
     }
   }
 
+  readonly #ow61Conn = ow61NewConn();
+
   private onMessage(payload: string): void {
+    ow61Socket(this.#ow61Conn, payload);
     let message: unknown;
     try {
       message = decodeMemoryBoundary(payload);

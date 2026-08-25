@@ -2449,6 +2449,114 @@ const docKey = (id: URI, instance: string): string => `${instance}\0${id}`;
  * caller knows it, the explicit instance key. */
 type LocalDocAddress = { id: URI; scope?: CellScope; scopeKey?: ScopeKey };
 
+// ---- OW61 TEMPORARY DIAGNOSTIC (not for commit) ----
+// Stages S2/S3/S4 of the arrival path, paired with stage S1 in
+// memory/v2/client.ts. S1 records what the socket saw; these say what the
+// frame carried on entry to apply, what the store held before and after,
+// and — at a quarantine — how far the missing document actually got.
+type Ow61Conn = { seen: Set<string>; frames: number; label: string };
+type Ow61State = { conns: Ow61Conn[]; seq: number };
+const ow61State = (): Ow61State => {
+  const g = globalThis as unknown as { __ow61?: Ow61State };
+  return (g.__ow61 ??= { conns: [], seq: 0 });
+};
+/** Which connections' sockets saw `hash` delivered — by label, so a
+ *  realm-wide hit is no longer reported as this replica's. */
+const ow61ConnsSeeing = (hash: string): string[] =>
+  ow61State().conns.filter((conn) => conn.seen.has(hash)).map((c) => c.label);
+
+const ow61CidsOf = (sync: SessionSync): string[] => {
+  const ids: string[] = [];
+  for (const upsert of sync.upserts) {
+    if (typeof upsert.id === "string" && upsert.id.startsWith("cid:")) {
+      ids.push(upsert.id.slice("cid:".length));
+    }
+  }
+  return ids;
+};
+
+const ow61Apply = (
+  replica: SpaceReplica,
+  sync: SessionSync,
+  type: string,
+): void => {
+  const carried = ow61CidsOf(sync);
+  if (carried.length === 0) return;
+  const held = carried.filter((hash) =>
+    (replica as unknown as { isSchemaDocPersisted(h: string): boolean })
+      .isSchemaDocPersisted(hash)
+  );
+  logger.error("ow61-S2-apply", () => [
+    `type=${type} toSeq=${sync.toSeq} carried=${
+      carried.map((h) => h.slice(5, 12)).join(",")
+    } alreadyHeld=${held.length}/${carried.length}`,
+  ]);
+  // S3: the same question after this frame has applied.
+  queueMicrotask(() => {
+    const after = carried.filter((hash) =>
+      (replica as unknown as { isSchemaDocPersisted(h: string): boolean })
+        .isSchemaDocPersisted(hash)
+    );
+    logger.error("ow61-S3-stored", () => [
+      `toSeq=${sync.toSeq} storedAfterApply=${after.length}/${carried.length}` +
+      ` missing=${
+        carried.filter((h) => !after.includes(h)).map((h) => h.slice(5, 12))
+          .join(",")
+      }`,
+    ]);
+  });
+};
+
+/**
+ * Why `#isVerifiedSchemaDocDelivered` said no, for one hash, at the moment
+ * the fixpoint asked. The three answers are different bugs: `absent` means
+ * the document never reached this replica (transport, ordering, or a frame
+ * addressed to another replica); `value-not-subschema` means it arrived
+ * with the wrong shape; `HASH-MISMATCH` means it arrived and something
+ * between the wire and here rewrote it, which would make the schema
+ * expansion in the memory client the suspect.
+ */
+const ow61Describe = (doc: unknown, hash: string): string => {
+  if (doc === undefined) return "absent";
+  if (!isObjectNotArray(doc)) return `not-an-object(${typeof doc})`;
+  const value = (doc as { value?: unknown }).value;
+  if (value === undefined) return "no-value-member";
+  if (!isSubschema(value)) {
+    return `value-not-subschema(${
+      Array.isArray(value) ? "array" : typeof value
+    })`;
+  }
+  const actual = internSchemaAsTaggedHashString(value as JSONSchema);
+  return actual === hash
+    ? "verified"
+    : `HASH-MISMATCH actual=${actual.slice(0, 20)}`;
+};
+
+const ow61Why = (
+  replica: SpaceReplica,
+  hash: string,
+  overlay: ReadonlyMap<string, unknown>,
+): string => {
+  const store = replica as unknown as { getDocument(uri: string): unknown };
+  return `overlay=${ow61Describe(overlay.get(`cid:${hash}`), hash)}` +
+    ` store=${ow61Describe(store.getDocument(`cid:${hash}`), hash)}` +
+    ` inFrameOverlay=${overlay.has(`cid:${hash}`)}`;
+};
+
+const ow61Stages = (replica: SpaceReplica, hash: string): string => {
+  const state = ow61State();
+  const store = replica as unknown as {
+    isSchemaDocPersisted(h: string): boolean;
+    getDocument(uri: string): unknown;
+  };
+  const seenBy = ow61ConnsSeeing(hash);
+  const inStore = store.getDocument(`cid:${hash}`) !== undefined;
+  const confirmed = store.isSchemaDocPersisted(hash);
+  return `cid:${hash.slice(5, 12)} socketConns=[${seenBy.join(",")}]` +
+    ` ofConns=${state.conns.length} store=${inStore} confirmed=${confirmed}`;
+};
+// ---- end OW61 TEMPORARY DIAGNOSTIC ----
+
 class SpaceReplica implements ISpaceReplica {
   readonly #space: MemorySpace;
   readonly #subscription: IStorageSubscription;
@@ -5472,6 +5580,9 @@ class SpaceReplica implements ISpaceReplica {
             quarantined.add(referrer);
             overlay.delete(referrer);
             changed = true;
+            logger.error("schema-doc-quarantine-stages", () => [
+              `${ow61Stages(this, dep)} ${ow61Why(this, dep, overlay)}`,
+            ]);
             logger.error("schema-doc-quarantine", () => [
               `Document ${referrer} was delivered with a broken schema ` +
               `ref: cid:${dep} is not delivered and verified in this ` +
@@ -5541,6 +5652,7 @@ class SpaceReplica implements ISpaceReplica {
       return;
     }
 
+    ow61Apply(this, sync, type);
     // Validation precedes every record mutation: an entry that fails the
     // delivery guarantee is QUARANTINED (dropped from this frame with a
     // loud diagnostic — never half-installed, never a process kill; see

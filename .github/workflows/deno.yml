@@ -21,9 +21,6 @@ concurrency:
 # variables holding the numbers are how a workflow declares a value an anchor
 # can name; nothing reads them.
 env:
-  # GitHub's Ubuntu image includes Chrome. Astral uses it directly instead of
-  # downloading another browser when the first browser test starts.
-  ASTRAL_BIN_PATH: /usr/bin/google-chrome
   WORK_TIMEOUT_MINUTES: &work-timeout 30
   JOB_TIMEOUT_MINUTES: &job-timeout 40
   CLI_WORK_TIMEOUT_MINUTES: &cli-work-timeout 10
@@ -1370,7 +1367,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        shard: [1]
         total: [10]
     steps:
       - name: 📥 Checkout repository
@@ -1406,12 +1403,12 @@ jobs:
           chmod +x ./common-binaries/toolshed
           # --background waits until the server has bound its port before it
           # returns, so the test steps never race a not-yet-listening server.
-          # Space-root ensure OFF for test lanes (see the package ON
-          # lane's note; RULED 2026-08-24).
+          # DIAGNOSTIC BRANCH: ensure ON (the production posture) and the
+          # OW61 per-session delivery probe armed.
           CFTS_AI_GATEWAY_URL="" \
           CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
           EXPERIMENTAL_SERVER_EXECUTION=true \
-          SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false \
+          OW61_PROBE=1 \
           ./common-binaries/toolshed \
             --background --log-file="$RUNNER_TEMP/toolshed.log"
 
@@ -1476,6 +1473,20 @@ jobs:
           deno test --no-check --v8-flags=--max-old-space-size=4096 --trace-leaks -A \
             --junit-path=../../test-results/patterns-server-execution-on-${{ matrix.shard }}.xml \
             "${TEST_FILES[@]}"
+
+      - name: 🔬 OW61 delivery probe verdict
+        if: always()
+        run: |
+          LOG="$RUNNER_TEMP/toolshed.log"
+          echo "=== ow61 probe totals ==="
+          echo "ok frames:   $(grep -c 'ow61-ok' "$LOG" || true)"
+          echo "VIOLATIONS:  $(grep -c 'ow61-VIOLATION' "$LOG" || true)"
+          echo "held cid:    $(grep -c 'ow61-held' "$LOG" || true)"
+          echo "=== violations (first 40) ==="
+          grep 'ow61-VIOLATION' "$LOG" | head -40 || true
+          echo "=== obligation timing (same frame vs earlier) ==="
+          grep -o 'sameFrame=[0-9]* earlierFrame=[0-9]* worstLagFrames=[0-9]*' "$LOG" \
+            | sort | uniq -c | sort -rn | head -20 || true
 
       - name: 📤 Upload test timing data
         if: always()
