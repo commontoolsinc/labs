@@ -19,6 +19,8 @@ import {
   planStableArrayCells,
 } from "../src/array-cell-identity.ts";
 import {
+  agentOwnerSchema,
+  cellHasOwnerProtection,
   pushStableCellGraph,
   readStableCellGraphValue,
 } from "../src/fabric-graph.ts";
@@ -159,6 +161,134 @@ Deno.test("stable graph writes preserve native `FabricValue`s", async () => {
     assertEquals(expression.source, "agent-data");
     assertEquals(expression.flags, "gi");
     assertEquals(bytes.slice(), new Uint8Array([1, 2, 3]));
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("stable graph writes refuse populated unprotected cells", async () => {
+  const signer = await Identity.fromPassphrase(
+    "agent connector unprotected graph test",
+  );
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const space = signer.did();
+  const connection = { runtime, spaceDid: space, ownerDid: space };
+  try {
+    const unprotectedRoot = runtime.getCell(space, {
+      graphTest: "unprotected-root",
+    });
+    const unprotectedChild = runtime.getCell(space, {
+      graphTest: "unprotected-child",
+    });
+    const confidentialOnly = runtime.getCell(
+      space,
+      { graphTest: "confidential-only" },
+      agentOwnerSchema(space, false),
+    );
+    await Promise.all([
+      unprotectedRoot.sync(),
+      unprotectedChild.sync(),
+      confidentialOnly.sync(),
+    ]);
+    await storageManager.synced();
+    const seed = runtime.edit();
+    unprotectedRoot.withTx(seed).setRawUntyped({ exposed: "root" });
+    unprotectedChild.withTx(seed).setRawUntyped({ exposed: "child" });
+    const confidentialSeed = confidentialOnly.withTx(seed);
+    confidentialSeed.setRawUntyped({ exposed: "confidential" });
+    confidentialSeed.applyCfcSchemaToExistingValue();
+    seed.prepareCfc();
+    const seeded = await seed.commit();
+    if (seeded.error) throw seeded.error;
+
+    await assertRejects(
+      () =>
+        pushStableCellGraph(connection, [{
+          cell: unprotectedRoot,
+          value: () => ({ exposed: false }),
+        }]),
+      Error,
+      "refusing to adopt an unprotected stable graph cell",
+    );
+
+    await assertRejects(
+      () =>
+        pushStableCellGraph(connection, [{
+          cell: confidentialOnly,
+          value: () => ({ exposed: false }),
+        }]),
+      Error,
+      "refusing to adopt an unprotected stable graph cell",
+    );
+
+    const parent = runtime.getCell(space, { graphTest: "protected-parent" });
+    await parent.sync();
+    await storageManager.synced();
+    await assertRejects(
+      () =>
+        pushStableCellGraph(connection, [{
+          cell: parent,
+          value: (materializeCell) => ({
+            child: materializeCell(
+              { graphTest: "unprotected-child" },
+              { exposed: false },
+            ),
+          }),
+        }]),
+      Error,
+      "refusing to adopt an unprotected stable graph cell",
+    );
+    assertEquals(unprotectedRoot.getRaw(), { exposed: "root" });
+    assertEquals(unprotectedChild.getRaw(), { exposed: "child" });
+    assertEquals(confidentialOnly.getRaw(), { exposed: "confidential" });
+    assertEquals(parent.getRaw(), undefined);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("stable graph writes one new cell referenced twice", async () => {
+  const signer = await Identity.fromPassphrase(
+    "agent connector repeated graph cell test",
+  );
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const space = signer.did();
+  const connection = { runtime, spaceDid: space, ownerDid: space };
+  try {
+    const parent = runtime.getCell(space, { graphTest: "repeated-parent" });
+    await pushStableCellGraph(connection, [{
+      cell: parent,
+      value: (materializeCell) => ({
+        first: materializeCell(
+          { graphTest: "repeated-child" },
+          { value: "shared" },
+        ),
+        second: materializeCell(
+          { graphTest: "repeated-child" },
+          { value: "shared" },
+        ),
+      }),
+    }]);
+
+    assertEquals(await readStableCellGraphValue(connection, parent), {
+      first: { value: "shared" },
+      second: { value: "shared" },
+    });
+    const child = runtime.getCell(space, { graphTest: "repeated-child" });
+    assertEquals(
+      cellHasOwnerProtection(runtime.readTx(), child, space),
+      true,
+    );
   } finally {
     await runtime.dispose();
     await storageManager.close();
@@ -321,12 +451,13 @@ Deno.test("stable graph field writes preserve document metadata", async () => {
           space: link.space,
           scope: link.scope,
           id: link.id,
-          path: [],
+          path: ["connectorMetadata"],
         }),
-        {
-          connectorMetadata: { preserved: true },
-          value: { retained: "after" },
-        },
+        { preserved: true },
+      );
+      assertEquals(
+        inspectionTx.readValueOrThrow(link),
+        { retained: "after" },
       );
     } finally {
       inspectionTx.abort();
@@ -344,7 +475,9 @@ function fakeCell(id = "of:parent") {
       id,
       path: [],
     }),
+    sync: () => Promise.resolve(),
     withTx: () => cell,
+    asSchema: () => cell,
     applyCfcSchemaToExistingValue: () => {},
   };
   return cell;
@@ -370,7 +503,10 @@ Deno.test("stable graph writes await one commit", async () => {
     },
   };
   const connection = {
-    runtime: { edit: () => transaction },
+    runtime: {
+      edit: () => transaction,
+      storageManager: { synced: () => Promise.resolve() },
+    },
     spaceDid: "did:test:space",
     ownerDid: "did:test:owner",
   };
@@ -401,6 +537,7 @@ Deno.test("stable graph writes surface a commit failure without retrying", async
   let commitCount = 0;
   const connection = {
     runtime: {
+      storageManager: { synced: () => Promise.resolve() },
       edit: () => ({
         readValueOrThrow: () => undefined,
         writeOrThrow: () => {},

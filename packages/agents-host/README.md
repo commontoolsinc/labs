@@ -325,7 +325,7 @@ The package root exports the following orchestration surfaces:
 | `startAgentsHost(options)`            | Takes both process locks, opens every dependency, starts the host, and returns a running handle |
 | `RunningAgentsHost.stop(reason?)`     | Performs one idempotent graceful shutdown and runtime disposal                                  |
 | `AgentsHostProcessLock.acquire(path)` | Takes one non-blocking operating-system lock                                                    |
-| `defaultTargetProcessLockPath(...)`   | Derives the local executor lock from the API URL origin and resolved space DID                  |
+| `defaultTargetProcessLockPath(...)`   | Derives the local executor lock from the API URL origin, resolved space DID, and owner DID      |
 | `parseAgentFabricApiUrl(value)`       | Parses an API URL and reports a credential-free error when the value is invalid                 |
 
 `startAgentsHost()` is the main embedding API. Its caller supplies connection

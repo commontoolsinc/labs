@@ -932,6 +932,87 @@ Deno.test("shared-space agent discovery and commands are owner-isolated", async 
   }
 });
 
+Deno.test("stable graph checks remote children before adoption", async () => {
+  const server = new MemoryV2Server.Server({
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string" ? principal : undefined;
+    },
+    sessionOpenAuth: { audience: EMULATED_AUDIENCE },
+  });
+  const owner = await Identity.fromPassphrase("stable graph remote owner");
+  const otherOwner = await Identity.fromPassphrase(
+    "stable graph remote squatter",
+  );
+  const ownerSession = await createSession({
+    identity: owner,
+    spaceName: `stable-graph-remote-${crypto.randomUUID()}`,
+  });
+  const otherSession = await createSession({
+    identity: otherOwner,
+    spaceDid: ownerSession.space,
+  });
+  const otherStorage = SharedServerStorageManager.connectTo(server, {
+    as: otherSession.as,
+  });
+  const otherRuntime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: otherStorage,
+  });
+  let ownerRuntime: Runtime | undefined;
+  let ownerStorage: SharedServerStorageManager | undefined;
+  try {
+    const childCause = { stableGraphTest: "remote-child" };
+    const otherChild = otherRuntime.getCell(ownerSession.space, childCause);
+    await otherChild.sync();
+    await otherStorage.synced();
+    const seed = otherRuntime.edit();
+    otherChild.withTx(seed).setRawUntyped({ exposed: true });
+    const seeded = await seed.commit();
+    if (seeded.error) throw seeded.error;
+    await otherStorage.synced();
+
+    ownerStorage = SharedServerStorageManager.connectTo(server, {
+      as: ownerSession.as,
+    });
+    ownerRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: ownerStorage,
+    });
+    const connection = {
+      runtime: ownerRuntime,
+      spaceDid: ownerSession.space,
+      ownerDid: owner.did(),
+    };
+    const parent = ownerRuntime.getCell(
+      ownerSession.space,
+      { stableGraphTest: "remote-parent" },
+      agentOwnerSchema(owner.did()),
+    );
+    await assertRejects(
+      () =>
+        pushStableCellGraph(connection, [{
+          cell: parent,
+          value: (materializeCell) => ({
+            child: materializeCell(childCause, { exposed: false }),
+          }),
+        }]),
+      Error,
+      "refusing to adopt an unprotected stable graph cell",
+    );
+
+    assertEquals(otherChild.getRaw(), { exposed: true });
+    assertEquals(parent.getRaw(), undefined);
+  } finally {
+    await ownerRuntime?.dispose();
+    await ownerStorage?.close();
+    await otherRuntime.dispose();
+    await otherStorage.close();
+    await server.close();
+  }
+});
+
 Deno.test("Fabric target refuses an unprotected owner root", async () => {
   const owner = await Identity.fromPassphrase("agent connector root owner");
   const storageManager = StorageManager.emulate({ as: owner });

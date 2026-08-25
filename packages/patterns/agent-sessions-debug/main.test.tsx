@@ -9,6 +9,7 @@ import {
   Writable,
 } from "commonfabric";
 import {
+  childNodes,
   findElementByText,
   findNode,
   propsOf,
@@ -47,6 +48,31 @@ function elementNamed(root: unknown, name: string): unknown | undefined {
   return findNode(root, (node) =>
     typeof node === "object" && node !== null &&
     (node as { name?: unknown }).name === name);
+}
+
+function countCellLinks(
+  root: unknown,
+  label: string,
+  visited = new Set<object>(),
+): number {
+  const value = readValue(root);
+  if (typeof value !== "object" || value === null) return 0;
+  if (visited.has(value)) return 0;
+  visited.add(value);
+  if (Array.isArray(value)) {
+    return value.reduce(
+      (count, child) => count + countCellLinks(child, label, visited),
+      0,
+    );
+  }
+  const current = (value as { name?: unknown }).name === "cf-cell-link" &&
+      readValue(propsOf(value)?.label) === label
+    ? 1
+    : 0;
+  return current + childNodes(value).reduce<number>(
+    (count, child) => count + countCellLinks(child, label, visited),
+    0,
+  );
 }
 
 const NativeEventFixture = pattern<void, ShardedJsonValue>(() => ({
@@ -586,6 +612,25 @@ export default pattern(() => {
       readValue(propsOf(textarea)?.["$value"]) === "" &&
       statusMessage !== undefined;
   });
+  const action_publish_invalid_command = action(() => {
+    commands.push("not command JSON");
+  });
+  const assert_invalid_command_visible = assert(() => {
+    const commandTable = findElementByText(view[UI], "cf-table", "Payload");
+    return view.commandCount === 2 &&
+      textContent(commandTable).includes("Invalid action value") &&
+      !textContent(commandTable).includes("not command JSON") &&
+      countCellLinks(commandTable, "Raw data") === 2;
+  });
+  const action_publish_nested_array_command = action(() => {
+    commands.push([["nested invalid action"]]);
+  });
+  const assert_nested_array_command_visible = assert(() => {
+    const commandTable = findElementByText(view[UI], "cf-table", "Payload");
+    return view.commandCount === 3 &&
+      !textContent(commandTable).includes("nested invalid action") &&
+      countCellLinks(commandTable, "Raw data") === 3;
+  });
 
   return {
     [TESTS]: [
@@ -616,6 +661,10 @@ export default pattern(() => {
       { action: action_resume_command_admission },
       { action: action_send_command },
       { assertion: assert_command_sent },
+      { action: action_publish_invalid_command },
+      { assertion: assert_invalid_command_visible },
+      { action: action_publish_nested_array_command },
+      { assertion: assert_nested_array_command_visible },
     ],
     view,
   };

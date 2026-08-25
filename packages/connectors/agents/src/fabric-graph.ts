@@ -143,24 +143,82 @@ export async function pushStableCellGraph(
   entries: ReadonlyArray<StableCellGraphEntry>,
 ): Promise<void> {
   if (entries.length === 0) return;
+  const writes: Array<{ cell: Cell<unknown>; value: unknown }> = [];
+  const materializeCell: StableCellMaterializer = (cause, value) => {
+    const cell = connection.runtime.getCell(
+      connection.spaceDid,
+      cause,
+      agentOwnerSchema(connection.ownerDid),
+    );
+    writes.push({ cell, value });
+    return cell;
+  };
+  for (const entry of entries) {
+    writes.push({ cell: entry.cell, value: entry.value(materializeCell) });
+  }
+  const cellsToSync = new Map<string, Cell<unknown>>();
+  for (const { cell } of writes) {
+    const link = cell.getAsNormalizedFullLink();
+    const key = JSON.stringify({
+      space: link.space,
+      scope: link.scope,
+      id: link.id,
+      path: link.path,
+    });
+    cellsToSync.set(key, cell);
+  }
+  const uniqueCells = [...cellsToSync.values()];
+  for (
+    let offset = 0;
+    offset < uniqueCells.length;
+    offset += HYDRATION_BATCH_SIZE
+  ) {
+    await Promise.all(
+      uniqueCells.slice(offset, offset + HYDRATION_BATCH_SIZE).map((cell) =>
+        cell.sync()
+      ),
+    );
+  }
+  await connection.runtime.storageManager.synced();
+
   const tx = connection.runtime.edit();
   tx.setCfcImplementationIdentity({
     kind: "builtin",
     builtinId: AGENT_CONNECTOR_WRITER_ID,
   });
+  const writtenCells = new Set<string>();
   try {
     const writeCellValue = (cell: Cell<unknown>, value: unknown) => {
       const link = cell.getAsNormalizedFullLink();
+      const priorValue = tx.readValueOrThrow(link);
+      const cellKey = JSON.stringify({
+        space: link.space,
+        scope: link.scope,
+        id: link.id,
+        path: link.path,
+      });
+      if (
+        priorValue !== undefined &&
+        !writtenCells.has(cellKey) &&
+        !cellHasOwnerProtection(tx, cell, connection.ownerDid)
+      ) {
+        throw new Error(
+          `refusing to adopt an unprotected stable graph cell for ${connection.ownerDid}`,
+        );
+      }
+      writtenCells.add(cellKey);
+      const protectedCell = cell.withTx(tx).asSchema(
+        agentOwnerSchema(connection.ownerDid),
+      );
       if (!isPlainRecord(value)) {
         tx.writeValueOrThrow(link, stableFabricValue(value));
-        cell.withTx(tx).applyCfcSchemaToExistingValue();
-        return cell;
+        protectedCell.applyCfcSchemaToExistingValue();
+        return protectedCell;
       }
-      const priorValue = tx.readValueOrThrow(link);
       if (!isPlainRecord(priorValue)) {
         tx.writeValueOrThrow(link, stableFabricValue(value));
-        cell.withTx(tx).applyCfcSchemaToExistingValue();
-        return cell;
+        protectedCell.applyCfcSchemaToExistingValue();
+        return protectedCell;
       }
       for (const key of Object.keys(priorValue)) {
         if (!Object.hasOwn(value, key)) {
@@ -187,21 +245,11 @@ export async function pushStableCellGraph(
           stableFabricValue(fieldValue),
         );
       }
-      cell.withTx(tx).applyCfcSchemaToExistingValue();
-      return cell;
+      protectedCell.applyCfcSchemaToExistingValue();
+      return protectedCell;
     };
-    const materializeCell: StableCellMaterializer = (cause, value) =>
-      writeCellValue(
-        connection.runtime.getCell(
-          connection.spaceDid,
-          cause,
-          agentOwnerSchema(connection.ownerDid),
-          tx,
-        ),
-        value,
-      );
-    for (const entry of entries) {
-      writeCellValue(entry.cell, entry.value(materializeCell));
+    for (const write of writes) {
+      writeCellValue(write.cell, write.value);
     }
   } catch (error) {
     tx.abort(error);
