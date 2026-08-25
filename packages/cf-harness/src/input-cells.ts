@@ -37,17 +37,23 @@ export type {
  */
 const INPUT_CELL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 
-/** A parsed `--input-cell` argument, before its schema file is read. */
+/** A parsed `--input-cell` argument, before its schema argument is read. */
 export interface ParsedInputCellArgument {
   name: string;
   ref: string;
-  /** Path of the operator's schema file, when the argument named one. */
-  schemaFile?: string;
+  /**
+   * The operator's schema argument, when the argument carried one: inline
+   * JSON, or `@path` naming a file — the same spelling `cf piece get
+   * --schema` takes.
+   */
+  schemaArgument?: string;
 }
 
 /**
  * Parses one `--input-cell` argument of the form
- * `<name>=<link>[;schema=<file>]`.
+ * `<name>=<link>[;schema=<json|@file>]`. Everything after the first
+ * `;schema=` is the schema argument verbatim, so inline JSON may itself
+ * contain `;`.
  *
  * @throws Error naming the defect when the argument does not fit the
  * grammar; the caller surfaces it as a usage error before any run starts.
@@ -58,7 +64,7 @@ export const parseInputCellArgument = (
   const eq = raw.indexOf("=");
   if (eq <= 0) {
     throw new Error(
-      `--input-cell must be <name>=<link>[;schema=<file>], got \`${raw}\``,
+      `--input-cell must be <name>=<link>[;schema=<json|@file>], got \`${raw}\``,
     );
   }
   const name = raw.slice(0, eq).trim();
@@ -67,25 +73,27 @@ export const parseInputCellArgument = (
       `--input-cell name must match ${INPUT_CELL_NAME_PATTERN}, got \`${name}\``,
     );
   }
-  const [refText, ...extras] = raw.slice(eq + 1).split(";");
-  const ref = refText!.trim();
+  const rest = raw.slice(eq + 1);
+  const schemaAt = rest.indexOf(";schema=");
+  const refText = schemaAt === -1 ? rest : rest.slice(0, schemaAt);
+  const ref = refText.trim();
   if (ref.length === 0) {
     throw new Error(`--input-cell \`${name}\` names no reference`);
   }
-  let schemaFile: string | undefined;
-  for (const extra of extras) {
-    const option = extra.trim();
-    if (!option.startsWith("schema=") || option.length <= "schema=".length) {
-      throw new Error(
-        `--input-cell \`${name}\` carries an unknown option \`${option}\`; the one supported is schema=<file>`,
-      );
-    }
-    if (schemaFile !== undefined) {
-      throw new Error(`--input-cell \`${name}\` names schema= twice`);
-    }
-    schemaFile = option.slice("schema=".length);
+  if (ref.includes(";")) {
+    const option = ref.slice(ref.indexOf(";") + 1).trim();
+    throw new Error(
+      `--input-cell \`${name}\` carries an unknown option \`${option}\`; the one supported is schema=<json|@file>`,
+    );
   }
-  return { name, ref, ...(schemaFile !== undefined ? { schemaFile } : {}) };
+  if (schemaAt === -1) {
+    return { name, ref };
+  }
+  const schemaArgument = rest.slice(schemaAt + ";schema=".length).trim();
+  if (schemaArgument.length === 0) {
+    throw new Error(`--input-cell \`${name}\` names an empty schema`);
+  }
+  return { name, ref, schemaArgument };
 };
 
 /**

@@ -723,18 +723,18 @@ designed to grow; the identity's profile is the expected next entry.
 
 #### Operator input cells
 
-`--input-cell <name>=<link>[;schema=<file>]` (repeatable) passes a cell into the
-run by reference: a cell populated in the space before the run exists, handed to
-the run as its input. Cells are the runtime's medium of exchange; the handle
-minted for one is only how the harness names a cell to a model that cannot hold
-addresses. The model is told the token and the operator's `<name>` for it,
-nothing more: the run's inputs reach the model from its first turn while their
-values stay in the fabric, so a prompt never holds a literal it could inline or
-pass on by accident. The optional schema file records the operator's statement
-of the cell's shape on the handle entry (`schemaSource: "operator"`), which
-`describe_handle` answers from without a fabric read — the cell declares its own
-schema in the fabric, so this is the operator's pre-stated view of it, often
-deliberately narrower.
+`--input-cell <name>=<link>[;schema=<json|@file>]` (repeatable) passes a cell
+into the run by reference: a cell populated in the space before the run exists,
+handed to the run as its input. Cells are the runtime's medium of exchange; the
+handle minted for one is only how the harness names a cell to a model that
+cannot hold addresses. The model is told the token and the operator's `<name>`
+for it, nothing more: the run's inputs reach the model from its first turn while
+their values stay in the fabric, so a prompt never holds a literal it could
+inline or pass on by accident. The optional schema file records the operator's
+statement of the cell's shape on the handle entry (`schemaSource: "operator"`),
+which `describe_handle` answers from without a fabric read — the cell declares
+its own schema in the fabric, so this is the operator's pre-stated view of it,
+often deliberately narrower.
 
 Unlike a grant, an input cell is explicit configuration, so failure is closed
 and loud rather than tolerated: a malformed argument or unreadable schema file

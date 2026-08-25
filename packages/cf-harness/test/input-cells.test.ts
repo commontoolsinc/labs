@@ -39,13 +39,24 @@ describe("input-cells", () => {
       });
     });
 
-    it("parses a schema file option after the reference", () => {
+    it("parses a schema argument after the reference", () => {
       expect(
-        parseInputCellArgument(`cities=${CELL_REF};schema=cities.json`),
+        parseInputCellArgument(`cities=${CELL_REF};schema=@cities.json`),
       ).toEqual({
         name: "cities",
         ref: CELL_REF,
-        schemaFile: "cities.json",
+        schemaArgument: "@cities.json",
+      });
+    });
+
+    it("keeps an inline schema argument verbatim, semicolons included", () => {
+      const inline = '{"type":"string","description":"a; b"}';
+      expect(
+        parseInputCellArgument(`cities=${CELL_REF};schema=${inline}`),
+      ).toEqual({
+        name: "cities",
+        ref: CELL_REF,
+        schemaArgument: inline,
       });
     });
 
@@ -72,10 +83,9 @@ describe("input-cells", () => {
         .toThrow("unknown option");
     });
 
-    it("throws when schema= is named twice", () => {
-      expect(() =>
-        parseInputCellArgument(`cities=${CELL_REF};schema=a.json;schema=b.json`)
-      ).toThrow("schema= twice");
+    it("throws for an empty schema argument", () => {
+      expect(() => parseInputCellArgument(`cities=${CELL_REF};schema=`))
+        .toThrow("an empty schema");
     });
   });
 

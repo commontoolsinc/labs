@@ -1380,7 +1380,7 @@ Deno.test("parseCfHarnessCliArgs collects operator input cells, reading each sch
       "--input-cell",
       `travellerName=${cellRef}`,
       "--input-cell",
-      `cities=${citiesRef};schema=cities.schema.json`,
+      `cities=${citiesRef};schema=@cities.schema.json`,
     ],
     {
       cwd: "/tmp/project",
@@ -1433,7 +1433,7 @@ Deno.test("parseCfHarnessCliArgs rejects an input-cell schema file that is not J
           "--prompt",
           "hi",
           "--input-cell",
-          `cities=/of:fid1:${"B".repeat(43)}/cities;schema=broken.json`,
+          `cities=/of:fid1:${"B".repeat(43)}/cities;schema=@broken.json`,
         ],
         {
           cwd: "/tmp/project",
@@ -2523,7 +2523,7 @@ Deno.test("parseCfHarnessCliArgs rejects an input-cell schema file that cannot b
           "--prompt",
           "hi",
           "--input-cell",
-          `cities=/of:fid1:${"B".repeat(43)}/cities;schema=missing.json`,
+          `cities=/of:fid1:${"B".repeat(43)}/cities;schema=@missing.json`,
         ],
         {
           cwd: "/tmp/project",
