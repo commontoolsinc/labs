@@ -31,6 +31,7 @@ import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { openSpace, type SpaceDb } from "./db.ts";
 import { annotate, collectLinks } from "./decode.ts";
 import {
+  candidatesMatching,
   getValueAt,
   owningLink,
   reconstructDocument,
@@ -353,13 +354,16 @@ export function buildCrossSpaceLinkIndex(
 
   for (const { label, space } of spaces) {
     const ownDid = spaceDidFromLabel(label);
-    const candidates = space.db
-      .prepare(
-        `SELECT DISTINCT id FROM revision
-         WHERE branch = ? AND scope_key = ? AND data LIKE '%"space":"did:key:%'`,
-      )
-      .all<{ id: string }>(branch, scope);
-    for (const { id } of candidates) {
+    // Candidates across every branch the read can reach: a child branch
+    // inherits its parent's link holders, and an index built from local rows
+    // only would drop their targets' `cross-space-linked` classification while
+    // the scan beside it still finds those targets.
+    const candidates = candidatesMatching(space, {
+      branch,
+      scope,
+      like: ['%"space":"did:key:%'],
+    });
+    for (const id of candidates) {
       examinedEntities++;
       let doc: unknown;
       try {

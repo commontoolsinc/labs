@@ -230,6 +230,42 @@ export function visibleRevisionRows(
 }
 
 /**
+ * Ids whose stored rows match every `data LIKE` pattern, across each branch the
+ * read can reach.
+ *
+ * The LIKE set is a CANDIDATE filter — each hit is reconstructed and tested
+ * properly by the caller — so a union across the chain is enough and no
+ * ownership arbitration belongs here: an id matched on a parent but overridden
+ * on the child reconstructs to the child's value and fails the real test on its
+ * own. Searching local rows only is what goes wrong, by never offering an
+ * inherited entity as a candidate at all.
+ */
+export function candidatesMatching(
+  space: SpaceDb,
+  opts: { branch: string; scope: string; like: readonly string[] },
+): string[] {
+  const stmt = space.db.prepare(
+    `SELECT DISTINCT id FROM revision
+     WHERE branch = ? AND scope_key = ? AND seq <= ?
+       AND ${opts.like.map(() => "data LIKE ?").join(" AND ")}`,
+  );
+  const ids = new Set<string>();
+  for (const link of branchReadChain(space, opts.branch)) {
+    for (
+      const r of stmt.all<{ id: string }>(
+        link.branch,
+        opts.scope,
+        link.atSeq,
+        ...opts.like,
+      )
+    ) {
+      ids.add(r.id);
+    }
+  }
+  return [...ids];
+}
+
+/**
  * The branch that owns one entity's records, or undefined when no branch the
  * read can reach holds any.
  *

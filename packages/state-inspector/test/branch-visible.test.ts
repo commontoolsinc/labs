@@ -20,9 +20,10 @@ import { Database } from "@db/sqlite";
 
 import { openSpace, type SpaceDb } from "../db.ts";
 import { entityHistory, hotEntities } from "../queries.ts";
-import { contendedEntities } from "../conflicts.ts";
+import { contendedEntities, entityConflicts } from "../conflicts.ts";
 import { entityTimeline, spaceTimeline } from "../timetravel.ts";
 import { analyzeSpaceSignals } from "../grouping.ts";
+import { spaceParticipants, valueAsIdentity } from "../scopes.ts";
 import { convergenceExact, convergenceScanExact } from "../multispace.ts";
 import { reconstructDocument } from "../reconstruct.ts";
 
@@ -342,6 +343,71 @@ describe("branch-visible", () => {
       });
     });
 
+    it("classifies an inherited cross-space link, not just the entity it points at", async () => {
+      const A = "did:key:zSpaceAAAA";
+      const B = "did:key:zSpaceBBBB";
+      const dir = await Deno.makeTempDir({ prefix: "branch-visible-link-" });
+      const opened: { label: string; space: SpaceDb }[] = [];
+      try {
+        for (const [did, target] of [[A, "A-value"], [B, "B-value"]]) {
+          const path = `${dir}/${did}.sqlite`;
+          const db = new Database(path, { create: true });
+          db.exec(SCHEMA);
+          const commit = db.prepare(
+            `INSERT INTO "commit" (seq, session_id, local_seq, original, resolution)
+             VALUES (?, ?, ?, '{}', '{"seq":0}')`,
+          );
+          const rev = db.prepare(
+            `INSERT INTO revision (id, seq, op_index, op, data, commit_seq)
+             VALUES (?, ?, 0, 'set', ?, ?)`,
+          );
+          // The replica, diverging between the spaces...
+          commit.run(1, ALICE, 1);
+          rev.run("of:target", 1, JSON.stringify({ value: target }), 1);
+          // ...and a holder linking at the OTHER space's copy of it.
+          commit.run(2, ALICE, 2);
+          rev.run(
+            "of:holder",
+            2,
+            JSON.stringify({
+              value: {
+                ref: {
+                  "/": {
+                    "link@1": {
+                      id: "of:target",
+                      space: did === A ? B : A,
+                      path: [],
+                    },
+                  },
+                },
+              },
+            }),
+            2,
+          );
+          db.prepare(
+            `INSERT INTO branch (name, parent_branch, fork_seq, head_seq)
+             VALUES ('kid', '', 2, 999)`,
+          ).run();
+          db.close();
+          opened.push({ label: `${did}.sqlite`, space: openSpace(path) });
+        }
+
+        // The holder is inherited on `kid`. An index built from local rows
+        // would not see it, so the divergence in `of:target` would come back
+        // classified as an independent instance rather than a replica.
+        const onParent = convergenceScanExact(opened).findings
+          .find((f) => f.id === "of:target");
+        expect(onParent?.relationship).toBe("cross-space-linked");
+
+        const onChild = convergenceScanExact(opened, { branch: "kid" })
+          .findings.find((f) => f.id === "of:target");
+        expect(onChild?.relationship).toBe("cross-space-linked");
+      } finally {
+        for (const { space } of opened) space.close();
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
     it("reports each space as holding the inherited entity, not absent", async () => {
       await twoForkedSpaces((spaces) => {
         const result = convergenceExact(spaces, {
@@ -351,6 +417,70 @@ describe("branch-visible", () => {
         expect(result.views.map((v) => v.present)).toEqual([true, true]);
         expect(result.verdict).toBe("diverged");
       });
+    });
+  });
+
+  describe("entityConflicts()", () => {
+    it("lists the writers of an entity the child inherited", async () => {
+      await withFork(CONTENDED_PARENT, [], (space) => {
+        expect(
+          entityConflicts(space, "of:shared", { branch: "kid" })
+            .writers.map((w) => w.seq),
+        ).toEqual([1, 2, 3]);
+      });
+    });
+
+    it("lists only the child's writers for an entity it overrode", async () => {
+      await withFork(CONTENDED_PARENT, [
+        { id: "of:quiet", value: "child" },
+      ], (space) => {
+        expect(
+          entityConflicts(space, "of:quiet", { branch: "kid" })
+            .writers.map((w) => w.seq),
+        ).toEqual([6]);
+      });
+    });
+  });
+
+  describe("spaceParticipants()", () => {
+    it("counts the commits behind a branch's inherited entities", async () => {
+      await withFork(CONTENDED_PARENT, [], (space) => {
+        // `listScopes` reads through ancestry, and this pairs principals with
+        // those same scoped-entity counts — so counting local commits only
+        // would credit a child's inherited entities to nobody.
+        const dids = spaceParticipants(space, { branch: "kid" })
+          .map((p) => p.did).sort();
+        expect(dids).toEqual(spaceParticipants(space).map((p) => p.did).sort());
+        expect(dids.length).toBe(2);
+      });
+    });
+  });
+
+  describe("valueAsIdentity()", () => {
+    it("resolves through a scope the child inherited", async () => {
+      // The STORED form, which is what `resolveScopeChain` builds and what the
+      // engine writes — not the decoded spelling `parseScope` reports.
+      const MINE = "user:did%3Akey%3AzAlice";
+      await withFork(
+        [
+          { id: "of:x", value: "shared" },
+          { id: "of:x", scope: MINE, value: "mine" },
+        ],
+        [],
+        (space) => {
+          // `scopeHasEntity` gates which scope this resolves from; branch-local,
+          // it finds neither and reports the entity absent from a branch that
+          // reads it.
+          const seen = valueAsIdentity(space, {
+            id: "of:x",
+            identity: "did:key:zAlice",
+            branch: "kid",
+          });
+          expect(seen.exists).toBe(true);
+          expect(seen.resolvedScope).toBe(MINE);
+          expect(seen.overrides).toBe(true);
+        },
+      );
     });
   });
 
