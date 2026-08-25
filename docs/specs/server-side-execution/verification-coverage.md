@@ -7468,6 +7468,47 @@ supply; OW29/OW32/OW34 closed):
     attribution of its whole board to the quarantine: part of that
     residue was a second blast radius, and part of it — shard 7's —
     was this fix's own.
+    THE FLOOR UNDER THE FLOOR, and OW61's last delivery-side
+    mechanism: `session.entities` records what the server SENT, not
+    what the client HOLDS, and it commits when a frame is BUILT. A
+    socket that dies mid-flight loses frames the server counts as
+    delivered — `rollbackUndeliveredSync` repairs only a
+    locally-throwing send, as its own comment concedes — so the cache
+    goes on claiming documents the client never received and the next
+    diff elides exactly those. A schema document elided that way is
+    unobtainable, which is what made this class terminal rather than
+    transient. The repair input was already on the wire and being
+    DISCARDED: a resuming client reports the highest server seq it
+    actually received (`client.ts` `reopen`, `seenSeq:
+    this.#serverSeq`), and `session-registry.ts` took
+    `Math.max(existing.seenSeq, client.seenSeq)` — throwing away the
+    only case that matters, a client admitting it is BEHIND. When
+    that report is below this session's `lastSyncedSeq`, the frames
+    between were sent and lost, and the next pass now routes through
+    the full evaluation (`forceFullResync`, existing machinery) that
+    re-ships the whole assembled state. No new protocol, no
+    retransmission to a client that holds the data, and the elision
+    the reversal ruling protects is untouched — a caught-up resume
+    takes the incremental path exactly as before. Pinned both
+    directions and mutation-checked
+    (`memory/test/v2-session-resume-watermark.test.ts`): with the
+    flag unset the behind-resume step fails while the caught-up step
+    still passes. BOARD 4: NINE of ten pattern shards green, 3/3
+    package lanes. Shard 6 — the residual board 3 could not explain,
+    the same cid unhealed with the escalation firing and reporting no
+    error — went GREEN, which settles what it was: reconnects were
+    live in those lanes, and the lost-frame-on-resume class was the
+    cause. (The reasoning that a reliable ordered socket means no
+    loss without death, so resume could not be implicated, was WRONG;
+    this board is what corrected it.) Full ON-lane progression across
+    five boards: 2 -> 2 -> 4 -> 8 -> 9 pattern shards, 1/3 -> 3/3
+    package lanes. THE LAST RESIDUAL IS NOT THIS DEFECT: shard 10's
+    degradation gate dies on `PatternManager.writeBackCompileCache`
+    (`runner/src/pattern-manager.ts` :2208) throwing the `/sourceMap`
+    CFC prepare abort — #6248's third signature, outside the delivery
+    path, with `Failed to create or find default pattern` and `No
+    data at cell` both at ZERO across every lane. It is #6248's own
+    scope decision, not OW61's.
 
   - **OW62 — adopt-not-start: the piece-open seam is where the ON
     execution model's "one starter per piece" has to land. POST-FLIP
