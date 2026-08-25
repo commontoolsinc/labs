@@ -217,9 +217,9 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
   {
     pattern: "agent-sessions-debug/main.tsx",
     baselines: ["20260818T001423Z-_DSuxwZWgUTcB_2z"],
-    // The proof reports `ownerDid` first. Accepting it exposes the command
-    // cell's change from an optional opaque input to the required writable
-    // queue that the connector host supplies.
+    // The proof reports `ownerDid` first. Holding it compatible in a separate
+    // proof reports the command cell's change from an optional opaque input to
+    // the required writable queue that the connector host supplies.
     paths: ["argument.ownerDid", "argument.commandsCell"],
     reason:
       "Before its first deployment, the connector-managed debug view changed " +

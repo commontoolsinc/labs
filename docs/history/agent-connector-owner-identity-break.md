@@ -35,7 +35,8 @@ currently reports the first argument issue:
 
 - `argument.ownerDid`: a newly required argument has no default.
 
-Accepting that issue exposes the second argument issue:
+Holding `ownerDid` compatible in a separate proof reports the second argument
+issue:
 
 - `argument.commandsCell`: the earlier optional opaque cell is replaced by a
   required writable array cell.
