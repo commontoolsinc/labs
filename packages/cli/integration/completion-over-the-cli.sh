@@ -538,6 +538,10 @@ else
   check "0" "$PROBE_STATUS" "the space positional still runs with no store"
   check "" "$(printf '%s\n' "$PROBE_OUT" | grep -v '^:cf:')" \
     "and offers nothing, which is all there is on disk to offer"
+  # The entity positional too, so this branch asserts as much as the one above
+  # and a machine with no store cannot pass by checking less.
+  probe "cf inspect piece did:key:zNoSuchSpace "
+  check "0" "$PROBE_STATUS" "the entity positional runs against no store either"
 fi
 
 step "16. wish and the enumerated remainder"
