@@ -753,6 +753,15 @@ Deno.test("command receipts require canonical identities and timestamps", () => 
     () =>
       parseCommandReceipt("command", {
         ...receipt,
+        ownerDid: "",
+      }),
+    Error,
+    "ownerDid must be a string",
+  );
+  assertThrows(
+    () =>
+      parseCommandReceipt("command", {
+        ...receipt,
         nativeSessionId: " session-1 ",
       }),
     Error,

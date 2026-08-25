@@ -382,6 +382,35 @@ Deno.test("Fabric target publishes sessions and command receipts", async () => {
       "command receipt status is invalid",
     );
 
+    const wrongOwnerReceipt = runtime.getCell(
+      space,
+      commandReceiptCause(space, space, "wrong-owner-command"),
+      agentOwnerSchema(space),
+    );
+    const wrongOwnerReceiptTx = runtime.edit();
+    wrongOwnerReceiptTx.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: AGENT_CONNECTOR_WRITER_ID,
+    });
+    wrongOwnerReceipt.withTx(wrongOwnerReceiptTx).set({
+      schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+      ownerDid: "did:key:another-owner",
+      commandId: "wrong-owner-command",
+      sourceId: source.id,
+      nativeSessionId: snapshot.summary.nativeSessionId,
+      status: "succeeded",
+    });
+    wrongOwnerReceipt.withTx(wrongOwnerReceiptTx)
+      .applyCfcSchemaToExistingValue();
+    wrongOwnerReceiptTx.prepareCfc();
+    const wrongOwnerReceiptCommit = await wrongOwnerReceiptTx.commit();
+    if (wrongOwnerReceiptCommit.error) throw wrongOwnerReceiptCommit.error;
+    await assertRejects(
+      () => target.readReceipt("wrong-owner-command"),
+      Error,
+      "command receipt belongs to another owner",
+    );
+
     const unprotectedReceipt = runtime.getCell(
       space,
       commandReceiptCause(space, space, "unprotected-command"),
@@ -1419,6 +1448,51 @@ Deno.test("Fabric target binds only an empty owner command queue", async () => {
         Error,
         "owner command cell has not been bound",
       );
+      const commandValueBefore = second.cells.commands.getRaw();
+      const commandProtectionBefore = cellHasOwnerProtection(
+        secondRuntime.readTx(),
+        second.cells.commands,
+        secondOwner.did(),
+      );
+      const originalEdit = secondRuntime.edit;
+      secondRuntime.edit = function () {
+        const tx = originalEdit.call(this);
+        tx.commit = () => {
+          const failure = Object.assign(
+            new Error("command cell protection interrupted"),
+            {
+              name: "PreconditionFailedError" as const,
+              precondition: "origin-committed" as const,
+            },
+          );
+          tx.abort(failure);
+          return Promise.resolve({ error: failure });
+        };
+        return tx;
+      };
+      try {
+        await assertRejects(
+          () =>
+            second.bindCommandCell(
+              second.cells.commands,
+              writerAuthorization,
+            ),
+          Error,
+          "could not protect the owner command cell: command cell protection interrupted",
+        );
+        assertEquals(second.cells.commands.getRaw(), commandValueBefore);
+        assertEquals(
+          cellHasOwnerProtection(
+            secondRuntime.readTx(),
+            second.cells.commands,
+            secondOwner.did(),
+          ),
+          commandProtectionBefore,
+        );
+      } finally {
+        secondRuntime.edit = originalEdit;
+      }
+      assertEquals(second.commandsAreBound(), false);
       await second.bindCommandCell(second.cells.commands, writerAuthorization);
       assertEquals(second.commandsAreBound(), true);
       assertEquals(await second.pollCommands(), []);
