@@ -1,35 +1,36 @@
-// The read-side delivery guarantee for content-addressed schema
-// documents, pinned at the session frame: a document reaches a client
-// alongside the `cid:` closure its schema references name, and each
-// closure document reaches a session exactly once
-// (docs/specs/content-addressed-schemas.md; verification-coverage.md
-// OW61).
-//
-// The guarantee has two halves that pull against each other, and until
-// this file the memory package pinned neither — no memory test drove a
-// `cid:`-mentioning document through a session frame at all, so the
-// whole shipping side was reachable only through cross-package
-// integration lanes.
-//
-//   Shipping — `assembleSchemaDocClosures` (v2/query.ts) stages the
-//   closure of every delivered document into the same frame. A client
-//   validates arrivals against its own store and QUARANTINES a document
-//   whose refs it cannot resolve, so an under-delivered closure is
-//   silent data loss rather than a loud error.
-//
-//   Elision — a session that already holds a closure document does not
-//   receive it again. Not retransmitting schemas is why content
-//   addressing exists, so the elision is correct by design and a
-//   per-frame resend is a regression, not a safety margin.
-//
-// Every watch below uses the SELECTS-NOTHING selector (`schema: false`)
-// — the space-cell-only subscriber shape OW61 names as the trigger.
-// That shape's walk never descends through a link, so it never
-// incidentally loads the schema documents the delivered value mentions,
-// and the closure pass is the only route by which they can arrive. Under
-// a walking selector the traversal loads them anyway and every
-// assertion here passes with the closure pass entirely disabled.
-
+/**
+ * The read-side delivery guarantee for content-addressed schema
+ * documents, pinned at the session frame: a document reaches a client
+ * alongside the `cid:` closure its schema references name, and each
+ * closure document reaches a session exactly once
+ * (docs/specs/content-addressed-schemas.md; verification-coverage.md
+ * OW61).
+ *
+ * The guarantee has two halves that pull against each other, and until
+ * this file the memory package pinned neither — no memory test drove a
+ * `cid:`-mentioning document through a session frame at all, so the
+ * whole shipping side was reachable only through cross-package
+ * integration lanes.
+ *
+ *   Shipping — `assembleSchemaDocClosures` (v2/query.ts) stages the
+ *   closure of every delivered document into the same frame. A client
+ *   validates arrivals against its own store and QUARANTINES a document
+ *   whose refs it cannot resolve, so an under-delivered closure is
+ *   silent data loss rather than a loud error.
+ *
+ *   Elision — a session that already holds a closure document does not
+ *   receive it again. Not retransmitting schemas is why content
+ *   addressing exists, so the elision is correct by design and a
+ *   per-frame resend is a regression, not a safety margin.
+ *
+ * Every watch below uses the SELECTS-NOTHING selector (`schema: false`)
+ * — the space-cell-only subscriber shape OW61 names as the trigger.
+ * That shape's walk never descends through a link, so it never
+ * incidentally loads the schema documents the delivered value mentions,
+ * and the closure pass is the only route by which they can arrive. Under
+ * a walking selector the traversal loads them anyway and every
+ * assertion here passes with the closure pass entirely disabled.
+ */
 import { assert } from "@std/assert";
 import { expect } from "@std/expect";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
@@ -314,6 +315,7 @@ describe("schema document closure delivery", () => {
     await drainUntil(
       server,
       () => hasDoc(effectFrames(readerOne.messages, elisionFrom)),
+      "the same-reference rewrite reaching the reader",
     );
     elisionFrames = effectFrames(readerOne.messages, elisionFrom);
     for (const frame of elisionFrames) reader.apply(frame);
@@ -325,6 +327,7 @@ describe("schema document closure delivery", () => {
     await drainUntil(
       server,
       () => hasDoc(effectFrames(readerOne.messages, newRefFrom)),
+      "the changed-reference rewrite reaching the reader",
     );
     newRefFrames = effectFrames(readerOne.messages, newRefFrom);
     for (const frame of newRefFrames) reader.apply(frame);
@@ -416,13 +419,25 @@ function hasDoc(frames: readonly Upsert[][]): boolean {
   );
 }
 
-/** Drains pending refresh passes until `done`, iteration-bounded. */
+/**
+ * Drains pending refresh passes until `done`, iteration-bounded, and
+ * THROWS naming `awaited` when the passes run out first. Returning
+ * quietly on exhaustion would let a dropped push frame reach the
+ * assertions as an empty frame list, which several of them cannot
+ * distinguish from a frame that carried nothing — the vacuous green this
+ * file exists to make impossible.
+ */
 async function drainUntil(
   server: Server,
   done: () => boolean,
+  awaited: string,
 ): Promise<void> {
-  for (let pass = 0; pass < 50 && !done(); pass++) {
+  for (let pass = 0; pass < 50; pass++) {
+    if (done()) return;
     await server.idle();
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
+  throw new Error(
+    `drained 50 refresh passes without ${awaited}; the push never arrived`,
+  );
 }
