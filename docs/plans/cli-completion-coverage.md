@@ -78,11 +78,11 @@ read before picking one up; this table is the roll-up.
 | 1 | Inline `--option=value` drops every live candidate | correctness | not started |
 | 2 | Flags offered past a `stopEarly()` boundary | correctness | not started |
 | 3 | Target resolution lags the reference grammar | correctness | not started |
-| 4 | Verb flags do not complete (with item 2) | pattern vocabulary | needs step 10 |
+| 4 | Verb flags do not complete | pattern vocabulary | shaper now, wiring after step 10 |
 | 5 | Result field paths for `get` and `wish` | pattern vocabulary | not started |
 | 6 | Result field paths for `call` and `exec` | pattern vocabulary | needs step 10 |
 | 7 | Slugs never complete | pattern vocabulary | not started |
-| 8 | `--space` has no source a caller recognizes | first link | needs a decision |
+| 8 | `--space` has no source a caller recognizes | first link | partly settled |
 | 9 | A verb's annotation is its kind, not its prose | comprehension | not started |
 | 10 | Wrapper and deprecated verbs are offered unmarked | comprehension | not started |
 | 11 | Every Tab costs two process starts | felt cost | needs a decision |
@@ -95,10 +95,33 @@ read before picking one up; this table is the roll-up.
 | 18 | A live-provider test seam | mechanism | not started |
 | 19 | A gate that fails when a new slot has no decision | mechanism | not started |
 
-Items 1 to 7 are worth doing in that order. The first three are corrections and
-are small, and items 4 to 6 read from listings those corrections have to be
-answering correctly first. Everything from 8 down can be picked up
-independently.
+**What can be picked up today.** Everything except one wiring change and one
+item. Items 1, 2, 3, 5 and 7 are independent of each other and of the surface
+work, and are worth doing in that order. Items 9, 10, 12, 13, 14, 15, 16 and 17
+are mechanical and can be taken at any time.
+
+Item 2 holds under either grammar. A `cf` flag written past the verb is refused
+today and belongs to the callable after step 10, so declining to offer one there
+is correct now and stays correct. It leaves the position offering nothing until
+item 4 fills it, which is the honest state for a position whose vocabulary the
+command cannot yet name — and a great deal better than offering flags the
+command rejects.
+
+Item 4 splits. Turning a verb's `inputSchema` into `--kebab-case` candidates is
+a pure function of the listing, belongs beside `shapeVerbCandidates`, needs no
+fabric to test, and is the same function under either grammar. Build it now.
+Only its wiring — which slot receives it — waits, because step 10 decides
+whether a verb's fields are written before the marker or after it.
+
+Item 6 is the one to leave alone. Under the current grammar it needs the whole
+line read for context, since a projection precedes the verb it shapes; after
+step 10 the verb is already before the cursor and it needs nothing. Building it
+now means building the machinery that step 10 makes unnecessary.
+
+Items 8 and 11 hold open decisions and are not work yet. Items 18 and 19 are the
+mechanism, and are worth having early rather than last: item 18 is the only way
+to see a live provider fail, and everything above it is a shape no live exercise
+currently runs.
 
 ## What this list covers, and what it cannot
 
@@ -209,13 +232,12 @@ as `_stopEarly` with no accessor; either read that field or have the completion
 layer name the two commands. Reading the field keeps the property where the
 command declares it, which is the reason to prefer it.
 
-Past the boundary the slot is the callable's, so this and item 4 are one edit:
-recognizing the boundary is what routes the slot to the verb's own fields, and
-recognizing it without routing the slot leaves the position offering nothing.
-[Naming the target](cli-surface-shape.md#naming-the-target) decides where the
-boundary sits — under it the verb opens the callable's section and `--` closes
-it, so the position after the verb is the callable's and the position after the
-marker is the read step's.
+This holds under either grammar. A `cf` flag past the verb is refused today, and
+after step 10 of [Naming the target](cli-surface-shape.md#naming-the-target) the
+position belongs to the callable — so declining to offer one there is correct
+now and stays correct. It leaves the position offering nothing until item 4
+fills it, which is what a position whose vocabulary the command cannot yet name
+should offer.
 
 ### 3. Target resolution lags the reference grammar
 
@@ -267,17 +289,16 @@ cf call --piece <piece> addItem --ti<TAB>        # after step 10
 cf call --piece <piece> addItem -- --ti<TAB>     # before it
 ```
 
-**Build this against the settled grammar, not the current one.** The two
-positions are different slots, so completing the current one means completing it
-again later, and it would teach the spelling that step 10 retires while the
-retirement is being taught. If it lands first for some other reason, it is
-transitional and says so.
+**The candidates and their slot are separable, and only the slot waits.**
+Turning an `inputSchema` into `--kebab-case` candidates is a pure function of
+the listing. It belongs beside `shapeVerbCandidates`, is testable with no
+fabric, and is the same function whichever position the fields are written in —
+so it can be built and landed before step 10 decides.
 
-`liveCandidates` dispatches on `option-value` and `argument` slots only, so
-neither position reaches a provider today. After step 10 the slot to route is
-the one following the verb, which is the same boundary item 2 has to recognize —
-the two are one edit, and recognizing the boundary without routing the slot
-leaves the position offering nothing.
+The wiring is what waits. `liveCandidates` dispatches on `option-value` and
+`argument` slots only, so neither position reaches a provider today, and routing
+it to the current position would teach the spelling step 10 retires while the
+retirement is being taught.
 
 The data needs no new request. `listPieceCallables` — the call
 `callableCandidates` already makes — returns each verb's `inputSchema`, and
@@ -387,20 +408,26 @@ directory looking for a store, so completion offers spaces in a checkout that
 holds one and nothing in a worktree that does not — while both talk to the same
 server.
 
-Three sources exist, and choosing among them is a decision this plan does not
-make:
+[Naming the target](cli-surface-shape.md#naming-the-target) settles where the
+*command* gets a space it was not given: `CF_SPACE`, with the flag overriding
+it. Two candidate sources follow from that and need no further decision — the
+ambient value itself, and the identity's home space, which is derivable from
+`--identity` alone with no server and no local store and is where a profile
+target resolves.
 
-- **The identity's home space.** Always derivable from `--identity` alone, with
-  no server and no local store. One candidate, always correct, and the one a
-  profile target resolves against.
-- **Local stores, made independent of the working directory.** Keeps today's
-  candidates and stops them depending on where the caller stands. Still DIDs.
-- **A record of spaces this CLI has opened.** The only source that can hold a
-  name, because it can record the name at the moment a session resolves it. New
-  state on disk, and the question of when an entry expires.
+An ambient space also changes how much this slot matters. `--space` is written
+to override rather than to state the usual case, so it is reached for less
+often once it has a default.
 
-The third is the one that answers the complaint; it is also the only one that
-adds a durable artifact, which is why it is a decision rather than a task.
+What stays open is whether anything holds a space **name**. Local stores yield
+DIDs and are the only source completion reads today; making them independent of
+the working directory keeps those candidates and stops them depending on where
+the caller stands, but they are still DIDs. The one source that could hold a
+name is a record of the spaces this CLI has opened, written at the moment a
+session resolves one — which is new state on disk, and the question of when an
+entry expires. That is a decision rather than a task, and it is worth deferring
+until `CF_SPACE` has been in use long enough to say whether the slot is still
+reached for.
 
 ## Comprehension
 
