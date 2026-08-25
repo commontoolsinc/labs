@@ -17,6 +17,8 @@
     "compile-types": "./scripts/compile-type-lib.ts ../../../TypeScript/src/lib ./assets/types/es2023.d.ts",
     "gen-cfc-types": "./scripts/generate-cfc-types.ts",
     "check-cfc-types": "./scripts/generate-cfc-types.ts --check",
+    "gen-commonfabric-types": "./scripts/generate-commonfabric-types.ts",
+    "check-commonfabric-types": "./scripts/generate-commonfabric-types.ts --check",
     "strip-withheld-globals": "./scripts/strip-withheld-globals.ts",
     "check-withheld-globals": "./scripts/strip-withheld-globals.ts --check"
   },
