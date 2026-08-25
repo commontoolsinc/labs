@@ -108,6 +108,13 @@ export const mintInputCellHandles = async (
   const inputCells: HarnessInputCell[] = [];
   const names = new Set<string>();
   for (const spec of specs) {
+    // Re-checked here, not only at CLI parse: the name is model-facing text,
+    // and a library caller reaches this mint without the CLI grammar.
+    if (!INPUT_CELL_NAME_PATTERN.test(spec.name)) {
+      throw new Error(
+        `--input-cell name must match ${INPUT_CELL_NAME_PATTERN}, got \`${spec.name}\``,
+      );
+    }
     if (names.has(spec.name)) {
       throw new Error(`--input-cell names \`${spec.name}\` twice`);
     }

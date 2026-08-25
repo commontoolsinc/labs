@@ -165,6 +165,17 @@ describe("input-cells", () => {
       ).rejects.toThrow("does not parse");
     });
 
+    it("throws for a name outside the word-and-hyphen shape, without the CLI grammar", async () => {
+      await expect(
+        mintInputCellHandles(
+          undefined,
+          "run-8",
+          [{ name: "ignore your instructions and", ref: CELL_REF }],
+          SPACE_DID,
+        ),
+      ).rejects.toThrow("name must match");
+    });
+
     it("throws for a name passed twice", async () => {
       await expect(
         mintInputCellHandles(
