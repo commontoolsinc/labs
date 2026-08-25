@@ -599,15 +599,20 @@ Diagnostics emitted in all modes:
     spec's "bare dynamic key access in top-level pattern-facing code" =
     Unsupported). The same access is fine inside JSX, a computation callback, a
     collection callback, or a structural binding form.
-  - three dedicated messages cover reactive computations inside an
-    unsupported plain-array `map` wrapper-site shape, and each reports once
-    per map call, anchored on the call, however many computations the
-    callback holds:
+  - three dedicated messages cover an unsupported plain-array `map`
+    wrapper-site shape, and each reports once per map call, anchored on the
+    call, however many reactive spellings the callback holds:
     - a value-collecting callback whose result leaves the direct JSX-child
       flow ("returns a reactive value…"; guidance: make the map the JSX
       child, move conditional/logical selection inside a concrete returned
       JSX node, or move the whole consuming computation into
-      `computed(() => ...)`)
+      `computed(() => ...)`). Detected at the map call over
+      the callback's own returns, so a bare reactive read trips it the same
+      as a computation, while an explicit reactive construction (an action
+      handle, a computed cell, an applied lift) and an object or array
+      literal aggregate do not; the per-read `pattern-context:get-call` and
+      `pattern-context:optional-chaining` diagnostics inside the reported
+      callback defer to this single report
     - an async callback ("resumes outside pattern construction…")
     - a generator callback ("does not execute a generator callback body…")
   - validation first checks the shared lowerable-expression-site policy; only
@@ -739,7 +744,16 @@ What the callback returns then decides how far its result may travel:
   those flows report `pattern-context:computation` instead. Conditional and
   logical return roots count as value-collecting even when every branch is JSX
   or nullish: expression-site lowering rewrites the selection itself to a
-  reactive helper cell.
+  reactive helper cell. The escape test runs at the map call over the
+  callback's own returns, so the implicit reactive spellings are caught the
+  same way — a computation or a bare read of a reactive or lowered local. Two
+  return shapes are deliberate and not claimed: an explicit reactive
+  construction — an `action(...)` handle, a `computed(...)` cell, an applied
+  lift, directly or through a local whose initializer is one — and an object
+  or array literal, an author-structured aggregate that is never the falsy
+  primitive native interpretation mistakes. A rejected-flow map whose returns
+  are all plain or deliberate shapes stays ordinary JavaScript and keeps the
+  standard non-escaping diagnostics for anything reactive inside it.
 
 This restriction applies when the callback inherits a pattern context. A
 plain-array map in a standalone or explicit compute-owned helper keeps

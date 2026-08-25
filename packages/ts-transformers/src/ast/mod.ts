@@ -28,6 +28,7 @@ export {
   getLiftAppliedInnerCall,
   getLiftAppliedInputAndCallback,
   getLoweredArrayMethodName,
+  getOwnReturnExpressions,
   getPatternBuilderCallbackArgument,
   hasReactiveCollectionProvenance,
   isCallbackReference,

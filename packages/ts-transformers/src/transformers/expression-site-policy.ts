@@ -5,12 +5,14 @@ import {
   classifyPlainArrayMapWrapperSite,
   detectCallKind,
   getCallArgumentPosition,
+  getOwnReturnExpressions,
   getTypeAtLocationWithFallback,
   hasAuthoredSourceSite,
   isCollectionType,
   isEventHandlerJsxAttribute,
   isFunctionLikeExpression,
   isInRestrictedReactiveContext,
+  isReactiveOriginExpression,
   isReactiveOriginTaggedTemplate,
   isSyntheticNode,
   type ReactiveContextInfo,
@@ -112,14 +114,16 @@ export type RestrictedReactiveComputationDecision =
   | {
     kind: "requires-computed";
   }
-  | {
-    kind: "unsupported-plain-array-map";
-    reason:
-      | "result-not-direct-jsx"
-      | "async-callback"
-      | "generator-callback";
-    call: ts.CallExpression;
-  };
+  | UnsupportedPlainArrayMapDecision;
+
+export interface UnsupportedPlainArrayMapDecision {
+  kind: "unsupported-plain-array-map";
+  reason:
+    | "result-not-direct-jsx"
+    | "async-callback"
+    | "generator-callback";
+  call: ts.CallExpression;
+}
 
 export function containsLogicalBinaryOperator(expr: ts.Expression): boolean {
   if (ts.isBinaryExpression(expr)) {
@@ -1490,6 +1494,119 @@ export function findPreferredNestedLowerableExpressionSite(
   return nestedSite;
 }
 
+/**
+ * True when the callback can hand `map` a reactive value the author did not
+ * explicitly construct or structure. Two return shapes are deliberate and do
+ * not count:
+ *
+ * - an explicit reactive origin — an `action(...)` handle, a `computed(...)`
+ *   cell, an applied lift — returned directly or through a local whose
+ *   initializer is one (weekly-calendar collects per-color action handles
+ *   through a local this way);
+ * - an object or array literal, which is an author-structured aggregate
+ *   (gmail-extractor collects per-email records around `generateObject`
+ *   results). A literal is also never the falsy primitive that native
+ *   boolean interpretation mistakes, so the collected entries cannot be
+ *   misread as their own values.
+ *
+ * What this owns is the implicit spelling: a bare read, a lowered local, or
+ * a computation whose runtime value is a wrapper object the author believes
+ * is plain.
+ */
+function plainArrayMapCollectsEscapingReactiveValues(
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): boolean {
+  return getOwnReturnExpressions(callback).some((returnExpression) => {
+    const value = unwrapExpression(returnExpression);
+    if (
+      ts.isObjectLiteralExpression(value) || ts.isArrayLiteralExpression(value)
+    ) {
+      return false;
+    }
+    if (isReactiveOriginExpression(value, context.checker)) {
+      return false;
+    }
+    if (ts.isIdentifier(value)) {
+      const initializer = getSoleLocalInitializer(value, context.checker);
+      if (
+        initializer &&
+        isReactiveOriginExpression(
+          unwrapExpression(initializer),
+          context.checker,
+        )
+      ) {
+        return false;
+      }
+    }
+    return analyze(returnExpression).containsReactive;
+  });
+}
+
+function getSoleLocalInitializer(
+  identifier: ts.Identifier,
+  checker: ts.TypeChecker,
+): ts.Expression | undefined {
+  const declarations = checker.getSymbolAtLocation(identifier)?.declarations;
+  if (!declarations || declarations.length !== 1) {
+    return undefined;
+  }
+  const [declaration] = declarations;
+  return ts.isVariableDeclaration(declaration)
+    ? declaration.initializer
+    : undefined;
+}
+
+/**
+ * Classifies a call expression as an unsupported plain-array map when its
+ * callback can hand a reactive value to `map` outside a supported flow.
+ *
+ * The per-expression classification below reaches only the expression shapes
+ * validation visits — computations, `.get()` reads, optional chains. A bare
+ * reactive read bound to a local and returned is none of those, yet the
+ * collected array still holds reactive values that an ordinary consumer would
+ * interpret as objects. This call-level check asks the flow question once for
+ * the map itself: an unsupported wrapper-site decision, a pattern-owned
+ * context, and any own return whose analysis carries escaping reactive
+ * content.
+ */
+export function classifyUnsupportedPlainArrayMapCall(
+  call: ts.CallExpression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): UnsupportedPlainArrayMapDecision | undefined {
+  const [firstArgument] = call.arguments;
+  if (!firstArgument) {
+    return undefined;
+  }
+  const callback = unwrapExpression(firstArgument);
+  if (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) {
+    return undefined;
+  }
+
+  const decision = classifyPlainArrayMapWrapperSite(
+    callback,
+    context.checker,
+    (sourceFile) => context.isSourceFileDefaultLibrary(sourceFile),
+  );
+  if (decision === undefined || decision === "supported") {
+    return undefined;
+  }
+
+  const reactiveContext = context.getReactiveContext(callback);
+  if (
+    reactiveContext.kind !== "pattern" ||
+    hasEnclosingComputeLikeCallback(callback, context)
+  ) {
+    return undefined;
+  }
+
+  return plainArrayMapCollectsEscapingReactiveValues(callback, context, analyze)
+    ? { kind: "unsupported-plain-array-map", reason: decision, call }
+    : undefined;
+}
+
 export function classifyRestrictedReactiveComputation(
   expression: ts.Expression,
   context: TransformationContext,
@@ -1506,7 +1623,20 @@ export function classifyRestrictedReactiveComputation(
     if (
       mapSiteDecision !== undefined && mapSiteDecision !== "supported" &&
       reactiveContext.kind === "pattern" &&
-      !hasEnclosingComputeLikeCallback(expression, context)
+      !hasEnclosingComputeLikeCallback(expression, context) &&
+      // The flow restriction is about reactive values escaping through the
+      // collected result. A rejected-flow map whose returns are all plain
+      // or explicit reactive constructions collects what the author meant
+      // it to, so a reactive computation inside it is a standard
+      // non-escaping site and falls through to the classification below.
+      // Async and generator callbacks violate the construction-time premise
+      // independent of what they return.
+      (mapSiteDecision !== "result-not-direct-jsx" ||
+        plainArrayMapCollectsEscapingReactiveValues(
+          callbackContext.callback,
+          context,
+          analyze,
+        ))
     ) {
       const analysis = analyze(expression);
       return analysis.containsReactive && analysis.requiresRewrite

@@ -1017,43 +1017,41 @@ function plainArrayMapCallbackCollectsRenderValues(
   checker: ts.TypeChecker,
   isSourceFileDefaultLibrary: (sourceFile: ts.SourceFile) => boolean,
 ): boolean {
-  const body = callback.body;
-  if (!ts.isBlock(body)) {
-    return isRenderCollectedValue(
-      body,
-      checker,
-      isSourceFileDefaultLibrary,
-    );
-  }
-  return !hasValueCollectingReturn(
-    body,
-    checker,
-    isSourceFileDefaultLibrary,
+  return getOwnReturnExpressions(callback).every((expression) =>
+    isRenderCollectedValue(expression, checker, isSourceFileDefaultLibrary)
   );
 }
 
-function hasValueCollectingReturn(
-  body: ts.Block,
-  checker: ts.TypeChecker,
-  isSourceFileDefaultLibrary: (sourceFile: ts.SourceFile) => boolean,
-): boolean {
-  const visit = (node: ts.Node): boolean | undefined => {
+/**
+ * The expressions `callback` can hand back to its caller: a concise arrow
+ * body, or the expressions of the return statements belonging to the callback
+ * itself. Returns inside nested functions belong to those functions and are
+ * not included; bare `return;` statements hand back `undefined` and carry no
+ * expression to include.
+ */
+export function getOwnReturnExpressions(
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+): ts.Expression[] {
+  const body = callback.body;
+  if (!ts.isBlock(body)) {
+    return [body];
+  }
+
+  const returns: ts.Expression[] = [];
+  const visit = (node: ts.Node): void => {
     if (ts.isFunctionLike(node)) {
-      return undefined;
+      return;
     }
     if (ts.isReturnStatement(node)) {
-      return node.expression !== undefined &&
-          !isRenderCollectedValue(
-            node.expression,
-            checker,
-            isSourceFileDefaultLibrary,
-          )
-        ? true
-        : undefined;
+      if (node.expression !== undefined) {
+        returns.push(node.expression);
+      }
+      return;
     }
-    return ts.forEachChild(node, visit);
+    ts.forEachChild(node, visit);
   };
-  return ts.forEachChild(body, visit) === true;
+  ts.forEachChild(body, visit);
+  return returns;
 }
 
 function isRenderCollectedValue(

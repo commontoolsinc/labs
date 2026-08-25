@@ -3836,17 +3836,18 @@ Deno.test("Reactive .get() Validation", async (t) => {
   await t.step(
     "allows a value-collecting map returned from a concise-body JSX-local IIFE",
     async () => {
-      const source = `      import { pattern, UI } from "commonfabric";
+      const source =
+        `      import { pattern, UI, Writable } from "commonfabric";
 
       const VALUES = ["a", "b"];
 
-      export default pattern<{ target: string }>(({ target }) => {
+      export default pattern<{ target: Writable<string> }>(({ target }) => {
         return {
           [UI]: (
             <div>
               {(() =>
                 VALUES.map((value) => {
-                  const matches = value === target;
+                  const matches = value === target.get();
                   return matches;
                 }))()}
             </div>
@@ -3950,8 +3951,137 @@ Deno.test("Reactive .get() Validation", async (t) => {
         types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
-      assertGreater(errors.length, 0, "Expected at least one error");
-      assertHasErrorType(errors, "pattern-context:get-call");
+      assertEquals(
+        errors.length,
+        1,
+        "the map-level flow diagnostic owns the whole callback, so the " +
+          "read inside it does not also draw pattern-context:get-call",
+      );
+      assertHasErrorType(errors, "pattern-context:computation");
+      assertStringIncludes(errors[0].message, "returns a reactive value");
+    },
+  );
+
+  await t.step(
+    "errors when a bare reactive read escapes through a map result",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ active: Writable<boolean> }>(({ active }) => {
+        const flags = VALUES.map((value) => {
+          const flag = active;
+          return flag;
+        });
+        const kept = flags.filter(Boolean);
+        return { kept };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        1,
+        "a bare read bound to a local and returned is not a computation, a " +
+          ".get() call, or an optional chain, so only the map-level check " +
+          "can see the collected escape",
+      );
+      assertHasErrorType(errors, "pattern-context:computation");
+      assertStringIncludes(errors[0].message, "returns a reactive value");
+    },
+  );
+
+  await t.step(
+    "allows explicit reactive constructions collected by a plain map",
+    async () => {
+      const source =
+        `      import { action, computed, pattern, Writable } from "commonfabric";
+
+      const COLORS = ["red", "blue"];
+      const SEPARATORS = ["-", "+"];
+
+      export default pattern<
+        { rows: Writable<string[]>; color: Writable<string> }
+      >(({ rows, color }) => {
+        const colorActions = COLORS.map((value) =>
+          action(() => color.set(value))
+        );
+        const joined = SEPARATORS.map((sep) => {
+          const cell = computed(() => rows.get().join(sep));
+          return cell;
+        });
+        return { colorActions, joined };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "an action handle or computed cell in a return is a deliberate " +
+          "artifact with its own collection semantics, returned directly " +
+          "or through a local, so the escape check does not claim it",
+      );
+    },
+  );
+
+  await t.step(
+    "allows literal aggregates collected by a plain map",
+    async () => {
+      const source =
+        `      import { computed, pattern, Writable } from "commonfabric";
+
+      const KEYS = ["a", "b"];
+
+      export default pattern<{ store: Writable<Record<string, number>> }>(
+        ({ store }) => {
+          const entries = KEYS.map((key) => {
+            const value = computed(() => store.get()[key] ?? 0);
+            return { key, value, doubled: computed(() => 2) };
+          });
+          return { entries };
+        },
+      );
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "an object-literal return is an author-structured aggregate, and a " +
+          "literal is never the falsy primitive native interpretation " +
+          "mistakes, so the escape check does not claim it",
+      );
+    },
+  );
+
+  await t.step(
+    "allows a plain-value map result consumed off the render path",
+    async () => {
+      const source = `      import { pattern } from "commonfabric";
+
+      export default pattern<{ label: string }>(({ label }) => {
+        const doubled = [1, 2, 3].map((x) => x * 2).filter((x) => x > 2);
+        return { doubled, label };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "a callback returning plain values collects ordinary data, so the " +
+          "map stays ordinary JavaScript wherever its result flows",
+      );
     },
   );
 

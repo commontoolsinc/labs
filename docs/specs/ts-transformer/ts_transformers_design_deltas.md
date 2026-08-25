@@ -127,11 +127,24 @@ mistake survives when the map result flows through a local first. That result
 therefore has to stay on the uninterpreted render path rather than become an
 operand of a later call or a stored intermediate, and each unsupported map
 call reports one `pattern-context:computation` diagnostic, anchored on the
-call. A render-collecting callback has no such exposure — its collected view
-nodes are ordinary data — so no flow restriction applies to it. Conditional
-and logical return roots are value-collecting even when their branches are JSX
-or nullish, because expression-site lowering rewrites the selection itself to a
-reactive helper cell. Async
+call. The escape test is applied at the map call itself over the callback's
+own returns, so it reaches the implicit spellings the same way — a
+computation or a bare read of a reactive or lowered local. Two return shapes
+are deliberate and not claimed: an explicit reactive construction — an
+`action(...)` handle, a `computed(...)` cell, an applied lift, returned
+directly or through a local whose initializer is one (weekly-calendar
+collects per-color action handles this way) — and an object or array
+literal, an author-structured aggregate that is never the falsy primitive
+native interpretation mistakes (gmail-extractor collects per-email records
+around `generateObject` results). A rejected-flow map whose returns are all
+plain or deliberate shapes collects what the author meant it to; a reactive
+computation inside one is a standard non-escaping site and keeps the
+standard "wrap it in `computed()`" classification instead. A
+render-collecting callback has no such exposure — its collected view nodes
+are ordinary data — so no flow restriction applies to it. Conditional and
+logical return roots are value-collecting even when their branches are JSX
+or nullish, because expression-site lowering rewrites the selection itself
+to a reactive helper cell. Async
 callbacks are excluded because their reactive work resumes after the
 construction frame, and generator callbacks because `map` never executes
 their bodies.
@@ -155,8 +168,10 @@ Two behaviors change:
   value sites can carry, so rendering
   `["-", "+"].map((sep) => <span>{rows.get().join(sep)}</span>)` compiles to
   per-separator lifts instead of being rejected. Both still fire in
-  result-interpreting callbacks and in value-collecting maps whose results
-  escape the render path.
+  result-interpreting callbacks. In a value-collecting map whose result
+  escapes the render path, the map-level `pattern-context:computation`
+  diagnostic owns the whole callback and the per-read diagnostics inside it
+  defer to that single report.
 
 A reactive array-method callback keeps the older, stricter rule, and the
 difference is structural rather than stylistic: that callback is lowered into a
