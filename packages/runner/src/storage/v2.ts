@@ -5530,6 +5530,7 @@ class SpaceReplica implements ISpaceReplica {
             overlay.delete(referrer);
             changed = true;
             logger.error("schema-doc-quarantine", () => [
+              `[${this.#space}] ` +
               `Document ${referrer} names schema document cid:${dep}, ` +
               `which is not delivered and verified in this replica ` +
               `(docs/specs/content-addressed-schemas.md). The document ` +
@@ -5906,6 +5907,11 @@ class SpaceReplica implements ISpaceReplica {
           this.#parkedOnSchemaClosure.delete(key);
         }
         if (releasable.length === 0) break;
+        logger.error("schema-doc-released", () => [
+          `[${this.#space}] releasing ${releasable.length} held ` +
+          `document(s) whose schema refs now resolve: ` +
+          releasable.map((upsert) => String(upsert.id)).join(", "),
+        ]);
         this.applySessionSync({
           type: "sync",
           fromSeq: 0,
