@@ -59,6 +59,19 @@ cf() {
   return $status
 }
 
+# Delegated scripts (verbs-over-the-cli, verb-session-gaps, and the drills)
+# run cf through $CF_BINARY, falling back to the checkout's deno task when it
+# is unset. Resolve and export it here once, from the same decision cf_impl
+# made, so a child tests the same artifact as the step that invoked it: the
+# external binary on PATH, or unset in local-source mode so the fallback
+# keeps parent and child on the checkout together.
+if [ -z "${CF_CLI_INTEGRATION_USE_LOCAL:-}" ] && [ -z "${CF_BINARY:-}" ]; then
+  CF_BINARY="$(type -P cf || true)"
+fi
+if [ -n "${CF_BINARY:-}" ]; then
+  export CF_BINARY
+fi
+
 PATTERN_SRC="$SCRIPT_DIR/pattern/main.tsx"
 SCHEMA_COMPATIBLE_PATTERN_SRC="$SCRIPT_DIR/pattern/schema-compatible.tsx"
 SCHEMA_INCOMPATIBLE_PATTERN_SRC="$SCRIPT_DIR/pattern/schema-incompatible.tsx"
@@ -1069,6 +1082,24 @@ run_verb_session_gaps() {
   echo "Successfully ran the verb-session gap harness for ${API_URL}."
 }
 
+# The completion chain against a live fabric. Same delegation rationale as the
+# two above; it deploys its own fixture and takes its own space.
+#
+# It is the only thing that drives a completion provider against real state,
+# and it reaches every provider that reads any — the fabric, the local stores,
+# or the environment. Its own header draws the boundary exactly:
+# the unit tests cover the pure half, and a provider that reaches a fabric and
+# returns the WRONG set looks exactly like one that returned nothing, because
+# completion swallows every error on purpose. It also carries `gap` assertions
+# for slots that deliberately answer nothing today, which fail the day one
+# starts answering.
+run_completion_walkthrough() {
+  echo "Running the completion walkthrough..."
+  API_URL="$API_URL" bash "$SCRIPT_DIR/completion-over-the-cli.sh" ||
+    error "The completion walkthrough failed."
+  echo "Successfully ran the completion walkthrough for ${API_URL}."
+}
+
 # The Topics content-safety drill: export a space's authored content, clobber a
 # topic the way a bad migration would, restore it, and prove the restore
 # byte-exact. docs/plans/topics-migration-rehearsal.md makes it part of every
@@ -1123,6 +1154,15 @@ looked in $root_store and $toolshed_store. Set CF_DRILL_STORE_DIR."
     bash "$SCRIPT_DIR/topics-restore-drill.sh" ||
     error "The topics restore drill failed."
   echo "Successfully ran the topics restore drill for ${API_URL}."
+}
+
+# The bulk-survey drill needs no store: the survey is API-only, so unlike the
+# topics restore drill there is nothing to discover on disk.
+run_bulk_survey_drill() {
+  echo "Running the bulk-survey drill..."
+  API_URL="$API_URL" bash "$SCRIPT_DIR/bulk-survey-drill.sh" ||
+    error "The bulk-survey drill failed."
+  echo "Successfully ran the bulk-survey drill for ${API_URL}."
 }
 
 # The top-level spellings are the same commands as their `cf piece`
@@ -1351,8 +1391,12 @@ case "$SECTION" in
     run_verbs_walkthrough
     cf_test_step_begin verb-session-gaps
     run_verb_session_gaps
+    cf_test_step_begin completion-walkthrough
+    run_completion_walkthrough
     cf_test_step_begin topics-restore-drill
     run_topics_restore_drill
+    cf_test_step_begin bulk-survey-drill
+    run_bulk_survey_drill
     ;;
   piece-call-retry)
     cf_test_step_begin piece-call-retry
@@ -1374,9 +1418,17 @@ case "$SECTION" in
     cf_test_step_begin verb-session-gaps
     run_verb_session_gaps
     ;;
+  completion)
+    cf_test_step_begin completion-walkthrough
+    run_completion_walkthrough
+    ;;
   topics-drill)
     cf_test_step_begin topics-restore-drill
     run_topics_restore_drill
+    ;;
+  bulk-survey-drill)
+    cf_test_step_begin bulk-survey-drill
+    run_bulk_survey_drill
     ;;
   *)
     error "Unknown CLI integration section: $SECTION"

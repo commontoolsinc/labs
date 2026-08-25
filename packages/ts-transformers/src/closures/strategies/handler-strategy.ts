@@ -1,6 +1,9 @@
 import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
-import { isEventHandlerJsxAttribute } from "../../ast/mod.ts";
+import {
+  isEventHandlerJsxAttribute,
+  preserveSourceMapRange,
+} from "../../ast/mod.ts";
 import { CaptureCollector } from "../capture-collector.ts";
 import { unwrapArrowFunction } from "../utils/ast-helpers.ts";
 import {
@@ -71,10 +74,16 @@ export function transformHandlerJsxAttribute(
     },
   );
 
-  const newInitializer = factory.createJsxExpression(
-    initializer.dotDotDotToken,
-    finalCall,
+  const newInitializer = preserveSourceMapRange(
+    factory.createJsxExpression(
+      initializer.dotDotDotToken,
+      finalCall,
+    ),
+    initializer,
   );
 
-  return factory.createJsxAttribute(attribute.name, newInitializer);
+  return preserveSourceMapRange(
+    factory.createJsxAttribute(attribute.name, newInitializer),
+    attribute,
+  );
 }

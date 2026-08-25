@@ -51,25 +51,25 @@ what this looks like when it bites.
 ## Output Conventions (scripts & agents)
 
 - stdout carries command output only; hints, tips and diagnostics go to stderr.
-  `piece get` prints JSON, with no ANSI to strip, and represents an absent value
-  as `null`.
+  `cf get` prints JSON, with no ANSI to strip, and represents an absent value as
+  `null`.
 - ANSI colors are emitted only when stdout is a TTY. Force off with `--no-color`
   or `NO_COLOR=1`; force on (e.g. through a pager) with `FORCE_COLOR=1`.
   (`cf view` keeps its own `--color` flag.)
 - `-q/--quiet` (on `piece`/`wish` subcommands) suppresses hints and next-step
   blocks on stderr. To also drop runtime warnings, add `--log-level error` (`-q`
   deliberately leaves the log floor alone — scripts parse those warnings).
-- `piece call` payloads: inline JSON argument, `-` to read stdin
+- `cf call` payloads: inline JSON argument, `-` to read stdin
   (`echo '{...}' | cf call ... handler -`), a bare pipe with no payload
   argument, or schema-derived flags after `--`. Empty stdin fails loudly.
-- A `piece get` path that doesn't resolve is a data error: one-line message on
+- A `cf get` path that doesn't resolve is a data error: one-line message on
   stderr, exit 1 (no usage screen). A `piece link` that fails validation
-  (missing source/target piece or path) reports the same way. So does a
-  `piece get` path that lands on a handler verb: reading a stream refuses — read
-  data, call verbs. A root verb's refusal points at `cf piece call` (its literal
-  spelling); a nested verb is not directly callable, so it points at reading the
-  parent object or `cf piece verbs`. The verb's parent object still reads, and
-  tool bindings read as data.
+  (missing source/target piece or path) reports the same way. So does a `cf get`
+  path that lands on a handler verb: reading a stream refuses — read data, call
+  verbs. A root verb's refusal points at `cf call` (its literal spelling); a
+  nested verb is not directly callable, so it points at reading the parent
+  object or `cf piece verbs`. The verb's parent object still reads, and tool
+  bindings read as data.
 
 ## Environment Setup
 
@@ -270,11 +270,11 @@ echo '42' | deno task cf set ... count
 echo '{"name": "John"}' | deno task cf set ... user
 ```
 
-`piece get` and `wish` always print JSON. Both accept a redundant `--json` so
+`cf get` and `wish` always print JSON. Both accept a redundant `--json` so
 callers can request the format explicitly.
 
-`piece get --filter` accepts a jq-inspired predicate over array items: paths,
-JSON literals, comparisons, `and`/`or`/`not`, and parentheses. Only `false` and
+`cf get --filter` accepts a jq-inspired predicate over array items: paths, JSON
+literals, comparisons, `and`/`or`/`not`, and parentheses. Only `false` and
 `null` are falsey; stored `undefined` is treated like a missing value and is
 also falsey. Non-array inputs are rejected. Two flags project the output:
 `--select` takes a comma-separated field list, and `--schema` takes an inline
@@ -345,7 +345,7 @@ passed over too, and the read reports the reference itself. A JSON `--schema`
 states a shape of its own rather than naming the source's fields, and is not
 held to that vocabulary.
 
-`piece call` takes the same three flags, before the callable name, with the same
+`cf call` takes the same three flags, before the callable name, with the same
 grammar, the same `--select`/`--schema` conflict, and the same error messages.
 They shape the result of the call — a handler's `result` inside the Invocation
 JSON, or a tool's JSON on stdout:
@@ -375,7 +375,7 @@ result rather than becoming an error. `exec` writes them **before the mounted
 file**, because everything after it belongs to the callable's own schema-derived
 interface — which also means a callable run through its own shebang cannot carry
 them. `exec` settles a handler under an invocation of its own and prints the
-same Invocation JSON `piece call` does; a tool's result stays on stdout with its
+same Invocation JSON `cf call` does; a tool's result stays on stdout with its
 result cell's address on stderr, written as an address argument `--piece` takes
 unchanged.
 
@@ -384,9 +384,9 @@ deno task cf wish '#profile' -i ./claude.key --select name,avatar
 deno task cf exec --select id,title /tmp/cf/…/result/search.tool --query milk
 ```
 
-For `piece call`, options before the callable name configure `piece call`.
-Arguments after the callable name configure the invoked handler or tool. The
-JSON forms match `cf exec`:
+For `cf call`, options before the callable name configure `cf call`. Arguments
+after the callable name configure the invoked handler or tool. The JSON forms
+match `cf exec`:
 
 ```bash
 # Complete input as an inline JSON value
@@ -410,11 +410,11 @@ results. Errors always go to stderr.
 
 ## Gotcha: Always `step` After `set` or `call`
 
-Neither `piece set` nor `piece call` triggers recomputation automatically. You
+Neither `cf set` nor `cf call` triggers recomputation automatically. You
 **must** run `piece step` after either one to get fresh computed values. When
-the value is session-scoped, use `piece get --step` so recomputation and the
-read happen in the same CLI session; a separate `piece step` process cannot
-carry session-local materialization into the following `piece get` process.
+the value is session-scoped, use `cf get --step` so recomputation and the read
+happen in the same CLI session; a separate `piece step` process cannot carry
+session-local materialization into the following `cf get` process.
 
 ```bash
 # After setting data:
@@ -426,7 +426,7 @@ deno task cf get --piece ID totalSpent ...
 deno task cf get --piece ID totalSpent --step ...
 ```
 
-A path-less `piece get` (whole result) degrades outputs it cannot reach — values
+A path-less `cf get` (whole result) degrades outputs it cannot reach — values
 living in another session's/user's scope are simply absent from the returned
 object rather than voiding the whole read. Use `--step` when you need those
 members materialized in your own session.

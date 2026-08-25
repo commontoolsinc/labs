@@ -42,7 +42,7 @@ import { RuntimeTransport } from "./client/transport.ts";
 import { PageHandle } from "./page-handle.ts";
 import {
   type CellRef,
-  ConsoleNotification,
+  ConsoleMessage,
   ErrorNotification,
   InitializationData,
   JSONValue,
@@ -73,7 +73,7 @@ export interface RuntimeClientOptions
 }
 
 export type RuntimeClientEvents = {
-  console: [ConsoleNotification];
+  console: [ConsoleMessage];
   navigaterequest: [{ cell: CellHandle }];
   error: [ErrorNotification];
   telemetry: [RuntimeTelemetryMarkerResult];
@@ -785,7 +785,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return this.#conn;
   }
 
-  private _onConsole = (data: ConsoleNotification): void => {
+  private _onConsole = (data: ConsoleMessage): void => {
     this.emit("console", data);
   };
 

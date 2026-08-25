@@ -13,7 +13,7 @@ first — this one uses its vocabulary. The third concern, the command surface, 
 Ask a piece for one of its fields and you get back the data at that path:
 
 ```bash
-cf piece get --piece <board> label
+cf get --piece <board> label
 → "My board"
 ```
 
@@ -83,7 +83,7 @@ elements. The two do not collapse into one, because **filtering runs before
 projection** — a predicate can inspect a field the result omits:
 
 ```bash
-cf piece get ... topics --filter '.status == "open"' --select 'title,id'
+cf get ... topics --filter '.status == "open"' --select 'title,id'
 ```
 
 `status` decides membership and never appears in the output. A single mechanism
@@ -411,7 +411,7 @@ remains prose in the verb's description.
 
 ### What dissolves, and what survives
 
-`cf piece get` already reads a receipt — its target is a cell, a receipt is a
+`cf get` already reads a receipt — its target is a cell, a receipt is a
 cell, and `--schema` projects it correctly. Once `--piece` accepts the `of:`
 address form, reading a receipt directly is an ordinary read and needs no
 command of its own.
@@ -434,7 +434,7 @@ unless noted.
   piece-specific. Its counterpart `getArgument` follows a link stored in the
   document and throws when absent, making it the only piece-shaped operation of
   the pair.
-- `cf piece get` against a receipt address returns its value, and
+- `cf get` against a receipt address returns its value, and
   `--schema note.title` projects it to `{"note": {"title": …}}`.
 
 **Documents and links**

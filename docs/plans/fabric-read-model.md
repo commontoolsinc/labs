@@ -31,7 +31,7 @@ really is in chapter 8, and storage in chapter 9.
 | **Link** | A pointer from one cell to another, stored inline in a document. Following links is how one cell reaches another. |
 | **Pattern** | A user-authored program declaring state and, optionally, callable operations. Components run once to wire up reactive state, in the style of Solid.js. |
 | **Piece** | A running instance of a pattern in a space. What you address, read, and call. |
-| **Verb** | A piece's callable operation, invoked with `cf piece call`. |
+| **Verb** | A piece's callable operation, invoked with `cf call`. |
 | **Receipt** | The cell the runtime writes when a verb finishes, holding whatever the verb returned. |
 | **Schema** | A description of data's shape. Schemas are queries here: the runtime reads one to decide which documents to load and how to treat each value. |
 | **Shape** | The schema supplied for one particular read — what this caller wants back. Written concisely or in full. |
@@ -70,8 +70,8 @@ different ways to end up holding a cell:
 
 | Arrival | What it does |
 | --- | --- |
-| `cf piece get --piece <addr>` | addresses a cell directly |
-| `cf piece call --piece <addr> <verb>` | runs a verb, then reads the receipt it wrote |
+| `cf get --piece <addr>` | addresses a cell directly |
+| `cf call --piece <addr> <verb>` | runs a verb, then reads the receipt it wrote |
 | `cf wish <query>` | resolves a query to whatever satisfies it |
 | `cf exec <mountedFile>` | reaches a verb through a filesystem mount and runs it |
 
@@ -143,7 +143,7 @@ Covered in [CLI surface shape](cli-surface-shape.md).
 ## What follows from the split
 
 Reads and calls stop blocking each other. The read layer can be settled against
-`cf piece get`, which is where the load already is, and calls inherit it rather
+`cf get`, which is where the load already is, and calls inherit it rather
 than specifying a parallel format.
 
 The command surface stops being a prerequisite. Sharing the read layer between

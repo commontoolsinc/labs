@@ -1,10 +1,12 @@
 import {
   fabricFromRealmValue,
   newDefaultJsonCodecEngine,
+  realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
+import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { toStructuredDebugValue } from "@commonfabric/data-model/value-debug";
 import {
   type SiteTable,
   siteTableCause,
@@ -180,6 +182,7 @@ import {
 } from "../protocol/mod.ts";
 import type { VDomOp } from "../protocol/types.ts";
 import { cellRefToKey } from "../shared/utils.ts";
+import { postToClient } from "./post-to-client.ts";
 import {
   postContextualRuntimeError,
   postRuntimeError,
@@ -192,7 +195,15 @@ import {
   mapCellRefsToSigilLinks,
 } from "./utils.ts";
 
-const MAX_SERIALIZATION_DEPTH = 5;
+/**
+ * Maximum nesting depth of a console argument's debug rendering. The bound is
+ * on the size of a message pattern code can emit in a loop; the transport
+ * imposes none of its own. Two of the levels are the rendering's, spent on the
+ * shapes this bridge exists to carry -- a tag around an instance's encoded
+ * contents, a ref beside a query result's data -- so the depth of the logged
+ * value that survives is smaller than the number here.
+ */
+const MAX_CONSOLE_DEBUG_DEPTH = 7;
 const blobUploadCodec = newDefaultJsonCodecEngine();
 
 /** Each registered logger's enabled state and level. */
@@ -403,152 +414,91 @@ function formatCellLink(cell: Cell<unknown>): string {
 }
 
 /**
- * Deep-walks a value and converts uncloneable parts (Cells, Proxies, functions)
- * into cloneable representations for postMessage. Preserves the structure of
- * objects so that `console.log({ self, name: "test" })` shows both the cell
- * reference _and_ the other properties.
+ * Produces the replacer that `toConsoleDebugValue()` converts through. It
+ * renders the values the conversion cannot render on its own: a cell by the
+ * link it holds, and a query-result proxy by that link together with the data
+ * behind it.
  *
- * Exported for testing.
+ * The result is stateful -- it holds what it built for each proxy -- so it
+ * serves a single conversion.
  */
-export function sanitizeForPostMessage(
-  value: unknown,
-  seen = new WeakSet<object>(),
-  depth = 0,
-): unknown {
-  // Handle primitives immediately
-  if (value === null || value === undefined) return value;
-  const type = typeof value;
-  if (type !== "object" && type !== "function") return value;
+function newConsoleDebugReplacer(): (value: any) => any {
+  const proxyValues = new Map<object, unknown>();
 
-  // Functions can't be cloned
-  if (type === "function") return "[Function]";
+  return (value: any) => {
+    if (isCell(value)) {
+      return formatCellLink(value);
+    }
 
-  // Depth limit to prevent runaway recursion
-  if (depth >= MAX_SERIALIZATION_DEPTH) {
-    return "[Max depth exceeded]";
-  }
+    // `isCellResult()` reads a symbol-keyed property, which a hostile proxy's
+    // `get` trap throws from. A throw here counts as declining to replace, and
+    // the value goes on to be rendered as whatever it appears to be.
+    if (!isCellResult(value)) {
+      return value;
+    }
 
-  const obj = value as object;
+    const already = proxyValues.get(value);
+    if (already !== undefined) {
+      // The same proxy converts to the same object every time, so that the
+      // conversion's own identity-keyed cycle detection sees a repeat as one.
+      return already;
+    }
 
-  // Circular reference protection. `seen` holds the _ancestors_ of `obj`, so a
-  // value reached twice by different paths is shown at both rather than
-  // reported as a cycle it is not part of -- two identical siblings in a dump
-  // are a common shape, and calling the second one circular misdescribes the
-  // data this exists to show. Cleared on the way back out, below.
-  if (seen.has(obj)) return "[Circular]";
-  seen.add(obj);
+    const result: Record<string, unknown> = {
+      __ref: formatCellLink(getCellOrThrow(value)),
+    };
 
-  try {
-    return sanitizedBody(value, obj, seen, depth);
-  } finally {
-    seen.delete(obj);
-  }
+    // The properties are exposed rather than copied, so that the conversion
+    // reads each one under its own guard: a proxy that throws on one key
+    // still reports the rest, and `__ref` along with them.
+    for (const key of Object.keys(value)) {
+      Object.defineProperty(result, key, {
+        enumerable: true,
+        get: () => value[key],
+      });
+    }
+
+    // Held only once complete, so that a proxy which throws before its keys
+    // can be listed is rendered the same way everywhere it appears rather
+    // than leaving a half-built object behind for its later positions. The
+    // conversion descends after this returns, so a cycle still finds it.
+    proxyValues.set(value, result);
+
+    return result;
+  };
 }
 
 /**
- * Helper for `sanitizeForPostMessage()`, which holds everything it does once
- * the value is known to be an object it has not already entered.
+ * Converts one of a pattern's `console.*` arguments into the value that crosses
+ * to the main thread.
+ *
+ * Exported for testing.
  */
-function sanitizedBody(
-  value: unknown,
-  obj: object,
-  seen: WeakSet<object>,
-  depth: number,
-): unknown {
-  // Check for Cell (direct cell reference)
-  if (isCell(value)) {
-    return formatCellLink(value);
-  }
+export function toConsoleDebugValue(value: unknown): FabricValue {
+  return toStructuredDebugValue(
+    value,
+    MAX_CONSOLE_DEBUG_DEPTH,
+    newConsoleDebugReplacer(),
+  );
+}
 
-  // Check for query result proxy (has toCell symbol) - walk the data _and_
-  // show the ref. Wrap in try-catch since isCellResult accesses a symbol
-  // property, which can throw on hostile Proxies with throwing get traps.
+/**
+ * Converts one of a pattern's `console.*` arguments into the form the
+ * notification carries it in. The other half is the `fabricFromRealmValue()`
+ * in `client/connection.ts`, which decodes before the client emits.
+ *
+ * Exported for testing.
+ */
+export function toConsoleWireValue(value: unknown): RealmEncodedValue {
   try {
-    if (isCellResult(value)) {
-      const cell = getCellOrThrow(value);
-      const cellRef = formatCellLink(cell);
-
-      // Walk the proxy's enumerable properties to extract the actual data
-      // This works because the Proxy forwards property access to the underlying value
-      const data: Record<string, unknown> = { __ref: cellRef };
-      for (const key of Object.keys(value as object)) {
-        try {
-          data[key] = sanitizeForPostMessage(
-            (value as Record<string, unknown>)[key],
-            seen,
-            depth + 1,
-          );
-        } catch {
-          data[key] = "[Unreadable]";
-        }
-      }
-      return data;
-    }
+    return realmFromFabricValue(toConsoleDebugValue(value));
   } catch {
-    // isCellResult or getCellOrThrow threw - hostile Proxy, bail out
-    return "[Object - uncloneable]";
-  }
-
-  // Arrays — cast needed because isCell/isCellResult type guards over-narrow
-  if (Array.isArray(value as object)) {
-    return (value as unknown[]).map((item) =>
-      sanitizeForPostMessage(item, seen, depth + 1)
-    );
-  }
-
-  // A `FabricSpecialObject` keeps its state in private fields and has zero
-  // enumerable own properties, so the property walk below would rebuild one as
-  // `{}` -- a dump asserting "empty object" about a value that is nothing of
-  // the kind. Both arms are named instead of descended: a primitive is atomic
-  // and has nothing to descend into, and an instance's codec contents are not
-  // reachable by property name. Naming beats refusing here, because what a
-  // debug dump was handed is the very thing being debugged.
-  //
-  // TODO(danfuzz): naming it is what the transport forces, not what the
-  // receiver wants. These args land in `console.log()` on the main thread
-  // (`RuntimeInternals.#onConsole` in `lib-shell`), so the reader is a
-  // devtools object inspector -- which renders a live `FabricBytes` as an
-  // expandable value and this string as a string. `codec-realm` carries the
-  // instance across whole, and the receiver decodes before logging.
-  //
-  // Two things stand in the way, and neither is this arm's doing.
-  // `codec-realm` refuses a cycle today, where this walk reports one and
-  // carries on, so its own memo `TODO` is a prerequisite. And a
-  // `console.log()` argument is whatever pattern code passed, which need not
-  // be a `FabricValue` at all -- so what replaces this is a walk that encodes
-  // the fabric it finds and goes on naming the functions, cells and cycles it
-  // finds, not an encode in place of a walk.
-  if (obj instanceof FabricSpecialObject) {
-    return toCompactDebugString(obj);
-  }
-
-  // Plain objects - walk properties.
-  try {
-    const result: Record<string, unknown> = {};
-    for (const key of Object.keys(obj)) {
-      try {
-        result[key] = sanitizeForPostMessage(
-          (obj as Record<string, unknown>)[key],
-          seen,
-          depth + 1,
-        );
-      } catch {
-        result[key] = "[Unreadable]";
-      }
-    }
-    return result;
-  } catch {
-    // Object doesn't support iteration (e.g., Proxy with throwing traps)
-    // Try to get constructor name for a more helpful message
-    try {
-      const name = obj.constructor?.name;
-      if (name && name !== "Object") {
-        return `[${name} - uncloneable]`;
-      }
-    } catch {
-      // Ignore
-    }
-    return "[Object - uncloneable]";
+    // An object forged onto a `FabricPrimitive`'s prototype is a `FabricValue`
+    // by every check and still has no encoding, so the encode is the one step
+    // here a hostile argument can stop. It says so and says nothing further:
+    // the value was built to defeat this, and what a reader needs is the
+    // argument's position in the call, which arrives either way.
+    return realmFromFabricValue({ "/unconvertible": "no encoding for value" });
   }
 }
 
@@ -656,7 +606,7 @@ export class RuntimeProcessor {
     // consults it from its beforeunload handler, so a reload with unconfirmed
     // writes prompts the user instead of silently dropping them.
     storageManager.subscribePendingCommits((pending) => {
-      self.postMessage({
+      postToClient({
         type: NotificationType.PendingWritesChanged,
         pending,
       });
@@ -674,23 +624,18 @@ export class RuntimeProcessor {
         telemetry,
       ),
       consoleHandler: ({ metadata, method, args }) => {
-        // Deep-walk args to convert uncloneable objects (Cells, Proxies,
-        // functions) into cloneable representations for postMessage.
-        // This preserves object structure so `console.log({ self, name })`
-        // shows both the cell reference and other properties.
-        const sanitizedArgs = args.map((arg) => sanitizeForPostMessage(arg));
-        self.postMessage({
+        postToClient({
           type: NotificationType.ConsoleMessage,
           metadata,
           method,
-          args: sanitizedArgs,
+          args: args.map((arg) => toConsoleWireValue(arg)),
         });
         return args;
       },
 
       navigateCallback: (target) => {
         const link = parseLink(target.getAsLink()) as NormalizedFullLink;
-        self.postMessage({
+        postToClient({
           type: NotificationType.NavigateRequest,
           targetCellRef: link,
         });
@@ -1152,10 +1097,10 @@ export class RuntimeProcessor {
       // in a microtask so that the subscription response returns
       // before a notification fires.
       queueMicrotask(() =>
-        self.postMessage({
+        postToClient({
           type: NotificationType.CellUpdate,
           cell: request.cell,
-          value: converted,
+          value: converted as JSONValue,
           ...(request.includeCfcLabel ? { cfcLabel: redactedLabel } : {}),
         })
       );
@@ -1684,7 +1629,7 @@ export class RuntimeProcessor {
   #onTelemetry = (event: Event) => {
     if (!this.#telemetryEnabled) return;
     const marker = (event as RuntimeTelemetryEvent).marker;
-    self.postMessage({
+    postToClient({
       type: NotificationType.Telemetry,
       marker,
     });
@@ -2058,7 +2003,7 @@ export class RuntimeProcessor {
       membershipProvider: this.renderMembershipProvider,
       onOps: (ops: VDomOp[]) => {
         const batchId = this.vdomBatchIdCounter++;
-        self.postMessage({
+        postToClient({
           type: NotificationType.VDomBatch,
           batchId,
           ops,

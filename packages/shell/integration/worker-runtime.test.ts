@@ -4,6 +4,7 @@ import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 import { env } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
+import { isWorkerReadyNotification } from "@commonfabric/runtime-client";
 
 const { FRONTEND_URL } = env;
 
@@ -47,13 +48,15 @@ describe("shell worker runtime", () => {
 
     if ((probe as { type: string }).type !== "message") {
       throw new Error(
-        `Expected worker READY message, got ${JSON.stringify(probe)}`,
+        `Expected worker ready message, got ${JSON.stringify(probe)}`,
       );
     }
 
     const message = probe as { type: "message"; data: unknown };
-    if (message.data !== "READY") {
-      throw new Error(`Expected READY, got ${JSON.stringify(message.data)}`);
+    if (!isWorkerReadyNotification(message.data)) {
+      throw new Error(
+        `Expected a ready notification, got ${JSON.stringify(message.data)}`,
+      );
     }
   });
 

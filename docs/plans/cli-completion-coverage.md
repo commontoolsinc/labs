@@ -36,10 +36,12 @@ needs a space, `--space` is required on every command that reads one, and
 value a caller types is a space name. A name derives its DID one way, so a
 discovered DID can never produce the name that made it.
 
-**Nothing exercises a live provider.** The unit tests cover the pure shaping
-functions and assert that a slot with no fabric context degrades to empty.
-Every path that reaches a fabric is unverified, and the defects below sit
-exactly where no live exercise runs.
+**A live provider is exercised in one place only.** The unit tests cover the
+pure shaping functions and assert that a slot with no fabric context degrades
+to empty; nothing they can see distinguishes a provider that reaches a fabric
+and returns the wrong set. `completion-over-the-cli.sh` (item 18) is what does,
+and the defects below are the ones it was written to make visible — several of
+them are asserted there as gaps until the item that closes them lands.
 
 ## How this list is ranked
 
@@ -75,30 +77,43 @@ read before picking one up; this table is the roll-up.
 
 | # | Item | Rank | Status |
 | --- | --- | --- | --- |
-| 1 | Inline `--option=value` drops every live candidate | correctness | not started |
-| 2 | Flags offered past a `stopEarly()` boundary | correctness | not started |
-| 3 | Target resolution lags the reference grammar | correctness | not started |
-| 4 | Verb flags do not complete (with item 2) | pattern vocabulary | needs step 10 |
-| 5 | Result field paths for `get` and `wish` | pattern vocabulary | not started |
+| 1 | Inline `--option=value` drops every live candidate | correctness | done |
+| 2 | Flags offered past a `stopEarly()` boundary | correctness | done |
+| 3 | Target resolution lags the reference grammar | correctness | done |
+| 4 | Verb flags do not complete | pattern vocabulary | shaper done, wiring after step 10 |
+| 5 | Result field paths for `get` and `wish` | pattern vocabulary | `get` done, `wish` refused |
 | 6 | Result field paths for `call` and `exec` | pattern vocabulary | needs step 10 |
-| 7 | Slugs never complete | pattern vocabulary | not started |
-| 8 | `--space` has no source a caller recognizes | first link | needs a decision |
-| 9 | A verb's annotation is its kind, not its prose | comprehension | not started |
-| 10 | Wrapper and deprecated verbs are offered unmarked | comprehension | not started |
+| 7 | Slugs never complete | pattern vocabulary | done |
+| 8 | `--space` has no source a caller recognizes | first link | partly settled |
+| 9 | A verb's annotation is its kind, not its prose | comprehension | done |
+| 10 | Wrapper and deprecated verbs are offered unmarked | comprehension | done |
 | 11 | Every Tab costs two process starts | felt cost | needs a decision |
 | 12 | `nospace` is inert on the stock macOS bash | felt cost | not started |
 | 13 | Space and entity positionals across `inspect` | operator surface | not started |
 | 14 | `wish` targets and scopes | CLI vocabulary | not started |
 | 15 | Remaining path-shaped and enumerable values | CLI vocabulary | not started |
 | 16 | Two provider entries that can never fire | hygiene | not started |
-| 17 | The README table omits the top-level spellings | hygiene | not started |
-| 18 | A live-provider test seam | mechanism | not started |
+| 17 | The README table omits the top-level spellings | hygiene | done |
+| 18 | A live-provider test seam | mechanism | done |
 | 19 | A gate that fails when a new slot has no decision | mechanism | not started |
 
-Items 1 to 7 are worth doing in that order. The first three are corrections and
-are small, and items 4 to 6 read from listings those corrections have to be
-answering correctly first. Everything from 8 down can be picked up
-independently.
+**What can be picked up today.** Items 12, 13, 14, 15 and 16 are mechanical and
+can be taken at any time. Item 19 is the other half of the mechanism item 18
+landed.
+
+Item 4's candidates are built and its wiring waits: step 10 decides whether a
+verb's fields are written before the `--` marker or after it, and the position
+offers nothing until then. That is the honest state for one whose vocabulary the
+command cannot yet name.
+
+Item 6 is the one to leave alone. Under the current grammar it needs the whole
+line read for context, since a projection precedes the verb it shapes; after
+step 10 the verb is already before the cursor and it needs nothing. Building it
+now means building the machinery that step 10 makes unnecessary.
+
+Items 8 and 11 hold open decisions and are not work yet. Item 5's `wish` half is
+closed rather than open: resolving a wish writes, so the slot cannot be
+completed from a resolution as it stands.
 
 ## What this list covers, and what it cannot
 
@@ -170,81 +185,58 @@ throwing. And `parseExecArgs` takes the spec first and the arguments second.
 
 ### 1. Inline `--option=value` drops every live candidate
 
-`--space=<TAB>`, `--piece=<TAB>`, and `--api-url=<TAB>` offer nothing, while the
-same options completed as `--space <TAB>` work. Enumerated values are
-unaffected: `--log-level=<TAB>` completes.
-
-`complete` in `lib/completion/mod.ts` filters candidates against the word under
-the cursor, which for this spelling is `--piece=`. `staticCandidates`
-re-attaches that prefix through `withInlinePrefix`, so its candidates survive
-the filter.
-`liveCandidates` returns bare values, so every one of them fails the prefix test
-and is dropped.
-
-The fix is to apply the inline prefix to the live half as well, which means
-`complete` carrying the slot's `inlinePrefix` across both sources rather than
-`staticCandidates` owning it alone.
+`complete` in `lib/completion/mod.ts` attaches the slot's `inlinePrefix` to
+every candidate, whichever source produced it. `staticCandidates` returns bare
+values, so one rule covers the static half and the live half alike — where the
+static half owning the prefix alone left every live candidate failing the
+prefix filter that `--piece=` is.
 
 This spelling is why `tokenizeLine` exists — bash splits its own words on `=` —
-so it is the one form the implementation is built to serve and the one that does
-not work.
+so it is the one form the implementation is built to serve.
 
-Directives are the other half of the same slot: `--identity=<TAB>` emits a files
-directive whose glob the shell applies to a word still carrying `--identity=`.
-Settle both in one change.
+The directive half of the same slot lives in the shell functions, because it is
+the shell that applies a glob. `$cur` is the whole word (`--identity=~/keys/a`)
+while readline replaces only the fragment after the last word-break character,
+so bash globs that fragment and zsh `compset -P`s the flag into `IPREFIX`.
 
 ### 2. Flags offered past a `stopEarly()` boundary
 
-After the callable name, `cf call` offers `--invocation`, `--filter`,
-`--select`, `--quiet` and the rest of its own flags. The command rejects all of
-them there: `buildCallCommand` in `commands/piece.ts` is `stopEarly()`, so the
-first positional ends option parsing and every later word belongs to the
-callable's schema-derived parser. The flags' own help text says so — each
-description ends "(before the callable name)". `cf exec` has the same shape and
-the same defect, its descriptions ending "(before the mounted file)".
+`resolveCompletionLine` in `lib/completion/line.ts` reads Cliffy's `_stopEarly`
+field, so past the callable name on `cf call` and past the mounted file on
+`cf exec` no option slot is reachable and a flag-shaped word does not shift the
+positional index. That keeps the property where the command declares it: a
+third command becoming `stopEarly()` needs no edit in the completion layer.
 
-`resolveCompletionLine` in `lib/completion/line.ts` has no notion of the
-boundary, so `option-name` stays reachable for the whole line. Cliffy records it
-as `_stopEarly` with no accessor; either read that field or have the completion
-layer name the two commands. Reading the field keeps the property where the
-command declares it, which is the reason to prefer it.
-
-Past the boundary the slot is the callable's, so this and item 4 are one edit:
-recognizing the boundary is what routes the slot to the verb's own fields, and
-recognizing it without routing the slot leaves the position offering nothing.
-[Naming the target](cli-surface-shape.md#naming-the-target) decides where the
-boundary sits — under it the verb opens the callable's section and `--` closes
-it, so the position after the verb is the callable's and the position after the
-marker is the read step's.
+This holds under either grammar. A `cf` flag past the verb is refused today, and
+after step 10 of [Naming the target](cli-surface-shape.md#naming-the-target) the
+position belongs to the callable — so declining to offer one there is correct
+now and stays correct. It leaves the position offering nothing until item 4
+fills it, which is what a position whose vocabulary the command cannot yet name
+should offer.
 
 ### 3. Target resolution lags the reference grammar
 
-Three documented ways to name a target complete nothing:
+`resolvePieceContext` in `lib/completion/providers.ts` parses the target through
+`normalizeLLMFriendlyRef`, which is the function the command's own intake parses
+it with: the embedded space, the `@scope` suffix, a trailing path, and the
+`#argument` suffix that selects the arguments cell the way `--input` does. What
+that does not recognize falls through to the alias grammar
+(`parseScopedIdSegment`). Taking the word verbatim as a piece id — which this
+did — meant every documented spelling but the bare id resolved to a listing
+call that could not succeed, and so to a slot that silently offered nothing.
 
-```bash
-cf call --piece /@did:key:.../of:fid1:... <TAB>   # canonical reference
-cf call --space donuts /of:fid1:... <TAB>          # positional address
-cf get --piece fid1:...#argument <TAB>             # the arguments cell
-```
+An embedded space DID supplies the space where the line names none, the way
+`parsePieceOptions` does with the same reference. Where the line names one it
+wins, and a mismatch between the two is the command's to report.
 
-The `--url` spelling of the same target works, which is what makes this read as
-random rather than as a missing capability.
-
-`resolvePieceContext` in `lib/completion/providers.ts` takes `--piece` verbatim
-as a piece id. The canonical form is not one, so the listing call fails and the
-slot degrades to empty. `normalizeLLMFriendlyRef` is the function that already
-parses this grammar — the embedded space, the `@scope` suffix, the trailing
-path, and `#argument` — and completion is an intake seam that does not use it.
-
-The positional address is a second, independent break: it occupies positional
-index 0, so `resolveSlot` resolves the cursor to the variadic `tail` rather than
-to `callable`, and the callable provider is never consulted. Whichever way
-completion learns the address form, it has to shift the positional index the way
-the command does.
-
-`#argument` selects the arguments cell, the same selection `--input` spells as a
-flag. `cellPathCandidates` reads `--input` and not the suffix, so the two
-spellings of one selection complete differently.
+The positional address was a second, independent break: it occupied positional
+index 0, so the cursor resolved to the variadic `tail` rather than to
+`callable`. `resolveCompletionLine` now reads it out as `line.address` instead
+of counting it, which shifts the index the way `readCallTarget` and
+`readTargetPositionals` shift it. Which commands accept one is carried in
+`POSITIONAL_ADDRESS_COMMANDS`, for the reason `PRE_PARSE_GLOBALS` is carried:
+nothing on the command tree distinguishes those arguments from an ordinary
+string.
 
 ## Pattern vocabulary
 
@@ -267,58 +259,65 @@ cf call --piece <piece> addItem --ti<TAB>        # after step 10
 cf call --piece <piece> addItem -- --ti<TAB>     # before it
 ```
 
-**Build this against the settled grammar, not the current one.** The two
-positions are different slots, so completing the current one means completing it
-again later, and it would teach the spelling that step 10 retires while the
-retirement is being taught. If it lands first for some other reason, it is
-transitional and says so.
+**The candidates and their slot are separable, and only the slot waits.**
+`shapeVerbFlagCandidates` in `lib/completion/verb-flags.ts` turns a listing
+row's `inputSchema` into the flags the parser accepts: one per declared field,
+kebab-cased, both spellings of a boolean, the value flags of a non-object input,
+and the generic ones every verb takes. `--help` is among them, because it falls
+inside the callable's section where it reaches the verb and prints that verb's
+own page.
 
-`liveCandidates` dispatches on `option-value` and `argument` slots only, so
-neither position reaches a provider today. After step 10 the slot to route is
-the one following the verb, which is the same boundary item 2 has to recognize —
-the two are one edit, and recognizing the boundary without routing the slot
-leaves the position offering nothing.
+It reads `declaredVerbFlags` in `lib/exec-schema.ts`, which is the enumeration
+the verb's help page renders. Two readers of one schema is how a flag comes to
+be accepted by the parser and named by neither surface, or the reverse.
 
-The data needs no new request. `listPieceCallables` — the call
-`callableCandidates` already makes — returns each verb's `inputSchema`, and
-`flagNameForKey` in `lib/exec-schema.ts` is the kebab-case mapping the parser
-itself applies. A verb declaring `title` accepts `--title`, and both halves of
-that sentence are already in the process.
+The module sits beside the providers rather than inside `providers.ts` because
+reading a declared input resolves `callable.ts`, which costs about a third of a
+whole static completion — and `providers.ts` is resolved on every Tab.
 
-`--help` belongs in this slot too: it falls inside the callable's section, where
-it reaches the verb and prints that verb's own page.
+The wiring is what waits. `liveCandidates` dispatches on `option-value` and
+`argument` slots only, so neither position reaches a provider, and routing it to
+the current position would teach the spelling step 10 retires while the
+retirement is being taught.
 
 The slot past the marker is not this one. It belongs to the read options, and
 completing it from the verb's declared result is item 6.
 
-### 5. Result field paths for `get` and `wish`
+### 5. Result field paths for `get`, and why not for `wish`
 
 `--select` takes comma-separated, dot-separated field paths into the value a
-read returns, and `--schema` accepts the same spelling. Both complete nothing.
+read returns, and `--schema` accepts the same spelling. On `cf get` and
+`cf piece get` both complete, in the projection's own grammar rather than the
+cell-path one: a list splits on `,` and a path on `.`, where `cellPathCandidates`
+walks `/`. A segment ending in `@` asks for that position's address rather than
+its value, and a bare `@` asks the read for its own, so both spellings of a
+position are offered.
 
-The grammar is its own, and is not the cell-path grammar:
-`parseSelectProjection` in `lib/cell-selection.ts` splits a list on `,` and a
-path on `.`, where `cellPathCandidates` walks `/`. A segment ending in `@`
-asks for that position's address rather than its value, and a bare `@` asks the
-read for its own — so a complete candidate set offers both spellings of a
-position.
+The vocabulary needs no request the slot does not already have: the value being
+projected is the one at the piece and path the line names, which `getCellValue`
+reads. A path below an array names a field of each element rather than an index,
+because that is what a projection does with one and an index there is refused.
+A key the concise grammar cannot carry is left out rather than offered in a form
+that does not work.
 
-For `cf get` the vocabulary needs no new request and no new reachability: the
-value being projected is the one at the piece and path already named, which
-`getCellValue` reads and `keysOf` already turns into keys. That makes this the
-cheapest high-value item on the list, and independent of item 4.
+**`wish` is refused, and the plan's own precondition is what refuses it.**
+Resolving a wish writes. `resolveWish` runs a single-node pattern in the target
+space and commits the cell it lands on, so the first Tab on a query that has not
+been resolved before adds revisions to the space — measured against a local
+server as 5 revisions, 2 commits and 4 heads for a query not seen before, where
+`piece ls`, `get` and `piece verbs` each add none. A second Tab on the same
+query adds nothing, because the cell is keyed by the query; a caller editing a
+query writes once per spelling they pass through.
 
-`cf wish` projects the resolved target the same way. A wish declares no result
-shape the way a verb declares an `outputSchema`, but a shape is not what this
-provider reads: it reads a value and takes its keys, and a wish is a read. So
-the target resolves and its keys are the candidates, the same walk `cf get`
-needs. `wish` is also the one command whose `--space` is optional, so this
-completes from an identity alone.
+That is a keystroke with a side effect, which is the bar this item said to clear
+before building it, and it is not cleared. Completing `wish --select` needs a
+resolution that reads without committing, which is a change to `resolveWish`
+rather than to completion.
 
-Confirm before building it that resolving a wish writes nothing. The profile
-ordering consults a most-recently-used list, and a Tab that reordered it would
-be a keystroke with a side effect — which is a bar completion has to clear
-whatever the candidates are worth.
+`call` and `exec` are the other two commands carrying these flags, and their
+projection names positions in a verb's result rather than in the piece's root.
+Completing them from the root would offer plausible names for a different value,
+which is item 6's subject and not this one.
 
 ### 6. Result field paths for `call` and `exec`
 
@@ -363,14 +362,24 @@ line that completes as it is typed and one that completes however it is edited.
 
 ### 7. Slugs never complete
 
-A slug is a valid `--piece` value — the alias grammar names it alongside the
-bare id — and `listSpaceSlugs` enumerates every slug a space's index records.
-Completion offers ids only. `piece set-slug` takes a slug positionally and
-completes nothing there either.
+The `--piece` slot offers every slug the space's index records, then every piece
+id. Both are values the flag takes, and the slug is the readable half of that
+vocabulary, so it leads. The annotation says which a candidate is and, where the
+slug resolves to a piece the listing named, what it points at.
 
-Offer slugs beside ids in the `--piece` slot, annotated so the two are
-distinguishable. A slug is the readable half of this vocabulary, so it belongs
-above the opaque id in the candidate order.
+`piece set-slug`'s slug positional completes the same set: naming an existing
+slug re-points it, which is the case completion helps with, and a slug being
+coined for the first time is a word nothing can offer.
+
+The listing is bounded by the space's index, which names slugs assigned since it
+existed — so an older slug still resolves and is not offered. Nothing can
+enumerate what it was never told the name of.
+
+The slot asks for both listings, so `loadPieces` is called twice. Measured
+against a local server across cold processes, one listing takes 333–347 ms and
+both together 345–439 ms: the second rides the session the first opened, and
+its cost sits under the run-to-run noise. A combined listing would be a new API
+for no measured gain, so the two calls stay.
 
 ## The first link
 
@@ -387,45 +396,50 @@ directory looking for a store, so completion offers spaces in a checkout that
 holds one and nothing in a worktree that does not — while both talk to the same
 server.
 
-Three sources exist, and choosing among them is a decision this plan does not
-make:
+[Naming the target](cli-surface-shape.md#naming-the-target) settles where the
+*command* gets a space it was not given: `CF_SPACE`, with the flag overriding
+it. Two candidate sources follow from that and need no further decision — the
+ambient value itself, and the identity's home space, which is derivable from
+`--identity` alone with no server and no local store and is where a profile
+target resolves.
 
-- **The identity's home space.** Always derivable from `--identity` alone, with
-  no server and no local store. One candidate, always correct, and the one a
-  profile target resolves against.
-- **Local stores, made independent of the working directory.** Keeps today's
-  candidates and stops them depending on where the caller stands. Still DIDs.
-- **A record of spaces this CLI has opened.** The only source that can hold a
-  name, because it can record the name at the moment a session resolves it. New
-  state on disk, and the question of when an entry expires.
+An ambient space also changes how much this slot matters. `--space` is written
+to override rather than to state the usual case, so it is reached for less
+often once it has a default.
 
-The third is the one that answers the complaint; it is also the only one that
-adds a durable artifact, which is why it is a decision rather than a task.
+What stays open is whether anything holds a space **name**. Local stores yield
+DIDs and are the only source completion reads today; making them independent of
+the working directory keeps those candidates and stops them depending on where
+the caller stands, but they are still DIDs. The one source that could hold a
+name is a record of the spaces this CLI has opened, written at the moment a
+session resolves one — which is new state on disk, and the question of when an
+entry expires. That is a decision rather than a task, and it is worth deferring
+until `CF_SPACE` has been in use long enough to say whether the slot is still
+reached for.
 
 ## Comprehension
 
-### 9. A verb's annotation is its kind, not its prose
+### 9. A verb's annotation is its prose, falling back to its kind
 
-`shapeVerbCandidates` annotates every candidate with `handler` or `tool`. The
-listing row carries `description` — the doc comment the author wrote on the
-property, the same sentence the verb's help page opens with. The annotation
-column is where that sentence belongs; the kind is a two-value fact that rarely
-decides anything at the prompt.
+`shapeVerbCandidates` annotates a candidate with the doc comment the author
+wrote on the property — the same sentence `cf piece verbs` prints under the row
+and the verb's help page opens with — taking its first line, which is what one
+column of one row holds. The kind is the fallback where the author documented
+nothing, so a candidate is never unannotated, and it is never derived from the
+name: a listing that restates `addItem` as "add item" reports a caller's own
+word back to them and calls it documentation.
 
-Fall back to the kind where a verb carries no prose, so a candidate is never
-unannotated.
-
-### 10. Wrapper and deprecated verbs are offered unmarked
+### 10. Wrapper and deprecated verbs are marked
 
 `cf piece verbs` hides `tier: "wrapper"` and `deprecated` rows unless `--all`,
-and prints a note saying how many it held back. `shapeVerbCandidates` maps the
-full array, so completion offers what the listing hides, and offers it looking
-like everything else.
+and prints a note saying how many it held back. Completion offers them, because
+both are callable and a name that works should be reachable — and marks them,
+because two surfaces disagreeing silently is what is not defensible. The marks
+lead the annotation: `[deprecated] Add one item.`
 
-Both are callable, so offering them is defensible and hiding them is defensible.
-What is not defensible is the two surfaces disagreeing silently. Marking them in
-the annotation column is the cheapest way to agree — it keeps a name reachable
-while saying what it is.
+The two can coexist, and the listing joins them, so completion joins them the
+same way — `[wrapper,deprecated]`. Picking one would be the same disagreement
+in a narrower place.
 
 ## Felt cost
 
@@ -513,37 +527,60 @@ internal. Neither entry is reachable.
 
 ### 17. The README table omits the top-level spellings
 
-The completion table in `packages/cli/README.md` lists `piece call`, `piece
-get`, and `piece set`. The top-level `cf call`, `cf get`, and `cf set` complete
-identically and are the spellings the surface leads with. The table also
-predates everything this plan adds, so it is the document to update as each item
-lands.
+The completion table in `packages/cli/README.md` names `call`, `get` and `set`,
+which are the spellings the surface leads with, and says that the `piece `
+spellings complete identically. It is the document each item updates as it
+lands, which is the obligation rather than the one edit.
 
 ## Mechanism
 
 ### 18. A live-provider test seam
 
-No test drives a provider against a fabric. `completion-providers.test.ts`
-covers the shaping functions and the degrade-to-empty path; the integration
-scripts under `packages/cli/integration/` do not mention completion.
+`packages/cli/integration/completion-over-the-cli.sh` is where every provider
+that reads state is exercised — the four that reach a fabric, the one that
+reads local stores, the one that reads the environment, and the pattern-file
+glob. The rest of the table hands the shell a constant directive that a fabric
+cannot change, and those are asserted one by one — kind and glob — in
+`test/completion-providers.test.ts`. Item 19 adds the other half: whether a
+slot has an entry at all.
 
-Every correctness defect above is a shape no live exercise runs. A script
-alongside `verbs-over-the-cli.sh` — deploy a fixture, then assert what a Tab
-offers at each slot of the chain — is the coverage that would have caught them,
-and it composes with the existing harness rather than needing a new one.
-`verb-session-gaps.sh` is the precedent for asserting a gap so that it fails
-loudly the day it closes.
+`--space` is the one whose candidates depend on the machine, since it reads
+what is on disk. That step reads `cf inspect spaces`' exit status as well as
+its output — a command that failed and a machine with no store print the same
+nothing — and probes the provider either way: with a store it must offer the
+DID, without one it must come back empty and successful.
 
-It is also the only way to settle the questions no table walk can reach, which
-are the ones to write first:
+It deploys `pattern/completion-target.tsx`,
+then asserts what a Tab offers at each slot of the chain, and runs in CI through
+`integration.sh`'s `piece-call` section (`completion` is the standalone
+selector). `test/completion-*.test.ts` stay the home for everything answerable
+without a fabric.
 
-- Whether `cellPathCandidates` should stop at a `$link` boundary or follow it,
-  and which it does.
-- Whether the `--piece` listing and the dispatcher agree about scope, so that
-  every completed id is one the same command can then read.
-- Whether a verb stored on both the input and result cells completes against the
-  cell the dispatcher will reach it on, which is the shadowing rule the verbs
-  listing states.
+Two rules the script holds to, both forced by completion's silence. A slot is
+judged only after the equivalent `cf` command has been run against the same
+target, so an empty candidate list reads as a defect rather than as an
+unreachable fabric. And a candidate is judged by whether the command accepts it.
+
+It carries `gap` assertions, on the `verb-session-gaps.sh` precedent, for the
+slots below that answer nothing today: each fails loudly the day its slot starts
+answering. The count is printed on the script's last line rather than restated
+here.
+
+The three questions no table walk can reach are settled there:
+
+- `cellPathCandidates` **follows** a `$link` boundary rather than stopping at
+  it, and the path that crosses one is a path `cf get` reads.
+- Every id the `--piece` listing offers is one the same command reads back. The
+  converse does not hold and is not a defect: the listing enumerates registered
+  pieces, while a child piece is reached by the address its parent's result
+  carries.
+- A verb on both cells completes **once**, against the result cell — the same
+  one the dispatcher reaches, which is the shadowing rule the verbs listing
+  states.
+
+One defect the script found that this list did not enumerate: the cell-path slot
+offers a piece's callables, which `cf get` refuses and redirects to `cf call`.
+It is asserted there as what happens today.
 
 ### 19. A gate that fails when a new slot has no decision
 

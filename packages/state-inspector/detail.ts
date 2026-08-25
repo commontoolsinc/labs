@@ -32,6 +32,9 @@ import {
   type EntityKind,
   isModuleValue,
   type ModuleEntry,
+  type ScanExtent,
+  scanLimit,
+  visibleEntityRows,
 } from "./model.ts";
 
 /** A resolved reference to another entity (or a cross-space target). */
@@ -448,6 +451,13 @@ function roleFor(kind: EntityKind, owned: boolean): string {
   }
 }
 
+/** A capped detail pass over a space, with how far its scan reached. */
+export interface DetailListing {
+  /** The entities detailed, at most `extent.limit` of them. */
+  details: EntityDetail[];
+  extent: ScanExtent;
+}
+
 /**
  * Build rich details for every entity in a space — one reconstruction pass,
  * resolving link-target labels and owner→child context names space-wide.
@@ -455,32 +465,38 @@ function roleFor(kind: EntityKind, owned: boolean): string {
 export function buildAllDetails(
   space: SpaceDb,
   opts: { branch?: string; scope?: string; limit?: number } = {},
-): EntityDetail[] {
+): DetailListing {
   const branch = opts.branch ?? "";
   const scope = opts.scope ?? "space";
-  const limit = opts.limit ?? 5000;
+  const limit = scanLimit(opts.limit);
   const ownDid = (space.path.split("/").pop() ?? "").replace(/\.sqlite$/, "");
 
-  const rows = space.db
-    .prepare(
-      `SELECT id, count(*) revisions FROM revision
-       WHERE branch = ? AND scope_key = ?
-       GROUP BY id ORDER BY revisions DESC LIMIT ?`,
-    )
-    .all<{ id: string; revisions: number }>(branch, scope, limit);
+  // The entities a read on this branch can see, tombstones already dropped —
+  // the same set the pass below describes, so `extent.total` counts what a
+  // complete pass would return and truncation is a fact rather than an
+  // inference from a count landing on the cap.
+  const rows = visibleEntityRows(space, { branch, scope });
+  const truncated = rows.length > limit;
+  const scanned = truncated ? rows.slice(0, limit) : rows;
+  let unreadable = 0;
 
   // Pass 1: reconstruct + module index + base labels.
   const docs = new Map<string, EntityDocument>();
   const moduleIndex = new Map<string, ModuleEntry>();
   const labelOf = new Map<string, { kind: EntityKind; label: string }>();
-  for (const r of rows) {
+  for (const r of scanned) {
     let doc: EntityDocument | undefined;
     try {
       doc = reconstructDocument(space, { id: r.id, branch, scope });
     } catch {
       doc = undefined;
     }
-    if (!doc) continue;
+    if (!doc) {
+      // Enumerated but not described: counted, never silently dropped, or a pass
+      // that skipped it would report itself complete over a smaller set.
+      unreadable++;
+      continue;
+    }
     docs.set(r.id, doc);
     const v = doc.value;
     if (isModuleValue(v)) {
@@ -527,21 +543,26 @@ export function buildAllDetails(
 
   const ctx: DetailContext = { ownDid, labelOf, nameOf, moduleIndex, docs };
 
-  // Pass 3: per-entity detail + version log.
+  // Pass 3: per-entity detail + version log, read from the branch that OWNS the
+  // entity's visible row. An entity a child branch INHERITED has its writes on
+  // the parent, so local-only rows would describe it with no history at all;
+  // one the child OVERRODE has a parent log the child's value never came
+  // through, and reporting it would credit this entity with revisions no read
+  // from here can reach. Both are the same rule — nearest branch wins — which
+  // `visibleEntityRows` already resolved, so each row carries its own link.
+  const ownerOf = new Map(scanned.map((r) => [r.id, r.link]));
   const versionStmt = space.db.prepare(
     `SELECT r.seq, r.op, c.session_id, c.created_at
      FROM revision r JOIN "commit" c ON c.seq = r.commit_seq
-     WHERE r.branch = ? AND r.id = ? AND r.scope_key = ?
+     WHERE r.branch = ? AND r.id = ? AND r.scope_key = ? AND r.seq <= ?
      ORDER BY r.seq ASC, r.op_index ASC`,
   );
   const out: EntityDetail[] = [];
   for (const [id, doc] of docs) {
-    const versions = versionStmt
-      .all<{ seq: number; op: string; session_id: string; created_at: string }>(
-        branch,
-        id,
-        scope,
-      )
+    const owner = ownerOf.get(id);
+    const versions = (owner === undefined ? [] : versionStmt.all<
+      { seq: number; op: string; session_id: string; created_at: string }
+    >(owner.branch, id, scope, owner.atSeq))
       .map((v) => ({
         seq: v.seq,
         op: v.op,
@@ -560,7 +581,15 @@ export function buildAllDetails(
     "free-cell": 5,
     unknown: 6,
   };
-  return out.sort(
-    (a, b) => order[a.kind] - order[b.kind] || (b.revisions - a.revisions),
-  );
+  return {
+    details: out.sort(
+      (a, b) => order[a.kind] - order[b.kind] || (b.revisions - a.revisions),
+    ),
+    extent: {
+      limit,
+      total: rows.length,
+      truncated,
+      unreadable,
+    },
+  };
 }

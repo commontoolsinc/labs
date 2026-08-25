@@ -106,11 +106,130 @@ function hasTable(space: SpaceDb, name: string): boolean {
     .get<{ 1: number }>(name);
 }
 
+/** One branch a read consults, and the seq its rows are visible up to. */
+export interface BranchReadLink {
+  branch: string;
+  /** Rows with `seq <= atSeq` on this branch are visible from the read. */
+  atSeq: number;
+}
+
+// A chain depends on the `branch` table, which an offline space file does not
+// gain while we hold it open read-only, so it is derived once per (space,
+// branch, seq) and reused. Without this a space-wide scan would re-derive the
+// same chain for every entity it reconstructs.
+const chainCache = new WeakMap<SpaceDb, Map<string, BranchReadLink[]>>();
+
+/**
+ * The branches a read on `branch` at `atSeq` consults, nearest first, each with
+ * the seq it is read at — the engine's `readRowForBranch` ancestry (`engine.ts`)
+ * resolved as a list instead of walked per entity.
+ *
+ * This is the ONE encoding of "what can a read on this branch see". A read
+ * resolves the first link that holds a row; a space-wide scan enumerates the
+ * union across links. Both have to agree, or a listing reports itself complete
+ * while omitting entities the same branch reads fine.
+ */
+export function branchReadChain(
+  space: SpaceDb,
+  branch: string,
+  atSeq: number = MAX_SEQ,
+): BranchReadLink[] {
+  let perSpace = chainCache.get(space);
+  if (!perSpace) chainCache.set(space, perSpace = new Map());
+  const key = `${atSeq}\u0000${branch}`;
+  const hit = perSpace.get(key);
+  if (hit) return hit;
+
+  const chain: BranchReadLink[] = [];
+  const seen = new Set<string>();
+  let current = branch;
+  let cut = atSeq;
+  // `seen` guards a malformed cycle in `parent_branch`; without it a space
+  // whose branch table points back at itself would recur forever.
+  while (!seen.has(current)) {
+    seen.add(current);
+    chain.push({ branch: current, atSeq: cut });
+    if (!hasTable(space, "branch")) break;
+    const b = space.db
+      .prepare("SELECT parent_branch, fork_seq FROM branch WHERE name = ?")
+      .get<{ parent_branch: string | null; fork_seq: number | null }>(current);
+    // The default branch is named "" (falsy) — test for null/undefined, not truthiness.
+    if (!b || b.parent_branch === null || b.parent_branch === undefined) break;
+    // Inherit at min(seq, fork_seq), with `?? 0` matching the engine's fallback
+    // exactly (engine.ts) — a malformed null fork_seq must not leak the parent's
+    // post-fork head into the child.
+    cut = Math.min(cut, b.fork_seq ?? 0);
+    current = b.parent_branch;
+  }
+  perSpace.set(key, chain);
+  return chain;
+}
+
+/** One (scope, entity) a read on a branch can see, and where it comes from. */
+export interface VisibleRevisionRow {
+  scope: string;
+  id: string;
+  /** Revisions on the branch that OWNS it — the history a read can reach. */
+  revisions: number;
+  /** The chain link that owns it. */
+  link: BranchReadLink;
+}
+
+/**
+ * Every (scope, entity) this branch has RECORDS for, each attributed to the
+ * nearest branch holding it — `resolveBranchRow`'s rule applied to a whole
+ * space instead of one entity.
+ *
+ * Records, not readable entities: an entity whose head is a `delete` is
+ * enumerated here, because a tombstone is something the branch holds and
+ * several callers need to know about it. `visibleEntityRows` is the read-
+ * visible set, and drops them. Do not mistake one for the other — the reason
+ * this function exists is that the ancestry rule was being written once per
+ * caller and drifting one caller at a time, and a caller that reads this as
+ * "what a read returns" reintroduces exactly that.
+ *
+ * Enumeration and reading have to agree about what a branch can see, or a view
+ * reports one domain while describing another: a listing that covers inherited
+ * entities beside a scope list that does not, or a page naming a per-user scope
+ * while showing no cells in it. Narrow with `scope` or `id` when only part of
+ * the space is wanted; the remaining shape is identical either way.
+ */
+export function visibleRevisionRows(
+  space: SpaceDb,
+  opts: { branch?: string; scope?: string; id?: string } = {},
+): VisibleRevisionRow[] {
+  const conditions = ["branch = ?", "seq <= ?"];
+  if (opts.scope !== undefined) conditions.push("scope_key = ?");
+  if (opts.id !== undefined) conditions.push("id = ?");
+  const stmt = space.db.prepare(
+    `SELECT scope_key, id, count(*) revs FROM revision
+     WHERE ${conditions.join(" AND ")} GROUP BY scope_key, id`,
+  );
+  const rows: VisibleRevisionRow[] = [];
+  const claimed = new Set<string>();
+  for (const link of branchReadChain(space, opts.branch ?? "")) {
+    const params: (string | number)[] = [link.branch, link.atSeq];
+    if (opts.scope !== undefined) params.push(opts.scope);
+    if (opts.id !== undefined) params.push(opts.id);
+    for (
+      const r of stmt.all<{ scope_key: string; id: string; revs: number }>(
+        ...params,
+      )
+    ) {
+      const key = `${r.scope_key}\u0000${r.id}`;
+      if (claimed.has(key)) continue;
+      claimed.add(key);
+      rows.push({ scope: r.scope_key, id: r.id, revisions: r.revs, link });
+    }
+  }
+  return rows;
+}
+
 /**
  * Resolve the single revision row visible for `id` at `atSeq` on `branch`,
  * replicating the engine's `readRowForBranch` (`engine.ts`): take the latest
  * local row at/before `atSeq`; if the branch has NONE, inherit the parent's row
- * at `min(atSeq, fork_seq)`, recursively to the root. Inheritance resolves WHICH
+ * at `min(atSeq, fork_seq)`, on up to the root. Inheritance resolves WHICH
  * branch owns the visible row — it does NOT merge logs.
  */
 function resolveBranchRow(
@@ -119,40 +238,17 @@ function resolveBranchRow(
   scope: string,
   id: string,
   atSeq: number,
-  seen: Set<string> = new Set(),
 ): { row: RevRow; branch: string } | undefined {
-  if (seen.has(branch)) return undefined;
-  seen.add(branch);
-
-  const row = space.db
-    .prepare(
-      `SELECT seq, op_index, op, data FROM revision
-       WHERE branch = ? AND id = ? AND scope_key = ? AND seq <= ?
-       ORDER BY seq DESC, op_index DESC LIMIT 1`,
-    )
-    .get<RevRow>(branch, id, scope, atSeq);
-  if (row) return { row, branch };
-
-  if (!hasTable(space, "branch")) return undefined;
-  const b = space.db
-    .prepare("SELECT parent_branch, fork_seq FROM branch WHERE name = ?")
-    .get<{ parent_branch: string | null; fork_seq: number | null }>(branch);
-  // The default branch is named "" (falsy) — test for null/undefined, not truthiness.
-  if (!b || b.parent_branch === null || b.parent_branch === undefined) {
-    return undefined;
-  }
-  // Inherit at min(seq, fork_seq), with `?? 0` matching the engine's fallback
-  // exactly (engine.ts) — a malformed null fork_seq must not leak the parent's
-  // post-fork head into the child.
-  const inheritedSeq = Math.min(atSeq, b.fork_seq ?? 0);
-  return resolveBranchRow(
-    space,
-    b.parent_branch,
-    scope,
-    id,
-    inheritedSeq,
-    seen,
+  const stmt = space.db.prepare(
+    `SELECT seq, op_index, op, data FROM revision
+     WHERE branch = ? AND id = ? AND scope_key = ? AND seq <= ?
+     ORDER BY seq DESC, op_index DESC LIMIT 1`,
   );
+  for (const link of branchReadChain(space, branch, atSeq)) {
+    const row = stmt.get<RevRow>(link.branch, id, scope, link.atSeq);
+    if (row) return { row, branch: link.branch };
+  }
+  return undefined;
 }
 
 /**

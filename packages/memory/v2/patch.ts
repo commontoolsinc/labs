@@ -4,6 +4,7 @@ import {
   cloneForMutation,
   CloneForMutationError,
   cloneIfNecessary,
+  type MutableFabricContainerValueLayer,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { isInstance, isObjectNotArray } from "@commonfabric/utils/types";
@@ -126,7 +127,7 @@ const thawSpine = (
   options?: { createMissing?: boolean; nextKeyAfterPath?: string },
 ): { root: FabricValue; container: PatchContainer } => {
   let value: FabricValue;
-  let pathValue: FabricValue;
+  let pathValue: MutableFabricContainerValueLayer;
   try {
     ({ value, pathValue } = cloneForMutation(root, thawPath, options));
   } catch (e) {

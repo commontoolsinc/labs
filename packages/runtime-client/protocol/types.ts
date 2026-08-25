@@ -125,6 +125,17 @@ export enum NotificationType {
   PendingWritesChanged = "callback:pending-writes",
 }
 
+/**
+ * Worker-to-main-thread signals the transport acts on itself, rather than
+ * forwarding to the connection. Their own enum because they are the channel's
+ * traffic rather than the runtime's: one settles the channel and one annotates
+ * it, and no `RuntimeConnection` ever sees either.
+ */
+export enum TransportNotificationType {
+  WorkerReady = "worker:ready",
+  WorkerConsole = "worker:console",
+}
+
 export type IPCClientMessage = {
   msgId: MessageId;
   data: IPCClientRequest;
@@ -144,6 +155,18 @@ export type IPCRemoteResponse = {
 };
 
 export type IPCRemoteMessage = IPCRemoteNotification | IPCRemoteResponse;
+
+/** The notifications the transport handles itself. */
+export type IPCTransportNotification =
+  | WorkerReadyNotification
+  | WorkerConsoleNotification;
+
+/**
+ * Everything the worker posts: what the connection receives, plus what the
+ * transport intercepts on the way to it. One type for one send, which is what
+ * `postToClient()` takes.
+ */
+export type IPCRemotePost = IPCRemoteMessage | IPCTransportNotification;
 
 /**
  * Base of every request a handler receives.
@@ -1140,13 +1163,22 @@ export type ConsoleNotification = {
   type: NotificationType.ConsoleMessage;
   metadata?: { pieceId?: string; patternId?: string; space?: string };
   method: string;
-  // TODO(danfuzz): these arrive pre-flattened to text by
-  // `sanitizeForPostMessage()` (`backends/runtime-processor.ts`), and the
-  // receiver hands them to `console.log()` -- a devtools inspector, which can
-  // show more of a value than a string of it can. A `codec-realm` arm here is
-  // what lets the fabric among them cross whole; see the marker at the producer
-  // for what else has to move first.
-  args: JSONValue[];
+  /**
+   * The arguments, each encoded on its own. `ConsoleMessage` is this same
+   * notification with them decoded, which is what the client emits.
+   *
+   * TODO(danfuzz): once the envelope itself is encoded, this field holds a
+   * `FabricValue[]` and the encoding at each end goes away with it.
+   */
+  args: RealmEncodedValue[];
+};
+
+/**
+ * A console notification as the client emits it, with its arguments decoded
+ * back into the values the pattern logged.
+ */
+export type ConsoleMessage = Omit<ConsoleNotification, "args"> & {
+  args: FabricValue[];
 };
 
 export type NavigateRequestNotification = {
@@ -1182,6 +1214,35 @@ export type PendingWritesNotification = {
 };
 
 /**
+ * The worker's first post, announcing that its entry module has run and its
+ * message listener is installed. The transport's `ready()` settles on it.
+ */
+export type WorkerReadyNotification = {
+  type: TransportNotificationType.WorkerReady;
+};
+
+/** The `console` methods the worker's console bridge forwards. */
+export const WORKER_CONSOLE_LEVELS = ["log", "warn", "error"] as const;
+
+/** One of {@link WORKER_CONSOLE_LEVELS}. */
+export type WorkerConsoleLevel = (typeof WORKER_CONSOLE_LEVELS)[number];
+
+/**
+ * One line of the worker's own `console` output, forwarded so that it reaches
+ * the page console too. Opt-in, through `SetForwardWorkerConsole`.
+ *
+ * The subject is the worker itself, where `ConsoleNotification`'s is a pattern
+ * running inside it. That is also why this one carries text: the worker's own
+ * logging is rendered where it is written, and a pattern's arguments cross as
+ * values.
+ */
+export type WorkerConsoleNotification = {
+  type: TransportNotificationType.WorkerConsole;
+  level: WorkerConsoleLevel;
+  text: string;
+};
+
+/**
  * The vocabulary of DOM mutations carried by a VDOM batch. The worker
  * reconciler that produces them and the main-thread applicator that consumes
  * them both live in `@commonfabric/html`, which defines the union; the protocol
@@ -1200,8 +1261,12 @@ export type VDomBatchNotification = {
   batchId: number;
   /** The operations to apply, in order */
   ops: VDomOp[];
-  /** Optional: the root node ID for this render tree */
-  rootId?: number;
+  /**
+   * The root node ID for this render tree; `null` while the tree has no root
+   * child, which the reconciler reports as a value rather than by omission.
+   * Absent when the batch says nothing about the root at all.
+   */
+  rootId?: number | null;
   /** The mount ID this batch belongs to */
   mountId?: number;
 };
@@ -1239,6 +1304,7 @@ export type IPCRemoteNotification =
   | ConsoleNotification
   | NavigateRequestNotification
   | ErrorNotification
+  | TelemetryNotification
   | VDomBatchNotification
   | PendingWritesNotification;
 

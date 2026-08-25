@@ -133,7 +133,7 @@ Deno.test("unified entity model + encoded commit decode", async (t) => {
       );
 
       await t.step("entities classify by path-set, not value shape", () => {
-        const ents = listEntityModels(space);
+        const ents = listEntityModels(space).entities;
         const byId = Object.fromEntries(ents.map((e) => [e.id, e]));
 
         assertEquals(byId["of:mod"].kind, "module");

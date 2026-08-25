@@ -67,9 +67,9 @@ packages and type-checks attached tests but does not run them.
 - Visual/styling problems
 - Event handling doesn't trigger (click handlers, etc.)
 
-## Stale Computed Values After `piece set`
+## Stale Computed Values After `cf set`
 
-**Gotcha:** `piece set` updates data but does NOT trigger computed re-evaluation. You must run `piece step` after `set` to get fresh computed values.
+**Gotcha:** `cf set` updates data but does NOT trigger computed re-evaluation. You must run `piece step` after `set` to get fresh computed values.
 
 ```bash
 # WRONG: Returns stale computed values

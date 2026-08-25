@@ -618,13 +618,24 @@ function suggestionForCommandSegment(words: string[]): string {
   const normalizedWords = words.map((word) =>
     word.replace(/^\(+/, "").replace(/\)+$/, "")
   );
+  // Verbs this hook advises on that are also reachable without `piece`. `get`
+  // and `call` are spelled both ways too, but carry no guidance here, so
+  // matching them would widen what the hook accepts without changing what it
+  // answers. A verb joins this set when it gains a branch below.
+  const GUIDED_TOP_LEVEL_COMMANDS = new Set(["set"]);
   const cfIndex = normalizedWords.findIndex((word, index) =>
-    word === "cf" && normalizedWords[index + 1] === "piece"
+    word === "cf" &&
+    (normalizedWords[index + 1] === "piece" ||
+      GUIDED_TOP_LEVEL_COMMANDS.has(normalizedWords[index + 1] ?? ""))
   );
   if (cfIndex < 0) return "";
 
   const commandWords = normalizedWords.slice(cfIndex);
-  const pieceCommand = commandWords[2];
+  // An optional `piece` segment shifts the verb one word along, so the verb is
+  // located by what precedes it rather than by a fixed index.
+  const pieceCommand = commandWords[1] === "piece"
+    ? commandWords[2]
+    : commandWords[1];
   const testOptions = commandWords.flatMap((word, index) => {
     if (word === "--test") {
       return [{ value: commandWords[index + 1], inline: false }];
@@ -648,7 +659,7 @@ function suggestionForCommandSegment(words: string[]): string {
     if (!hasTestOption && main && /\.test\.[cm]?[jt]sx?$/.test(main)) {
       return "Test pattern deployed as the executable diagnostic entry. Next, inspect its action and assertion cells.";
     }
-    return `${testSuggestion} Next, use 'cf piece inspect' to view state or 'cf piece call' to test handlers.`;
+    return `${testSuggestion} Next, use 'cf piece inspect' to view state or 'cf call' to test handlers.`;
   }
   if (pieceCommand === "setsrc") {
     return `${testSuggestion} Next, use 'cf piece step' to trigger re-evaluation, then 'cf piece inspect' to verify.`;
@@ -660,7 +671,7 @@ function suggestionForCommandSegment(words: string[]): string {
     return "State set. Run 'cf piece step' to trigger re-evaluation before reading computed values.";
   }
   if (pieceCommand === "inspect") {
-    return "State inspected. Use 'cf piece call handlerName' to test handlers or 'cf piece set' to modify state.";
+    return "State inspected. Use 'cf call handlerName' to test handlers or 'cf set' to modify state.";
   }
   return "";
 }

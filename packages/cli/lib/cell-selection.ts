@@ -3062,7 +3062,7 @@ export async function deriveSelectedValue(
 
   const { commonfabric } = createBuilder({
     unsafeHostTrust: runtime.createUnsafeHostTrust({
-      reason: "cf piece get filter/schema computed projection",
+      reason: "cf get filter/schema computed projection",
     }),
   });
   const { lift, pattern } = commonfabric;

@@ -26,9 +26,14 @@ export type {
   SpaceCellContents,
 } from "./runtime.ts";
 export {
+  ADOPT_SERVER_FLAGS_ENV,
   type BrowserWorkerPresetParams,
+  type DeployedClientExperimentalParams,
   type EnvReader,
   EXPERIMENTAL_ENV_VARS,
+  EXPERIMENTAL_FLAG_AUTHORITY,
+  type ExperimentalFlagAuthority,
+  experimentalOptionsForDeployedClient,
   experimentalOptionsFromEnv,
   type PatternTestPresetParams,
   type ProductionServerPresetParams,
@@ -36,6 +41,7 @@ export {
   RUNTIME_OPTION_KEYS,
   type RuntimeOptionKey,
   runtimePresets,
+  SERVER_EXPERIMENTAL_PATH,
   type UnitTestPresetParams,
 } from "./runtime-presets.ts";
 export type {

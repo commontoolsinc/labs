@@ -346,6 +346,27 @@ describe("pattern-user-post-bash", () => {
       ).toContain("Run 'cf piece step'");
     });
 
+    it("gives the same guidance whether or not a data command names piece", () => {
+      // `set` is the only data command carrying guidance, so it is the only
+      // one whose two spellings can be compared for anything. Asserting the
+      // text as well as the equality keeps the comparison from holding
+      // because both sides are empty.
+      const nested = suggestionForPatternUserCommand(
+        "cf piece set --piece ID title",
+      );
+      expect(nested).toContain("Run 'cf piece step'");
+      expect(suggestionForPatternUserCommand("cf set --piece ID title"))
+        .toBe(nested);
+    });
+
+    it("still ignores a bare cf whose next word carries no guidance", () => {
+      // The widened match must not swallow every `cf` invocation, and must not
+      // claim a verb this hook has nothing to say about.
+      expect(suggestionForPatternUserCommand("cf test")).toBe("");
+      expect(suggestionForPatternUserCommand("cf wish '#topic'")).toBe("");
+      expect(suggestionForPatternUserCommand("cf get --piece ID title")).toBe("");
+    });
+
     it("returns no suggestion for unrelated commands", () => {
       expect(suggestionForPatternUserCommand("git status")).toBe("");
     });

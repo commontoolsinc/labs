@@ -2474,49 +2474,7 @@ export class Runtime {
     return tx.commit().then(async ({ error }) => {
       if (error) {
         if (maxRetries > 0 && isRetryableCommitRejection(error)) {
-          // A CONFLICT means this replica is behind the authoritative
-          // version: re-running immediately re-reads the same stale local
-          // state and fails identically, so without waiting the retries all
-          // burn on one deterministic conflict (CT-1824 — the compile-cache
-          // write-back looped this way and stale-version pieces recompiled
-          // on every cold boot). The conflict carries the catch-up gate;
-          // await it so the retry runs against fresh state — same protocol
-          // as the scheduler's conflict handling (scheduler/action-run.ts).
-          // A readiness gate that rejects (session closed/replaced while
-          // waiting) is control flow, not an error: retry anyway and let
-          // commit produce the definitive outcome.
-          const readyToRetry =
-            (error as { readyToRetry?: () => unknown }).readyToRetry;
-          if (typeof readyToRetry === "function") {
-            try {
-              await readyToRetry();
-            } catch {
-              // Readiness aborted — the retry's commit decides.
-            }
-          }
-          // The catch-up gate advances the session past the conflicting
-          // commit, but a doc this replica never READ does not arrive with
-          // it — and a conflicted blind WRITE means exactly that (the
-          // compile-cache write-back rewrites derived docs a cold replica
-          // has never seen). Pull the named doc so the retry's write
-          // carries its true version instead of re-asserting seq 0.
-          const conflict = (error as {
-            conflict?: { space?: MemorySpace; of?: string };
-          }).conflict;
-          if (
-            conflict?.space !== undefined &&
-            typeof conflict.of === "string" &&
-            conflict.of !== "of:unknown"
-          ) {
-            try {
-              await this.storageManager.open(conflict.space).sync(
-                conflict.of as unknown as URI,
-                { path: [], schema: false },
-              );
-            } catch {
-              // Pull failed — the retry's commit decides.
-            }
-          }
+          await this.awaitCommitRetryReadiness(error);
           return this.editWithRetry<T>(fn, maxRetries - 1);
         } else {
           return { error };
@@ -2532,6 +2490,62 @@ export class Runtime {
         },
       };
     });
+  }
+
+  /**
+   * Wait until a retry of a rejected commit would run against FRESH state.
+   * The protocol every conflict retrier shares — `editWithRetry` above, and
+   * the runner's commit-gated piece start (runner.ts):
+   *
+   * A CONFLICT means this replica is behind the authoritative version:
+   * re-running immediately re-reads the same stale local state and fails
+   * identically, so without waiting the retries all burn on one
+   * deterministic conflict (CT-1824 — the compile-cache write-back looped
+   * this way and stale-version pieces recompiled on every cold boot). The
+   * conflict carries the catch-up gate; await it so the retry runs against
+   * fresh state — the same protocol as the scheduler's conflict handling
+   * (scheduler/action-run.ts). A readiness gate that REJECTS (session closed
+   * or replaced while waiting) is control flow, not an error: return anyway
+   * and let the retry's own commit produce the definitive outcome.
+   *
+   * The gate advances the session past the conflicting commit, but a doc
+   * this replica never READ does not arrive with it — and a conflicted blind
+   * WRITE means exactly that (the compile-cache write-back rewrites derived
+   * docs a cold replica has never seen; a piece start's basis names computed
+   * docs the serving side was materializing). So the named doc is pulled
+   * too, and the retry's write carries its true version instead of
+   * re-asserting seq 0.
+   *
+   * Every step is best-effort by design: this resolves rather than throws,
+   * because the retry's commit — not this readiness — is what decides.
+   */
+  async awaitCommitRetryReadiness(error: unknown): Promise<void> {
+    const readyToRetry = (error as { readyToRetry?: () => unknown })
+      ?.readyToRetry;
+    if (typeof readyToRetry === "function") {
+      try {
+        await readyToRetry();
+      } catch {
+        // Readiness aborted — the retry's commit decides.
+      }
+    }
+    const conflict = (error as {
+      conflict?: { space?: MemorySpace; of?: string };
+    })?.conflict;
+    if (
+      conflict?.space !== undefined &&
+      typeof conflict.of === "string" &&
+      conflict.of !== "of:unknown"
+    ) {
+      try {
+        await this.storageManager.open(conflict.space).sync(
+          conflict.of as unknown as URI,
+          { path: [], schema: false },
+        );
+      } catch {
+        // Pull failed — the retry's commit decides.
+      }
+    }
   }
 
   prepareTxForCommit(tx: IExtendedStorageTransaction): void {

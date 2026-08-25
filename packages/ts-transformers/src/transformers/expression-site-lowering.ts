@@ -4,6 +4,7 @@ import {
   isCollectionType,
   isFunctionLikeExpression,
   isSyntheticNode,
+  preserveSourceMapRange,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
@@ -553,9 +554,12 @@ export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
         preferInputBoundWrappers: true,
       });
       if (rewritten) {
-        return context.factory.createJsxExpression(
-          node.dotDotDotToken,
-          rewritten,
+        return preserveSourceMapRange(
+          context.factory.createJsxExpression(
+            node.dotDotDotToken,
+            rewritten,
+          ),
+          node,
         );
       }
 
@@ -666,16 +670,7 @@ function allDataFlowsAreElementBindingRoots(
 function isPassthroughContainerExpression(
   expression: ts.Expression,
 ): boolean {
-  let current = expression;
-  while (
-    ts.isParenthesizedExpression(current) ||
-    ts.isAsExpression(current) ||
-    ts.isTypeAssertionExpression(current) ||
-    ts.isSatisfiesExpression(current) ||
-    ts.isNonNullExpression(current)
-  ) {
-    current = current.expression;
-  }
+  const current = unwrapExpression(expression);
   return ts.isPropertyAccessExpression(current) ||
     ts.isElementAccessExpression(current) ||
     ts.isObjectLiteralExpression(current) ||
@@ -884,9 +879,12 @@ export function rewriteArrayMethodCallbackExpressionSites(
           preferInputBoundWrappers: true,
         });
         if (rewritten) {
-          return context.factory.createJsxExpression(
-            node.dotDotDotToken,
-            rewritten,
+          return preserveSourceMapRange(
+            context.factory.createJsxExpression(
+              node.dotDotDotToken,
+              rewritten,
+            ),
+            node,
           );
         }
       }

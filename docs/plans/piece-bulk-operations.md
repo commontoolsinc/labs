@@ -1,8 +1,8 @@
 # Bulk piece operations
 
-**Status:** proposed; stage 1's survey library is built and in review, its
-`cf` entry points and CI drill follow in stacked changes immediately behind
-it, and every later stage is unbuilt. This is the design and build sequence for changing
+**Status:** proposed; stages 1 and 2 — the survey and repair libraries,
+their `cf` entry points, and their coverage in the CI drill and the demo —
+are built. Every later stage is unbuilt. This is the design and build sequence for changing
 many pieces in one space as one reviewable, resumable operation. Driven by
 recurring Topics board upgrades.
 
@@ -91,9 +91,10 @@ the whole collection at once and names neither the offending member nor its
 position, so finding the one bad piece among a hundred has no better method
 than bisection by hand. A survey answers it in one pass.
 
-Survey is also how the other three are judged. A survey taken before a run is
-the pre-state record the plan needs; the same survey taken afterwards is the
-verification; and the difference between them is the report of what the run
+Survey is also how the reference operations are judged. A survey taken
+before a run is the pre-state record the plan needs; the same survey taken
+afterwards is the verification; and the difference between them is the
+report of what the run
 actually did. One artifact, three uses — which is why it is built first.
 
 ## The spine
@@ -148,9 +149,17 @@ resume a re-invocation rather than a separate mode.
 not a limitation to be optimized away — a parent recomputing over children
 mid-change is the failure this ordering exists to prevent.
 
-**Verify** is a separate pass, never a side effect of applying. An apply that
-exits zero is not a verdict: the source-update path reports success for a
-piece whose source committed but whose running instance failed to refresh.
+**Verify** is a separate pass, never a side effect of applying. An apply
+that exits zero is not a verdict: the source-update path reports success for
+a piece whose source committed but whose running instance failed to refresh.
+The instrument differs by operation: a reference operation is verified by
+the survey-diff, while a repair is verified by re-reading the stored
+document and re-asking the fixer — a distinct read after each row's write,
+made row by row inside the same invocation, because the fixer is already in
+hand and the survey-diff cannot see document work, which is why it refuses
+repair rows. The whole-set after-pass is a dry run over the same selection:
+it re-asks the fixer across every piece, and one that comes back
+all-conforming is the verification an operator runs on its own.
 
 **Resume** is the precondition check again: re-running the same command
 re-derives what is outstanding, skips what landed, and stops on what moved
@@ -165,8 +174,15 @@ what to do to it:
 piece         precondition                  operation
 of:fid1:aaa…  reference=PB0Gum…#default     retarget=topic.tsx@<rev>
 of:fid1:bbb…  reference=PB0Gum…#default     retarget=topic.tsx@<rev>
-of:fid1:ccc…  document-hash=9f2c…           repair=<fixer>
+of:fid1:ccc…  document-hash=9f2c…           repair=<fixer>@<closure-id>
 ```
+
+A repair row carries two pins, because it has two inputs that can drift: the
+document hash holds the piece to the state the fixer's answer was computed
+from, and the closure identity — the same no-compile identity a retarget's
+source carries — holds the fixer to the implementation that was reviewed. A
+plan whose fixer file changed after review, or whose spelling resolves to
+different code elsewhere, refuses before the module is even imported.
 
 Four properties follow from making this a file rather than a command line:
 
@@ -320,12 +336,9 @@ piece and pieces controllers they call — the layer that owns piece
 operations, and one from which the runner's local-program resolution is
 importable, so turning a row's source into a program belongs there too.
 There they are tested on the package's own runtime fixtures, with no command
-surface at all. Only a small wrapper in the CLI has to decide whether this is
-spelled as a subcommand of an existing group, a group of its own, or
-something else — so that decision is genuinely deferred rather than quietly
-made, and the first increment does not wait on it. A decision made when the
-first *write* operation needs a home is made with more information than one
-made now.
+surface at all. Only a small wrapper in the CLI carries the spelling, which
+decision 1 has since settled: the `piece` group holds every piece operation,
+single or bulk.
 
 **Two selectors to start, and the collection one carries the order.** A
 selector is a value handed to the survey. `{kind: "collection", holder,
@@ -489,8 +502,10 @@ that looks like a complete one.
 containment result, and `retained` column — run against the live board on
 day one, it answers which pieces sit on which identity and whether anything
 registered sits outside the holder; the survey-diff, which compares a survey
-against a plan or an earlier survey and is the verification every later
-stage uses; the reference a local source produces, computed without
+against a plan or an earlier survey and is the verification every
+reference operation uses — a repair's verification is re-asking its own
+fixer, and the diff refuses repair rows rather than answering about work
+it cannot see; the reference a local source produces, computed without
 compiling; and the drill.
 
 - [x] Enumeration comes from the holder's collection, and the registry is
@@ -502,7 +517,7 @@ compiling; and the drill.
 - [x] Each row records whether the source behind its recorded identity is
       still retained in the space, so a row with no rollback target is known
       before the run rather than during the incident.
-- [ ] One process handles a board-sized set, start to finish.
+- [x] One process handles a board-sized set, start to finish.
 - [x] The read reports live state on every invocation, and a test proves it:
       a read taken after a change reflects the change.
 - [x] The output is a plan — the same artifact the later stages consume —
@@ -519,11 +534,10 @@ compiling; and the drill.
       survey, reporting per piece moved as planned, still outstanding, or
       moved to something the plan did not ask for.
 - [x] The survey and the pin read are invocable from `cf`
-      (`cf piece survey`, `cf piece inspect --pattern-identity`),
-      provisionally spelled per decision 1.
-- [ ] The stage-1 drill runs in continuous integration, under the CLI
-      integration suite's `piece-call` section. Ticked by the stacked
-      change that lands it.
+      (`cf piece survey`, `cf piece inspect --pattern-identity`), the
+      spelling decision 1 has since confirmed.
+- [x] The stage-1 drill runs in continuous integration, under the CLI
+      integration suite's `piece-call` section.
 
 ### 2. Repair, by a supplied fixer
 
@@ -544,7 +558,10 @@ it.
 means that piece needs nothing, which collapses selection, resumption, and
 verification into one mechanism:
 
-- Selection is "run the fixer, keep the pieces it would change".
+- Selection is "run the fixer over the enumerated pieces and classify":
+  the ones it would change are the work, and the ones it would not are
+  already landed — recorded as such, since a resumable artifact needs the
+  landed rows as much as the outstanding ones.
 - Resume is the same question asked again — a piece already repaired is one
   the fixer no longer changes.
 - Verification is the same question asked afterwards — a repair succeeded
@@ -575,18 +592,21 @@ stands alone as a read-only "what would change" report; and the
 complete-document and links-intact refusals as library checks, which the
 Topics restore script hand-rolls today and should import instead.
 
-- [ ] A fixer is supplied by the caller, and adding a new kind of repair
+- [x] A fixer is supplied by the caller, and adding a new kind of repair
       requires no change to the tooling.
-- [ ] Selection, resume, and verification all derive from the fixer being a
+- [x] Selection, resume, and verification all derive from the fixer being a
       no-op, with no separately maintained predicate.
-- [ ] A dry run reports the exact per-piece document diff, and writes
+- [x] A dry run reports the exact per-piece document diff, and writes
       nothing. For a whole-document write this is a requirement, not a
       convenience.
-- [ ] A fixer that returns an incomplete document is refused rather than
+- [x] A fixer that returns an incomplete document is refused rather than
       applied, and a test proves the refusal.
-- [ ] References survive a repair that does not mention them, and a fixer
+- [x] References survive a repair that does not mention them, and a fixer
       that would rewrite one as a value is refused.
-- [ ] Re-running a completed repair writes nothing.
+- [x] Re-running a completed repair writes nothing.
+- [x] The repair act in `packages/cli/integration/bulk-ops-demo.sh` stops
+      being pending: the transcript runs a fixer live under the canonical
+      spelling, `cf piece repair`.
 
 ### 3. Retarget
 
@@ -605,8 +625,8 @@ a verdict, and the two stay separate invocations.
 per-piece
 timing, where the number from the first rehearsal run decides whether
 siblings may run concurrently and whether stage 5 is worth building; and the
-retarget drill. This is also the stage at which the entry point gets its
-spelling (decision 1).
+retarget drill. The entry point's spelling follows decision 1: the `piece`
+group.
 
 - [ ] A retarget of a seeded board runs to completion from a checked-in plan.
 - [ ] Preconditions are proved for every row before the first write.
@@ -637,6 +657,10 @@ spelling (decision 1).
 - [ ] Per-piece timing is reported as the run proceeds. A run whose cost per
       piece is unknown cannot be improved, and the number is the input to
       every decision below about whether to go faster.
+- [ ] The apply and survey-diff acts in
+      `packages/cli/integration/bulk-ops-demo.sh` stop being pending: the
+      transcript applies a stamped plan and diffs the after-survey against
+      it where it now shows the provisional spellings.
 
 ### 4. Rollback
 
@@ -667,6 +691,9 @@ rollback-plan derivation; and the rollback drill.
 - [ ] The reversal is exercised against a copy, in the drill, before any live
       run is allowed to depend on it. A rollback path first attempted during
       the incident it exists for is not a rollback path.
+- [ ] The rollback act in `packages/cli/integration/bulk-ops-demo.sh` stops
+      being pending: the transcript derives and restores live where it now
+      shows the provisional spelling.
 
 ### 5. A session across the whole run
 
@@ -718,14 +745,13 @@ Topics rehearsal remains the place where the real pattern is exercised.
 Each is named with the stage that forces it, so none of them has to be
 settled before work starts.
 
-1. **How bulk is spelled** — *stage 3*. Whether the existing per-piece
-   commands grow a plan-file target, or bulk operations get their own group,
-   decides whether the word for "one piece" stays consistent across the
-   command surface. This interacts with
-   [CLI surface shape](cli-surface-shape.md). It is deferred on purpose: the
-   core is library code, so nothing in stage 1 waits on it, and it is settled
-   when the first write operation needs a home. Until then the survey and
-   the identity read surface wherever the thin wrapper finds cheapest.
+1. ~~**How bulk is spelled.**~~ **Resolved: the `piece` group holds every
+   piece operation, single or bulk.** The first write operation is stage 2's
+   repair, and it lands as `cf piece repair` beside `cf piece survey` and
+   `cf piece inspect`: one group, one word for "one piece", and the later
+   write stages follow the same shape. A separate bulk group would buy a
+   second home at the cost of the consistency that
+   [CLI surface shape](cli-surface-shape.md) exists to protect.
 2. ~~**Where preconditions are evaluated.**~~ **Resolved: over the API, and
    stage 1 builds the read.** A piece's pattern identity is readable from a
    live deployment without running the piece — the piece inspection path
@@ -742,17 +768,18 @@ settled before work starts.
    risk from the same flag used many times. The row field keeps the record
    per row and the plan-time flag keeps the decision single; the apply reads
    only the row. See the plan encoding above.
-4. **Whether repair gets a narrow write** — *stage 2*. Two writes reach a
-   piece's stored input today. One replaces the whole document and re-runs
-   the piece against it. The other writes at a path inside the document, but
-   validates the document it lands in against the piece's schema before
-   committing — which is exactly what a document in need of repair fails, so
-   it refuses the pieces a repair exists for. That leaves "change one
-   property" as a whole-document read-modify-write per piece: a large blast
-   radius for a small change, and the same path that has been observed
-   freezing a stale schema into a live board. Either repair gets a path write
-   that can be told to skip that validation, or the design accepts the wide
-   one and says why.
+4. ~~**Whether repair gets a narrow write.**~~ **Resolved: the wide write,
+   guarded.** The fixer contract already produces a whole document, so the
+   wide write is the one that matches it, and the blast radius is held by
+   refusals rather than by narrowing: an incomplete document is refused
+   before any write, a reference either round-trips untouched or the
+   document is refused, and purity is probed on every evaluation. What made
+   the narrow write attractive — sparing untouched fields and references —
+   the guards deliver at the document level: a raw read written back whole
+   carries its sigil links intact, measured at the library seam. A narrow
+   path write remains available as a later addition if rehearsal shows the
+   wide write's cost, but it would be a new runner write primitive and is
+   not what repair waits on.
 5. ~~**How a fixer is supplied.**~~ **Resolved: a validator is a JSON
    schema; a fixer is a TypeScript module the run imports.** A module can be
    type-checked against the document shape, tested without a space, and

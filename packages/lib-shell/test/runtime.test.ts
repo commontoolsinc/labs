@@ -7,6 +7,7 @@ import {
   defaultRenderConfidentialityCeiling,
   RuntimeInternals,
 } from "@commonfabric/lib-shell";
+import { TransportNotificationType } from "@commonfabric/runtime-client";
 
 type MockRuntimeClientEvents = {
   console: [unknown];
@@ -486,7 +487,11 @@ describe("RuntimeInternals", () => {
         constructor(_url: URL | string) {
           super();
           queueMicrotask(() =>
-            this.dispatchEvent(new MessageEvent("message", { data: "READY" }))
+            this.dispatchEvent(
+              new MessageEvent("message", {
+                data: { type: TransportNotificationType.WorkerReady },
+              }),
+            )
           );
         }
         postMessage(message: unknown): void {

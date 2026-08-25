@@ -10,9 +10,11 @@
 
 import {
   type EnvReader,
+  type ExperimentalOptions,
   experimentalOptionsFromEnv,
   Runtime,
 } from "@commonfabric/runner";
+import { publishServingExperimentalOverrides } from "./experimental-posture.ts";
 import { serverExecutionEnabledFromEnv } from "./server-execution-flag.ts";
 import { ExecutorHost } from "@commonfabric/runner/executor/host";
 import { LoopbackStorageManager } from "@commonfabric/runner/executor/loopback-storage";
@@ -20,6 +22,20 @@ import type { Server as MemoryServer } from "@commonfabric/memory/v2/server";
 import type { Identity } from "@commonfabric/identity";
 
 let host: ExecutorHost | undefined;
+
+/**
+ * The flags a SERVING runtime runs regardless of the environment. Written
+ * once because two consumers need the same answer: the runtime factory
+ * below, and `/api/meta`, which reports the posture this deployment actually
+ * serves at so a client adopting it does not run a flag the deployment
+ * abandoned (docs/development/EXPERIMENTAL_OPTIONS.md).
+ */
+const SERVING_RUNTIME_EXPERIMENTAL = {
+  serverExecution: true,
+  // serving-loop.md §3e: the pattern-update posture flips server-side — the
+  // SpaceServer owns the watcher and the swap under the flag.
+  systemPatternAutoUpdate: true,
+} as const satisfies ExperimentalOptions;
 
 /** The production default for the per-space outstanding-network-effect
  * cap (serving-loop.md §5; README §3.8's multi-tenancy contract needs a
@@ -197,14 +213,7 @@ export function startServerExecutionHost(options: {
         // commit through the loopback plane, and the wave destination
         // takes over at activation.
         servingPosture: true,
-        experimental: {
-          ...experimental,
-          serverExecution: true,
-          // serving-loop.md §3e: the pattern-update posture flips
-          // server-side — the SpaceServer owns the watcher and the swap
-          // under the flag.
-          systemPatternAutoUpdate: true,
-        },
+        experimental: { ...experimental, ...SERVING_RUNTIME_EXPERIMENTAL },
       });
       void space;
       return Promise.resolve({
@@ -216,10 +225,16 @@ export function startServerExecutionHost(options: {
       });
     },
   });
+  // Only now, with the loop actually up: what `/api/meta` adds to the base
+  // posture, so a client adopting this deployment's flags gets the ones the
+  // SERVING runtimes run rather than only the generic webhook runtime's.
+  publishServingExperimentalOverrides(SERVING_RUNTIME_EXPERIMENTAL);
   return host;
 }
 
 export async function stopServerExecutionHost(): Promise<void> {
   await host?.close();
   host = undefined;
+  // Nothing serves any more, so `/api/meta` reports the base posture again.
+  publishServingExperimentalOverrides(null);
 }

@@ -48,6 +48,30 @@ function surveyRow(
 
 describe("bulk-diff", () => {
   describe("diffPlan()", () => {
+    it("refuses a plan carrying repair rows, naming them", () => {
+      const plan = {
+        header,
+        rows: [{
+          piece: "fid1:ccc",
+          expect: {
+            patternIdentity: "x",
+            symbol: "default",
+            retained: true,
+            documentHash: "9f2c",
+          },
+          op: {
+            kind: "repair" as const,
+            fixer: "fix-titles.ts",
+            fixerIdentity: "impl-v1",
+          },
+        }],
+      };
+      expect(() => diffPlan(plan, plan)).toThrow(
+        "cannot verify a document repair",
+      );
+      expect(() => diffPlan(plan, plan)).toThrow("fid1:ccc");
+    });
+
     it("returns landed, outstanding, and moved-elsewhere for retarget rows", () => {
       const plan: PiecePlan = {
         header,
