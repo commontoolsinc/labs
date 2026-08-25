@@ -153,7 +153,12 @@ describe("topic-board-pivot-contract", () => {
   beforeAll(async () => {
     const identity = await Identity.generate({ implementation: "noble" });
     cc = await initializePiecesController({
-      space: SPACE_NAME,
+      // A space of this suite's own. Two boards started in one space contend
+      // on deferred start under server execution — the second start reads a
+      // computed the first has not confirmed, the transaction retries, and the
+      // suite that started first never settles. Nothing here needs to share a
+      // space with the suite above, so it does not.
+      space: `${SPACE_NAME}-pivot`,
       apiUrl: new URL(API_URL),
       identity,
     });
@@ -213,16 +218,44 @@ describe("topic-board-pivot-contract", () => {
     key: "referencedBy" | "mentions",
   ): Promise<unknown[]> => ((await t.result.get([key])) ?? []) as unknown[];
 
-  const inboundTitles = async (t: PieceController, length: number) =>
-    (await awaitEdges(t, "referencedBy", length)) as { title: string }[];
+  /** Await the named topics APPEARING among `t`'s inbound edges, then hand
+   * back the rows so the caller can pin the exact set.
+   *
+   * Waits on content rather than on a count, because `referencedBy` is served
+   * from the board-wide pivot rather than written here: a count that settles
+   * one row away from the expected number — which server execution has been
+   * seen to do — makes a count-wait wait for a number that is never coming,
+   * while a content-wait still resolves the moment the edge lands and the
+   * assertion after it still catches the extra row. */
+  const awaitInbound = async (
+    t: PieceController,
+    ...titles: string[]
+  ): Promise<{ title: string }[]> => {
+    const cell = (await t.result.getCell()).key("referencedBy");
+    return await waitForCellValue<{ title: string }[]>(
+      cc.runtime,
+      cell,
+      (v) => {
+        const rows = (v ?? []) as { title?: string }[];
+        return titles.every((want) => rows.some((r) => r?.title === want));
+      },
+    );
+  };
 
   it("builds one pivot row per topic, claiming no edges before any mention", async () => {
-    const crossrefs = (await board.result.getCell()).key("crossrefs");
+    // Waits on the three topics this suite filed, which `addTopic` produces
+    // directly, rather than on the pivot's row count — the pivot is board-wide
+    // and has been seen to settle a row away from the topic count under server
+    // execution, which a count-wait would never recover from. The row count is
+    // then asserted rather than awaited, so an extra row still fails.
+    const topics = (await board.result.getCell()).key("topics");
     await waitForCellValue<unknown[]>(
       cc.runtime,
-      crossrefs,
-      (v) => Array.isArray(v) && v.length === 3,
+      topics,
+      (v) => ((v ?? []) as unknown[]).length === 3,
     );
+    expect(((await board.result.get(["crossrefs"])) as unknown[]).length)
+      .toBe(3);
     // The pivot has served three rows, so the topics behind them have settled.
     expect((await edgesNow(target, "referencedBy")).length).toBe(0);
     expect((await edgesNow(target, "mentions")).length).toBe(0);
@@ -252,8 +285,8 @@ describe("topic-board-pivot-contract", () => {
     await source.result.set({ topic: third.getCell() }, ["mention"]);
     await awaitEdges(source, "mentions", 2);
 
-    expect((await inboundTitles(target, 1))[0].title).toBe("Graph source");
-    expect((await inboundTitles(third, 1))[0].title).toBe("Graph source");
+    expect((await awaitInbound(target, "Graph source")).length).toBe(1);
+    expect((await awaitInbound(third, "Graph source")).length).toBe(1);
     // Mentioning is not mutual.
     expect((await edgesNow(source, "referencedBy")).length).toBe(0);
   });
@@ -265,6 +298,6 @@ describe("topic-board-pivot-contract", () => {
     expect((await edgesNow(target, "referencedBy")).length).toBe(0);
     // The edge that was not retracted survives as a reference, not a
     // flattened copy of the piece it names.
-    expect((await inboundTitles(third, 1))[0].title).toBe("Graph source");
+    expect((await awaitInbound(third, "Graph source")).length).toBe(1);
   });
 });
