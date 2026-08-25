@@ -211,25 +211,40 @@ export enum RequestType {
    */
   ResetLoggerBaselines = "runtime:resetLoggerBaselines",
 
-  /** Answers with the scheduler's settle statistics, or `null` when off. */
+  /**
+   * Answers with the scheduler's settle statistics from the last settle pass.
+   * `null` covers two states and does not distinguish them: recording is off,
+   * or it is on and no pass has completed yet.
+   */
   GetSettleStats = "runtime:getSettleStats",
 
   /** Answers with the settle statistics recorded per pass, oldest first. */
   GetSettleStatsHistory = "runtime:getSettleStatsHistory",
 
-  /** Turns settle-statistics recording on or off; it is off by default. */
+  /**
+   * Turns settle-statistics recording on or off. Off by default, the
+   * collection costing something per settle pass. Turning it *off* also
+   * discards the statistics and history already collected, so a client that
+   * toggles it loses what it had.
+   */
   SetSettleStatsEnabled = "runtime:setSettleStatsEnabled",
 
   /** Answers with the recorded per-action run trace. */
   GetActionRunTrace = "runtime:getActionRunTrace",
 
-  /** Turns action-run tracing on or off. */
+  /**
+   * Turns action-run tracing on or off. Off by default, and turning it off
+   * also discards the trace already collected.
+   */
   SetActionRunTraceEnabled = "runtime:setActionRunTraceEnabled",
 
   /** Answers with the recorded trigger trace. */
   GetTriggerTrace = "runtime:getTriggerTrace",
 
-  /** Turns trigger tracing on or off. */
+  /**
+   * Turns trigger tracing on or off. Off by default, and turning it off also
+   * discards the trace already collected.
+   */
   SetTriggerTraceEnabled = "runtime:setTriggerTraceEnabled",
 
   /** Answers with the recorded write stack traces. */
@@ -1009,7 +1024,8 @@ export type GetSettleStatsRequest = BaseRequest & {
 export type SetSettleStatsEnabledRequest = BaseRequest & {
   type: RequestType.SetSettleStatsEnabled;
   /**
-   * Whether settle statistics are recorded.
+   * Whether settle statistics are recorded. Setting it false also discards
+   * what has been collected.
    */
   enabled: boolean;
 };
@@ -1028,7 +1044,8 @@ export type GetActionRunTraceRequest = BaseRequest & {
 export type SetActionRunTraceEnabledRequest = BaseRequest & {
   type: RequestType.SetActionRunTraceEnabled;
   /**
-   * Whether action runs are traced.
+   * Whether action runs are traced. Setting it false also discards the trace
+   * already collected.
    */
   enabled: boolean;
 };
@@ -1042,7 +1059,8 @@ export type GetTriggerTraceRequest = BaseRequest & {
 export type SetTriggerTraceEnabledRequest = BaseRequest & {
   type: RequestType.SetTriggerTraceEnabled;
   /**
-   * Whether triggers are traced.
+   * Whether triggers are traced. Setting it false also discards the trace
+   * already collected.
    */
   enabled: boolean;
 };
@@ -1078,7 +1096,8 @@ export type DetectNonIdempotentRequest = BaseRequest & {
 /** The scheduler's settle statistics, or `null` while recording is off. */
 export type SettleStatsResponse = {
   /**
-   * The statistics, or `null` while recording is off.
+   * The statistics from the last settle pass. `null` where recording is off,
+   * and equally where it is on but no pass has completed.
    */
   stats: SettleStats | null;
 };
