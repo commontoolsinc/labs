@@ -108,20 +108,23 @@ reconstructs within the resolved branch from the latest
 that dialect has a custom `splice` op and specific add/missing-key semantics a
 hand-rolled applier gets wrong. Stored payloads go through the engine's rule
 too: `decodeStoredDocumentPayload` / `decodeStoredPatchListPayload`
-(`@commonfabric/memory/v2`) default an absent payload and refuse a root that is
-not a tree of paths, taking this package's decoder as an argument so an offline
-read still accepts the untagged plain-JSON rows the engine's own boundary
-decoder does not. Patches apply through `applyPatchToDocument` rather than bare
-`applyPatch`, because a root op can replace a document with any value and the
-engine rejects at the FIRST boundary that leaves a non-document — validating
-only the end of a chain would let a later patch restore an object and launder
-the invalid step before it. Every boundary a reconstruction crosses is checked
-where the engine checks it: base, snapshot, and each patch in turn.
-`reconstruct-parity.test.ts` **drives the real engine** and asserts
-`reconstructDocument == engine.read()` across branch inheritance, child-local
-patches, tombstones, patch-first, and snapshots. Conflict and scope analysis
-likewise reuse the engine's exported `patchOverlapsRead` / `resolveScopeKey`
-rather than re-deriving them.
+(`@commonfabric/memory/v2`) refuse an absent payload and a root that is not a
+tree of paths, taking this package's decoder as an argument so an offline read
+still accepts the untagged plain-JSON rows the engine's own boundary decoder
+does not. The decoder is the ONLY thing the two readers differ on: an absent
+payload never reaches it, since a rule that decided that case through a
+placeholder string would reject for the engine and accept for a plain-JSON
+reader, and read differently per caller. Patches apply through
+`applyPatchToDocument` rather than bare `applyPatch`, because a root op can
+replace a document with any value and the engine rejects at the FIRST boundary
+that leaves a non-document — validating only the end of a chain would let a
+later patch restore an object and launder the invalid step before it. Every
+boundary a reconstruction crosses is checked where the engine checks it: base,
+snapshot, and each patch in turn. `reconstruct-parity.test.ts` **drives the real
+engine** and asserts `reconstructDocument == engine.read()` across branch
+inheritance, child-local patches, tombstones, patch-first, and snapshots.
+Conflict and scope analysis likewise reuse the engine's exported
+`patchOverlapsRead` / `resolveScopeKey` rather than re-deriving them.
 
 The store can't be opened through the live `Engine` (its constructor runs
 migrations that would mutate the durable file), so reconstruction is a

@@ -1905,32 +1905,28 @@ export const isEntityDocument = (
 ): value is EntityDocument => isObjectNotArray(value);
 
 /**
- * How a stored payload reads when its row holds none. A document defaults to
- * `null`, which {@link decodeStoredDocumentPayload} then refuses as a root — a stored
- * document is always a tree of paths. A patch list defaults to the empty list,
- * which IS applicable. The asymmetry is the rule callers get wrong when they
- * re-derive it, so it lives here rather than at each reader.
- */
-const ABSENT_DOCUMENT_PAYLOAD = "null";
-const ABSENT_PATCH_LIST_PAYLOAD = "[]";
-
-/**
- * Read a stored document payload: default an absent one, decode it, and refuse
- * a root that is not a tree of paths.
+ * Read a stored document payload: decode it, and refuse a root that is not a
+ * tree of paths.
  *
  * `decode` is the caller's, because the readers disagree on which payloads they
  * accept and only on that: the engine reads what it wrote, through
  * {@link decodeMemoryBoundary}, while an offline reader over a durable file may
- * also meet untagged plain-JSON rows and route accordingly. Everything else —
- * the default, the root check — is one rule shared here, since a reader that
- * tests the payload for truthiness instead takes an empty string for an absent
- * one and rebuilds a document the engine would have rejected.
+ * also meet untagged plain-JSON rows and route accordingly. Everything else is
+ * one rule shared here, since a reader that tests the payload for truthiness
+ * instead takes an empty string for an absent one and rebuilds a document the
+ * engine would have rejected.
+ *
+ * An absent payload never reaches the decoder. Handing one a placeholder string
+ * makes the rule depend on which decoder was passed — `decodeMemoryBoundary`
+ * refuses any untagged payload, a plain-JSON decoder accepts one — and two
+ * readers that disagree about an absent payload do not share a rule at all. An
+ * absent document is `null`, which the root check below refuses on its own.
  */
 export const decodeStoredDocumentPayload = (
   decode: (source: string) => unknown,
   data: string | null,
 ): EntityDocument => {
-  const parsed = decode(data ?? ABSENT_DOCUMENT_PAYLOAD);
+  const parsed = data === null ? null : decode(data);
   if (!isEntityDocument(parsed)) {
     const shape = parsed === null
       ? "null"
@@ -1944,12 +1940,20 @@ export const decodeStoredDocumentPayload = (
   return parsed;
 };
 
-/** Read a stored patch-list payload. Absent means the empty list. */
+/**
+ * Read a stored patch-list payload through the same rule. An absent payload is
+ * refused rather than read as the empty list: nothing writes a patch row
+ * without one, so an absent payload is a malformed row, and applying it as a
+ * no-op would leave the document reading current.
+ */
 export const decodeStoredPatchListPayload = (
   decode: (source: string) => unknown,
   data: string | null,
 ): PatchOp[] => {
-  const parsed = decode(data ?? ABSENT_PATCH_LIST_PAYLOAD);
+  if (data === null) {
+    throw new TypeError("memory v2 stored patches must carry a payload");
+  }
+  const parsed = decode(data);
   if (!Array.isArray(parsed)) {
     throw new TypeError("memory v2 stored patches must be arrays");
   }

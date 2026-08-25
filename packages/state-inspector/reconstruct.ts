@@ -22,10 +22,8 @@ import {
   decodeStoredDocumentPayload,
   decodeStoredPatchListPayload,
   type EntityDocument as StoredDocument,
-  isEntityDocument,
   type PatchOp,
 } from "@commonfabric/memory/v2";
-import type { FabricValue } from "@commonfabric/api";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 
 import type { SpaceDb } from "./db.ts";
@@ -482,8 +480,13 @@ export function reconstructOutcome(
     // status is finer than the engine's because a listing that says "(no data)"
     // tells a reader something "(undecodable)" does not.
     if (row.op === "set" && row.data === null) return { status: "empty" };
-    const decoded = row.op === "set"
-      ? decodeStored(row.data!)
+    // Both arms return a document already held to the root rule — `storedDocument`
+    // checks the payload it decodes, and every boundary inside the patch chain is
+    // checked as it is crossed — so a present outcome here carries a document no
+    // reader has to re-test, and a malformed one arrives as the shared rule's own
+    // error, naming the shape it found.
+    const document = row.op === "set"
+      ? storedDocument(row.data)
       // patch: reconstruct within the branch that owns the resolved row.
       : reconstructWithinBranch(
         space,
@@ -493,18 +496,7 @@ export function reconstructOutcome(
         row.seq,
         row.op_index,
       );
-    // A document is a tree of top-level paths. Anything else — a stored `null`,
-    // an array, a scalar — is malformed, and calling it present hands every
-    // reader a value they will dereference as a document.
-    if (!isEntityDocument(decoded)) {
-      return {
-        status: "undecodable",
-        error: new TypeError(
-          "memory v2 stored documents must be plain object roots",
-        ),
-      };
-    }
-    return { status: "present", document: decoded as EntityDocument };
+    return { status: "present", document: document as EntityDocument };
   } catch (error) {
     return { status: "undecodable", error };
   }
