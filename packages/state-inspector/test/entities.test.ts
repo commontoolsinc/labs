@@ -139,6 +139,25 @@ function seed(path: string) {
   commit.run(14, session, 14, "{}");
   op.run("of:emptystr", 14, "set", "", 14);
 
+  // The same corruption one op deeper, where a patch chain hides it. The engine
+  // decodes a base and a patch payload unconditionally and rejects a malformed
+  // one, so reconstruction has to reach the same verdict rather than reading an
+  // empty payload as an absent one and rebuilding a document over it.
+  commit.run(15, session, 15, "{}");
+  op.run("of:badbase", 15, "set", "", 15);
+  commit.run(16, session, 16, "{}");
+  op.run(
+    "of:badbase",
+    16,
+    "patch",
+    JSON.stringify([{ op: "add", path: "/value", value: { ok: true } }]),
+    16,
+  );
+  commit.run(17, session, 17, "{}");
+  op.run("of:badpatch", 17, "set", JSON.stringify({ value: { n: 1 } }), 17);
+  commit.run(18, session, 18, "{}");
+  op.run("of:badpatch", 18, "patch", "", 18);
+
   // A second piece whose owned cells are a tombstone and a corrupt entity, so
   // `describePiece` has both to tell apart.
   commit.run(12, session, 12, "{}");
@@ -260,6 +279,15 @@ Deno.test("unified entity model + encoded commit decode", async (t) => {
         assertEquals(byId["of:nulldoc"].label, "(undecodable)");
         assertEquals(byId["of:emptystr"].kind, "unknown");
         assertEquals(byId["of:emptystr"].label, "(undecodable)");
+
+        // A patch chain must not launder either one: a malformed base read as
+        // an absent one would rebuild a document the engine refuses to produce,
+        // and a malformed patch read as an empty list would silently apply
+        // nothing and call the result current.
+        assertEquals(byId["of:badbase"].kind, "unknown");
+        assertEquals(byId["of:badbase"].label, "(undecodable)");
+        assertEquals(byId["of:badpatch"].kind, "unknown");
+        assertEquals(byId["of:badpatch"].label, "(undecodable)");
       });
 
       await t.step(

@@ -106,11 +106,16 @@ reconstructs within the resolved branch from the latest
 `set`/`delete`/`snapshot` base, and applies patches through the server's own
 `applyPatch` (`@commonfabric/memory/v2/patch`) — not a re-implementation, since
 that dialect has a custom `splice` op and specific add/missing-key semantics a
-hand-rolled applier gets wrong. `reconstruct-parity.test.ts` **drives the real
-engine** and asserts `reconstructDocument == engine.read()` across branch
-inheritance, child-local patches, tombstones, patch-first, and snapshots.
-Conflict and scope analysis likewise reuse the engine's exported
-`patchOverlapsRead` / `resolveScopeKey` rather than re-deriving them.
+hand-rolled applier gets wrong. Stored payloads are decoded on the engine's
+terms as well: a document root is refused through the engine's own
+`isEntityDocument`, an absent document payload reads as `null` and an absent
+patch payload as `[]`, so a malformed write is rejected here exactly where the
+engine rejects it rather than being read as an absent one.
+`reconstruct-parity.test.ts` **drives the real engine** and asserts
+`reconstructDocument == engine.read()` across branch inheritance, child-local
+patches, tombstones, patch-first, and snapshots. Conflict and scope analysis
+likewise reuse the engine's exported `patchOverlapsRead` / `resolveScopeKey`
+rather than re-deriving them.
 
 The store can't be opened through the live `Engine` (its constructor runs
 migrations that would mutate the durable file), so reconstruction is a
@@ -243,12 +248,16 @@ A standalone `cli.ts` entry exists for use outside the `cf` CLI (local only;
   reconstruction FAILURES only. An unfiltered `entities` never has any — it
   returns a row for an unreadable entity rather than dropping it, labeled by why
   it could not be read — while `entities --kind` counts the rows the filter
-  dropped because they would not reconstruct. A row the filter drops on a kind
-  it did determine is not one of them: a tombstone classifies as `deleted` and a
-  document whose shape nothing recognizes as `unknown`, neither is a `piece`,
-  and neither is a gap in the answer. The HTML explorer banners both, because a
-  generated page is a file that outlives the stderr notice — it gets opened
-  later and shared with someone who never ran the command.
+  dropped because they would not reconstruct AND could have been the kind asked
+  for. A row the filter drops on a kind it did determine is not one of them: a
+  tombstone classifies as `deleted` and a document whose shape nothing
+  recognizes as `unknown`, neither is a `piece`, and neither is a gap in the
+  answer. Neither is an unreadable row under `--kind deleted`: what makes an
+  entity deleted is the OP of its visible row, which is read before any payload
+  is, so corruption cannot hide a tombstone and that scan is exhaustive. The
+  HTML explorer banners both, because a generated page is a file that outlives
+  the stderr notice — it gets opened later and shared with someone who never ran
+  the command.
 - **A scan sees what a read sees.** `visibleRevisionRows` is the one enumeration
   of what a branch can see, attributing each (scope, entity) to the nearest
   branch holding it; `visibleEntityRows`, `listScopes`, `scopeOverlay`, the HTML

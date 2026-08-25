@@ -780,6 +780,14 @@ export function listEntityModels(
   // what happened to it.
   const isUnreadable = (o: ReconstructOutcome): boolean =>
     o.status === "undecodable" || o.status === "empty";
+  // Whether corruption could be hiding the kind that was asked for. It cannot
+  // hide a tombstone: what makes an entity `deleted` is the OP of its visible
+  // row, which is read before any payload is, and an unreadable row's op is a
+  // `set` or a `patch`. So a `deleted` scan is exhaustive even over rows it
+  // could not decode, and counting them would make a complete listing report
+  // itself partial — turning `--require-complete` into a nonzero exit over an
+  // answer that was whole.
+  const concealable = kind !== "deleted";
 
   const kept: EntityScanRow[] = [];
   let truncated = false;
@@ -798,7 +806,7 @@ export function listEntityModels(
     const doc = documentOf(outcome);
     indexModule(r.id, doc);
     if (kind !== undefined && kindOf(outcome) !== kind) {
-      if (isUnreadable(outcome)) unreadable++;
+      if (concealable && isUnreadable(outcome)) unreadable++;
       continue;
     }
     if (kept.length === limit) {

@@ -18,10 +18,9 @@
 // no live runtime/cell). See packages/memory/v2/patch.ts.
 
 import { applyPatch } from "@commonfabric/memory/v2/patch";
-import type { PatchOp } from "@commonfabric/memory/v2";
+import { isEntityDocument, type PatchOp } from "@commonfabric/memory/v2";
 import type { FabricValue } from "@commonfabric/api";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import type { SpaceDb } from "./db.ts";
 import { decodeStored } from "./decode.ts";
@@ -100,6 +99,36 @@ interface RevRow {
 }
 
 const MAX_SEQ = Number.MAX_SAFE_INTEGER;
+
+/**
+ * Decode a stored document the way the engine's `decodeStoredDocument` does: a
+ * missing payload reads as `null`, and a root that is not a plain object is
+ * refused through the engine's own `isEntityDocument`. Testing the payload for
+ * truthiness instead would take an empty string — a malformed write — for an
+ * absent one and hand back a document the engine refuses to produce.
+ */
+function decodeStoredDocument(data: string | null): EntityDocument {
+  const parsed = decodeStored(data ?? "null");
+  if (!isEntityDocument(parsed)) {
+    throw new TypeError(
+      "memory v2 stored documents must be plain object roots",
+    );
+  }
+  return parsed as EntityDocument;
+}
+
+/**
+ * Decode a stored patch list as the engine's `decodeStoredPatchList` does. Here
+ * a missing payload IS an empty list — the asymmetry with a document is the
+ * engine's, not a shortcut.
+ */
+function decodeStoredPatchList(data: string | null): PatchOp[] {
+  const parsed = decodeStored(data ?? "[]");
+  if (!Array.isArray(parsed)) {
+    throw new TypeError("memory v2 stored patches must be arrays");
+  }
+  return parsed as PatchOp[];
+}
 
 /** Does this DB carry a given table? (legacy/partial DBs lack branch/snapshot.) */
 function hasTable(space: SpaceDb, name: string): boolean {
@@ -348,8 +377,8 @@ function reconstructWithinBranch(
     )
     .get<RevRow>(branch, id, scope, rowSeq, rowSeq, rowOpIndex);
 
-  let doc: FabricValue = base && base.op === "set" && base.data
-    ? (decodeStored(base.data) as FabricValue)
+  let doc: FabricValue = base && base.op === "set"
+    ? decodeStoredDocument(base.data) as FabricValue
     : {};
   let baseSeq = base ? base.seq : 0;
   let baseOpIndex = base ? base.op_index : -1;
@@ -393,7 +422,7 @@ function reconstructWithinBranch(
       rowOpIndex,
     );
   for (const p of patches) {
-    const ops = p.data ? (decodeStored(p.data) as PatchOp[]) : [];
+    const ops = decodeStoredPatchList(p.data);
     doc = applyPatch(doc, ops);
   }
   return doc;
@@ -447,6 +476,12 @@ export function reconstructOutcome(
   try {
     // A `set` stores no data only when `data` is NULL. An empty string is a
     // payload, and a malformed one — it belongs with the decode failures below.
+    //
+    // The engine reads a NULL payload as `null` and rejects it as a document,
+    // so this names as `empty` what the engine names an error. Both carry no
+    // document, which is what `reconstructDocument` reports either way; the
+    // status is finer than the engine's because a listing that says "(no data)"
+    // tells a reader something "(undecodable)" does not.
     if (row.op === "set" && row.data === null) return { status: "empty" };
     const decoded = row.op === "set"
       ? decodeStored(row.data!)
@@ -462,7 +497,7 @@ export function reconstructOutcome(
     // A document is a tree of top-level paths. Anything else — a stored `null`,
     // an array, a scalar — is malformed, and calling it present hands every
     // reader a value they will dereference as a document.
-    if (!isObjectNotArray(decoded)) {
+    if (!isEntityDocument(decoded)) {
       return {
         status: "undecodable",
         error: new TypeError(
