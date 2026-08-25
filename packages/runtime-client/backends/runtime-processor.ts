@@ -6,10 +6,7 @@ import {
 import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import {
-  toCompactDebugString,
-  toStructuredDebugValue,
-} from "@commonfabric/data-model/value-debug";
+import { toStructuredDebugValue } from "@commonfabric/data-model/value-debug";
 import {
   type SiteTable,
   siteTableCause,
@@ -492,19 +489,15 @@ export function toConsoleDebugValue(value: unknown): FabricValue {
  * Exported for testing.
  */
 export function toConsoleWireValue(value: unknown): RealmEncodedValue {
-  const debugValue = toConsoleDebugValue(value);
-
   try {
-    return realmFromFabricValue(debugValue);
+    return realmFromFabricValue(toConsoleDebugValue(value));
   } catch {
     // An object forged onto a `FabricPrimitive`'s prototype is a `FabricValue`
     // by every check and still has no encoding, so the encode is the one step
-    // here that a hostile argument can stop. Naming it is what the conversion
-    // does for a primitive it cannot descend anyway, and a name always
-    // encodes. What gets named is the converted value rather than the
-    // original, because the depth limit has been applied to it and rendering
-    // the original again would leave that limit behind.
-    return realmFromFabricValue(toCompactDebugString(debugValue));
+    // here a hostile argument can stop. It says so and says nothing further:
+    // the value was built to defeat this, and what a reader needs is the
+    // argument's position in the call, which arrives either way.
+    return realmFromFabricValue({ "/unconvertible": "no encoding for value" });
   }
 }
 

@@ -1424,49 +1424,27 @@ describe("toConsoleDebugValue", () => {
         .toEqual({ a: Symbol.for("tag") });
     });
 
-    it("returns a forged `FabricPrimitive` named rather than throwing", () => {
+    it("returns a forged `FabricPrimitive` as `/unconvertible`, not a throw", () => {
       // An object on a `FabricPrimitive`'s prototype passes every membership
       // check and has no encoding: `isValidFabricValue()` says true and the
-      // encode refuses. The handler must not throw over it, since a pattern
-      // can build one and the throw would abort its own `console.log()`.
+      // encode refuses. The handler must not throw over it, since the throw
+      // would abort the pattern's own `console.log()`. Nothing is said about
+      // what the value was -- it was built to defeat exactly this.
       const forged = Object.create(FabricBytes.prototype);
       expect(isValidFabricValue(toConsoleDebugValue(forged))).toBe(true);
       expect(() => realmFromFabricValue(toConsoleDebugValue(forged)))
         .toThrow();
       expect(fabricFromRealmValue(toConsoleWireValue(forged)))
-        .toBe("/Bytes(...)");
+        .toEqual({ "/unconvertible": "no encoding for value" });
     });
 
-    it("returns a forged `FabricPrimitive`'s fallback still depth-limited", () => {
-      // The fallback names the converted value, not the original: the limit
-      // has already been applied to the one and not to the other.
+    it("returns `/unconvertible` for the whole argument a forgery is buried in", () => {
+      // The failure is the argument's, not the position's: nothing of the
+      // surrounding value survives, which is the price of not sifting a
+      // hostile graph for the piece that broke.
       const forged = Object.create(FabricBytes.prototype);
-      let sib: unknown = { leaf: "bottom" };
-      for (let i = 0; i < 30; i++) sib = { [`l${i}`]: sib };
-
-      const arrived = fabricFromRealmValue(
-        toConsoleWireValue({ forged, sib }),
-      ) as string;
-      expect(arrived).toContain("/Bytes(...)");
-      expect(arrived).toContain('"/...":"object"');
-      expect(arrived).not.toContain("l24");
-      expect(arrived).not.toContain("bottom");
-    });
-
-    it("returns a forged `FabricPrimitive`'s fallback with markers unescaped", () => {
-      // The fallback renders a value the conversion has already been over, so
-      // its markers must come through as themselves. A renderer that converts
-      // what it is handed would escape each one a second time -- `/function`
-      // arriving as `//function` -- and the depth marker alone cannot say so,
-      // since the limit mints a fresh one at the same place either way.
-      const forged = Object.create(FabricBytes.prototype);
-      const arrived = fabricFromRealmValue(
-        toConsoleWireValue({ forged, fn: function named() {}, m: new Map() }),
-      ) as string;
-
-      expect(arrived).toContain('"/function":"named(...)"');
-      expect(arrived).toContain('"/Map":"/..."');
-      expect(arrived).not.toContain("//");
+      expect(fabricFromRealmValue(toConsoleWireValue({ a: 1, forged })))
+        .toEqual({ "/unconvertible": "no encoding for value" });
     });
 
     it("returns a unique symbol as its marker", () => {
