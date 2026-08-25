@@ -42,7 +42,10 @@
 import ts from "typescript";
 import { COMMONFABRIC_REACTIVE_ORIGIN_BUILDER_NAMES } from "../core/commonfabric-runtime-registry.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
-import { unwrapExpression } from "../utils/expression.ts";
+import {
+  unwrapExpression,
+  unwrapTransparentWrapperOnce,
+} from "../utils/expression.ts";
 import {
   classifyArrayMethodCallSite,
   detectCallKind,
@@ -831,7 +834,7 @@ export class PatternContextValidationTransformer
     if (ts.isFunctionDeclaration(node)) return undefined;
     let current: ts.Node = node;
     let parent = current.parent;
-    while (parent && this.transparentWrapperInner(parent) === current) {
+    while (parent && unwrapTransparentWrapperOnce(parent) === current) {
       current = parent;
       parent = current.parent;
     }
@@ -842,22 +845,6 @@ export class PatternContextValidationTransformer
       ts.isObjectLiteralExpression(parent.parent)
     ) {
       return parent;
-    }
-    return undefined;
-  }
-
-  // Expressions that wrap a value without changing it: parentheses, `as`,
-  // `satisfies`, non-null `!`, and `<T>` assertions. Returns the wrapped inner
-  // expression, or undefined when the node is not such a wrapper.
-  private transparentWrapperInner(node: ts.Node): ts.Expression | undefined {
-    if (
-      ts.isParenthesizedExpression(node) ||
-      ts.isAsExpression(node) ||
-      ts.isSatisfiesExpression(node) ||
-      ts.isNonNullExpression(node) ||
-      ts.isTypeAssertionExpression(node)
-    ) {
-      return node.expression;
     }
     return undefined;
   }
