@@ -724,8 +724,10 @@ async function entityCandidates(
   const space = openSpace(await resolveSpace(token));
   try {
     // No limit of its own: the set is what `cf inspect entities` would list
-    // with no `--limit`, so a completed id is one that command names too.
-    return values(shapeEntityCandidates(listEntityModels(space)));
+    // with no `--limit`, so a completed id is one that command names too. The
+    // listing reports its own extent, and a capped one is still every
+    // candidate this slot can honestly offer.
+    return values(shapeEntityCandidates(listEntityModels(space).entities));
   } finally {
     space.close();
   }
