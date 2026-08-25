@@ -36,10 +36,11 @@ JavaScript "wild west" (unknown/any) <-> Strongly typed (FabricValue) <-> Serial
   handling.
 
 - **Middle layer — `FabricValue`.** The strongly typed core of the data model.
-  Contains only primitives, `FabricInstance` implementations (including wrapper
-  classes for native JS types), and recursive containers. No raw native JS
-  objects appear at this layer — they are wrapped into `FabricInstance`
-  implementations by the conversion functions (Section 8).
+  Contains only primitives and containers, the latter being arrays, plain
+  objects, and `FabricInstance` implementations (including wrapper classes for
+  native JS types). No raw native JS objects appear at this layer — they are
+  wrapped into `FabricInstance` implementations by the conversion functions
+  (Section 8).
 
 - **Right layer — Serialized form.** The wire/storage representation
   (`Uint8Array` for binary formats, JSON-compatible trees for the JSON engine).
@@ -127,7 +128,7 @@ type FabricValue =
   //       - System types: `UnknownValue`, `ProblematicValue`
   | FabricInstance
 
-  // (d) Recursive containers -- read-only; see the immutability callout below
+  // (d) Plain containers -- read-only; see the immutability callout below
   | readonly FabricValue[]
   | { readonly [key: string]: FabricValue };
 ```
@@ -139,32 +140,43 @@ naming the `FabricPrimitive` subclasses individually — describes exactly the
 same set while saying more about it. Read the split as this document's
 elaboration of one implementation arm.
 
-> **Fabric values are deeply read-only, with one intentional hole.** The
+Arms (c) and (d) are the **containers** — the values that hold other
+`FabricValue`s, and so the values a walk descends into. The implementation
+names that set `FabricContainerValue`. What divides the two arms is where the
+contents live, not whether there are any: a plain container's contents are its
+own indices and keys, while a `FabricInstance` holds its contents privately and
+reaches them through the protocol of Section 2.3. Arms (a) and (b) are the
+non-containers, holding no `FabricValue` at all.
+
+> **Fabric values are deeply read-only, with one intentional hole.** The plain
 > container arms are read-only, and because their element and property types are
 > themselves `FabricValue`, that read-only-ness is inherited all the way down: a
 > `FabricValue` tree cannot be written through at any depth. The implementation
-> names the two container arms `FabricArray` (`ReadonlyArray<FabricValue>`) and
+> names those two arms `FabricArray` (`ReadonlyArray<FabricValue>`) and
 > `FabricPlainObject` (`Readonly<Record<string, FabricValue>>`); this is the
 > type-level counterpart of the runtime deep-freeze contract in Section 8.6, and
 > the two are meant to agree.
 >
-> The hole is the `FabricInstance` arm. An instance exposes arbitrary members,
-> and a member can change instance state — including which values the instance
-> refers to — so the read-only-ness stops at an instance boundary and does not
-> reach what lies beyond it. This is deliberate rather than an oversight: the
-> intended semantics *are* expressible in TypeScript, but not concisely enough
-> to be worth the cost at every use site. Treat the type-level guarantee as
-> covering the containers and the primitives, and Section 8.6 as the statement
-> that actually binds instances.
+> The hole is the `FabricInstance` arm — the one container the guarantee does
+> not reach. An instance exposes arbitrary members, and a member can change
+> instance state — including which values the instance refers to — so the
+> read-only-ness stops at an instance boundary and does not reach what lies
+> beyond it. This is deliberate rather than an oversight: the intended semantics
+> *are* expressible in TypeScript, but not concisely enough to be worth the cost
+> at every use site. Treat the type-level guarantee as covering the plain
+> containers and the primitives, and Section 8.6 as the statement that actually
+> binds instances.
 >
-> **Construction is the exception that proves the rule.** Building a container
-> requires writing to it, so the implementation provides
+> **Construction is the exception that proves the rule.** Building a plain
+> container requires writing to it, so the implementation provides
 > `MutableFabricValueLayer` — a value whose *root* container is mutable
 > (`MutableFabricArrayLayer` is `FabricValue[]`, `MutableFabricPlainObjectLayer`
 > is `Record<string, FabricValue>`) while everything nested within it remains an
-> ordinary read-only `FabricValue`. It is a single construction layer, not a
-> deep thaw, and it is a builder's type: a value that has finished being built
-> is a `FabricValue`.
+> ordinary read-only `FabricValue`. `MutableFabricContainerValueLayer` is that
+> same layer narrowed to the container arms, for a caller that has already
+> established it holds one. Each is a single construction layer, not a deep
+> thaw, and each is a builder's type: a value that has finished being built is a
+> `FabricValue`.
 
 > **Restricted and excluded JS types.**
 >
@@ -176,7 +188,7 @@ elaboration of one implementation arm.
 >   are rejected. The TypeScript `symbol` type cannot express this distinction,
 >   so it is enforced at runtime by the conversion, hashing, and encoding
 >   boundaries (Sections 4.9, 6, and 5). Symbol-keyed *properties* on plain
->   objects are a separate matter — see Section 1.5 (Recursive Containers /
+>   objects are a separate matter — see Section 1.5 (Plain Containers /
 >   Objects).
 > - `function` — Functions are opaque closures with no portable representation.
 >   They are explicitly **not** representable as `FabricValue`s, eliciting a
@@ -1369,7 +1381,11 @@ owned class to host a `[CODEC]`); see Section 4.5.
 > subclasses (`FabricEpochNsec`, `FabricEpochDay`, `FabricHash`, `FabricBytes`,
 > `FabricRegExp`) under `packages/data-model/fabric-primitives/`.
 
-### 1.5 Recursive Containers
+### 1.5 Plain Containers
+
+Two of the three container arms: the ones whose contents are structural, held
+as the value's own indices and keys. The third, `FabricInstance`, keeps its
+contents private and is governed by the protocol of Section 2.3 instead.
 
 **Arrays:**
 - Direct `Array` instances only: the prototype must be `Array.prototype`
@@ -2717,10 +2733,10 @@ act and hand the work to it. An engine is otherwise its configuration — the
 codec registry and the leniency setting — and the two factories that say which
 act classes this format uses.
 
-The walk itself, and the format's account of how a container is written down,
-belong to the acts. That is what lets the walk be written without a threaded
-parameter: the state one call carries and the methods that consult it are the
-same object.
+The walk itself, and the format's account of how a plain container is written
+down, belong to the acts. That is what lets the walk be written without a
+threaded parameter: the state one call carries and the methods that consult it
+are the same object.
 
 ```typescript
 // Shown at module scope.
@@ -3476,9 +3492,9 @@ export function hashOf(value: unknown): FabricHash {
 
 Hashing operates on `FabricValue` directly, using codec-encoded state for
 `FabricInstance`s (including the native object wrappers; via `codecOf()`,
-Section 2.4) and type-specific handling for primitives and containers. This
-makes identity hashing independent of any particular wire encoding — the same
-hash whether later serialized to JSON, CBOR, or Automerge.
+Section 2.4) and type-specific handling for primitives and plain containers.
+This makes identity hashing independent of any particular wire encoding — the
+same hash whether later serialized to JSON, CBOR, or Automerge.
 
 ### 6.6 Use Cases
 
@@ -3559,14 +3575,14 @@ boundary-only encoding and the three-layer architecture:
 
 > **`toJSON()` is not a conversion route.** The conversion functions give a
 > `toJSON()` method no standing: a value that is not a `FabricValue`, a
-> `FabricNativeObject`, or an accepted container does not become representable
-> by carrying one. An object bearing `toJSON` is read as the record it is, so
-> the method itself is an ordinary member — a function, which no record may
-> hold. Anything that needs a representation of its own implements the fabric
-> protocol (`FabricInstance` + `[CODEC]`); anything that a caller wants encoded
-> on its way in is that caller's to encode before it reaches the conversion.
-> Honoring `toJSON()` would eagerly convert to JSON-compatible shapes, which is
-> incompatible with late serialization.
+> `FabricNativeObject`, or an accepted plain container does not become
+> representable by carrying one. An object bearing `toJSON` is read as the
+> record it is, so the method itself is an ordinary member — a function, which
+> no record may hold. Anything that needs a representation of its own implements
+> the fabric protocol (`FabricInstance` + `[CODEC]`); anything that a caller
+> wants encoded on its way in is that caller's to encode before it reaches the
+> conversion. Honoring `toJSON()` would eagerly convert to JSON-compatible
+> shapes, which is incompatible with late serialization.
 
 ### 7.2 Unifying JSON Encoding
 
@@ -3999,9 +4015,9 @@ export function nativeFromFabricValue(
 | Plain objects | Recursively unwrapped; output frozen | Recursively unwrapped; output NOT frozen |
 
 The output type is `FabricConvertibleValue` (Section 1.2), reflecting that the
-result may contain native JS types at any depth — a container of them is neither
-a `FabricValue` nor a `FabricNativeObject`, so the recursive type is what names
-it.
+result may contain native JS types at any depth — a plain container of them is
+neither a `FabricValue` nor a `FabricNativeObject`, so the recursive type is
+what names it.
 
 > **Implementation: `FabricNativeWrapper` dispatch.** The unwrapping functions
 > use a single `instanceof FabricNativeWrapper` check to identify all native
@@ -4192,8 +4208,8 @@ from internal codec machinery to callers:
   calls `deepFreeze()`: the codec-produced value (often a `FabricPrimitive`
   subclass, already frozen — the cache hit makes this O(1)), the lenient-mode
   `ProblematicValue` fallback, and the unknown-tag arm's `UnknownValue`. A
-  container arm calls `Object.freeze()` on the array or object it has just
-  built, whose children the leaf arms have already deep-frozen, so the
+  plain-container arm calls `Object.freeze()` on the array or object it has
+  just built, whose children the leaf arms have already deep-frozen, so the
   guarantee holds without walking them a second time. Which arm produced a
   value is therefore not something a caller has to know. See Section 4.5
   step 4.

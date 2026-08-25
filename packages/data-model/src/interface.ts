@@ -222,6 +222,18 @@ export type MutableFabricArrayLayer = FabricValue[];
 export type MutableFabricPlainObjectLayer = Record<string, FabricValue>;
 
 /**
+ * A `FabricContainerValue` with a mutable root. Nested containers remain
+ * ordinary (readonly) `FabricValue`s, so this models a single construction
+ * layer rather than a deep thaw. A `FabricInstance` arm passes through
+ * unchanged: an instance's mutability is its own frozen state to report, not
+ * something a type can layer over it.
+ */
+export type MutableFabricContainerValueLayer =
+  | FabricInstance
+  | MutableFabricArrayLayer
+  | MutableFabricPlainObjectLayer;
+
+/**
  * A `FabricValue` with a mutable root container. Nested containers remain
  * ordinary (readonly) `FabricValue`s, so this models a single construction
  * layer rather than a deep thaw.

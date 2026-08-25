@@ -351,6 +351,15 @@ export type FabricValue =
   | FabricPlainObject
   | undefined;
 
+/**
+ * The container types that are part of `FabricValue`. Note that
+ * `FabricSpecialObject` is a combination of container and non-container.
+ */
+export type FabricContainerValue =
+  | FabricArray
+  | FabricInstance // One of the two direct subclasses of `FabricSpecialObject`.
+  | FabricPlainObject;
+
 /** A `FabricValue` other than `null` or `undefined`. */
 export type NonNullableFabricValue = NonNullable<FabricValue>;
 

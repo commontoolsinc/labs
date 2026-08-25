@@ -20,6 +20,7 @@ export {
   type FabricValue,
   type FabricValueLayer,
   type MutableFabricArrayLayer,
+  type MutableFabricContainerValueLayer,
   type MutableFabricPlainObjectLayer,
   type MutableFabricValueLayer,
   type NonNullableFabricValue,
