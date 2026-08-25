@@ -640,8 +640,17 @@ walks and subtracts the two provider tables from it, in three directions:
 
 - A slot with no provider, no enumerated set, and no allowlist entry.
 - A provider entry matching no slot — item 16's subtraction, made permanent.
-- An allowlist entry matching no slot, so the record of a decision cannot
+- An allowlist entry that decides no slot, so the record of a decision cannot
   outlive the thing it was about.
+
+A slot is one option on one command, not one option name. The scoped providers
+carry the commands they answer on, and the gate asks about each command the
+name is declared on separately: a `--from` answered on `space clone` says
+nothing about the `--from` on `inspect diff`, and reading the key alone would
+report the second as decided when what it offers is silence. The allowlist
+takes the same two shapes — a bare long name where nothing provides the option
+anywhere, and `<command path>:<long name>` for the commands where an option
+that is provided elsewhere means something else.
 
 It cannot decide that a slot *should* complete, and does not try. It requires
 that every slot has been decided about, and the allowlist is where a decision
@@ -653,3 +662,11 @@ out to be path-shaped and got directives rather than an allowance
 (`--pattern-coverage-dir`, `--timing-measures-out`, `--cfc-writeback-state`);
 the rest are counts, timestamps, pasted identifiers, coined words, and
 expressions with their own grammar.
+
+Asking per command named twenty more. One took candidates — `piece repair
+--list` names a piece, exactly as the `--list` on `piece survey` does. The rest
+are recorded: the two sequence numbers `inspect diff` spells `--from` and
+`--to`; the raw scope keys nine `inspect` subcommands take, which are read out
+of the data being inspected the way `--session` already is; and the eight
+projections that shape something other than the value at a target, which are
+items 6 and 5's `wish` half rather than an omission.

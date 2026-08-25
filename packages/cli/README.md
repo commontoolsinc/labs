@@ -1139,8 +1139,10 @@ stripped from `argv` before Cliffy parses, in `lib/log-level.ts` and
 behind that tree. It walks the same commands and names every value-taking option
 and every positional with no provider, no enumerated set, and no recorded reason
 for having none — and the same subtraction the other way, so a provider entry
-matching no slot fails too. It cannot decide that a slot should complete; it
-requires that somebody decided.
+matching no slot fails too. It asks per command rather than per option name,
+since a provider scoped to one command answers nothing on the others declaring
+the same flag. It cannot decide that a slot should complete; it requires that
+somebody decided.
 
 The tests divide the same way. `test/completion-*.test.ts` cover everything
 answerable without a fabric — line resolution, candidate shaping, and the

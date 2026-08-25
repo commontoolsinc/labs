@@ -9,16 +9,22 @@
  * is indistinguishable at the prompt from one whose fabric is unreachable —
  * both offer nothing — so the drift never announces itself.
  *
- * Both provider keys are derivable from the same tree the resolver walks: an
- * option's long name, and `<command path>:<argument name>`. So the drift is
+ * Both provider tables answer in command paths, and both are derivable from
+ * the same tree the resolver walks: a positional entry is keyed by
+ * `<command path>:<argument name>`, and an option entry carries the commands
+ * its provider answers on wherever it answers on some of them. So the drift is
  * machine-detectable, in three directions:
  *
  * - A slot with no provider, no enumerated set, and no allowlist entry.
  * - A provider entry matching no slot on the tree — the same subtraction run
  *   the other way, which is what found `log-file` and `state-path` belonging
  *   to commands that declare no Cliffy options at all.
- * - An allowlist entry matching no slot, so the record of a decision cannot
- *   outlive the thing it was about.
+ * - An allowlist entry that decides no slot, so the record of a decision
+ *   cannot outlive the thing it was about.
+ *
+ * A slot is one option ON one command, not one option name: `--from` is a
+ * snapshot file on `space clone` and a sequence number on `inspect diff`, and
+ * a provider for the first says nothing about the second.
  *
  * What this cannot decide is whether a slot SHOULD complete — plenty should
  * not. What it requires is that every slot has been decided about, which is
@@ -62,11 +68,16 @@ export const NO_CANDIDATES = new Map<string, string>([
 ]);
 
 /**
- * Options deliberately left without candidates, keyed by long name.
+ * Options deliberately left without candidates.
  *
- * The same question, answered per option rather than per slot: an entry here is
- * a value with no set to draw from, or one whose set would cost more to derive
- * than the keystrokes it saves.
+ * The same question, answered per option: an entry here is a value with no set
+ * to draw from, or one whose set would cost more to derive than the keystrokes
+ * it saves.
+ *
+ * A bare long name decides the option wherever it is declared, and is honest
+ * only where nothing provides it anywhere. An option a provider answers on one
+ * command means something else on the rest, so those are decided one at a time
+ * under `<command path>:<long name>`.
  */
 export const NO_OPTION_CANDIDATES = new Map<string, string>([
   // Numbers, durations and bounds. Nothing enumerates a count.
@@ -116,6 +127,38 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
     "an export name inside a pattern file, which needs the file compiled",
   ],
   ["filename", "a display name for what `cf view` is rendering"],
+  // The commands where an option a provider answers elsewhere means something
+  // else. `--from` and `--to` bound a range of commits here, where on
+  // `space clone` they name a snapshot file and a destination directory.
+  ["inspect diff:from", "a revision sequence number"],
+  ["inspect diff:to", "the same"],
+  // A raw scope key: `space`, `user:<did>`, or `session:<did>:<uuid>`, read
+  // out of the data being inspected — the disposition `--session`, which
+  // names the last of those parts, already carries. `inspect converge` reads
+  // across spaces, so it has no single store to read them from at all.
+  ["inspect conflicts:scope", "a stored scope key, read out of the data"],
+  ["inspect converge:scope", "the same, across every space compared"],
+  ["inspect diff:scope", "the same"],
+  ["inspect graph:scope", "the same"],
+  ["inspect history:scope", "the same"],
+  ["inspect html:scope", "the same"],
+  ["inspect piece:scope", "the same"],
+  ["inspect timeline:scope", "the same"],
+  ["inspect value-at:scope", "the same"],
+  // A projection into a VERB's result rather than into the value at a target,
+  // so its vocabulary is the verb's `outputSchema`. Item 6 of
+  // docs/plans/cli-completion-coverage.md builds it, and waits on step 10 of
+  // docs/plans/cli-surface-shape.md for the verb to precede the cursor.
+  ["call:select", "the verb's own result shape"],
+  ["call:schema", "the same"],
+  ["piece call:select", "the same"],
+  ["piece call:schema", "the same"],
+  ["exec:select", "the same"],
+  ["exec:schema", "the same"],
+  // `wish` projects what its query resolved to, and resolving a wish commits a
+  // cell to the space: a Tab must not write. Item 5's `wish` half, declined.
+  ["wish:select", "a resolution a Tab must not make"],
+  ["wish:schema", "the same"],
 ]);
 
 /** One positional the tree declares, and where it was found. */
@@ -133,13 +176,16 @@ export interface DeclaredSlots {
 
 /** What the check found, in the three directions it looks. */
 export interface SlotReport {
-  /** Options with no provider, no enumerated set, and no allowlist entry. */
+  /**
+   * Option slots — one option on one command — with no provider, no
+   * enumerated set, and no allowlist entry.
+   */
   readonly undecidedOptions: string[];
   /** Positionals with no provider and no allowlist entry. */
   readonly undecidedPositionals: string[];
   /** Provider entries matching no slot on the tree. */
   readonly unreachableProviders: string[];
-  /** Allowlist entries matching no slot on the tree. */
+  /** Allowlist entries that decide no slot on the tree. */
   readonly staleAllowlist: string[];
 }
 
@@ -182,23 +228,63 @@ export function collectSlots(
   return { options, positionals };
 }
 
+/** An option slot as a failure line reads it: the flag, and where it is. */
+function optionSlotLabel(name: string, where: string): string {
+  return `--${name}  (${where})`;
+}
+
+/** An option allowance as a failure line reads it, in either key form. */
+function allowanceLabel(key: string): string {
+  const cut = key.indexOf(":");
+  return cut === -1
+    ? `--${key}`
+    : optionSlotLabel(key.slice(cut + 1), key.slice(0, cut));
+}
+
 /** Subtract what completion decides about from what the tree declares. */
 export function reportSlots(
   declared: DeclaredSlots,
   known: {
-    readonly providerOptions: ReadonlySet<string>;
+    /**
+     * Option long name -> the command paths its provider answers on, or `null`
+     * where it answers on every command declaring the option.
+     */
+    readonly providerOptions: ReadonlyMap<string, readonly string[] | null>;
     readonly providerArguments: ReadonlySet<string>;
     readonly enumerated: ReadonlySet<string>;
     readonly allowedOptions: ReadonlySet<string>;
     readonly allowedPositionals: ReadonlySet<string>;
   },
 ): SlotReport {
+  // Every allowance that turned out to answer a slot. What is left over is a
+  // decision about something that is no longer there to decide.
+  const spent = new Set<string>();
+
   const undecidedOptions: string[] = [];
-  for (const [name, where] of [...declared.options].sort()) {
-    if (known.providerOptions.has(name)) continue;
-    if (known.enumerated.has(name)) continue;
-    if (known.allowedOptions.has(name)) continue;
-    undecidedOptions.push(`--${name}  (${where.join(", ")})`);
+  for (const [name, paths] of [...declared.options].sort()) {
+    const provided = known.providerOptions.get(name);
+    for (const where of [...paths].sort()) {
+      if (
+        provided !== undefined &&
+        (provided === null || provided.includes(where))
+      ) {
+        continue;
+      }
+      if (known.enumerated.has(name)) continue;
+      const scoped = `${where}:${name}`;
+      if (known.allowedOptions.has(scoped)) {
+        spent.add(scoped);
+        continue;
+      }
+      // A bare name decides the option across the whole tree, which is only
+      // honest where nothing provides it anywhere: an option a provider
+      // answers on one command has to be decided per command on the rest.
+      if (provided === undefined && known.allowedOptions.has(name)) {
+        spent.add(name);
+        continue;
+      }
+      undecidedOptions.push(optionSlotLabel(name, where));
+    }
   }
 
   const undecidedPositionals: string[] = [];
@@ -208,7 +294,10 @@ export function reportSlots(
     )
   ) {
     if (known.providerArguments.has(slot.key)) continue;
-    if (known.allowedPositionals.has(slot.key)) continue;
+    if (known.allowedPositionals.has(slot.key)) {
+      spent.add(slot.key);
+      continue;
+    }
     undecidedPositionals.push(slot.key);
   }
 
@@ -216,8 +305,17 @@ export function reportSlots(
     declared.positionals.map((slot) => slot.key),
   );
   const unreachableProviders: string[] = [];
-  for (const name of known.providerOptions) {
-    if (!declared.options.has(name)) unreachableProviders.push(`--${name}`);
+  for (const [name, paths] of known.providerOptions) {
+    const declaredOn = declared.options.get(name);
+    if (!declaredOn) {
+      unreachableProviders.push(`--${name}`);
+      continue;
+    }
+    for (const path of paths ?? []) {
+      if (!declaredOn.includes(path)) {
+        unreachableProviders.push(optionSlotLabel(name, path));
+      }
+    }
   }
   for (const key of known.providerArguments) {
     if (!positionalKeys.has(key)) unreachableProviders.push(key);
@@ -225,10 +323,10 @@ export function reportSlots(
 
   const staleAllowlist: string[] = [];
   for (const key of known.allowedPositionals) {
-    if (!positionalKeys.has(key)) staleAllowlist.push(key);
+    if (!spent.has(key)) staleAllowlist.push(key);
   }
-  for (const name of known.allowedOptions) {
-    if (!declared.options.has(name)) staleAllowlist.push(`--${name}`);
+  for (const key of known.allowedOptions) {
+    if (!spent.has(key)) staleAllowlist.push(allowanceLabel(key));
   }
 
   return {
@@ -246,7 +344,7 @@ export function describeFailures(report: SlotReport): string[] {
     lines.map((line) => `  ${line}`).join("\n");
   if (report.undecidedOptions.length > 0) {
     failures.push(
-      `${report.undecidedOptions.length} value-taking option(s) have no ` +
+      `${report.undecidedOptions.length} value-taking option slot(s) have no ` +
         `provider, no enumerated set, and no entry in NO_OPTION_CANDIDATES:\n` +
         block(report.undecidedOptions),
     );
@@ -266,7 +364,7 @@ export function describeFailures(report: SlotReport): string[] {
   }
   if (report.staleAllowlist.length > 0) {
     failures.push(
-      `${report.staleAllowlist.length} allowlist entr(ies) match no slot:\n` +
+      `${report.staleAllowlist.length} allowlist entr(ies) decide no slot:\n` +
         block(report.staleAllowlist),
     );
   }
@@ -299,14 +397,19 @@ export function main(args: readonly string[] = []): number {
     console.error(failures.join("\n\n"));
     console.error(
       "\nEither give the slot candidates in packages/cli/lib/completion/, or " +
-        "record why it has none in tasks/check-completion-slots.ts.",
+        "record why it has none in tasks/check-completion-slots.ts — under " +
+        "`<command path>:<name>` where the option means something else " +
+        "elsewhere.",
     );
     return 1;
   }
 
+  let optionSlots = 0;
+  for (const paths of declared.options.values()) optionSlots += paths.length;
   console.log(
-    `Completion slots OK (${declared.options.size} option name(s), ` +
-      `${declared.positionals.length} positional(s)).`,
+    `Completion slots OK (${optionSlots} option slot(s) over ` +
+      `${declared.options.size} name(s), ${declared.positionals.length} ` +
+      `positional(s)).`,
   );
   return 0;
 }
