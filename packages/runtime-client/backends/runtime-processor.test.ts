@@ -1437,6 +1437,22 @@ describe("toConsoleDebugValue", () => {
         .toBe("/Bytes(...)");
     });
 
+    it("returns a forged `FabricPrimitive`'s fallback still depth-limited", () => {
+      // The fallback names the converted value, not the original: the limit
+      // has already been applied to the one and not to the other.
+      const forged = Object.create(FabricBytes.prototype);
+      let sib: unknown = { leaf: "bottom" };
+      for (let i = 0; i < 30; i++) sib = { [`l${i}`]: sib };
+
+      const arrived = fabricFromRealmValue(
+        toConsoleWireValue({ forged, sib }),
+      ) as string;
+      expect(arrived).toContain("/Bytes(...)");
+      expect(arrived).toContain('"/...":"object"');
+      expect(arrived).not.toContain("l24");
+      expect(arrived).not.toContain("bottom");
+    });
+
     it("returns a unique symbol as its marker", () => {
       // Unlike an interned one, this has no encoding: the description is all
       // that can be said about it on the far side.

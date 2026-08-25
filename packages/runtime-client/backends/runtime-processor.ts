@@ -492,15 +492,19 @@ export function toConsoleDebugValue(value: unknown): FabricValue {
  * Exported for testing.
  */
 export function toConsoleWireValue(value: unknown): RealmEncodedValue {
+  const debugValue = toConsoleDebugValue(value);
+
   try {
-    return realmFromFabricValue(toConsoleDebugValue(value));
+    return realmFromFabricValue(debugValue);
   } catch {
     // An object forged onto a `FabricPrimitive`'s prototype is a `FabricValue`
     // by every check and still has no encoding, so the encode is the one step
     // here that a hostile argument can stop. Naming it is what the conversion
     // does for a primitive it cannot descend anyway, and a name always
-    // encodes.
-    return realmFromFabricValue(toCompactDebugString(value));
+    // encodes. What gets named is the converted value rather than the
+    // original, because the depth limit has been applied to it and rendering
+    // the original again would leave that limit behind.
+    return realmFromFabricValue(toCompactDebugString(debugValue));
   }
 }
 
