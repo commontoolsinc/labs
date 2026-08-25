@@ -1,3 +1,23 @@
+/**
+ * CT-1917 (2026-07-28 estuary): a hot-swap to a new pattern version re-runs
+ * setup, and setup re-validates the STORED argument against the candidate
+ * schema by materializing it — dereferencing every link. What that validation
+ * may conclude about a link-valued slot is tri-state, and this file pins the
+ * line: a target the replica has never pulled is NOT judged (the swap
+ * postpones and retries on convergence — the two-session cases cover that
+ * shape); a target the replica holds, or holds the CONFIRMED ABSENCE of, is
+ * judged as the data it is — so a required slot over a confirmed-absent doc
+ * holds the swap, V1 keeps running, and the first write that materializes
+ * the doc re-fires the watcher and completes it. No verdict is ever minted
+ * over bytes nobody read; no data that was read escapes its verdict.
+ *
+ * Production shape (the original incident): BacklinksIndex's `pieceRegistry`
+ * argument links into its host default-app's registry cell; the host was down
+ * (its own pattern failed to compile), the link read cold, and the
+ * official-pattern upgrade of BacklinksIndex died on "missing required
+ * property pieceRegistry".
+ */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
@@ -5,24 +25,6 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-
-// CT-1917 (2026-07-28 estuary): a hot-swap to a new pattern version re-runs
-// setup, and setup re-validates the STORED argument against the candidate
-// schema by materializing it — dereferencing every link. What that validation
-// may conclude about a link-valued slot is tri-state, and this file pins the
-// line: a target the replica has never pulled is NOT judged (the swap
-// postpones and retries on convergence — the two-session cases cover that
-// shape); a target the replica holds, or holds the CONFIRMED ABSENCE of, is
-// judged as the data it is — so a required slot over a confirmed-absent doc
-// holds the swap, V1 keeps running, and the first write that materializes
-// the doc re-fires the watcher and completes it. No verdict is ever minted
-// over bytes nobody read; no data that was read escapes its verdict.
-//
-// Production shape (the original incident): BacklinksIndex's `pieceRegistry`
-// argument links into its host default-app's registry cell; the host was down
-// (its own pattern failed to compile), the link read cold, and the
-// official-pattern upgrade of BacklinksIndex died on "missing required
-// property pieceRegistry".
 
 const signer = await Identity.fromPassphrase("pattern-swap-link-argument");
 const space = signer.did();

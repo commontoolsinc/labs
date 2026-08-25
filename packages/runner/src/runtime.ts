@@ -2200,7 +2200,11 @@ export class Runtime {
      * from the runtime's own. Absent = the runtime's own identity, the
      * pre-stage-A path byte for byte. */
     identity?: ScopeKeyIdentity,
-  ): void {
+    /** Whether a load is warranted or already in flight — `false` exactly
+     * when the local replica has SEEN the doc (its state, or its confirmed
+     * absence) and no fetch is pending, so a caller distinguishing "cannot
+     * read yet" from "read as absent" can gate on it. */
+  ): boolean {
     const { space, id, scope } = link;
     // Kick keys are per scope INSTANCE (key-vocabulary.md §5's stage-F
     // serving-hazard list): name-keyed, A's kick suppressed B's load and
@@ -2212,14 +2216,14 @@ export class Runtime {
     const key = `${space}\0${
       resolveScopeKey(scope, identity ?? this.scopeKeyIdentity)
     }\0${id}`;
-    if (this.missingDocLoadKicks.has(key)) return;
+    if (this.missingDocLoadKicks.has(key)) return true;
     // A same-space target the replica already has state for (or a manager
     // without lazy replication) needs no fetch.
     const sameSpace = sourceSpace === space;
     const mgr = this.storageManager;
     const reserved = sameSpace &&
       mgr.shouldPullDoc?.(space, id, scope, identity) === true;
-    if (sameSpace && !reserved) return;
+    if (sameSpace && !reserved) return false;
     this.missingDocLoadKicks.add(key);
     const load = identity === undefined
       ? this.getCellFromLink(link).sync()
@@ -2239,6 +2243,7 @@ export class Runtime {
         if (reserved) mgr.retractDocPullKick?.(space, id, scope, identity);
       }),
     );
+    return true;
   }
 
   getCfcStats(): Readonly<CfcRuntimeStats> {

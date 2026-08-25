@@ -1415,13 +1415,16 @@ export function validateAndTransform(
       // same-space only when the replica has never seen the doc); the
       // tracked read re-runs the reader on arrival. A served per-instance
       // run's absent target loads AS that run's instance (stage A — the
-      // runner's explicit-instance read). The miss is also noted on the
-      // transaction, so a caller that judges the materialized value can
-      // tell an absence it must wait out from a value it read and judged
-      // (setup's argument validation — see `Runner.validateArgument`).
+      // runner's explicit-instance read). When a load is warranted or in
+      // flight, the miss is also noted on the transaction, so a caller
+      // that judges the materialized value can tell an absence it must
+      // wait out from one the replica has CONFIRMED (setup's argument
+      // validation — see `Runner.validateArgument`); a confirmed absence
+      // is a judged read and leaves no note.
       (missing, sourceSpace) => {
-        noteMissingLinkTargetTx(tx!, missing);
-        runtime.ensureLinkedDocLoaded(missing, sourceSpace, runIdentity);
+        if (runtime.ensureLinkedDocLoaded(missing, sourceSpace, runIdentity)) {
+          noteMissingLinkTargetTx(tx!, missing);
+        }
       },
     ),
     objectCreator,

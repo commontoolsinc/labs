@@ -20,7 +20,10 @@ import type {
   IExtendedStorageTransaction,
   INotFoundError,
 } from "./storage/interface.ts";
-import { linkResolutionProbe } from "./storage/reactivity-log.ts";
+import {
+  linkResolutionProbe,
+  noteMissingLinkTargetTx,
+} from "./storage/reactivity-log.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type { Runtime } from "./runtime.ts";
 import type { CfcAddress, CfcDereferenceTrace } from "./cfc/types.ts";
@@ -459,6 +462,18 @@ export function resolveLinkTracingDereferences(
   // else = a present doc without this path).
   let followedHop = false;
   let pendingDeadEnd = false;
+  // Whether the hop that produced the CURRENT link kicked a pull for its
+  // target — a cross-space hop always does, a same-space one exactly when
+  // the replica has never seen the doc. A dead end behind such a hop is an
+  // absence the replica must still wait out, and is noted on the
+  // transaction for callers that judge materialized values (setup's
+  // argument validation); a dead end at a doc the replica has SEEN — its
+  // confirmed absence — leaves no note and is judged as the data it is.
+  // (A pull kicked by an EARLIER read and still unsettled reads as seen
+  // here — the reservation is already taken — so a racing judgment can
+  // land early; the settlement-awaiting retry around setup validation
+  // absorbs that window.)
+  let lastHopPullKicked = false;
   // The input handle's own provenance (link-types.ts `viaLinkHop`): a
   // handle minted from a stored sigil starts AT its hop target, so a
   // first-probe dead-end there is still a dead-end behind a hop — the
@@ -660,6 +675,7 @@ export function resolveLinkTracingDereferences(
       const mgr = runtime.storageManager;
       const reserved = !crossSpace &&
         mgr.shouldPullDoc?.(link.space, link.id, link.scope) === true;
+      lastHopPullKicked = crossSpace || reserved;
       if (crossSpace || reserved) {
         // Only the cross-space kick is replayed. A same-space one is taken
         // against a reservation, so a second resolution of this link would not
@@ -693,6 +709,7 @@ export function resolveLinkTracingDereferences(
         link.scope === "space"
       ) {
         pendingDeadEnd = true;
+        if (lastHopPullKicked) noteMissingLinkTargetTx(tx, link);
       }
       break;
     }
