@@ -10,6 +10,9 @@
  * inside it. Dispatch is generic in the base class, so nothing here enumerates
  * concrete subclasses.
  *
+ * That same privacy is why an instance is sealed at construction over a single
+ * non-enumerable own property; `[FREEZE_SHIELD]` covers the pair.
+ *
  * This module and the freeze utility import each other. The cycle is
  * deliberate, and is safe only because each side reaches the other from inside
  * a function body; a dereference during module evaluation would break it.
@@ -34,6 +37,24 @@ import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
  * in place; `deepClone()` constructs a new instance.
  */
 export const DEEP_FREEZE: unique symbol = Symbol("data-model.deepFreeze");
+
+/**
+ * Well-known symbol for the sole own property every `FabricInstance` carries:
+ * the one that keeps `Object.isFrozen()` an honest report of the instance's
+ * frozen state.
+ *
+ * An instance keeps its contents in private fields, and a sealed object with no
+ * own properties is *vacuously* frozen: `Object.isFrozen()` would answer `true`
+ * for a freshly built, fully mutable instance, and every thaw would then
+ * short-circuit to identity. One writable own property is what gives the
+ * predicate something to bear on -- `Object.freeze()` clears its `writable`
+ * bit, so `Object.isFrozen()` tracks the instance's frozen state exactly.
+ *
+ * The property is non-enumerable, so it stays out of every structural view: a
+ * spread, `Object.keys()`, `JSON.stringify()`, and a naive walk all see
+ * nothing. Its value is never read; existing is the whole of its job.
+ */
+export const FREEZE_SHIELD: unique symbol = Symbol("data-model.freezeShield");
 
 /**
  * Well-known symbol for checking whether a `FabricInstance` is already deeply
@@ -93,6 +114,30 @@ export const DEEP_CLONE_CORE: unique symbol = Symbol(
  * freeze-protocol plumbing (`[DEEP_FREEZE]()`, `[IS_DEEP_FROZEN]()`) live.
  */
 export abstract class BaseFabricInstance extends FabricInstance {
+  /**
+   * Constructs an instance: installs the `[FREEZE_SHIELD]` property, then
+   * seals. The seal makes an attempt to add a property to an instance throw,
+   * where it would otherwise attach data that no structural view, encoder, or
+   * hash goes on to see. The shield must precede the seal, for the reason its
+   * own doc gives.
+   *
+   * A subclass keeps its state in private fields, which are not properties and
+   * so are untouched by the seal. A subclass that declares a public field, or
+   * assigns one after `super()`, throws here by design.
+   */
+  constructor() {
+    super();
+
+    Object.defineProperty(this, FREEZE_SHIELD, {
+      value: false,
+      writable: true,
+      enumerable: false,
+      configurable: false,
+    });
+
+    Object.seal(this);
+  }
+
   //
   // Subclass contract
   //
