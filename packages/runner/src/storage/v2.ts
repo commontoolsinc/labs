@@ -4111,7 +4111,9 @@ class SpaceReplica implements ISpaceReplica {
         },
       }));
 
-      const { view, sync } = await session.watchAddSync(watches);
+      const { view, precedingSyncs, sync } = await session.watchAddSync(
+        watches,
+      );
 
       if (this.#closed) {
         view.close();
@@ -4120,6 +4122,22 @@ class SpaceReplica implements ISpaceReplica {
 
       this.#watchView = view;
       try {
+        for (const precedingSync of precedingSyncs) {
+          const precedingCids = precedingSync.upserts.flatMap((upsert) =>
+            typeof upsert.id === "string" && upsert.id.startsWith("cid:")
+              ? [upsert.id.slice(9, 16)]
+              : []
+          );
+          if (precedingCids.length > 0) {
+            console.error(
+              `[ow61-S2-replica] session=${session.sessionId}` +
+                ` space=${this.#space} type=preceding` +
+                ` toSeq=${precedingSync.toSeq}` +
+                ` cids=${precedingCids.join(",")}`,
+            );
+          }
+          this.applySessionSync(precedingSync, "integrate");
+        }
         const ow61Cids = sync.upserts.flatMap((upsert) =>
           typeof upsert.id === "string" && upsert.id.startsWith("cid:")
             ? [upsert.id.slice(9, 16)]
