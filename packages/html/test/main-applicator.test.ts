@@ -272,8 +272,8 @@ describe("DomApplicator", () => {
       const parent = applicator.getNode(1) as any;
       const child = applicator.getNode(2) as any;
       expect(parent.childNodes.length).toBe(1);
-      expect(parent.childNodes[0]).toEqual(child);
-      expect(child.parentNode).toEqual(parent);
+      expect(parent.childNodes[0]).toStrictEqual(child);
+      expect(child.parentNode).toStrictEqual(parent);
     });
 
     it("inserts child before another", () => {
@@ -355,10 +355,11 @@ describe("DomApplicator", () => {
         const staleParent = applicator.getNode(2) as unknown as {
           childNodes: Array<{ tagName: string }>;
         };
-        expect(laterParent.childNodes.map((child) => child.tagName)).toEqual([
-          "SPAN",
-        ]);
-        expect(staleParent.childNodes).toEqual([]);
+        expect(laterParent.childNodes.map((child) => child.tagName))
+          .toStrictEqual([
+            "SPAN",
+          ]);
+        expect(staleParent.childNodes).toStrictEqual([]);
       },
     );
 
@@ -388,7 +389,7 @@ describe("DomApplicator", () => {
         const parent = applicator.getNode(1) as unknown as {
           childNodes: Array<{ tagName: string }>;
         };
-        expect(parent.childNodes.map((child) => child.tagName)).toEqual([
+        expect(parent.childNodes.map((child) => child.tagName)).toStrictEqual([
           "A",
           "B",
           "C",
@@ -419,7 +420,7 @@ describe("DomApplicator", () => {
         const parent = applicator.getNode(1) as unknown as {
           childNodes: Array<{ tagName: string }>;
         };
-        expect(parent.childNodes).toEqual([]);
+        expect(parent.childNodes).toStrictEqual([]);
         expect(
           (applicator.getNode(2) as unknown as { tagName: string }).tagName,
         )
@@ -488,7 +489,7 @@ describe("DomApplicator", () => {
           parentNode: unknown;
           tagName: string;
         };
-        expect(parent.childNodes).toEqual([]);
+        expect(parent.childNodes).toStrictEqual([]);
         expect(pendingChild.parentNode).toBe(null);
 
         applicator.applyBatch({
@@ -496,8 +497,10 @@ describe("DomApplicator", () => {
           ops: [{ op: "remove-node", nodeId: 3 }],
         });
 
-        expect(parent.childNodes.map((child) => child.tagName)).toEqual(["A"]);
-        expect(pendingChild.parentNode).toEqual(parent);
+        expect(parent.childNodes.map((child) => child.tagName)).toStrictEqual([
+          "A",
+        ]);
+        expect(pendingChild.parentNode).toStrictEqual(parent);
       },
     );
 
@@ -613,7 +616,7 @@ describe("DomApplicator", () => {
         isTrusted: true,
       });
 
-      expect(events).toEqual([]);
+      expect(events).toStrictEqual([]);
       expect(applicator.getNode(1)).toBe(undefined);
       expect(applicator.getNode(2)).toBe(undefined);
     });
@@ -646,7 +649,7 @@ describe("DomApplicator", () => {
       expect(events[0].handlerId).toBe(42);
       expect(events[0].nodeId).toBe(1);
       expect(events[0].event.type).toBe("click");
-      expect(events[0].event.provenance).toEqual({
+      expect(events[0].event.provenance).toStrictEqual({
         origin: "dom",
         trusted: true,
       });
@@ -691,7 +694,7 @@ describe("DomApplicator", () => {
       const node = applicator.getNode(1) as any;
       node.dispatchEvent({ type: "click", target: node, isTrusted: true });
 
-      expect(events[0].event.target?.dataset).toEqual({
+      expect(events[0].event.target?.dataset).toStrictEqual({
         uiAction: "SubmitDirectCommand",
       });
     });
@@ -754,7 +757,7 @@ describe("DomApplicator", () => {
       const node = applicator.getNode(2) as any;
       node.dispatchEvent({ type: "click", target: node, isTrusted: true });
 
-      expect(events[0].event.provenance).toEqual({
+      expect(events[0].event.provenance).toStrictEqual({
         origin: "dom",
         trusted: true,
         ui: {
@@ -1038,7 +1041,7 @@ describe("DomApplicator", () => {
       applicator.setContainer(container);
 
       // Verify container is registered with ID 0
-      expect(applicator.getNode(0)).toEqual(container);
+      expect(applicator.getNode(0)).toStrictEqual(container);
     });
 
     it("allows inserting children directly into container", () => {
@@ -1175,7 +1178,7 @@ describe("DomApplicator", () => {
           await Promise.resolve();
 
           expect(node.value.constructor.name).toBe("CellHandle");
-          expect(requested).toEqual(["value"]);
+          expect(requested).toStrictEqual(["value"]);
         } finally {
           if (customElementsDescriptor) {
             Object.defineProperty(

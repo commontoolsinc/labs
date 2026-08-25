@@ -281,7 +281,7 @@ describe("main-renderer", () => {
       });
 
       expect(connection.sentEvents.length).toBe(1);
-      expect(connection.sentEvents[0]).toEqual({
+      expect(connection.sentEvents[0]).toStrictEqual({
         mountId,
         handlerId: 42,
         nodeId: 1,
@@ -330,7 +330,10 @@ describe("main-renderer", () => {
         rootId: 1,
       });
 
-      expect(connection.acknowledgedBatches).toEqual([{ mountId, batchId: 7 }]);
+      expect(connection.acknowledgedBatches).toStrictEqual([{
+        mountId,
+        batchId: 7,
+      }]);
 
       await renderer.dispose();
     });
