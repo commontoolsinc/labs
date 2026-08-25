@@ -148,6 +148,19 @@ ${fn}() {
     done
   fi
 
+  # A word opening with \`#\` is a comment to an interactive bash, which drops
+  # it and everything after it before the command is called: \`wish #profile\`
+  # runs \`wish\` with no target. \`\\#profile\` is one word to the shell and the
+  # bare \`#profile\` to the command, and completing it again reads back the
+  # same target, so the escape is added to the candidate rather than left to
+  # the caller to remember.
+  local j
+  for j in "\${!COMPREPLY[@]}"; do
+    case "\${COMPREPLY[j]}" in
+      '#'*) COMPREPLY[j]="\\\\\${COMPREPLY[j]}" ;;
+    esac
+  done
+
   # The trailing space is inverted rather than suppressed. \`compopt\` is the
   # per-completion switch and it is bash 4+, so the ${name} binding is
   # registered \`-o nospace\` and a candidate that should END the word carries

@@ -1059,6 +1059,22 @@ that should end the word carrying its own space: `compopt` is the per-completion
 switch and it is bash 4 and later, while macOS ships bash 3.2, so the space is
 inverted rather than suppressed. zsh does it natively.
 
+The inversion is registered on the `cf` binding alone. A `deno` line can be
+handed back to whatever completed `deno` beforehand, and that completion's own
+spacing has to survive the handoff, so the `deno` binding keeps bash's default
+and `deno task cf` pays a keystroke per path segment where `cf` does not. On
+bash 4 and later `compopt` reaches that binding too and the cost disappears;
+under bash 3.2 there is no per-completion switch to reach it with, and taking
+the space away from every `deno test` and `deno run` completion is the larger
+loss.
+
+A candidate that opens with `#` — every `cf wish` target but the root — is
+inserted backslash-escaped in bash, as `\#profile`. Written bare it would be a
+comment, and the target would never reach the command; the escape is one word to
+the shell and the bare target to the CLI, and completing it again reads back the
+same target. zsh quotes what it inserts, so it arrives escaped there without the
+script doing anything.
+
 ### `deno task cf` and other invocations
 
 The scripts bind `deno` as well as `cf`, so `deno task cf piece <TAB>` completes

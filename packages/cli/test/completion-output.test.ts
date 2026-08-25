@@ -303,6 +303,49 @@ Deno.test("generated bash script leaves the deno binding's spacing alone", () =>
   );
 });
 
+Deno.test("generated bash script escapes a candidate that would open a comment", async () => {
+  // `#profile` written into an interactive bash is a comment: the word, and
+  // the rest of the line with it, never reaches the command. `\#profile` is
+  // one word to the shell and the bare target to the CLI, and completing it
+  // again reads back the same target — so the candidate carries the escape
+  // rather than the caller having to remember it. Run through a real bash,
+  // because what is being asserted is what bash does with the script.
+  const dir = await Deno.makeTempDir();
+  try {
+    await Deno.writeTextFile(
+      `${dir}/cf`,
+      "#!/bin/sh\nprintf '#profileName\\n/\\nplain\\n'\n",
+    );
+    await Deno.chmod(`${dir}/cf`, 0o755);
+    await Deno.writeTextFile(`${dir}/cf.bash`, bashCompletionScript("cf"));
+    const { stdout } = await new Deno.Command("/bin/bash", {
+      args: [
+        "--norc",
+        "--noprofile",
+        "-c",
+        [
+          `PATH="${dir}:$PATH"`,
+          `. "${dir}/cf.bash"`,
+          `COMP_LINE='cf wish #profileN'`,
+          "COMP_POINT=17",
+          `COMP_WORDS=(cf wish '#profileN')`,
+          "COMP_CWORD=2",
+          "_cf_complete cf",
+          `printf '[%s]' "\${COMPREPLY[@]}"`,
+        ].join("\n"),
+      ],
+    }).output();
+    // Only the hashtag is escaped, and the trailing space each candidate
+    // carries is outside the escape.
+    assertEquals(
+      new TextDecoder().decode(stdout),
+      "[\\#profileName ][/ ][plain ]",
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("generated bash script avoids bash 4 builtins", () => {
   // macOS ships bash 3.2: `mapfile` does not exist at all, and `compopt` is
   // absent so it must be probed before use. Match on invocations rather than
