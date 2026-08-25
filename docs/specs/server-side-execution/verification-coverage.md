@@ -5951,8 +5951,9 @@ supply; OW29/OW32/OW34 closed):
     render` (`lunch-poll-vote.test.ts:306`), the GUEST's join click;
     the host always joins; the join card renders `Unknown profile` /
     `Create profile` forever because the viewer's `#profile` wish
-    never resolves. Everything before it passes in seconds (measured
-    steps 3.4-5.3 s even in reds). The store/log discriminator
+    never resolves. Everything before it passes in seconds even in
+    the reds; the wall time is entirely that 300 s net. The
+    store/log discriminator
     separates the arms 11/11 including the smoke: in every RED the
     guest's profile space holds exactly **4 commits, NO
     `patternIdentity` in any of them, and 0 mentions in the toolshed
@@ -7106,9 +7107,10 @@ supply; OW29/OW32/OW34 closed):
     EVIDENCE NOTE 2026-08-24 — the OBSERVED RATE collapsed; the row
     STAYS OPEN. Measured by the topics measurement campaign (seat
     `topics-benchmark`, branch
-    `claude/server-exec-v2-topics-benchmark`, park checkpoint
-    `97f0745e5` carrying the harness and the per-run artifacts;
-    report `topics-measure-report-2026-08-24.md` §2b/§5.3, untracked
+    `claude/server-exec-v2-topics-benchmark` — park checkpoint
+    `97f0745e5` plus evidence commits, the harness and per-run
+    artifacts committed under `.bench-artifacts/`; report
+    `topics-measure-report-2026-08-24.md` §2b/§5.3, untracked
     beside the worktrees) at tip `2ea87cea9` — #6199's CFC
     envelope/cid convergence, with OW45 arm-B stage 1 (#6210) in
     tree. The guard fired **0 times across the campaign's 20 journey
