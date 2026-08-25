@@ -216,6 +216,8 @@ Deno.test("live candidates: every path-shaped slot hands the shell its own direc
     ["cf deps update ", "files", undefined],
     ["cf fuse mount ", "dirs", undefined],
     ["cf fuse unmount ", "dirs", undefined],
+    ["cf piece repair --fixer ", "files", "*.ts"],
+    ["cf piece repair --plan ", "files", undefined],
   ];
   for (const [text, kind, glob] of cases) {
     const result = await liveCandidates(lineFor(text));
