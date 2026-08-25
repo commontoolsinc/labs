@@ -49,7 +49,7 @@ Calling a verb with an id the caller chose, so the outcome stays recoverable:
 
 ```bash
 export CF_INVOCATION_SESSION="$(cf invocation-session new)"
-cf piece call --piece <board> --invocation create-note-7 \
+cf call --piece <board> --invocation create-note-7 \
   createNote '{"title":"Notes"}'
 ```
 
@@ -67,7 +67,7 @@ Keeping that address means the result can be re-read later without running the
 verb again — an ordinary read, since a receipt is an ordinary cell:
 
 ```bash
-cf piece get --piece of:fid1:...
+cf get --piece of:fid1:...
 ```
 
 Losing that address is the case these notes do not solve; see
@@ -97,7 +97,7 @@ env-reachable
 ([EXPERIMENTAL_OPTIONS.md](../development/EXPERIMENTAL_OPTIONS.md)). When the
 runtime produces none, the response omits `receipt` — absent, never fabricated.
 
-**Not every receipt comes from `cf piece call`.** Shell clicks,
+**Not every receipt comes from `cf call`.** Shell clicks,
 background-piece-service runs, and pattern-internal chains all dispatch handlers
 and write receipts with deterministic ids: `queueSchedulerEvent`
 (`packages/runner/src/scheduler/events.ts`, behind the `queueEvent` facade) sets
@@ -125,7 +125,7 @@ Settlement — not that the handler ran. Two cases with opposite behavior:
   not run, but `result` stays `undefined` and `postRun(undefined)` runs anyway,
   writing `{}` — exactly the shape a value-less success writes.
 
-`cf piece call` catches the second in its pre-dispatch payload gate, so CLI
+`cf call` catches the second in its pre-dispatch payload gate, so CLI
 callers see a refusal that does not spend the id. Other dispatchers may not.
 
 | Question | Answer |
@@ -183,7 +183,7 @@ A detached caller knows the receipt address before the receipt exists, so the
 reader **subscribes and wakes when it appears**; it must not poll
 (AGENTS.md, "Avoid timeouts, retry loops, and sleeps";
 [waiting-in-tests.md](../development/waiting-in-tests.md)). `--wait <seconds>`
-bounds a caller's own patience, as on `cf piece call`.
+bounds a caller's own patience, as on `cf call`.
 
 `tx.handlingReceiptLink` is set during handling — before the commit, and only
 when receipts are enabled — which is what lets `--no-wait` return `receipt`:
@@ -200,7 +200,7 @@ losing the process's output entirely.
 | What the caller knows | Correct action |
 | --- | --- |
 | The invocation settled, and its receipt address was kept | Read that address — an ordinary read |
-| Uncertain whether the commit happened, or whether the handler failed | Repeat `cf piece call` with the same `--invocation` id |
+| Uncertain whether the commit happened, or whether the handler failed | Repeat `cf call` with the same `--invocation` id |
 | Response lost, including the receipt address | Replay, or accept the loss — see the deferred section |
 | No caller-chosen id retained | Recovery is not guaranteed |
 
@@ -247,7 +247,7 @@ the id outlives a lost commit but not a sync that never completes.
 Two call-specific cases. Failures inside a shaped read report under the read
 layer's rules.
 
-**`cf piece call` is unchanged.** A refused or failed call reports on stderr with
+**`cf call` is unchanged.** A refused or failed call reports on stderr with
 the existing `invocation: <id> phase: <phase>` line and exits non-zero. A settled
 call exits zero.
 

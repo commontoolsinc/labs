@@ -36,7 +36,7 @@ import {
   deepEqual,
   encodeJsonPointer,
   entityIdFrom,
-  experimentalOptionsFromEnv,
+  experimentalOptionsForDeployedClient,
   formatFabricRef,
   getCellOrThrow,
   getMetaLink,
@@ -282,7 +282,7 @@ function cfcLabelViewForCommand(
     : redactCaveatSourcesForDisplay(effectiveView);
 }
 
-/** A `cf piece get` path that lands ON a verb. Reading a verb returns the
+/** A read path that lands ON a verb, under either spelling. Reading a verb returns the
  * stream's serialization — never what the caller wanted — so the read refuses
  * and redirects instead, mirroring the llm-dialog read tool's "Path resolves
  * to a handler; use invoke() instead." (verb contract WS-F, read-path guard).
@@ -494,10 +494,22 @@ export async function loadPieces(
   config: SpaceConfig,
 ): Promise<PiecesController> {
   setLLMUrl(config.apiUrl);
-  const session = await timeCliPhase(
-    "loadPieces.makeSession",
-    () => makeSession(config),
-  );
+  // The deployment's own flag posture, with this process's explicit
+  // EXPERIMENTAL_* still winning per flag: a cf binary is installed
+  // independently of the server it talks to, so left to the environment alone
+  // it drifts (docs/development/EXPERIMENTAL_OPTIONS.md). Fetched alongside
+  // the session rather than before it — neither needs the other.
+  const [session, experimental] = await Promise.all([
+    timeCliPhase("loadPieces.makeSession", () => makeSession(config)),
+    timeCliPhase(
+      "loadPieces.serverExperimental",
+      () =>
+        experimentalOptionsForDeployedClient({
+          apiUrl: new URL(config.apiUrl),
+          env: Deno.env.get,
+        }),
+    ),
+  ]);
   // A `--space` given as a name has only now resolved to a DID; this is the
   // deferred half of the embedded-space check `normalizeLLMFriendlyRef`
   // performs at parse time for a DID-configured space.
@@ -519,7 +531,7 @@ export async function loadPieces(
             memoryHost: new URL(config.apiUrl),
             spaceIdentity: session.spaceIdentity,
           }),
-          experimental: experimentalOptionsFromEnv(Deno.env.get),
+          experimental,
           errorHandlers: [
             (error) => {
               runtimeErrors.push({
@@ -4072,7 +4084,7 @@ async function classifyReadPathVerb(
  * projection check as a matter of course — and that error tells the caller to
  * retry with `--step`, which sends them to re-run a read that cannot succeed
  * at any number of steps. Classify before surrendering to the projection
- * error so the refusal naming `cf piece call` wins. Returns null when the path
+ * error so the refusal naming `cf call` wins. Returns null when the path
  * is not certainly a verb, leaving the projection error exactly as it was.
  */
 async function verbReadRefusalOrNull(

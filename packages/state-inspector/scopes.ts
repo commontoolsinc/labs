@@ -32,6 +32,7 @@ import {
   type EntityDocument,
   reconstructDocument,
   selectAtPath,
+  visibleRevisionRows,
 } from "./reconstruct.ts";
 
 export type ScopeKind = "space" | "user" | "session" | "other";
@@ -82,24 +83,35 @@ const KIND_ORDER: Record<ScopeKind, number> = {
   other: 3,
 };
 
-/** Enumerate the scopes present in a space, with entity/revision counts. */
+/**
+ * Enumerate the scopes a read on this branch can see, with entity/revision
+ * counts.
+ *
+ * Reads through branch ancestry, because a child branch inherits its parent's
+ * per-user and per-session state along with everything else: enumerating only
+ * the scopes written ON the branch drops those, and a caller that walks this
+ * list to cover "every scope" would cover a subset without knowing. Each
+ * (scope, entity) is attributed to the nearest branch holding it, exactly as a
+ * read resolves it, so counts describe what is visible from here rather than
+ * summing a parent's history into a child's. A space with no child branches
+ * has a one-link chain, where this is the query it always was.
+ */
 export function listScopes(
   space: SpaceDb,
   opts: { branch?: string } = {},
 ): Scope[] {
-  const branch = opts.branch ?? "";
-  const rows = space.db
-    .prepare(
-      `SELECT scope_key, count(DISTINCT id) ents, count(*) revs
-       FROM revision WHERE branch = ? GROUP BY scope_key`,
-    )
-    .all<{ scope_key: string; ents: number; revs: number }>(branch);
-  return rows
-    .map((r) => ({
-      ...parseScope(r.scope_key),
-      entities: r.ents,
-      revisions: r.revs,
-    }))
+  // Counts cover every entity the branch holds records for, tombstoned ones
+  // included: a scope is a fact about what the store contains, and one whose
+  // entities were all deleted is still a scope that was written to.
+  const totals = new Map<string, { entities: number; revisions: number }>();
+  for (const row of visibleRevisionRows(space, { branch: opts.branch })) {
+    const total = totals.get(row.scope) ?? { entities: 0, revisions: 0 };
+    total.entities += 1;
+    total.revisions += row.revisions;
+    totals.set(row.scope, total);
+  }
+  return [...totals.entries()]
+    .map(([scope, total]) => ({ ...parseScope(scope), ...total }))
     .sort((a, b) =>
       KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || b.revisions - a.revisions
     );
@@ -349,12 +361,13 @@ export function scopeOverlay(
   opts: { branch?: string } = {},
 ): ScopeOverlay {
   const branch = opts.branch ?? "";
-  const rows = space.db
-    .prepare(
-      `SELECT scope_key, count(*) revs FROM revision
-       WHERE branch = ? AND id = ? GROUP BY scope_key`,
-    )
-    .all<{ scope_key: string; revs: number }>(branch, id);
+  // The scopes this branch holds records for, not only those written on it: an
+  // inherited entity's per-user variants live on the parent, and an overlay
+  // that missed them would report no divergence where there is some. Tombstoned
+  // heads are wanted here too — an entity present in one scope and DELETED in
+  // another is a divergence, and `(absent)` below is its own class of one.
+  const rows = visibleRevisionRows(space, { branch, id })
+    .map((r) => ({ scope_key: r.scope, revs: r.revisions }));
   // Content-key each variant from the RAW reconstructed value (hashStringOf is
   // already fabric-aware and depth-complete). Hashing the *annotated* value
   // would falsely converge — depth-8 truncation collapses values that differ

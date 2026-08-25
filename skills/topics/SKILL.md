@@ -128,7 +128,7 @@ deno task cf get --url "$TOPIC_URL" links --input \
 ```
 
 A `--select` segment ending in `@` returns that position's address instead of a
-copy of what is behind it, which is what a following `piece call` needs. It does
+copy of what is behind it, which is what a following `cf call` needs. It does
 not compose with `--filter` — a filtered array's survivors no longer say which
 positions they came from — so ask for an address in its own unfiltered read:
 
@@ -257,12 +257,12 @@ becomes a reference; one that names a web page stays a web page.
 ## Persistence and computed results
 
 Topics handlers commit source writes before result recomputation. Verify bodies,
-comments, links, titles, and the board's topic list with
-`piece get ... --input`. To read `topicCount`, `index`, `commentCount`,
-`lastActivityAt`, or other computed results, use `piece get ... --step`. This
-keeps start, pull, recomputation, synchronization, read, and stop in one CLI
-runtime; a separate `piece step` process cannot carry session-scoped
-materialization into a later `piece get` process.
+comments, links, titles, and the board's topic list with `cf get ... --input`.
+To read `topicCount`, `index`, `commentCount`, `lastActivityAt`, or other
+computed results, use `cf get ... --step`. This keeps start, pull,
+recomputation, synchronization, read, and stop in one CLI runtime; a separate
+`piece step` process cannot carry session-scoped materialization into a later
+`cf get` process.
 
 An unstepped result read with stored raw data but unresolved required values
 exits nonzero and points to `--step`; it is not an empty or absent result. If

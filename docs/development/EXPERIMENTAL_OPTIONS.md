@@ -32,7 +32,7 @@ was last checked against the code.
 | [`contentAddressedSchemas`](#contentaddressedschemas)                       | `EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS` env / shell build define, or `RuntimeOptions.experimental`                                                                  | on                                                                                   | Robin McCollum (PR #5833)                             | finish the spec's Phase 3 (retire transport schema compression for link positions), then delete flag                                                                                                                              | implemented, on by default                                                      |
 | [`commitPreconditions`](#commitpreconditions)                               | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry)                             | on                                                                                   | Bernhard Seefeld (#4090)                              | fold into base scheduler semantics, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`plainResultReceipts`](#plainresultreceipts)                               | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env, or `RuntimeOptions.experimental`                                                                      | on                                                                                   | Mike Salisbury (verb contract WS-C)                   | fold into receipt semantics and delete flag after a bake period                                                                                                                                                                   | implemented, on by default                                                      |
-| [`systemPatternAutoUpdate`](#systempatternautoupdate)                       | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental`                                             | on in the shell (same-toolshed system sources, including all roots); ALSO on server-side under server-execution (`server-execution.ts:171` defaults it true — serving-loop.md §3e; both runtimes then race the update, OCC-guarded and content-addressed — verification-coverage.md OW56 finding 2) | Bernhard Seefeld (#4611; shell default-on #4619)      | graduate to always-on, then delete flag                                                                                                                                                                                           | implemented, on in the shell                                                    |
+| [`systemPatternAutoUpdate`](#systempatternautoupdate)                       | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental`                                             | on in the shell (same-toolshed system sources, including all roots); ALSO on server-side under server-execution (`SERVING_RUNTIME_EXPERIMENTAL` in `toolshed/lib/server-execution.ts` forces it true for every serving runtime, and `/api/meta` publishes it — serving-loop.md §3e; both runtimes then race the update, OCC-guarded and content-addressed — verification-coverage.md OW56 finding 2) | Bernhard Seefeld (#4611; shell default-on #4619)      | graduate to always-on, then delete flag                                                                                                                                                                                           | implemented, on in the shell                                                    |
 | [`computedCellIds`](#computedcellids)                                       | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental`                                                                          | on                                                                                   | Robin McCollum (#4659)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`lazyMaterialization`](#lazymaterialization)                               | `EXPERIMENTAL_LAZY_MATERIALIZATION` env, or `RuntimeOptions.experimental`                                                                       | on                                                                                   | Bernhard Seefeld                                      | fold into base read semantics, then delete flag                                                             | implemented, on by default                                         |
 | [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | off (`SERVER_EXECUTION_DEFAULT_ENABLED = false` — the ONE first-party default; Phase 7 landed flip-READY, DARK; explicit `true` = the ON arm) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | the flip is its OWN one-line PR after the plan's Phase-7 ordered gates; then soak on main, then delete the flag and the OFF path (the split-out post-soak PR) | Phases 1–6 landed; Phase 7 flip-READY landed dark (owner ruling 2026-08-16): OFF by default everywhere, the ON arm fully selectable and CI-tested on an ON-built binary |
@@ -85,6 +85,14 @@ is mapped to `null` there, which records the decision rather than leaving an
 omission. The mapping accepts exactly `"true"` and `"false"`; any other
 value is ignored with a warning rather than coerced. See
 [How flags propagate](#how-flags-propagate).
+
+A client that is not built alongside the server it talks to — the `cf` binary
+among them — starts from the posture that deployment publishes rather than
+from its own environment, with an explicit `EXPERIMENTAL_*` still winning per
+flag. Which flags it takes that way is the second registry in the same file,
+`EXPERIMENTAL_FLAG_AUTHORITY`; see
+[Clients that are not built alongside their
+server](#clients-that-are-not-built-alongside-their-server).
 
 ### `modernCellRep`
 
@@ -1221,8 +1229,18 @@ Server Process (Deno)
   +-- toolshed/index.ts           --> new Runtime(toolshedRuntimeOptions(...))
 ```
 
-The background piece service and the CLI use the same mapping and the same
-presets, so the three server-side wirings agree on how a value parses.
+The background piece service's main and worker processes use the same mapping
+and the same presets, so the server-side wirings agree on how a value parses.
+
+The CLI is not one of them. `cf`, the pieces controller behind it, the agents
+host and `cast-admin` are clients of a deployment rather than part of one, and
+they resolve their posture from that deployment first — the environment
+supplies their overrides, not their starting point. Their wiring is
+[Clients that are not built alongside their
+server](#clients-that-are-not-built-alongside-their-server). The CLI's
+LOCAL modes (`cf test`, `cf dev`) run against emulated storage, have no
+deployment to ask, and do read the environment alone, through this same
+mapping.
 
 ### Browser-side (build-time injection)
 
@@ -1252,11 +1270,108 @@ on restart without a rebuild. The browser is also the one place a CFC dial is
 host-controlled at construction: the `browserWorker` preset takes
 `cfcEnforcementMode` and `cfcFlowLabels` from the shell's initialization data.
 
+### Clients that are not built alongside their server
+
+The shell cannot disagree with its server: toolshed bakes the defines and
+serves the bundle, so a browser runs the posture of the deployment it loaded
+from. Every other client is installed, deployed, or checked out on its own
+schedule — the `cf` binary, the pieces controller a FUSE mount opens, the
+agents host, the background-piece admin CLI — and the environment they read
+belongs to whoever launched them, not to the deployment they talk to. Left
+there, the operator has to know a deployment's flags and set them by hand, and
+nothing reports it when they do not.
+
+These clients take the posture from the server instead. Each one calls
+`experimentalOptionsForDeployedClient` in place of `experimentalOptionsFromEnv`
+before constructing its `Runtime`:
+
+```
+cf / pieces controller / agents host / cast-admin
+  |
+  +-- GET <apiUrl>/api/meta  --> { experimental: { <flag>: <boolean>, ... } }
+  |     the posture the SERVER runs at
+  |
+  +-- runner/runtime-presets.ts --> experimentalOptionsForDeployedClient()
+  |     explicit EXPERIMENTAL_* > server declaration > built-in default
+  |
+  +-- runtimePresets.remoteClient({ experimental, ... })
+```
+
+What the server publishes is the posture its constructed `Runtime` resolved —
+built-in defaults and preset resolution included, not a second reading of its
+own environment that could disagree with the first. A flag the server left
+unresolved is omitted, and a server that has no `Runtime` yet publishes
+`null`; a client reads either as "this deployment said nothing" and keeps its
+own default. Absence of a declaration is never a declaration of `false`, which
+is what lets a client of an older server behave exactly as it did before the
+server published anything.
+
+A serving toolshed runs two kinds of runtime, and what it publishes is the
+posture it SERVES at. The generic runtime it constructs for webhook pattern
+execution supplies the base; under server-execution the per-space serving
+runtimes force `serverExecution` and `systemPatternAutoUpdate` on top of it
+(`SERVING_RUNTIME_EXPERIMENTAL` in
+[`packages/toolshed/lib/server-execution.ts`](../../packages/toolshed/lib/server-execution.ts),
+the one place those two are written), and those override the base for as long
+as the serving loop runs. Every other flag reaches both runtimes from the same
+environment, so the base already carries it.
+
+Three rules govern what a client does with a declaration:
+
+- **An explicit `EXPERIMENTAL_*` still wins.** It outranks the declaration:
+  it is the documented rollback lever and how CI pins a lane, and a server
+  able to overrule it would leave neither mechanism working. Setting one is
+  also how you disagree with a deployment on purpose.
+- **Only a server-authoritative flag is adopted.**
+  `EXPERIMENTAL_FLAG_AUTHORITY` in
+  [`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts)
+  classifies every flag as `"server"` or `"client"`, type-gated the same way as
+  the environment mapping, so a new flag does not compile until someone decides
+  whether a `cf` binary follows the deployment on it. Every flag is `"server"`
+  today: each is visible in what gets written, in what the server admits, or in
+  which side runs the compute. `"client"` is for a flag that gates a purely
+  in-process experiment — over-adopting costs nothing, while a client
+  diverging where it should not is a silent corruption, so classify toward
+  `"server"` when the answer is not obvious.
+- **A client adopts only flags it knows.** The declaration is read through an
+  allowlist of this build's own flags, and only boolean values: a key from a
+  newer server is ignored as a matter of course, and a malformed value is
+  dropped with a warning rather than coerced.
+
+`CF_ADOPT_SERVER_FLAGS=false` turns the whole mechanism off for one process,
+for the case where a deployment publishes something a client cannot run and you
+do not yet know which flag it is. Per-flag `EXPERIMENTAL_*` overrides are the
+answer when you do.
+
+A caller whose startup can be cancelled passes its `AbortSignal`, and the
+request carries it. Without one, a deployment that accepts the connection and
+then says nothing holds that startup for as long as it stays silent, with no
+shutdown able to reach it. An aborted signal is the one failure that does not
+resolve to the environment: it throws the abort reason, because the caller has
+stopped wanting a posture at all.
+
+Presets that run against local emulated storage — `cf test`, `cf dev`, the
+pattern harnesses — have no server to ask and keep reading the environment
+alone. The background piece service's own main and worker processes have one
+but do not ask it: they are deployed with the same environment as the toolshed
+they serve alongside, and read it directly through `productionServer`.
+
+The adoption happens before `new Runtime(...)`, not at the memory handshake,
+even though `hello`/`hello.ok` already carries capability flags in both
+directions. Flags such as `modernCellRep` reach ambient control points inside
+the constructor, before the transport connects, so a handshake-time value
+would arrive after the process had already committed to a serialization. The
+handshake's job stays what it is: refusing a connection whose peer resolved a
+wire contract differently — which, for a client that adopts, is a mismatch
+that should no longer arise.
+
 ### Background piece service
 
 The background piece service reads the same environment variables and builds its
-runtimes (the main process and each worker) through the `productionServer`
-preset, so set the same `EXPERIMENTAL_*` variables when starting it.
+main and worker runtimes through the `productionServer` preset, so set the same
+`EXPERIMENTAL_*` variables when starting it. Its `cast-admin` CLI is the
+exception: that one is a client of whatever toolshed it is pointed at, and
+adopts the deployment's posture like the others above.
 
 ## Enabling flags locally
 
@@ -1347,6 +1462,13 @@ config reaches:
   a decision about how each preset treats it.
 - `coreOptions` holds the shared first-party posture (today, the CFC pins) that
   every preset composes.
+- `EXPERIMENTAL_FLAG_AUTHORITY` classifies every flag as `"server"` or
+  `"client"` for a client that is not built alongside its server, typed the same
+  way, so a new flag forces that decision too.
+  `experimentalOptionsForDeployedClient` resolves one client's posture through
+  it; see
+  [Clients that are not built alongside their
+server](#clients-that-are-not-built-alongside-their-server).
 
 - Only one set of experimental flags is active per JavaScript context at a time.
 - In the browser the web worker is a separate JavaScript context, so its flags
@@ -1471,6 +1593,12 @@ sweep does not mistake them for missing experimental flags:
   [the configuration reference](./CONFIGURATION.md#runner-diagnostics).
 - **CLI controls** (environment): `CF_EXEC_SHEBANG`, `CF_CLI_TRACE_TIMINGS`,
   `CF_PROFILE_DONE_MARKER`.
+- **`CF_ADOPT_SERVER_FLAGS`** — set to `false` to stop a client that is not
+  built alongside its server from adopting that deployment's posture, leaving
+  it on its own environment. An escape hatch over the mechanism, not a flag
+  over a feature; see
+  [Clients that are not built alongside their
+server](#clients-that-are-not-built-alongside-their-server).
 - **Operational and build toggles**: `RATE_LIMIT_TRUST_FORWARDED_FOR`
   (deployment topology, not a feature dial — see CONFIGURATION.md),
   `MEMORY_ACL_MODE` (`off` / `observe` /

@@ -3631,14 +3631,28 @@ export class Server {
         }
       }
 
+      // Diff first, commit the session cache after (review finding S4 —
+      // the build-then-commit discipline the push path's commitEntities
+      // states): the cache is the delivered-entries diff base, so any
+      // failure between here and the response must leave it untouched —
+      // a cache that already claims the frame's entries delivered while
+      // the requester got a QueryError elides them from every later
+      // diff, a durable silent under-delivery for the session. This
+      // also keeps the catch's "evaluation state is staged" comment
+      // true. No throw-capable step sits between the diff and the
+      // commit TODAY (the closure pass that motivated the reorder was
+      // removed with the per-frame resend — OW61's reversal ruling);
+      // the ordering is kept as hygiene so the next inserted step does
+      // not silently reintroduce the poisoning.
       const upserts: SessionCacheEntry[] = [];
       for (const [key, entry] of updates) {
-        const previous = session.entities.get(key);
-        session.entities.set(key, entry);
-        session.trackedIds.add(toDirtyKey(entry.id, entry.scopeKey));
-        if (!sameSnapshot(previous, entry)) {
+        if (!sameSnapshot(session.entities.get(key), entry)) {
           upserts.push(entry);
         }
+      }
+      for (const [key, entry] of updates) {
+        session.entities.set(key, entry);
+        session.trackedIds.add(toDirtyKey(entry.id, entry.scopeKey));
       }
 
       const serverSeq = Engine.serverSeq(engine);

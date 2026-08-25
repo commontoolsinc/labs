@@ -90,12 +90,12 @@ Commands that take a piece accept two textual reference forms:
 New reference-syntax capabilities land in the canonical form first; the alias
 does not grow a capability the canonical form lacks.
 
-On `piece get`, `piece set`, and `piece call`, a canonical reference can sit in
-the first positional instead of riding `--piece`: an address begins with `/` and
-a relative path never does, so the two positions cannot collide. The bare and
-slug spellings stay on `--piece`, where no path competes for the position.
-Naming the target twice — `--piece` beside a positional address — is refused
-rather than resolved.
+On `cf get`, `cf set`, and `cf call`, a canonical reference can sit in the first
+positional instead of riding `--piece`: an address begins with `/` and a
+relative path never does, so the two positions cannot collide. The bare and slug
+spellings stay on `--piece`, where no path competes for the position. Naming the
+target twice — `--piece` beside a positional address — is refused rather than
+resolved.
 
 Those three commands are also mounted at top level as `cf get`, `cf set`, and
 `cf call`: reading and writing cells is not a piece-management concern, and the
@@ -132,7 +132,10 @@ naming the piece. A `--list` survey reads exactly the pieces named and makes no
 containment claim; each entry takes either reference form, and a canonical
 entry's embedded space composes the way it does on `--piece` — supplying the
 space when `--space` is absent, agreeing with it otherwise. Read-only; the
-spelling is provisional until the bulk write operations get a home.
+spelling is provisional until the bulk write operations get a home. To watch the
+surface work rather than read about it, `integration/bulk-ops-demo.sh` narrates
+a board-sized survey end to end against a running server, with the unbuilt write
+stages shown as pending acts.
 
 `cf piece slugs` lists the space's slug index: every name assigned through
 `--slug` or `set-slug`, each resolved to the piece it names. The index records
@@ -216,7 +219,7 @@ from a later update preserves an existing unambiguous class.
 ## Output Conventions
 
 - stdout carries command output only; hints and diagnostics go to stderr.
-  `piece get` prints JSON and represents an absent value as `null`.
+  `cf get` prints JSON and represents an absent value as `null`.
 - ANSI colors are emitted only when stdout is a TTY. `--no-color` or
   `NO_COLOR=1` disables them everywhere (including Cliffy help/usage output);
   `FORCE_COLOR=1`/`CLICOLOR_FORCE=1` forces them when piped. The policy is
@@ -228,9 +231,9 @@ from a later update preserves an existing unambiguous class.
   parse `--quiet` runs' stderr for runtime warnings (Loom's stale-root heal
   greps for `load-pattern-by-identity-source-miss`). Use `--log-level error` to
   drop warnings; the two compose.
-- `piece call` accepts its payload as an inline JSON argument, `-` for stdin, an
+- `cf call` accepts its payload as an inline JSON argument, `-` for stdin, an
   implicit pipe (no payload argument), or schema-derived flags after `--`.
-- A `piece get` path that doesn't resolve prints a one-line error on stderr and
+- A `cf get` path that doesn't resolve prints a one-line error on stderr and
   exits 1 — it is a data error, not a usage error. A `piece link` that fails
   validation (a source/target piece or path that doesn't exist) reports the same
   way.
@@ -239,7 +242,7 @@ from a later update preserves an existing unambiguous class.
 
 ### What a call refuses before it dispatches
 
-`piece call` judges the payload against the verb's declared event schema before
+`cf call` judges the payload against the verb's declared event schema before
 anything is sent, so a refusal costs nothing: the invocation id was never spent
 and the corrected retry can reuse it.
 
@@ -303,8 +306,8 @@ them takes the same three flags — `--filter`, `--select` and `--schema` — wi
 the same grammar, the same conflict rule and the same error messages. The
 vocabulary is learned once and written wherever you arrived from.
 
-`piece get` filters an array before it reaches stdout and projects the result to
-a smaller shape:
+`cf get` filters an array before it reaches stdout and projects the result to a
+smaller shape:
 
 ```bash
 cf get --piece ID items --filter '.status == "open"'
@@ -313,7 +316,7 @@ cf get --piece ID items \
   --select id,title,author.name
 ```
 
-`piece call` writes them before the callable name:
+`cf call` writes them before the callable name:
 
 ```bash
 cf call --piece ID --select topic.title addTopic '{"title":"Ship it"}'
@@ -342,12 +345,12 @@ for the `cf exec` spelling when you want to shape what comes back.
 Everything below describes all four. What differs is only what the selection is
 about:
 
-| Command      | What the selection shapes                                                                                |
-| ------------ | -------------------------------------------------------------------------------------------------------- |
-| `piece get`  | the value at the cell its address and path name                                                          |
-| `piece call` | the **result of the call** — a handler's `result` inside the Invocation JSON, or a tool's JSON on stdout |
-| `wish`       | the cell the query resolved to, before the walk that strips handles                                      |
-| `exec`       | the same result `piece call` shapes, for the verb the mounted file names                                 |
+| Command   | What the selection shapes                                                                                |
+| --------- | -------------------------------------------------------------------------------------------------------- |
+| `cf get`  | the value at the cell its address and path name                                                          |
+| `cf call` | the **result of the call** — a handler's `result` inside the Invocation JSON, or a tool's JSON on stdout |
+| `wish`    | the cell the query resolved to, before the walk that strips handles                                      |
+| `exec`    | the same result `cf call` shapes, for the verb the mounted file names                                    |
 
 See [what a selection means for a call](#what-a-selection-means-for-a-call) for
 the cases where the call's difference shows. `exec` is the same invocation
@@ -822,11 +825,11 @@ printf '%s' '{"query":"milk"}' | cf call ... search --json
 ```
 
 Bare `--json` reads stdin. An inline value immediately after it is parsed as the
-complete input. `piece call` also accepts a single positional JSON value. Put
+complete input. `cf call` also accepts a single positional JSON value. Put
 schema-derived piece-call flags after `--`, for example
 `cf call ... search -- --query milk`. Use `-- --json-file <path>` for a
 piece-call JSON file. These rules keep the options before the callable name for
-`piece call` itself and the arguments after the name for the invoked callable.
+`cf call` itself and the arguments after the name for the invoked callable.
 
 ## Command visibility
 
@@ -972,8 +975,8 @@ such as `--log-level` — plus live values read from the fabric:
 | Slot                            | Completes to                                |
 | ------------------------------- | ------------------------------------------- |
 | `--piece`                       | piece ids, annotated with each piece's name |
-| `piece call <callable>`         | the piece's callables, as `cf piece verbs`  |
-| `piece get`/`set <path>`        | cell keys, one path segment at a time       |
+| `cf call <callable>`            | the piece's callables, as `cf piece verbs`  |
+| `cf get`/`cf set <path>`        | cell keys, one path segment at a time       |
 | `piece link <source>/<target>`  | `pieceId/path/to/field` endpoints           |
 | `--space`                       | space DIDs of local memory-v2 stores        |
 | `--identity`, pattern arguments | `*.key` / `*.tsx` files, via the shell      |

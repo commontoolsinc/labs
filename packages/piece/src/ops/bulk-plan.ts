@@ -77,6 +77,14 @@ export interface PieceExpect {
    * transition appends a baseline revision, so a survey cannot read one for it.
    */
   revisionId?: string;
+  /**
+   * The hash of the piece's stored input document, recorded by a repair's
+   * dry run. It is the repair row's precondition the way the reference pair
+   * is a retarget row's: the apply refuses a row whose stored document no
+   * longer hashes to it, because a document something else moved is a stop,
+   * not an overwrite.
+   */
+  documentHash?: string;
 }
 
 /** Replace a piece's source with the program a local source closure produces. */
@@ -142,8 +150,21 @@ export interface RestoreOp {
   revisionId?: string;
 }
 
+/**
+ * Run a caller-supplied fixer over the piece's stored input document. The
+ * fixer itself is a TypeScript module the run imports, so the plan records
+ * only its name for readers and for diffing — the row's enforceable half is
+ * `expect.documentHash`, which pins the document the fixer's answer was
+ * computed from.
+ */
+export interface RepairOp {
+  kind: "repair";
+  /** The fixer's name as supplied — a module path or label; never resolved. */
+  fixer: string;
+}
+
 /** What a plan row does to its piece, absent on a survey-only row. */
-export type PieceOp = RetargetOp | RestoreOp;
+export type PieceOp = RetargetOp | RestoreOp | RepairOp;
 
 /** One piece in a plan: the piece, its precondition, and its operation. */
 export interface PiecePlanRow {
@@ -222,14 +243,30 @@ export function encodePlan(plan: PiecePlan): string {
 export function decodePlan(text: string): PiecePlan {
   const lines = text.split("\n").filter((line) => line.trim() !== "");
   if (lines.length === 0) throw new Error("Plan is empty.");
-  const header = JSON.parse(lines[0]) as unknown;
-  if (!isPlanHeader(header)) {
+  return normalizePlan({
+    header: JSON.parse(lines[0]),
+    rows: lines.slice(1).map((line) => JSON.parse(line)),
+  });
+}
+
+/**
+ * Validate an assembled plan against every invariant the codec holds, and
+ * return it with each row's piece address canonical. This is the one
+ * validator the decoder and the executors share: an in-memory plan handed
+ * straight to a run gets exactly the scrutiny a decoded file gets, so no
+ * caller can slip a shape past execution that the codec would have refused
+ * — a repair row without its document hash, a duplicate piece, an invalid
+ * row.
+ */
+export function normalizePlan(
+  plan: { header: unknown; rows: readonly unknown[] },
+): PiecePlan {
+  if (!isPlanHeader(plan.header)) {
     throw new Error(
       'Plan does not start with a "piece-plan" v1 header line.',
     );
   }
-  const rows = lines.slice(1).map((line, index) => {
-    const row = JSON.parse(line) as unknown;
+  const rows = plan.rows.map((row, index) => {
     if (!isPlanRow(row)) {
       throw new Error(`Plan row ${index + 1} is not a valid row object.`);
     }
@@ -242,7 +279,7 @@ export function decodePlan(text: string): PiecePlan {
     }
     seen.add(row.piece);
   }
-  return { header, rows };
+  return { header: plan.header, rows };
 }
 
 /**
@@ -250,10 +287,11 @@ export function decodePlan(text: string): PiecePlan {
  * becomes the reference the retarget produced, and the operation restores the
  * retained revision carrying the reference the row recorded. Nothing is
  * re-surveyed or re-supplied. A plan whose header names pieces the survey
- * could not account for is refused before any row is read. Rows without a
- * retarget op have nothing to roll
- * back and are left out; a plan with no retarget rows at all is refused,
- * because deriving an empty rollback would read as having one.
+ * could not account for is refused before any row is read. Survey-only and
+ * restore rows have nothing to roll back and are left out; a repair row is
+ * refused by name, its reversal being an inverse fixer nothing can derive;
+ * and a plan with no retarget rows at all is refused, because deriving an
+ * empty rollback would read as having one.
  *
  * A retarget row whose prior source is not retained is refused by name
  * before any rollback row is produced: a restore of an unretained source is
@@ -274,6 +312,16 @@ export function deriveRollbackPlan(
     throw new Error(
       "No rollback can be derived from an incomplete plan: its header " +
         "names pieces the survey did not account for.",
+    );
+  }
+  const repairs = plan.rows.filter((row) => row.op?.kind === "repair");
+  if (repairs.length > 0) {
+    // A repair's reversal would be the inverse fixer, which does not exist;
+    // silently dropping the rows would launder a partial rollback into a
+    // complete-looking one.
+    throw new Error(
+      "No rollback can be derived: repair rows have no derivable " +
+        "reversal — " + repairs.map((row) => row.piece).join(", ") + ".",
     );
   }
   const unretained = plan.rows.filter((row) =>
@@ -402,10 +450,18 @@ function isPlanRow(value: unknown): value is PiecePlanRow {
     expect.patternIdentity === "" ||
     typeof expect.symbol !== "string" || expect.symbol === "" ||
     typeof expect.retained !== "boolean" ||
-    !isOptionalName(expect.revisionId)
+    !isOptionalName(expect.revisionId) ||
+    !isOptionalName(expect.documentHash)
   ) return false;
   if (value.op === undefined) return true;
   if (!isPieceOp(value.op)) return false;
+  if (value.op.kind === "repair") {
+    // A repair row's verifiable half is the document hash: without one the
+    // row cannot be resumed or verified from the artifact, so the codec
+    // requires it rather than carrying a row no run could check.
+    return typeof expect.documentHash === "string" &&
+      expect.documentHash !== "";
+  }
   // A row whose operation produces the reference the row already records is
   // unverifiable: a diff could not tell "landed" from "never ran". Such a
   // row is a no-op to drop, not an operation to carry.
@@ -415,6 +471,9 @@ function isPlanRow(value: unknown): value is PiecePlanRow {
 
 function isPieceOp(value: unknown): value is PieceOp {
   if (!isRecord(value)) return false;
+  if (value.kind === "repair") {
+    return typeof value.fixer === "string" && value.fixer !== "";
+  }
   if (
     typeof value.patternIdentity !== "string" ||
     value.patternIdentity === "" ||

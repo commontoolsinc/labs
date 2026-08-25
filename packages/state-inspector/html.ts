@@ -16,6 +16,8 @@ import { type SpaceSummary, summarizeSpace } from "./queries.ts";
 import { buildSpaceGraph, type SpaceGraph } from "./graph.ts";
 import { spaceTimeline, type SpaceTimelineEntry } from "./timetravel.ts";
 import { buildAllDetails, type EntityDetail } from "./detail.ts";
+import type { ScanExtent } from "./model.ts";
+import { visibleRevisionRows } from "./reconstruct.ts";
 import {
   listScopes,
   type Participant,
@@ -37,6 +39,8 @@ export interface InspectorBundle {
   liveBase: string;
   summary: SpaceSummary;
   details: EntityDetail[];
+  /** How far the entity scan behind `details` and `graph` reached. */
+  extent: ScanExtent;
   graph: SpaceGraph;
   timeline: SpaceTimelineEntry[];
   /** Per-identity scopes present (space / user:<DID> / session:<DID>:*). */
@@ -57,33 +61,44 @@ export function buildInspectorBundle(
     scope?: string;
     generatedAt?: string;
     liveBase?: string;
+    limit?: number;
   } = {},
 ): InspectorBundle {
   const branch = opts.branch ?? "";
   const scope = opts.scope ?? "space";
+  const limit = opts.limit;
   const did = (space.path.split("/").pop() ?? "").replace(/\.sqlite$/, "");
 
   // Entities that carry per-user/session state (in a non-space scope, or in
   // more than one scope) get a full scope overlay so the explorer can show the
-  // per-identity divergence the space-scope view hides.
-  const overlayIds = space.db
-    .prepare(
-      `SELECT id FROM revision WHERE branch = ?
-       GROUP BY id
-       HAVING count(DISTINCT scope_key) > 1
-           OR sum(CASE WHEN scope_key != 'space' THEN 1 ELSE 0 END) > 0`,
+  // per-identity divergence the space-scope view hides. Discovered over the
+  // same branch-visible domain the tree and the scope list use — a child branch
+  // inherits its parent's per-user state, and a page that named a user scope
+  // while finding no cells in it would report the divergence as absent. Records
+  // rather than readable entities, so an entity deleted in one scope and live
+  // in another still reaches the overlay that exists to show that.
+  const scoped = new Map<string, Set<string>>();
+  for (const row of visibleRevisionRows(space, { branch })) {
+    const scopes = scoped.get(row.id) ?? new Set<string>();
+    scopes.add(row.scope);
+    scoped.set(row.id, scopes);
+  }
+  const overlayIds = [...scoped.entries()]
+    .filter(([, scopes]) =>
+      scopes.size > 1 || [...scopes].some((scope) => scope !== "space")
     )
-    .all<{ id: string }>(branch)
-    .map((r) => r.id);
+    .map(([id]) => id);
   const overlays = overlayIds.map((id) => scopeOverlay(space, id, { branch }));
 
+  const listing = buildAllDetails(space, { branch, scope, limit });
   return {
     space: did,
     generatedAt: opts.generatedAt ?? "",
     liveBase: opts.liveBase ?? "",
     summary: summarizeSpace(space),
-    details: buildAllDetails(space, { branch, scope }),
-    graph: buildSpaceGraph(space, { branch, scope }),
+    details: listing.details,
+    extent: listing.extent,
+    graph: buildSpaceGraph(space, { branch, scope, limit }),
     timeline: spaceTimeline(space, { branch, scope }),
     scopes: listScopes(space, { branch }),
     overlays,
@@ -679,6 +694,33 @@ export function renderInspectorHtml(bundle: InspectorBundle): string {
       multiUser ? `, ${multiUser} multi-user ⚔` : ""
     }`
     : "";
+  // The header's entity count is the whole space, while the tree and graph hold
+  // only what the scan reached. Say so, or the two read as one number.
+  //
+  // Both kinds of shortfall have to appear ON THE PAGE. A capped or partial
+  // explorer is a FILE — opened days later, shared with someone who never ran
+  // the command — so the notice `cf` wrote to stderr at generation time is not
+  // there to be read, and this banner is the only thing that survives.
+  const warnings: string[] = [];
+  if (bundle.extent.truncated) {
+    warnings.push(
+      `⚠ capped at ${bundle.extent.limit} of ${bundle.extent.total} entities · rebuild with a higher --limit for the rest`,
+    );
+  }
+  if (bundle.extent.unreadable > 0) {
+    // Named apart from the cap: a higher limit does not recover an entity whose
+    // stored payload will not decode.
+    warnings.push(
+      `⚠ ${bundle.extent.unreadable} of ${bundle.extent.total} entities could not be reconstructed and are missing below · a higher --limit will not recover them`,
+    );
+  }
+  const capLine = warnings
+    .map((text) =>
+      `<span class="stats" style="color:var(--piece)">${
+        escapeHtml(text)
+      }</span>`
+    )
+    .join("\n  ");
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -694,6 +736,7 @@ export function renderInspectorHtml(bundle: InspectorBundle): string {
     escapeHtml(opsLine)
   }${bundle.generatedAt ? ` · ${bundle.generatedAt.slice(0, 10)}` : ""}</span>
   <span class="stats" style="color:var(--stream)">${idLine}${xLine}${cfLine}</span>
+  ${capLine}
   <span class="live">app URL <input id="live-input" placeholder="https://host (for live links)" size="22"></span>
 </header>
 <nav>

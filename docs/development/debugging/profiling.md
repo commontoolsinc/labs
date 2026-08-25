@@ -402,5 +402,30 @@ A toolshed is a Deno process, so the recipes in step 2 apply to it: run it under
 in this process, which for a server means the health-stats capture either side
 rather than a mark in the test that provoked it.
 
+For a local investigation the dev scripts own the wiring:
+
+```bash
+./scripts/start-local-dev.sh --port-offset 2 --inspect
+```
+
+starts the toolshed under `--inspect=127.0.0.1:<9229 + offset>`, and
+`http://127.0.0.1:<that port>/json` names the WebSocket debugger endpoint.
+
+Attaching DevTools suits a phase you can provoke by hand. A phase another
+process provokes — a browser load driven by a harness, a CLI run — wants the
+capture scripted so the bracket is exact: connect a WebSocket to the debugger
+endpoint, send `Profiler.enable`, `Profiler.setSamplingInterval` and
+`Profiler.start`, hold the connection open while the provoking process runs,
+then `Profiler.stop` and write the result's `profile` to a `.cpuprofile` file,
+which Chrome DevTools and speedscope both load. When the provoker cannot signal
+the driver directly, a sentinel file the driver polls for is the honest
+bracket: the provoker touches it when its observable effect lands, and the
+poll's looseness costs trailing idle samples, never attribution.
+
+To say what ran inside the window, difference `slowQueries` around it the same
+way as the timing rows: it is a bounded list, so capture it either side and
+read the new tail — each entry names the operation, the space, and the watch
+counts behind one server span the profile just weighed.
+
 OTEL spans exist behind `OTEL_ENABLED` with a collector to receive them, and are
 the right instrument for a deployed server rather than a local investigation.

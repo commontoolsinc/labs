@@ -10,11 +10,25 @@ export {
   type PiecePlanRow,
   type PlanEnumeration,
   type RegisteredOutside,
+  type RepairOp,
   type RestoreOp,
   type RetargetOp,
   type RetargetSource,
   type SurveyProblem,
 } from "./bulk-plan.ts";
+export {
+  collectLinkPaths,
+  type DocumentChange,
+  documentChanges,
+  evaluateFixer,
+  type Fixer,
+  type FixerOutcome,
+  type RepairOptions,
+  repairPieces,
+  type RepairReport,
+  type RepairRow,
+  type RepairVerdict,
+} from "./bulk-repair.ts";
 export {
   diffPlan,
   type PatternRef,

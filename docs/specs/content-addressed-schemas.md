@@ -406,6 +406,19 @@ exactly two guarantees, both about delivery rather than about values:
   nothing, since selecting by an uncollectable schema would produce a
   result whose shape the receiving client could never reproduce from
   what arrives.
+- **Elision across frames is the design, not a hole** (OW61 reversal,
+  RULED 2026-08-24). The delivered SET spans frames: a session's later
+  frames deliberately elide `cid:` documents earlier frames already
+  delivered — not retransmitting schemas is why content addressing
+  exists. The client's obligation is the mirror of that: absorb every
+  frame the server sends, in order, retaining delivered `cid:`
+  documents for the session's life; a frame is validated against the
+  prospective frame PLUS the stored replica precisely because the
+  replica is expected to hold what earlier frames delivered. An
+  arrival whose ref cannot resolve therefore indicates a CLIENT-side
+  absorb/ordering defect (a dropped, reordered, or un-retained earlier
+  delivery) — the defect class OW61's investigation owns — never a
+  server obligation to re-ship.
 
 Arrival mirrors the assembly pass rather than trusting it: BEFORE a frame
 applies, every schema ref its documents embed — a registered `cid:`
@@ -415,7 +428,25 @@ stored replica holds whose content passes the identity check. Verified
 content, never mere presence: a forged local copy fails even when the
 realm registry holds a valid twin from another space, and content that
 changes under a previously verified `cid:` id fails outright. A broken
-ref rejects the frame whole, with the replica untouched. The repair
+ref QUARANTINES the offending document (OW61's ACKed containment,
+RULED 2026-08-24): that document is dropped from the frame with a loud
+per-doc diagnostic and the replica keeps whatever it already held under
+its id, while the frame's other documents apply — quarantining an
+in-frame schema document re-checks refs that resolved through it, so
+dependents fail closed together. Fail-closed for the DOCUMENT (an
+unverifiable schema document never registers; a document with
+unresolvable refs never applies; a forged replacement of a stored
+verified document is itself the quarantined copy), contained for the
+PROCESS: this validation runs on the background consume path, where a
+frame-wide throw was an unhandled rejection that killed the consuming
+worker wholesale on one bad document. Quarantine is containment for a
+defect, not a protocol state: the elision design means an unchanged
+quarantined document may never be re-delivered mid-session (the
+server's session cache rightly claims the client holds its ref), so
+the heal waits for the next full evaluation — a watch.set, a
+reconnect — whose full frame carries the whole assembled closure; the
+arrival diagnostic is the loud record meanwhile, and the underlying
+absorb/ordering defect is the thing to find and fix (OW61). The repair
 paths that do exist serve callers, not arrival: the traversal loader's
 reads are tracked (arrival re-runs the reader), the missing-target kick
 requests the fetch, and any sync of a schema document delivers its

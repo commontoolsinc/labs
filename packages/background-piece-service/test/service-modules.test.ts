@@ -7,7 +7,11 @@ import {
   assertThrows,
 } from "@std/assert";
 import { Identity, realmValueFromKeyPair } from "@commonfabric/identity";
-import { EXPERIMENTAL_ENV_VARS, Runtime } from "@commonfabric/runner";
+import {
+  ADOPT_SERVER_FLAGS_ENV,
+  EXPERIMENTAL_ENV_VARS,
+  Runtime,
+} from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   isWorkerIPCResponse,
@@ -1423,7 +1427,7 @@ describe("cast admin entry point", () => {
     assertEquals(dependencies.envGet, Deno.env.get);
 
     const identity = await Identity.generate({ implementation: "noble" });
-    const runtime = createCastRuntime(TEST_API_URL, identity);
+    const runtime = await createCastRuntime(TEST_API_URL, identity);
     try {
       const session = await dependencies.createSession({
         identity,
@@ -1488,7 +1492,7 @@ describe("cast admin entry point", () => {
 
   it("creates the cast runtime", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
-    const runtime = createCastRuntime(TEST_API_URL, identity);
+    const runtime = await createCastRuntime(TEST_API_URL, identity);
     const cell = runtime.getCell(identity.did(), "cast-runtime-test", {
       type: "object",
       properties: {},
@@ -1501,7 +1505,7 @@ describe("cast admin entry point", () => {
   it("threads the injected env reader into the cast runtime's experimental flags", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
     const consulted = new Set<string>();
-    const runtime = createCastRuntime(
+    const runtime = await createCastRuntime(
       TEST_API_URL,
       identity,
       (key) => {
@@ -1516,6 +1520,9 @@ describe("cast admin entry point", () => {
       for (const envVar of Object.values(EXPERIMENTAL_ENV_VARS)) {
         if (envVar !== null) assert(consulted.has(envVar));
       }
+      // The opt-out over server-flag adoption rides the same boundary; this
+      // admin CLI reads nothing from process env directly.
+      assert(consulted.has(ADOPT_SERVER_FLAGS_ENV));
     } finally {
       await runtime.dispose();
     }

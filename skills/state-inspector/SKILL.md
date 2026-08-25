@@ -207,10 +207,22 @@ fixed recipe. The recurring debugging questions and where they resolve:
   v2 stage C.2, and the tool no longer reads them even from an old snapshot that
   still contains them. The entity-history surface always works; the basis table
   absent (pre-migration store) or empty is normal, not a broken DB.
-- **Lists and the bundle are capped** (e.g. history/hot/graph/contention have
-  limits; the HTML stale-read pass caps per bundle and _marks_ un-analyzed cells
-  rather than showing them clean). When a count equals a round cap, suspect
-  truncation and narrow with flags or a per-entity command.
+- **A capped result announces itself — and the caps that don't are the ones to
+  watch.** The space-wide scans (`entities`, `graph`, `html`) print a cap notice
+  on stderr in _both_ modes, so silence there means you hold the whole set; a
+  `--json` consumer that discards stderr discards the only warning it gets.
+  `entities --kind` selects _during_ the scan, so `--limit` counts entities of
+  that kind, not entities walked to find them. **Scripting a backup or rollback
+  payload? Pass `--require-complete`** — a capped scan then exits nonzero with
+  nothing on stdout. Check that status where it is produced: a shell pipeline
+  reports its LAST command's status, so a scan piped into `jq` and a redirect
+  refuses, and the redirect still writes an empty file and reports success.
+  Capture the scan on its own, or set `pipefail`. It refuses for either kind of
+  incompleteness — a cap reached, or an entity that would not reconstruct, which
+  a higher `--limit` never recovers. The other caps stay silent —
+  history/hot/contention row limits, and the HTML stale-read pass, which caps
+  per bundle and _marks_ un-analyzed cells rather than showing them clean. There
+  a count equal to a round cap is still the tell.
 - **`--json` is the agent path.** Human output elides; for anything you parse or
   chain, pass `--json`.
 - **It reads DBs it didn't write.** A corrupt/partial row degrades that one

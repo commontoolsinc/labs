@@ -18,7 +18,7 @@ For handler-based checks:
 3. run `piece step`
 4. inspect resulting state
 
-Always remember that `piece set` and `piece call` do not trigger recomputation
+Always remember that `cf set` and `cf call` do not trigger recomputation
 on their own. The follow-up `piece step` is part of the test, not optional
 cleanup.
 

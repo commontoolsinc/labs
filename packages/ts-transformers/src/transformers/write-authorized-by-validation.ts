@@ -1,6 +1,7 @@
 import ts from "typescript";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import { getNodeText } from "../ast/mod.ts";
+import { unwrapExpression } from "../utils/expression.ts";
 
 export class WriteAuthorizedByValidationTransformer
   extends HelpersOnlyTransformer {
@@ -346,7 +347,7 @@ function substituteTypeNode(
 function isSupportedWriteAuthorizedByInitializer(
   initializer: ts.Expression,
 ): boolean {
-  const expression = unwrapInitializer(initializer);
+  const expression = unwrapExpression(initializer);
   return ts.isCallExpression(expression) &&
     ts.isIdentifier(expression.expression) &&
     (
@@ -354,18 +355,4 @@ function isSupportedWriteAuthorizedByInitializer(
       expression.expression.text === "module" ||
       expression.expression.text === "requireEventIntegrity"
     );
-}
-
-function unwrapInitializer(expression: ts.Expression): ts.Expression {
-  let current = expression;
-  while (
-    ts.isParenthesizedExpression(current) ||
-    ts.isAsExpression(current) ||
-    ts.isTypeAssertionExpression(current) ||
-    ts.isSatisfiesExpression(current) ||
-    ts.isNonNullExpression(current)
-  ) {
-    current = current.expression;
-  }
-  return current;
 }

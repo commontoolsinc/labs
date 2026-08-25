@@ -7,7 +7,12 @@ import {
   ensureSpaceRootsFromEnv,
   serverExecutionPolicyFromEnv,
   startServerExecutionHost,
+  stopServerExecutionHost,
 } from "@/lib/server-execution.ts";
+import {
+  experimentalPosture,
+  publishExperimentalPosture,
+} from "@/lib/experimental-posture.ts";
 
 // The Phase-6 env knobs (serving-loop.md §5) are the production
 // multi-tenancy bound: a runaway fan-out must degrade only its own space,
@@ -141,6 +146,84 @@ describe("startServerExecutionHost OFF witness", () => {
         name === "EXPERIMENTAL_SERVER_EXECUTION" ? "false" : undefined,
     });
     expect(host).toBeUndefined();
+  });
+
+  // What `/api/meta` reports has to be the posture this deployment SERVES at,
+  // not the generic webhook runtime's: a serving runtime forces flags of its
+  // own, and a client adopting the base alone would run values the deployment
+  // does not (docs/development/EXPERIMENTAL_OPTIONS.md).
+  describe("the posture it publishes", () => {
+    // Enough of a server for the host to register its observer on and let go
+    // of again; an inert host touches nothing else.
+    const observableServer = () =>
+      ({ setServerExecutionObserver: () => {} }) as unknown as MemoryServer;
+    const serviceIdentity = {
+      did: () => "did:key:zServing",
+    } as unknown as Identity;
+
+    it("adds nothing while the serving loop is off", () => {
+      publishExperimentalPosture({ systemPatternAutoUpdate: false });
+      try {
+        startServerExecutionHost({
+          server: untouchable<MemoryServer>("server"),
+          identity: untouchable<Identity>("identity"),
+          apiUrl: new URL("http://toolshed.test"),
+          envGet: () => undefined,
+        });
+        expect(experimentalPosture()).toEqual({
+          systemPatternAutoUpdate: false,
+        });
+      } finally {
+        publishExperimentalPosture(null);
+      }
+    });
+
+    it("adds the serving runtimes' own flags over the base while it serves", async () => {
+      publishExperimentalPosture({
+        modernCellRep: true,
+        serverExecution: false,
+        systemPatternAutoUpdate: false,
+      });
+      try {
+        expect(
+          startServerExecutionHost({
+            server: observableServer(),
+            identity: serviceIdentity,
+            apiUrl: new URL("http://toolshed.test"),
+            envGet: (name) =>
+              name === "EXPERIMENTAL_SERVER_EXECUTION" ? "true" : undefined,
+          }),
+        ).toBeDefined();
+        // The two the serving runtime factory forces, over a base that says
+        // the opposite; everything else rides the base through untouched.
+        expect(experimentalPosture()).toEqual({
+          modernCellRep: true,
+          serverExecution: true,
+          systemPatternAutoUpdate: true,
+        });
+      } finally {
+        await stopServerExecutionHost();
+        publishExperimentalPosture(null);
+      }
+    });
+
+    it("drops them again once the serving loop stops", async () => {
+      publishExperimentalPosture({ serverExecution: false });
+      try {
+        startServerExecutionHost({
+          server: observableServer(),
+          identity: serviceIdentity,
+          apiUrl: new URL("http://toolshed.test"),
+          envGet: (name) =>
+            name === "EXPERIMENTAL_SERVER_EXECUTION" ? "true" : undefined,
+        });
+        await stopServerExecutionHost();
+        expect(experimentalPosture()).toEqual({ serverExecution: false });
+      } finally {
+        await stopServerExecutionHost();
+        publishExperimentalPosture(null);
+      }
+    });
   });
 });
 

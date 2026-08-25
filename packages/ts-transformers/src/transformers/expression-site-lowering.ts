@@ -666,16 +666,7 @@ function allDataFlowsAreElementBindingRoots(
 function isPassthroughContainerExpression(
   expression: ts.Expression,
 ): boolean {
-  let current = expression;
-  while (
-    ts.isParenthesizedExpression(current) ||
-    ts.isAsExpression(current) ||
-    ts.isTypeAssertionExpression(current) ||
-    ts.isSatisfiesExpression(current) ||
-    ts.isNonNullExpression(current)
-  ) {
-    current = current.expression;
-  }
+  const current = unwrapExpression(expression);
   return ts.isPropertyAccessExpression(current) ||
     ts.isElementAccessExpression(current) ||
     ts.isObjectLiteralExpression(current) ||
