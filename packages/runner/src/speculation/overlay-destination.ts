@@ -1954,6 +1954,24 @@ export class SpeculationOverlayDestination
         let arrived = true;
         for (const doc of entry.writtenDocs) {
           const state = view(doc.id, doc.scope);
+          // A content-addressed doc witnesses by IDENTITY (#6304): a
+          // `cid:` doc's id derives from its content, so any confirmed
+          // cover holds exactly the bytes this run wrote — a
+          // speculative re-set of an already-stored schema document is
+          // a no-op the store has already spoken for. Its cover can
+          // also never advance (every rewrite is identical, so the
+          // equality cutoff elides it), which makes the floor
+          // comparison below unpassable: the entry stands FOREVER, its
+          // other patch layers replay over every newer confirmed base
+          // (an array splice is not idempotent — the
+          // four-rows-for-three-topics divergence), and every later
+          // speculation reading through its layers blocks behind it.
+          // A cid doc with NO confirmed cover still holds the entry:
+          // nothing has served the schema document yet, and dropping
+          // the layer would flip local schema resolution to nothing.
+          if (doc.id.startsWith("cid:") && state.confirmedSeq > 0) {
+            continue;
+          }
           if (state.confirmedSeq === 0 || state.confirmedSeq < floor) {
             arrived = false;
             break;

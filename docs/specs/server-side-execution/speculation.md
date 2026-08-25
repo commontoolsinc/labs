@@ -391,7 +391,21 @@ either: the predicate demands the derivation itself — `derived` — not
 merely a server-side write (`!== "derived"`, conservative, converging
 on the next cover). The elision posture above is unchanged: no rewrite
 means the doc's seq stays BELOW the floor, and the predicate is never
-consulted. Carriage: the covering commit's class rides session-frame
+consulted. **A content-addressed write witnesses by IDENTITY (#6304
+fix, 2026-08-25): a `cid:` doc the store already holds — a confirmed
+cover at ANY seq — witnesses arrival regardless of the floor. The id
+derives from the content, so the stored bytes are exactly what the run
+wrote, and the cover can never advance (every rewrite is identical, so
+the equality cutoff elides it), which made the floor comparison
+unpassable: an entry whose speculative run re-set an already-stored
+schema document stood FOREVER, its other patch layers replaying over
+every newer confirmed base (an array splice is not idempotent — the
+served pivot's four rows over the store's three) while every later
+speculation reading through its layers blocked behind it. A cid doc
+with NO confirmed cover still holds the entry: nothing has served the
+schema document yet, and dropping the layer would flip local schema
+resolution to nothing. Pinned in `speculation-arrival-gate.test.ts`
+(the #6304 scripted shape, with its mutation).** Carriage: the covering commit's class rides session-frame
 upserts as `coverClass` (populated only under the flag — the OFF wire
 is byte-identical), is recorded on the replica's confirmed record
 (frames on integrate; `authored`/`derived` at own-commit promotions),
