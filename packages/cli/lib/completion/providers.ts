@@ -446,7 +446,7 @@ function projectionFieldCandidates(
  * path while `revision,@` is the suffix — and both sets of rules live in
  * `lib/cell-selection.ts`, so they are asked rather than mirrored.
  */
-async function acceptedProjections(
+export async function acceptedProjections(
   candidates: readonly Candidate[],
   flag: "select" | "schema",
 ): Promise<Candidate[]> {

@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertFalse } from "@std/assert";
 import { resolveCompletionLine } from "../lib/completion/line.ts";
 import {
+  acceptedProjections,
   descendProjection,
   keysOf,
   linkEndpointPrefix,
@@ -209,6 +210,13 @@ Deno.test("live candidates: a fabric slot without context degrades to empty", as
   await withEnv({}, async () => {
     for (
       const text of [
+        // The projection guards, which answer before any fabric is reached: a
+        // call's projection is a verb's result rather than the piece's root,
+        // and a `--schema` word opening with `@` or `{` is a file or a schema.
+        "cf call --piece x --select ",
+        "cf exec /tmp/x --select ",
+        "cf get --piece x --schema @",
+        "cf get --piece x --schema {",
         "cf piece call --piece x ",
         "cf piece get --piece x ",
         "cf piece get-label --piece x ",
@@ -492,6 +500,28 @@ Deno.test("shaping: an address-marked segment keeps completing below it", () => 
   );
   // An escaped `@` is part of the name, not the marker.
   assertEquals(splitSelectPrefix("a\\@.").path, ["a@"]);
+});
+
+Deno.test("acceptedProjections keeps what the flag's own parser reads as a field list", async () => {
+  // The filter itself, driven directly: a spelling each flag refuses, one it
+  // reads as something other than a field list, and one it takes.
+  const shape = (values: string[]) => values.map((value) => ({ value }));
+  assertEquals(
+    (await acceptedProjections(
+      shape(["@", "revision,@", "ok"]),
+      "select",
+    )).map((candidate) => candidate.value),
+    ["@", "revision,@", "ok"],
+  );
+  // `--schema @` is an empty file path; `--schema true` parses, but as the
+  // boolean JSON Schema rather than a field list.
+  assertEquals(
+    (await acceptedProjections(
+      shape(["@", "true", "revision,@", "ok"]),
+      "schema",
+    )).map((candidate) => candidate.value),
+    ["revision,@", "ok"],
+  );
 });
 
 Deno.test("the projection grammar decides which candidates a flag can take", async () => {
