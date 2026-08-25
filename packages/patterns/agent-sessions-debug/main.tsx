@@ -1740,24 +1740,17 @@ const DebugView = pattern<DebugInput, DebugOutput>(
         ),
       );
     });
-    const projectedSessionStartPage = computed(() =>
-      Math.max(0, currentSessionPage - 1)
-    );
     const projectedSessionEntries = computed(() => {
-      const start = projectedSessionStartPage * SESSION_PAGE_SIZE;
+      const start = currentSessionPage * SESSION_PAGE_SIZE;
       const end = Math.min(
         currentSessionEntries(allIndex).length,
-        (currentSessionPage + 2) * SESSION_PAGE_SIZE,
+        start + SESSION_PAGE_SIZE,
       );
       return currentSessionEntries(allIndex).slice(
         start,
         end,
       );
     });
-    // TODO(@ianh): Replace the adjacent-page projection window with keyed
-    // suspension in mapWithPattern. The list runner needs to retain inactive
-    // element results so page changes can reuse hydrated rows without keeping
-    // three pages of row and raw-view projections active.
     // deno-lint-ignore no-explicit-any
     const projectedSessions = (projectedSessionEntries as any).mapWithPattern(
       // The list runner supplies each linked record in its element field.
@@ -1767,9 +1760,7 @@ const DebugView = pattern<DebugInput, DebugOutput>(
     ) as PublishedSessionRow[];
     const pageSessionCells = slicePublishedSessionCells({
       values: projectedSessions,
-      start: computed(() =>
-        (currentSessionPage - projectedSessionStartPage) * SESSION_PAGE_SIZE
-      ),
+      start: 0,
       count: SESSION_PAGE_SIZE,
     });
     const pageSessions = computed(() => materializedCells(pageSessionCells));

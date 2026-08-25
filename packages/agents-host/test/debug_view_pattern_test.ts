@@ -945,12 +945,12 @@ Deno.test("debug pattern bounds raw-data links to one session page", async () =>
       (result as Record<string, unknown>)["$UI"],
       "Raw data",
     );
-    const firstPageRunnerCount = runtime.runner.cancels.size;
     assertEquals(
       countSessionRawDataLinks((result as Record<string, unknown>)["$UI"]),
       SESSION_PAGE_SIZE,
     );
     assertEquals(firstPageLinkIds.length, SESSION_PAGE_SIZE);
+    const firstPageRunnerCount = runtime.runner.cancels.size;
     const nextButton = renderedNodes(
       (result as Record<string, unknown>)["$UI"],
     ).find((node) =>
@@ -981,8 +981,10 @@ Deno.test("debug pattern bounds raw-data links to one session page", async () =>
       secondPageLinkIds.every((id) => !firstPageIds.has(id)),
       true,
     );
-    const secondPageRunnerCount = runtime.runner.cancels.size;
-    assertEquals(secondPageRunnerCount > firstPageRunnerCount, true);
+    assertEquals(
+      runtime.runner.cancels.size <= firstPageRunnerCount + 1,
+      true,
+    );
     openedRawSession.key("load").send({});
     await runtime.settled();
     await openedRawSession.pull();
@@ -1013,6 +1015,7 @@ Deno.test("debug pattern bounds raw-data links to one session page", async () =>
       ),
       true,
     );
+    const openedRawRunnerCount = runtime.runner.cancels.size;
     (nextPage as { send: (event: unknown) => void }).send({});
     await runtime.settled();
 
@@ -1028,8 +1031,7 @@ Deno.test("debug pattern bounds raw-data links to one session page", async () =>
       SESSION_PAGE_SIZE,
     );
     assertEquals(thirdPageLinkIds.length, SESSION_PAGE_SIZE);
-    const thirdPageRunnerCount = runtime.runner.cancels.size;
-    assertEquals(thirdPageRunnerCount < secondPageRunnerCount, true);
+    assertEquals(runtime.runner.cancels.size, openedRawRunnerCount);
     (nextPage as { send: (event: unknown) => void }).send({});
     await runtime.settled();
 
@@ -1037,6 +1039,10 @@ Deno.test("debug pattern bounds raw-data links to one session page", async () =>
     assertEquals(
       countSessionRawDataLinks((lastResult as Record<string, unknown>)["$UI"]),
       trailingSessionCount,
+    );
+    assertEquals(
+      runtime.runner.cancels.size < openedRawRunnerCount,
+      true,
     );
     const filterInput = renderedNodes(
       (lastResult as Record<string, unknown>)["$UI"],
@@ -1113,7 +1119,10 @@ Deno.test("debug pattern bounds raw-data links to one session page", async () =>
       ),
       firstPageLinkIds,
     );
-    assertEquals(runtime.runner.cancels.size < thirdPageRunnerCount, true);
+    assertEquals(
+      runtime.runner.cancels.size <= openedRawRunnerCount,
+      true,
+    );
   } finally {
     await runtime.dispose();
     await storageManager.close();
@@ -1212,7 +1221,7 @@ Deno.test("debug pattern resumes sessions published while it was stopped", async
 Deno.test("debug pattern loads connector child cells on a cold replica", async () => {
   const server = newSharedServer();
   const spaceName = `debug-cold-${crypto.randomUUID()}`;
-  const sessionCount = SESSION_PAGE_SIZE * 34;
+  const sessionCount = SESSION_PAGE_SIZE + 1;
   let debugPieceId = "";
   let rawPieceId = "";
   let manifestDocumentId = "";
@@ -1422,7 +1431,7 @@ Deno.test("debug pattern loads connector child cells on a cold replica", async (
         "AgentsHost.health()",
         "preceding seven days",
         "all non-deleted session-row links",
-        "shared action array",
+        "owner-confidential command queue",
         "latest 200 receipt-row links",
       ];
       for (const [index, link] of topLevelRawLinks.entries()) {

@@ -60,30 +60,27 @@ stopped.
 Each Raw data link opens a separate read-only piece for that session's stable
 manifest cell. The detail piece reads the provider metadata, complete normalized
 message list, and native event chunks. Those values include the provider session
-ID. The sessions table omits provider IDs. The table shows 20 sessions per page
-and projects the preceding and following pages as a bounded prefetch window.
-This keeps adjacent page changes responsive while keeping every published
-session reachable. At most 60 session rows and their raw-data pieces remain
-active for the table. Raw views opened as separate pages have independent
-lifetimes. The page filter and column sorting apply to the current page only and
-do not load every retained row.
+ID. The sessions table omits provider IDs. The table shows and projects up to 20
+sessions per page. Every published session remains reachable without keeping
+off-page session rows or their raw-data pieces active. Raw views opened as
+separate pages have independent lifetimes. The page filter and column sorting
+apply to the current page only and do not load every retained row.
 
 The complete index stores live cells for session rows. The pattern selects a
-three-page window before projecting those cells into table rows. The list runner
-uses each session cell as the projection identity, reuses overlapping rows as
-the window moves, and stops projections that leave the window. Projection
-results remain row-cell links until the pattern slices out the current page.
-Only those selected row cells feed sorting, filtering, and rendering. A raw view
-that was opened as its own page has an independent lifetime, so reclaiming its
-table row does not stop the open page. A session gets the same raw-view URL when
-it returns to the table page. Each row stores a manifest cell with an empty
-document schema, so validating the table does not follow the manifest's child
-links. When the separate raw session view mounts, its start handler removes that
-listing schema and reads the selected session. Manifests store live cells for
-chunk descriptors, and each descriptor stores a live native-event chunk cell.
-Arrays inside provider JSON use the same stable child-cell convention. The
-rendered loading state does not contain the manifest cell. Opening the session
-table therefore does not read every retained transcript.
+current page before projecting those cells into table rows. The list runner uses
+each session cell as the projection identity and stops projections that leave
+the page. Projection results remain row-cell links. Only those selected row
+cells feed sorting, filtering, and rendering. A raw view that was opened as its
+own page has an independent lifetime, so reclaiming its table row does not stop
+the open page. A session gets the same raw-view URL when it returns to the table
+page. Each row stores a manifest cell with an empty document schema, so
+validating the table does not follow the manifest's child links. When the
+separate raw session view mounts, its start handler removes that listing schema
+and reads the selected session. Manifests store live cells for chunk
+descriptors, and each descriptor stores a live native-event chunk cell. Arrays
+inside provider JSON use the same stable child-cell convention. The rendered
+loading state does not contain the manifest cell. Opening the session table
+therefore does not read every retained transcript.
 
 The debug pattern gives session rows only the shallow fields used by the table.
 Each row keeps its manifest behind an opaque cell link. Opening the table does

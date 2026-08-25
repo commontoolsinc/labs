@@ -478,10 +478,80 @@ function fakeCell(id = "of:parent") {
     sync: () => Promise.resolve(),
     withTx: () => cell,
     asSchema: () => cell,
+    setRawUntyped: () => {},
     applyCfcSchemaToExistingValue: () => {},
   };
   return cell;
 }
+
+Deno.test("stable graph hydrates the owner-schema cell before writing", async () => {
+  let schemaBindings = 0;
+  let syncs = 0;
+  let writes = 0;
+  let hydrated = false;
+  const link = {
+    space: "did:test:space",
+    scope: "space",
+    id: "of:parent",
+    path: [],
+  };
+  const protectedCell = {
+    getAsNormalizedFullLink: () => link,
+    sync: () => {
+      syncs++;
+      hydrated = true;
+      return Promise.resolve();
+    },
+    withTx: () => protectedCell,
+    setRawUntyped: () => {
+      assertEquals(hydrated, true);
+      writes++;
+    },
+    applyCfcSchemaToExistingValue: () => assertEquals(hydrated, true),
+  };
+  const makeCell = () => ({
+    getAsNormalizedFullLink: () => link,
+    asSchema: () => {
+      schemaBindings++;
+      return protectedCell;
+    },
+  });
+  const firstCell = makeCell();
+  const secondCell = makeCell();
+  const transaction = {
+    readValueOrThrow: () => undefined,
+    writeOrThrow: () => {},
+    setCfcImplementationIdentity: () => {},
+    prepareCfc: () => {},
+    abort: () => ({ ok: {} }),
+    commit: () => Promise.resolve({ ok: {} }),
+  };
+
+  await pushStableCellGraph(
+    // deno-lint-ignore no-explicit-any -- focused runtime fixture.
+    {
+      runtime: { edit: () => transaction },
+      spaceDid: "did:test:space",
+      ownerDid: "did:test:owner",
+    } as any,
+    [
+      {
+        // deno-lint-ignore no-explicit-any -- focused cell fixture.
+        cell: firstCell as any,
+        value: () => ({ value: "first" }),
+      },
+      {
+        // deno-lint-ignore no-explicit-any -- focused cell fixture.
+        cell: secondCell as any,
+        value: () => ({ value: "second" }),
+      },
+    ],
+  );
+
+  assertEquals(schemaBindings, 1);
+  assertEquals(syncs, 1);
+  assertEquals(writes, 2);
+});
 
 Deno.test("stable graph writes await one commit", async () => {
   const commitStarted = Promise.withResolvers<void>();
@@ -505,7 +575,6 @@ Deno.test("stable graph writes await one commit", async () => {
   const connection = {
     runtime: {
       edit: () => transaction,
-      storageManager: { synced: () => Promise.resolve() },
     },
     spaceDid: "did:test:space",
     ownerDid: "did:test:owner",
@@ -537,7 +606,6 @@ Deno.test("stable graph writes surface a commit failure without retrying", async
   let commitCount = 0;
   const connection = {
     runtime: {
-      storageManager: { synced: () => Promise.resolve() },
       edit: () => ({
         readValueOrThrow: () => undefined,
         writeOrThrow: () => {},

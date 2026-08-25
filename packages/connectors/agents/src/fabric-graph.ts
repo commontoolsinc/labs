@@ -156,8 +156,9 @@ export async function pushStableCellGraph(
   for (const entry of entries) {
     writes.push({ cell: entry.cell, value: entry.value(materializeCell) });
   }
-  const cellsToSync = new Map<string, Cell<unknown>>();
-  for (const { cell } of writes) {
+  const ownerSchema = agentOwnerSchema(connection.ownerDid);
+  const protectedCells = new Map<string, Cell<unknown>>();
+  const protectedWrites = writes.map(({ cell, value }) => {
     const link = cell.getAsNormalizedFullLink();
     const key = JSON.stringify({
       space: link.space,
@@ -165,9 +166,14 @@ export async function pushStableCellGraph(
       id: link.id,
       path: link.path,
     });
-    cellsToSync.set(key, cell);
-  }
-  const uniqueCells = [...cellsToSync.values()];
+    let protectedCell = protectedCells.get(key);
+    if (protectedCell === undefined) {
+      protectedCell = cell.asSchema(ownerSchema);
+      protectedCells.set(key, protectedCell);
+    }
+    return { cell: protectedCell, value };
+  });
+  const uniqueCells = [...protectedCells.values()];
   for (
     let offset = 0;
     offset < uniqueCells.length;
@@ -179,7 +185,6 @@ export async function pushStableCellGraph(
       ),
     );
   }
-  await connection.runtime.storageManager.synced();
 
   const tx = connection.runtime.edit();
   tx.setCfcImplementationIdentity({
@@ -207,17 +212,13 @@ export async function pushStableCellGraph(
         );
       }
       writtenCells.add(cellKey);
-      const protectedCell = cell.withTx(tx).asSchema(
-        agentOwnerSchema(connection.ownerDid),
-      );
+      const protectedCell = cell.withTx(tx);
       if (!isPlainRecord(value)) {
-        tx.writeValueOrThrow(link, stableFabricValue(value));
-        protectedCell.applyCfcSchemaToExistingValue();
+        protectedCell.setRawUntyped(stableFabricValue(value));
         return protectedCell;
       }
       if (!isPlainRecord(priorValue)) {
-        tx.writeValueOrThrow(link, stableFabricValue(value));
-        protectedCell.applyCfcSchemaToExistingValue();
+        protectedCell.setRawUntyped(stableFabricValue(value));
         return protectedCell;
       }
       for (const key of Object.keys(priorValue)) {
@@ -248,7 +249,7 @@ export async function pushStableCellGraph(
       protectedCell.applyCfcSchemaToExistingValue();
       return protectedCell;
     };
-    for (const write of writes) {
+    for (const write of protectedWrites) {
       writeCellValue(write.cell, write.value);
     }
   } catch (error) {
