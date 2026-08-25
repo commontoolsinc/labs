@@ -201,6 +201,7 @@ Deno.test("CI browser tests use the runner's installed Chrome", async () => {
   const savedFetch = globalThis.fetch;
 
   try {
+    assertEquals(configuredPath, "/usr/bin/google-chrome");
     Deno.env.set("CI", "1");
     Deno.env.delete("ASTRAL_BIN_PATH");
     if (configuredPath) Deno.env.set("ASTRAL_BIN_PATH", Deno.execPath());
@@ -233,7 +234,6 @@ Deno.test("CI browser tests use the runner's installed Chrome", async () => {
       await getBinary("chrome", { cache }),
       Deno.execPath(),
     );
-    assertEquals(configuredPath, "/usr/bin/google-chrome");
   } finally {
     globalThis.fetch = savedFetch;
     if (savedPath === undefined) Deno.env.delete("ASTRAL_BIN_PATH");
