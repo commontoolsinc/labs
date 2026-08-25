@@ -13,13 +13,23 @@
  * still-labelled data is refused again, correctly. Re-running is the property
  * under test; whether the fresh verdict differs is policy's business.
  *
- * A METADATA-only change (widening a declared label, value byte-identical)
- * does NOT re-trigger a reader. That is pre-existing and independent of this
- * change — a succeeding action that never meets a refusal does not re-run on
- * one either — so it is reported rather than pinned here. It is also coherent
- * with monotonicity: a label can only widen, so a metadata change can tighten
- * a verdict but never loosen one, and a re-run could not turn a refusal into
- * a success.
+ * A METADATA-only change (widening a declared label over a byte-identical
+ * value) does NOT re-trigger a reader, and that is correct rather than a gap.
+ * A result computed under the policy that existed at the time was computed
+ * legitimately; it does not retroactively fall under a later policy, it comes
+ * under one when it is recomputed. The next run over a changed value sees the
+ * widened label and is judged by it, and the existing derived document keeps
+ * the label it was actually derived with — so nothing is laundered, and what
+ * a tightening does not get is retroactivity.
+ *
+ * Monotonicity is the other half of why: a label can only widen, so a re-run
+ * provoked by a metadata change could only ever be refused — it cannot repair
+ * anything. Revisiting already-derived values under a new policy would be a
+ * re-enforcement sweep, which is a different design from a trigger.
+ *
+ * The behaviour is pre-existing either way — an action that succeeds and
+ * never meets a refusal does not re-run on a metadata change either — so it
+ * is documented here rather than pinned as a test.
  */
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
