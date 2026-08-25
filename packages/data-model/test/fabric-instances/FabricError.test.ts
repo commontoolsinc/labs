@@ -25,7 +25,6 @@ import { expect } from "@std/expect";
 import { FabricInstance, type FabricValue } from "@/interface.ts";
 import {
   DEEP_FREEZE,
-  FREEZE_SHIELD,
   IS_DEEP_FROZEN,
 } from "@/fabric-bases/BaseFabricInstance.ts";
 import { CODEC } from "@/codec-interface/interface.ts";
@@ -61,7 +60,6 @@ describe("FabricError", () => {
     const se = FabricError.fromNativeError(new Error("test"));
     se.setExtra("extra", 1);
     expect(Object.getOwnPropertyNames(se)).toEqual([]);
-    expect(Object.getOwnPropertySymbols(se)).toEqual([FREEZE_SHIELD]);
     expect({ ...se }).toEqual({});
   });
 

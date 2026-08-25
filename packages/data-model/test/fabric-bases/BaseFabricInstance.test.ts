@@ -22,7 +22,6 @@ import {
   BaseFabricInstance,
   DEEP_CLONE_CORE,
   DEEP_FREEZE,
-  FREEZE_SHIELD,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
 } from "@/fabric-bases/BaseFabricInstance.ts";
@@ -182,9 +181,8 @@ describe("BaseFabricInstance", () => {
     });
 
     it("reports an unfrozen instance as not frozen", () => {
-      // The case the `[FREEZE_SHIELD]` property exists for: sealing an object
-      // with no own properties would make this `true`, and every thaw would
-      // then short-circuit to identity.
+      // Sealing an object that has no own properties would make this `true`,
+      // and every thaw would then short-circuit to identity.
       const probe = new Probe("t");
       expect(Object.isFrozen(probe)).toBe(false);
     });
@@ -200,11 +198,6 @@ describe("BaseFabricInstance", () => {
       expect(Object.keys(probe)).toEqual([]);
       expect({ ...probe }).toEqual({});
       expect(JSON.stringify(probe)).toBe("{}");
-    });
-
-    it("installs `[FREEZE_SHIELD]` as the sole own symbol", () => {
-      const probe = new Probe("t");
-      expect(Object.getOwnPropertySymbols(probe)).toEqual([FREEZE_SHIELD]);
     });
   });
 

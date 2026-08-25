@@ -39,9 +39,8 @@ import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 export const DEEP_FREEZE: unique symbol = Symbol("data-model.deepFreeze");
 
 /**
- * Well-known symbol for the sole own property every `FabricInstance` carries:
- * the one that keeps `Object.isFrozen()` an honest report of the instance's
- * frozen state.
+ * Key for the sole own property every `FabricInstance` carries: the one that
+ * keeps `Object.isFrozen()` an honest report of the instance's frozen state.
  *
  * An instance keeps its contents in private fields, and a sealed object with no
  * own properties is *vacuously* frozen: `Object.isFrozen()` would answer `true`
@@ -54,7 +53,7 @@ export const DEEP_FREEZE: unique symbol = Symbol("data-model.deepFreeze");
  * spread, `Object.keys()`, `JSON.stringify()`, and a naive walk all see
  * nothing. Its value is never read; existing is the whole of its job.
  */
-export const FREEZE_SHIELD: unique symbol = Symbol("data-model.freezeShield");
+const FREEZE_SHIELD: unique symbol = Symbol("data-model.freezeShield");
 
 /**
  * Well-known symbol for checking whether a `FabricInstance` is already deeply
