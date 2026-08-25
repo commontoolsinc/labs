@@ -81,6 +81,8 @@ export type SessionOpenAuthFactory = (
 
 export type WatchMutationResult = {
   view: WatchView;
+  /** Effects delivered before the first watch response, in wire order. */
+  precedingSyncs: SessionSync[];
   sync: SessionSync;
 };
 
@@ -597,6 +599,7 @@ export class SpaceSession {
   }>();
   #watchSpecs: WatchSpec[] = [];
   #watchView: WatchView | null = null;
+  #precedingWatchSyncs: SessionSync[] = [];
   #sessionId: string;
   #sessionToken: string | undefined;
   #serverSeq: number;
@@ -855,6 +858,7 @@ export class SpaceSession {
         this.scheduleAck(result.serverSeq);
         return {
           view: this.#watchView,
+          precedingSyncs: this.takePrecedingWatchSyncs(),
           sync: result.sync,
         };
       },
@@ -897,6 +901,7 @@ export class SpaceSession {
         this.scheduleAck(result.serverSeq);
         return {
           view: this.#watchView,
+          precedingSyncs: this.takePrecedingWatchSyncs(),
           sync: result.sync,
         };
       },
@@ -928,6 +933,10 @@ export class SpaceSession {
     this.noteResult(effect.toSeq);
     if (this.#watchView === null) {
       this.#watchView = WatchView.fromSync(effect);
+      this.#precedingWatchSyncs.push(effect);
+    } else if (this.#precedingWatchSyncs.length > 0) {
+      this.#watchView.applySync(effect, false);
+      this.#precedingWatchSyncs.push(effect);
     } else {
       this.#watchView.applySync(effect, true);
     }
@@ -1151,6 +1160,12 @@ export class SpaceSession {
    */
   setConcurrentWatchRefresh(enabled: boolean): void {
     this.#concurrentWatchRefresh = enabled;
+  }
+
+  private takePrecedingWatchSyncs(): SessionSync[] {
+    const syncs = this.#precedingWatchSyncs;
+    this.#precedingWatchSyncs = [];
+    return syncs;
   }
 
   /**
