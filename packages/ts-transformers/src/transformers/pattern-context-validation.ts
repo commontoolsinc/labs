@@ -336,6 +336,31 @@ export class PatternContextValidationTransformer
       analyze,
     );
     if (decision.kind !== "requires-computed") {
+      if (decision.kind === "allowed") {
+        return;
+      }
+
+      const message = decision.reason === "result-not-direct-jsx"
+        ? `A reactive computation in a plain-array map callback can lower ` +
+          `only when the synchronous map result reaches a JSX child without ` +
+          `ordinary code interpreting it. An ordinary consumer of the mapped ` +
+          `array would receive reactive cells instead of their values. Keep ` +
+          `the map on the render path, or move the whole consuming operation ` +
+          `into computed(() => ...).`
+        : decision.reason === "async-callback"
+        ? `An async plain-array map callback resumes outside pattern ` +
+          `construction, so it cannot own reactive computations. Keep the ` +
+          `render callback synchronous or move deferred work into an ` +
+          `explicit supported owner.`
+        : `Array.map() does not execute a generator callback body, so the ` +
+          `generator cannot own reactive computations. Use a synchronous ` +
+          `render callback or an explicit supported owner.`;
+      context.reportDiagnostic({
+        severity: "error",
+        type: "pattern-context:computation",
+        message,
+        node,
+      });
       return;
     }
 

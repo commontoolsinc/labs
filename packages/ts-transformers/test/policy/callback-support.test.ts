@@ -139,7 +139,7 @@ Deno.test(
     const { sourceFile, checker, context } = createProgramAndContext(
       `
       const items = [1, 2, 3];
-      const result = items.map((item) => item + 1);
+      const result = <div>{items.map((item) => <span>{item + 1}</span>)}</div>;
     `,
       { withDefaultLibrary: true },
     );
@@ -166,7 +166,7 @@ Deno.test(
     const { sourceFile, checker, context } = createProgramAndContext(
       `
       const items: readonly number[] = [1, 2, 3];
-      const result = items.map((item) => item + 1);
+      const result = <div>{items.map((item) => <span>{item + 1}</span>)}</div>;
     `,
       { withDefaultLibrary: true },
     );
@@ -185,7 +185,7 @@ Deno.test(
     const { sourceFile, checker, context, program } = createProgramAndContext(
       `
       const items = [1, 2, 3];
-      const result = items.map((item) => item + 1);
+      const result = <div>{items.map((item) => <span>{item + 1}</span>)}</div>;
     `,
       { withVirtualLibrary: true },
     );
@@ -209,7 +209,7 @@ Deno.test(
     const { sourceFile, checker, context, program } = createProgramAndContext(
       `
       const items = [1, 2, 3];
-      const result = items.map((item) => item + 1);
+      const result = <div>{items.map((item) => <span>{item + 1}</span>)}</div>;
     `,
       { withAmbientArrayDeclaration: true },
     );
@@ -302,7 +302,7 @@ Deno.test(
       }
 
       declare const grid: Grid<number>;
-      const result = grid.map((cell) => cell + 1);
+      const result = <div>{grid.map((cell) => <span>{cell + 1}</span>)}</div>;
     `);
 
     const callback = findFirstNode(sourceFile, ts.isArrowFunction);
@@ -321,7 +321,7 @@ Deno.test(
       }
 
       const items = new Array<number>();
-      const result = items.map((item) => item + 1);
+      const result = <div>{items.map((item) => <span>{item + 1}</span>)}</div>;
     `);
 
     const callback = findFirstNode(sourceFile, ts.isArrowFunction);
@@ -341,7 +341,9 @@ Deno.test(
       }
 
       const items = [1, 2, 3];
-      const result = items.map((item) => item + 1, (item) => item * 2);
+      const result = (
+        <div>{items.map((item) => item + 1, (item) => item * 2)}</div>
+      );
     `,
       { withDefaultLibrary: true },
     );
@@ -363,6 +365,83 @@ Deno.test(
         .supportsPatternOwnedWrapperCallbackSite,
       false,
     );
+  },
+);
+
+Deno.test(
+  "Callback support policy: a map result stored in a local carries no wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const mapped = items.map((item) => item + 1);
+      const result = <div>{mapped}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a consumed map result carries no wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const result = <div>{items.map((item) => item + 1).filter(Boolean)}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+  },
+);
+
+Deno.test(
+  "Callback support policy: an async map callback carries no wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const result = <div>{items.map(async (item) => item + 1)}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a generator map callback carries no wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const result = <div>{items.map(function* (item) { yield item + 1; })}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findFirstNode(sourceFile, ts.isFunctionExpression);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
   },
 );
 

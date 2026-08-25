@@ -17,6 +17,7 @@ export {
   classifyArrayMethodCallSite,
   classifyArrayMethodResultSinkCall,
   classifyArrayMethodResultSinkReceiverChainCall,
+  classifyPlainArrayMapWrapperSite,
   classifyWildcardTraversalCall,
   declaredVerbResultTypeNode,
   detectCallKind,

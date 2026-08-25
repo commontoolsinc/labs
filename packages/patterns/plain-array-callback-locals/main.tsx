@@ -1,10 +1,10 @@
 /**
  * Fixture: value bindings inside a plain-array `.map()` callback.
  *
- * A plain-array callback in a pattern body runs during pattern build, so each
- * of these bindings is a pattern-body binding and lowers to its own
- * per-iteration lift. The central one is `marker`: a bare comparison bound to
- * a name and read further down as the condition of a JSX ternary.
+ * A directly rendered synchronous plain-array callback runs during pattern
+ * build, so each of these bindings is a pattern-body binding and lowers to its
+ * own per-iteration lift. The central one is `marker`: a bare comparison bound
+ * to a name and read further down as the condition of a JSX ternary.
  *
  * `textContent` in the shared vnode helpers maps a boolean to "", so every
  * probe renders a distinct string in both branches and the test can tell the

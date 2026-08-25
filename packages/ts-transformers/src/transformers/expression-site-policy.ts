@@ -2,6 +2,7 @@ import ts from "typescript";
 import {
   classifyArrayMethodCall,
   classifyArrayMethodCallSite,
+  classifyPlainArrayMapWrapperSite,
   detectCallKind,
   getCallArgumentPosition,
   getTypeAtLocationWithFallback,
@@ -110,6 +111,13 @@ export type RestrictedReactiveComputationDecision =
   }
   | {
     kind: "requires-computed";
+  }
+  | {
+    kind: "unsupported-plain-array-map";
+    reason:
+      | "result-not-direct-jsx"
+      | "async-callback"
+      | "generator-callback";
   };
 
 export function containsLogicalBinaryOperator(expr: ts.Expression): boolean {
@@ -1486,6 +1494,29 @@ export function classifyRestrictedReactiveComputation(
   context: TransformationContext,
   analyze: AnalyzeFn,
 ): RestrictedReactiveComputationDecision {
+  const callbackContext = context.getEnclosingCallbackContext(expression);
+  if (callbackContext) {
+    const reactiveContext = context.getReactiveContext(expression);
+    const mapSiteDecision = classifyPlainArrayMapWrapperSite(
+      callbackContext.callback,
+      context.checker,
+      (sourceFile) => context.isSourceFileDefaultLibrary(sourceFile),
+    );
+    if (
+      mapSiteDecision !== undefined && mapSiteDecision !== "supported" &&
+      reactiveContext.kind === "pattern" &&
+      !hasEnclosingComputeLikeCallback(expression, context)
+    ) {
+      const analysis = analyze(expression);
+      return analysis.containsReactive && analysis.requiresRewrite
+        ? {
+          kind: "unsupported-plain-array-map",
+          reason: mapSiteDecision,
+        }
+        : { kind: "allowed" };
+    }
+  }
+
   if (!isInRestrictedReactiveContext(expression, context.checker, context)) {
     return { kind: "allowed" };
   }

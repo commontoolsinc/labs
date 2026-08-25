@@ -3470,11 +3470,17 @@ Deno.test("Reactive .get() Validation", async (t) => {
   await t.step(
     "allows a .get() inside a plain array map callback",
     async () => {
-      const source = `      import { pattern, Writable } from "commonfabric";
+      const source =
+        `      import { pattern, UI, Writable } from "commonfabric";
 
       export default pattern<{ rows: Writable<string[]> }>(({ rows }) => {
-        const joined = ["-", "+"].map((sep) => rows.get().join(sep));
-        return { joined };
+        return {
+          [UI]: (
+            <div>
+              {["-", "+"].map((sep) => <span>{rows.get().join(sep)}</span>)}
+            </div>
+          ),
+        };
       });
     `;
       const { diagnostics } = await validateSource(source, {
@@ -3484,8 +3490,164 @@ Deno.test("Reactive .get() Validation", async (t) => {
       assertEquals(
         errors.length,
         0,
-        "map collects what the callback returns, so its value sites carry " +
-          "the read into a per-element lift",
+        "the synchronous map result flows straight into JSX, so its value " +
+          "sites carry the read into a per-element lift",
+      );
+    },
+  );
+
+  await t.step(
+    "errors when a lifted plain map result flows through a local",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ target: Writable<string> }>(({ target }) => {
+        const t = target.get();
+        const mapped = VALUES.map((value) => {
+          const matches = value === t;
+          return matches;
+        });
+        const selected = mapped.filter(Boolean);
+        return { selected };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
+      assertStringIncludes(
+        errors.map((error) => error.message).join("\n"),
+        "ordinary consumer of the mapped array",
+      );
+    },
+  );
+
+  await t.step(
+    "allows an ordinary map result consumer in a standalone helper",
+    async () => {
+      const source = `      import { ReadonlyCell } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export function select(target: ReadonlyCell<string>): boolean[] {
+        const mapped = VALUES.map((value) => value === target.get());
+        return mapped.filter(Boolean);
+      }
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "standalone helpers execute under their own compute boundary, so " +
+          "their ordinary map result consumers do not request a pattern-owned wrapper",
+      );
+    },
+  );
+
+  await t.step(
+    "errors when a lifted plain map result feeds a JSX-local filter",
+    async () => {
+      const source = `      import { pattern, UI } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ target: string }>(({ target }) => {
+        return {
+          [UI]: (
+            <div>
+              {VALUES.map((value) => {
+                const matches = value === target;
+                return matches;
+              }).filter(Boolean).length}
+            </div>
+          ),
+        };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
+      assertStringIncludes(
+        errors.map((error) => error.message).join("\n"),
+        "ordinary consumer of the mapped array",
+      );
+    },
+  );
+
+  await t.step(
+    "errors inside an async plain array map callback",
+    async () => {
+      const source = `      import { pattern, UI } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ target: string }>(({ target }) => {
+        return {
+          [UI]: (
+            <div>
+              {VALUES.map(async (value) => {
+                await Promise.resolve();
+                const matches = value === target;
+                return <span>{matches ? "yes" : "no"}</span>;
+              })}
+            </div>
+          ),
+        };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
+      assertStringIncludes(
+        errors.map((error) => error.message).join("\n"),
+        "resumes outside pattern construction",
+      );
+    },
+  );
+
+  await t.step(
+    "errors inside a generator plain array map callback",
+    async () => {
+      const source = `      import { pattern, UI } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ target: string }>(({ target }) => {
+        return {
+          [UI]: (
+            <div>
+              {VALUES.map(function* (value) {
+                const matches = value === target;
+                yield matches;
+                return <span>{matches ? "yes" : "no"}</span>;
+              })}
+            </div>
+          ),
+        };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
+      assertStringIncludes(
+        errors.map((error) => error.message).join("\n"),
+        "does not execute a generator callback body",
       );
     },
   );

@@ -894,44 +894,53 @@ export function classifyArrayCallbackContainerCall(
 const COLLECTING_ARRAY_METHOD_NAMES = new Set(["map"]);
 
 /**
- * True when `callback` is the callback of an ordinary eager Array method that
- * collects results rather than interpreting them — the one shape whose body may
- * carry pattern-owned wrapper sites, because a lifted callback-local can be
- * returned from it without changing what the method does.
+ * True when `callback` is a synchronous callback of an ordinary eager Array
+ * method that collects results rather than interpreting them, and the collected
+ * result flows to a JSX-child expression without ordinary code reading it.
  *
- * Three things must hold, and each rules out a shape that would otherwise slip
- * through method-name matching alone: the callback is argument zero, so a
- * comparator or an `initialValue` in another position does not qualify; the
- * resolved owner symbol includes the configured default-library
- * `Array`/`ReadonlyArray` declaration, so a same-named source or ambient type
- * and a `map` of some other type do not qualify; and the receiver is a plain
- * array that no reactive lowering owns, so the reactive collection operators
- * keep their own structural treatment.
+ * The JSX-child sink is what makes the permission closed under later use: a
+ * native `.map()` does not inspect a returned cell, but an ordinary consumer of
+ * the resulting array (`filter`, `find`, `some`, a reduction, or the same flow
+ * through a local) would. Keeping the map call render-owned — either as the JSX
+ * child or as the direct result of a synchronous IIFE that is the child —
+ * preserves the render-building use case without letting a cell array escape to
+ * ordinary JavaScript.
+ *
+ * The callback must also be argument zero, belong to the configured
+ * default-library `Array`/`ReadonlyArray`, and run synchronously. Async callbacks
+ * resume after pattern construction, while generator callbacks are never run by
+ * `map`, so neither can own construction-time wrapper sites.
  */
-export function isCollectingPlainArrayMethodCallback(
+export type PlainArrayMapWrapperSiteDecision =
+  | "supported"
+  | "result-not-direct-jsx"
+  | "async-callback"
+  | "generator-callback";
+
+export function classifyPlainArrayMapWrapperSite(
   callback: ts.ArrowFunction | ts.FunctionExpression,
   checker: ts.TypeChecker,
   isSourceFileDefaultLibrary: (sourceFile: ts.SourceFile) => boolean,
-): boolean {
+): PlainArrayMapWrapperSiteDecision | undefined {
   const position = getCallArgumentPosition(callback);
   if (!position || position.index !== 0) {
-    return false;
+    return undefined;
   }
 
   const call = position.call;
   const callSite = classifyArrayMethodCallSite(call, checker);
   if (!callSite || callSite.ownership !== "plain" || callSite.lowered) {
-    return false;
+    return undefined;
   }
 
   const declaration = checker.getResolvedSignature(call)?.declaration;
   if (!declaration) {
-    return false;
+    return undefined;
   }
 
   const owner = findOwnerDeclaration(declaration);
   if (!owner?.name || !ARRAY_OWNER_NAMES.has(owner.name.text)) {
-    return false;
+    return undefined;
   }
 
   const ownerSymbol = checker.getSymbolAtLocation(owner.name);
@@ -941,12 +950,116 @@ export function isCollectingPlainArrayMethodCallback(
       isSourceFileDefaultLibrary(candidate.getSourceFile())
     )
   ) {
-    return false;
+    return undefined;
   }
 
   const { name } = declaration as { readonly name?: ts.Node };
-  return !!name && ts.isIdentifier(name) &&
-    COLLECTING_ARRAY_METHOD_NAMES.has(name.text);
+  if (
+    !name || !ts.isIdentifier(name) ||
+    !COLLECTING_ARRAY_METHOD_NAMES.has(name.text)
+  ) {
+    return undefined;
+  }
+
+  if (
+    callback.modifiers?.some((modifier) =>
+      modifier.kind === ts.SyntaxKind.AsyncKeyword
+    )
+  ) {
+    return "async-callback";
+  }
+  if (
+    ts.isFunctionExpression(callback) && callback.asteriskToken !== undefined
+  ) {
+    return "generator-callback";
+  }
+  return flowsDirectlyToJsxChild(call) ? "supported" : "result-not-direct-jsx";
+}
+
+export function isRenderSafePlainArrayMapCallback(
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  checker: ts.TypeChecker,
+  isSourceFileDefaultLibrary: (sourceFile: ts.SourceFile) => boolean,
+): boolean {
+  return classifyPlainArrayMapWrapperSite(
+    callback,
+    checker,
+    isSourceFileDefaultLibrary,
+  ) === "supported";
+}
+
+function flowsDirectlyToJsxChild(expression: ts.Expression): boolean {
+  const original = ts.getOriginalNode(expression);
+  let current = ts.isExpression(original) && original.parent
+    ? original
+    : expression;
+
+  while (true) {
+    while (
+      current.parent &&
+      (
+        ts.isParenthesizedExpression(current.parent) ||
+        ts.isAsExpression(current.parent) ||
+        ts.isTypeAssertionExpression(current.parent) ||
+        ts.isSatisfiesExpression(current.parent) ||
+        ts.isNonNullExpression(current.parent)
+      ) && current.parent.expression === current
+    ) {
+      current = current.parent;
+    }
+
+    const parent = current.parent;
+    if (
+      parent && ts.isJsxExpression(parent) && parent.expression === current &&
+      (ts.isJsxElement(parent.parent) || ts.isJsxFragment(parent.parent))
+    ) {
+      return true;
+    }
+
+    if (
+      !parent || !ts.isReturnStatement(parent) || parent.expression !== current
+    ) {
+      return false;
+    }
+
+    const iifeCall = getSynchronousIifeCallForReturn(parent);
+    if (!iifeCall) {
+      return false;
+    }
+    current = iifeCall;
+  }
+}
+
+function getSynchronousIifeCallForReturn(
+  statement: ts.ReturnStatement,
+): ts.CallExpression | undefined {
+  let owner: ts.Node | undefined = statement.parent;
+  while (owner && !ts.isFunctionLike(owner)) {
+    owner = owner.parent;
+  }
+  if (
+    !owner ||
+    (!ts.isArrowFunction(owner) && !ts.isFunctionExpression(owner)) ||
+    owner.modifiers?.some((modifier) =>
+      modifier.kind === ts.SyntaxKind.AsyncKeyword
+    ) ||
+    (ts.isFunctionExpression(owner) && owner.asteriskToken !== undefined)
+  ) {
+    return undefined;
+  }
+
+  let callee: ts.Expression = owner;
+  while (
+    callee.parent && ts.isParenthesizedExpression(callee.parent) &&
+    callee.parent.expression === callee
+  ) {
+    callee = callee.parent;
+  }
+
+  const call = callee.parent;
+  return call && ts.isCallExpression(call) && call.expression === callee
+    ? call
+    : undefined;
 }
 
 export function classifyArrayMethodResultSinkCall(

@@ -60,12 +60,18 @@ decisions about wrapping.
 This document focuses on reactive collection calls that `ClosureTransformer`
 rewrites. An ordinary eager `Array.map()` or `ReadonlyArray.map()` call remains
 plain JavaScript, but a callback in a pattern body can still carry pattern-owned
-value sites that stage 13 lowers. That permission is narrower than the
-`plain-array-value` callback boundary: `isCollectingPlainArrayMethodCallback`
-admits only argument zero of a `map` whose owner symbol includes the configured
-TypeScript default-library `Array`/`ReadonlyArray` declaration. Same-named
-source and ambient types do not qualify, and neither do result-interpreting
-methods such as `filter`, `find`, `sort`, `flatMap`, or `reduce`.
+value sites that stage 13 lowers when the map result reaches a JSX child without
+ordinary code interpreting it (directly or through a synchronous IIFE return).
+That permission is narrower than the `plain-array-value` callback boundary:
+`isRenderSafePlainArrayMapCallback` admits only a synchronous argument-zero
+callback of a `map` whose owner symbol includes the configured TypeScript
+default-library `Array`/`ReadonlyArray` declaration. Same-named source and
+ambient types do not qualify, neither do async or generator callbacks, and a map
+result stored or consumed by ordinary JavaScript carries no sites. The
+result-interpreting methods such as `filter`, `find`, `sort`, `flatMap`, and
+`reduce` remain excluded too. This restriction applies to pattern-owned wrapper
+sites; maps inside standalone or explicit compute-owned helpers remain ordinary
+JavaScript.
 
 ## What `ClosureTransformer` does for `.map`s
 
