@@ -13,6 +13,7 @@ import { type Cell } from "../cell.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { validateAgainstSchema } from "../cfc/schema-sanitization.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import { settleAbandonedRequest } from "./abandoned-request.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import type { Runtime } from "../runtime.ts";
 import { type Action } from "../scheduler.ts";
@@ -595,7 +596,25 @@ function fetchBuiltin(kind: FetchKind) {
             );
             runtime.trackAsyncWork(work, parentCell);
           },
-          { idempotencyKey: effectKey },
+          {
+            idempotencyKey: effectKey,
+            onRejected: (rejection) => {
+              runtime.trackAsyncWork(
+                settleAbandonedRequest(
+                  runtime,
+                  kind.name,
+                  effectKey,
+                  (settleTx) => {
+                    sendResult(settleTx, { pending, result, error });
+                    pending.withTx(settleTx).set(false);
+                    result.withTx(settleTx).set(undefined);
+                    error.withTx(settleTx).set(rejection.message);
+                  },
+                ),
+                parentCell,
+              );
+            },
+          },
         );
       }
     };

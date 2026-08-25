@@ -67,6 +67,7 @@ import {
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { cfcSchemaToObject, resolveCfcSchemaRefs } from "../cfc/schema-refs.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import { settleAbandonedRequest } from "./abandoned-request.ts";
 import { markEffectCompletion } from "../executor/effect-completion.ts";
 import { createTrustResolver } from "../cfc/trust.ts";
 import {
@@ -3583,6 +3584,31 @@ export function llmDialog(
                 }),
                 parentCell,
               );
+            },
+            {
+              onRejected: (rejection) => {
+                // The turn is not in the conversation: the user's message, the
+                // pending flag and the request id all rode the transaction
+                // that was abandoned, so appending an assistant error message
+                // here would answer a turn no reader can see. What is left to
+                // do is put the announcement back, since it rode that
+                // transaction too, and take the pending flag down so nothing
+                // waits on a turn that will not run. The seam reports the
+                // refusal itself.
+                if (requestId !== nextRequestId) return;
+                runtime.trackAsyncWork(
+                  settleAbandonedRequest(
+                    runtime,
+                    "llmDialog",
+                    `llmDialog:${nextRequestId}`,
+                    (settleTx) => {
+                      sendResult(settleTx, result);
+                      pending.withTx(settleTx).set(false);
+                    },
+                  ),
+                  parentCell,
+                );
+              },
             },
           );
         },
