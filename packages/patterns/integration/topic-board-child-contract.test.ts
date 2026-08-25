@@ -58,7 +58,10 @@ function onArmStepSkip(step: string): { ignore: boolean } {
       JSON.stringify(step)
     } (until ${entry.phase}) — ${entry.reason}`,
   );
-  return { ignore: true };
+  // DIAGNOSTIC (#6304, temporary): the skip is DISARMED on this branch so
+  // the registered step RUNS in the ON lane and the failure-time dump
+  // below captures the standing replica/overlay state.
+  return { ignore: false };
 }
 
 /**
@@ -303,6 +306,48 @@ describe("topic-board-pivot-contract", () => {
     );
   };
 
+  /** DIAGNOSTIC (#6304, temporary): dump the client replica's pending
+   * layers and the speculation overlay's live entries, so a wrong pivot
+   * row count in CI names the standing layer and the retirement gate it
+   * fails. Reads process-internal state through temporary debug
+   * accessors; never asserts. */
+  const dump6304 = async (label: string): Promise<void> => {
+    try {
+      const space = (cc as unknown as { space: string }).space;
+      const runtime = cc.runtime as unknown as {
+        speculationOverlay?: { debugState(s: string): unknown };
+        storageManager: {
+          open(s: string): {
+            replica: { debugPendingState?(): unknown };
+          };
+        };
+      };
+      console.log(
+        `#6304 [${label}] crossrefs =`,
+        Deno.inspect(await board.result.get(["crossrefs"]), {
+          depth: 5,
+          iterableLimit: 20,
+        }),
+      );
+      console.log(
+        `#6304 [${label}] overlay =`,
+        Deno.inspect(runtime.speculationOverlay?.debugState(space), {
+          depth: 8,
+          iterableLimit: 100,
+        }),
+      );
+      console.log(
+        `#6304 [${label}] replica pending =`,
+        Deno.inspect(
+          runtime.storageManager.open(space).replica.debugPendingState?.(),
+          { depth: 8, iterableLimit: 100 },
+        ),
+      );
+    } catch (error) {
+      console.log(`#6304 [${label}] dump failed:`, error);
+    }
+  };
+
   /** The board's topic titles, in filing order. Asserted in place of a bare
    * count, because a count of four says nothing: a doubled topic and a
    * doubled pivot row over three topics are different defects, and only the
@@ -349,8 +394,12 @@ describe("topic-board-pivot-contract", () => {
       // present by the wait above leaves `topics` at four and hangs that
       // wait (it has no deadline); only a duplicate landing after the wait
       // matched would surface here as a doubled title.
-      expect(((await board.result.get(["crossrefs"])) as unknown[]).length)
-        .toBe(3);
+      const crossrefRows =
+        ((await board.result.get(["crossrefs"])) ?? []) as unknown[];
+      if (crossrefRows.length !== 3) {
+        await dump6304(`baseline-count-${crossrefRows.length}`);
+      }
+      expect(crossrefRows.length).toBe(3);
       // The pivot has served three rows, so the topics behind them have
       // settled.
       expect((await edgesNow(target, "referencedBy")).length).toBe(0);
@@ -396,5 +445,10 @@ describe("topic-board-pivot-contract", () => {
     // The edge that was not retracted survives as a reference, not a
     // flattened copy of the piece it names.
     expect((await awaitInbound(third, "Graph source")).length).toBe(1);
+
+    // DIAGNOSTIC (#6304, temporary): the suite-end state, while the
+    // controller is still live — whether a layer standing at the baseline
+    // case ever retired.
+    await dump6304("suite-end");
   });
 });

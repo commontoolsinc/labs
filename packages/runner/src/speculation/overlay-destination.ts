@@ -366,6 +366,35 @@ export class SpeculationOverlayDestination
     return this.#entries.get(space)?.size ?? 0;
   }
 
+  /** DIAGNOSTIC (#6304, temporary): every live entry's retirement inputs
+   * plus the replica's view of each doc it read or wrote — enough to
+   * evaluate the sweep's three gates offline. */
+  debugState(space: MemorySpace): unknown {
+    const replica = this.#runtime.storageManager.open(space).replica;
+    const view = replica.speculationRetirementView?.bind(replica);
+    const ackedSeqOf = replica.ackedSeqOf?.bind(replica);
+    const docView = (doc: { id: URI; scope?: CellScope }) => ({
+      ...doc,
+      ...(view === undefined ? {} : view(doc.id, doc.scope)),
+    });
+    return {
+      watermark: this.#watermarks.get(space) ?? 0,
+      entries: [...(this.#entries.get(space)?.values() ?? [])].map((e) => ({
+        localSeq: e.localSeq,
+        confirmedFloor: e.confirmedFloor,
+        eventId: e.eventId,
+        parentEventId: e.parentEventId,
+        sourceAction: e.sourceAction,
+        origins: e.originLocalSeqs.map((seq) => ({
+          localSeq: seq,
+          acked: ackedSeqOf?.(seq),
+        })),
+        pendingReadDocs: e.pendingReadDocs.map(docView),
+        writtenDocs: e.writtenDocs.map(docView),
+      })),
+    };
+  }
+
   /** DIAGNOSTIC (tests): cumulative EVENT-HANDLER-kind seals this
    * overlay diverted — never decremented by retirement, so it
    * witnesses transient echoes deterministically. The Phase-4

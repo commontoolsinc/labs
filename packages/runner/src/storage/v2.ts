@@ -3129,6 +3129,27 @@ class SpaceReplica implements ISpaceReplica {
     return this.#ackedSeqsByLocalSeq.get(localSeq);
   }
 
+  /** DIAGNOSTIC (#6304, temporary): every doc holding a pending layer,
+   * with each layer's ops and ack state, plus the confirmed cover. */
+  debugPendingState(): unknown[] {
+    const out: unknown[] = [];
+    for (const [key, record] of this.#docs.entries()) {
+      if (record.pending.length === 0) continue;
+      out.push({
+        key,
+        confirmedSeq: record.confirmed.seq,
+        coverClass: record.confirmed.coverClass,
+        pending: record.pending.map((entry) => ({
+          localSeq: entry.localSeq,
+          op: entry.op,
+          acked: this.#ackedSeqsByLocalSeq.get(entry.localSeq),
+          ...(entry.op === "patch" ? { patches: entry.patches } : {}),
+        })),
+      });
+    }
+    return out;
+  }
+
   /**
    * Resolves when the accepted commit at `localSeq` has been APPLIED to
    * this replica's settled view — immediately when its accept was
