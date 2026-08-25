@@ -30,7 +30,11 @@ import { hashStringOf } from "@commonfabric/data-model/value-hash";
 
 import { openSpace, type SpaceDb } from "./db.ts";
 import { annotate, collectLinks } from "./decode.ts";
-import { getValueAt, reconstructDocument } from "./reconstruct.ts";
+import {
+  getValueAt,
+  reconstructDocument,
+  visibleRevisionRows,
+} from "./reconstruct.ts";
 
 export interface SpaceRef {
   /** Display label — usually the space DID (DB file basename). */
@@ -447,12 +451,12 @@ export function convergenceScanExact(
   // id -> how many spaces hold it
   const counts = new Map<string, number>();
   for (const { space } of spaces) {
-    const ids = space.db
-      .prepare(
-        `SELECT DISTINCT id FROM revision WHERE branch = ? AND scope_key = ?`,
-      )
-      .all<{ id: string }>(branch, scope);
-    for (const { id } of ids) counts.set(id, (counts.get(id) ?? 0) + 1);
+    // Entities each space can SEE on this branch, ancestry included: a
+    // convergence scan that enumerated only local rows would silently skip
+    // entities both spaces read fine, and report agreement it never checked.
+    for (const { id } of visibleRevisionRows(space, { branch, scope })) {
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
   }
   const shared = [...counts.entries()].filter(([, n]) => n >= 2).map(([id]) =>
     id
@@ -506,12 +510,12 @@ export function convergenceScan(
     : buildCrossSpaceLinkIndex(spaces, { scope, branch });
   const counts = new Map<string, number>();
   for (const { space } of spaces) {
-    const ids = space.db
-      .prepare(
-        `SELECT DISTINCT id FROM revision WHERE branch = ? AND scope_key = ?`,
-      )
-      .all<{ id: string }>(branch, scope);
-    for (const { id } of ids) counts.set(id, (counts.get(id) ?? 0) + 1);
+    // Entities each space can SEE on this branch, ancestry included: a
+    // convergence scan that enumerated only local rows would silently skip
+    // entities both spaces read fine, and report agreement it never checked.
+    for (const { id } of visibleRevisionRows(space, { branch, scope })) {
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
   }
   const shared = [...counts.entries()].filter(([, count]) => count >= 2).map(
     ([id]) => id,

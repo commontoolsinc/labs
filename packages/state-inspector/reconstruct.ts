@@ -230,6 +230,21 @@ export function visibleRevisionRows(
 }
 
 /**
+ * The branch that owns one entity's visible row, or undefined when the entity
+ * is not visible from here at all.
+ *
+ * A pass describing ONE entity's history asks this: nearest-branch ownership
+ * decides which log the reader can reach, and it hides a parent's writes for an
+ * entity the child overrode exactly as it hides the parent's value.
+ */
+export function owningLink(
+  space: SpaceDb,
+  opts: { branch?: string; scope?: string; id: string },
+): BranchReadLink | undefined {
+  return visibleRevisionRows(space, opts)[0]?.link;
+}
+
+/**
  * Resolve the single revision row visible for `id` at `atSeq` on `branch`,
  * replicating the engine's `readRowForBranch` (`engine.ts`): take the latest
  * local row at/before `atSeq`; if the branch has NONE, inherit the parent's row
