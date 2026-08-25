@@ -807,6 +807,89 @@ describe("schema-doc-sync", () => {
     );
   });
 
+  it("keeps a parked NEWER revision when an older refresh for the same doc applies", () => {
+    // A watch refresh can carry an older seq than a revision already
+    // parked — the monotonicity guard in the apply loop exists for
+    // exactly that. Superseding the park on any arrival would discard
+    // the newer revision permanently, and the schema's later arrival
+    // would have nothing to release. Found in review of this change.
+    const depSchema = { type: "string", title: "stale-refresh" } as const;
+    const depHash = internSchemaAsTaggedHashString(depSchema);
+    const provider = readerStorage.open(space);
+    const replica = provider.replica as unknown as {
+      applySessionSync(sync: unknown, type: string): void;
+      getDocument(uri: string): unknown;
+    };
+    const newer = {
+      value: {
+        revision: "newer",
+        linked: {
+          "/": {
+            [LINK_V1_TAG]: {
+              id: "of:stale-target",
+              path: [],
+              schema: { $ref: `cid:${depHash}` },
+            },
+          },
+        },
+      },
+    };
+    // seq 5, deferred on the missing schema.
+    replica.applySessionSync({
+      type: "sync",
+      fromSeq: 980_000,
+      toSeq: 980_001,
+      upserts: [
+        {
+          branch: "",
+          id: "of:stale-carrier",
+          scope: "space",
+          seq: 5,
+          doc: newer,
+        },
+      ],
+      removes: [],
+    }, "integrate");
+    expect(replica.getDocument("of:stale-carrier")).toBeUndefined();
+
+    // seq 3 — an OLDER refresh, no ref of its own, so it applies.
+    replica.applySessionSync({
+      type: "sync",
+      fromSeq: 980_001,
+      toSeq: 980_002,
+      upserts: [
+        {
+          branch: "",
+          id: "of:stale-carrier",
+          scope: "space",
+          seq: 3,
+          doc: { value: { revision: "older" } },
+        },
+      ],
+      removes: [],
+    }, "integrate");
+
+    // The schema lands; the parked seq-5 revision is still there and
+    // wins on seq. Superseding on the stale arrival would leave the
+    // replica pinned to "older" forever.
+    replica.applySessionSync({
+      type: "sync",
+      fromSeq: 980_002,
+      toSeq: 980_003,
+      upserts: [
+        {
+          branch: "",
+          id: `cid:${depHash}`,
+          scope: "space",
+          seq: 6,
+          doc: { value: depSchema },
+        },
+      ],
+      removes: [],
+    }, "integrate");
+    expect(replica.getDocument("of:stale-carrier")).toEqual(newer);
+  });
+
   it("PULLS the cid a parked doc waits on and applies it, with nothing re-delivered (the OW61 board's shape)", async () => {
     // #6248's ensure-ON board: the cid document IS installed in the
     // space — the server elides it because this session already
