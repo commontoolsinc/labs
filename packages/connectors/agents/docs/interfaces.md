@@ -259,7 +259,8 @@ the corresponding snapshot value is null. A non-null snapshot value takes
 precedence.
 
 The connector enriches `gitRepo`, `gitBranch`, and `gitWorktreeRoot` after the
-driver returns the snapshot.
+driver returns the snapshot. Commit and remote observations live in the shallow
+checkout index rather than each session manifest.
 
 ### Session snapshot
 
@@ -552,6 +553,24 @@ normalized metadata, nullable `archived` and `active` lifecycle fields, provider
 capabilities, up to 12 recent normalized message previews, a live manifest cell
 link, content hash, and synchronization status. The lifecycle fields describe
 provider state. Synchronization status describes the connector's published copy.
+
+Each index also contains one shallow `checkouts` row per non-deleted worktree.
+The row records its root, current branch, current commit, selected repository
+remote, every fetch or push remote, and observation time. Consumers can join
+repository data to local checkouts without loading session manifests or
+deduplicating sessions.
+
+The host can also provide checkout directories discovered below configured
+filesystem roots. Those observations are included even when no retained agent
+session names the checkout. A failed discovery prevents index publication, so a
+partial filesystem scan cannot delete checkout rows. Candidates with stale or
+invalid `.git` markers are omitted from the completed scan.
+
+A publication that omits checkout directories preserves the prior checkout rows.
+This lets a post-command session refresh update one session without deleting
+discovery-only inventory. A complete filesystem scan supplies the directory
+array, including an empty array, and replaces the discovery portion of the
+inventory.
 
 The manifest and chunk fields are stored as `FabricLink`s rather than copied
 objects. A consumer whose schema declares those fields as `Cell` values can read
@@ -860,6 +879,8 @@ ledger's in-memory values without calling `put()`.
 2. `git -C <root> branch --show-current`
 3. `git -C <root> remote get-url upstream`
 4. `git -C <root> remote get-url origin` when upstream is absent
+5. `git -C <root> rev-parse HEAD`
+6. `git -C <root> remote -v`
 
 `beginObservation()` creates a lookup scope for one publication. It deduplicates
 equal working directories and equal repository roots within that scope. A new
@@ -872,5 +893,8 @@ observation.
 A missing working directory, a non-repository directory, or a failed Git process
 produces null metadata rather than a failed session publication.
 
-The connector stores the remote string exactly as Git returns it. It does not
-canonicalize SSH and HTTPS URLs or inspect repository contents.
+The connector removes credentials, query strings, and fragments from standard
+URL remotes before publication. It preserves SCP-style SSH remotes and otherwise
+keeps Git's spelling. It omits local paths, remote-helper commands, and other
+opaque remote forms. It deduplicates the fetch and push forms of an equal URL
+under each remote name. It does not inspect repository contents.

@@ -13,6 +13,7 @@ Deno.test("parseAgentsHostConfig validates and preserves provider options", () =
   const config = parseAgentsHostConfig({
     schema: AGENTS_HOST_CONFIG_SCHEMA,
     collectionIntervalMs: 1_234,
+    checkoutRoots: ["/workspace/checkouts"],
     sources: [
       {
         id: "codex-work",
@@ -34,6 +35,7 @@ Deno.test("parseAgentsHostConfig validates and preserves provider options", () =
   });
 
   assertEquals(config.collectionIntervalMs, 1_234);
+  assertEquals(config.checkoutRoots, ["/workspace/checkouts"]);
   assertEquals(config.sources, [
     {
       id: "codex-work",
@@ -52,6 +54,30 @@ Deno.test("parseAgentsHostConfig validates and preserves provider options", () =
       enabled: false,
     },
   ]);
+});
+
+Deno.test("parseAgentsHostConfig validates checkout search roots", () => {
+  for (
+    const checkoutRoots of [
+      "/workspace/checkouts",
+      ["relative"],
+      ["/workspace/checkouts", "/workspace/checkouts"],
+    ]
+  ) {
+    assertThrows(
+      () =>
+        parseAgentsHostConfig({
+          schema: AGENTS_HOST_CONFIG_SCHEMA,
+          checkoutRoots,
+          sources: [{
+            id: "codex",
+            driver: "codex-app-server",
+            enabled: true,
+          }],
+        }),
+      Error,
+    );
+  }
 });
 
 Deno.test("parseAgentsHostConfig rejects ambiguous source identities", () => {

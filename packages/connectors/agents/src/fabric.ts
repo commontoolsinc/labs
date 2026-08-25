@@ -30,7 +30,7 @@ import type {
   NormalizedMessage,
 } from "./types.ts";
 import { AGENT_CONNECTOR_SCHEMAS } from "./protocol.ts";
-import { GitContextResolver } from "./git-context.ts";
+import { type GitContext, GitContextResolver } from "./git-context.ts";
 import {
   materializeStableArrayCells,
   planStableArrayCells,
@@ -49,6 +49,9 @@ export interface AgentFabricCells {
 export interface AgentFabricPublishOptions {
   preserveUntouchedStatus?: boolean;
   observationSequence?: number;
+  checkoutDirectories?: string[];
+  signal?: AbortSignal;
+  onCommit?: () => void;
 }
 
 interface CellLink {
@@ -68,6 +71,9 @@ interface IndexEntry {
   gitRepo: string | null;
   gitBranch: string | null;
   gitWorktreeRoot: string | null;
+  gitHeadSha: string | null;
+  gitRemotes: Array<{ name: string; urls: string[] }>;
+  gitObservedAt: string | null;
   createdAt: string | null;
   updatedAt: string | null;
   archived: boolean | null;
@@ -96,10 +102,30 @@ interface AgentSessionIndex {
   totalSessionCount?: number;
   olderSessionCount?: number;
   sources: Array<Record<string, unknown>>;
+  checkouts?: CheckoutEntry[];
   // TODO(@ianh): Publish a shallow session directory with the row links and
   // sortable title, update-time, and worktree keys. Consumers cannot sort the
   // linked session rows globally without loading every row cell.
   sessions: IndexEntry[];
+}
+
+export interface CheckoutEntry {
+  root: string;
+  gitRepo: string | null;
+  gitBranch: string | null;
+  gitHeadSha: string | null;
+  gitRemotes: Array<{ name: string; urls: string[] }>;
+  observedAt: string;
+}
+
+export interface CheckoutObservation {
+  gitRepo: string | null;
+  gitBranch: string | null;
+  gitWorktreeRoot: string | null;
+  gitHeadSha: string | null;
+  gitRemotes: Array<{ name: string; urls: string[] }>;
+  gitObservedAt: string | null;
+  syncStatus?: "complete" | "stale" | "partial" | "deleted";
 }
 
 const RECENT_SESSION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
@@ -122,6 +148,48 @@ export function sessionIndexBuckets<
     all: [...entries],
     olderCount: entries.length - recent.length,
   };
+}
+
+export function checkoutEntries(
+  sessions: CheckoutObservation[],
+  discovered: CheckoutObservation[] = [],
+): CheckoutEntry[] {
+  const checkouts = new Map<string, CheckoutEntry>();
+  const observe = (observation: CheckoutObservation) => {
+    const root = observation.gitWorktreeRoot;
+    const observedAt = observation.gitObservedAt;
+    if (!root || !observedAt || observation.syncStatus === "deleted") return;
+    const prior = checkouts.get(root);
+    if (prior && prior.observedAt > observedAt) return;
+    checkouts.set(root, {
+      root,
+      gitRepo: observation.gitRepo,
+      gitBranch: observation.gitBranch,
+      gitHeadSha: observation.gitHeadSha,
+      gitRemotes: observation.gitRemotes,
+      observedAt,
+    });
+  };
+  for (const session of sessions) observe(session);
+  for (const checkout of discovered) observe(checkout);
+  return [...checkouts.values()].sort((left, right) =>
+    left.root.localeCompare(right.root)
+  );
+}
+
+function storedCheckoutObservations(
+  ...indexes: Array<AgentSessionIndex | null>
+): CheckoutObservation[] {
+  return indexes.flatMap((index) =>
+    (index?.checkouts ?? []).map((checkout) => ({
+      gitRepo: checkout.gitRepo,
+      gitBranch: checkout.gitBranch,
+      gitWorktreeRoot: checkout.root,
+      gitHeadSha: checkout.gitHeadSha,
+      gitRemotes: checkout.gitRemotes,
+      gitObservedAt: checkout.observedAt,
+    }))
+  );
 }
 
 export function agentFabricCauses(spaceDid: string) {
@@ -359,6 +427,7 @@ async function planSessionGraph(
   conn: AgentFabricConnection,
   prepared: PreparedSession,
   driver: string,
+  gitContext: GitContext,
 ): Promise<PlannedSessionGraph> {
   const manifest = conn.runtime.getCell(
     conn.spaceDid,
@@ -440,6 +509,9 @@ async function planSessionGraph(
       gitRepo: prepared.summary.gitRepo ?? null,
       gitBranch: prepared.summary.gitBranch ?? null,
       gitWorktreeRoot: prepared.summary.gitWorktreeRoot ?? null,
+      gitHeadSha: gitContext.gitHeadSha,
+      gitRemotes: gitContext.gitRemotes,
+      gitObservedAt: gitContext.gitObservedAt,
       createdAt: prepared.summary.createdAt,
       updatedAt: prepared.summary.updatedAt,
       archived: prepared.summary.archived,
@@ -536,10 +608,29 @@ export class AgentFabricTarget implements CommandTarget {
     return sequence;
   }
 
+  async validateCheckout(
+    directory: string,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    return await this.#gitContext.validateCheckout(directory, signal);
+  }
+
   async #publish(
     collected: CollectedSource[],
     options: AgentFabricPublishOptions & { observationSequence: number },
   ): Promise<number> {
+    let graphCommitStarted = false;
+    const startGraphCommit = () => {
+      if (graphCommitStarted) return;
+      options.onCommit?.();
+      graphCommitStarted = true;
+    };
+    const throwIfPublicationCanStop = () => {
+      if (!graphCommitStarted) options.signal?.throwIfAborted();
+    };
+    const cancellableSignal = () =>
+      graphCommitStarted ? undefined : options.signal;
+    throwIfPublicationCanStop();
     const isSuperseded = (key: string) =>
       (this.#latestObservationBySession.get(key) ?? 0) >
         options.observationSequence;
@@ -567,6 +658,18 @@ export class AgentFabricTarget implements CommandTarget {
         { preserveLinkFields: new Set(["manifest"]) },
       ),
     );
+    const discoveredCheckouts: GitContext[] = [];
+    if (options.checkoutDirectories !== undefined) {
+      for (const directory of options.checkoutDirectories) {
+        throwIfPublicationCanStop();
+        const checkout = await gitContext.resolveCheckout(
+          directory,
+          cancellableSignal(),
+        );
+        if (checkout) discoveredCheckouts.push(checkout);
+      }
+    }
+    throwIfPublicationCanStop();
     const entriesByKey = new Map<string, IndexEntry>(
       [
         ...(previousRecent?.sessions ?? []),
@@ -575,6 +678,13 @@ export class AgentFabricTarget implements CommandTarget {
         .map((entry): [string, IndexEntry] => {
           const restored = {
             ...entry,
+            gitHeadSha: typeof entry.gitHeadSha === "string"
+              ? entry.gitHeadSha
+              : null,
+            gitRemotes: Array.isArray(entry.gitRemotes) ? entry.gitRemotes : [],
+            gitObservedAt: typeof entry.gitObservedAt === "string"
+              ? entry.gitObservedAt
+              : null,
             archived: typeof entry.archived === "boolean"
               ? entry.archived
               : null,
@@ -611,8 +721,10 @@ export class AgentFabricTarget implements CommandTarget {
     const observedDescriptorSourceIds = new Set<string>();
     const flushGraphs = async () => {
       if (pendingGraphs.length === 0) return;
+      throwIfPublicationCanStop();
       const batch = pendingGraphs;
       pendingGraphs = [];
+      startGraphCommit();
       await pushSessionGraphBatch(this.conn, batch);
     };
 
@@ -636,18 +748,51 @@ export class AgentFabricTarget implements CommandTarget {
       );
       const currentKeys = new Set<string>();
       for (const snapshot of source.sessions) {
+        throwIfPublicationCanStop();
         const key = sessionKey(
           source.source.id,
           snapshot.summary.nativeSessionId,
         );
         currentKeys.add(key);
         if (isSuperseded(key)) continue;
-        const prepared = await prepareSession(
-          source.source.id,
-          await gitContext.enrich(snapshot),
+        const previousEntry = entriesByKey.get(key);
+        const observedContext = await gitContext.resolve(
+          snapshot.summary.cwd,
+          cancellableSignal(),
         );
+        throwIfPublicationCanStop();
+        const preservesPriorGit = previousEntry !== undefined &&
+          (observedContext.gitObservationFailed === true ||
+            (observedContext.gitWorktreeRoot !== null &&
+              observedContext.gitObservedAt === null &&
+              previousEntry.gitWorktreeRoot ===
+                observedContext.gitWorktreeRoot));
+        const context = preservesPriorGit
+          ? {
+            gitRepo: previousEntry!.gitRepo,
+            gitBranch: previousEntry!.gitBranch,
+            gitWorktreeRoot: previousEntry!.gitWorktreeRoot,
+            gitHeadSha: previousEntry!.gitHeadSha,
+            gitRemotes: previousEntry!.gitRemotes,
+            gitObservedAt: previousEntry!.gitObservedAt,
+          }
+          : observedContext;
+        const {
+          gitHeadSha: _gitHeadSha,
+          gitRemotes: _gitRemotes,
+          gitObservedAt: _gitObservedAt,
+          gitObservationFailed: _gitObservationFailed,
+          ...summaryContext
+        } = context;
+        const prepared = await prepareSession(source.source.id, {
+          ...snapshot,
+          summary: {
+            ...snapshot.summary,
+            ...summaryContext,
+          },
+        });
+        throwIfPublicationCanStop();
         observedSessionKeys.add(prepared.key);
-        const previousEntry = entriesByKey.get(prepared.key);
         if (
           previousEntry &&
           previousEntry.contentHash === prepared.snapshotHash &&
@@ -656,6 +801,12 @@ export class AgentFabricTarget implements CommandTarget {
           const { deletedAt: _deletedAt, ...rest } = previousEntry;
           entriesByKey.set(prepared.key, {
             ...rest,
+            gitRepo: prepared.summary.gitRepo ?? null,
+            gitBranch: prepared.summary.gitBranch ?? null,
+            gitWorktreeRoot: prepared.summary.gitWorktreeRoot ?? null,
+            gitHeadSha: context.gitHeadSha,
+            gitRemotes: context.gitRemotes,
+            gitObservedAt: context.gitObservedAt,
             capabilities: { ...capabilities },
             recentMessages: recentSessionMessages(
               prepared.normalizedMessages,
@@ -668,6 +819,7 @@ export class AgentFabricTarget implements CommandTarget {
           this.conn,
           prepared,
           driver,
+          context,
         );
         const entry = graph.indexEntry;
         entry.capabilities = { ...capabilities };
@@ -728,7 +880,7 @@ export class AgentFabricTarget implements CommandTarget {
       }
     }
     await flushGraphs();
-
+    throwIfPublicationCanStop();
     const generatedAt = new Date().toISOString();
     const generation = Math.max(
       previousRecent?.generation ?? 0,
@@ -751,6 +903,12 @@ export class AgentFabricTarget implements CommandTarget {
       left,
       right,
     ) => left.key.localeCompare(right.key));
+    const checkouts = options.checkoutDirectories === undefined
+      ? checkoutEntries(
+        activeSessions,
+        storedCheckoutObservations(previousRecent, previousAll),
+      )
+      : checkoutEntries(activeSessions, discoveredCheckouts);
     const recentIndex: AgentSessionIndex = {
       schema: AGENT_CONNECTOR_SCHEMAS.sessionIndex,
       bucket: "recent",
@@ -759,6 +917,7 @@ export class AgentFabricTarget implements CommandTarget {
       totalSessionCount: activeSessions.length,
       olderSessionCount: buckets.olderCount,
       sources,
+      checkouts,
       sessions: buckets.recent,
     };
     const allIndex: AgentSessionIndex = {
@@ -769,6 +928,7 @@ export class AgentFabricTarget implements CommandTarget {
       totalSessionCount: activeSessions.length,
       olderSessionCount: buckets.olderCount,
       sources,
+      checkouts,
       sessions: allSessions,
     };
     const indexChildScope = childScope(
@@ -779,6 +939,8 @@ export class AgentFabricTarget implements CommandTarget {
       planStableArrayCells(recentIndex, indexChildScope),
       planStableArrayCells(allIndex, indexChildScope),
     ]);
+    throwIfPublicationCanStop();
+    startGraphCommit();
     await pushStableCellGraph(
       this.conn,
       [

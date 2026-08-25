@@ -172,11 +172,13 @@ class FakeTarget implements AgentsHostTarget {
   publications: CollectedSource[][] = [];
   allocatedObservationSequences: number[] = [];
   observationSequences: number[] = [];
+  checkoutDirectories: string[][] = [];
   receipts: AgentSessionCommandReceipt[] = [];
   commandCallback?: (commands: unknown[]) => void;
   subscriptionCancelled = false;
   failSubscriptionCancel = false;
   failRefresh = false;
+  failNextHealth = false;
   refreshCount = 0;
   terminalReceiptFailures = 0;
   terminalReceipt = Promise.withResolvers<AgentSessionCommandReceipt>();
@@ -201,16 +203,29 @@ class FakeTarget implements AgentsHostTarget {
 
   publish(
     collected: CollectedSource[],
-    options?: { observationSequence?: number },
+    options?: {
+      observationSequence?: number;
+      checkoutDirectories?: string[];
+      signal?: AbortSignal;
+      onCommit?: () => void;
+    },
   ): Promise<number> {
     this.publications.push(structuredClone(collected));
     if (options?.observationSequence !== undefined) {
       this.observationSequences.push(options.observationSequence);
     }
+    if (options?.checkoutDirectories !== undefined) {
+      this.checkoutDirectories.push([...options.checkoutDirectories]);
+    }
+    options?.onCommit?.();
     this.afterPublish?.();
     return Promise.resolve(
       collected.reduce((count, source) => count + source.sessions.length, 0),
     );
+  }
+
+  validateCheckout(): Promise<boolean> {
+    return Promise.resolve(true);
   }
 
   async publishHealth(value: Record<string, unknown>): Promise<void> {
@@ -225,6 +240,10 @@ class FakeTarget implements AgentsHostTarget {
     this.healthGate = undefined;
     gate?.entered.resolve();
     await gate?.release.promise;
+    if (this.failNextHealth) {
+      this.failNextHealth = false;
+      throw new Error("health publication rejected");
+    }
   }
 
   async subscribeCommands(
@@ -306,11 +325,19 @@ Deno.test("AgentsHost publishes sessions, health, and lifecycle activity", async
       ledger: await openLedger(directory),
       createDriver: () => driver,
       clock: clock(),
+      checkoutRoots: ["/workspace/checkouts"],
+      discoverCheckouts: (roots) => {
+        assertEquals(roots, ["/workspace/checkouts"]);
+        return Promise.resolve(["/workspace/checkouts/project"]);
+      },
     });
 
     assertEquals(await host.start(), 1);
     assertEquals(target.publications.length, 1);
     assertEquals(target.publications[0][0].source.id, "codex");
+    assertEquals(target.checkoutDirectories, [[
+      "/workspace/checkouts/project",
+    ]]);
     assertEquals(host.health().status, "ready");
     assertEquals(host.health().target.debugPieceId, "debug-piece");
     assertEquals(host.health().sources[0].sessionCount, 1);
@@ -360,6 +387,7 @@ Deno.test("AgentsHost continues when one configured source fails to start", asyn
     assertEquals(target.publications[0].map((source) => source.source.id), [
       "healthy",
     ]);
+    assertEquals(target.checkoutDirectories, [[]]);
     const failedHealth = host.health().sources.find((source) =>
       source.id === "failed"
     );
@@ -856,6 +884,77 @@ Deno.test("AgentsHost checks startup cancellation after initial collection", asy
     );
     await host.stop("startup-cancelled");
     assertEquals(driver.stopped, true);
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("AgentsHost completes a sync committed before cancellation", async () => {
+  const directory = await Deno.makeTempDir();
+  try {
+    const driver = new FakeDriver("codex");
+    const target = new FakeTarget();
+    const host = new AgentsHost({
+      sources: [sourceConfig("codex")],
+      target,
+      targetDescription: TARGET_DESCRIPTION,
+      ledger: await openLedger(directory),
+      createDriver: () => driver,
+      clock: clock(),
+    });
+    await host.start({ acceptCommands: false });
+
+    const controller = new AbortController();
+    target.afterPublish = () => {
+      controller.abort(new Error("cancelled after publication commit"));
+    };
+    assertEquals(
+      await host.synchronize("committed", controller.signal),
+      1,
+    );
+    assertEquals(host.health().sync?.status, "complete");
+    assertEquals(host.health().sync?.reason, "committed");
+    assertEquals(
+      host.health().activity.some((event) => event.type === "sync-cancelled"),
+      false,
+    );
+    await host.stop();
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("AgentsHost reports post-commit health failure", async () => {
+  const directory = await Deno.makeTempDir();
+  try {
+    const driver = new FakeDriver("codex");
+    const target = new FakeTarget();
+    const host = new AgentsHost({
+      sources: [sourceConfig("codex")],
+      target,
+      targetDescription: TARGET_DESCRIPTION,
+      ledger: await openLedger(directory),
+      createDriver: () => driver,
+      clock: clock(),
+    });
+    await host.start({ acceptCommands: false });
+
+    const controller = new AbortController();
+    target.afterPublish = () => {
+      target.failNextHealth = true;
+      controller.abort(new Error("cancelled after publication commit"));
+    };
+    await assertRejects(
+      () => host.synchronize("health-failure", controller.signal),
+      Error,
+      "health publication rejected",
+    );
+    assertEquals(host.health().sync?.status, "failed");
+    assertEquals(
+      host.health().activity.at(-1)?.type,
+      "sync-failed",
+    );
+    await host.stop();
   } finally {
     await Deno.remove(directory, { recursive: true });
   }

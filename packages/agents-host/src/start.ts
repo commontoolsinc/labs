@@ -32,6 +32,7 @@ export interface StartAgentsHostOptions {
   identityPath: string;
   space: string;
   sources: AgentSourceConfig[];
+  checkoutRoots?: string[];
   targetLockPath?: string;
   debugView?: boolean;
   acceptCommands?: boolean;
@@ -147,6 +148,7 @@ export async function startAgentsHost(
     options.signal?.throwIfAborted();
     host = new AgentsHost({
       sources: options.sources,
+      checkoutRoots: options.checkoutRoots,
       target: fabric.target,
       targetDescription: describeAgentFabricTarget(
         fabric.target,

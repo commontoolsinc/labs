@@ -7,6 +7,7 @@
   "exports": {
     ".": "./mod.ts",
     "./cli": "./src/cli.ts",
+    "./checkout-discovery": "./src/checkout-discovery.ts",
     "./config": "./src/config.ts",
     "./debug-view": "./src/debug-view.ts",
     "./fabric-runtime": "./src/fabric-runtime.ts",

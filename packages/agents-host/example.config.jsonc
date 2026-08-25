@@ -1,6 +1,7 @@
 {
   "schema": "commonfabric.agents-host.config.v1",
   "collectionIntervalMs": 900000,
+  "checkoutRoots": ["/workspace/checkouts"],
   "sources": [
     {
       "id": "codex",
