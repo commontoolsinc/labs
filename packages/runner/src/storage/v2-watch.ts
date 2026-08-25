@@ -20,6 +20,7 @@ import {
   containsExternalSchemaRef,
   decomposeSchema,
   recomposeSchema,
+  SchemaDocumentNotAtHandError,
   SchemaNotDecomposableError,
 } from "../schema-decompose.ts";
 import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
@@ -79,14 +80,16 @@ export const normalizeSyncSelector = (
  *   recomposes to the fully inline form through the realm registry, which
  *   holds every document behind a locally created reference.
  *
- * A decomposition refusal keeps the selector exactly as given. An
- * inline-only schema goes to the wire inline, which every server accepts.
- * A ref-bearing schema whose documents the registry cannot supply also
- * passes through — but that selector names a document this client could
- * not resolve either, so a current server rejects it and the failed load
- * surfaces as a dropped event far from this cause. The error log below
- * names the missing document at the point where the inconsistency is
- * first detectable (#6303).
+ * A decomposition refusal keeps the selector exactly as given. A
+ * structural refusal (nested `$defs`, an `$id`, and the rest) is harmless
+ * on the wire — the schema rides inline, refs and all, and the server
+ * verifies only the referenced closure. A ref whose DOCUMENT the registry
+ * cannot supply also passes through — but that selector names a document
+ * this client could not resolve, so the server rejects it unless the
+ * space happens to persist the document, and the failed load surfaces as
+ * a dropped event far from this cause. The error log below names the
+ * missing document for exactly that refusal, at the point where the
+ * inconsistency is first detectable (#6303).
  */
 export const externalizeSyncSelector = (
   selector: SchemaPathSelector,
@@ -122,11 +125,12 @@ export const externalizeSyncSelector = (
     });
   } catch (error) {
     if (error instanceof SchemaNotDecomposableError) {
-      if (carriesRefs) {
+      if (error instanceof SchemaDocumentNotAtHandError) {
         logger.error("unresolvable-selector-schema-ref", () => [
-          "sync selector schema carries a `cid:` reference this client",
-          "cannot resolve; the server will reject the query and the",
-          "pending load will fail:",
+          "sync selector schema references a `cid:` schema document this",
+          "client cannot resolve; unless the space persists the document,",
+          "the server will reject the query and the pending load will",
+          "fail:",
           error.message,
         ]);
       }

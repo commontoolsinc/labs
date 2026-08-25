@@ -11,6 +11,7 @@ import {
   isExternalSchemaRef,
   parseExternalSchemaRef,
   recomposeSchema,
+  SchemaDocumentNotAtHandError,
   SchemaNotDecomposableError,
 } from "../src/schema-decompose.ts";
 
@@ -398,6 +399,38 @@ describe("schema-decompose", () => {
           properties: { x: { $ref: "cid:fid1:abc" } },
         })
       ).toThrow(SchemaNotDecomposableError);
+    });
+
+    it("throws the not-at-hand subtype naming the missing document's hash", () => {
+      let thrown: unknown;
+      try {
+        decomposeSchema({
+          type: "object",
+          properties: { x: { $ref: "cid:fid1:abc" } },
+        });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(SchemaDocumentNotAtHandError);
+      expect((thrown as SchemaDocumentNotAtHandError).taggedHash).toBe(
+        "fid1:abc",
+      );
+    });
+
+    it("throws the base refusal, not the not-at-hand subtype, for a structural refusal", () => {
+      let thrown: unknown;
+      try {
+        decomposeSchema({
+          type: "object",
+          properties: {
+            nested: { type: "object", $defs: { Inner: { type: "string" } } },
+          },
+        });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(SchemaNotDecomposableError);
+      expect(thrown).not.toBeInstanceOf(SchemaDocumentNotAtHandError);
     });
 
     it("includes the resolved closure behind a pre-existing external ref", () => {

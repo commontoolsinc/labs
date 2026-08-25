@@ -170,6 +170,43 @@ describe("v2-watch", () => {
       expect(JSON.stringify(captured[0])).toContain(hash);
     });
 
+    it("stays silent when a ref-bearing schema refuses for a structural reason", () => {
+      // The server verifies only the referenced closure, so a selector whose
+      // refusal is structural — here a nested `$defs` beside a resolvable
+      // reference — is served fine when the document is persisted; logging
+      // it would announce a rejection that never comes.
+      setContentAddressedSchemasConfig(true);
+      const doc: JSONSchemaObj = {
+        type: "string",
+        title: "registered-beside-structural-refusal",
+      };
+      const hash = internSchemaAsTaggedHashString(doc);
+      registerSchemaDocument(hash, doc);
+      const probed: string[] = [];
+      const mixed = {
+        path: [],
+        schema: {
+          type: "object",
+          properties: {
+            referenced: { $ref: `cid:${hash}` },
+            nested: { type: "object", $defs: { Inner: { type: "string" } } },
+          },
+        },
+      } as const;
+      const captured = captureErrorLogs(() => {
+        expect(
+          externalizeSyncSelector(mixed as never, (probedHash) => {
+            probed.push(probedHash);
+            return true;
+          }),
+        ).toBe(mixed as never);
+      });
+      expect(captured).toEqual([]);
+      // The structural refusal fires before the persistence probe runs, so
+      // nothing about the referenced closure was ever checked.
+      expect(probed).toEqual([]);
+    });
+
     it("stays silent when an inline-only schema refuses decomposition", () => {
       setContentAddressedSchemasConfig(true);
       const refused = {

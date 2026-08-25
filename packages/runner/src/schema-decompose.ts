@@ -102,6 +102,24 @@ export class SchemaNotDecomposableError extends Error {
   }
 }
 
+/**
+ * The refusal for an external ref whose document the resolver cannot
+ * supply — the one {@link SchemaNotDecomposableError} that is about
+ * availability rather than the input's structure. Callers that treat a
+ * locally unresolvable reference differently from a structural refusal (a
+ * structural one is harmless inline; an unresolvable reference reaches the
+ * server unverified) catch this subtype; everything catching the base
+ * class keeps seeing both.
+ */
+export class SchemaDocumentNotAtHandError extends SchemaNotDecomposableError {
+  constructor(readonly taggedHash: string) {
+    super(
+      `references a schema document that is not at hand: \`${taggedHash}\``,
+    );
+    this.name = "SchemaDocumentNotAtHandError";
+  }
+}
+
 /** Formats an external schema reference from its parts. */
 export function formatExternalSchemaRef(
   taggedHash: string,
@@ -456,9 +474,7 @@ export function decomposeSchema(
       if (documents.has(hash)) continue;
       const supplied = options.resolveDocument?.(hash);
       if (supplied === undefined) {
-        throw new SchemaNotDecomposableError(
-          `references a schema document that is not at hand: \`${hash}\``,
-        );
+        throw new SchemaDocumentNotAtHandError(hash);
       }
       const sah = internSchema(supplied, true);
       if (sah.taggedHashString !== hash) {
