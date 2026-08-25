@@ -292,10 +292,12 @@ export async function runRetarget(
       // a wrong-space stop whose session also would not release. Only the
       // message survives, which is all the library reads off this throw.
       throw new Error(
-        settleProblem === undefined ? disposeProblem : settleProblem +
-          (disposeProblem === undefined
-            ? ""
-            : ` Its session could not be disposed either: ${disposeProblem}.`),
+        settleProblem === undefined
+          ? disposeProblem
+          : disposeProblem === undefined
+          ? settleProblem
+          : `${settleProblem.replace(/\.$/, "")}. Its session could not ` +
+            `be disposed either: ${disposeProblem}.`,
       );
     },
   };

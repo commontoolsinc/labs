@@ -503,10 +503,11 @@ describe("piece-retarget", () => {
       // The settle failure leads: it is why the boundary cannot be trusted.
       // The disposal that failed after it is named too, never instead.
       const stop = report.stopReason ?? "";
-      expect(stop).toContain("the group's writes never landed");
+      // One period joins the two sentences: the settle message carries none
+      // of its own, so the composition must supply it.
       expect(stop).toContain(
-        "Its session could not be disposed either: the runtime would not " +
-          "shut down.",
+        "the group's writes never landed. Its session could not be " +
+          "disposed either: the runtime would not shut down.",
       );
       expect(stop.indexOf("never landed")).toBeLessThan(
         stop.indexOf("could not be disposed"),
