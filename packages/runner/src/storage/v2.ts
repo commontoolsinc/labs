@@ -6035,7 +6035,20 @@ class SpaceReplica implements ISpaceReplica {
         const { session } = await this.activeSessionHandle();
         const result = await session.resyncWatchSet?.();
         if (result !== undefined && !this.#closed) {
-          this.applySessionSync(result.sync, "pull");
+          // UPSERTS ONLY. This resync is a REPAIR — it exists to obtain
+          // content the delivery cache wrongly believes this replica
+          // holds — and it must not also act as a watch-set authority.
+          // `buildFullSync` derives its removes by diffing the session
+          // cache against the freshly evaluated closure, so a closure
+          // that legitimately differs from the cache carries removes
+          // for documents a live consumer is still reading; applying
+          // them deletes state out from under it (watched on #6260's
+          // board 2: pattern shard 7, green on board 1, failed on
+          // `shopping-list.tsx` with `hasTags is not a function` and
+          // destructured-undefined errors — data vanishing mid-run).
+          // Removes belong to the ordinary watch path, which owns the
+          // watch set; this path only ever adds back what is missing.
+          this.applySessionSync({ ...result.sync, removes: [] }, "pull");
         }
       } catch (error) {
         logger.warn("schema-closure-resync-failed", () => [
