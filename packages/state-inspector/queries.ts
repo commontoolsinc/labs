@@ -233,7 +233,13 @@ export function hotEntities(
     }
   }
   return out
-    .sort((a, b) => b.writes - a.writes || utf8Compare(a.id, b.id))
+    // Scope breaks the last tie: the same id can be held in several scopes, so
+    // id alone leaves equal-write rows in whatever order the walk produced, and
+    // a limited result would return an arbitrary one of them.
+    .sort((a, b) =>
+      b.writes - a.writes || utf8Compare(a.id, b.id) ||
+      utf8Compare(a.scope, b.scope)
+    )
     .slice(0, limit);
 }
 

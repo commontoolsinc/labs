@@ -230,12 +230,18 @@ export function visibleRevisionRows(
 }
 
 /**
- * The branch that owns one entity's visible row, or undefined when the entity
- * is not visible from here at all.
+ * The branch that owns one entity's records, or undefined when no branch the
+ * read can reach holds any.
  *
  * A pass describing ONE entity's history asks this: nearest-branch ownership
  * decides which log the reader can reach, and it hides a parent's writes for an
  * entity the child overrode exactly as it hides the parent's value.
+ *
+ * NOT a readability check. It follows `visibleRevisionRows` in enumerating
+ * RECORDS, so a tombstoned entity has an owning branch while a read of it
+ * returns nothing — which is right for a history (a delete is a write worth
+ * showing) and wrong as a gate. A caller that needs "can this be read" must
+ * reconstruct, or take the entity from `visibleEntityRows`.
  */
 export function owningLink(
   space: SpaceDb,

@@ -32,6 +32,7 @@ import { openSpace, type SpaceDb } from "./db.ts";
 import { annotate, collectLinks } from "./decode.ts";
 import {
   getValueAt,
+  owningLink,
   reconstructDocument,
   visibleRevisionRows,
 } from "./reconstruct.ts";
@@ -161,12 +162,18 @@ function entityMeta(
   scope: string,
   branch: string,
 ): SpaceEntityView {
-  const meta = space.db
+  // Resolved through the OWNING branch, like every other surface describing one
+  // entity. `present` gates the value read below, so a branch-local count marks
+  // an inherited entity absent before reconstruction runs — and then the scan
+  // reports it as held by nobody and suppresses the divergence it exists to
+  // find.
+  const owner = owningLink(space, { branch, scope, id });
+  const meta = owner === undefined ? undefined : space.db
     .prepare(
       `SELECT max(seq) headSeq, count(*) revisions FROM revision
-       WHERE branch = ? AND id = ? AND scope_key = ?`,
+       WHERE branch = ? AND id = ? AND scope_key = ? AND seq <= ?`,
     )
-    .get<MetaRow>(branch, id, scope);
+    .get<MetaRow>(owner.branch, id, scope, owner.atSeq);
   const present = !!meta && meta.revisions > 0;
   if (!present) {
     return {
@@ -182,10 +189,10 @@ function entityMeta(
     .prepare(
       `SELECT c.session_id, c.created_at FROM revision r
        JOIN "commit" c ON c.seq = r.commit_seq
-       WHERE r.branch = ? AND r.id = ? AND r.scope_key = ?
+       WHERE r.branch = ? AND r.id = ? AND r.scope_key = ? AND r.seq <= ?
        ORDER BY r.seq DESC, r.op_index DESC LIMIT 1`,
     )
-    .get<LastRow>(branch, id, scope);
+    .get<LastRow>(owner!.branch, id, scope, owner!.atSeq);
   return {
     label: "",
     present: true,

@@ -23,6 +23,7 @@ import { entityHistory, hotEntities } from "../queries.ts";
 import { contendedEntities } from "../conflicts.ts";
 import { entityTimeline, spaceTimeline } from "../timetravel.ts";
 import { analyzeSpaceSignals } from "../grouping.ts";
+import { convergenceExact, convergenceScanExact } from "../multispace.ts";
 import { reconstructDocument } from "../reconstruct.ts";
 
 const SCHEMA = `
@@ -53,6 +54,7 @@ const BOB = "session:did%3Akey%3AzBob:s2";
 interface Write {
   branch?: string;
   id: string;
+  scope?: string;
   session?: string;
   value: unknown;
 }
@@ -75,15 +77,22 @@ async function withFork(
      VALUES (?, ?, ?, ?, '{}', '{"seq":0}')`,
   );
   const rev = db.prepare(
-    `INSERT INTO revision (branch, id, seq, op_index, op, data, commit_seq)
-     VALUES (?, ?, ?, 0, 'set', ?, ?)`,
+    `INSERT INTO revision (branch, id, scope_key, seq, op_index, op, data, commit_seq)
+     VALUES (?, ?, ?, ?, 0, 'set', ?, ?)`,
   );
   let seq = 0;
   const write = (w: Write) => {
     seq++;
     const branch = w.branch ?? "";
     commit.run(seq, branch, w.session ?? ALICE, seq);
-    rev.run(branch, w.id, seq, JSON.stringify({ value: w.value }), seq);
+    rev.run(
+      branch,
+      w.id,
+      w.scope ?? "space",
+      seq,
+      JSON.stringify({ value: w.value }),
+      seq,
+    );
   };
   parent.forEach(write);
   const forkSeq = seq;
@@ -234,6 +243,113 @@ describe("branch-visible", () => {
         // fail.
         expect(analyzeSpaceSignals(space).isHome).toBe(true);
         expect(analyzeSpaceSignals(space, { branch: "kid" }).isHome).toBe(true);
+      });
+    });
+  });
+
+  describe("hotEntities() ties", () => {
+    it("orders equal-write rows sharing an id by scope, against the walk order", async () => {
+      const MINE = "user:did:key:zAlice";
+      // The tie-break only bites where walk order and scope order DISAGREE, and
+      // one link cannot produce that: a single `GROUP BY id, scope_key` already
+      // emits scopes ascending. Across a chain it can — the walk takes the
+      // CHILD's link first, so the child's scope arrives before the parent's
+      // whatever the names are. Here the child holds the per-user scope and the
+      // parent the shared one, so the walk yields `user:…` first and the sort
+      // has to put `space` back in front.
+      await withFork(
+        [{ id: "of:x", value: 1 }],
+        [{ id: "of:x", scope: MINE, value: 2 }],
+        (space) => {
+          const hot = hotEntities(space, { branch: "kid" });
+          expect(hot.map((e) => e.scope)).toEqual(["space", MINE]);
+          // And a cap takes the same one every run rather than whichever the
+          // walk happened to reach first.
+          expect(hotEntities(space, { branch: "kid", limit: 1 })[0].scope)
+            .toBe("space");
+        },
+      );
+    });
+  });
+
+  describe("contendedEntities() limits", () => {
+    it("treats a negative limit as unlimited, as the SQL it replaced did", async () => {
+      await withFork(CONTENDED_PARENT, [], (space) => {
+        const all = contendedEntities(space).map((e) => e.id);
+        expect(all.length).toBe(2);
+        // `slice(0, -1)` would drop the last, reporting one fewer contended
+        // entity than there are — and the conflicts CLI accepts a negative.
+        expect(contendedEntities(space, { limit: -1 }).map((e) => e.id))
+          .toEqual(all);
+      });
+    });
+
+    it("applies a positive limit", async () => {
+      await withFork(CONTENDED_PARENT, [], (space) => {
+        expect(contendedEntities(space, { limit: 1 }).length).toBe(1);
+      });
+    });
+  });
+
+  describe("cross-space convergence on a child branch", () => {
+    /** Two spaces, each holding `of:shared` on the parent, values differing. */
+    async function twoForkedSpaces(
+      run: (spaces: { label: string; space: SpaceDb }[]) => void,
+    ): Promise<void> {
+      const dir = await Deno.makeTempDir({ prefix: "branch-visible-conv-" });
+      const opened: { label: string; space: SpaceDb }[] = [];
+      try {
+        for (const [label, value] of [["a", "A-value"], ["b", "B-value"]]) {
+          const path = `${dir}/${label}.sqlite`;
+          const db = new Database(path, { create: true });
+          db.exec(SCHEMA);
+          db.prepare(
+            `INSERT INTO "commit" (seq, session_id, local_seq, original, resolution)
+             VALUES (1, ?, 1, '{}', '{"seq":0}')`,
+          ).run(ALICE);
+          db.prepare(
+            `INSERT INTO revision (id, seq, op_index, op, data, commit_seq)
+             VALUES ('of:shared', 1, 0, 'set', ?, 1)`,
+          ).run(JSON.stringify({ value }));
+          db.prepare(
+            `INSERT INTO branch (name, parent_branch, fork_seq, head_seq)
+             VALUES ('kid', '', 1, 999)`,
+          ).run();
+          db.close();
+          opened.push({ label, space: openSpace(path) });
+        }
+        run(opened);
+      } finally {
+        for (const { space } of opened) space.close();
+        await Deno.remove(dir, { recursive: true });
+      }
+    }
+
+    it("finds the divergence in an entity both spaces inherited", async () => {
+      await twoForkedSpaces((spaces) => {
+        // On the parent the scan sees it diverge. The child inherits the same
+        // entity in both spaces and reads the same two values, so the same
+        // divergence has to be found there — enumerating the id and then
+        // reporting it held by nobody would suppress the finding this scan
+        // exists for.
+        expect(convergenceScanExact(spaces).findings.map((f) => f.id))
+          .toEqual(["of:shared"]);
+        expect(
+          convergenceScanExact(spaces, { branch: "kid" }).findings.map((f) =>
+            f.id
+          ),
+        ).toEqual(["of:shared"]);
+      });
+    });
+
+    it("reports each space as holding the inherited entity, not absent", async () => {
+      await twoForkedSpaces((spaces) => {
+        const result = convergenceExact(spaces, {
+          id: "of:shared",
+          branch: "kid",
+        });
+        expect(result.views.map((v) => v.present)).toEqual([true, true]);
+        expect(result.verdict).toBe("diverged");
       });
     });
   });
