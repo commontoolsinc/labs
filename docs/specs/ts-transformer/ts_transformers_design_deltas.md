@@ -86,12 +86,17 @@ landed after the snapshot above:
     `builder-call-hoisting.ts`; no transformer emits it and no fixture expects
     it. See `packages/ts-transformers/docs/derive-to-lift-design.md`.
 
-### Addendum 4 (a render-owned synchronous plain-array `map` carries sites)
+### Addendum 4 (a supported synchronous plain-array `map` carries sites)
 
 A synchronous `map` callback on an ordinary JavaScript array inside a pattern
-body carries pattern-owned expression sites when its result reaches a JSX child
-without ordinary code interpreting it. The map call may be the child itself or
-the direct return of a synchronous IIFE that is the child.
+body carries pattern-owned expression sites when its collected values stay on
+the render path. What the callback returns decides how far the result may
+travel: a render-collecting callback — returning JSX, nullish or literal
+constants, or conditional/logical selections over those — embeds every
+lowered value in its view nodes, so its result may flow anywhere; a
+value-collecting callback can return a lowered value, so its map call must be
+the JSX child itself or the direct return of a synchronous IIFE — concise
+arrow body or explicit `return` — whose call is the child.
 `supportsPatternOwnedWrapperCallbackSite`
 (`policy/callback-boundary.ts`) admits the `plain-array-value` boundary for
 that callback and result-flow shape, which
@@ -115,12 +120,17 @@ includes the configured default-library `Array`/`ReadonlyArray` declaration, so
 a comparator in a later argument position, a same-named source or ambient type,
 and a `map` belonging to some other type are all excluded.
 
-Collection by `map` is necessary but insufficient. A native consumer of the
-result can still interpret the collected cells: `.map(...).filter(Boolean)`
-sees each cell as a truthy object, and the same mistake survives when the map
-result flows through a local first. The map result therefore has to stay on the
-uninterpreted render path rather than become an operand of a later call or a
-stored intermediate. Async
+Collection by `map` is necessary but insufficient for a value-collecting
+callback. A native consumer of its result can interpret the collected cells:
+`.map(...).filter(Boolean)` sees each cell as a truthy object, and the same
+mistake survives when the map result flows through a local first. That result
+therefore has to stay on the uninterpreted render path rather than become an
+operand of a later call or a stored intermediate, and each unsupported map
+call reports one `pattern-context:computation` diagnostic, anchored on the
+call. A render-collecting callback has no such exposure — its collected view
+nodes are ordinary data — so no flow restriction applies to it; a conditional
+branch that is a bare literal counts as value-collecting, because under a
+reactive condition it lowers to a cell of plain data. Async
 callbacks are excluded because their reactive work resumes after the
 construction frame, and generator callbacks because `map` never executes
 their bodies.
@@ -131,7 +141,8 @@ is stored or consumed.
 Two behaviors change:
 
 - A binding such as `const isToday = weekDates?.[colIdx] === todayDate` inside
-  a render-owned `COLUMN_INDICES.map((colIdx) => …)` lowers. Previously
+  a supported `COLUMN_INDICES.map((colIdx) => …)` lowers — rendered inline or
+  named in a local first, when the callback returns view nodes. Previously
   the comparison was
   emitted raw, so it ran on the reactive proxies rather than their values and
   froze to `false`. Reading the binding as a JSX condition then rendered the
@@ -139,11 +150,12 @@ Two behaviors change:
   `isInRestrictedReactiveContext` suppresses the "wrap it in `computed()`"
   errors that the same binding draws outside JSX.
 - `pattern-context:get-call` and `pattern-context:optional-chaining` no longer
-  fire for a read that a render-owned synchronous `map` callback's own
+  fire for a read that a supported synchronous `map` callback's own
   value sites can carry, so rendering
   `["-", "+"].map((sep) => <span>{rows.get().join(sep)}</span>)` compiles to
   per-separator lifts instead of being rejected. Both still fire in
-  result-interpreting callbacks and in map results that escape the render path.
+  result-interpreting callbacks and in value-collecting maps whose results
+  escape the render path.
 
 A reactive array-method callback keeps the older, stricter rule, and the
 difference is structural rather than stylistic: that callback is lowered into a

@@ -50,6 +50,11 @@ export default pattern(() => {
     at(tree, "joined--") === "a-b-c" &&
     at(tree, "joined-+") === "a+b+c"
   );
+  const assert_named = assert(() =>
+    at(tree, "named-0") === "free" &&
+    at(tree, "named-1") === "held" &&
+    at(tree, "named-2") === "free"
+  );
 
   // Every binding must stay live, not merely be right once. Moving the target
   // to "c" moves each comparison with it.
@@ -69,6 +74,10 @@ export default pattern(() => {
     at(tree, "negated-1") === "off" &&
     at(tree, "negated-2") === "on"
   );
+  const assert_named_after = assert(() =>
+    at(tree, "named-1") === "free" &&
+    at(tree, "named-2") === "held"
+  );
 
   // A write to a cell the callback read eagerly reaches the same bindings.
   const action_rename_last = action(() => {
@@ -77,7 +86,8 @@ export default pattern(() => {
   const assert_after_rename = assert(() =>
     at(tree, "marker-2") === "away" &&
     at(tree, "label-2") === "z" &&
-    at(tree, "joined--") === "a-b-z"
+    at(tree, "joined--") === "a-b-z" &&
+    at(tree, "named-2") === "free"
   );
 
   return {
@@ -90,11 +100,13 @@ export default pattern(() => {
       { assertion: assert_display },
       { assertion: assert_label },
       { assertion: assert_joined },
+      { assertion: assert_named },
 
       { action: action_select_c },
       { assertion: assert_marker_after },
       { assertion: assert_inline_optional_after },
       { assertion: assert_negated_after },
+      { assertion: assert_named_after },
 
       { action: action_rename_last },
       { assertion: assert_after_rename },

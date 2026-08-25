@@ -1,10 +1,13 @@
 /**
  * Fixture: value bindings inside a plain-array `.map()` callback.
  *
- * A directly rendered synchronous plain-array callback runs during pattern
- * build, so each of these bindings is a pattern-body binding and lowers to its
- * own per-iteration lift. The central one is `marker`: a bare comparison bound
- * to a name and read further down as the condition of a JSX ternary.
+ * A rendered synchronous plain-array callback runs during pattern build, so
+ * each of these bindings is a pattern-body binding and lowers to its own
+ * per-iteration lift. The central one is `marker`: a bare comparison bound to
+ * a name and read further down as the condition of a JSX ternary. The
+ * `namedColumns` probe pins the through-a-local flow: a render-collecting
+ * callback embeds every lowered value in the view nodes it returns, so the
+ * collected array is ordinary data and a local may carry it to the JSX child.
  *
  * `textContent` in the shared vnode helpers maps a boolean to "", so every
  * probe renders a distinct string in both branches and the test can tell the
@@ -50,6 +53,14 @@ export default pattern<Input, Output>(({ letters, selection, visible }) => {
     letters.set(["a", "b", "z"]);
   });
 
+  // A render-collecting map named before rendering: the collected view nodes
+  // are ordinary data, so the local carries them to the JSX child while each
+  // callback-local binding still lowers to its per-iteration lift.
+  const namedColumns = INDICES.map((idx) => {
+    const held = items?.[idx] === target;
+    return <span id={`named-${idx}`}>{held ? "held" : "free"}</span>;
+  });
+
   return {
     [NAME]: "Plain-array callback locals",
     [UI]: (
@@ -87,6 +98,7 @@ export default pattern<Input, Output>(({ letters, selection, visible }) => {
           const joined = letters.get().join(sep);
           return <span id={`joined-${sep}`}>{joined}</span>;
         })}
+        {namedColumns}
       </div>
     ),
     selectC,

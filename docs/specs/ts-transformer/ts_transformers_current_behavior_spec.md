@@ -599,6 +599,16 @@ Diagnostics emitted in all modes:
     spec's "bare dynamic key access in top-level pattern-facing code" =
     Unsupported). The same access is fine inside JSX, a computation callback, a
     collection callback, or a structural binding form.
+  - three dedicated messages cover reactive computations inside an
+    unsupported plain-array `map` wrapper-site shape, and each reports once
+    per map call, anchored on the call, however many computations the
+    callback holds:
+    - a value-collecting callback whose result leaves the direct JSX-child
+      flow ("returns a reactive value…"; guidance: make the map the JSX
+      child, return JSX from the callback, or move the whole consuming
+      computation into `computed(() => ...)`)
+    - an async callback ("resumes outside pattern construction…")
+    - a generator callback ("does not execute a generator callback body…")
   - validation first checks the shared lowerable-expression-site policy; only
     non-lowerable computation sites still report this error (so `items[0].name`,
     `name.toUpperCase()` at lowerable top-level sites, and dynamic keys inside
@@ -693,8 +703,7 @@ described in the target-language spec:
 - top-level pattern-body value-expression sites
 - callback-local value-expression sites inside supported collection callbacks,
   both the reactive ones that become sub-patterns and synchronous plain-array
-  `map` callbacks whose result flows to a JSX child without ordinary code
-  interpreting it
+  `map` callbacks whose collected values stay on the render path
 
 `isEligiblePatternOwnedWrapperCallbackSite` decides the third bucket from the
 enclosing callback's boundary kind
@@ -707,21 +716,36 @@ pattern-owned sites outright; the compute-owned boundaries (`computed`,
 that can hold them, which `isRenderSafePlainArrayMapCallback`
 (`ast/call-kind.ts`) decides. It admits a synchronous argument-zero callback
 of the configured default-library `Array`/`ReadonlyArray` `map`, over a plain
-receiver no reactive lowering owns, only when the map call itself is a JSX
-child expression or the direct return of a synchronous IIFE that is the child.
-A source or ambient type merely named `Array` or `ReadonlyArray` is not a
-standard array. Async callbacks resume after pattern construction, and
-generator callbacks are not executed by `map`, so neither is admitted.
-This result-flow restriction applies when the callback inherits a pattern
-context. A plain-array map in a standalone or explicit compute-owned helper
-keeps ordinary JavaScript semantics and requests no pattern-owned wrapper site.
+receiver no reactive lowering owns. A source or ambient type merely named
+`Array` or `ReadonlyArray` is not a standard array. Async callbacks resume
+after pattern construction, and generator callbacks are not executed by `map`,
+so neither is admitted.
 
-`map` stores each callback result without reading it, but that alone is not a
-closed guarantee: a subsequent ordinary `filter`, `find`, `some`, `every`,
-sort, or reduction would interpret collected cells, including when the array
-flows through a local first. Requiring an uninterpreted render flow keeps those
-cells inside the JSX lowering path. Every other callback-taking
-array method also reads the result as it runs:
+What the callback returns then decides how far its result may travel:
+
+- A **render-collecting** callback returns view content — JSX, a nullish or
+  literal constant, or a conditional/logical selection over those. Every
+  lowered value it creates is embedded in the returned view nodes, so the
+  collected array holds view nodes and plain values, and the result may flow
+  anywhere ordinary data flows: through a local, a filter, a JSX attribute,
+  or a conditional.
+- A **value-collecting** callback can return a lowered value itself, so the
+  collected array holds bare cells. Only the JSX-child rendering path knows
+  how to read those, so the map call must be the JSX child expression itself,
+  or the direct return of a synchronous IIFE — concise arrow body or explicit
+  `return` — whose call is the child. A subsequent ordinary `filter`, `find`,
+  `some`, `every`, sort, or reduction would interpret the cell objects, and
+  the same mistake survives when the array flows through a local first, so
+  those flows report `pattern-context:computation` instead. A conditional
+  branch that is a bare literal (`cond ? "T" : "-"`) counts as
+  value-collecting: under a reactive condition it lowers to a cell of plain
+  data.
+
+This restriction applies when the callback inherits a pattern context. A
+plain-array map in a standalone or explicit compute-owned helper keeps
+ordinary JavaScript semantics and requests no pattern-owned wrapper site.
+
+Every other callback-taking array method also reads the result as it runs:
 `filter`, `find`, `some`, and `every` as a boolean, `sort` as a number,
 `flatMap` as an array test, `reduce` as the next accumulator. A cell reaching
 any of those is an object, which is truthy, not a number, and not an array, so

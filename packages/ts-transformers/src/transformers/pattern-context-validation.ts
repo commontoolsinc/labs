@@ -157,6 +157,14 @@ function objectMemberMessage(kind: ObjectMemberKind): string {
 
 export class PatternContextValidationTransformer
   extends HelpersOnlyTransformer {
+  /**
+   * Map calls already reported as unsupported plain-array map wrapper sites.
+   * The decision is a property of the map call, not of any one expression in
+   * its callback, so each call reports once however many reactive
+   * computations the callback holds.
+   */
+  private reportedPlainArrayMapCalls = new WeakSet<ts.Node>();
+
   transform(context: TransformationContext): ts.SourceFile {
     const checker = context.checker;
     const analyze = context.getDataFlowAnalyzer();
@@ -340,13 +348,19 @@ export class PatternContextValidationTransformer
         return;
       }
 
+      if (this.reportedPlainArrayMapCalls.has(decision.call)) {
+        return;
+      }
+      this.reportedPlainArrayMapCalls.add(decision.call);
+
       const message = decision.reason === "result-not-direct-jsx"
-        ? `A reactive computation in a plain-array map callback can lower ` +
-          `only when the synchronous map result reaches a JSX child without ` +
-          `ordinary code interpreting it. An ordinary consumer of the mapped ` +
-          `array would receive reactive cells instead of their values. Keep ` +
-          `the map on the render path, or move the whole consuming operation ` +
-          `into computed(() => ...).`
+        ? `This plain-array map callback returns a reactive value, so the ` +
+          `collected array holds cells rather than values, and only a ` +
+          `direct JSX child rendering can read them. An ordinary consumer ` +
+          `of the mapped array would interpret the cell objects instead. ` +
+          `Make the map the JSX child, return JSX from the callback so ` +
+          `lowered values stay inside the view nodes, or move the whole ` +
+          `consuming computation into computed(() => ...).`
         : decision.reason === "async-callback"
         ? `An async plain-array map callback resumes outside pattern ` +
           `construction, so it cannot own reactive computations. Keep the ` +
@@ -359,7 +373,7 @@ export class PatternContextValidationTransformer
         severity: "error",
         type: "pattern-context:computation",
         message,
-        node,
+        node: decision.call,
       });
       return;
     }

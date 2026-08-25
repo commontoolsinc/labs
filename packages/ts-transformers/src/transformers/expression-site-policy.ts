@@ -118,6 +118,7 @@ export type RestrictedReactiveComputationDecision =
       | "result-not-direct-jsx"
       | "async-callback"
       | "generator-callback";
+    call: ts.CallExpression;
   };
 
 export function containsLogicalBinaryOperator(expr: ts.Expression): boolean {
@@ -1512,6 +1513,7 @@ export function classifyRestrictedReactiveComputation(
         ? {
           kind: "unsupported-plain-array-map",
           reason: mapSiteDecision,
+          call: callbackContext.call,
         }
         : { kind: "allowed" };
     }

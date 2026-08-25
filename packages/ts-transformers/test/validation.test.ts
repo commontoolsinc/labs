@@ -3653,6 +3653,195 @@ Deno.test("Reactive .get() Validation", async (t) => {
   );
 
   await t.step(
+    "allows a render-collecting plain map result through a local",
+    async () => {
+      const source =
+        `      import { pattern, UI, Writable } from "commonfabric";
+
+      const COLS = [0, 1, 2];
+
+      export default pattern<{ today: Writable<number> }>(({ today }) => {
+        const rows = COLS.map((col) => {
+          const isToday = col === today.get();
+          return <span>{isToday ? "T" : "-"}</span>;
+        });
+        return { [UI]: <div>{rows}</div> };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "every lowered value is embedded in the returned view nodes, so " +
+          "the collected array holds no bare cell and may flow through a local",
+      );
+    },
+  );
+
+  await t.step(
+    "allows a render-collecting plain map inside a JSX conditional",
+    async () => {
+      const source =
+        `      import { pattern, UI, Writable } from "commonfabric";
+
+      const COLS = [0, 1, 2];
+
+      export default pattern<{ today: Writable<number>; show: boolean }>(
+        ({ today, show }) => {
+          return {
+            [UI]: (
+              <div>
+                {show
+                  ? COLS.map((col) => {
+                    const isToday = col === today.get();
+                    return <span>{isToday ? "T" : "-"}</span>;
+                  })
+                  : null}
+              </div>
+            ),
+          };
+        },
+      );
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "a conditional selecting a render-collecting map still collects " +
+          "view nodes, so the render path owns everything the map produced",
+      );
+    },
+  );
+
+  await t.step(
+    "allows a value-collecting map returned from a concise-body JSX-local IIFE",
+    async () => {
+      const source = `      import { pattern, UI } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ target: string }>(({ target }) => {
+        return {
+          [UI]: (
+            <div>
+              {(() =>
+                VALUES.map((value) => {
+                  const matches = value === target;
+                  return matches;
+                }))()}
+            </div>
+          ),
+        };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "a concise arrow body is the IIFE's direct return, so the map " +
+          "result reaches the JSX child the same as an explicit return",
+      );
+    },
+  );
+
+  await t.step(
+    "errors once for a value-collecting map off the render path",
+    async () => {
+      const source =
+        `      import { pattern, UI, Writable } from "commonfabric";
+
+      const COLS = [0, 1, 2];
+
+      export default pattern<{ today: Writable<number> }>(({ today }) => {
+        return {
+          [UI]: (
+            <div>
+              <ul data-cols={COLS.map((col) => {
+                const isToday = col === today.get();
+                return isToday ? "T" : "-";
+              })} />
+            </div>
+          ),
+        };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter(
+        (error) => error.type === "pattern-context:computation",
+      );
+      assertEquals(
+        errors.length,
+        1,
+        "the unsupported flow is a property of the map call, so the " +
+          "callback's several reactive computations report one diagnostic",
+      );
+      assertStringIncludes(errors[0].message, "returns a reactive value");
+    },
+  );
+
+  await t.step(
+    "errors when mixed returns can carry a lowered value",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ target: Writable<string> }>(({ target }) => {
+        const t = target.get();
+        const rows = VALUES.map((value) => {
+          const matches = value === t;
+          if (value.length > 1) {
+            return <b>{value}</b>;
+          }
+          return matches;
+        });
+        return { rows };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
+      assertStringIncludes(
+        errors.map((error) => error.message).join("\n"),
+        "returns a reactive value",
+      );
+    },
+  );
+
+  await t.step(
+    "errors on a non-rendered plain map carrying a read into the result record",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      export default pattern<{ rows: Writable<string[]> }>(({ rows }) => {
+        const joined = ["-", "+"].map((sep) => rows.get().join(sep));
+        return { joined };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:get-call");
+    },
+  );
+
+  await t.step(
     "still errors on a named reactive comparison inside a plain filter",
     async () => {
       const source = `      import { pattern, Writable } from "commonfabric";

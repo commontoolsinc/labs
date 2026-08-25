@@ -894,17 +894,21 @@ export function classifyArrayCallbackContainerCall(
 const COLLECTING_ARRAY_METHOD_NAMES = new Set(["map"]);
 
 /**
- * True when `callback` is a synchronous callback of an ordinary eager Array
- * method that collects results rather than interpreting them, and the collected
- * result flows to a JSX-child expression without ordinary code reading it.
+ * How a plain-array `map` callback relates to pattern-owned wrapper sites.
+ * `map` stores each callback result without reading it, so what the collected
+ * array can safely feed depends on what the callback returns:
  *
- * The JSX-child sink is what makes the permission closed under later use: a
- * native `.map()` does not inspect a returned cell, but an ordinary consumer of
- * the resulting array (`filter`, `find`, `some`, a reduction, or the same flow
- * through a local) would. Keeping the map call render-owned — either as the JSX
- * child or as the direct result of a synchronous IIFE that is the child —
- * preserves the render-building use case without letting a cell array escape to
- * ordinary JavaScript.
+ * - A render-collecting callback returns view content: JSX, a nullish or
+ *   literal constant, or a conditional/logical selection over those. Every
+ *   lowered value it creates is embedded in the returned view nodes, so the
+ *   collected array holds view nodes and plain values — ordinary data whose
+ *   result may flow anywhere.
+ * - A value-collecting callback can return a lowered value itself. The
+ *   collected array then holds reactive cells, and only the JSX-child
+ *   lowering path knows how to read those: an ordinary consumer (`filter`,
+ *   `find`, a reduction, or the same flow through a local) would interpret
+ *   the cell object rather than its value. Such a map must be the JSX child
+ *   itself, or the direct return of a synchronous IIFE that is the child.
  *
  * The callback must also be argument zero, belong to the configured
  * default-library `Array`/`ReadonlyArray`, and run synchronously. Async callbacks
@@ -973,6 +977,9 @@ export function classifyPlainArrayMapWrapperSite(
   ) {
     return "generator-callback";
   }
+  if (plainArrayMapCallbackCollectsRenderValues(callback)) {
+    return "supported";
+  }
   return flowsDirectlyToJsxChild(call) ? "supported" : "result-not-direct-jsx";
 }
 
@@ -986,6 +993,103 @@ export function isRenderSafePlainArrayMapCallback(
     checker,
     isSourceFileDefaultLibrary,
   ) === "supported";
+}
+
+/**
+ * True when every value the callback can hand to `map` is render content: a
+ * JSX element or fragment, a nullish value, a literal constant, or a
+ * conditional/logical selection over those. A lowered computation inside such
+ * a callback is embedded in the returned view nodes, so the collected array
+ * never holds a bare cell and the map result needs no flow restriction.
+ *
+ * A conditional or logical selection can itself lower to a cell when its
+ * condition is reactive, but that cell carries view content and is read by the
+ * same child-rendering path that reads any other cell-valued child. Literal
+ * branches are excluded below the top level for exactly that reason:
+ * `cond ? "T" : "-"` under a reactive condition lowers to a cell of plain
+ * data, which only the JSX-child path may collect.
+ */
+function plainArrayMapCallbackCollectsRenderValues(
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+): boolean {
+  const body = callback.body;
+  if (!ts.isBlock(body)) {
+    return isRenderCollectedValue(body, true);
+  }
+  return !hasValueCollectingReturn(body);
+}
+
+function hasValueCollectingReturn(body: ts.Block): boolean {
+  const visit = (node: ts.Node): boolean | undefined => {
+    if (ts.isFunctionLike(node)) {
+      return undefined;
+    }
+    if (ts.isReturnStatement(node)) {
+      return node.expression !== undefined &&
+          !isRenderCollectedValue(node.expression, true)
+        ? true
+        : undefined;
+    }
+    return ts.forEachChild(node, visit);
+  };
+  return ts.forEachChild(body, visit) === true;
+}
+
+function isRenderCollectedValue(
+  expression: ts.Expression,
+  topLevel: boolean,
+): boolean {
+  let current = expression;
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isTypeAssertionExpression(current) ||
+    ts.isSatisfiesExpression(current) ||
+    ts.isNonNullExpression(current)
+  ) {
+    current = current.expression;
+  }
+
+  if (
+    ts.isJsxElement(current) || ts.isJsxSelfClosingElement(current) ||
+    ts.isJsxFragment(current)
+  ) {
+    return true;
+  }
+  if (current.kind === ts.SyntaxKind.NullKeyword) {
+    return true;
+  }
+  if (ts.isIdentifier(current) && current.text === "undefined") {
+    return true;
+  }
+  if (
+    topLevel &&
+    (ts.isStringLiteralLike(current) || ts.isNumericLiteral(current) ||
+      current.kind === ts.SyntaxKind.TrueKeyword ||
+      current.kind === ts.SyntaxKind.FalseKeyword)
+  ) {
+    return true;
+  }
+  if (ts.isConditionalExpression(current)) {
+    return isRenderCollectedValue(current.whenTrue, false) &&
+      isRenderCollectedValue(current.whenFalse, false);
+  }
+  if (ts.isBinaryExpression(current)) {
+    const operator = current.operatorToken.kind;
+    if (operator === ts.SyntaxKind.AmpersandAmpersandToken) {
+      // `cond && <jsx/>` collects either the falsy left value, which is
+      // plain data, or the right operand.
+      return isRenderCollectedValue(current.right, false);
+    }
+    if (
+      operator === ts.SyntaxKind.BarBarToken ||
+      operator === ts.SyntaxKind.QuestionQuestionToken
+    ) {
+      return isRenderCollectedValue(current.left, false) &&
+        isRenderCollectedValue(current.right, false);
+    }
+  }
+  return false;
 }
 
 function flowsDirectlyToJsxChild(expression: ts.Expression): boolean {
@@ -1017,28 +1121,37 @@ function flowsDirectlyToJsxChild(expression: ts.Expression): boolean {
     }
 
     if (
-      !parent || !ts.isReturnStatement(parent) || parent.expression !== current
+      parent && ts.isReturnStatement(parent) && parent.expression === current
     ) {
-      return false;
+      let owner: ts.Node | undefined = parent.parent;
+      while (owner && !ts.isFunctionLike(owner)) {
+        owner = owner.parent;
+      }
+      const iifeCall = owner && getSynchronousIifeCall(owner);
+      if (!iifeCall) {
+        return false;
+      }
+      current = iifeCall;
+      continue;
     }
 
-    const iifeCall = getSynchronousIifeCallForReturn(parent);
-    if (!iifeCall) {
-      return false;
+    if (parent && ts.isArrowFunction(parent) && parent.body === current) {
+      const iifeCall = getSynchronousIifeCall(parent);
+      if (!iifeCall) {
+        return false;
+      }
+      current = iifeCall;
+      continue;
     }
-    current = iifeCall;
+
+    return false;
   }
 }
 
-function getSynchronousIifeCallForReturn(
-  statement: ts.ReturnStatement,
+function getSynchronousIifeCall(
+  owner: ts.Node,
 ): ts.CallExpression | undefined {
-  let owner: ts.Node | undefined = statement.parent;
-  while (owner && !ts.isFunctionLike(owner)) {
-    owner = owner.parent;
-  }
   if (
-    !owner ||
     (!ts.isArrowFunction(owner) && !ts.isFunctionExpression(owner)) ||
     owner.modifiers?.some((modifier) =>
       modifier.kind === ts.SyntaxKind.AsyncKeyword
