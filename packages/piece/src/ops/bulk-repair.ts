@@ -530,10 +530,20 @@ export async function repairPieces(
   pieces: PiecesController,
   options: RepairOptions,
 ): Promise<RepairReport> {
-  if (options.fixerName === "") {
-    // Stamped into the artifact it would be an op the codec refuses, so a
-    // successful apply would return a plan nothing can decode or resume.
-    throw new Error("A fixerName must be nonempty when given.");
+  if (options.fixerName === "" || options.fixerIdentity === "") {
+    // Stamped into the artifact either would be an op the codec refuses,
+    // so a successful apply would return a plan nothing can decode.
+    throw new Error(
+      "A fixerName and a fixerIdentity must be nonempty when given.",
+    );
+  }
+  if (
+    (options.fixerName === undefined) !== (options.fixerIdentity === undefined)
+  ) {
+    // The name is for readers and the identity is the pin; an op carrying
+    // one without the other is a plan the codec refuses, so the pair is
+    // required together before anything is read.
+    throw new Error("fixerName and fixerIdentity travel together.");
   }
   const survey = await surveyPieces(pieces, { selector: options.selector });
   if (!survey.complete) {
@@ -619,16 +629,10 @@ export async function repairPieces(
           disagreeing.map((row) => row.piece).join(", ") + ".",
       );
     }
-    const pinned = plan.rows.filter((row) =>
-      row.op?.kind === "repair" && row.op.fixerIdentity !== undefined
-    );
-    if (pinned.length > 0 && options.fixerIdentity === undefined) {
-      throw new Error(
-        "The plan pins its fixer's implementation and this run supplies " +
-          "no fixerIdentity to hold it against.",
-      );
-    }
-    const repinned = pinned.filter((row) =>
+    // No separate has-identity check: the pair rule above means a run with
+    // a fixerName carries the identity too, and the fixerName requirement
+    // for plans has already fired for a run with neither.
+    const repinned = plan.rows.filter((row) =>
       row.op?.kind === "repair" &&
       row.op.fixerIdentity !== options.fixerIdentity
     );
@@ -767,15 +771,16 @@ export async function repairPieces(
           piece: row.piece,
           ...phase,
           expect: { ...row.expect, documentHash: decision.documentHash },
-          ...(options.fixerName === undefined ? {} : {
-            op: {
-              kind: "repair",
-              fixer: options.fixerName,
-              ...(options.fixerIdentity === undefined
-                ? {}
-                : { fixerIdentity: options.fixerIdentity }),
-            },
-          }),
+          ...(options.fixerName === undefined ||
+              options.fixerIdentity === undefined
+            ? {}
+            : {
+              op: {
+                kind: "repair",
+                fixer: options.fixerName,
+                fixerIdentity: options.fixerIdentity,
+              },
+            }),
         });
         return;
       }

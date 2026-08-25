@@ -495,6 +495,7 @@ describe("bulk-repair", () => {
         selector: collectionOf(holder),
         fixer: upperSeed,
         fixerName: "upper-seed.ts",
+        fixerIdentity: "impl-v1",
       });
 
       // Both hashes computed independently from the stored documents, so
@@ -531,8 +532,8 @@ describe("bulk-repair", () => {
       // document-hash precondition and the named repair, and the codec
       // round-trips it.
       expect(report.plan.rows.map((row) => row.op)).toEqual([
-        { kind: "repair", fixer: "upper-seed.ts" },
-        { kind: "repair", fixer: "upper-seed.ts" },
+        { kind: "repair", fixer: "upper-seed.ts", fixerIdentity: "impl-v1" },
+        { kind: "repair", fixer: "upper-seed.ts", fixerIdentity: "impl-v1" },
       ]);
       // Computed independently from the stored document, so a wrong hash
       // cannot certify itself.
@@ -549,6 +550,7 @@ describe("bulk-repair", () => {
         selector: collectionOf(holder),
         fixer: upperSeed,
         fixerName: "upper-seed.ts",
+        fixerIdentity: "impl-v1",
       });
 
       // Something other than the plan changes the SECOND piece's document:
@@ -561,6 +563,7 @@ describe("bulk-repair", () => {
         selector: collectionOf(holder),
         fixer: upperSeed,
         fixerName: "upper-seed.ts",
+        fixerIdentity: "impl-v1",
         plan: dry.plan,
         apply: true,
       });
@@ -822,6 +825,7 @@ describe("bulk-repair", () => {
         selector: collectionOf(holder),
         fixer: upperSeed,
         fixerName: "upper-seed.ts",
+        fixerIdentity: "impl-v1",
       });
 
       // Preflight sees both rows clean; a concurrent writer then moves the
@@ -852,6 +856,7 @@ describe("bulk-repair", () => {
         selector: collectionOf(holder),
         fixer: upperSeed,
         fixerName: "upper-seed.ts",
+        fixerIdentity: "impl-v1",
         plan: dry.plan,
         apply: true,
       });
@@ -871,12 +876,14 @@ describe("bulk-repair", () => {
         selector: collectionOf(holder),
         fixer: upperSeed,
         fixerName: "upper-seed.ts",
+        fixerIdentity: "impl-v1",
       });
 
       const first = await repairPieces(pieces, {
         selector: collectionOf(holder),
         fixer: upperSeed,
         fixerName: "upper-seed.ts",
+        fixerIdentity: "impl-v1",
         plan: dry.plan,
         apply: true,
       });
@@ -889,6 +896,7 @@ describe("bulk-repair", () => {
         selector: collectionOf(holder),
         fixer: upperSeed,
         fixerName: "upper-seed.ts",
+        fixerIdentity: "impl-v1",
         plan: dry.plan,
         apply: true,
       });
@@ -908,6 +916,7 @@ describe("bulk-repair", () => {
         selector: collectionOf(holder),
         fixer: upperSeed,
         fixerName: "upper-seed.ts",
+        fixerIdentity: "impl-v1",
       });
 
       const reversed = {
@@ -942,6 +951,7 @@ describe("bulk-repair", () => {
         selector: collectionOf(holder),
         fixer: upperSeed,
         fixerName: "upper-seed.ts",
+        fixerIdentity: "impl-v1",
         plan: reversed,
         apply: true,
       });
@@ -957,6 +967,7 @@ describe("bulk-repair", () => {
           selector: collectionOf(holder),
           fixer: upperSeed,
           fixerName: "upper-seed.ts",
+          fixerIdentity: "impl-v1",
           plan: truncated,
           apply: true,
         }),
@@ -996,6 +1007,7 @@ describe("bulk-repair", () => {
         selector: collectionOf(holder),
         fixer: upperSeed,
         fixerName: "upper-seed.ts",
+        fixerIdentity: "impl-v1",
       });
 
       await expect(
@@ -1003,6 +1015,7 @@ describe("bulk-repair", () => {
           selector: collectionOf(holder),
           fixer: upperSeed,
           fixerName: "upper-seed.ts",
+          fixerIdentity: "impl-v1",
           plan: {
             header: {
               ...dry.plan.header,
@@ -1024,6 +1037,7 @@ describe("bulk-repair", () => {
         selector: collectionOf(holder),
         fixer: upperSeed,
         fixerName: "upper-seed.ts",
+        fixerIdentity: "impl-v1",
       });
 
       // A repair row stripped of its document hash: the codec would refuse
@@ -1041,6 +1055,7 @@ describe("bulk-repair", () => {
           selector: collectionOf(holder),
           fixer: upperSeed,
           fixerName: "upper-seed.ts",
+          fixerIdentity: "impl-v1",
           plan: hashless as never,
           apply: true,
         }),
@@ -1057,6 +1072,7 @@ describe("bulk-repair", () => {
           selector: collectionOf(holder),
           fixer: upperSeed,
           fixerName: "upper-seed.ts",
+          fixerIdentity: "impl-v1",
           plan: doubled,
           apply: true,
         }),
@@ -1082,6 +1098,7 @@ describe("bulk-repair", () => {
         selector: collectionOf(holder),
         fixer: upperSeed,
         fixerName: "upper-seed.ts",
+        fixerIdentity: "impl-v1",
       });
 
       // Move the second piece so the plan-driven apply blocks at preflight.
@@ -1092,6 +1109,7 @@ describe("bulk-repair", () => {
         selector: collectionOf(holder),
         fixer: upperSeed,
         fixerName: "upper-seed.ts",
+        fixerIdentity: "impl-v1",
         plan: dry.plan,
         apply: true,
       });
@@ -1113,6 +1131,7 @@ describe("bulk-repair", () => {
         selector: collectionOf(holder),
         fixer: upperSeed,
         fixerName: "upper-seed.ts",
+        fixerIdentity: "impl-v1",
         plan: blocked.plan,
         apply: true,
       });
@@ -1159,7 +1178,7 @@ describe("bulk-repair", () => {
           plan: dry.plan,
           apply: true,
         }),
-      ).rejects.toThrow("no fixerIdentity");
+      ).rejects.toThrow("travel together");
       expect((await rawInput(a)).seed).toBe("alpha");
 
       const applied = await repairPieces(pieces, {
@@ -1180,6 +1199,7 @@ describe("bulk-repair", () => {
         selector: collectionOf(holder),
         fixer: upperSeed,
         fixerName: "upper-seed.ts",
+        fixerIdentity: "impl-v1",
       });
 
       await expect(
@@ -1187,6 +1207,7 @@ describe("bulk-repair", () => {
           selector: collectionOf(holder),
           fixer: upperSeed,
           fixerName: "upper-seed.ts",
+          fixerIdentity: "impl-v1",
           plan: {
             header: { ...dry.plan.header, space: "did:key:somewhere-else" },
             rows: dry.plan.rows,
@@ -1200,6 +1221,7 @@ describe("bulk-repair", () => {
           selector: collectionOf(holder),
           fixer: upperSeed,
           fixerName: "other-fixer.ts",
+          fixerIdentity: "impl-v1",
           plan: dry.plan,
           apply: true,
         }),
@@ -1218,6 +1240,7 @@ describe("bulk-repair", () => {
           selector: collectionOf(holder),
           fixer: upperSeed,
           fixerName: "upper-seed.ts",
+          fixerIdentity: "impl-v1",
           plan: opless,
           apply: true,
         }),

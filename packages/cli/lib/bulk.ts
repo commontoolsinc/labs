@@ -112,6 +112,39 @@ export async function runRepair(
   request: RepairRunRequest,
   deps: RepairRunDependencies = {},
 ): Promise<RepairReport> {
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  const resolve = deps.resolvePieceAddress ?? resolvePieceAddress;
+  const selector = await resolveSelector(pieces, request.selector, resolve);
+  // The identity of the fixer module's authored closure, computed the way a
+  // retarget's source identity is — without compiling, and so without
+  // running anything — so the plan pins the implementation reviewed rather
+  // than a path whose file can change.
+  const computeIdentity = deps.computeFixerIdentity ??
+    (async (path: string) =>
+      await programEntryIdentity(
+        await resolveLocalSourceProgram(pieces.runtime, { main: path }),
+      ));
+  const fixerIdentity = await computeIdentity(request.fixerPath);
+  const plan = request.planPath === undefined ? undefined : decodePlan(
+    await (deps.readTextFile ?? Deno.readTextFile)(request.planPath),
+  );
+  if (plan !== undefined) {
+    // The pin is held before the module is imported: a dynamic import
+    // evaluates the module's top-level code, and an implementation the
+    // plan's reviewer never saw must not run even that much. The library
+    // re-checks the same pin behind the seam.
+    const repinned = plan.rows.filter((row) =>
+      row.op?.kind === "repair" && row.op.fixerIdentity !== fixerIdentity
+    );
+    if (repinned.length > 0) {
+      throw new Error(
+        "The plan pins a different fixer implementation than " +
+          `${request.fixerName} resolves to, on: ` +
+          repinned.map((row) => row.piece).join(", ") +
+          ". Nothing was imported.",
+      );
+    }
+  }
   const importModule = deps.importModule ??
     ((path: string) => import(toFileUrl(path).href));
   const module = await importModule(request.fixerPath);
@@ -122,21 +155,6 @@ export async function runRepair(
         `${request.fixerName}.`,
     );
   }
-  const pieces = await (deps.loadPieces ?? loadPieces)(config);
-  const resolve = deps.resolvePieceAddress ?? resolvePieceAddress;
-  const selector = await resolveSelector(pieces, request.selector, resolve);
-  // The identity of the fixer module's authored closure, computed the way a
-  // retarget's source identity is — without compiling — so the plan pins
-  // the implementation reviewed rather than a path whose file can change.
-  const computeIdentity = deps.computeFixerIdentity ??
-    (async (path: string) =>
-      await programEntryIdentity(
-        await resolveLocalSourceProgram(pieces.runtime, { main: path }),
-      ));
-  const fixerIdentity = await computeIdentity(request.fixerPath);
-  const plan = request.planPath === undefined ? undefined : decodePlan(
-    await (deps.readTextFile ?? Deno.readTextFile)(request.planPath),
-  );
   return await repairPieces(pieces, {
     selector,
     fixer: fixer as Fixer,

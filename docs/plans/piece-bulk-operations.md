@@ -174,8 +174,15 @@ what to do to it:
 piece         precondition                  operation
 of:fid1:aaa…  reference=PB0Gum…#default     retarget=topic.tsx@<rev>
 of:fid1:bbb…  reference=PB0Gum…#default     retarget=topic.tsx@<rev>
-of:fid1:ccc…  document-hash=9f2c…           repair=<fixer>
+of:fid1:ccc…  document-hash=9f2c…           repair=<fixer>@<closure-id>
 ```
+
+A repair row carries two pins, because it has two inputs that can drift: the
+document hash holds the piece to the state the fixer's answer was computed
+from, and the closure identity — the same no-compile identity a retarget's
+source carries — holds the fixer to the implementation that was reviewed. A
+plan whose fixer file changed after review, or whose spelling resolves to
+different code elsewhere, refuses before the module is even imported.
 
 Four properties follow from making this a file rather than a command line:
 

@@ -68,7 +68,7 @@ const REPORT: RepairReport = {
         retained: true,
         documentHash: "9f2c",
       },
-      op: { kind: "repair", fixer: "fix-seeds.ts" },
+      op: { kind: "repair", fixer: "fix-seeds.ts", fixerIdentity: "impl-v1" },
     }],
   },
   applied: 0,
@@ -341,7 +341,9 @@ describe("piece-repair", () => {
       expect(applied.complete).toBe(true);
 
       // An edited fixer file resolves to a different closure identity, and
-      // the reviewed plan refuses to run it.
+      // the reviewed plan refuses before the module is even imported — a
+      // dynamic import runs top-level code nobody reviewed.
+      let imported = false;
       await expect(
         runRepair({} as never, {
           ...base,
@@ -349,6 +351,10 @@ describe("piece-repair", () => {
           apply: true,
         }, {
           ...deps,
+          importModule: () => {
+            imported = true;
+            return Promise.resolve(upperSeed);
+          },
           computeFixerIdentity: () => Promise.resolve("impl-v2"),
           readTextFile: () =>
             Promise.resolve(
@@ -359,6 +365,7 @@ describe("piece-repair", () => {
             ),
         } as never),
       ).rejects.toThrow("different fixer implementation");
+      expect(imported).toBe(false);
 
       const cell = await member.input.getCell();
       await cell.pull();
@@ -408,15 +415,18 @@ describe("piece-repair", () => {
     });
 
     it("refuses a fixer module that does not default-export a function", async () => {
+      const member = await pieces.create(memberProgram(), {
+        input: { seed: "alpha" },
+      });
       await expect(
         runRepair({} as never, {
-          selector: { kind: "list", pieces: ["fid1:x"] },
+          selector: { kind: "list", pieces: [member.id] },
           fixerPath: "/repairs/empty.ts",
           fixerName: "empty.ts",
         }, {
-          loadPieces: () => {
-            throw new Error("must not load");
-          },
+          loadPieces: () => Promise.resolve(pieces),
+          resolvePieceAddress: (_pieces: unknown, token: string) =>
+            Promise.resolve(token),
           importModule: () => Promise.resolve({}),
           computeFixerIdentity: () => Promise.resolve("impl-v1"),
         } as never),
