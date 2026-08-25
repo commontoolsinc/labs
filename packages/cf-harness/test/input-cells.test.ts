@@ -39,27 +39,6 @@ describe("input-cells", () => {
       });
     });
 
-    it("parses a schema argument after the reference", () => {
-      expect(
-        parseInputCellArgument(`cities=${CELL_REF};schema=@cities.json`),
-      ).toEqual({
-        name: "cities",
-        ref: CELL_REF,
-        schemaArgument: "@cities.json",
-      });
-    });
-
-    it("keeps an inline schema argument verbatim, semicolons included", () => {
-      const inline = '{"type":"string","description":"a; b"}';
-      expect(
-        parseInputCellArgument(`cities=${CELL_REF};schema=${inline}`),
-      ).toEqual({
-        name: "cities",
-        ref: CELL_REF,
-        schemaArgument: inline,
-      });
-    });
-
     it("throws for an argument without a name/reference separator", () => {
       expect(() => parseInputCellArgument(CELL_REF)).toThrow(
         "<name>=<link>",
@@ -78,14 +57,9 @@ describe("input-cells", () => {
       );
     });
 
-    it("throws for an option other than schema=", () => {
-      expect(() => parseInputCellArgument(`cities=${CELL_REF};shape=x.json`))
-        .toThrow("unknown option");
-    });
-
-    it("throws for an empty schema argument", () => {
-      expect(() => parseInputCellArgument(`cities=${CELL_REF};schema=`))
-        .toThrow("an empty schema");
+    it("throws for any option after the reference", () => {
+      expect(() => parseInputCellArgument(`cities=${CELL_REF};schema=x.json`))
+        .toThrow("the flag takes none");
     });
   });
 
@@ -110,17 +84,16 @@ describe("input-cells", () => {
       expect(resolveHandleToken(table, inputCells[0]!.token)).toBeDefined();
     });
 
-    it("records an operator schema on the minted entry", async () => {
-      const schema = { type: "string" } as const;
+    it("records no schema on the minted entry — the cell's declaration is the source of truth", async () => {
       const { table, inputCells } = await mintInputCellHandles(
         undefined,
         "run-2",
-        [{ name: "travellerName", ref: CELL_REF, schema }],
+        [{ name: "travellerName", ref: CELL_REF }],
         SPACE_DID,
       );
       const entry = resolveHandleToken(table, inputCells[0]!.token);
-      expect(entry?.schema).toEqual(schema);
-      expect(entry?.schemaSource).toBe("operator");
+      expect(entry?.schema).toBeUndefined();
+      expect(entry?.schemaSource).toBeUndefined();
     });
 
     it("records the table entry's canonical spelling as the cell's ref", async () => {

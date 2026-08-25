@@ -37,23 +37,17 @@ export type {
  */
 const INPUT_CELL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 
-/** A parsed `--input-cell` argument, before its schema argument is read. */
+/** A parsed `--input-cell` argument. */
 export interface ParsedInputCellArgument {
   name: string;
   ref: string;
-  /**
-   * The operator's schema argument, when the argument carried one: inline
-   * JSON, or `@path` naming a file — the same spelling `cf piece get
-   * --schema` takes.
-   */
-  schemaArgument?: string;
 }
 
 /**
- * Parses one `--input-cell` argument of the form
- * `<name>=<link>[;schema=<json|@file>]`. Everything after the first
- * `;schema=` is the schema argument verbatim, so inline JSON may itself
- * contain `;`.
+ * Parses one `--input-cell` argument of the form `<name>=<link>`. A cell's
+ * shape is not stated here: an input cell carries its own declared schema in
+ * the fabric, and `describe_handle` answers from that — one source of truth,
+ * on the cell, where its labels also live.
  *
  * @throws Error naming the defect when the argument does not fit the
  * grammar; the caller surfaces it as a usage error before any run starts.
@@ -64,7 +58,7 @@ export const parseInputCellArgument = (
   const eq = raw.indexOf("=");
   if (eq <= 0) {
     throw new Error(
-      `--input-cell must be <name>=<link>[;schema=<json|@file>], got \`${raw}\``,
+      `--input-cell must be <name>=<link>, got \`${raw}\``,
     );
   }
   const name = raw.slice(0, eq).trim();
@@ -73,27 +67,17 @@ export const parseInputCellArgument = (
       `--input-cell name must match ${INPUT_CELL_NAME_PATTERN}, got \`${name}\``,
     );
   }
-  const rest = raw.slice(eq + 1);
-  const schemaAt = rest.indexOf(";schema=");
-  const refText = schemaAt === -1 ? rest : rest.slice(0, schemaAt);
-  const ref = refText.trim();
+  const ref = raw.slice(eq + 1).trim();
   if (ref.length === 0) {
     throw new Error(`--input-cell \`${name}\` names no reference`);
   }
   if (ref.includes(";")) {
     const option = ref.slice(ref.indexOf(";") + 1).trim();
     throw new Error(
-      `--input-cell \`${name}\` carries an unknown option \`${option}\`; the one supported is schema=<json|@file>`,
+      `--input-cell \`${name}\` carries an option \`${option}\`; the flag takes none — a cell's shape and labels live on its declared schema in the fabric`,
     );
   }
-  if (schemaAt === -1) {
-    return { name, ref };
-  }
-  const schemaArgument = rest.slice(schemaAt + ";schema=".length).trim();
-  if (schemaArgument.length === 0) {
-    throw new Error(`--input-cell \`${name}\` names an empty schema`);
-  }
-  return { name, ref, schemaArgument };
+  return { name, ref };
 };
 
 /**
@@ -142,11 +126,7 @@ export const mintInputCellHandles = async (
         `--input-cell \`${spec.name}\` reference targets another space; only references into the session space are allowed`,
       );
     }
-    const minted = await mintAddressHandle(current, spec.ref, {
-      ...(spec.schema !== undefined
-        ? { schema: spec.schema, schemaSource: "operator" as const }
-        : {}),
-    });
+    const minted = await mintAddressHandle(current, spec.ref);
     current = minted.table;
     // The record carries the entry's canonical spelling, not the operator's
     // raw one, so the run-state record and the table entry agree on one ref.

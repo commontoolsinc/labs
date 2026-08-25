@@ -1370,7 +1370,7 @@ Deno.test("parseCfHarnessCliArgs rejects a handle-value origin that is not one",
   }
 });
 
-Deno.test("parseCfHarnessCliArgs collects operator input cells, reading each schema file", async () => {
+Deno.test("parseCfHarnessCliArgs collects operator input cells", async () => {
   const cellRef = `/of:fid1:${"A".repeat(43)}/travellerName`;
   const citiesRef = `/of:fid1:${"B".repeat(43)}/cities`;
   const parsed = await parseCfHarnessCliArgs(
@@ -1380,16 +1380,9 @@ Deno.test("parseCfHarnessCliArgs collects operator input cells, reading each sch
       "--input-cell",
       `travellerName=${cellRef}`,
       "--input-cell",
-      `cities=${citiesRef};schema=@cities.schema.json`,
+      `cities=${citiesRef}`,
     ],
-    {
-      cwd: "/tmp/project",
-      env: {},
-      readTextFile: (path: string) => {
-        assertEquals(path, "/tmp/project/cities.schema.json");
-        return Promise.resolve('{"type":"object"}');
-      },
-    },
+    { cwd: "/tmp/project", env: {} },
   );
 
   if ("help" in parsed) {
@@ -1397,7 +1390,7 @@ Deno.test("parseCfHarnessCliArgs collects operator input cells, reading each sch
   }
   assertEquals(parsed.inputCells, [
     { name: "travellerName", ref: cellRef },
-    { name: "cities", ref: citiesRef, schema: { type: "object" } },
+    { name: "cities", ref: citiesRef },
   ]);
 });
 
@@ -1422,27 +1415,6 @@ Deno.test("parseCfHarnessCliArgs rejects an input cell that does not fit the gra
       ),
     Error,
     "--input-cell must be <name>=<link>",
-  );
-});
-
-Deno.test("parseCfHarnessCliArgs rejects an input-cell schema file that is not JSON", async () => {
-  await assertRejects(
-    () =>
-      parseCfHarnessCliArgs(
-        [
-          "--prompt",
-          "hi",
-          "--input-cell",
-          `cities=/of:fid1:${"B".repeat(43)}/cities;schema=@broken.json`,
-        ],
-        {
-          cwd: "/tmp/project",
-          env: {},
-          readTextFile: () => Promise.resolve("{ not json"),
-        },
-      ),
-    Error,
-    "must be valid JSON",
   );
 });
 
@@ -2512,27 +2484,6 @@ Deno.test("runCfHarnessCli refuses duplicate input-cell names before any run set
       line.includes("--input-cell names `travellerName` twice")
     ),
     true,
-  );
-});
-
-Deno.test("parseCfHarnessCliArgs rejects an input-cell schema file that cannot be read", async () => {
-  await assertRejects(
-    () =>
-      parseCfHarnessCliArgs(
-        [
-          "--prompt",
-          "hi",
-          "--input-cell",
-          `cities=/of:fid1:${"B".repeat(43)}/cities;schema=@missing.json`,
-        ],
-        {
-          cwd: "/tmp/project",
-          env: {},
-          readTextFile: () => Promise.reject(new Error("no such file")),
-        },
-      ),
-    Error,
-    "schema file cannot be read",
   );
 });
 

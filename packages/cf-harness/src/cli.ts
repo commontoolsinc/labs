@@ -522,7 +522,7 @@ Options:
   --browser-access-profile-mode <mode> persistent | transient
   --browser-access-account-access <access> available | none
   --handle-value-origin <origin> Origin a handle's value may be sent to (repeatable; none by default)
-  --input-cell <name>=<link>[;schema=<json|@file>] Pass a cell in the fabric space into the run by reference, announced to the model as a handle under the operator-authored <name>; the schema spelling matches cf piece get --schema (repeatable; requires --fabric-space)
+  --input-cell <name>=<link>       Pass a cell in the fabric space into the run by reference, announced to the model as a handle under the operator-authored <name>; its shape and labels live on the cell's declared schema (repeatable; requires --fabric-space)
   --cfc-enforcement-mode <mode> disabled | observe | enforce-explicit | enforce-strict
   --cfc-result-dir <path>       Host dir where runsc writes the CFC result sidecar (required for enforce-* modes)
   --cfc-invocation-context-dir <path> Host dir where the harness writes the CFC invocation-context sidecar (required for enforce-* modes)
@@ -839,21 +839,16 @@ const parseHandleValueOrigins = (
 };
 
 /**
- * The input cells `--input-cell` names, with each schema argument resolved.
- * The schema spelling matches `cf piece get --schema`: inline JSON, or
- * `@path` naming a file. Grammar defects, an unreadable schema file, and a
- * schema that is not a JSON Schema are all refused at parse: an input cell
- * is explicit operator configuration, and a run must not start without what
- * it asked for. The references themselves are validated against the session
- * space later, at mint time, where the space is known.
+ * The input cells `--input-cell` names. Grammar defects are refused at
+ * parse: an input cell is explicit operator configuration, and a run must
+ * not start without what it asked for. No shape is stated here — a cell's
+ * schema and labels live on its declaration in the fabric. The references
+ * themselves are validated against the session space later, at mint time,
+ * where the space is known.
  */
-const parseInputCells = async (
+const parseInputCells = (
   raw: string | readonly string[] | undefined,
-  options: {
-    cwd: string;
-    readTextFile: (path: string) => Promise<string>;
-  },
-): Promise<readonly HarnessInputCellSpec[]> => {
+): readonly HarnessInputCellSpec[] => {
   const values = raw === undefined
     ? []
     : (typeof raw === "string" ? [raw] : raw);
@@ -868,30 +863,7 @@ const parseInputCells = async (
       throw new Error(`--input-cell names \`${parsed.name}\` twice`);
     }
     names.add(parsed.name);
-    let schema: JSONSchema | undefined;
-    if (parsed.schemaArgument !== undefined) {
-      let text = parsed.schemaArgument;
-      if (text.startsWith("@")) {
-        const path = resolve(options.cwd, text.slice(1));
-        try {
-          text = await options.readTextFile(path);
-        } catch (error) {
-          throw new Error(
-            `--input-cell \`${parsed.name}\` schema file cannot be read: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-        }
-      }
-      schema = parseStructuredResultSchema(text, {
-        label: `--input-cell \`${parsed.name}\` schema`,
-      })?.schema;
-    }
-    specs.push({
-      name: parsed.name,
-      ref: parsed.ref,
-      ...(schema !== undefined ? { schema } : {}),
-    });
+    specs.push({ name: parsed.name, ref: parsed.ref });
   }
   return specs;
 };
@@ -1488,9 +1460,8 @@ export const parseCfHarnessCliArgs = async (
     );
   }
   const readTextFile = deps.readTextFile ?? Deno.readTextFile;
-  const inputCells = await parseInputCells(
+  const inputCells = parseInputCells(
     args["input-cell"] as string | readonly string[] | undefined,
-    { cwd, readTextFile },
   );
   // A resumed run replays the input cells its run state recorded; a new
   // one on resume would be silently ignored, so it is refused like --skill

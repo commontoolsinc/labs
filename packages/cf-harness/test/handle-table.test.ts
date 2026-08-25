@@ -553,7 +553,7 @@ describe("handle-table", () => {
         ...table,
         entries: table.entries.map((entry) => ({
           ...entry,
-          schemaSource: "operator",
+          schemaSource: "harness",
         })),
       } as unknown as HarnessHandleTable;
       expect(() => assertValidHarnessHandleTable(broken)).toThrow(

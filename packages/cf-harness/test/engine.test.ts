@@ -256,7 +256,6 @@ Deno.test("CfHarnessEngine mints operator input cells once and replays the recor
     inputCells: [{
       name: "travellerName",
       ref: cellRef,
-      schema: { type: "string" },
     }],
     fabricSessionFactory: () =>
       Promise.resolve(
@@ -280,8 +279,8 @@ Deno.test("CfHarnessEngine mints operator input cells once and replays the recor
   const entry = engine.handleTable?.entries.find(
     (candidate) => candidate.token === inputCells[0]!.token,
   );
-  assertEquals(entry?.schema, { type: "string" });
-  assertEquals(entry?.schemaSource, "operator");
+  assertEquals(entry?.schema, undefined);
+  assertEquals(entry?.schemaSource, undefined);
 
   // A second establishment answers from the record without another session.
   assertEquals(await engine.establishInputCells(), inputCells);

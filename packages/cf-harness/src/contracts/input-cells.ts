@@ -6,8 +6,6 @@
  * what run state persists.
  */
 
-import type { JSONSchema } from "@commonfabric/api";
-
 /** One input cell as the operator specified it, before any minting. */
 export interface HarnessInputCellSpec {
   /**
@@ -16,15 +14,12 @@ export interface HarnessInputCellSpec {
    * prose by construction — never text read from the fabric.
    */
   name: string;
-  /** The reference to mint, as an LLM-friendly link string. */
-  ref: string;
   /**
-   * Optional operator-written shape of the cell, recorded on the handle
-   * entry with `schemaSource: "operator"` so `describe_handle` answers
-   * without a fabric read. The cell declares its own schema in the fabric;
-   * this is the operator's pre-stated view of it, often narrower.
+   * The reference to mint, as an LLM-friendly link string. The cell's shape
+   * and labels are not stated here: both live on the cell's declared schema
+   * in the fabric, which `describe_handle` reads through the session.
    */
-  schema?: JSONSchema;
+  ref: string;
 }
 
 /** One input cell, as recorded in run state. */
