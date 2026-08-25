@@ -598,8 +598,8 @@ Topics restore script hand-rolls today and should import instead.
       that would rewrite one as a value is refused.
 - [x] Re-running a completed repair writes nothing.
 - [x] The repair act in `packages/cli/integration/bulk-ops-demo.sh` stops
-      being pending: the transcript runs a fixer live where it now shows
-      the provisional spelling.
+      being pending: the transcript runs a fixer live under the canonical
+      spelling, `cf piece repair`.
 
 ### 3. Retarget
 

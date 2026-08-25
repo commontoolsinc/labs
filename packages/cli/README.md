@@ -131,11 +131,10 @@ in-scope identity that the collection lacks makes the survey exit nonzero,
 naming the piece. A `--list` survey reads exactly the pieces named and makes no
 containment claim; each entry takes either reference form, and a canonical
 entry's embedded space composes the way it does on `--piece` — supplying the
-space when `--space` is absent, agreeing with it otherwise. Read-only; the
-spelling is provisional until the bulk write operations get a home. To watch the
-surface work rather than read about it, `integration/bulk-ops-demo.sh` narrates
-a board-sized survey end to end against a running server, with the unbuilt write
-stages shown as pending acts.
+space when `--space` is absent, agreeing with it otherwise. Read-only. To watch
+the surface work rather than read about it, `integration/bulk-ops-demo.sh`
+narrates a board-sized survey and repair end to end against a running server,
+with the unbuilt write stages shown as pending acts.
 
 `cf piece repair` runs a caller-supplied fixer — a TypeScript module whose
 default export is a pure transform from a piece's stored input document to the

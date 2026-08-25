@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Bulk piece operations as something to watch. What runs today is stage 1 of
-# docs/plans/piece-bulk-operations.md — a board of 113 members surveyed in
-# one process, the plan it emits, the retarget stamp, and the containment
-# refusal — live rather than asserted. What the later stages add appears as
+# Bulk piece operations as something to watch. What runs today is stages 1
+# and 2 of docs/plans/piece-bulk-operations.md — a board of 113 members
+# surveyed in one process, the plan it emits, the retarget stamp, the
+# containment refusal, and a repair: a fixer run dry, applied from its own
+# plan, and resumed as landed — live rather than asserted. What the later
+# stages add appears as
 # PENDING acts at the end: the eventual shape of the mechanism stays visible
 # in the transcript, and each stage's checklist in the plan carries the item
 # that converts its act from pending to run, so a landed stage cannot leave
@@ -181,7 +183,7 @@ refused() {
 # against until the stage lands. What keeps a pending act from going stale is
 # the plan document instead — each later stage's checklist carries the item
 # that converts its act here from pending to run, the same per-change tick
-# discipline stage 1 used.
+# discipline stages 1 and 2 used.
 pending() {
   printf '\n%s   » %s%s\n' "$Y" "$1" "$N"
   printf '%s     PENDING — %s%s\n' "$Y" "$2" "$N"

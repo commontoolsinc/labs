@@ -145,7 +145,8 @@ describe("piece-repair", () => {
               hints.push(message);
             },
             printError: () => {},
-            exit: () => {
+            exit: (code) => {
+              expect(code).toBe(1);
               throw new ExitSentinel();
             },
           })
@@ -154,6 +155,18 @@ describe("piece-repair", () => {
       expect(written?.path).toBe("plan.jsonl");
       expect(written?.text).toContain('"piece-plan"');
       expect(hints).toContain("refused: fid1:aaa the fixer threw");
+    });
+
+    it("prints the whole report as JSON under --json", async () => {
+      const rendered: Array<{ value: unknown; json: boolean | undefined }> = [];
+      await repairFromCommand({ ...OPTIONS, path: "topics", json: true }, {
+        runRepair: () => Promise.resolve(REPORT),
+        render: (value, config) => {
+          rendered.push({ value, json: config?.json });
+        },
+        printHint: () => {},
+      });
+      expect(rendered).toEqual([{ value: REPORT, json: true }]);
     });
 
     it("routes cf piece repair to repairFromCommand", () => {

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# The bulk-survey drill: deploy a board whose members are created through its
-# own verb, survey it, and assert the plan — the stage-1 drill of
+# The bulk-operations drill: deploy a board whose members are created
+# through its own verb, survey it, assert the plan — and repair it: a fixer
+# run dry with every plan row recording its precondition and fixer, applied
+# from that plan, resumed as all-landed writing nothing, and a
+# field-dropping fixer refused by name. Stages 1 and 2 of
 # docs/plans/piece-bulk-operations.md, which finishes each stage with a CI
 # drill so "does the migration tooling still work?" stays a CI result.
 #
