@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertFalse } from "@std/assert";
 import { resolveCompletionLine } from "../lib/completion/line.ts";
 import {
   descendProjection,
@@ -14,6 +14,10 @@ import {
   splitPathPrefix,
   splitSelectPrefix,
 } from "../lib/completion/providers.ts";
+import {
+  parseSelectionProjection,
+  parseSelectProjection,
+} from "../lib/cell-selection.ts";
 import { tokenizeLine } from "../lib/completion/mod.ts";
 import { main } from "../commands/main.ts";
 
@@ -490,20 +494,43 @@ Deno.test("shaping: an address-marked segment keeps completing below it", () => 
   assertEquals(splitSelectPrefix("a\\@.").path, ["a@"]);
 });
 
-Deno.test("shaping: --schema is offered no field named for a whole-value schema", () => {
-  // `--schema true` IS a JSON Schema and `--schema false` is refused as one,
-  // so neither can name a field there however the source spells its keys.
-  // `--select` reads them as ordinary names.
-  const keys = { "true": 1, "false": 2, "ok": 3 };
-  assertEquals(
-    shapeProjectionCandidates(keys, "", { reserved: ["true", "false"] })
-      .map((candidate) => candidate.value),
-    ["ok", "ok@"],
-  );
-  assertEquals(
-    shapeProjectionCandidates(keys, "").map((candidate) => candidate.value),
-    ["true", "true@", "false", "false@", "ok", "ok@"],
-  );
+Deno.test("the projection grammar decides which candidates a flag can take", async () => {
+  // The boundary cases, each settled by the flag's own parser rather than by
+  // a rule restated here. A candidate that parses but comes back as something
+  // other than a field list — `--schema true` is the boolean JSON Schema — is
+  // not a candidate for this slot either.
+  const shaped = (prefix: string) =>
+    shapeProjectionCandidates({ "true": 1, "false": 2, ok: 3 }, prefix, {
+      self: true,
+    }).map((candidate) => candidate.value);
+  const accepted = async (flag: "select" | "schema", prefix: string) => {
+    const kept: string[] = [];
+    for (const value of shaped(prefix)) {
+      try {
+        const parsed = flag === "select"
+          ? parseSelectProjection(value)
+          : await parseSelectionProjection(value);
+        if (parsed.kind === "concise") kept.push(value);
+      } catch {
+        // refused by this flag
+      }
+    }
+    return kept;
+  };
+
+  // `--select` takes a bare `@` at the first element; `--schema` reads a
+  // leading `@` as a file path and so does not.
+  assert((await accepted("select", "")).includes("@"));
+  assertFalse((await accepted("schema", "")).includes("@"));
+  // After a comma neither is leading, so both take it.
+  assert((await accepted("select", "revision,")).includes("revision,@"));
+  assert((await accepted("schema", "revision,")).includes("revision,@"));
+  // `true` alone is a whole-value schema to one flag and refused by the
+  // other, and an ordinary field name to both once it is not alone.
+  assertFalse((await accepted("select", "")).includes("true"));
+  assertFalse((await accepted("schema", "")).includes("true"));
+  assert((await accepted("select", "revision,")).includes("revision,true"));
+  assert((await accepted("schema", "revision,")).includes("revision,true"));
 });
 
 Deno.test("shaping: a key the concise grammar cannot carry is not offered", () => {

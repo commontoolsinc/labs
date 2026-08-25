@@ -21,7 +21,7 @@
  */
 
 import type { JSONSchema } from "@commonfabric/api";
-import { declaredVerbFlags } from "../exec-schema.ts";
+import { type DeclaredVerbFlag, declaredVerbFlags } from "../exec-schema.ts";
 import type { Candidate } from "./static.ts";
 
 /** The half of a verb listing row these candidates are derived from. */
@@ -65,25 +65,44 @@ export function shapeVerbFlagCandidates(
     candidates.push({ value, description });
   };
 
-  for (const flag of declaredVerbFlags(verb.inputSchema)) {
-    const description = fieldDescription(flag.schema) ??
-      (flag.required ? "required" : "optional");
-    // Nothing reserves a field name, so a verb may declare `json`,
-    // `json-file` or `help` — names the command already owns as bare tokens.
-    // The parser reads the bare token as ITS meaning and never reaches the
-    // field, so the field is offered in the one spelling that does reach it.
+  const declared = declaredVerbFlags(verb.inputSchema);
+  const describe = (flag: DeclaredVerbFlag) =>
+    fieldDescription(flag.schema) ?? (flag.required ? "required" : "optional");
+  // The token each declared field owns outright, which is the lookup the
+  // parser makes first.
+  const owned = new Set(declared.map((flag) => `--${flag.name}`));
+
+  // In the parser's own order. `parseObjectInput` matches the bare `--json`
+  // and `--json-file` before anything else, then a declared field of the
+  // token's exact name, and only then reads a `no-` prefix as a negation. A
+  // candidate list in any other order names flags that do something else.
+  for (const flag of declared) {
+    // A verb may declare `json`, `json-file` or `help` — names the command
+    // owns as bare tokens. The parser reads the bare token as ITS meaning and
+    // never reaches the field, so the field is offered in the one spelling
+    // that does: a boolean carries its value, anything else stops at the `=`.
     if (RESERVED_BARE_SPELLINGS.has(flag.name)) {
-      // A boolean carries its value in the spelling; anything else is
-      // completed up to the `=` and the caller writes the value.
       add(
         flag.negatable ? `--${flag.name}=true` : `--${flag.name}=`,
-        `${description} (the declared field)`,
+        `${describe(flag)} (the declared field)`,
       );
-      if (flag.negatable) add(`--no-${flag.name}`, `${description} (false)`);
       continue;
     }
-    add(`--${flag.name}`, description);
-    if (flag.negatable) add(`--no-${flag.name}`, `${description} (false)`);
+    add(`--${flag.name}`, describe(flag));
+  }
+
+  for (const flag of declared) {
+    if (!flag.negatable) continue;
+    const negation = `--no-${flag.name}`;
+    // A field named `noActive` owns `--no-active`, and the parser finds it
+    // before it ever reads the token as a negation of `active`. Offering the
+    // negation there would annotate one field's flag with another's meaning —
+    // so the inline spelling, which no other field can own, is offered instead.
+    if (owned.has(negation)) {
+      add(`--${flag.name}=false`, `${describe(flag)} (false)`);
+      continue;
+    }
+    add(negation, `${describe(flag)} (false)`);
   }
 
   for (const generic of GENERIC_FLAGS) {

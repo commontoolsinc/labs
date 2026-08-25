@@ -989,14 +989,17 @@ and a path on `.`, and a trailing `@` asks for a position's address rather than
 its value. A path below an array names a field of each element, however many
 array layers deep it sits, because that is what the projection does with one.
 
-`--select` alone accepts a bare `@`, which asks the read for its own address, at
-any element of the list. `--schema` reads two other things by their first
-character — `@` opens a file path, and a JSON Schema opens with `{` or is one of
-the boolean schemas `true` and `false` — so it takes no bare `@`, and no field
-named `true` or `false` is offered there because those spell a whole-value
-schema instead. `cf call`'s and `cf exec`'s projections shape a verb's result
-rather than the piece's root, and are not completed from it; `cf wish`'s
-resolution writes to the space, and a Tab must not.
+A bare `@` asks the read for its own address and is accepted wherever an element
+of the list begins — with one exception `--schema` makes: an argument _starting_
+with `@` is an `@file` path, so `--schema @` is an empty one while
+`--schema revision,@` is the suffix. `--schema` also reads `{`, `true` and
+`false` as whole-value JSON Schemas, so no field of those names is offered
+there, while `--select` takes `true` and `false` as ordinary names anywhere but
+alone. Completion does not restate any of that: it puts each prospective
+candidate back through the flag's own parser and offers what comes back as a
+field list. `cf call`'s and `cf exec`'s projections shape a verb's result rather
+than the piece's root, and are not completed from it; `cf wish`'s resolution
+writes to the space, and a Tab must not.
 
 An option's value completes the same whether it is written after a space or
 after `=`, and every spelling of a target reaches the same slots behind it: the

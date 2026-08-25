@@ -98,6 +98,38 @@ describe("shapeVerbFlagCandidates()", () => {
     ]);
   });
 
+  it("gives a colliding negation to the field that owns the token", () => {
+    // `parseObjectInput` looks a token up as a declared field before it reads
+    // a `no-` prefix as a negation, so `--no-active` sets `noActive` and never
+    // means `active = false`. Annotating it as the negation would put one
+    // field's meaning on another field's flag.
+    const schema = {
+      type: "object",
+      properties: {
+        active: { type: "boolean" },
+        noActive: { type: "boolean" },
+      },
+    };
+    const spec = {
+      callableKind: "handler",
+      defaultVerb: "invoke",
+      inputSchema: schema,
+    } as ExecCommandSpec;
+    const candidates = shapeVerbFlagCandidates({
+      inputSchema: schema as ExecCommandSpec["inputSchema"],
+    });
+    const negation = candidates.find((c) => c.value === "--no-active");
+    expect(negation?.description).toBe("optional");
+    expect(parseExecArgs(spec, ["--no-active"]).input).toEqual({
+      noActive: true,
+    });
+    // `active = false` is still reachable, by the spelling no field can own.
+    expect(candidates.map((c) => c.value)).toContain("--active=false");
+    expect(parseExecArgs(spec, ["--active=false"]).input).toEqual({
+      active: false,
+    });
+  });
+
   it("offers one candidate per value where a field collides with a generic flag", () => {
     // Two menu entries of one value would mean two different things.
     const values = shapeVerbFlagCandidates({

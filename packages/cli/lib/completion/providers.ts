@@ -414,29 +414,60 @@ function projectionFieldCandidates(
       { input: line.flags.has("input") || config.pieceInput === true },
     );
 
-    const candidates = shapeProjectionCandidates(
-      descendProjection(value, path),
-      `${list}${prefix}`,
-      // `--schema true` is a JSON Schema in its own right and `--schema false`
-      // is refused as one, so neither can name a field there however the
-      // source spells its keys. `--select` reads them as ordinary names.
-      {
-        // A path that is only the suffix names the position the read is
-        // already at, which no field path reaches. It is legal as any element
-        // of the list — `revision,@` parses — so it is offered at every
-        // element start. `--schema` does not accept it: a leading `@` there
-        // names a file.
-        self: flag === "select" && atElementStart,
-        ...(flag === "schema" && list === "" && prefix === ""
-          ? { reserved: ["true", "false"] }
-          : {}),
-      },
+    // Everything the position could name, including the bare address suffix
+    // wherever an element begins — then held to what the flag's own parser
+    // accepts. Which spellings are reserved is not a rule worth restating:
+    // `--select true` is refused while `revision,true` is a field, and
+    // `--schema @` is an empty file path while `revision,@` is the suffix.
+    // Round-tripping is what keeps the offered set and the accepted set one.
+    const candidates = await acceptedProjections(
+      shapeProjectionCandidates(
+        descendProjection(value, path),
+        `${list}${prefix}`,
+        { self: atElementStart },
+      ),
+      flag,
     );
     if (candidates.length === 0) return NOTHING;
     // A field path continues with `.` or `,`, so hold the cursor in place the
     // way a cell path does.
     return { candidates, directives: [{ kind: "nospace" }] };
   };
+}
+
+/**
+ * The candidates the flag's own parser accepts, written as the whole argument
+ * they would become.
+ *
+ * A completion is a spelling a caller may stop at, so the bar is the one every
+ * other slot here is held to: the command takes it. The two flags read the
+ * same field list and reserve different spellings around it — `--select true`
+ * is refused while `revision,true` is a field, `--schema @` is an empty file
+ * path while `revision,@` is the suffix — and both sets of rules live in
+ * `lib/cell-selection.ts`, so they are asked rather than mirrored.
+ */
+async function acceptedProjections(
+  candidates: readonly Candidate[],
+  flag: "select" | "schema",
+): Promise<Candidate[]> {
+  const { parseSelectProjection, parseSelectionProjection } = await import(
+    "../cell-selection.ts"
+  );
+  const accepted: Candidate[] = [];
+  for (const candidate of candidates) {
+    try {
+      const parsed = flag === "select"
+        ? parseSelectProjection(candidate.value)
+        : await parseSelectionProjection(candidate.value);
+      // Parsing is not enough: `--schema true` succeeds and means the boolean
+      // JSON Schema, not a field of that name. The parser reports which
+      // reading it took, and only the field-list one is what this slot offers.
+      if (parsed.kind === "concise") accepted.push(candidate);
+    } catch {
+      // A spelling this flag refuses is not a candidate for it.
+    }
+  }
+  return accepted;
 }
 
 /**
@@ -551,7 +582,7 @@ export function projectionKeys(value: unknown): string[] {
 export function shapeProjectionCandidates(
   value: unknown,
   prefix: string,
-  options: { self?: boolean; reserved?: readonly string[] } = {},
+  options: { self?: boolean } = {},
 ): Candidate[] {
   const candidates: Candidate[] = [];
   if (options.self) {
@@ -560,12 +591,7 @@ export function shapeProjectionCandidates(
       description: "the read source's address",
     });
   }
-  const reserved = new Set(options.reserved ?? []);
-  for (
-    const key of projectionKeys(value)
-      .filter(isWritableFieldName)
-      .filter((key) => !reserved.has(key))
-  ) {
+  for (const key of projectionKeys(value).filter(isWritableFieldName)) {
     candidates.push({ value: `${prefix}${key}` });
     candidates.push({
       value: `${prefix}${key}@`,
