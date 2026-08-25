@@ -1,5 +1,5 @@
 import { cloneCfcLabelView } from "@commonfabric/runner/cfc/label-view-core";
-import { CellRef } from "../protocol/mod.ts";
+import { CellRef } from "@/protocol/mod.ts";
 
 export function cellRefToKey(cell: CellRef): string {
   // Key on the FULL id including its URI scheme: the hash preimage is

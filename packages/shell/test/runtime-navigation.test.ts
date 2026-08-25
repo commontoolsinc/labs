@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { DID } from "@commonfabric/identity";
 import { createSession, Identity } from "@commonfabric/identity";
-import { EventEmitter } from "../../runtime-client/client/emitter.ts";
+import { EventEmitter } from "../../runtime-client/src/client/emitter.ts";
 import {
   createRuntimeClientOptions,
   RuntimeInternals,

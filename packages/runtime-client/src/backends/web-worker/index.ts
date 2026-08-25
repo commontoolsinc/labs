@@ -11,7 +11,7 @@ import "core-js/proposals/async-explicit-resource-management";
 import { getLogger } from "@commonfabric/utils/logger";
 import { unrefTimer } from "@commonfabric/utils/sleep";
 
-import { CompilerStackLoadError } from "../../../runner/src/harness/deferred-compiler-stack.ts";
+import { CompilerStackLoadError } from "@commonfabric/runner";
 import {
   IPCRemoteResponse,
   isIPCClientMessage,
@@ -21,9 +21,9 @@ import {
   TransportNotificationType,
   WORKER_CONSOLE_LEVELS,
   WorkerConsoleLevel,
-} from "../../protocol/mod.ts";
-import { RuntimeProcessor } from "../mod.ts";
-import { postToClient } from "../post-to-client.ts";
+} from "@/protocol/mod.ts";
+import { RuntimeProcessor } from "@/backends/mod.ts";
+import { postToClient } from "@/backends/post-to-client.ts";
 
 // Count-only ledger of request traffic as seen by the worker: one
 // `received/<type>` per request that reached this message handler and one

@@ -1,5 +1,5 @@
-import { CompilerStackLoadError } from "../../runner/src/harness/deferred-compiler-stack.ts";
-import { NotificationType, RuntimeErrorCode } from "../protocol/mod.ts";
+import { CompilerStackLoadError } from "@commonfabric/runner";
+import { NotificationType, RuntimeErrorCode } from "@/protocol/mod.ts";
 import { postToClient } from "./post-to-client.ts";
 
 function runtimeErrorCode(error: Error): RuntimeErrorCode | undefined {

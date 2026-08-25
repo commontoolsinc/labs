@@ -330,7 +330,7 @@ Runner seams: envelope persist loop + `ensureSchemaDocument`
 `redactCaveatSourceAtom`/`redactCaveatSourcesForDisplay` + the
 keep-source-intact scope comment (`cfc/label-view-core.ts`), the three IPC
 redaction sites + the open `meta:"cfc"` raw seam
-(`runtime-client/backends/runtime-processor.ts`), sigil label views
+(`runtime-client/src/backends/runtime-processor.ts`), sigil label views
 (`cfc/link-label-view.ts`, `cell.ts` `convertCellsToLinks`),
 `flowReadExcluded` + S18 write guard (`cfc/prepare.ts`),
 `CFC_LABEL_READ_FAILED_ATOM` ungrantable marker (`cfc/observation.ts`),

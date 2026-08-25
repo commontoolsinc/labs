@@ -1,9 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { DID } from "@commonfabric/identity";
-import { PageHandle } from "../page-handle.ts";
-import { $conn, type RuntimeClient } from "../runtime-client.ts";
-import { type CellRef, RequestType } from "../protocol/mod.ts";
+import { PageHandle } from "@/page-handle.ts";
+import { $conn, type RuntimeClient } from "@/runtime-client.ts";
+import { type CellRef, RequestType } from "@/protocol/mod.ts";
 
 // Federation PR2: PageHandle.start/stop carry their cell's space so a
 // handle for a foreign-space page routes to that space's piece context

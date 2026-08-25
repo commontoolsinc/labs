@@ -1,4 +1,4 @@
-import type { IPCRemotePost } from "../protocol/mod.ts";
+import type { IPCRemotePost } from "@/protocol/mod.ts";
 
 /**
  * Posts one message from the worker to its client. This is the whole of the

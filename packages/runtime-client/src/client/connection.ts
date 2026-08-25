@@ -33,11 +33,11 @@ import {
   TelemetryNotification,
   VDomBatchNotification,
   VDomMountResponse,
-} from "../protocol/mod.ts";
+} from "@/protocol/mod.ts";
 import { RuntimeTransport } from "./transport.ts";
 import { EventEmitter } from "./emitter.ts";
-import { $onCellUpdate, CellHandle } from "../cell-handle.ts";
-import { cellRefToKey } from "../shared/utils.ts";
+import { $onCellUpdate, CellHandle } from "@/cell-handle.ts";
+import { cellRefToKey } from "@/shared/utils.ts";
 
 const ipcLogger = getLogger("runtime-client");
 

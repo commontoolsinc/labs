@@ -1970,7 +1970,7 @@ red-first-evidenced where the batch required it):
   `event-append-client.test.ts`); the browser-adapter follow-up
   carries the remaining debts as OW20.
 - m7 — worker/host flag-posture AGREEMENT
-  (`runtime-client/backends/runtime-processor.ts`):
+  (`runtime-client/src/backends/runtime-processor.ts`):
   `InitializationData.experimental` now types `serverExecution` (it
   rode as an untyped excess property), and the worker asserts the
   constructed runtime's resolved posture matches the host's

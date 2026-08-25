@@ -27,8 +27,8 @@ import {
 import type { LoggerFlagsBreakdown } from "@commonfabric/utils/logger";
 import { backtickQuote } from "@commonfabric/utils/markdown";
 
-import { isCellRef } from "../protocol/mod.ts";
-import { CellRef, type LoggerFlagsData, PageRef } from "../protocol/types.ts";
+import { isCellRef } from "@/protocol/mod.ts";
+import { CellRef, type LoggerFlagsData, PageRef } from "@/protocol/types.ts";
 
 /**
  * Converts a value arriving over the connection into the form the worker
