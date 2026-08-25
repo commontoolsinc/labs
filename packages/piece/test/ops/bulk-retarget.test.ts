@@ -65,20 +65,7 @@ describe("bulk-retarget", () => {
     opens = 0;
     closes = 0;
     sessions = {
-      open: async () => {
-        opens += 1;
-        const runtime = new Runtime({
-          apiUrl: new URL("http://toolshed.test"),
-          storageManager,
-        });
-        runtimes.push(runtime);
-        const pieces = new PiecesController(
-          await createSession({ identity: signer, spaceName }),
-          runtime,
-        );
-        await pieces.synced();
-        return pieces;
-      },
+      open: () => openSession(),
       // Disposal deferred to afterEach: the emulated store lives in its
       // runtimes, so closing for real would lose the space between groups.
       // The boundary itself — one close per open — is still observed.
@@ -97,6 +84,28 @@ describe("bulk-retarget", () => {
     await storageManager.close();
     await Deno.remove(dir, { recursive: true });
   });
+
+  /**
+   * A counted session over `name`, the space under test by default. Every
+   * open a run sees comes through here, so the open and close counts stay
+   * comparable however a test bends the factory.
+   */
+  async function openSession(
+    name: string = spaceName,
+  ): Promise<PiecesController> {
+    opens += 1;
+    const runtime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+    });
+    runtimes.push(runtime);
+    const pieces = new PiecesController(
+      await createSession({ identity: signer, spaceName: name }),
+      runtime,
+    );
+    await pieces.synced();
+    return pieces;
+  }
 
   /** Create `count` pieces on v1 and the plan retargeting them to v2. */
   async function seed(
@@ -535,6 +544,57 @@ describe("bulk-retarget", () => {
     // The writes the first group committed are still committed.
     expect((await pinOf(ids[0]))?.patternIdentity).toBe(
       (plan.rows[0].op as RetargetOp).patternIdentity,
+    );
+  });
+
+  it("stops when a group's session serves another space", async () => {
+    const { plan, ids } = await seed(3);
+    const elsewhere = `${spaceName}-elsewhere`;
+    const namer = await openSession(elsewhere);
+    const strayDid = namer.getSpace();
+    await sessions.close(namer);
+    const before = { opens, closes };
+    let attempts = 0;
+    const strayGroup: RetargetSessions = {
+      open: () => {
+        attempts += 1;
+        // Preflight and the first apply group serve the plan's space; the
+        // second group's session answers for the other one.
+        return attempts === 3 ? openSession(elsewhere) : sessions.open();
+      },
+      close: (pieces) => sessions.close(pieces),
+    };
+
+    const report = await retargetPieces(strayGroup, {
+      plan,
+      apply: true,
+      groupSize: 2,
+    });
+
+    expect(report.rows.map((row) => row.verdict)).toEqual([
+      "applied",
+      "applied",
+      "unattempted",
+    ]);
+    expect(report.rows[2].piece).toBe(ids[2]);
+    // Untouched, not accused: the row is where the plan left it, and a run
+    // that read the wrong space would report it moved by another writer.
+    expect(report.rows[2].problem).toBeUndefined();
+    expect(report.applied).toBe(2);
+    expect(report.complete).toBe(false);
+    expect(report.stopReason).toContain(plan.header.space);
+    expect(report.stopReason).toContain(strayDid);
+    // The session opened, so it is released like any other.
+    expect(opens - before.opens).toBe(3);
+    expect(closes - before.closes).toBe(3);
+    // The other space holds nothing at that address, this run included.
+    const strayReader = await openSession(elsewhere);
+    const strayPin = await readPiecePin(strayReader, ids[2]);
+    await sessions.close(strayReader);
+    expect(strayPin).toBeUndefined();
+    // The row stands where it stood in the plan's own space.
+    expect((await pinOf(ids[2]))?.patternIdentity).toBe(
+      plan.rows[2].expect.patternIdentity,
     );
   });
 

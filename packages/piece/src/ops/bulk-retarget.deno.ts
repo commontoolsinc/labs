@@ -61,8 +61,8 @@ export interface RetargetSessions {
  * not apply — a source resolving to a different reference than the row
  * recorded. `failed` is an operational failure, state-checked; and
  * `unattempted` names the rows a stop leaves untouched — the pieces of a
- * group whose session never opened among them, nothing having been written
- * to them.
+ * group whose session never opened, or opened onto another space, among
+ * them, nothing having been written to them.
  */
 export type RetargetVerdict =
   | "landed"
@@ -111,7 +111,8 @@ export interface RetargetReport {
   complete: boolean;
   /**
    * Why the run stopped when no piece is at fault: a session that could not
-   * be opened or could not be released. A piece's own trouble rides its
+   * be opened, could not be released, or opened onto a space other than the
+   * plan's. A piece's own trouble rides its
    * row's `problem`; a boundary failure belongs to the run rather than to
    * any one piece, so it is reported here — and its presence makes
    * `complete` false whatever the rows say, since a run whose session
@@ -192,9 +193,11 @@ async function closeSession(
  * Apply a retarget plan, or — without `apply` — report where every piece
  * stands. Serial in plan order; preflight proves every row's precondition
  * before the first write; grouped sessions bound what stays live; a stop
- * names every unattempted piece. The plan's space is held against the
- * session's, so a plan replayed elsewhere is refused rather than run
- * against whatever pieces happen to answer to its addresses. A session
+ * names every unattempted piece. The plan's space is held against every
+ * session's, so a plan replayed elsewhere is refused before it reads
+ * rather than run against whatever pieces happen to answer to its
+ * addresses — the preflight's mismatch refusing the run outright, a later
+ * group's stopping it with the remainder named. A session
  * boundary that fails once outcomes exist is a stop like any other — the
  * rows stand, the remainder is named, and `stopReason` says what broke;
  * only the preflight's own open throws, there being no report to lose.
@@ -390,6 +393,28 @@ export async function retargetPieces(
         report({ piece: row.piece, ...phase, verdict: "unattempted" });
       }
       stopped = true;
+      continue;
+    }
+    if (pieces.getSpace() !== plan.header.space) {
+      // Every session, not just the preflight's: the factory is the
+      // caller's, and a later one can answer for another space, where these
+      // addresses name different pieces — or nothing at all. The rows are
+      // untouched, so they are unattempted and the reason is the run's.
+      const mismatch = `The plan names space ${plan.header.space}; this ` +
+        `group's session targets ${pieces.getSpace()}.`;
+      for (const row of group) {
+        const phase = row.phase === undefined ? {} : { phase: row.phase };
+        report({ piece: row.piece, ...phase, verdict: "unattempted" });
+      }
+      stopped = true;
+      // This session opened, so it is released like any other. A release
+      // that fails too is named after the mismatch and never instead of
+      // it: the wrong space is why the run stopped.
+      const closeProblem = await closeSession(sessions, pieces);
+      sessionProblem = mismatch +
+        (closeProblem === undefined
+          ? ""
+          : ` Its session could not be released either: ${closeProblem}.`);
       continue;
     }
     // One retained-source cache for this group's session, as in preflight.
