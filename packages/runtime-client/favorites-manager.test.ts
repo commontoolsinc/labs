@@ -113,102 +113,108 @@ describe("FavoritesManager.addFavorite tag derivation", () => {
 });
 
 describe("FavoritesManager other operations", () => {
-  it("removeFavorite sends the piece reference and its key", async () => {
-    const stub = makeStub();
-    await new FavoritesManager(stub.rt).removeFavorite(space, "piece-x");
-    expect(stub.sent[0]).toMatchObject({
-      piece: { id: "of:piece-x", space },
+  describe("removeFavorite()", () => {
+    it("sends the piece reference and its key", async () => {
+      const stub = makeStub();
+      await new FavoritesManager(stub.rt).removeFavorite(space, "piece-x");
+      expect(stub.sent[0]).toMatchObject({
+        piece: { id: "of:piece-x", space },
+      });
+      // The same key add uses, so the removal reaches the same favorite entity.
+      expect(stub.sent[0].id).toBe(
+        favoriteKey({ space, id: "of:piece-x", path: [] }),
+      );
     });
-    // The same key add uses, so the removal reaches the same favorite entity.
-    expect(stub.sent[0].id).toBe(
-      favoriteKey({ space, id: "of:piece-x", path: [] }),
-    );
   });
 
-  it("getFavorites returns the favorites list", async () => {
-    const entries = [{ cell: {}, tags: ["a"], userTags: [] }];
-    const stub = makeStub({ favorites: entries });
-    const result = await new FavoritesManager(stub.rt).getFavorites();
-    expect(result).toEqual(entries);
+  describe("getFavorites()", () => {
+    it("returns the favorites list", async () => {
+      const entries = [{ cell: {}, tags: ["a"], userTags: [] }];
+      const stub = makeStub({ favorites: entries });
+      const result = await new FavoritesManager(stub.rt).getFavorites();
+      expect(result).toEqual(entries);
+    });
+
+    it("returns `[]` when the cell is empty", async () => {
+      const stub = makeStub({ favorites: undefined });
+      expect(await new FavoritesManager(stub.rt).getFavorites()).toEqual([]);
+    });
   });
 
-  it("getFavorites returns [] when the cell is empty", async () => {
-    const stub = makeStub({ favorites: undefined });
-    expect(await new FavoritesManager(stub.rt).getFavorites()).toEqual([]);
-  });
+  describe("subscribeFavorites()", () => {
+    it("delivers values and stops on unsubscribe", async () => {
+      const stub = makeStub();
+      const seen: unknown[] = [];
+      const cancel = new FavoritesManager(stub.rt).subscribeFavorites((f) =>
+        seen.push(f)
+      );
+      await tick();
+      expect(stub.hasSubscriber()).toBe(true);
 
-  it("subscribeFavorites delivers values and stops on unsubscribe", async () => {
-    const stub = makeStub();
-    const seen: unknown[] = [];
-    const cancel = new FavoritesManager(stub.rt).subscribeFavorites((f) =>
-      seen.push(f)
-    );
-    await tick();
-    expect(stub.hasSubscriber()).toBe(true);
+      stub.invokeSubscribe([{ cell: {}, tags: ["x"], userTags: [] }]);
+      expect(seen).toEqual([[{ cell: {}, tags: ["x"], userTags: [] }]]);
 
-    stub.invokeSubscribe([{ cell: {}, tags: ["x"], userTags: [] }]);
-    expect(seen).toEqual([[{ cell: {}, tags: ["x"], userTags: [] }]]);
+      // A null delivery is normalized to an empty array.
+      stub.invokeSubscribe(undefined);
+      expect(seen[1]).toEqual([]);
 
-    // A null delivery is normalized to an empty array.
-    stub.invokeSubscribe(undefined);
-    expect(seen[1]).toEqual([]);
+      cancel();
+      expect(stub.wasUnsubscribed()).toBe(true);
+      // After cleanup, further deliveries are dropped.
+      stub.invokeSubscribe([{ cell: {}, tags: ["y"], userTags: [] }]);
+      expect(seen.length).toBe(2);
+    });
 
-    cancel();
-    expect(stub.wasUnsubscribed()).toBe(true);
-    // After cleanup, further deliveries are dropped.
-    stub.invokeSubscribe([{ cell: {}, tags: ["y"], userTags: [] }]);
-    expect(seen.length).toBe(2);
-  });
-
-  it("subscribeFavorites reports setup errors to onError", async () => {
-    const stub = makeStub({ ensureThrows: true });
-    const seen: unknown[] = [];
-    let reported: Error | undefined;
-    new FavoritesManager(stub.rt).subscribeFavorites(
-      (f) => seen.push(f),
-      (err) => {
-        reported = err;
-      },
-    );
-    await tick();
-    await tick();
-    expect(reported?.message).toBe("ensure failed");
-    // The callback is still invoked once with an empty list on failure.
-    expect(seen).toEqual([[]]);
-  });
-
-  it("subscribeFavorites treats an aborted runtime as cancellation", async () => {
-    const stub = makeStub({ ensureDisposed: true });
-    const seen: unknown[] = [];
-    let reported: Error | undefined;
-    new FavoritesManager(stub.rt).subscribeFavorites(
-      (f) => seen.push(f),
-      (err) => {
-        reported = err;
-      },
-    );
-    await tick();
-    await tick();
-    // An aborted runtime signal marks an expected teardown race, not an error:
-    // neither onError nor the empty-list callback fires.
-    expect(reported).toBeUndefined();
-    expect(seen).toEqual([]);
-  });
-
-  it("subscribeFavorites logs setup errors when no onError is given", async () => {
-    const stub = makeStub({ ensureThrows: true });
-    const original = console.error;
-    let logged = false;
-    console.error = () => {
-      logged = true;
-    };
-    try {
-      new FavoritesManager(stub.rt).subscribeFavorites(() => {});
+    it("reports setup errors to `onError`", async () => {
+      const stub = makeStub({ ensureThrows: true });
+      const seen: unknown[] = [];
+      let reported: Error | undefined;
+      new FavoritesManager(stub.rt).subscribeFavorites(
+        (f) => seen.push(f),
+        (err) => {
+          reported = err;
+        },
+      );
       await tick();
       await tick();
-    } finally {
-      console.error = original;
-    }
-    expect(logged).toBe(true);
+      expect(reported?.message).toBe("ensure failed");
+      // The callback is still invoked once with an empty list on failure.
+      expect(seen).toEqual([[]]);
+    });
+
+    it("treats an aborted runtime as cancellation", async () => {
+      const stub = makeStub({ ensureDisposed: true });
+      const seen: unknown[] = [];
+      let reported: Error | undefined;
+      new FavoritesManager(stub.rt).subscribeFavorites(
+        (f) => seen.push(f),
+        (err) => {
+          reported = err;
+        },
+      );
+      await tick();
+      await tick();
+      // An aborted runtime signal marks an expected teardown race, not an error:
+      // neither onError nor the empty-list callback fires.
+      expect(reported).toBeUndefined();
+      expect(seen).toEqual([]);
+    });
+
+    it("logs setup errors when no `onError` is given", async () => {
+      const stub = makeStub({ ensureThrows: true });
+      const original = console.error;
+      let logged = false;
+      console.error = () => {
+        logged = true;
+      };
+      try {
+        new FavoritesManager(stub.rt).subscribeFavorites(() => {});
+        await tick();
+        await tick();
+      } finally {
+        console.error = original;
+      }
+      expect(logged).toBe(true);
+    });
   });
 });
