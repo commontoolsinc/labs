@@ -184,7 +184,13 @@ describe("topic-board-pivot-contract", () => {
   /** Await a derived edge count rather than reading straight after `set()`.
    * A verb's completion says the event ran, not that the pivot has recomputed
    * and served its consequence — under server execution those are different
-   * moments, and reading between them sees a transient count. */
+   * moments, and reading between them sees a transient count.
+   *
+   * Only ever awaited for a count the write is about to PRODUCE. An absence is
+   * not a thing to wait for: "no edges yet" and "the edge has not arrived yet"
+   * are the same observation, so a wait for zero cannot fail — it can only
+   * hang, and `waitForCellValue` has no deadline of its own. Absences are read
+   * with {@link edgesNow} after a positive signal has settled. */
   const awaitEdges = async (
     t: PieceController,
     key: "referencedBy" | "mentions",
@@ -194,9 +200,18 @@ describe("topic-board-pivot-contract", () => {
     return await waitForCellValue<unknown[]>(
       cc.runtime,
       cell,
-      (v) => Array.isArray(v) && v.length === length,
+      // A path that has produced nothing yet reads as undefined rather than as
+      // an empty array, so the count has to treat the two alike.
+      (v) => ((v ?? []) as unknown[]).length === length,
     );
   };
+
+  /** The edges as they stand, with no waiting. Read only once something the
+   * same write produces has already been awaited. */
+  const edgesNow = async (
+    t: PieceController,
+    key: "referencedBy" | "mentions",
+  ): Promise<unknown[]> => ((await t.result.get([key])) ?? []) as unknown[];
 
   const inboundTitles = async (t: PieceController, length: number) =>
     (await awaitEdges(t, "referencedBy", length)) as { title: string }[];
@@ -208,8 +223,9 @@ describe("topic-board-pivot-contract", () => {
       crossrefs,
       (v) => Array.isArray(v) && v.length === 3,
     );
-    await awaitEdges(target, "referencedBy", 0);
-    await awaitEdges(target, "mentions", 0);
+    // The pivot has served three rows, so the topics behind them have settled.
+    expect((await edgesNow(target, "referencedBy")).length).toBe(0);
+    expect((await edgesNow(target, "mentions")).length).toBe(0);
   });
 
   // NOTE ON WHAT THIS CANNOT SEPARATE, because the distinction is easy to
@@ -228,7 +244,7 @@ describe("topic-board-pivot-contract", () => {
     // Referencing yourself is not being referenced from somewhere else.
     await target.result.set({ topic: target.getCell() }, ["mention"]);
     await awaitEdges(target, "mentions", 1);
-    expect((await awaitEdges(target, "referencedBy", 0)).length).toBe(0);
+    expect((await edgesNow(target, "referencedBy")).length).toBe(0);
   });
 
   it("gives each mentioned topic its own inbound edge, and is not symmetric", async () => {
@@ -239,14 +255,14 @@ describe("topic-board-pivot-contract", () => {
     expect((await inboundTitles(target, 1))[0].title).toBe("Graph source");
     expect((await inboundTitles(third, 1))[0].title).toBe("Graph source");
     // Mentioning is not mutual.
-    expect((await awaitEdges(source, "referencedBy", 0)).length).toBe(0);
+    expect((await edgesNow(source, "referencedBy")).length).toBe(0);
   });
 
   it("drops only the retracted edge on unmention, leaving the other standing", async () => {
     await source.result.set({ topic: target.getCell() }, ["unmention"]);
     await awaitEdges(source, "mentions", 1);
 
-    expect((await awaitEdges(target, "referencedBy", 0)).length).toBe(0);
+    expect((await edgesNow(target, "referencedBy")).length).toBe(0);
     // The edge that was not retracted survives as a reference, not a
     // flattened copy of the piece it names.
     expect((await inboundTitles(third, 1))[0].title).toBe("Graph source");
