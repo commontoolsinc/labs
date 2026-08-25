@@ -1321,4 +1321,139 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
     expect(view.confirmedSeq).toBeGreaterThan(0);
     expect(view.coverClass).toBe("authored");
   });
+
+  it("a content-addressed write witnesses arrival by identity (#6304, scripted): a stored `cid:` doc's frozen cover below the floor does not hold the entry — coverage retires it and its array patch stops replaying; a cid doc with NO confirmed cover still holds it (mutation: identity witness removed → the entry stands forever and fabricates a fourth row)", async () => {
+    // The #6304 shape: a speculative derivation re-sets an already-stored
+    // schema document (`cid:` — content-addressed, so the re-set is a
+    // no-op by identity) and patches a shared array doc in the same run.
+    // A cid doc's confirmed cover can never advance (every rewrite is
+    // identical, so the equality cutoff elides it), so an arrival gate
+    // that holds it to `confirmedSeq >= floor` strands the entry forever
+    // — and the standing array patch replays over every newer confirmed
+    // base, growing the served array past the durable store.
+    const cidDoc = "cid:schema-reset" as never;
+    const arrayDoc = "of:pivot-rows" as never;
+    let nextLocalSeq = 10;
+    // Per-doc confirmed covers: the array doc's derivation has arrived
+    // ABOVE the floor (46 < 50); the cid doc's cover is frozen at its
+    // original registration seq, far below it.
+    const views = new Map<
+      string,
+      { confirmedSeq: number; coverClass?: string }
+    >([
+      [cidDoc, { confirmedSeq: 22, coverClass: "derived" }],
+      [arrayDoc, { confirmedSeq: 50, coverClass: "derived" }],
+    ]);
+    const replica = {
+      sealNative: (
+        native: { operations: Array<Record<string, unknown>> },
+        _source: unknown,
+        verdict: Promise<unknown>,
+      ) => {
+        const localSeq = nextLocalSeq++;
+        return {
+          localSeq,
+          commit: {
+            localSeq,
+            // The entry's floor: a confirmed read at seq 46.
+            reads: {
+              confirmed: [{ id: "of:input", seq: 46 }],
+              pending: [],
+            },
+            operations: native.operations,
+          },
+          settled: verdict.then(() => undefined, () => undefined),
+        };
+      },
+      speculationRetirementView: (id: string) => ({
+        confirmedSeq: views.get(id)?.confirmedSeq ?? 0,
+        coverClass: views.get(id)?.coverClass,
+        pendingLocalSeqs: [] as number[],
+      }),
+      ackedSeqOf: () => undefined,
+      speculationAckObserver: undefined as (() => void) | undefined,
+      speculationArrivalObserver: undefined as (() => void) | undefined,
+    };
+    const watermarkSinks: Array<(value: unknown) => void> = [];
+    const runtime = {
+      storageManager: { open: () => ({ replica }) },
+      getCellFromLink: (link: { id: string }) => ({
+        sink: (cb: (value: unknown) => void) => {
+          if (link.id === SERVER_EXECUTION_WATERMARK_DOC_ID) {
+            watermarkSinks.push(cb);
+          }
+          return () => {};
+        },
+      }),
+    } as unknown as Runtime;
+    const destination = new SpeculationOverlayDestination(runtime);
+    const sealBoth = () => {
+      const tx = {
+        tx: {
+          sourceAction: { name: "pivot" },
+          sealInto: (collector: {
+            sealSpaceCommit: (
+              space: MemorySpace,
+              native: unknown,
+              source: unknown,
+            ) => Promise<unknown>;
+          }) =>
+            collector.sealSpaceCommit(
+              space,
+              {
+                operations: [
+                  {
+                    op: "patch",
+                    id: arrayDoc,
+                    scope: "space",
+                    patches: [{
+                      op: "splice",
+                      path: "/value",
+                      index: 2,
+                      remove: 0,
+                      add: [{ row: 3 }],
+                    }],
+                  },
+                  {
+                    op: "set",
+                    id: cidDoc,
+                    scope: "space",
+                    value: { schema: true },
+                  },
+                ],
+                preconditions: [],
+              },
+              { sourceAction: { name: "pivot" } },
+            ).then(() => ({ ok: {} })),
+        },
+      } as unknown as IExtendedStorageTransaction;
+      stampSpeculationRunContext(tx, {
+        actionId: "pivot",
+        kind: "derivation",
+      });
+      return destination.seal(tx);
+    };
+    expect((await sealBoth()).ok).toBeDefined();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(destination.entryCount(space)).toBe(1);
+    // Coverage arrives (W 46 ≥ floor 46). The array doc's cover (50,
+    // derived) witnesses above the floor; the cid doc witnesses by
+    // identity despite its frozen cover — the entry retires, so its
+    // splice stops replaying over the served array.
+    for (const sink of watermarkSinks) sink({ seq: 46 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(destination.entryCount(space)).toBe(0);
+    // The identity witness is NOT a relaxation for an UNSTORED schema
+    // document: a cid doc with no confirmed cover still holds the entry
+    // — dropping its layer would flip local schema resolution to
+    // nothing.
+    views.set(cidDoc, { confirmedSeq: 0 });
+    expect((await sealBoth()).ok).toBeDefined();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(destination.entryCount(space)).toBe(1);
+    for (const sink of watermarkSinks) sink({ seq: 46 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(destination.entryCount(space)).toBe(1);
+    destination.close();
+  });
 });
