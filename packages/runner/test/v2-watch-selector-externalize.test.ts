@@ -137,6 +137,40 @@ describe("v2-watch", () => {
       );
     });
 
+    it("passes a structurally refused schema through when its references resolve", () => {
+      // Decomposition refuses structural constructs — here an `$anchor` —
+      // and that refusal says nothing about the `cid:` refs the schema
+      // carries. With every reference's closure in the registry there is
+      // nothing unemittable about the selector: it goes to the wire as
+      // given, and the server's persistence validation stays its arbiter.
+      // The throw below is reserved for references the registry cannot
+      // supply.
+      setContentAddressedSchemasConfig(true);
+      const release = acquireSchemaRegistryLease();
+      try {
+        const refForm = externalizeSchema({
+          type: "object",
+          properties: { label: { type: "string" } },
+        }) as JSONSchemaObj;
+        expect(typeof refForm.$ref).toBe("string");
+        const refused = {
+          path: [],
+          schema: {
+            type: "object",
+            properties: {
+              linked: refForm,
+              anchored: { $anchor: "a", type: "string" },
+            },
+          },
+        } as const;
+        expect(externalizeSyncSelector(refused as never, () => false)).toBe(
+          refused as never,
+        );
+      } finally {
+        release();
+      }
+    });
+
     it("throws rather than emitting a reference the registry cannot back", () => {
       // The client's send-only-what-you-can-back obligation, enforced at
       // the emission gate: forwarding the ref would only move this failure

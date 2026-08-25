@@ -24,6 +24,7 @@ import {
 } from "../schema-decompose.ts";
 import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
 import {
+  isSchemaDocumentClosureComplete,
   lookupSchemaDocument,
   registerSchemaDocument,
 } from "../schema-registry.ts";
@@ -93,16 +94,20 @@ export class SelectorClosureUnavailableError extends Error {
  *
  * A decomposition refusal keeps the selector exactly as given when the
  * schema carries no references — inline is inline, and the server accepts
- * it. A REF-BEARING schema whose documents the registry cannot supply
- * throws {@link SelectorClosureUnavailableError} instead: emitting it
- * would violate the client's send-only-what-you-can-back obligation and
- * spend a round trip on the server's refusal, while the local registry is
- * where the miss actually is. A reference dies with the registry epoch
- * that minted it, and every retainer of externalized forms drops them on
- * the registry clear (the wish sidecar pattern caches, the sanitize
- * memo), so reaching this throw means a retainer outlived its epoch or a
- * reference crossed from another process without its closure — a bug to
- * surface at its source, not to forward.
+ * it. Refusal is structural as often as it is a missing document, so a
+ * ref-bearing refusal splits on what the registry can actually supply: a
+ * schema whose every reference resolves passes through as given, with the
+ * server's persistence validation the arbiter for it, while a reference
+ * whose closure the registry cannot supply throws
+ * {@link SelectorClosureUnavailableError} — emitting it would violate the
+ * client's send-only-what-you-can-back obligation and spend a round trip
+ * on the server's refusal, while the local registry is where the miss
+ * actually is. A reference dies with the registry epoch that minted it,
+ * and every retainer of externalized forms drops them on the registry
+ * clear (the wish sidecar pattern caches, the sanitize memo), so reaching
+ * that throw means a retainer outlived its epoch or a reference crossed
+ * from another process without its closure — a bug to surface at its
+ * source, not to forward.
  */
 export const externalizeSyncSelector = (
   selector: SchemaPathSelector,
@@ -139,10 +144,19 @@ export const externalizeSyncSelector = (
   } catch (error) {
     if (error instanceof SchemaNotDecomposableError) {
       if (!carriesRefs) return selector;
-      throw new SelectorClosureUnavailableError(
-        [...collectExternalSchemaRefHashes(schema as JSONSchemaObj)],
-        error,
-      );
+      // Decomposition refuses for structural reasons too — a nested
+      // `$defs`, a `$id`, an unsupported `$ref` form — and those say
+      // nothing about whether the `cid:` refs the schema carries resolve.
+      // Only a reference whose closure the registry cannot supply is
+      // unemittable; when every ref resolves, the selector goes to the
+      // wire as given (rebuilding the inline form needs the decomposition
+      // that just refused), and the server's persistence validation stays
+      // the arbiter for it, as it was before the gate existed.
+      const missing = [
+        ...collectExternalSchemaRefHashes(schema as JSONSchemaObj),
+      ].filter((hash) => !isSchemaDocumentClosureComplete(hash));
+      if (missing.length === 0) return selector;
+      throw new SelectorClosureUnavailableError(missing, error);
     }
     throw error;
   }
