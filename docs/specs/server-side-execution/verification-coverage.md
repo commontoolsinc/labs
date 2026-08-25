@@ -5909,6 +5909,146 @@ supply; OW29/OW32/OW34 closed):
     recovery, whose mechanism targets exactly that death; the entry
     lifts on its own gate evidence at the merged head, never by
     inference from the default-app gate.
+    **THE LUNCH-POLL FILE ENTRY'S OWN GATE, 2026-08-24: 7/10 — NO
+    LIFT. The b04 START class is CLOSED on this file's own evidence
+    too; what keeps the entry is a THIRD residue member, and it is on
+    the WRITE side.** Method, as the merge note prescribed: ON-built
+    binary at the merged head `f14e44830` (#6224's catch-up-and-start
+    in tree), sha256 `ce65782063f4f14a1…` re-verified into every run's
+    ledger line; the FILE entry NEUTRALIZED in the working tree for
+    all runs (the tree held at exactly that one-file diff, recorded
+    per run rather than asserted) and the file's having RUN verified
+    per run from its own `running 1 test from …` line; fresh store,
+    own port and posture probe per run (`shellServerExecutionDefine`
+    "true" + `servingLoop` present, 11/11; port-free check after
+    every run, PID-only kills); ensure-off
+    (`SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false` — deliberately the CI
+    ON lanes' posture, i.e. what a lifted file would actually run
+    under); 10 counted runs INTERLEAVED 5 quiet / 5 loaded (r00 a
+    smoke, uncounted). Verdicts: greens 19-39 s; every red the test's
+    own 300 s `waitForCondition` net (313-322 s wall — never the
+    600 s harness bound, which was never raised); reds r02 (loaded),
+    r05 and r09 (quiet), plus the quiet smoke — NOT load-driven
+    (loads 1.7-15.5 with no relation to the verdict; if anything the
+    quiet arm fared worse). Report and per-run evidence are UNTRACKED
+    and outside any checkout, on the measuring box:
+    `lunch-lift-report.md` and `lunch-lift-evidence/` beside the
+    worktrees (`runs/r00…r10/` each with its ledger, test and
+    toolshed logs, meta+stats JSON and its own `memory/` store;
+    `probes/p1…p3/`, `final-ledger.txt`, and the harness).
+    **b04 CLOSED at this head:** `deferred-start-catchup` fired in
+    EVERY run (10 activations over the 10 counted, 11 with the
+    smoke), `deferred-start-catchup-failed` **0**, terminal `Error
+    committing deferred …` **0**, `pattern-load-error` **0** — the
+    entry's own recorded death ("dies terminally on a
+    stale-confirmed-read ConflictError") did not reproduce once, in
+    either arm, reds included. Strictly that is the ABSENCE of the
+    death's lines rather than a positive witness of each recovery's
+    success; the signature is unmissable and never appeared.
+    **THE NEW MEMBER — the GUEST's mid-session profile piece never
+    lands its PROGRAM-materialization commit.** All three reds are
+    one shape at one place: `Timed out waiting for #lp-join-button to
+    render` (`lunch-poll-vote.test.ts:306`), the GUEST's join click;
+    the host always joins; the join card renders `Unknown profile` /
+    `Create profile` forever because the viewer's `#profile` wish
+    never resolves. Everything before it passes in seconds (measured
+    steps 3.4-5.3 s even in reds). The store/log discriminator
+    separates the arms 11/11 including the smoke: in every RED the
+    guest's profile space holds exactly **4 commits, NO
+    `patternIdentity` in any of them, and 0 mentions in the toolshed
+    log** (its identity home space 2 commits instead of 4); in every
+    GREEN both profile spaces reach 14-21 commits, both carry
+    `patternIdentity`, and the server names them 57-216 times. The
+    stalled store is BYTE-IDENTICAL across the reds — seq 1 authored
+    337 B / 1 op (the space ACL), seq 2 derived 167 B (watermark
+    set), seq 3 authored 125 187 B / 3 ops `{of:2, cid:1}`, seq 4
+    derived 200 B (watermark patch) — and seq 3's three ids are
+    content-addressed and identical across runs AND across different
+    randomly generated identities, i.e. a deterministic
+    identity-independent closure fragment, not the guest's own piece.
+    What is MISSING is the ~98-101 operation, 76-200 KB authored
+    commit carrying the piece's root doc, its `computed:` docs and
+    its whole `cid:` program/schema closure WITH `patternIdentity` —
+    the commit after which, in a green run (and for the HOST's space
+    even inside a red one), the serving side engages and the space
+    converges over 13-19 commits. With no pattern meta durable the
+    serving loop has nothing to load and never names the space at
+    all. The reds are also SILENT client-side (0 browser warn/err in
+    r00/r02/r05, exactly 1 in r09; greens emit 5-14 designed
+    non-fatal lines — the client says nothing when it fails and
+    complains when it succeeds), which is what makes the store the
+    only usable witness; the worker console bridge was verified live
+    at all three levels first, so the silence is a finding rather
+    than a blind instrument. **NOT DETERMINED, deliberately:**
+    whether that commit was REFUSED, DROPPED in flight, or NEVER
+    ISSUED. The guest's space appears in NO server-side line at all —
+    including none of the 50-73 per-run
+    `foreign-write-refused` / `seal-space-commit-failed` refusals,
+    which name OTHER spaces and fire just as often in greens — so the
+    refusal hypothesis is unsupported by these logs and this is not
+    S-A regressing; the write appears never to have reached the
+    server, and that link is the open question the campaign hands on.
+    **Why a member and not a re-sighting of the two read-side ones:**
+    NOT r01's silent `readCell` starvation — that member is
+    store-verified COMPLETE with the piece context fully live and
+    only the read starved, whereas here the store is missing the
+    PROGRAM and no piece ever ran, so there is no live context to
+    starve; NOT r06/r09's stranded whole-piece — that member fires
+    one watcher `pattern-load-error` for a keyless identity while the
+    durable store's pointers are all REAL identities (session-side
+    keylessness), whereas here `pattern-load-error` is 0 in every run
+    and the durable store carries NO `patternIdentity` at all, i.e.
+    keylessness that is DURABLE, the opposite. What it IS is this
+    row's opening sentence verbatim, placeholder included —
+    reappearing for a piece the SECOND browser creates MID-SESSION,
+    and reached by a DIFFERENT route than the row's recorded one
+    (S-A fixed the writeback-refusal route; here the client's program
+    commit appears never to reach the server).
+    **Two flags, recorded not acted on.** (1) S-B's durability
+    barrier cannot cover this: the test awaits `waitForRuntimeIdle`
+    on the guest immediately after the create (the host's identical
+    path greens every time), and a barrier over IN-FLIGHT work does
+    not await a write that is never in flight. (2) The S-C skip
+    ruling's PREMISE does not reach this case: S-C was skipped on the
+    reasoning that every create runs through `waitForRuntimeIdle` —
+    S-B's barrier — before any RELOAD; this surface has NO reload at
+    all, does run the create through the barrier, and still loses the
+    program in every red. Whether that reopens S-C is the owner's
+    call, not a measurement call.
+    **Anti-red-herrings, recorded so the next seat does not
+    re-derive them.** `piece-start-commit-failed` is NOT this file's
+    discriminator: 13 occurrences across the campaign, 1-2 per run,
+    in GREEN runs as often as red. It remains a real unrecovered arm
+    — the catch-up recovery is wired to the deferred-start commit,
+    not to the piece-instantiate one — and this row already carries
+    it as an open residual, but it does not explain these reds, and
+    ruling it out cost the measuring seat real time. And OW46's
+    `structure-load-stuck` counter is BLIND here: it fires 6× per run
+    in BOTH arms and in the reds names only the HOST's space, because
+    it counts deferred structure loads of DEMANDED roots and this
+    space's root is never demanded at all.
+    **Side probe (n=3 — a LEAD, not a finding; diagnostic, outside
+    the gate and the ledger).** With only
+    `SERVER_EXECUTION_ENSURE_SPACE_ROOTS` flipped to `true`: **3/3
+    RED, and red EARLIER and differently** — all three time out
+    filling `#wish-profile-name-input`, i.e. the HOST's
+    profile-create surface never renders, 300 s, before the
+    campaign's failure point is even reached, with NO profile space
+    created at all (the campaign's reds at least create the guest's
+    space). Two narrow conclusions: the lane's ensure-off posture is
+    ruled OUT as an explanation of the campaign's reds, and
+    ensure-ON is a strictly worse regime for this file — worth
+    someone's attention independently, at n=3 on a non-sanctioned
+    posture. Bearing recorded as a bearing, not a finding: the loss
+    here is WRITE-direction and occurs at ensure-OFF, so OW61's
+    separate client-side ABSORB investigation is not expected to
+    close this shape.
+    **DISPOSITION: NO LIFT. The entry STAYS, its reason reworded to
+    the narrowed charge — the b04 class it was minted for is closed
+    at this head, and it now stands on the guest-profile
+    program-materialization loss. The lift bar is UNCHANGED: this
+    entry's own gate evidence at the merged head, 10/10, never by
+    inference from the default-app gate.**
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
