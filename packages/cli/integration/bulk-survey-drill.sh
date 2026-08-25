@@ -164,7 +164,59 @@ AFTER=$($CF piece survey -q --piece "$BOARD" --path items $ARGS \
 check "$((MEMBERS_TOTAL + 1))" "$AFTER" \
   "the after-survey counts the member added since"
 
-step "10. A registered in-scope orphan makes the survey refuse"
+step "10. A repair runs dry, applies from its plan, and resumes as landed"
+cat > "$WORK/fix-titles.ts" <<'FIXER'
+export default (document: Readonly<Record<string, unknown>>) => ({
+  ...document,
+  ...(typeof document.title === "string"
+    ? { title: (document.title as string).toUpperCase() }
+    : {}),
+});
+FIXER
+if $CF piece repair -q --piece "$BOARD" --path items $ARGS \
+  --fixer "$WORK/fix-titles.ts" --out "$WORK/repair.jsonl" \
+  2>"$WORK/repair-dry.err"; then
+  ok "dry repair exited 0"
+else
+  bad "dry repair exited nonzero"
+  sed 's/^/  | /' "$WORK/repair-dry.err"
+fi
+DRY_OPS=$(tail -n +2 "$WORK/repair.jsonl" | jq -rs \
+  'map(.op.fixer) | unique | join(",")')
+check "$WORK/fix-titles.ts" "$DRY_OPS" \
+  "every plan row records the fixer it was evaluated for"
+APPLY_FACTS=$($CF piece repair -q --piece "$BOARD" --path items $ARGS \
+  --fixer "$WORK/fix-titles.ts" --plan "$WORK/repair.jsonl" --apply --json \
+  2>"$WORK/repair-apply.err" | jq -r '[(.applied|tostring),
+    (.complete|tostring), (.rows | map(.verdict) | unique | join(","))]
+    | @tsv')
+MEMBERS_NOW=$((MEMBERS_TOTAL + 1))
+check "$(printf '%s\ttrue\trepaired' "$MEMBERS_NOW")" "$APPLY_FACTS" \
+  "the plan-driven apply repaired every member row"
+RESUME=$($CF piece repair -q --piece "$BOARD" --path items $ARGS \
+  --fixer "$WORK/fix-titles.ts" --plan "$WORK/repair.jsonl" --apply --json \
+  2>/dev/null | jq -r '[(.applied|tostring), (.complete|tostring),
+    (.rows | map(.verdict) | unique | join(","))] | @tsv')
+check "$(printf '0\ttrue\tconforms')" "$RESUME" \
+  "re-running the completed plan writes nothing and reads all-landed"
+cat > "$WORK/drop-everything.ts" <<'FIXER'
+export default () => ({});
+FIXER
+if $CF piece repair -q --piece "$BOARD" --path items $ARGS \
+  --fixer "$WORK/drop-everything.ts" \
+  >/dev/null 2>"$WORK/repair-refuse.err"; then
+  bad "a field-dropping fixer was accepted"
+else
+  ok "a field-dropping fixer exited nonzero"
+fi
+if grep -q "incomplete document" "$WORK/repair-refuse.err"; then
+  ok "the refusal names the incomplete document"
+else
+  bad "the refusal does not name the incomplete document"
+  sed 's/^/  | /' "$WORK/repair-refuse.err"
+fi
+
+step "11. A registered in-scope orphan makes the survey refuse"
 ORPHAN=$($CF piece new --quiet --main-export Member \
   "$SCRIPT_DIR/pattern/bulk-member.tsx" $ARGS 2>/dev/null |
   grep -oE '^fid1:[A-Za-z0-9_-]+' | head -1)
@@ -183,7 +235,7 @@ else
   bad "the refusal does not name the orphan"
 fi
 
-step "11. A list survey claims no containment"
+step "12. A list survey claims no containment"
 LIST_FACTS=$($CF piece survey -q --list "$BOARD" $ARGS 2>/dev/null |
   head -1 | jq -r '[.selector, (.enumerated.collection|tostring),
     (.enumerated.registeredOutside|tostring)] | @tsv')

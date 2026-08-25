@@ -137,6 +137,14 @@ surface work rather than read about it, `integration/bulk-ops-demo.sh` narrates
 a board-sized survey end to end against a running server, with the unbuilt write
 stages shown as pending acts.
 
+`cf piece repair` runs a caller-supplied fixer — a TypeScript module whose
+default export is a pure transform from a piece's stored input document to the
+document it should hold — over the same selection surface the survey takes. Dry
+by default, reporting the exact per-piece diff and writing nothing; under
+`--apply` it writes each row in its own transaction, and a plan from a dry run
+drives the apply row for row under its document-hash preconditions (`--plan`).
+The design is `docs/plans/piece-bulk-operations.md`, stage 2.
+
 `cf piece slugs` lists the space's slug index: every name assigned through
 `--slug` or `set-slug`, each resolved to the piece it names. The index records
 assignments made since it existed, so a slug written by an older client still

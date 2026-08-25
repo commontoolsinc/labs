@@ -7,12 +7,19 @@
  * above it stay seams.
  */
 
+import { toFileUrl } from "@std/path";
+
 import { resolvePieceAddress } from "@commonfabric/piece";
 import {
+  decodePlan,
+  type Fixer,
   type PiecePin,
+  type PiecesController,
   type PieceSelector,
   type PlannedRetarget,
   readPiecePin,
+  repairPieces,
+  type RepairReport,
   type RetargetSource,
   surveyPieces,
   type SurveyResult,
@@ -45,6 +52,83 @@ export async function readSourcePin(
     config.piece,
   );
   return await readPiecePin(pieces, piece, new Map(), config.pieceScope);
+}
+
+/**
+ * Resolve a selector's addresses the way every other piece verb resolves
+ * one — slugs included — shared by the survey and the repair so the two
+ * cannot drift in what an address means.
+ */
+async function resolveSelector(
+  pieces: PiecesController,
+  selector: PieceSelector,
+  resolve: typeof resolvePieceAddress,
+): Promise<PieceSelector> {
+  if (selector.kind === "collection") {
+    return { ...selector, holder: await resolve(pieces, selector.holder) };
+  }
+  const resolved: string[] = [];
+  for (const entry of selector.pieces) {
+    resolved.push(await resolve(pieces, entry));
+  }
+  return { kind: "list", pieces: resolved };
+}
+
+/** What one repair run is asked to do, parsed off the command line. */
+export interface RepairRunRequest {
+  selector: PieceSelector;
+  /** The fixer module's absolute path, for the import. */
+  fixerPath: string;
+  /** The fixer's name as supplied, recorded in the emitted plan. */
+  fixerName: string;
+  /** A plan file to execute, row for row, under its preconditions. */
+  planPath?: string;
+  /** Write the fixer's documents; absent, the run is the dry report. */
+  apply?: boolean;
+}
+
+export interface RepairRunDependencies {
+  loadPieces?: typeof loadPieces;
+  resolvePieceAddress?: typeof resolvePieceAddress;
+  readTextFile?: (path: string) => Promise<string>;
+  /** The module import, injectable so tests supply a fixer without disk. */
+  importModule?: (path: string) => Promise<unknown>;
+}
+
+/**
+ * Run the repair: import the fixer module, resolve the selector's addresses
+ * the way the other piece verbs do, decode the plan file when one drives
+ * the run, and hand the library the pieces. Dry by default; the library
+ * owns every refusal beyond the fixer module's own shape.
+ */
+export async function runRepair(
+  config: SpaceConfig,
+  request: RepairRunRequest,
+  deps: RepairRunDependencies = {},
+): Promise<RepairReport> {
+  const importModule = deps.importModule ??
+    ((path: string) => import(toFileUrl(path).href));
+  const module = await importModule(request.fixerPath);
+  const fixer = (module as { default?: unknown }).default;
+  if (typeof fixer !== "function") {
+    throw new Error(
+      `The fixer module must default-export the fixer function: ` +
+        `${request.fixerName}.`,
+    );
+  }
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  const resolve = deps.resolvePieceAddress ?? resolvePieceAddress;
+  const selector = await resolveSelector(pieces, request.selector, resolve);
+  const plan = request.planPath === undefined ? undefined : decodePlan(
+    await (deps.readTextFile ?? Deno.readTextFile)(request.planPath),
+  );
+  return await repairPieces(pieces, {
+    selector,
+    fixer: fixer as Fixer,
+    fixerName: request.fixerName,
+    ...(plan === undefined ? {} : { plan }),
+    ...(request.apply === true ? { apply: true } : {}),
+  });
 }
 
 /** One `--retarget` flag, parsed: which phase, what source, what label. */
@@ -101,16 +185,7 @@ export async function runSurvey(
 
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
   const resolve = deps.resolvePieceAddress ?? resolvePieceAddress;
-  let selector = request.selector;
-  if (selector.kind === "collection") {
-    selector = { ...selector, holder: await resolve(pieces, selector.holder) };
-  } else {
-    const resolved: string[] = [];
-    for (const entry of selector.pieces) {
-      resolved.push(await resolve(pieces, entry));
-    }
-    selector = { kind: "list", pieces: resolved };
-  }
+  const selector = await resolveSelector(pieces, request.selector, resolve);
 
   // A null prototype, so a phase named like an `Object.prototype` member is
   // an own key rather than a write through the prototype chain.

@@ -1,9 +1,8 @@
 # Bulk piece operations
 
-**Status:** proposed; stage 1 — the survey library, its `cf` entry points,
-and its CI drill — is built. Stage 2's repair library — the fixer runner,
-the dry-run diff, and the refusals — is built; its `cf` entry point and
-demo act follow in a stacked change. Every later stage is unbuilt. This is the design and build sequence for changing
+**Status:** proposed; stages 1 and 2 — the survey and repair libraries,
+their `cf` entry points, and their coverage in the CI drill and the demo —
+are built. Every later stage is unbuilt. This is the design and build sequence for changing
 many pieces in one space as one reviewable, resumable operation. Driven by
 recurring Topics board upgrades.
 
@@ -598,7 +597,7 @@ Topics restore script hand-rolls today and should import instead.
 - [x] References survive a repair that does not mention them, and a fixer
       that would rewrite one as a value is refused.
 - [x] Re-running a completed repair writes nothing.
-- [ ] The repair act in `packages/cli/integration/bulk-ops-demo.sh` stops
+- [x] The repair act in `packages/cli/integration/bulk-ops-demo.sh` stops
       being pending: the transcript runs a fixer live where it now shows
       the provisional spelling.
 

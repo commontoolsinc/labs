@@ -15,7 +15,13 @@ import {
 } from "@commonfabric/runner/shared";
 import { decode } from "@commonfabric/utils/encoding";
 
-import { type PhaseRetarget, readSourcePin, runSurvey } from "../lib/bulk.ts";
+import {
+  type PhaseRetarget,
+  readSourcePin,
+  type RepairRunRequest,
+  runRepair,
+  runSurvey,
+} from "../lib/bulk.ts";
 import { addressArgument, VerbInputValidationError } from "../lib/callable.ts";
 import type {
   InvocationIdentity,
@@ -2340,6 +2346,58 @@ export const piece = targetOptions(
     { conflicts: ["out"] },
   )
   .action(surveyFromCommand)
+  /* piece repair */
+  .command(
+    "repair",
+    "Run a caller-supplied fixer over the selection's stored input documents",
+  )
+  .usage(pieceUsage)
+  .example(
+    cliText(
+      `cf piece repair ${EX_ID} ${EX_COMP_PIECE} --path topics --fixer fix.ts`,
+    ),
+    "Report what the fixer would change, writing nothing.",
+  )
+  .option(
+    "-c,--piece <piece:string>",
+    `${PIECE_OPTION_HELP} The holder whose collection is repaired.`,
+  )
+  .option(
+    "--path <path:string>",
+    "Path to the collection inside the holder's document; segments joined with '/'.",
+  )
+  .option(
+    "--side <side:string>",
+    "Which document holds the collection: input (the default) or result.",
+  )
+  .option(
+    "--list <piece:string>",
+    "Repair this piece instead of a collection. Repeatable.",
+    { collect: true, conflicts: ["piece", "path", "side"] },
+  )
+  .option(
+    "--fixer <path:string>",
+    "A TypeScript module whose default export is the fixer: a pure transform from a piece's stored input document to the document it should hold.",
+    { required: true },
+  )
+  .option(
+    "--plan <file:string>",
+    "Execute this plan's rows, in its order, under its document-hash preconditions.",
+  )
+  .option(
+    "--apply",
+    "Write the documents the fixer produces. Without it the run is the dry report: the exact per-piece diff, and no write at all.",
+  )
+  .option(
+    "--out <file:string>",
+    "Write the emitted plan to a file instead of stdout.",
+  )
+  .option(
+    "--json",
+    "Write the full repair report as JSON to stdout instead of the plan.",
+    { conflicts: ["out"] },
+  )
+  .action(repairFromCommand)
   /* piece view */
   .command("view", "Display the rendered view for a piece")
   .usage(pieceUsage)
@@ -3149,12 +3207,7 @@ export function parseRetargetFlag(spec: string): PhaseRetarget {
   };
 }
 
-export interface SurveyCLIOptions extends PieceCLIOptions {
-  /** Inherited from the `piece` mount's global target options. */
-  quiet?: boolean;
-  path?: string;
-  side?: string;
-  list?: string[];
+export interface SurveyCLIOptions extends BulkSelectionOptions {
   retarget?: string[];
   validator?: string;
   out?: string;
@@ -3169,20 +3222,30 @@ export interface SurveyCommandDependencies {
   exit?: (code: number) => never;
 }
 
-export async function surveyFromCommand(
-  options: SurveyCLIOptions,
-  deps: SurveyCommandDependencies = {},
-): Promise<void> {
-  setQuietMode(!!options.quiet);
-  let selector: PieceSelector;
-  let spaceConfig;
+/** The selection surface the bulk piece commands share. */
+export interface BulkSelectionOptions extends PieceCLIOptions {
+  /** Inherited from the `piece` mount's global target options. */
+  quiet?: boolean;
+  path?: string;
+  side?: string;
+  list?: string[];
+}
+
+/**
+ * Read a bulk command's selection off its flags — one function for the
+ * survey and the repair, so the two cannot drift in what an address means
+ * or what they refuse. A `--list` entry is either the canonical reference
+ * form or the bare id; a canonical entry may embed the target space, which
+ * supplies the space when `--space` is absent and must otherwise agree —
+ * at parse time against a DID, through validateEmbeddedSpaces against a
+ * name still to be resolved. Bulk operations read whole pieces, so a
+ * scope, a path, or the #argument suffix on an entry is refused rather
+ * than dropped.
+ */
+export function readBulkSelection(
+  options: BulkSelectionOptions,
+): { selector: PieceSelector; spaceConfig: SpaceConfig } {
   if (options.list !== undefined && options.list.length > 0) {
-    // An entry is either the canonical reference form or the bare id. A
-    // canonical entry may embed the target space: it supplies the space when
-    // --space is absent, and otherwise the two must agree — at parse time
-    // against a DID, through validateEmbeddedSpaces against a name still to
-    // be resolved. The survey reads whole pieces, so a scope, a path, or the
-    // #argument suffix on an entry is refused rather than dropped.
     let listSpace = options.space;
     const embedded: string[] = [];
     const entries = options.list.map((entry) => {
@@ -3191,8 +3254,8 @@ export async function surveyFromCommand(
         // The bare alias grammar reads @ as its scope marker.
         if (entry.includes("@")) {
           throw new ValidationError(
-            `A scoped piece cannot be surveyed; drop the @scope suffix on ` +
-              `${JSON.stringify(entry)}.`,
+            `A scoped piece cannot be selected for a bulk operation; drop ` +
+              `the @scope suffix on ${JSON.stringify(entry)}.`,
             { exitCode: 1 },
           );
         }
@@ -3200,22 +3263,22 @@ export async function surveyFromCommand(
       }
       if (ref.scope !== undefined) {
         throw new ValidationError(
-          `A scoped piece cannot be surveyed; drop the @scope suffix on ` +
-            `${JSON.stringify(entry)}.`,
+          `A scoped piece cannot be selected for a bulk operation; drop ` +
+            `the @scope suffix on ${JSON.stringify(entry)}.`,
           { exitCode: 1 },
         );
       }
       if (ref.path.length > 0) {
         throw new ValidationError(
-          `A survey reads whole pieces; drop the path on ` +
+          `A bulk operation reads whole pieces; drop the path on ` +
             `${JSON.stringify(entry)}.`,
           { exitCode: 1 },
         );
       }
       if (ref.input) {
         throw new ValidationError(
-          `A survey reads whole pieces; drop the #argument suffix on ` +
-            `${JSON.stringify(entry)}.`,
+          `A bulk operation reads whole pieces; drop the #argument suffix ` +
+            `on ${JSON.stringify(entry)}.`,
           { exitCode: 1 },
         );
       }
@@ -3230,7 +3293,7 @@ export async function surveyFromCommand(
       }
       return ref.pieceId;
     });
-    spaceConfig = parseSpaceOptions(
+    const spaceConfig = parseSpaceOptions(
       listSpace === options.space ? options : { ...options, space: listSpace },
     );
     if (embedded.length > 0) {
@@ -3239,42 +3302,51 @@ export async function surveyFromCommand(
         ...embedded,
       ];
     }
-    selector = { kind: "list", pieces: entries };
-  } else {
-    const pieceConfig = parsePieceOptions(options);
-    spaceConfig = pieceConfig;
-    if (pieceConfig.pieceScope !== undefined) {
-      throw new ValidationError(
-        "A scoped piece cannot hold the surveyed collection; drop the " +
-          "@scope suffix.",
-        { exitCode: 1 },
-      );
-    }
-    const path = (options.path ?? "").split("/").filter((s) => s !== "");
-    if (path.length === 0) {
-      throw new ValidationError(
-        "--path names the collection to survey; use --list to survey pieces directly.",
-        { exitCode: 1 },
-      );
-    }
-    if (
-      options.side !== undefined && options.side !== "input" &&
-      options.side !== "result"
-    ) {
-      throw new ValidationError(
-        `--side takes input or result, got "${options.side}".`,
-        { exitCode: 1 },
-      );
-    }
-    selector = {
+    return { selector: { kind: "list", pieces: entries }, spaceConfig };
+  }
+  const pieceConfig = parsePieceOptions(options);
+  if (pieceConfig.pieceScope !== undefined) {
+    throw new ValidationError(
+      "A scoped piece cannot hold the selected collection; drop the " +
+        "@scope suffix.",
+      { exitCode: 1 },
+    );
+  }
+  const path = (options.path ?? "").split("/").filter((s) => s !== "");
+  if (path.length === 0) {
+    throw new ValidationError(
+      "--path names the collection; use --list to select pieces directly.",
+      { exitCode: 1 },
+    );
+  }
+  if (
+    options.side !== undefined && options.side !== "input" &&
+    options.side !== "result"
+  ) {
+    throw new ValidationError(
+      `--side takes input or result, got "${options.side}".`,
+      { exitCode: 1 },
+    );
+  }
+  return {
+    selector: {
       kind: "collection",
       holder: pieceConfig.piece,
       path,
       ...(options.side === undefined
         ? {}
         : { side: options.side as "input" | "result" }),
-    };
-  }
+    },
+    spaceConfig: pieceConfig,
+  };
+}
+
+export async function surveyFromCommand(
+  options: SurveyCLIOptions,
+  deps: SurveyCommandDependencies = {},
+): Promise<void> {
+  setQuietMode(!!options.quiet);
+  const { selector, spaceConfig } = readBulkSelection(options);
   const shared = {
     ...(options.root === undefined ? {} : { root: absPath(options.root) }),
     ...(options.test === undefined
@@ -3337,6 +3409,85 @@ export async function surveyFromCommand(
             (outside) =>
               `  registered outside the selection: ${outside.piece} on ` +
               `${outside.patternIdentity}#${outside.symbol}`,
+          ),
+        ].join("\n"),
+      },
+      deps,
+    );
+  }
+}
+
+export interface RepairCLIOptions extends BulkSelectionOptions {
+  fixer: string;
+  plan?: string;
+  apply?: boolean;
+  out?: string;
+}
+
+export interface RepairCommandDependencies {
+  runRepair?: typeof runRepair;
+  render?: typeof render;
+  writeTextFile?: typeof Deno.writeTextFile;
+  printError?: (message: string) => void;
+  printHint?: (message: string) => void;
+  exit?: (code: number) => never;
+}
+
+export async function repairFromCommand(
+  options: RepairCLIOptions,
+  deps: RepairCommandDependencies = {},
+): Promise<void> {
+  setQuietMode(!!options.quiet);
+  const { selector, spaceConfig } = readBulkSelection(options);
+  const request: RepairRunRequest = {
+    selector,
+    fixerPath: absPath(options.fixer),
+    fixerName: options.fixer,
+    ...(options.plan === undefined ? {} : { planPath: absPath(options.plan) }),
+    ...(options.apply === true ? { apply: true } : {}),
+  };
+  const report = await (deps.runRepair ?? runRepair)(spaceConfig, request);
+  const print = deps.render ?? render;
+  const printHint = deps.printHint ?? hint;
+  if (options.json) {
+    print(report, { json: true });
+  } else {
+    const plan = encodePlan(report.plan);
+    if (options.out !== undefined) {
+      await (deps.writeTextFile ?? Deno.writeTextFile)(options.out, plan);
+      printHint(`Wrote ${report.plan.rows.length} plan rows to ${options.out}`);
+    } else {
+      print(plan.trimEnd());
+    }
+  }
+  const tally = new Map<string, number>();
+  for (const row of report.rows) {
+    tally.set(row.verdict, (tally.get(row.verdict) ?? 0) + 1);
+  }
+  printHint(
+    [...tally.entries()].map(([verdict, count]) => `${verdict}: ${count}`)
+      .join(" · "),
+  );
+  for (const row of report.rows) {
+    if (row.problem !== undefined) {
+      printHint(`${row.verdict}: ${row.piece} ${row.problem}`);
+    }
+  }
+  if (!report.complete) {
+    exitWithDataError(
+      {
+        message: [
+          options.apply === true
+            ? "Repair did not complete; re-running resumes it."
+            : "Repair found rows it must refuse.",
+          // The problem rides the message, not a hint: a quiet script is
+          // the caller most in need of the why.
+          ...report.rows.filter((row) =>
+            row.verdict !== "conforms" && row.verdict !== "repaired" &&
+            (options.apply === true || row.verdict !== "would-change")
+          ).map((row) =>
+            `  ${row.verdict}: ${row.piece}` +
+            (row.problem === undefined ? "" : ` ${row.problem}`)
           ),
         ].join("\n"),
       },
