@@ -2176,18 +2176,23 @@ export class Runtime {
   // are distinct docs, and a kick for one scope must not suppress another's.
   private missingDocLoadKicks = new Set<string>();
   // Reference counts for missing-doc loads whose sync has not settled yet,
-  // fed by EVERY kick path (this runtime's `ensureLinkedDocLoaded` and
-  // link-resolution's hop-follow kick alike). Distinct from the permanent
-  // dedup above because the two answer different questions: the dedup
-  // answers "has a kick ever been taken", which must stay true for the
-  // manager's lifetime, while a caller asking whether an absence is still
-  // unresolved ("cannot read yet" versus "read as absent") needs a key that
-  // CLEARS when the load settles — a settled load means the replica now
-  // holds the doc's state or its confirmed absence, and treating the doc as
-  // pending past that point turns every confirmed absence into a permanent
-  // postponement. A count rather than a set, so two kick paths tracking the
-  // same doc cannot have the first settlement erase the second's pending
-  // state.
+  // fed by every kick that FETCHES A MISSING DOC on a reader's behalf: this
+  // runtime's `ensureLinkedDocLoaded`, and link-resolution's RESERVED
+  // same-space pull. The resolver's unreserved cross-space kick stays out
+  // on purpose — it is a liveness refresh that fires on every resolution,
+  // present targets and settled absences alike, and registering it would
+  // re-mark a confirmed absence as provisional forever (see
+  // `missingDocAbsenceIsProvisional`, whose invariant this tracker serves).
+  // Distinct from the permanent dedup above because the two answer
+  // different questions: the dedup answers "has a kick ever been taken",
+  // which must stay true for the manager's lifetime, while a caller asking
+  // whether an absence is still unresolved ("cannot read yet" versus "read
+  // as absent") needs a key that CLEARS when the load settles — a settled
+  // load means the replica now holds the doc's state or its confirmed
+  // absence, and treating the doc as pending past that point turns every
+  // confirmed absence into a permanent postponement. A count rather than a
+  // set, so two kicks tracking the same doc cannot have the first
+  // settlement erase the second's pending state.
   private missingDocLoadsInFlight = new Map<string, number>();
 
   private missingDocLoadKey(
@@ -2203,8 +2208,11 @@ export class Runtime {
 
   /**
    * Register a missing-doc load as in flight and hand back its settle
-   * callback. Every kick path registers here, whichever machinery performs
-   * the sync, so {@link isMissingDocLoadInFlight} answers for all of them.
+   * callback. Every kick that fetches a missing doc on a reader's behalf
+   * registers here, whichever machinery performs the sync, so
+   * {@link isMissingDocLoadInFlight} answers for all of them; a liveness
+   * refresh sync deliberately does not (the field comment on
+   * `missingDocLoadsInFlight` says why).
    */
   trackMissingDocLoadInFlight(
     space: MemorySpace,
@@ -2228,11 +2236,13 @@ export class Runtime {
   }
 
   /**
-   * Whether SOME load for this doc — kicked by any read, in any
-   * transaction — is still unsettled. The answer a reader needs to tell an
-   * absence it must wait out from one the replica has confirmed: a
-   * reservation consumed by another transaction's kick reads as "seen" to
-   * `shouldPullDoc`, while the doc is in truth still on the wire.
+   * Whether some REGISTERED load for this doc — a missing-doc fetch kicked
+   * by any read, in any transaction — is still unsettled. The answer a
+   * reader needs to tell an absence it must wait out from one the replica
+   * has confirmed: a reservation consumed by another transaction's kick
+   * reads as "seen" to `shouldPullDoc`, while the doc is in truth still on
+   * the wire. Liveness refresh syncs never register, so they never answer
+   * here.
    */
   isMissingDocLoadInFlight(
     space: MemorySpace,
@@ -2255,9 +2265,10 @@ export class Runtime {
    *
    * Centralized because the two halves come from different bookkeeping and
    * every partial answer has been wrong somewhere: the in-flight tracker
-   * covers loads kicked by ANY path in ANY transaction (a reservation
-   * consumed by a concurrent kick reads as "seen" to `shouldPullDoc` while
-   * the doc is mid-transfer), and {@link ensureLinkedDocLoaded} owns the
+   * covers every registered missing-doc fetch, whichever kick path in
+   * whichever transaction took it (a reservation consumed by a concurrent
+   * kick reads as "seen" to `shouldPullDoc` while the doc is
+   * mid-transfer), and {@link ensureLinkedDocLoaded} owns the
    * permanent-dedup-versus-seen distinction and kicks the load that makes a
    * provisional verdict healable. Liveness refresh syncs (the resolver's
    * per-resolution cross-space kick) deliberately do not register with the
