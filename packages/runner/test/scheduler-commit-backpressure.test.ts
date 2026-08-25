@@ -578,6 +578,68 @@ describe("committed-write backpressure", () => {
   );
 
   it(
+    "reports a CFC-refused write dropped on the terminal disposition",
+    async () => {
+      // A CFC-refused write is silent data loss of user intent: the UI's
+      // write never lands. `reportDroppedCfcRejectedWrite` exists to say so
+      // unconditionally, because the `logger.warn` beside it is the opt-in
+      // scheduler logger and is disabled in deployed workers (labs#4772).
+      // The refusal is classified terminal rather than give-up, so the report
+      // has to hang off both dispositions — this pins the terminal one.
+      const piece = buildCounterPiece(
+        runtime,
+        tx,
+        "backpressure-cfc-refusal-root",
+      );
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.idle();
+
+      const commitTelemetry = collectEventCommitMarkers(runtime);
+      // The injection names `RowLabelCommitError` because the rejection has
+      // to arrive over the wire to reach this path, and `toRejectedError`
+      // preserves only the names on its allow-list — a client-minted
+      // `CfcCommitRefusalError` never round-trips, so it cannot be injected
+      // here. What is under test is the ROUTING, not the provenance: a
+      // rejection classified terminal whose message is a CFC refusal must
+      // still be reported, and both halves of that pairing are what the
+      // real client-side refusal presents to this switch.
+      const injector = rejectServerTransacts(storageManager, Infinity, {
+        name: "RowLabelCommitError",
+        message: "CFC enforcement rejected commit: relevant transaction was " +
+          "not prepared: writer-fit confidentiality misfit",
+      });
+      const reported: unknown[][] = [];
+      const originalConsoleError = console.error;
+      console.error = (...args: unknown[]) => {
+        reported.push(args);
+      };
+
+      try {
+        piece.queueAdd(
+          4,
+          "evt:backpressure-cfc-refusal:0:backpressure-cfc-refusal-root",
+        );
+        await commitTelemetry.firstMarker;
+        await runtime.idle();
+
+        // The refused write did not land, and the drop was reported rather
+        // than left to the opt-in logger.
+        expect(piece.total()).toBe(0);
+        expect(
+          reported.some((args) =>
+            String(args[0]).includes("Owner-protected write dropped")
+          ),
+        ).toBe(true);
+      } finally {
+        console.error = originalConsoleError;
+        injector.restore();
+        commitTelemetry.dispose();
+      }
+    },
+  );
+
+  it(
     "surfaces a terminal error when a transient conflict never converges",
     async () => {
       await disposeSchedulerTestRuntime({ storageManager, runtime, tx });

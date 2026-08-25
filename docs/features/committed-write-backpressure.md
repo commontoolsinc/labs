@@ -241,8 +241,10 @@ must be actively retried rather than recovered by re-derivation.
   case drives an unending conflict to a terminal `CommitConvergenceError`.
 - `packages/runner/test/cfc-ui-contract.test.ts` — the `writeAuthorizedBy`
   enforcement cases confirm the fast-fail path: an unauthorized push is rejected
-  with `StorageTransactionAborted` and dropped immediately rather than retried for
-  the full window.
+  and dropped immediately rather than retried for the full window. The refusal
+  is a `CfcCommitRefusalError` — a verdict on the pushed data, so it is
+  terminal (`cfc/verdict-reason.ts`); only a refusal that is not wholly a
+  verdict keeps the retryable `StorageTransactionAborted` name.
 - `packages/patterns/integration/home-profile.test.ts` — unchanged browser-level
   profile-creation regression coverage; still passes (the fix does not regress
   the normal cross-space append).
