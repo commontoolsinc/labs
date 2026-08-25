@@ -13,6 +13,80 @@ import {
 } from "../v2.ts";
 import { toDirtyKey } from "./query.ts";
 
+// ---- OW61 TEMPORARY DIAGNOSTIC (not for commit) ----
+import { collectExternalSchemaRefHashes } from "../../runner/src/schema-decompose.ts";
+import { isSubschema } from "../../runner/src/schema-walk.ts";
+import { mapLinkSchemas } from "./schema-table-links.ts";
+import { isObjectNotArray } from "@commonfabric/utils/types";
+import type { JSONSchema } from "@commonfabric/api";
+
+const ow61Sent = new Map<string, Set<string>>();
+const ow61On = () => {
+  try {
+    return Deno.env.get("OW61_PROBE") === "1";
+  } catch {
+    return false;
+  }
+};
+const ow61SetFor = (sessionId: string): Set<string> => {
+  let sent = ow61Sent.get(sessionId);
+  if (sent === undefined) {
+    sent = new Set();
+    ow61Sent.set(sessionId, sent);
+  }
+  return sent;
+};
+export const ow61Frame = (
+  where: string,
+  sessionId: string,
+  upserts: readonly SessionCacheEntry[],
+): void => {
+  if (!ow61On()) return;
+  const sent = ow61SetFor(sessionId);
+  const inFrame: string[] = [];
+  for (const entry of upserts) {
+    if (entry.id.startsWith("cid:")) {
+      const h = entry.id.slice(4);
+      inFrame.push(h);
+      sent.add(h);
+    }
+  }
+  const need: Array<[string, string]> = [];
+  for (const entry of upserts) {
+    const doc = entry.doc;
+    if (!isObjectNotArray(doc)) continue;
+    if (entry.id.startsWith("cid:")) {
+      const inner = (doc as { value?: unknown }).value;
+      if (isSubschema(inner)) {
+        for (const h of collectExternalSchemaRefHashes(inner as JSONSchema)) {
+          need.push([entry.id, h]);
+        }
+      }
+      continue;
+    }
+    mapLinkSchemas(doc as never, (schema) => {
+      for (const h of collectExternalSchemaRefHashes(schema as JSONSchema)) {
+        need.push([entry.id, h]);
+      }
+      return schema;
+    });
+  }
+  const missing = need.filter(([, h]) => !sent.has(h));
+  if (missing.length > 0) {
+    console.error(
+      `[ow61-VIOLATION] ${where} session=${sessionId.slice(0, 10)} ` +
+        `frameCids=${inFrame.length} ` +
+        `missing=${missing.map(([id, h]) => `${id}->cid:${h}`).join(" ")}`,
+    );
+  } else if (need.length > 0) {
+    console.error(
+      `[ow61-ok] ${where} session=${sessionId.slice(0, 10)} refs=${need.length} frameCids=${inFrame.length}`,
+    );
+  }
+};
+// ---- end OW61 TEMPORARY DIAGNOSTIC ----
+
+
 /**
  * A session's cached snapshot of one tracked doc INSTANCE. `scopeKey` is
  * server-internal (the wire upsert keeps the scope NAME — a client's
