@@ -5611,12 +5611,23 @@ class SpaceReplica implements ISpaceReplica {
       // so it can be applied once the schema document it names resolves.
       // Dropping it here would lose it for the session — the server
       // never re-sends an unchanged document (OW61's elision design).
+      // Keyed by the FULL document address, the same identity the
+      // record store uses — NOT the bare id. The quarantine unit is the
+      // id (branch- and instance-blind, by design), but a keyed frame
+      // may carry two instances of one (branch, id, scope), and an
+      // id-keyed park would drop one of them on the floor.
       for (const upsert of sync.upserts) {
         const id = upsert.id;
         if (typeof id !== "string") continue;
         const waitingOn = deferred.get(id);
         if (waitingOn === undefined) continue;
-        this.#parkedOnSchemaClosure.set(id, { upsert, waitingOn });
+        this.#parkedOnSchemaClosure.set(
+          docKey(
+            id as URI,
+            this.instanceKey(upsert.scope, undefined, upsert.scopeKey),
+          ),
+          { upsert, waitingOn },
+        );
       }
       sync = {
         ...sync,
@@ -5697,7 +5708,12 @@ class SpaceReplica implements ISpaceReplica {
       // version, and treating it as one discards a park that is still
       // waiting (the sink's own pull for a not-yet-applied doc).
       if (upsert.seq > 0 && this.#parkedOnSchemaClosure.size > 0) {
-        this.#parkedOnSchemaClosure.delete(upsert.id as string);
+        this.#parkedOnSchemaClosure.delete(
+          docKey(
+            upsert.id as URI,
+            this.instanceKey(upsert.scope, undefined, upsert.scopeKey),
+          ),
+        );
       }
       // The arrival wake fires on a FORWARD move — and on a same-seq
       // frame whose class arrives LATE (undefined -> defined): an entry
@@ -5771,7 +5787,11 @@ class SpaceReplica implements ISpaceReplica {
     }
     for (const remove of sync.removes) {
       const id = remove.id as URI;
-      this.#parkedOnSchemaClosure.delete(id);
+      // Same address identity as the record below: a deleted document
+      // must never be resurrected by a park that predates its remove.
+      this.#parkedOnSchemaClosure.delete(
+        docKey(id, this.instanceKey(remove.scope, undefined, remove.scopeKey)),
+      );
       const record = this.record(id, remove.scope, undefined, remove.scopeKey);
       record.confirmed = confirmedVersion(0, undefined);
       record.materialized = undefined;
@@ -5865,13 +5885,13 @@ class SpaceReplica implements ISpaceReplica {
     try {
       while (true) {
         const releasable: SessionSync["upserts"][number][] = [];
-        for (const [id, parked] of this.#parkedOnSchemaClosure) {
+        for (const [key, parked] of this.#parkedOnSchemaClosure) {
           const resolved = [...parked.waitingOn].every((hash) =>
             this.#isVerifiedSchemaDocDelivered(hash, EMPTY_OVERLAY)
           );
           if (!resolved) continue;
           releasable.push(parked.upsert);
-          this.#parkedOnSchemaClosure.delete(id);
+          this.#parkedOnSchemaClosure.delete(key);
         }
         if (releasable.length === 0) break;
         this.applySessionSync({

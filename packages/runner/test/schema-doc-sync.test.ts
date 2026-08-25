@@ -731,6 +731,82 @@ describe("schema-doc-sync", () => {
     expect(replica.getDocument("of:absorb-carrier")).toEqual(carrierDoc);
   });
 
+  it("parks two instances of one id separately, so neither delivery is lost", () => {
+    // The park is keyed by the full document address, not the bare id:
+    // the quarantine unit IS the id (branch- and instance-blind, by
+    // design), but one frame may carry two instances of a single
+    // (branch, id, scope) and an id-keyed park would drop one of them
+    // on the floor. Found in review of this change.
+    const depSchema = { type: "string", title: "two-instances" } as const;
+    const depHash = internSchemaAsTaggedHashString(depSchema);
+    const provider = readerStorage.open(space);
+    const replica = provider.replica as unknown as {
+      applySessionSync(sync: unknown, type: string): void;
+      getDocument(uri: string, scope?: string): unknown;
+    };
+    const carrierFor = (marker: string) => ({
+      value: {
+        marker,
+        linked: {
+          "/": {
+            [LINK_V1_TAG]: {
+              id: "of:dual-target",
+              path: [],
+              schema: { $ref: `cid:${depHash}` },
+            },
+          },
+        },
+      },
+    });
+    replica.applySessionSync({
+      type: "sync",
+      fromSeq: 970_000,
+      toSeq: 970_001,
+      upserts: [
+        {
+          branch: "",
+          id: "of:dual-carrier",
+          scope: "space",
+          seq: 1,
+          doc: carrierFor("space-instance"),
+        },
+        {
+          branch: "",
+          id: "of:dual-carrier",
+          scope: "user",
+          seq: 1,
+          doc: carrierFor("user-instance"),
+        },
+      ],
+      removes: [],
+    }, "integrate");
+
+    replica.applySessionSync({
+      type: "sync",
+      fromSeq: 970_001,
+      toSeq: 970_002,
+      upserts: [
+        {
+          branch: "",
+          id: `cid:${depHash}`,
+          scope: "space",
+          seq: 2,
+          doc: { value: depSchema },
+        },
+      ],
+      removes: [],
+    }, "integrate");
+
+    // BOTH instances come back. An id-keyed park returns only the
+    // second, having overwritten the first.
+    expect(replica.getDocument("of:dual-carrier", "space")).toEqual(
+      carrierFor("space-instance"),
+    );
+    expect(replica.getDocument("of:dual-carrier", "user")).toEqual(
+      carrierFor("user-instance"),
+    );
+  });
+
   it("PULLS the cid a parked doc waits on and applies it, with nothing re-delivered (the OW61 board's shape)", async () => {
     // #6248's ensure-ON board: the cid document IS installed in the
     // space — the server elides it because this session already
