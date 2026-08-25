@@ -780,11 +780,14 @@ Deno.test("every wish target offered is one the command's help enumerates", () =
   // The vocabulary is the wish builtin's rather than the command tree's, so it
   // is carried here by hand. The help text is where it is documented, and a
   // target in one and not the other is the drift this catches.
-  const help = wish.getDescription();
+  //
+  // Whole words, not substrings: the help enumerates `#profileName` as well as
+  // `#profile`, so a substring test would keep passing after `#profile` itself
+  // was dropped from the help — the one drift most likely to happen.
+  const documented = new Set(wish.getDescription().split(/\s+/));
   for (const candidate of wishTargetCandidates().candidates) {
-    if (candidate.value === "/") continue; // The root, named in prose.
     assert(
-      help.includes(candidate.value),
+      documented.has(candidate.value),
       `${candidate.value} is offered but not documented in cf wish --help`,
     );
   }
