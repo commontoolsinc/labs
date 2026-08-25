@@ -18,6 +18,9 @@ import { extractHashtags } from "@commonfabric/utils/hashtags";
 import { getLogger } from "@commonfabric/utils/logger";
 
 import { h } from "../builder/h.ts";
+// DIAGNOSTIC import (profile-starvation seat, 2026-08-25): observe the wave
+// settlement of the sidecar instantiation commit.
+import { waveSettlementOf } from "../executor/wave.ts";
 import {
   type CellScope,
   type JSONSchema,
@@ -2355,8 +2358,26 @@ export function wish(
       );
       runtime.prepareTxForCommit(runTx);
       const { error } = await runTx.commit();
+      // DIAGNOSTIC (profile-starvation seat, 2026-08-25).
+      wishFlowLogger.warn("sidecar-run-committed", () => [
+        `sidecar run for ${resultCell.sourceURI}: commit ` +
+        `${error ? `ERROR ${toCompactDebugString(error)}` : "ok"}`,
+      ]);
       if (error) {
         await commitPatternErrorUI(resultCell, toCompactDebugString(error));
+        return;
+      }
+      const settlement = waveSettlementOf(runTx);
+      if (settlement !== undefined) {
+        const settled = await settlement;
+        wishFlowLogger.warn("sidecar-run-settled", () => [
+          `sidecar run for ${resultCell.sourceURI}: wave settlement ` +
+          `${
+            settled.error !== undefined
+              ? `WITHDRAWN ${settled.error.message}`
+              : "durable"
+          }`,
+        ]);
       }
     } catch (error) {
       await commitPatternErrorUI(resultCell, errorMessage(error));
@@ -2431,6 +2452,14 @@ export function wish(
     };
 
     const cachedProfileCreatePattern = profileCreatePatternCache.cached();
+    // DIAGNOSTIC (profile-starvation seat, 2026-08-25).
+    if (!sidecarIsServed && runtime.servingPosture === true) {
+      wishFlowLogger.warn("profile-create-launch", () => [
+        `profile-create launch for ${sidecarUser}: cached=` +
+        `${cachedProfileCreatePattern !== undefined} cancelled=${cancelled} ` +
+        `resultCell=${slot.resultCell?.sourceURI ?? "<none>"}`,
+      ]);
+    }
     if (sidecarIsServed) {
       // The SpaceServer fetches/instantiates the create surface for this
       // demander and flips its ready cell; this speculative run only
@@ -2462,6 +2491,14 @@ export function wish(
         }
       }, runtime.servingPosture ? parentCell.space : undefined).then(
         (pattern) => {
+          // DIAGNOSTIC (profile-starvation seat, 2026-08-25).
+          if (runtime.servingPosture === true) {
+            wishFlowLogger.warn("profile-create-fetch-resolved", () => [
+              `profile-create fetch resolved for ${sidecarUser}: pattern=` +
+              `${pattern !== undefined} cancelled=${cancelled} resultCell=` +
+              `${slot.resultCell?.sourceURI ?? "<none>"}`,
+            ]);
+          }
           if (cancelled || !slot.resultCell) return;
           if (pattern) {
             return runSidecarInOwnTx(

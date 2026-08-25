@@ -1433,6 +1433,17 @@ export class WaveAccumulator
   }
 
   #withdraw(contribution: WaveContribution, message: string): void {
+    // DIAGNOSTIC (profile-starvation seat, 2026-08-25): every withdrawal
+    // named, because a withdrawn ONE-SHOT contribution (bookkeeping
+    // continuation, sidecar instantiation) has no reactive reads to
+    // re-run it and a quiet space never re-triggers it — the silent
+    // permanent-loss class this seat is hunting.
+    logger.warn("contribution-withdrawn", () => [
+      `wave ${this.#space} withdrew contribution action=` +
+      `${contribution.context.actionId ?? "<unstamped>"} kind=` +
+      `${contribution.context.kind ?? "<none>"} eventId=` +
+      `${contribution.context.eventId ?? "<none>"}: ${message}`,
+    ]);
     for (const space of contribution.spaces) {
       space.resolveVerdict({ withdrawn: { message } });
     }
