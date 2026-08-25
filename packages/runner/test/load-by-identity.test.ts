@@ -169,6 +169,63 @@ describe("load by module identity (warm + version-bump recovery)", () => {
     });
   });
 
+  it("reconstructs a stored pattern an authoring gate now refuses", async () => {
+    // The 2026-08-25 estuary outage, pinned at its seam. This source's
+    // result declares a reserved key opaque — the shape every pre-`VNode`
+    // pattern stored, and the shape the opaque-reserved-key authoring gate
+    // now refuses. Admission stays refused (the first assertion). But the
+    // cold-recovery path reloads durable stored bytes nobody can re-author,
+    // under an identity pin that admits nothing new — a piece pinned to
+    // such a pattern must keep loading, or a new authoring rule bricks
+    // every deployed piece of an older shape at the next runtime-version
+    // bump: profiles fleet-wide, in the incident.
+    const legacy: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "import { NAME, pattern, lift } from 'commonfabric';",
+            "const dbl = lift((x:number)=>x*2);",
+            "export default pattern<{ value: number }, { [NAME]?: unknown; result: number }>(({ value }) => {",
+            "  return { result: dbl(value) };",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    await expect(engine.compileToRecordGraph(legacy)).rejects.toThrow(
+      "declared `unknown`",
+    );
+
+    const storedSource: Source[] = legacy.files.map((f) => ({
+      name: f.name,
+      contents: f.contents,
+    }));
+    const recovered = await engine.compileResolvedToRecordGraph(
+      storedSource,
+      legacy.main,
+    );
+    // Deterministic under reconstruction: the demoted report changes no
+    // emitted byte, so the identity a second reconstruction computes is the
+    // one the first did — what the caller's stored-identity pin checks.
+    const again = await engine.compileResolvedToRecordGraph(
+      storedSource,
+      legacy.main,
+    );
+    expect(again.entryIdentity).toBe(recovered.entryIdentity);
+
+    const result = await engine.evaluateCachedModules(
+      toCached(recovered.modules),
+      recovered.entryIdentity,
+      { sourceFiles: storedSource },
+    );
+    expect(await runPattern(result.main, 6, "legacy reconstruction")).toEqual({
+      result: 12,
+    });
+  });
+
   it("cold-loads an exact attached source-root package", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",

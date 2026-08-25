@@ -166,6 +166,20 @@ export type TransformationOptions = {
    * verbatim (modulo path-separator normalization).
    */
   readonly canonicalWriterIdentityFile?: (fileName: string) => string;
+  /**
+   * The program is DURABLE STORED pattern source being reloaded — bytes
+   * nobody can re-author, recompiled by a toolchain newer than the one that
+   * accepted them, under an identity pin that guarantees this compile admits
+   * nothing new. Authoring-shape gates report as warnings in this mode
+   * instead of errors, so a new rule cannot retroactively brick every
+   * stored pattern of an older shape (the 2026-08-25 estuary deploy: the
+   * opaque-reserved-key rule refused every piece pinned to a pre-`VNode`
+   * pattern, profiles fleet-wide among them). The transformer-level twin of
+   * the compiler option of the same name (CT-1916). Authoring paths — cf
+   * check, deploy, candidate admission — leave this off and stay strict:
+   * there the author is present and can fix the shape.
+   */
+  readonly storedSource?: boolean;
 };
 
 export type DiagnosticSeverity = "error" | "warning";
