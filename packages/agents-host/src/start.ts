@@ -116,7 +116,10 @@ export async function startAgentsHost(
     abortable(trackStartup(task), options.signal);
   try {
     options.signal?.throwIfAborted();
-    fabric = await openAgentFabricRuntime(options);
+    fabric = await openAgentFabricRuntime({
+      ...options,
+      deferStorageClaim: true,
+    });
     options.signal?.throwIfAborted();
     const targetLockPath = options.targetLockPath ??
       await defaultTargetProcessLockPath(
@@ -126,6 +129,8 @@ export async function startAgentsHost(
       );
     options.signal?.throwIfAborted();
     processLocks.push(await AgentsHostProcessLock.acquire(targetLockPath));
+    options.signal?.throwIfAborted();
+    await waitForStartup(fabric.target.claimStorage());
     options.signal?.throwIfAborted();
     const ledgerPath = await defaultTargetLedgerPath(
       options.apiUrl,

@@ -613,11 +613,25 @@ Deno.test("Fabric target publishes sessions and command receipts", async () => {
       spaceDid: space,
       agentConnector: "invalid-index-test-array-elements",
     };
+    const validCheckout = {
+      root: "/repo",
+      gitRepo: null,
+      gitBranch: null,
+      gitHeadSha: null,
+      gitRemotes: [],
+      observedAt: "2026-08-21T00:00:00.000Z",
+    };
     const writeInvalidIndex = async (
       session: Record<string, unknown>,
       sources = index.sources,
+      checkouts = index.checkouts,
     ) => {
-      const invalidIndex = { ...index, sources, sessions: [session] };
+      const invalidIndex = {
+        ...index,
+        sources,
+        checkouts,
+        sessions: [session],
+      };
       const [invalidRecentPlan, invalidAllPlan] = await Promise.all([
         planStableArrayCells(
           { ...invalidIndex, bucket: "recent" },
@@ -692,6 +706,48 @@ Deno.test("Fabric target publishes sessions and command receipts", async () => {
       () => target.publish(collected),
       Error,
       "agent session index row 0 has an invalid shape",
+    );
+    await writeInvalidIndex(publishedSession, index.sources, {});
+    await assertRejects(
+      () => target.publish(collected),
+      Error,
+      "agent session index has an invalid shape",
+    );
+    await writeInvalidIndex(
+      publishedSession,
+      index.sources,
+      [{ ...validCheckout, root: "repo" }],
+    );
+    await assertRejects(
+      () => target.publish(collected),
+      Error,
+      "agent session index checkout 0 has an invalid shape",
+    );
+    await writeInvalidIndex(
+      publishedSession,
+      index.sources,
+      [{
+        ...validCheckout,
+        gitRemotes: [{ name: "origin", urls: [42] }],
+      }],
+    );
+    await assertRejects(
+      () => target.publish(collected),
+      Error,
+      "agent session index checkout 0 has an invalid shape",
+    );
+    await writeInvalidIndex(
+      publishedSession,
+      index.sources,
+      [{
+        ...validCheckout,
+        observedAt: "not-a-timestamp",
+      }],
+    );
+    await assertRejects(
+      () => target.publish(collected),
+      Error,
+      "agent session index checkout 0 has an invalid shape",
     );
   } finally {
     await runtime.dispose();
@@ -1014,6 +1070,50 @@ Deno.test("stable graph checks remote children before adoption", async () => {
     await otherRuntime.dispose();
     await otherStorage.close();
     await server.close();
+  }
+});
+
+Deno.test("Fabric target can defer its storage claim", async () => {
+  const owner = await Identity.fromPassphrase(
+    "agent connector deferred claim owner",
+  );
+  const storageManager = StorageManager.emulate({ as: owner });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  try {
+    const connection = {
+      runtime,
+      spaceDid: owner.did(),
+      ownerDid: owner.did(),
+    };
+    const target = await AgentFabricTarget.connect(connection);
+    assertEquals(target.cells.index.getRaw(), undefined);
+    assertEquals(target.cells.commands.getRaw(), undefined);
+
+    await target.claimStorage();
+
+    assertEquals(
+      cellHasOwnerProtection(
+        runtime.readTx(),
+        target.cells.index,
+        owner.did(),
+      ),
+      true,
+    );
+    assertEquals(
+      cellHasOwnerProtection(
+        runtime.readTx(),
+        target.cells.receipts,
+        owner.did(),
+      ),
+      true,
+    );
+    assertEquals(target.cells.commands.getRaw(), undefined);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
   }
 });
 

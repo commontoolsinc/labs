@@ -44,6 +44,7 @@ import {
   type StableArrayCellPlan,
 } from "./array-cell-identity.ts";
 import { AsyncSerialQueue } from "./serial-queue.ts";
+import { isAbsolute } from "@std/path";
 
 export interface AgentFabricCells {
   index: Cell<unknown>;
@@ -424,6 +425,14 @@ export function createAgentFabricCells(
 export async function ensureAgentFabricCells(
   conn: AgentFabricConnection,
 ): Promise<AgentFabricCells> {
+  const cells = await syncAgentFabricCells(conn);
+  await claimAgentFabricRoots(conn, cells);
+  return cells;
+}
+
+async function syncAgentFabricCells(
+  conn: AgentFabricConnection,
+): Promise<AgentFabricCells> {
   const cells = createAgentFabricCells(conn);
   await Promise.all([
     cells.index.sync(),
@@ -433,7 +442,6 @@ export async function ensureAgentFabricCells(
     cells.receipts.sync(),
   ]);
   await conn.runtime.storageManager.synced();
-  await claimAgentFabricRoots(conn, cells);
   return cells;
 }
 
@@ -547,6 +555,7 @@ function asIndex(
     (record.olderSessionCount !== undefined &&
       !isNonNegativeSafeInteger(record.olderSessionCount)) ||
     !Array.isArray(record.sources) ||
+    (record.checkouts !== undefined && !Array.isArray(record.checkouts)) ||
     !Array.isArray(record.sessions)
   ) {
     throw new Error("agent session index has an invalid shape");
@@ -564,6 +573,28 @@ function asIndex(
       );
     }
     sourceIds.add(source.id);
+  }
+  const checkoutRoots = new Set<string>();
+  for (const [index, checkout] of (record.checkouts ?? []).entries()) {
+    if (
+      !isRecord(checkout) || typeof checkout.root !== "string" ||
+      !isAbsolute(checkout.root) || checkoutRoots.has(checkout.root) ||
+      !isNullableString(checkout.gitRepo) ||
+      !isNullableString(checkout.gitBranch) ||
+      !isNullableString(checkout.gitHeadSha) ||
+      !Array.isArray(checkout.gitRemotes) ||
+      !checkout.gitRemotes.every((remote) =>
+        isRecord(remote) && typeof remote.name === "string" &&
+        remote.name.length > 0 && Array.isArray(remote.urls) &&
+        remote.urls.every((url) => typeof url === "string" && url.length > 0)
+      ) ||
+      !isIsoTimestamp(checkout.observedAt)
+    ) {
+      throw new Error(
+        `agent session index checkout ${index} has an invalid shape`,
+      );
+    }
+    checkoutRoots.add(checkout.root);
   }
   const sessionKeys = new Set<string>();
   const statuses = new Set(["complete", "partial", "stale", "deleted"]);
@@ -782,6 +813,20 @@ export class AgentFabricTarget implements CommandTarget {
   ): Promise<AgentFabricTarget> {
     const cells = await ensureAgentFabricCells(conn);
     return new AgentFabricTarget(conn, cells, gitContext);
+  }
+
+  static async connect(
+    conn: AgentFabricConnection,
+    gitContext = new GitContextResolver(),
+  ): Promise<AgentFabricTarget> {
+    const cells = await syncAgentFabricCells(conn);
+    return new AgentFabricTarget(conn, cells, gitContext);
+  }
+
+  claimStorage(): Promise<void> {
+    return this.#mutations.run(() =>
+      claimAgentFabricRoots(this.conn, this.cells)
+    );
   }
 
   publish(

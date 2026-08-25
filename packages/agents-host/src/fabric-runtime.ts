@@ -35,6 +35,7 @@ export async function openAgentFabricRuntime(options: {
   identityPath: string;
   ownerDid: string;
   space: string;
+  deferStorageClaim?: boolean;
   signal?: AbortSignal;
 }): Promise<AgentFabricRuntime> {
   options.signal?.throwIfAborted();
@@ -103,12 +104,15 @@ export async function openAgentFabricRuntime(options: {
     const manager = new PiecesController(session, runtime);
     await stage(manager.synced());
     options.signal?.throwIfAborted();
+    const connection = {
+      runtime,
+      spaceDid: session.space,
+      ownerDid: options.ownerDid,
+    };
     const target = await stage(
-      AgentFabricTarget.open({
-        runtime,
-        spaceDid: session.space,
-        ownerDid: options.ownerDid,
-      }),
+      options.deferStorageClaim
+        ? AgentFabricTarget.connect(connection)
+        : AgentFabricTarget.open(connection),
     );
     options.signal?.throwIfAborted();
     return {
