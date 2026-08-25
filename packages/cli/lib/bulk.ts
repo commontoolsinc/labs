@@ -30,6 +30,12 @@ import {
   programEntryIdentity,
   resolveLocalSourceProgram,
 } from "@commonfabric/piece/ops/bulk-local";
+import {
+  retargetPieces,
+  type RetargetReport,
+  type RetargetRow,
+  type RetargetSessions,
+} from "@commonfabric/piece/ops/bulk-retarget";
 import type { JSONSchema, RuntimeProgram } from "@commonfabric/runner";
 
 import { loadPieces, type PieceConfig, type SpaceConfig } from "./piece.ts";
@@ -205,6 +211,68 @@ async function importProgramSnapshot(
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
+}
+
+/** What one retarget run is asked to do, parsed off the command line. */
+export interface RetargetRunRequest {
+  /**
+   * The plan file this run consumes. The plan is the whole input: it names
+   * the pieces, the reference each must still be on, and the source each
+   * moves to, so a retarget carries no selection of its own.
+   */
+  planPath: string;
+  /** Write each row's source; absent, the run is the classification alone. */
+  apply?: boolean;
+  /** Pieces one session serves before it is replaced. */
+  groupSize?: number;
+  /** Called as each row settles, for reporting as the run proceeds. */
+  onRow?: (row: RetargetRow) => void;
+}
+
+export interface RetargetRunDependencies {
+  loadPieces?: typeof loadPieces;
+  readTextFile?: (path: string) => Promise<string>;
+  retargetPieces?: typeof retargetPieces;
+}
+
+/**
+ * Run the retarget: decode the plan file and hand the library a session
+ * supply that opens a real session per group and disposes its runtime when
+ * the group ends, which closes that session's storage — so a group's pieces
+ * stop being live at the boundary rather than accumulating across the run.
+ *
+ * Dry by default. Every refusal is the library's, the plan's space among
+ * them: each session answers for the space this command names, and a plan
+ * surveyed elsewhere is refused before a single row is read.
+ */
+export async function runRetarget(
+  config: SpaceConfig,
+  request: RetargetRunRequest,
+  deps: RetargetRunDependencies = {},
+): Promise<RetargetReport> {
+  const plan = decodePlan(
+    await (deps.readTextFile ?? Deno.readTextFile)(request.planPath),
+  );
+  const load = deps.loadPieces ?? loadPieces;
+  const sessions: RetargetSessions = {
+    open: () => load(config),
+    close: async (pieces) => {
+      // Settle first, dispose second. Disposal closes this session's storage
+      // without draining it, so a read still in flight would come back
+      // against a closed client — a failure belonging to a session already
+      // being released, reported over the rows the group just produced.
+      await pieces.synced();
+      await pieces.dispose();
+    },
+  };
+  return await (deps.retargetPieces ?? retargetPieces)(sessions, {
+    plan,
+    ...(request.apply === true ? { apply: true } : {}),
+    ...(request.groupSize === undefined
+      ? {}
+      : { groupSize: request.groupSize }),
+    ...(request.onRow === undefined ? {} : { onRow: request.onRow }),
+  });
 }
 
 /** One `--retarget` flag, parsed: which phase, what source, what label. */
