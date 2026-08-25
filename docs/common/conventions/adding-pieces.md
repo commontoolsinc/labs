@@ -119,7 +119,8 @@ and writes to the owned `pieceRegistry` Writable. The runtime infrastructure
 (`PiecesController.add()`) also uses this handler — patterns should follow the
 same approach.
 
-Use `pieceRegistry` and `#pieceRegistry` for direct registry access.
+Use the `addPiece` handler for registry writes. To read registry entries, wish
+for `#pieceRegistry`; do not request `pieceRegistry` as a Writable.
 
 See [handler()](../concepts/handler.md) for handler mechanics and
 [wish()](wish.md) for wish usage.

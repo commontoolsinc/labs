@@ -432,7 +432,7 @@ describe("wish built-in", () => {
   });
 
   describe("object-based wish syntax", () => {
-    it("resolves the piece registry target", async () => {
+    it("resolves the piece registry through a sourced default root", async () => {
       const canonicalRegistryCell = runtime.getCellFromEntityId<unknown[]>(
         space,
         pieceRegistryEntityId,
@@ -451,6 +451,14 @@ describe("wish built-in", () => {
         .withTx(tx);
       (defaultPatternCell as any).key("pieceRegistry").set(
         canonicalRegistryCell.withTx(tx),
+      );
+      defaultPatternCell.setMetaRaw("patternIdentity", {
+        identity: "stored-default-app",
+        symbol: "default",
+      });
+      defaultPatternCell.setMetaRaw(
+        "patternSource",
+        "/api/patterns/system/default-app.tsx",
       );
       (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
