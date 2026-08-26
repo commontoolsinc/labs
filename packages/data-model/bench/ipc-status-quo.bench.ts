@@ -92,8 +92,10 @@ const farSide = new FarSide();
  * costs turns on how many containers a walk visits and whether anything needs
  * encoding at all, and these differ in both.
  *
- * `lossy` marks a subject the status quo does not actually carry, so a reader
- * does not take its timing for a like-for-like comparison.
+ * What is absent is as deliberate as what is here. A subject belongs only if
+ * both arms carry the same data, so that the ratio between them is a cost
+ * rather than an artifact; a payload the status quo drops is not measured
+ * here at all, rather than measured and qualified.
  */
 const MEGABYTE = 1024 * 1024;
 
