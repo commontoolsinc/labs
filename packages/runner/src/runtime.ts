@@ -2991,21 +2991,21 @@ export class Runtime {
     patternFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
-    options?: { schedulePatternUpdate?: boolean },
+    options?: { schedulePatternUpdate?: boolean; patternSource?: string },
   ): Cell<R>;
   run<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     pattern: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-    options?: { schedulePatternUpdate?: boolean },
+    options?: { schedulePatternUpdate?: boolean; patternSource?: string },
   ): Cell<R>;
   run<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     patternOrModule: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-    options: { schedulePatternUpdate?: boolean } = {},
+    options: { schedulePatternUpdate?: boolean; patternSource?: string } = {},
   ): Cell<R> {
     return this.runner.run<T, R>(
       tx,

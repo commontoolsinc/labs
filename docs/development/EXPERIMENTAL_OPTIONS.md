@@ -297,7 +297,9 @@ server](#clients-that-are-not-built-alongside-their-server).
   system root for the space kind (home.tsx / default-app.tsx), recording the
   displaced ref under `displacedPattern` meta (see pattern-updates.md for the
   full exception semantics). URL-based root creation and recreation stamp
-  provenance; custom `RuntimeProgram` recreation does not. Repository-pinned
+  provenance, and the wish builtin stamps its sidecar pieces (profile
+  create/picker, suggestion) with the `system:` ref of the pattern each run
+  fetches; custom `RuntimeProgram` recreation does not stamp. Repository-pinned
   sourceless patterns, cross-origin sources, default roots reached by the
   generic post-start hook, and starts that intentionally install no pattern
   watcher remain excluded. The check remains best-effort; if identity lookup or
