@@ -61,8 +61,9 @@ a record: archive it to `docs/history/plans/` following the procedure in
   closeout when that build lands. The arc's
   [OW54 give-up design](server-execution-v2/ow54-give-up-design.md) proposes,
   for owner ratification, the durable terminal cover and explicit retry for a
-  served event whose dispatch load or commit preparation cannot recover; it is
-  a design artifact only and changes no live contract before those rulings.
+  served event whose dispatch or proven-no-commit finalization failure cannot
+  recover; it is a design artifact only and changes no live contract before
+  those rulings.
 - [Retention and CFC execution provenance](retention-and-provenance.md)
   sequences how long an invocation record is kept and what the runtime knows
   about who caused it — the `AgentActor` mint, trusted ingress, and metadata
