@@ -7,7 +7,6 @@ import {
   NAME,
   pattern,
   type PerSession,
-  type PerUser,
   type ReadonlyCell,
   Stream,
   UI,

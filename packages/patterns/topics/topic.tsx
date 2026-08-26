@@ -9,7 +9,6 @@ import {
   NAME,
   pattern,
   type PerSession,
-  type PerUser,
   type ReadonlyCell,
   SELF,
   Stream,
