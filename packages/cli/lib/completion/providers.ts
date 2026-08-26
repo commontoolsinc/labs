@@ -27,6 +27,7 @@ import ports from "@commonfabric/ports" with { type: "json" };
 
 /** A directive tells the shell to complete something only it can do well. */
 export type Directive =
+
   /** Hand off to the shell's own file completion, filtered by glob. */
   | { readonly kind: "files"; readonly glob?: string }
   /** Hand off to the shell's directory completion. */
@@ -275,10 +276,13 @@ async function callableCandidates(
 export interface VerbListingLike {
   readonly name: string;
   readonly kind: string;
+
   /** The author's doc comment on the verb, where the listing carries one. */
   readonly description?: string;
+
   /** A UI affordance rather than a headless verb. Hidden by `cf piece verbs`. */
   readonly tier?: string;
+
   /** `@deprecated` on the verb. Hidden by `cf piece verbs`. */
   readonly deprecated?: boolean;
 }
@@ -514,10 +518,13 @@ export async function acceptedProjections(
 export function splitSelectPrefix(typed: string): {
   /** Elements already closed, trailing comma included. */
   list: string;
+
   /** Segments already closed within the element being typed. */
   path: string[];
+
   /** Those segments as written, trailing dot included. */
   prefix: string;
+
   /** Whether nothing has been typed yet in this element. */
   atElementStart: boolean;
 } {

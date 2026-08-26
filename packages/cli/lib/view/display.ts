@@ -50,6 +50,7 @@ export function displayModeLabel(mode: DisplayMode): string {
 export interface DisplayCell {
   readonly ch: string;
   readonly col: number;
+
   /** Exclusive source column represented by this display cell. */
   readonly sourceEnd: number;
   readonly syntax: Style;
@@ -289,8 +290,10 @@ export function glyphFor(cp: string): string {
 interface CsiMatch {
   /** Number of source code points the whole sequence spans. */
   readonly len: number;
+
   /** The final byte, e.g. "m" for a color (SGR) sequence. */
   readonly final: string;
+
   /** The parameter bytes between `ESC [` and the final byte. */
   readonly params: string;
 }

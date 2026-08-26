@@ -21,22 +21,31 @@ export type ActiveWrapMode = Exclude<WrapMode, "off">;
 export interface WrappedRow {
   /** Absolute screen row in the complete wrapped document. */
   readonly row: number;
+
   /** Index of the logical line in the displayed document. */
   readonly line: number;
+
   /** Display-column offset where this screen row starts. */
   readonly offset: number;
+
   /** Display-column offset where this logical line's final screen row starts. */
   readonly lastOffset: number;
+
   /** Source cells available on this row. */
   readonly sourceWidth: number;
+
   /** Exclusive display-column end of the source cells drawn on this row. */
   readonly sourceEnd: number;
+
   /** Cells copied from the logical line's prefix before this row's source. */
   readonly prefixWidth: number;
+
   /** Whether source content continues on the following row. */
   readonly continues: boolean;
+
   /** Whether this row has room for a continuation marker. */
   readonly wrapMarker: boolean;
+
   /** Cells reserved at the right edge for a line annotation. */
   readonly suffixWidth: number;
 }
@@ -44,36 +53,50 @@ export interface WrappedRow {
 export interface WrapDecoration {
   /** Cells reserved on the logical line's first screen row. */
   readonly firstWidth: number;
+
   /** Cells reserved on the first screen row after the logical line wraps. */
   readonly firstContinuationWidth?: number;
+
   /** Cells reserved on later screen rows of the logical line. */
   readonly continuationWidth: number;
 }
 
 export interface WrapPlan {
   readonly rowCount: number;
+
   /** Total number of content columns available on each screen row. */
   readonly rowWidth: number;
+
   /** Display columns consumed by each row that carries a continuation marker. */
   readonly rowStride: number;
+
   /** First screen row occupied by each logical line. */
   readonly firstRow: readonly number[];
+
   /** Last screen row occupied by each logical line. */
   readonly lastRow: readonly number[];
+
   /** Source cells consumed by a continued first row. */
   readonly firstSourceWidth: readonly number[];
+
   /** Source cells consumed by each continued row after the first. */
   readonly continuationStride: readonly number[];
+
   /** Source cells consumed by the first continuation when it wraps again. */
   readonly firstContinuationStride: readonly number[];
+
   /** Annotation width on each logical line's first row. */
   readonly firstSuffixWidth: readonly number[];
+
   /** Annotation width on each logical line's first continuation row. */
   readonly firstContinuationSuffixWidth: readonly number[];
+
   /** Annotation width on later rows of each logical line. */
   readonly continuationSuffixWidth: readonly number[];
+
   /** Display width of each logical line. */
   readonly lineWidth: readonly number[];
+
   /** Variable word-wrap boundaries, or null entries for fixed-width rows. */
   readonly wordRows: readonly (WordWrapLine | null)[] | null;
 }

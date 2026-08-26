@@ -56,8 +56,10 @@ export interface VersionCheckDeps {
     serverSha: string,
   ) => Promise<ShaRelation>;
   warn?: (message: string) => void;
+
   /** Registers the process-end hook the deferred note prints from. */
   addUnloadListener?: (handler: () => void) => void;
+
   /** The exit code the process is ending with, read inside that hook. */
   exitCode?: () => number;
 }

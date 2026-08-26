@@ -21,6 +21,7 @@ export interface Style {
 
 export const ESC = "\x1b";
 export const CSI = `${ESC}[`;
+
 /** Operating System Command introducer and its BEL terminator. */
 const OSC = `${ESC}]`;
 const BEL = "\x07";
@@ -95,10 +96,12 @@ export const term = {
   clearLine: `${CSI}2K`,
   clearToEol: `${CSI}0K`,
   home: `${CSI}H`,
+
   /** Move the cursor to a 1-based (row, col). */
   moveTo(row: number, col: number): string {
     return `${CSI}${row};${col}H`;
   },
+
   /** Set the terminal's default background color (OSC 11). This is the color
    * the terminal fills the area outside the character grid with — the sub-cell
    * padding below the last row and beside the last column — which no cell can
@@ -107,6 +110,7 @@ export const term = {
     const h = rgb.map((c) => c.toString(16).padStart(2, "0")).join("");
     return `${OSC}11;#${h}${BEL}`;
   },
+
   /** Restore the terminal's own default background color (OSC 111). */
   resetDefaultBg: `${OSC}111${BEL}`,
 };

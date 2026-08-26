@@ -43,6 +43,7 @@ import type { LineEndingProvenance } from "../editbuffer.ts";
 export interface Highlighter {
   /** The current highlighted lines. */
   readonly lines: readonly Line[];
+
   /** Apply the new full text and return the updated lines. */
   update(
     text: string,
@@ -53,16 +54,22 @@ export interface Highlighter {
 /** A resolved definition site for a referenced symbol (jump-to-definition). */
 export interface DefTarget {
   readonly name: string;
+
   /** Offset within the same document, when the definition is in-document. */
   readonly blobOffset?: number;
+
   /** Real file path, when the definition is in a file outside the document. */
   readonly filePath?: string;
+
   /** Character offset within `filePath`. */
   readonly fileOffset?: number;
+
   /** 0-based line of the definition (document line in-document, file otherwise). */
   readonly line: number;
+
   /** 0-based display column of the definition. */
   readonly col?: number;
+
   /** A trimmed one-line preview of the definition site. */
   readonly preview: string;
 }
@@ -75,15 +82,18 @@ export interface DefTarget {
 export interface Semantics {
   /** The inferred type at a source offset, or `null` when not knowable. */
   typeAt(offset: number): string | null;
+
   /**
    * Where the symbol at a source offset is defined. In-document definitions
    * carry a `blobOffset`; definitions in real files carry a `filePath`. Empty
    * when nothing resolves.
    */
   definitionOf(offset: number): DefTarget[];
+
   /** Read and color an external file (within the workspace) so the pager can
    * show a definition that lives outside the document. Null when unreadable. */
   fileLines(filePath: string): readonly Line[] | null;
+
   /** Build the backing program now (off the interactive path), so the first
    * real query does not pay the one-time cost. Safe to call repeatedly. */
   prewarm(): void;
@@ -93,6 +103,7 @@ export interface Semantics {
 export interface SemanticsOptions {
   /** Working directory, for discovering the workspace / import map. */
   cwd: string;
+
   /** Name for the implicit single section when the text has no headers. */
   fileName?: string;
 }
@@ -101,6 +112,7 @@ export interface SemanticsOptions {
 export interface RenderInputExtent {
   /** Total byte count when {@link complete} is true, otherwise bytes retained. */
   readonly byteLength: number;
+
   /** Whether {@link byteLength} is the complete input size. */
   readonly complete: boolean;
 }
@@ -114,6 +126,7 @@ export interface ByteLanguageDetector {
 interface LanguageInputBase {
   /** How file bytes become the string retained by the view model. */
   readonly decoder: LanguageDecoder;
+
   /** When present, files using this input representation are read-only. */
   readonly readOnlyReason?: string;
 }
@@ -127,14 +140,19 @@ export interface TextLanguageInput extends LanguageInputBase {
 export interface ByteLanguageInput extends LanguageInputBase {
   readonly kind: "bytes";
   readonly readOnlyReason: string;
+
   /** Build a fresh incremental content detector. */
   createDetector(): ByteLanguageDetector;
+
   /** Maximum raw bytes retained for an interactive rendered preview. */
   readonly previewByteLimit: number;
+
   /** Render retained bytes as a bounded whole-file view. */
   renderLines(raw: string, extent?: RenderInputExtent): Line[];
+
   /** Render complete redirected input without retaining it. */
   renderByteStream(chunks: AsyncIterable<Uint8Array>): AsyncIterable<Line>;
+
   /** Number of rows produced for a complete byte count. */
   renderedByteLineCount(byteLength: number): number;
 }
@@ -150,16 +168,21 @@ export type LanguageInput = TextLanguageInput | ByteLanguageInput;
  */
 export interface HunkStructureContext {
   readonly doc: Document;
+
   /** Source line (file or fragment) → diff line, for the lines the hunk shows. */
   readonly lineToDiff: Map<number, number>;
+
   /** Whether UTF-8 decoding removed a BOM before this document was parsed. */
   readonly sourceOmitsUtf8Bom: boolean;
+
   /** Line starts of the source text `doc` was parsed from. */
   readonly sourceLineStarts: number[];
+
   /** Last diff line of the hunk (its extent). */
   readonly hunkEnd: number;
   readonly diffLineStarts: number[];
   readonly rawLines: string[];
+
   /** Name → declaration index the remap contributes to (for `t` peeks). */
   readonly definitions: Map<string, Definition[]>;
 }

@@ -918,6 +918,7 @@ function normalizeProjectionSchema(
 /** A field name one concise path segment names, and what it asks for there. */
 interface ConciseSegment {
   name: string;
+
   /** The segment ended in an unescaped {@link CONCISE_ADDRESS_SUFFIX}. */
   marked: boolean;
 }
@@ -1221,6 +1222,7 @@ const DERIVED_PROJECTION_SOURCE = "<the verb's declared result>";
  */
 interface DerivedPosition {
   schema?: unknown;
+
   /** A `$link` marker was emitted at or below this position. */
   cut: boolean;
 }
@@ -1545,6 +1547,7 @@ interface ArrayProjectionMask {
   items: ProjectionMask;
 }
 interface ObjectProjectionMask extends ObjectMask<ProjectionMask> {}
+
 /**
  * Which positions a selection reads. `false` is the rejecting one: the
  * position contributes nothing to the read, and the runner never loads what
@@ -1774,6 +1777,7 @@ function alignConciseMarkers(
  */
 interface UnheldSelectionField {
   key: string;
+
   /**
    * The position the field was named at, spelled the way this boundary spells
    * a projection position everywhere else: `<root>` for the read's own source,
@@ -1781,6 +1785,7 @@ interface UnheldSelectionField {
    * crosses.
    */
   position: string;
+
   /**
    * What the position does hold: the field names it declares, the types it
    * states where it declares no fields, or the stream it is.
@@ -2508,6 +2513,7 @@ interface ResolvedProjection {
   itemProjectionSchema?: JSONSchema;
   itemMask?: ProjectionMask;
   implicitArrayTraversal: boolean;
+
   /** The projection's markers, at the depth the source puts them. */
   markers?: LinkMarkers;
 }
@@ -2642,6 +2648,7 @@ function resolveProjection(
 interface WalkedPosition {
   cell: Cell<unknown>;
   address: RenderedLinkAddress;
+
   /**
    * The space the rendered reference is written relative to: an address in
    * another space carries a `@did` prefix, one in this space does not. It is
@@ -2890,6 +2897,7 @@ function arrayItemProjectionError(flag: ProjectionFlag): CellSelectionError {
 interface TransformReads {
   /** Separates this runtime's transform cells from another runtime's. */
   readonly discriminator: number;
+
   /** The pattern each transform result cell runs, by space-qualified id. */
   readonly patterns: Map<string, Pattern>;
 }

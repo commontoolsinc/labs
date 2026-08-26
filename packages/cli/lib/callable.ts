@@ -65,6 +65,7 @@ export interface CallableResolution {
   cellKey: string;
   pieces: PiecesController;
   space: MemorySpace;
+
   /** This verb's declared result, resolved on demand.
    *
    * A THUNK rather than a value, because reaching it costs a pattern load and
@@ -78,6 +79,7 @@ export interface CallableResolution {
    * to consult — which says this resolution cannot describe a result rather
    * than promising there is none. */
   declaredResult?: () => Promise<JSONSchema | undefined>;
+
   /** The verb's declared event schema — the input contract as the handler
    * module in the compiled pattern states it, reference markers intact.
    *
@@ -95,6 +97,7 @@ export interface CallableResolution {
    * the same conditions. Only a dispatch the published shape refuses pulls
    * it — the load rides the refusal path, never a clean dispatch. */
   declaredEvent?: () => Promise<JSONSchema | undefined>;
+
   /** The verb's published event schema, when the resolution knows a richer
    * one than the dispatch cell carries.
    *
@@ -141,12 +144,15 @@ export interface InvocationIdentity {
 
 export interface CallableExecutionDeps {
   uuid?: () => string;
+
   /** The id and session naming this call's invocation, for a handler send.
    * Absent for a call that names no invocation, which is then dispatched
    * under a runtime-minted event id and has no receipt to come back for. */
   invocation?: InvocationIdentity;
+
   /** Phase observer for early-exit reporting. */
   onPhase?: (phase: InvocationPhase) => void;
+
   /** `--no-wait`: await this handling's transaction-local commit
    * acknowledgment, then return WITHOUT the receipt readback (sync + read).
    * The commit acknowledgment cannot be skipped: the handler executes in
@@ -161,6 +167,7 @@ export interface CallableExecutionDeps {
    * come back for — and only the handler send path supports it (a tool's
    * result is delivered by this process, not read back from a receipt). */
   skipReadback?: boolean;
+
   /** `--show-links`: annotate the Invocation JSON with a `links` dictionary
    * mapping result paths to their backing cell addresses (verb contract
    * WS-F, F2). Provenance rides BESIDE the value, never inline — an inline
@@ -169,6 +176,7 @@ export interface CallableExecutionDeps {
    * document, so plain JSON inside one doc adds nothing. Rides the receipt
    * readback, which is why it cannot combine with `--no-wait`. */
   showLinks?: boolean;
+
   /** `--filter`/`--select`/`--schema`: the shape the caller asked the result
    * to arrive in. Answered by the same selection step `cf piece get` reads
    * through, so one grammar covers reads and calls.
@@ -185,6 +193,7 @@ export interface CallableExecutionDeps {
    * keeps returning nothing — there is no value for a selection to be
    * about. */
   selection?: CellSelection;
+
   /** @internal Seam for tests, mirroring `getCellValue`'s. */
   deriveSelectedValue?: typeof deriveSelectedValue;
 }
@@ -200,11 +209,13 @@ export type InvocationResultLink = string;
 /** The outcome of a handler invocation made with a caller-supplied id. */
 export interface InvocationOutcome {
   id: string;
+
   /** `"settled"` once receipt readback completed. Otherwise the furthest
    * phase the caller chose to observe: `--no-wait` returns at `"committed"`
    * (commit acknowledged, readback skipped), and a caller-bounded wait
    * reports the phase its bound expired in. */
   status: "settled" | InvocationPhase;
+
   /** Durable address of this handling's receipt — the cell the outcome is
    * written to, and the one `result` is read from.
    *
@@ -229,13 +240,16 @@ export interface InvocationOutcome {
    * off nothing writes a receipt, and an address naming a cell that does not
    * exist is worse than no address. */
   receipt?: InvocationResultLink;
+
   /** The verb's result read back from the handling's receipt, when the
    * receipt carried one (a reactive-bearing return, or a plain return under
    * the plainResultReceipts flag). Absent for value-less verbs. */
   result?: unknown;
+
   /** True when this call collided on the create-only receipt: the handling
    * did not commit again, and `result` is the ORIGINAL outcome. */
   deduplicated?: boolean;
+
   /** Under `--show-links` only: result paths mapped to their backing cell
    * addresses in canonical reference syntax, provenance beside the value the
    * caller can pass straight back to `--piece`. The root `"/"` entry is the
@@ -288,8 +302,10 @@ export function canonicalAddress(ref: CallableResultRef): string {
 
 export interface ExecutedCallable {
   outputText?: string;
+
   /** Present for handler sends carrying a caller-supplied invocation id. */
   invocation?: InvocationOutcome;
+
   /** The tool result cell's address — the handle a caller can revisit later
    * instead of re-running the tool (verb contract Part 2,
    * docs/plans/pattern-verb-contract.md). Handlers gain their equivalent with
@@ -561,6 +577,7 @@ export interface DeclaredEventFields {
    * declared more than once keeps its FIRST account, in declaration order,
    * which is the rule the refusal vocabulary already follows. */
   properties: Record<string, JSONSchema>;
+
   /** Names any member marks required. */
   required: Set<string>;
 }

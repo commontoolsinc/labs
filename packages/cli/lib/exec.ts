@@ -71,9 +71,11 @@ export interface ExecDependencies {
   readTextInput?: () => Promise<string>;
   readTextFile?: (path: string) => Promise<string>;
   isStdinTerminal?: () => boolean;
+
   /** @internal Seam for tests, the same one `getCellValue` and
    * `CallableExecutionDeps` carry. */
   deriveSelectedValue?: CallableExecutionDeps["deriveSelectedValue"];
+
   /**
    * Each phase the dispatch below reaches, in order. A caller announcing the
    * invocation identity hangs it here: the identity is what a failed call is
@@ -85,8 +87,10 @@ export interface ExecDependencies {
 export interface ExecutedMountedCallableFile {
   helpText?: string;
   outputText?: string;
+
   /** Handler invocation outcome, passed through from ExecutedCallable. */
   invocation?: InvocationOutcome;
+
   /** Tool result cell address, passed through from ExecutedCallable. */
   resultRef?: CallableResultRef;
   parsed: ParsedExecArgs;
@@ -105,6 +109,7 @@ export interface ExecuteMountedCallableOptions {
    * `cf piece call` and `cf wish` read through — so one grammar covers every
    * arrival, whichever one a caller reached for. */
   selection?: CellSelection;
+
   /** @internal Seam for tests. Production mints a fresh pair per call: see
    * {@link executeMountedCallableFile}. */
   invocation?: InvocationIdentity;

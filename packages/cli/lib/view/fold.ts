@@ -15,17 +15,21 @@ import { languageForFile } from "./languages/language.ts";
 export interface DiffFileRange {
   /** 0-based index in document order — the stable key for the fold set. */
   readonly index: number;
+
   /** First and last (inclusive) diff-text line of the file (header … last
    * hunk line). */
   readonly headerLine: number;
   readonly endLine: number;
+
   /** The path used for file-category detection (new side, else old side). */
   readonly path: string;
   readonly isTest: boolean;
   readonly isMarkdown: boolean;
+
   /** Added and removed line counts within the file's range. */
   readonly adds: number;
   readonly dels: number;
+
   /** The one-line summary shown when the file is collapsed. */
   readonly summary: Line;
 }
@@ -136,9 +140,11 @@ export interface FoldPlan {
   /** The lines to render: full lines, with each collapsed file's range replaced
    * by one summary line. */
   readonly displayLines: readonly Line[];
+
   /** A document line → the display row it appears on (a line inside a collapsed
    * file maps to that file's summary row). */
   docToDisplay(docLine: number): number;
+
   /** A display row → the document line it stands for (a summary row maps to its
    * file's header line). */
   displayToDoc(displayRow: number): number;

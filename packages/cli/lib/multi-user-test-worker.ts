@@ -83,6 +83,7 @@ export type StepKind =
 
 export interface StepMeta {
   kind: StepKind;
+
   /** Marker name for label/await steps. */
   marker?: string;
   skip?: boolean;
@@ -121,6 +122,7 @@ let storageManager:
   | { synced(): Promise<void>; close(): Promise<void> }
   | undefined;
 let engine: Engine | undefined;
+
 /** Every participant's marker document, keyed by participant name. */
 const markersCells = new Map<string, Cell<Record<string, boolean>>>();
 let selfParticipant: string | undefined;
@@ -129,6 +131,7 @@ let patternCoverage: PatternCoverageCollector | undefined;
 let patternCoveragePath: string | undefined;
 let patternCoverageRoot: string | undefined;
 const runtimeErrors: string[] = [];
+
 /** Channel 1: console.error/warn captured via the harness console event. */
 const consoleErrors: string[] = [];
 const consoleWarnings: string[] = [];
@@ -138,6 +141,7 @@ let continuousUiCancel: (() => void) | undefined;
 // post-compile point where the channel-2 snapshot is taken, so compile-time
 // module-evaluation console output does not fail tests.
 let consoleCaptureActive = false;
+
 /** Channel 2: logger error/warn count snapshot taken after compile, before run. */
 let loggerCountsBeforeRun: LoggerErrorWarnSnapshot = new Map();
 

@@ -21,6 +21,7 @@ export interface ExecCommandSpec {
   defaultVerb: "invoke" | "run";
   inputSchema: JSONSchema;
   outputSchemaSummary?: JSONSchema;
+
   /**
    * What this callable is FOR, in the author's own words: the doc comment on
    * the pattern property that declares it.
@@ -856,12 +857,16 @@ function fullFlagUsage(flagName: string, schema: JSONSchema): string {
 export interface DeclaredVerbFlag {
   /** The flag's long name, without dashes — `flagNameForKey`'s mapping. */
   readonly name: string;
+
   /** The declared field it fills; absent for a non-object input's own flags. */
   readonly key?: string;
+
   /** That field's schema, for a caller rendering a placeholder or a type. */
   readonly schema?: JSONSchema;
+
   /** Whether the payload door owes this field. */
   readonly required: boolean;
+
   /** Whether `--no-<name>` is accepted beside it. */
   readonly negatable: boolean;
 }
