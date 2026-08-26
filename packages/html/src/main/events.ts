@@ -19,6 +19,7 @@ import {
 export interface SerializedEvent {
   /** Event type (e.g., "click", "input", "change") */
   type: string;
+
   /** Internal provenance hint from the renderer */
   provenance?: EventProvenance;
 

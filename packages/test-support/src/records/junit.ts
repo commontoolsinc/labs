@@ -253,6 +253,7 @@ export function isRelativeSourcePath(classname: string): boolean {
 export interface IngestJUnitOptions {
   kind: string;
   scope: string;
+
   /**
    * Repository path of the test process's working directory, "" when it ran
    * at the repository root. Joined onto relative classnames to produce

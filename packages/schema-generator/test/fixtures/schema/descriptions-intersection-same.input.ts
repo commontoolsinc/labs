@@ -6,6 +6,7 @@ interface A {
 interface B {
   /** Name doc */
   name: string;
+
   /** Age */
   age: number;
 }
