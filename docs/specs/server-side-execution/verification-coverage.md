@@ -6226,7 +6226,10 @@ supply; OW29/OW32/OW34 closed):
     **CURRENT DISPOSITION: RESOLVED — the server never issued the
     materialization commit on its first served attempt.** Under ON the
     client may run the handler speculatively, but intentionally discards
-    that seal and waits for the authoritative server transaction. The
+    that seal and waits for the authoritative server transaction.
+    **OWNER RULING 2026-08-26:** “with ON, the transaction should go
+    through the server. it's in this case fine for the client to just
+    wait for that to complete vs speculatively running things.” The
     server reached `ProfileHome.inSpace()` before the anonymous target
     name was cached; name resolution warmed the cache and threw
     `RetryImmediately`, but `retries: false` caused the served event to
@@ -6237,9 +6240,14 @@ supply; OW29/OW32/OW34 closed):
     and passes at two; production-shaped ensure-OFF ON evidence moved
     from 2/8 target-member reds on current main to 0/8, with all eight
     guest stores carrying the 98-operation `patternIdentity`
-    materialization. This was neither a server refusal nor loss of a
-    required client wire send; it was the server name-resolution retry
-    gate preventing issuance.
+    materialization. Baseline head: `37b45336a`; diagnostic fix head:
+    `8524f4ec1`; rebased smokes: f10 at `622ef2bda` and f11 at
+    `e158eb0c3`. The run stores and logs remain on the measuring box at
+    `/Users/berni/labs-worktrees/lunch-member-evidence/`; the running
+    report is `/Users/berni/labs-worktrees/lunch-member-report.md`.
+    This was neither a server refusal nor loss of a required client wire
+    send; it was the server name-resolution retry gate preventing
+    issuance.
     **THE ENSURE-ON PROFILE-SURFACE MEMBER ROOT-CAUSED AND FIXED
     2026-08-25 (PR #6312) — the n=3 side probe's "create surface never renders"
     shape and the #6248 board's profile-shard family, reproduced
@@ -6327,9 +6335,10 @@ supply; OW29/OW32/OW34 closed):
     program-materialization commit never landing) is a DIFFERENT,
     post-click stage; it is now resolved by the served-event
     name-resolution requeue described in that entry's current
-    disposition. The owner-directed pin supersedes the earlier 10/10
-    lift bar with the requested approximately eight-run re-baseline,
-    a red-first mechanism regression, and eight post-fix runs. (iv)
+    disposition. The 2026-08-26 owner ruling and evidence recorded there
+    supersede the earlier 10/10 lift bar with the requested approximately
+    eight-run re-baseline, a red-first mechanism regression, and eight
+    post-fix runs. (iv)
     Whether the #6248 board's
     POST-fill shape (shards 2/6: fill succeeded, click landed,
     `#profile` never resolved) is this same clobber on a later

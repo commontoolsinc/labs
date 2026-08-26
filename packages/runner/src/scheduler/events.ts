@@ -1341,12 +1341,14 @@ export async function dispatchQueuedEvent(state: {
   // originStatus() fallback ("confirmed") would let a descendant of a failed
   // origin run.
   const requeueForNameResolution = () => {
-    // A served name-resolution retry stays in this scheduler settle, so the
-    // installed destination seals its warmed-cache run into the SAME wave. It
-    // keeps the served carriage: acting identity, stream-entry consequence
-    // mark, LT1 ownership, and failure hook. This does not opt the event into
-    // commit retries; `retry` remains false and a failed commit still belongs
-    // to the wave/drain cadence.
+    // A served name-resolution retry re-enters this scheduler settle. If it
+    // runs before the flush deadline, the installed destination seals its
+    // warmed-cache run into the current wave; a cut instead leaves the
+    // existing LT1-purge/durable-drain cadence in charge. The retry keeps the
+    // served carriage: acting identity, stream-entry consequence mark, LT1
+    // ownership, and failure hook. This does not opt the event into commit
+    // retries; `retry` remains false and a failed commit still belongs to the
+    // wave/drain cadence.
     const requeued: QueuedEvent = {
       id: queuedEvent.id,
       // The flag rides every requeue with the id it describes: dropping it
