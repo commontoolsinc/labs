@@ -6186,7 +6186,70 @@ supply; OW29/OW32/OW34 closed):
     POST-fill shape (shards 2/6: fill succeeded, click landed,
     `#profile` never resolved) is this same clobber on a later
     surface or another member is undetermined — re-measure on that
-    board at a head carrying this fix.
+    board at a head carrying this fix. **RESOLVED 2026-08-25 (the
+    re-measure: CI failure-path store capture at the lane-flip head,
+    run 32929764230, scratch instrumentation branch
+    `claude/server-exec-v2-postfill-diagnosis` — never merged): NOT
+    this clobber — ANOTHER MEMBER, one mechanism across both shards,
+    store-proven in both captures.** The trusted CreateProfile
+    click's durable entry is healthy (seq 17 in both event spaces:
+    `target.value "Ada Lovelace"`, `rendererTrusted: true`, clean
+    admission), and the served dispatch DROPPED it pre-dispatch: the
+    head-event load park awaited a cross-space replica load of the
+    HOME space's ensured `defaultPattern` quote doc — a doc the
+    server's OWN ensure had durably written ONE second earlier — and
+    the load failed `ConnectionError: memory session revoked:
+    unauthorized` (storage/v2.ts sync-load-failure) because the
+    serving plane's home-space session predated the genesis ACL
+    (activation-before-genesis, the recorded boot order) and the ACL
+    landing revoked it (`#revokeDeauthorizedSessions`,
+    memory/v2/server.ts — by design, heal-on-next-mount; a HOME
+    genesis is `{user: OWNER}` with no `"*"`, so the pre-genesis
+    session is de-authorized the moment it lands);
+    `failHeadEventLoadPark` (scheduler/facade.ts) maps ANY load-park
+    failure to the TERMINAL drop arm, and the drain sealed
+    `{status: "dropped", consequenced: true}` with the watermark
+    advanced (seq 18, `consequence_of` naming the eventId) —
+    at-least-once discharged, nothing ever re-runs the event, the
+    authoritative handler never executes, and the surface starves
+    the full 300 s net. This VIOLATES events.md §5's T3 drop
+    predicate ("no runnable handler", never "the run raced"): the
+    handler was runnable and the input doc existed durably; the
+    spec-conforming disposition for an unreachable input is
+    `deferred` (no consequence; re-drain) — the same code's own
+    docstring names the split. Negative discriminators, both stores
+    swept whole: clobber patch signature 0, `sidecarError` 0,
+    `sidecar-run-raced` 0 (this fix HOLDS — no hole); not the
+    read-side r01 member (an error account exists and the
+    consequence is absent, not present-but-unread); not residual
+    (i)'s basis-row gap (the entry is consequenced-dropped, and the
+    only dropped contributions — 3× `compile-cache/writeback` in the
+    speculative profile space's first waves — re-ran and healed in
+    the same second); not OW54's give-up arm (no CFC rejection, no
+    commit attempted) and not OW58's notice wedge (the notice sealed
+    cleanly). A NEW served-event-family member: the pre-dispatch
+    load-park failure arm. Rates at this base: shard 2 red 2/2 CI
+    boards, shard 6 red 2/2, local control 0/12 — the click must
+    land inside the [pre-genesis session open → revocation →
+    re-mount] window with a cross-space read at preflight; slow CI
+    runners do, the local box did not. Shard 9
+    (`cfc-staged-publish`, `TrustedSaveDraft` → `#saved-title`) red
+    1/2 and GREEN on the capture board — UNHARVESTED: symptom-
+    compatible with this member, no store evidence, classification
+    open. Observability, recorded: a terminally dropped served event
+    is invisible in serving stats (`events.*` has no dropped
+    counter; only the scheduler WARN line and the entry's
+    `status: "dropped"` field carry it). Product exposure: ANY ACL
+    change revokes serving sessions by design (sharing is a normal
+    operation), so under ON a served dispatch's cross-space load
+    racing a revocation permanently and silently discards a user's
+    trusted action; the fix direction (load-park failure →
+    `deferred`/re-park) touches the seal-adjacent path — OW58's
+    "(α)-critical, its own deliberate pass" caution applies, and the
+    disposition (fix-before-flip vs. narrow honest step-skips naming
+    shared-profile's, profile-embed's, and staged-publish's steps
+    with an owed row) is the owner's call, deliberately not taken by
+    the diagnosis seat.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
