@@ -732,7 +732,7 @@ export const inspect = new Command()
   })
   /* inspect operations */
   .command(
-    "operations <space:string> [id:string]",
+    "operations <space:string> [entity:string]",
     "Collaborative field epochs, cursors, histories, and checkpoint health.",
   )
   .option("--branch <branch:string>", "Branch (default: '').")
@@ -746,11 +746,11 @@ export const inspect = new Command()
     "--submission-after-seq <seq:integer>",
     "Return submitted history after this commit sequence.",
   )
-  .action(async (options, space, id) => {
+  .action(async (options, space, entity) => {
     const s = await openByToken(space, options);
     try {
       const report = inspectOperationFields(s, {
-        id,
+        id: entity,
         branch: options.branch,
         scope: options.scope,
         fieldLimit: options.limit,
