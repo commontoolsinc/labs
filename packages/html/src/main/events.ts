@@ -5,7 +5,7 @@
  * sent to the worker thread for dispatch to the appropriate handler.
  */
 
-import type { JSONValue } from "@commonfabric/runtime-client";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   type EventProvenance,
   getEventProvenance,
@@ -45,7 +45,7 @@ export interface SerializedEvent {
   target?: SerializedEventTarget;
 
   // Custom event detail
-  detail?: JSONValue;
+  detail?: FabricValue;
 }
 
 export type { EventProvenance };
@@ -57,18 +57,18 @@ export type { EventProvenance };
 export interface SerializedEventTarget {
   name?: string;
   /**
-   * The element's current value. A `JSONValue` rather than a string: a custom
+   * The element's current value. A `FabricValue` rather than a string: a custom
    * element chooses what its `value` is, and a `cf-input`, a `cf-tabs` and a
    * `cf-calendar` each declare theirs as `CellHandle<string> | string`, which
    * arrives here as the sigil link the conversion resolved it to.
    */
-  value?: JSONValue;
+  value?: FabricValue;
   /**
    * Whether the element is checked -- or, where the element chose to expose
    * something else, what it chose. `cf-checkbox` and `cf-switch` each declare
    * theirs as `CellHandle<boolean> | boolean`.
    */
-  checked?: JSONValue;
+  checked?: FabricValue;
   selected?: boolean;
   selectedIndex?: number;
   selectedOptions?: { value: string }[];
@@ -212,8 +212,8 @@ export function serializeEvent(event: Event): SerializedEvent {
   // `codec-realm` carries the whole domain here; what has to stay is the
   // separate job the conversion does of turning an unencodable detail into
   // something rather than failing the event. The same holds of a target's
-  // `value` above. The outbound half of this seam is marked on `SetPropOp` in
-  // `../vdom-ops.ts`.
+  // `value` and `checked` above. The outbound half of this seam is marked on
+  // `SetPropOp` in `../vdom-ops.ts`.
   if ("detail" in event && (event as CustomEvent).detail !== undefined) {
     serialized.detail = toSerializableValue((event as CustomEvent).detail);
   }
@@ -227,16 +227,34 @@ export function serializeEvent(event: Event): SerializedEvent {
  * no conversion at all. Handing the pattern something is the point: an event
  * whose value cannot cross is still an event the handler should see.
  */
-function toSerializableValue(value: unknown): JSONValue {
+function toSerializableValue(value: unknown): FabricValue {
   try {
     // The round trip resolves whatever `toJSON()` a value defines -- a
     // `CellHandle` becomes its sigil link -- and drops what JSON has no
     // representation for. `undefined` comes back from `JSON.stringify()` for a
     // function or a symbol, and a circular reference or a throwing `toJSON()`
-    // lands in the `catch`.
+    // throws out of it.
     const jsonString = JSON.stringify(value);
-    return jsonString !== undefined ? JSON.parse(jsonString) : String(value);
+    if (jsonString !== undefined) return JSON.parse(jsonString);
   } catch {
+    // Described below, as a value with no JSON form at all is.
+  }
+
+  return describeUnconvertible(value);
+}
+
+/**
+ * Renders a value with no JSON form as text, for a description that must be
+ * produced whatever it is handed.
+ *
+ * A value can refuse even to be coerced: `String()` reaches for `toString` and
+ * `valueOf`, and an object made with `Object.create(null)` has no prototype to
+ * find either on. `/unconvertible` is the fixed token for that.
+ */
+function describeUnconvertible(value: unknown): string {
+  try {
     return String(value);
+  } catch {
+    return "/unconvertible";
   }
 }

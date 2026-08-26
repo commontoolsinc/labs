@@ -782,11 +782,11 @@ export interface ITransactionWriteRequest {
 /**
  * One address's before-and-after across a change.
  *
- * A type alias rather than an `interface` because it rides the IPC envelope
- * inside a telemetry marker, and the envelope is encoded as a `FabricValue`:
- * TypeScript grants an implicit index signature to an anonymous object type
- * and not to an interface, so an interface can never satisfy
- * `FabricPlainObject` however plain its members are.
+ * A type alias rather than an `interface`, and it has to stay one: its members
+ * are `FabricValue`s and it rides the IPC envelope inside a telemetry marker,
+ * so it must be able to satisfy `FabricPlainObject`. An `interface` never can,
+ * however plain its members -- TypeScript grants the implicit index signature
+ * that requires to an anonymous object type and not to an interface.
  */
 export type IMemoryChange = {
   /**

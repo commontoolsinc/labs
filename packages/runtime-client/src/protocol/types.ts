@@ -1977,7 +1977,7 @@ export type SerializedDomEvent = {
   /**
    * A custom event's payload.
    */
-  detail?: JSONValue;
+  detail?: FabricValue;
 };
 
 /**
@@ -1989,18 +1989,18 @@ export type SerializedEventTarget = {
    */
   name?: string;
   /**
-   * The element's current value. A `JSONValue` rather than a string: a custom
+   * The element's current value. A `FabricValue` rather than a string: a custom
    * element chooses what its `value` is, and a `cf-input`, a `cf-tabs` and a
    * `cf-calendar` each declare theirs as `CellHandle<string> | string`, which
    * arrives here as the sigil link the main thread resolved it to.
    */
-  value?: JSONValue;
+  value?: FabricValue;
   /**
    * Whether a checkbox or radio is checked -- or, where the element chose to
    * expose something else, what it chose. `cf-checkbox` and `cf-switch` each
    * declare theirs as `CellHandle<boolean> | boolean`.
    */
-  checked?: JSONValue;
+  checked?: FabricValue;
   /**
    * Whether an option is selected.
    */
