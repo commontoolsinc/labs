@@ -7,6 +7,7 @@ import {
   type ApplyOpOperation,
   type ApplyOpResolution,
   type OperationFieldSnapshot,
+  type ReleaseOpFieldOperation,
   type SessionSync,
   toValuePath,
   type WatchSpec,
@@ -88,11 +89,12 @@ describe("operation storage capability", () => {
                     precedingSyncs: [],
                   }),
                 transact: (commit: {
-                  operations: ApplyOpOperation[];
+                  operations: (ApplyOpOperation | ReleaseOpFieldOperation)[];
                 }) => {
-                  appliedSubmissionIds.push(
-                    commit.operations[0].submissionId,
-                  );
+                  const operation = commit.operations[0];
+                  if (operation.op === "apply-op") {
+                    appliedSubmissionIds.push(operation.submissionId);
+                  }
                   if (sessionNumber === 1) {
                     applyStarted.resolve();
                     return firstApply.promise;
@@ -111,6 +113,7 @@ describe("operation storage capability", () => {
     const provider = storage.open(signer.did());
     expect(hasOperationStorageCapability(provider)).toBe(true);
     if (!hasOperationStorageCapability(provider)) return;
+    expect(await provider.operationCodecs()).toEqual(["test@1"]);
 
     const cancel = await provider.subscribeOperationField({
       id: "of:route-operation",
@@ -141,8 +144,242 @@ describe("operation storage capability", () => {
     expect(sessions).toBe(2);
     expect(watchAdds).toBe(2);
     expect(appliedSubmissionIds).toEqual(["route:1", "route:1"]);
+    await provider.releaseOperationField({
+      op: "release-op-field",
+      id: "of:route-operation",
+      path: toValuePath([]),
+      codec: "test@1",
+      cursor: { epoch: 1, version: 1 },
+    });
+    cancel();
     cancel();
     await storage.closeNow();
+    await expect(provider.subscribeOperationField({
+      id: "of:closed-provider",
+      path: toValuePath([]),
+    }, () => {})).rejects.toThrow("memory provider closed");
+  });
+
+  it("retries a provider watch whose route changes during installation", async () => {
+    const sync: SessionSync = {
+      type: "sync",
+      fromSeq: 0,
+      toSeq: 0,
+      upserts: [],
+      removes: [],
+    };
+    const firstAddition = defer<{
+      view: MemoryV2Client.WatchView;
+      sync: SessionSync;
+      precedingSyncs: SessionSync[];
+    }>();
+    const firstAdditionStarted = defer<void>();
+    let sessions = 0;
+    let additions = 0;
+    let removals = 0;
+    const storage = new (class extends V2StorageManager {
+      constructor() {
+        super(
+          {
+            as: signer,
+            memoryHost: new URL("https://default-toolshed.test"),
+          },
+          {
+            create: () => {
+              sessions++;
+              const sessionNumber = sessions;
+              const client = {
+                serverFlags: { applyOp: true, operationCodecs: ["test@1"] },
+                close: () => Promise.resolve(),
+              } as unknown as MemoryV2Client.Client;
+              const session = {
+                watchAddSync: () => {
+                  additions++;
+                  if (sessionNumber === 1) {
+                    firstAdditionStarted.resolve();
+                    return firstAddition.promise;
+                  }
+                  return Promise.resolve({
+                    view: MemoryV2Client.WatchView.fromSync(sync),
+                    sync,
+                    precedingSyncs: [],
+                  });
+                },
+                watchRemoveSync: () => {
+                  removals++;
+                  return Promise.resolve({
+                    view: MemoryV2Client.WatchView.fromSync(sync),
+                    sync,
+                    precedingSyncs: [],
+                  });
+                },
+              } as unknown as MemoryV2Client.SpaceSession;
+              return Promise.resolve({ client, session });
+            },
+          },
+        );
+      }
+    })();
+    const provider = storage.open(signer.did());
+    if (!hasOperationStorageCapability(provider)) return;
+
+    const subscribing = provider.subscribeOperationField({
+      id: "of:route-watch-installation",
+      path: toValuePath([]),
+    }, () => {});
+    await firstAdditionStarted.promise;
+    expect(
+      storage.registerSpaceHost(
+        signer.did(),
+        "https://hinted-toolshed.test",
+      ),
+    ).toBe(true);
+    const settled = storage.crossSpaceSettled();
+    firstAddition.resolve({
+      view: MemoryV2Client.WatchView.fromSync(sync),
+      sync,
+      precedingSyncs: [],
+    });
+
+    const cancel = await subscribing;
+    await settled;
+    expect(sessions).toBe(2);
+    expect(additions).toBe(2);
+    expect(removals).toBe(0);
+    cancel();
+    cancel();
+    await storage.closeNow();
+  });
+
+  it("retries a provider watch that settles after its replica changes", async () => {
+    const storage = new (class extends V2StorageManager {
+      constructor() {
+        super(
+          { as: signer, memoryHost: new URL("memory://") },
+          {
+            create: () => Promise.reject(new Error("session should not open")),
+          },
+        );
+      }
+    })();
+    const provider = storage.open(signer.did());
+    if (!hasOperationStorageCapability(provider)) return;
+    const firstAddition = defer<() => void>();
+    const firstAdditionStarted = defer<void>();
+    let firstCancellations = 0;
+    let secondCancellations = 0;
+    const secondReplica = {
+      subscribeOperationField: () =>
+        Promise.resolve(() => secondCancellations++),
+      closeNow: () => Promise.resolve(),
+    };
+    (provider as unknown as { replica: unknown }).replica = {
+      subscribeOperationField: () => {
+        firstAdditionStarted.resolve();
+        return firstAddition.promise;
+      },
+    };
+
+    const subscribing = provider.subscribeOperationField({
+      id: "of:changed-replica-watch",
+      path: toValuePath([]),
+    }, () => {});
+    await firstAdditionStarted.promise;
+    (provider as unknown as { replica: unknown }).replica = secondReplica;
+    firstAddition.resolve(() => firstCancellations++);
+
+    const cancel = await subscribing;
+    expect(firstCancellations).toBe(1);
+    expect(secondCancellations).toBe(0);
+    cancel();
+    expect(secondCancellations).toBe(1);
+    await storage.closeNow();
+  });
+
+  it("removes failed provider subscriptions", async () => {
+    const storage = new (class extends V2StorageManager {
+      constructor() {
+        super(
+          { as: signer, memoryHost: new URL("memory://") },
+          {
+            create: () =>
+              Promise.resolve({
+                client: {
+                  serverFlags: { applyOp: true },
+                  close: () => Promise.resolve(),
+                } as unknown as MemoryV2Client.Client,
+                session: {
+                  watchAddSync: () => Promise.reject(new Error("watch failed")),
+                } as unknown as MemoryV2Client.SpaceSession,
+              }),
+          },
+        );
+      }
+    })();
+    const provider = storage.open(signer.did());
+    if (!hasOperationStorageCapability(provider)) return;
+
+    await expect(provider.subscribeOperationField({
+      id: "of:failed-provider-watch",
+      path: toValuePath([]),
+    }, () => {})).rejects.toThrow("watch failed");
+    await storage.closeNow();
+  });
+
+  it("cancels provider subscriptions during both teardown paths", async () => {
+    const createStorage = () =>
+      new (class extends V2StorageManager {
+        constructor() {
+          super(
+            { as: signer, memoryHost: new URL("memory://") },
+            {
+              create: () =>
+                Promise.reject(new Error("session should not open")),
+            },
+          );
+        }
+      })();
+    const query = {
+      id: "of:provider-teardown",
+      path: toValuePath([]),
+    };
+
+    const gracefulStorage = createStorage();
+    const gracefulProvider = gracefulStorage.open(signer.did());
+    if (!hasOperationStorageCapability(gracefulProvider)) return;
+    let gracefulCancellations = 0;
+    (gracefulProvider as unknown as { replica: unknown }).replica = {
+      subscribeOperationField: () =>
+        Promise.resolve(() => gracefulCancellations++),
+      close: () => Promise.resolve(),
+    };
+    await gracefulProvider.subscribeOperationField(query, () => {});
+    await gracefulStorage.close();
+    expect(gracefulCancellations).toBe(1);
+
+    const immediateStorage = createStorage();
+    const immediateProvider = immediateStorage.open(signer.did());
+    if (!hasOperationStorageCapability(immediateProvider)) return;
+    const addition = defer<() => void>();
+    const additionStarted = defer<void>();
+    let immediateCancellations = 0;
+    (immediateProvider as unknown as { replica: unknown }).replica = {
+      subscribeOperationField: () => {
+        additionStarted.resolve();
+        return addition.promise;
+      },
+      closeNow: () => Promise.resolve(),
+    };
+    const subscribing = immediateProvider.subscribeOperationField(
+      query,
+      () => {},
+    );
+    await additionStarted.promise;
+    await immediateStorage.closeNow();
+    addition.resolve(() => immediateCancellations++);
+
+    await expect(subscribing).rejects.toThrow("memory provider closed");
+    expect(immediateCancellations).toBe(1);
   });
 
   it("fails closed when Memory lacks operation support or a resolution", async () => {

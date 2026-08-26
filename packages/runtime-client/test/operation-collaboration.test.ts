@@ -456,6 +456,9 @@ describe("RuntimeClient operation collaboration", () => {
       subscriptionId: "subscription:1",
     } as never)).toEqual({ value: true });
     expect(cancellations).toBe(1);
+    subscribed!(field);
+    await Promise.resolve();
+    expect(notifications).toHaveLength(1);
 
     await processor.handleRequest({
       type: RequestType.OperationCapabilities,
@@ -489,6 +492,12 @@ describe("RuntimeClient operation collaboration", () => {
       type: RequestType.OperationUnsubscribe,
       subscriptionId: "subscription:switch",
     } as never);
+    expect(
+      await processor.handleRequest({
+        type: RequestType.OperationSessionClose,
+        operationSessionId: "session:missing",
+      } as never),
+    ).toEqual({ value: false });
     expect(cancellations).toBe(2);
 
     (processor as any)._isDisposed = true;
@@ -508,7 +517,41 @@ describe("RuntimeClient operation collaboration", () => {
     ) as RuntimeProcessor;
     await expect(unsupported.handleOperationCapabilities({ cell } as never))
       .rejects.toThrow("does not support");
+    await expect(processor.handleOperationCapabilities({
+      cell,
+      operationSessionId: "",
+    } as never)).rejects.toThrow("operation session id is malformed");
     expect(subscribed).toBeDefined();
+  });
+
+  it("removes a failed worker watch and its operation session", async () => {
+    const capability = {
+      operationCodecs: () => Promise.resolve(["test@1"]),
+      queryOperationField: () => Promise.resolve({}),
+      applyOperation: () => Promise.resolve({}),
+      releaseOperationField: () => Promise.resolve(),
+      subscribeOperationField: () =>
+        Promise.reject(new Error("watch installation failed")),
+    };
+    const processor = Object.assign(Object.create(RuntimeProcessor.prototype), {
+      runtime: operationRuntime(capability),
+      operationSubscriptions: new Map(),
+      _isDisposed: false,
+    }) as RuntimeProcessor;
+    const request = {
+      cell: {
+        space: "did:key:z6Mk-runtime",
+        id: "of:failed-watch",
+        path: [],
+      },
+      operationSessionId: "session:failed-watch",
+      subscriptionId: "subscription:failed-watch",
+    };
+
+    await expect(processor.handleOperationSubscribe(request as never)).rejects
+      .toThrow("watch installation failed");
+    expect((processor as any).operationSubscriptions.size).toBe(0);
+    expect((processor as any).operationSessions.size).toBe(0);
   });
 
   it("cancels operation subscriptions during worker disposal", async () => {
