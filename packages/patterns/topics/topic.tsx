@@ -190,9 +190,14 @@ export interface TopicComment {
    * authorship on a profile wish — CT-1879). Comments carry no minted id:
    * array elements have stable entity identity; future editing addresses
    * elements by reference (`equals()`), not by a synthetic key. */
-  /** Every comment carries one: `addComment` requires a signature, so there
-   * is no unsigned thread entry to describe. */
-  author: TopicAuthor;
+  /** Every comment written from now on carries one, because `addComment`
+   * requires a signature. Still OPTIONAL with a default, and that is not a
+   * hedge: a comment stored by the unsigned path has no author, and a stored
+   * record type has to accept what is already stored. Requiring it here does
+   * not make old comments signed — it makes a deployed piece holding one
+   * impossible to update at all, which `deno task pattern-vintage` refuses
+   * rather than discovers in production. */
+  author?: TopicAuthor;
   body: string | Default<"">;
   sentAt: number | Default<0>;
 }

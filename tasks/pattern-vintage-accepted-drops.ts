@@ -78,6 +78,11 @@ export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
   {
     pattern: "topics/main.tsx",
     paths: [
+      // The unsigned caller retires, and the display names it fed go with it.
+      "myName",
+      "setMyName",
+      "topics[].createdByName",
+      "mentionable[].createdByName",
       // --- the demand narrowing (docs/history/topics-demand-narrowing-break.md)
       // The board demanded the topic's whole published surface of every stored
       // topic, three verb streams among them. A holder's required demands are
@@ -148,13 +153,35 @@ export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
     // The topic's own edge row, whole. A topic no longer derives one: inbound
     // references are read out of the board's pivot and published as
     // `referencedBy`, so nothing reads this path.
-    paths: ["crossrefs"],
+    paths: [
+      "crossrefs",
+      // The unsigned caller retires, and the display names it fed go with it:
+      // a comment always carries a structured author now, so the mirror beside
+      // it describes nothing. A stored topic keeps what it holds; what goes is
+      // the pattern's claim to publish these.
+      "createdByName",
+      "comments[].authorName",
+      // And the structured author a legacy topic used to get FROM that name.
+      // `createdByOf` projected `createdByName` into `createdBy` when a topic
+      // had no structured author; with the name retired, such a topic reads as
+      // the inert sentinel instead.
+      //
+      // Accepted on evidence, not on principle: every one of the 113 topics on
+      // the deployed board carries a structured `createdBy.name`, so no live
+      // topic reaches the projection being removed. The replayed vintages
+      // predate structured authorship and do, which is what surfaces here. A
+      // census belongs in the migration's pre-flight rather than being taken
+      // on trust from this comment.
+      "createdBy",
+    ],
     capturedThrough: "2026-08-06T23-04-13.189Z",
     reason:
       "Topics' reference graph was rebuilt on cell identity — see the matching " +
       "entry in tasks/pattern-compat-accepted-breaks.ts. The board's own " +
       "`crossrefs` came back as a pivot and strands nothing, so only a topic's " +
-      "retired per-topic row is listed here.",
+      "retired per-topic row is listed here. Carried with it: the unsigned " +
+      "caller's retirement, whose display-name mirrors go too — one entry per " +
+      "pattern, because a second would shadow this one rather than add to it.",
     record: "docs/history/topics-crossref-identity-break.md",
   },
   {
