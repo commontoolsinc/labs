@@ -2059,7 +2059,7 @@ describe("runtime-processor", () => {
       ) as RuntimeProcessor;
 
       await expect(
-        RuntimeProcessor.prototype.handleCellPull.call(processor, {
+        processor.handleRequest({
           type: RequestType.CellPull,
           cell: ref,
         }),

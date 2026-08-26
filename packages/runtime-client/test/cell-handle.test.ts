@@ -1939,6 +1939,35 @@ describe("cell-handle", () => {
       }
     });
 
+    it("reports a rejected append commit", async () => {
+      const failure = new Error("commit refused");
+      const reported = Promise.withResolvers<unknown[]>();
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: { type: RequestType }) =>
+            request.type === RequestType.CellPush
+              ? Promise.reject(failure)
+              : Promise.resolve({}),
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle<number[]>(runtime, ref, [0]);
+      const originalError = console.error;
+      console.error = (...args: unknown[]) => reported.resolve(args);
+
+      try {
+        cell.push(1);
+
+        const [message, error] = await reported.promise;
+        expect(message).toBe("[CellHandle] Push failed:");
+        expect(error).toBe(failure);
+      } finally {
+        console.error = originalError;
+      }
+    });
+
     it("keeps a later read behind an in-flight append", async () => {
       const appendResponse = Promise.withResolvers<void>();
       const requests: RequestType[] = [];
