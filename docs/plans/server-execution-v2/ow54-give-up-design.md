@@ -71,14 +71,17 @@ Every acceptable option must preserve all of these:
 7. **No new operation timeout.** The budget changes disposition after an
    observed failure. It does not cancel a still-running load or turn a slow but
    eventually successful operation into a failure.
-8. **OFF is unchanged.** The design applies only to durable served entries.
+8. **Settlement is not failure.** Dirty-input recomputation, continuation
+   waves, and pending foreign replica loads spend no delivery-failure budget.
+9. **OFF is unchanged.** The design applies only to durable served entries.
    Client-only events have no durable entry for the server to re-drain or seal.
 
 ## 3. Option matrix
 
 | Question | Options | Recommendation, pending owner ruling |
 | --- | --- | --- |
-| Give-up predicate | attempt count; elapsed age; class-specific count/age; explicit health signal; hybrid class + durable age + health wake | **Hybrid.** Persist one cumulative first-failure time, classify the failure, retry on a typed recovery signal, and terminalize at a wall-clock ceiling. Counts are observability only. |
+| Give-up predicate | attempt count; elapsed age; class-specific count/age; explicit health signal; hybrid class + cumulative failed-state time + health wake | **Hybrid.** Persist cumulative time in confirmed failure episodes, classify the failure, pause while typed recovery or ordinary dependency settlement progresses, and terminalize at a failed-state budget. Counts are observability only. |
+| Cross-space settlement | latest committed foreign value; explicit target-side demand and coverage | **Explicit freshness obligation when freshness is part of handler correctness.** Spaces still settle independently; waiting or continuation is not a delivery failure. This is an adjacent currentness design, not an OW54 timeout. |
 | Terminal disposition | reuse `dropped`; reuse `error`; use only an entry-local `needs-attention` notice; pair the entry notice with a per-space unresolved-attention index | **New entry-local `needs-attention` terminal kind plus a derived per-space index.** The entry is authoritative; the index makes unresolved notices discoverable after a fresh client process. |
 | Ordering release | never step over; release only the affected stream; release the space after the notice commits | **Release the space after durable cover.** The notice occupies the failed event's arrival position; later outcomes may commit in the same or a later wave, never without it. |
 | Re-arm | automatically reopen the same entry on ACL/session change; explicit retry with a new event ID; terminal means no retry | **Explicit retry with a new event ID and `retryOf`.** The original stays terminal; current client authority is revalidated and exactly-once remains per event ID. |
@@ -115,10 +118,13 @@ single ceiling.
 - Directly bounds how long the user's action blocks the stream.
 - Treats a known self-healing revocation and an unknown slow backend failure
   alike.
+- Charges ordinary recovery work after the failed boundary has healed. A
+  handler may legitimately need several scheduler passes, a flush-deadline cut,
+  or a foreign-space input before its read closure is current.
 - Requires an owner-approved duration and a policy for server clock skew.
 
-**Recommendation: use as the non-resetting outer bound, not as the whole
-policy.**
+**Recommendation: reject elapsed age from the first failure.** Use persisted
+wall-clock intervals to measure only time spent in a confirmed failed state.
 
 #### C. Failure-class-specific budgets
 
@@ -132,7 +138,8 @@ Assign each class its own count or duration.
   hole.
 
 **Recommendation: use class only to choose recovery behavior and immediate
-terminal classes. Use one cumulative outer age for every recoverable class.**
+terminal classes. Use one cumulative failed-state duration for every
+recoverable class.**
 
 #### D. Explicit health signal only
 
@@ -146,10 +153,11 @@ after a relevant ACL revision.
 - Some failures, including an unknown commit-preparation crash, have no current
   recovery signal.
 
-**Recommendation: use it to wake retries, with the wall-clock ceiling as the
-escape from a signal that never arrives.**
+**Recommendation: use it to wake retries and to end a confirmed failure
+episode, with cumulative failed-state duration as the escape from a signal that
+never arrives.**
 
-#### E. Hybrid: typed class, durable cumulative age, health-driven retry
+#### E. Hybrid: typed class, durable failed-state time, health-driven retry
 
 On the first actual failure of the head event, persist a processing-side
 checkpoint on its stream entry:
@@ -164,15 +172,20 @@ type DeliveryDeferral = {
     | "protocol"
     | "timeout"
     | "unknown";
-  firstObservedAt: number;
+  firstFailureAt: number;
+  lastFailureAt: number;
+  accumulatedFailureMs: number;
+  activeFailureStartedAt?: number;
+  state: "failed" | "recovering";
   recoveryEpoch?: string;
 };
 ```
 
 The checkpoint is not a consequence: it does not set `consequenced`, appear in
-`consequenceOf`, or advance the watermark. It is written once, and only updated
-when a more specific failure class becomes known. Per-attempt counts stay in
-stats rather than producing a durable write every 250 ms.
+`consequenceOf`, or advance the watermark. It changes only on a failure or
+recovery transition, including when a more specific failure class becomes
+known. Per-attempt counts stay in stats rather than producing a durable write
+every 250 ms.
 
 The proposed policy is:
 
@@ -182,15 +195,29 @@ The proposed policy is:
   retry on that event, not every backstop tick;
 - `timeout`, `unknown`, and `commit-preparation` receive one clean reattempt,
   then retry only on a relevant input/runtime change;
-- every recoverable class shares one cumulative age measured from
-  `firstObservedAt`; remount, reconnect, recovery-epoch change, failure-class
-  change, and scheduler attempts do not reset it; and
-- when the age reaches `MAX_EVENT_DELIVERY_DEFERRAL_AGE`, the server seals
-  `needs-attention` without another load attempt.
+- an actual typed failure starts or resumes an active failure episode;
+- a typed positive recovery signal for that same boundary closes the episode,
+  adds its duration to `accumulatedFailureMs`, and wakes one retry; ordinary
+  dirty-input settlement and pending replica loads are `recovering`, not
+  `failed`;
+- recovery, remount, failure-class change, and scheduler attempts never erase
+  accumulated failed-state time; only a committed handler consequence or
+  terminal notice clears the checkpoint; and
+- when accumulated failed-state time reaches
+  `MAX_EVENT_DELIVERY_FAILURE_BUDGET`, the server seals `needs-attention`
+  without another load attempt.
 
-The draft value is **60 seconds**, deliberately much longer than the current
-roughly two-second cold-view creation-race window and short enough to bound a
-user-visible blocked stream. This number is a recommendation, not a decision.
+For the last comparison, spent budget is
+`accumulatedFailureMs + (now - activeFailureStartedAt)` while `state` is
+`failed`, and only `accumulatedFailureMs` while `recovering`. Entering `failed`
+schedules one policy wake at the remaining budget boundary. That wake evaluates
+terminal disposition; it does not cancel or time out a storage operation and is
+not a retry cadence.
+
+The draft value is **60 seconds of confirmed failed-state time**, deliberately
+much longer than the current roughly two-second cold-view creation-race window.
+It bounds infrastructure failure without charging a legitimate multi-wave or
+cross-space settle. This number is a recommendation, not a decision.
 
 Barrier followers require a separate outcome from the failing head. The live
 code currently sends `cause: "load-park"` for both. A later build must produce
@@ -215,15 +242,53 @@ Only `role: "failed-head"` creates or evaluates a delivery-deferral checkpoint.
 The follower remains pending and is tried normally after the head gets a
 handler consequence or durable terminal cover.
 
-**Recommendation: E.** It directly closes the flapping-session weakening: the
-clock clears only on a committed handler consequence or committed terminal
-notice, never on an intervening failure kind or session generation.
+**Recommendation: E.** It directly closes both failure modes in the simpler
+age proposal: accumulated time survives a flapping session, while time spent
+making legitimate progress does not terminalize the user's action.
 
-### 4.2 Predicate owner questions
+### 4.2 Settlement and cross-space dependencies
+
+A stale handler input is not itself a delivery failure. Preflight keeps the
+event at the scheduler head, makes its read closure transiently demanded, and
+recomputes invalid or never-run inputs before dispatch. If that recomputation
+reads a foreign-space document whose replica load is in flight, the existing
+CT-1795 gate parks the event until the load settles. Neither state creates or
+ages a delivery-deferral checkpoint.
+
+The spaces do not share or nest one wave. The home SpaceServer may finish in
+the current wave when the foreign input arrives before its flush deadline. If
+the deadline cuts first, it commits only work already safely sealed, does not
+advance the event's coverage, and resumes in a continuation wave. The foreign
+SpaceServer runs independently. A foreign commit wakes the home scheduler and,
+if the event is still pending, causes preflight to run again; a commit after
+dispatch is ordinary later input and never replays the at-most-once handler.
+
+There is one adjacent currentness limit that OW54 must not hide. A foreign read
+loads the target document's latest committed value and registers a future wake,
+but does not by itself demand an undemanded derivation in the target space or
+prove that target space quiescent. The semantic options are:
+
+1. **Per-space snapshot:** the handler may use the latest committed foreign
+   value visible to its home wave. A later foreign commit is ordinary next-wave
+   input and never replays the at-most-once handler.
+2. **Explicit foreign freshness obligation:** when a handler's closure needs a
+   foreign derived value, the home server records target-side demand plus a
+   coverage obligation, leaves the event pending, and resumes only after the
+   target server publishes the required coverage or a typed failure. The two
+   SpaceServers still run independent waves; there is no distributed wave or
+   cross-space atomic commit.
+
+**Recommendation: option 2 for foreign derived values whose freshness is part
+of handler correctness.** Its implementation and cycle/non-progress semantics
+are a separate currentness design, not part of OW54. Until that design exists,
+OW54 must not turn lack of foreign progress into a fabricated load failure or
+charge it against the delivery-failure budget.
+
+### 4.3 Predicate owner questions
 
 - **OQ-1:** Ratify the hybrid predicate, or choose A–D.
-- **OQ-2:** Ratify the recommended 60-second cumulative outer age, choose a
-  different value, or make it deployment-configured.
+- **OQ-2:** Ratify the recommended 60-second cumulative failed-state budget,
+  choose a different value, or make it deployment-configured.
 - **OQ-3:** Ratify the immediate-terminal classes
   (`authorization`/`protocol`) and the initial recoverable class set.
 - **OQ-4:** Is a persisted server wall-clock time acceptable across lease
@@ -234,6 +299,10 @@ notice, never on an intervening failure kind or session generation.
   failure and therefore cannot terminalize it without introducing an operation
   timeout. Recommendation: treat a never-settling load as a separate storage
   correctness defect; do not add an OW54 timeout around the promise.
+- **OQ-19:** Does foreign currentness mean the latest committed per-space
+  snapshot, or must a foreign derived read carry target-side demand and a
+  coverage obligation? Recommendation: the explicit obligation when freshness
+  is part of handler correctness, designed separately from OW54.
 
 ## 5. Give-up disposition and notice
 
@@ -278,9 +347,11 @@ type NeedsAttentionTerminalCover = {
   attention: {
     phase: "dispatch-load" | "commit-preparation",
     failureClass: DeliveryFailureClass,
-    code: "delivery-deadline-exceeded" | "permanent-delivery-failure",
-    firstObservedAt: number,
-    lastObservedAt: number,
+    code: "delivery-failure-budget-exhausted" |
+      "permanent-delivery-failure",
+    firstFailureAt: number,
+    lastFailureAt: number,
+    accumulatedFailureMs: number,
     recovery: "explicit-retry"
   }
 };
@@ -301,7 +372,7 @@ The entry alone is not a complete discovery surface after a full client
 restart: the new process may not know which stream sidecars to watch. The same
 wave therefore adds a reference and safe summary to a well-known per-space
 unresolved-attention index. The entry remains authoritative; the index contains
-only `{ eventId, sidecarId, phase, failureClass, code, firstObservedAt }` and is
+only `{ eventId, sidecarId, phase, failureClass, code, firstFailureAt }` and is
 removed atomically with resolution. A client watches one index per open space,
 then resolves the referenced entry before offering recovery actions.
 
@@ -326,8 +397,8 @@ for discovery; a product-wide inbox may later project from it.
   compaction hold, and the derived per-space discovery index; or choose a
   separate authoritative attention document.
 - **OQ-8:** Ratify the client-safe field set. Recommendation: stable phase,
-  class, code, times, count, and recovery mode; raw keys and raw error text stay
-  server-side.
+  class, code, first/last failure times, accumulated failed-state time, count,
+  and recovery mode; raw keys and raw error text stay server-side.
 - **OQ-9:** Does explicit dismissal count as recovery, or may an unresolved
   notice be cleared only by a retry? Recommendation: support both, recording
   `dismissed` or the new retry event ID as the resolution.
@@ -434,7 +505,7 @@ The recommended build separates them at the producer:
 - a typed `CommitPreparationError` enters the delivery-deferral checkpoint
   with `phase: "commit-preparation"`;
 - a fresh attempt may run while the entry is pending, under the same
-  non-resetting outer age;
+  cumulative failed-state budget;
 - persistent preparation failure seals the same `needs-attention` shape; and
 - a storage-time rejection with an ambiguous commit outcome is not eligible
   for explicit replay under this design. The initial build covers only failures
@@ -467,7 +538,10 @@ the failing head and barrier followers. Add:
   followers do not increment it;
 - `events.deliveryDeferralsActive`: current pending entries with a durable
   delivery-deferral checkpoint;
-- `events.oldestDeliveryDeferralMs`: age of the oldest active checkpoint;
+- `events.deliveryFailuresActive`: checkpoints currently in the `failed`
+  state, excluding recovery and dependency settlement;
+- `events.maxAccumulatedDeliveryFailureMs`: greatest spent failure budget among
+  active checkpoints;
 - `events.needsAttention`: terminal notices whose wave committed, split by
   `dispatch-load` and `commit-preparation` in a nested `byPhase` object;
 - `events.needsAttentionSealFailures`: attempts that failed to persist the
@@ -487,9 +561,11 @@ Log transitions rather than every 250 ms attempt:
 - `event-delivery-deferred` at first failure, with event ID, phase, typed class,
   safe space/stream identity, and server-only detailed cause;
 - `event-delivery-class-changed` when classification becomes more specific;
-- `event-delivery-recovery-observed` when a recovery epoch wakes a retry;
-- `event-needs-attention` when the terminal notice commits, including age and
-  the failed-head attempts observed during the current tenure;
+- `event-delivery-recovery-observed` when a typed recovery signal closes an
+  active failure episode and wakes a retry;
+- `event-needs-attention` when the terminal notice commits, including
+  accumulated failed-state time and the failed-head attempts observed during
+  the current tenure;
 - `event-needs-attention-seal-failed` when durable cover fails; and
 - `event-retry-requested` with original and new event IDs.
 
@@ -517,7 +593,9 @@ type NeedsAttentionClientOutcome = {
   attention: {
     phase: "dispatch-load" | "commit-preparation";
     failureClass: DeliveryFailureClass;
-    code: "delivery-deadline-exceeded" | "permanent-delivery-failure";
+    code: "delivery-failure-budget-exhausted" |
+      "permanent-delivery-failure";
+    accumulatedFailureMs: number;
   };
 };
 ```
@@ -566,29 +644,45 @@ until §10 is resolved.
 > event whose handler remains runnable but whose dispatch load or pre-storage
 > commit preparation cannot recover does not satisfy T3 and MUST NOT be marked
 > `dropped`. The first actual failure of that event records a processing-side
-> delivery-deferral checkpoint on its stream entry. Its elapsed age is
-> cumulative until a handler consequence or terminal notice commits: retries,
-> remounts, reconnects, recovery-epoch changes, and failure-class changes do not
-> reset it. An event held only behind an earlier arrival records no checkpoint
-> and spends no budget.
+> delivery-deferral checkpoint on its stream entry. The checkpoint accumulates
+> only intervals in which a typed delivery failure remains active. A typed
+> positive recovery signal closes the active interval and wakes one retry;
+> dirty-input recomputation, ordinary wave continuation, and an in-flight
+> replica load are settlement, not failure, and spend no budget. Recovery,
+> remount, failure-class change, and scheduler attempts do not erase accumulated
+> failed-state time. Only a committed handler consequence or terminal notice
+> clears the checkpoint. An event held only behind an earlier arrival records no
+> checkpoint and spends no budget.
 >
 > **DRAFT — pending owner ruling.** A typed permanent authorization or protocol
 > failure seals immediately. Every other covered failure retries when its typed
 > recovery signal changes and may receive one clean reattempt, but seals when
-> the checkpoint reaches `MAX_EVENT_DELIVERY_DEFERRAL_AGE` (DRAFT value: 60
-> seconds). Attempt counts are observations, never the terminal predicate. This
-> deadline does not cancel an in-flight operation; it is evaluated only after
-> the system has observed a failure.
+> `accumulatedFailureMs` reaches `MAX_EVENT_DELIVERY_FAILURE_BUDGET` (DRAFT
+> value: 60 seconds). Attempt counts are observations, never the terminal
+> predicate. The budget does not cancel an in-flight operation and is evaluated
+> only while the system holds an observed failure verdict.
+>
+> **DRAFT — pending owner ruling. Cross-space settlement.** Event preflight
+> makes the handler's home-scheduler read closure current before dispatch. A
+> pending foreign replica load parks the event and is settlement, not failure.
+> Spaces run independent waves: a flush-deadline cut may move the pending event
+> to a continuation home wave, and a foreign commit wakes the home scheduler;
+> no wave nests another space's wave and no cross-space atomic commit is
+> implied. A foreign derived value whose freshness is part of handler
+> correctness requires the separately ruled target-side demand and coverage
+> obligation; absent that mechanism, a foreign read means the latest committed
+> per-space value, not proof of foreign-space quiescence.
 >
 > **DRAFT — pending owner ruling. Where the notice lives.** The terminal cover
 > is `{ consequenced: true, status: "needs-attention", reason, attention }` on
 > the event's own stream entry. `attention` carries a stable phase, failure
-> class, reason code, first/last observation times, and
-> `recovery: "explicit-retry"`; it carries no payload, credentials,
-> cross-space document keys, or raw backend error. The commit writes the notice
-> as that event's consequence, names the event in `consequenceOf`, and advances
-> `eventWatermark` past it. `needs-attention` is a terminal kind beside T3
-> `dropped`, not a widening of T3 and not a claim that the handler ran.
+> class, reason code, first/last failure times, and
+> accumulated failed-state time plus `recovery: "explicit-retry"`; it carries no
+> payload, credentials, cross-space document keys, or raw backend error. The
+> commit writes the notice as that event's consequence, names the event in
+> `consequenceOf`, and advances `eventWatermark` past it. `needs-attention` is a
+> terminal kind beside T3 `dropped`, not a widening of T3 and not a claim that
+> the handler ran.
 >
 > **DRAFT — pending owner ruling. Retention and client signal.** An unresolved
 > `needs-attention` entry is excluded from stream compaction. The same atomic
@@ -606,18 +700,19 @@ until §10 is resolved.
 > **DRAFT — pending owner ruling. Commit preparation.** A deterministic CFC
 > policy verdict remains an immediate error consequence. A typed crash while
 > preparing the commit is a pre-storage delivery failure and follows the same
-> checkpoint, deadline, `needs-attention`, and explicit-retry rules as a failed
-> dispatch load. An ambiguous storage-time commit outcome is outside this retry
-> rule.
+> checkpoint, failed-state budget, `needs-attention`, and explicit-retry rules
+> as a failed dispatch load. An ambiguous storage-time commit outcome is outside
+> this retry rule.
 
 ### 9.3 serving-loop.md §7 — extend the events block
 
 > **DRAFT — pending owner ruling.** `events.loadParkDeferrals` counts all
 > load-park deferral decisions, including arrival-barrier followers;
 > `loadParkFailures` counts only heads whose required load actually failed.
-> `deliveryDeferralsActive` and `oldestDeliveryDeferralMs` expose the current
-> pending checkpoint population. `needsAttention` counts terminal attention
-> notices after their wave commits, split by failure phase;
+> `deliveryDeferralsActive`, `deliveryFailuresActive`, and
+> `maxAccumulatedDeliveryFailureMs` expose the current checkpoint population
+> without counting ordinary settlement as failure. `needsAttention` counts
+> terminal attention notices after their wave commits, split by failure phase;
 > `needsAttentionSealFailures` counts failed attempts to persist that cover;
 > and `explicitRetries` counts accepted new-ID retry appends. `dropped` remains
 > exclusive to events.md §5's T3 disposition. Repeated failure attempts are
@@ -638,9 +733,10 @@ until §10 is resolved.
 > an immediate error even though it is not a deterministic policy verdict.
 >
 > **DRAFT — pending owner ruling. Proposed close.** Distinguish an actually
-> failing head from arrival-barrier followers; persist one non-resetting
-> first-failure checkpoint; classify failures with typed producer data; retry
-> on recovery epochs; and after the ratified cumulative age seal an entry-local
+> failing head from arrival-barrier followers; persist cumulative time in typed
+> failed-state episodes; classify failures with typed producer data; pause the
+> budget while recovery and dependency settlement make progress; retry on
+> recovery epochs; and after the ratified failure budget seal an entry-local
 > `{ status: "needs-attention", consequenced: true }` notice. The notice is a
 > new terminal kind beside T3 drop, occupies the event's arrival position,
 > blocks later durable outcomes until its cover joins a successful wave, stays
@@ -650,7 +746,7 @@ until §10 is resolved.
 > `retryOf`; the original never re-arms. Deterministic CFC verdicts remain
 > immediate error consequences; typed commit-preparation crashes use the same
 > bounded attention path as dispatch-load failures. OPEN until the owner rules
-> OQ-1 through OQ-18 in the design document and the later build lands with the
+> OQ-1 through OQ-19 in the design document and the later build lands with the
 > flapping, seal-failure, order-release, client-reconnect, and exactly-once
 > pins.
 
@@ -658,9 +754,10 @@ until §10 is resolved.
 
 Nothing below is decided by this document.
 
-1. **Predicate:** adopt hybrid typed class + health wake + non-resetting durable
-   age?
-2. **Age:** adopt 60 seconds, another constant, or deployment configuration?
+1. **Predicate:** adopt hybrid typed class + health wake + cumulative durable
+   failed-state time?
+2. **Budget:** adopt 60 seconds of confirmed failed-state time, another
+   constant, or deployment configuration?
 3. **Classes:** which failures are immediately terminal, and which are
    recoverable?
 4. **Clock:** accept persisted server wall clock and the stated skew behavior?
@@ -684,10 +781,15 @@ Nothing below is decided by this document.
     point?
 17. **Logs:** replace per-attempt warnings with transition logs plus counters?
 18. **Visibility:** require a persistent shell attention surface in the build?
+19. **Foreign freshness:** does a foreign derived read mean the latest committed
+    per-space value, or must handler preflight carry target-side demand and a
+    coverage obligation when freshness is part of correctness?
 
-The recommendation is **yes to all eighteen**, with the 60-second value called
-out as the least evidence-backed recommendation and therefore the first one to
-replace if the owner has a product latency target.
+The recommendation is **yes to all nineteen**, with the 60-second failed-state
+budget called out as the least evidence-backed recommendation and therefore the
+first one to replace if the owner has a product latency target. Question 19's
+implementation remains a separate currentness design rather than expanding the
+OW54 build.
 
 ## 11. Later build shape and blast radius
 
@@ -703,10 +805,11 @@ expected to touch these seams:
    arrival-barrier outcomes, carry typed failure data, and keep client/LT1
    behavior unchanged.
 3. **Space-server drain state** —
-   `packages/runner/src/executor/space-server.ts`. Persist/read the first-failure
-   checkpoint, never reset it on flapping epochs, terminalize only the failed
-   head, keep followers budget-free, and release the barrier only through an
-   atomic successful cover.
+   `packages/runner/src/executor/space-server.ts`. Persist failure-episode
+   transitions and cumulative failed-state time, never erase spent budget on
+   flapping epochs, terminalize only the failed head, keep settlement and
+   followers budget-free, and release the barrier only through an atomic
+   successful cover.
 4. **Seal machinery** — the same `#sealEventConsequenceNotice` path plus wave
    outcome accounting. A resolved `{ error }` must be treated as seal failure;
    later consequences cannot commit past it. This is the OW58-sensitive part
@@ -739,15 +842,15 @@ client absorption, and retention all exist.
 
 The later build is not complete without red-first, mutation-watched pins for:
 
-1. a failed head crosses the age while a flapping session changes recovery
-   epoch repeatedly; the checkpoint never resets and exactly one attention
-   notice commits;
+1. a failed head accumulates the full failure budget while a flapping session
+   changes recovery epoch repeatedly; recovery intervals pause but never erase
+   spent budget, and exactly one attention notice commits;
 2. a barrier follower never creates a checkpoint or terminalizes merely
    because the head does;
-3. a fast session-revocation recovery before the age runs the handler exactly
-   once and leaves no attention notice;
+3. a fast session-revocation recovery before the budget is spent runs the
+   handler exactly once and leaves no attention notice;
 4. a timeout/unknown failure stops four-Hz polling while waiting for recovery
-   or the terminal deadline;
+   or terminal failure-budget exhaustion;
 5. a notice commit that rejects or resolves `{ error }` leaves the head pending
    and prevents a later outcome from committing;
 6. a successful notice occupies the earlier arrival position and later events
@@ -760,8 +863,12 @@ The later build is not complete without red-first, mutation-watched pins for:
    typed preparation crash follows the bounded attention path;
 10. client-side and stream-entry-less LT1 events retain their existing
     behavior; and
-11. stats distinguish barrier work, actual head failures, committed notices,
-    and failed notice seals without relying on log text.
+11. stats distinguish barrier work, actual head failures, active failure time,
+    committed notices, and failed notice seals without relying on log text; and
+12. a dirty event input whose recompute reads a foreign space spends no failure
+    budget while the load and continuation waves make progress, never nests the
+    spaces' waves, and dispatches at most once after the ratified freshness
+    condition holds.
 
 Tests must use an injected clock and causal recovery/seal gates. No sleeps,
 polling-based proof, or real-time wait is part of the contract.
@@ -773,5 +880,7 @@ polling-based proof, or real-time wait is part of the contract.
 - OW63's cross-piece same-space shaper-order question;
 - the general pre-queue sidecar-sync/view-lag hardening owed by OW45;
 - a global product attention inbox beyond this event-entry notice;
+- target-side foreign-derived demand, coverage, cycle detection, and
+  non-progress implementation (OQ-19's separate currentness design);
 - cancellation or timeout of a never-settling storage promise; and
 - replay of any failure whose storage outcome may be ambiguous.
