@@ -5,6 +5,10 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { firstResolvedOutputRedirect } from "../src/runner.ts";
+import {
+  createSigilLinkFromParsedLink,
+  getDerivedInternalCellLink,
+} from "../src/link-utils.ts";
 
 // Seen live on estuary home spaces (2026-07-29): a sub-pattern node whose
 // stored outputs carry a DEFERRED partialCause alias unwraps to a bare
@@ -67,6 +71,43 @@ describe("firstResolvedOutputRedirect vs partialCause aliases", () => {
     const found = firstResolvedOutputRedirect(rt, tx, outputs, base);
     tx.abort("test: read-only");
     expect(found?.id).toBe(spot.getAsNormalizedFullLink().id);
+  });
+
+  it("returns a cause-only spot link parsed, with no read of its doc", () => {
+    // The identity bind (CT-1943) renders a partialCause alias as its
+    // derived cell's kind-free id — a cause-only coordinate whose data,
+    // for a computed-kind descriptor, lives at the KINDED entity, so
+    // nothing is ever written under this id. Resolving it reads that
+    // never-written doc, tying the scan to replication state and kicking
+    // a pull no store can satisfy. Given the id in `causeOnlyIds`, the
+    // scan returns the parsed coordinates and the transaction records no
+    // read of the doc.
+    const tx = rt.edit();
+    const base = rt.getCell<Record<string, unknown>>(
+      space,
+      "cause-only-spot-base",
+      undefined,
+      tx,
+    );
+    const twin = getDerivedInternalCellLink(base, {
+      partialCause: { "$generated": 0 },
+      scope: "space",
+    });
+    const binding = createSigilLinkFromParsedLink(twin, {
+      overwrite: "redirect",
+    });
+
+    const found = firstResolvedOutputRedirect(
+      rt,
+      tx,
+      { generated: binding },
+      base,
+      new Set([twin.id]),
+    );
+    expect(found?.id).toBe(twin.id);
+    const reads = tx.getReactivityLog?.().reads ?? [];
+    expect(reads.filter((read) => read.id === twin.id)).toEqual([]);
+    tx.abort("test: read-only");
   });
 
   it("returns undefined (not a throw) when outputs hold ONLY such aliases", () => {
