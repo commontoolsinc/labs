@@ -30,7 +30,7 @@ import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
-import { toDeepFrozenSchema } from "@/schema-utils.ts";
+import { toDeepFrozenSchema } from "@/schema-copy.ts";
 
 describe("schema-intern", () => {
   describe("internSchema()", () => {

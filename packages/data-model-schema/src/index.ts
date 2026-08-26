@@ -29,13 +29,13 @@ export {
   REJECTING_SELECTOR,
 } from "./path-selector.ts";
 
+export { emptySchemaObject, schemaForValueType } from "./basic-schemas.ts";
+
 export {
-  cloneSchemaMutable,
-  emptySchemaObject,
   internSchemaPairAsKey,
   isNontrivialSchema,
-  schemaForValueType,
   schemaWithoutProperties,
   schemaWithProperties,
-  toDeepFrozenSchema,
 } from "./schema-utils.ts";
+
+export { cloneSchemaMutable, toDeepFrozenSchema } from "./schema-copy.ts";

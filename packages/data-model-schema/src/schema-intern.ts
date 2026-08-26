@@ -8,7 +8,7 @@ import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { SchemaAndHash } from "./SchemaAndHash.ts";
-import { toDeepFrozenSchema } from "./schema-utils.ts";
+import { toDeepFrozenSchema } from "./schema-copy.ts";
 
 /**
  * Bidirectional intern cache for schemas.
