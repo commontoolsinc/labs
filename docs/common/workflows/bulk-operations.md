@@ -26,29 +26,52 @@ The surface is shaped around those four, and three ideas carry the whole of it.
 
 **The plan is the unit of work, not the command line.** A survey emits a
 line-oriented JSON file: a header accounting for the selection, then one row per
-piece. Each row records the identity that piece runs today, whether that source
-is still retained in the space, and the hash of the document a verdict was
-computed from. The plan is what a later stage consumes, so what was decided is
-written down before anything is written to.
+piece, in the order a run must work through them. Each row records the identity
+that piece runs today and whether that source is still retained in the space —
+the rollback question. A row carries no operation unless a stage put one there:
+a survey's rows are a pre-state record until it is asked to stamp a retarget, or
+until a repair's dry run emits rows of its own. The plan is what a later stage
+consumes, so what was decided is written down before anything is written to.
 
-**Dry is the default, and the apply is driven by the plan.** Every write stage
-runs first as a report — the exact per-piece change, and nothing written. The
-apply then takes that plan as its input and works through its rows in its order,
-each row's recorded precondition proved inside the same transaction that writes
-it. A document that moved since the plan was taken fails its own row rather than
-being overwritten.
+**Dry is the default, and what an apply proves is per operation.** Neither write
+stage writes without `--apply`, and what the dry run reports differs: a repair
+prints the exact per-piece document diff, a retarget prints where each piece
+stands against its own row's reference pair.
 
-**The verdict is a second survey, never the apply's exit code.** An apply that
-exits zero says the writes it attempted returned success. Whether the collection
-now holds what you wanted is a different question, and it is answered by
-surveying again and holding the result against the plan the run was made from.
-The two stay separate invocations on purpose.
+The precondition differs too, and the difference is what matters when something
+else is writing at the same time. A repair row's precondition is the hash of the
+document its dry run read, and it is proved *inside* the transaction that
+writes: the check runs in the edit closure, which re-runs against fresh state on
+a commit conflict, so a document that moved fails its own row rather than being
+overwritten. A retarget row's precondition is the reference pair it records, and
+it is proved by a read in the same session immediately *before* the write rather
+than by the write itself — `setPattern` conditions its commit on the reference
+it reads for itself, not on the one the row recorded. The two reads are not
+adjacent — the run resolves the row's source from disk and recomputes its
+identity in between — and a piece that something else moves inside that gap is
+carried to the row's target rather than refused, so a retarget plan is not a
+defense against a second writer working the same pieces at the same time. What
+the recorded pair does buy is that a piece already moved when the run reaches it
+stops the run: once at the preflight that classifies every row before the first
+write, and again in the read taken immediately before that row's own write.
+
+**The verdict is a second look, never the apply's exit code.** An apply that
+exits zero says the writes it attempted returned success, which is not the same
+question as whether the collection now holds what you wanted. For a retarget the
+second look is a survey, held against the plan the run was made from, and the
+two stay separate invocations on purpose. For a repair it is the fixer: a
+reference diff is refused outright for a plan carrying repair rows, because a
+repair moves the document and not the reference, so a diff would answer
+`unchanged` about work it cannot see. Re-running the fixer is what verifies a
+repair, and a document it no longer changes is a repaired one.
 
 ## The session, act by act
 
 The demo deploys a board, files 113 members through its verb, and works the
 collection from there. `$SPACE` is a throwaway space and `$WORK` a scratch
-directory; every other value is one a previous command printed.
+directory the session writes its plans into. `$RETARGET_FIXTURE` is a pattern
+source in this repository, `board` is the slug the holder was deployed under,
+and `fix-titles.ts` is a file Act 7 writes.
 
 ### Acts 1–2 · A collection the registry cannot enumerate
 
@@ -107,18 +130,27 @@ the count. There is no cache to invalidate and nothing to refresh.
 ### Act 7 · A repair, where the fixer is the work
 
 A **fixer** is a TypeScript module whose default export is a pure transform from
-a piece's stored document to the document it should hold. That is the whole of
-what a caller writes. Selection, ordering, the write, the stop and the resume
-belong to the tooling.
+a piece's stored input document to the document it should hold. That is the
+whole of what a caller writes. Selection, ordering, the write, the stop and the
+resume belong to the tooling.
+
+Purity is checked rather than assumed: the run evaluates the fixer twice over
+one document and refuses it by name if the two answers differ. Four more
+answers are refused the same way, before anything is written: one that is not a
+document, one holding a value the store cannot keep, one that drops a field the
+write would then zero — the write replaces the document whole — and one that
+rewrote or dropped a link.
 
 ```bash
 cf piece repair -s "$SPACE" --piece board --path items \
   --fixer "$WORK/fix-titles.ts" --out "$WORK/repair.jsonl"
 ```
 
-Dry: the exact per-piece diff, and no write at all. Every row records the
-document hash its verdict was computed from — the precondition the apply will
-prove — and the fixer it was evaluated for.
+Dry: the exact per-piece diff, and no write at all. The plan it emits holds one
+row per member — a repair works the members and not the holder — and a row whose
+document the fixer could evaluate records the hash that verdict was computed
+from, the precondition the apply will prove, beside the fixer it was evaluated
+for.
 
 ```bash
 cf piece repair -s "$SPACE" --piece board --path items \
@@ -147,7 +179,10 @@ cf piece retarget -s "$SPACE" --plan "$WORK/retarget.jsonl" \
   --out "$WORK/dry.json"
 ```
 
-Dry again: every row classified against its own reference pair, nothing written.
+Dry again: every row that carries an op classified against its own reference
+pair, and nothing written. A row without one is not work — the holder's row is
+the usual case — so the report leaves it out rather than reporting a verdict
+about a piece this run will not touch.
 
 ```bash
 cf piece retarget -s "$SPACE" --plan "$WORK/retarget.jsonl" \
@@ -170,14 +205,17 @@ cf piece survey -s "$SPACE" --piece board --path items \
   --diff "$WORK/retarget.jsonl"
 ```
 
-A planned piece lands in one of three outcomes — moved as planned, still
-outstanding, or moved to something the plan did not ask for — and the third is
-what an upgrade that half-converged looks like. The command exits nonzero unless
-every planned row converged.
+A row that carried an op lands in one of three outcomes — moved as planned,
+still outstanding, or moved to something the plan did not ask for — and the
+third is what an upgrade that half-converged looks like. A row the plan recorded
+without one is not measured against a target it never had: it reads as unchanged
+or as changed, the holder's row among them. A row whose piece the after-survey
+no longer holds reads as gone from the selection. The command exits nonzero
+unless every row is landed or unchanged, which is what "converged" means here.
 
-A member filed after the plan was taken is none of the three. It is named as
-held by the space and not by the plan, rather than counted as though the plan
-had asked for it.
+A member filed after the plan was taken is none of those. It is named as held by
+the space and not by the plan, rather than counted as though the plan had asked
+for it.
 
 ### Act 10 · The refusal the survey exists to make
 
