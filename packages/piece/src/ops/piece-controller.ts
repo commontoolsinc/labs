@@ -3992,8 +3992,27 @@ export class PieceController<T = unknown> {
     let transition: PieceSourceTransition | undefined;
     try {
       await this.#runMutation(mutationVersion, async () => {
-        const { pattern: previousPattern, ref: previousRef } = await this
-          .#loadCurrentPattern();
+        // A piece whose current pattern cannot load is exactly the piece a
+        // source replacement rescues: a stored identity resolvable only from
+        // a retired bundle (a wish-minted sidecar with no in-space program)
+        // strands the piece otherwise. The loaded pattern feeds only the two
+        // checks the escape hatch already waives — the backward-compatibility
+        // assertion and retained-link validation — so under
+        // `dangerouslyAllowIncompatibleSchema` a failed load degrades to the
+        // stored identity ref alone. Without the flag the load failure stays
+        // fatal, unchanged.
+        let previousPattern: Pattern | undefined;
+        let previousRef: { identity: string; symbol: string };
+        try {
+          ({ pattern: previousPattern, ref: previousRef } = await this
+            .#loadCurrentPattern());
+        } catch (error) {
+          if (!options?.dangerouslyAllowIncompatibleSchema) throw error;
+          await this.#cell.sync();
+          const storedRef = getPatternIdentityRef(this.#cell);
+          if (!storedRef) throw error;
+          previousRef = storedRef;
+        }
         const expected = getPieceSourceSnapshot(this.#cell);
         if (expected === undefined) {
           throw new Error("piece missing source state");
@@ -4030,7 +4049,9 @@ export class PieceController<T = unknown> {
         // Callers who want every reason at once run `checkPattern()`, which is
         // exactly what `--check` is for.
         if (!options?.dangerouslyAllowIncompatibleSchema) {
-          assertPatternSchemasBackwardCompatible(previousPattern, pattern);
+          // Reached only when the load above succeeded: a failed load
+          // without the flag rethrows there.
+          assertPatternSchemasBackwardCompatible(previousPattern!, pattern);
         }
         transition = pieceSourceTransition(
           expected,
@@ -4050,7 +4071,9 @@ export class PieceController<T = unknown> {
                 argumentCell,
                 this.#pieces,
                 {
-                  priorArgumentSchema: previousPattern.argumentSchema,
+                  // Same narrowing as the assertion above: this validator arm
+                  // exists only without the flag, where the load succeeded.
+                  priorArgumentSchema: previousPattern!.argumentSchema,
                   // `applySetupState` rewrites the argument from `getRaw()`, so
                   // every retained link's envelope is written back unchanged and
                   // nothing here is rebuilt as an alias. The validator verifies
