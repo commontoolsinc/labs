@@ -96,6 +96,15 @@ rehearsal four times:
    `addLink`'s `kind` and `label`, which the handler already defaults and
    which the gate refuses to relax on their own. **Landed.**
 
+Baselines are recorded ONCE, when the batch is complete — not after each item.
+A baseline recorded mid-batch describes a contract that never ships, and the
+next item in the batch breaks it, so it has to be forgiven by an accepted-break
+entry that exists only to excuse an artefact. Baselines cannot be deleted
+either, so that churn is permanent. The cost of waiting is that the
+compatibility gate reports unrecorded contracts, and stays red, until the last
+item lands; that is the honest state of a break that has not finished being
+taken.
+
 Item 1 additionally needs, before it can land:
 
 - an accepted-break entry for `topics/main.tsx` and `topics/topic.tsx` naming
