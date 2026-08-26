@@ -13,7 +13,7 @@ signatures.
 This repository contains many packages that compose and stack to create the
 Common Fabric product.
 
-1. Foundation: api, data-model, runner, identity, memory
+1. Foundation: api, data-model, data-model-schema, runner, identity, memory
 2. System: schema-generator, iframe-sandbox, ts-transformers, js-compiler
 3. Capabilities: piece, html, llm, navigation
 4. Operation: agents-host, background-piece-service, cli, connectors/agents,

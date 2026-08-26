@@ -40,7 +40,7 @@ import type {
   JSONSchemaObj,
   JSONSchemaTypes,
 } from "@commonfabric/api";
-import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
+import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model-schema";
 import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";

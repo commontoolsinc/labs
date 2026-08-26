@@ -1,37 +1,14 @@
 /**
- * Schema hashing. This provides schema-specific hashing functions, including
- * an interning (uniquing) system specifc to schemas.
+ * Schema interning (uniquing): one canonical, deep-frozen instance per
+ * structurally distinct schema, paired with its content hash.
  */
 
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 
-import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import { SchemaAndHash } from "./SchemaAndHash.ts";
 import { toDeepFrozenSchema } from "./schema-utils.ts";
-import { hashOf, hashStringOf } from "./value-hash.ts";
-
-//
-// Hash computation
-//
-// Passes through to `value-hash.ts`.
-//
-
-/**
- * Computes a deterministic hash of a JSONSchema. Structurally-equal schemas
- * always produce the same hash. Returns a string for use as a map key or cache
- * key. This accepts `undefined` as a convenience for contexts where that value
- * is useful to mean "no relevant schema," or "missing schema," and so on.
- *
- * This function is a pass-through to `hashStringOf()`, just with a narrower
- * argument type.
- */
-export function hashSchema(schema: JSONSchema | undefined): string {
-  return hashStringOf(schema);
-}
-
-//
-// Schema interning
-//
 
 /**
  * Bidirectional intern cache for schemas.

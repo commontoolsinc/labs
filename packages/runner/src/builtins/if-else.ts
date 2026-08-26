@@ -1,4 +1,4 @@
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 
 import { type Cell } from "../cell.ts";
 import { resolveLink } from "../link-resolution.ts";

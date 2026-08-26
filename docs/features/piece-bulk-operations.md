@@ -139,8 +139,17 @@ first write. A row that is moved-elsewhere, or that cannot be read at all,
 keeps the run from starting — every row reports where it stands, and nothing
 is applied. The serial pass then proves each row again in the session that
 writes it, the preflight's verdict deciding nothing there: a row proved landed
-is reported without a write, and a row another writer moved since preflight is
-caught by the same read that would have skipped it.
+is reported without a write, and a row moved to something no row of the plan
+names stops the run by name. Past that read the write carries the reference
+the recheck proved, refused inside the transaction that would commit it, so a
+move landing between the two is refused rather than overwritten.
+
+One case is absorbed rather than caught, and the plan cannot see it: a second
+writer that moves a piece onto the very reference the row was going to write
+leaves it indistinguishable from a row this run had already landed, and it is
+reported landed and skipped. The general statement is the honest one — a plan
+is a record of what a run intended and a check on what it finds, not an
+interlock against another writer.
 
 Resume is therefore re-invocation of the same command, not a mode. It costs
 one read per piece, is decided before any write, and rewrites nothing that

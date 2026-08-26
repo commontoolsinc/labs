@@ -8,7 +8,7 @@ import {
   deepFrozenCloneAndInternSchema,
   hashSchema,
   internSchema,
-} from "@commonfabric/data-model/schema-hash";
+} from "@commonfabric/data-model-schema";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { favoriteListSchema } from "@commonfabric/home-schemas";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";

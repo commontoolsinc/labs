@@ -71,12 +71,6 @@ export interface AllowedCycle {
 // delete the line, and this check confirms it is gone.
 export const ALLOWLIST: readonly AllowedCycle[] = [
   {
-    packages: ["api", "data-model"],
-    reason:
-      "api's cfc module freezes values with data-model's deep-freeze, while " +
-      "data-model's `FabricSpecialObject` classes are typed by api.",
-  },
-  {
     packages: ["memory", "runner"],
     reason:
       "memory's v2 query planner drives runner's schema traversal through " +
