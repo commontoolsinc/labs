@@ -403,6 +403,59 @@ see [File headers](#file-headers) below. Everything else in that shape is the
 defect. To title a region of a file or a class, use a section marker, which is
 a `//` block; see [Section markers](#section-markers) above.
 
+### The blank line above
+
+A blank line goes above every doc comment. It is what separates a documented
+declaration from whatever precedes it, and it holds uniformly: a function after
+another function, an interface property after another property, an array
+element after another element.
+
+Two positions have nothing above to separate from, and so take no blank line:
+
+- **The first line of a file**, where a file header opens the file. A shebang
+  or a file-scoped pragma is something above, though, and takes the blank line
+  like anything else.
+- **Directly under an opening bracket** — `{`, `(`, or `[` — where the doc
+  comment belongs to the first member, parameter, or element of the block. The
+  bracket is the separator.
+
+The dense cases are the ones the rule is for. An interface whose properties
+each carry a one-line doc comment reads as an undifferentiated run of lines
+without it, and pairing each comment to its property is work left to the
+reader:
+
+```ts
+// Shown at module scope.
+
+/** Everything known about one donut. */
+export interface Donut {
+  /** Style, such as `cruller` or `fritter`. */
+  readonly style: string;
+
+  /** Desired fryer temperature, in Kelvin. */
+  readonly temperature: number;
+
+  /** Toppings, in the order they are applied. */
+  readonly toppings: readonly string[];
+}
+```
+
+Parentheses are the one construct the rule does not reach past that first
+position: `deno fmt` removes a blank line between two items of a parenthesized
+list, so a documented parameter or argument list runs unbroken.
+
+```ts
+// Shown at module scope.
+
+/** Fries one donut to order. */
+export function fry(
+  /** Style to fry. */
+  style: string,
+  /** Desired fryer temperature, in Kelvin. */
+  temperature: number,
+): void {}
+```
+
 ### What gets one
 
 - Every file, as a header, except for the kinds listed under
