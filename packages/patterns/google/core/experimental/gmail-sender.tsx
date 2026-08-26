@@ -40,16 +40,22 @@ import { type Auth, createGoogleAuth } from "../util/google-auth-manager.tsx";
 type EmailDraft = {
   /** Recipient email address */
   to: string | Default<"">;
+
   /** Email subject line */
   subject: string | Default<"">;
+
   /** Plain text body */
   body: string | Default<"">;
+
   /** CC recipients (comma-separated) */
   cc: string | Default<"">;
+
   /** BCC recipients (comma-separated) */
   bcc: string | Default<"">;
+
   /** Message ID to reply to (for threading) */
   replyToMessageId: string | Default<"">;
+
   /** Thread ID to reply to (for threading) */
   replyToThreadId: string | Default<"">;
 };

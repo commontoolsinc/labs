@@ -37,8 +37,10 @@ export type { GoogleComment, GoogleDocsDocument };
 export interface GoogleDocsClientConfig {
   /** How many times to refresh an expired token and retry before giving up. */
   retries?: number;
+
   /** Enable verbose console logging */
   debugMode?: boolean;
+
   /**
    * External refresh callback for cross-piece token refresh.
    * Use this when the auth cell belongs to a different piece - direct cell updates

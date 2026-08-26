@@ -1054,6 +1054,7 @@ type ClickAim =
  */
 type ClickLanding = {
   verdict: "pending" | "hit" | "missed";
+
   /** The innermost few elements the interaction did reach, outward. */
   path: string;
 };
@@ -1110,6 +1111,7 @@ const aimAtMarkedTarget = async (
 
   type Landing = {
     verdict: "pending" | "hit" | "missed";
+
     /** Whether the interaction's first event carried the mark. */
     onTarget: boolean | undefined;
     path: string;
@@ -1940,43 +1942,55 @@ export interface TimingStatRow {
 export interface ChurnCounters {
   /** Total computation/effect runs (`scheduler/run/action`). */
   actionRuns: number;
+
   /** Commit conflicts — stale-seq-basis rejections (`storage.v2/commit-conflict`). */
   commitConflicts: number;
+
   /** Reverts emitted after a rejected commit (`storage.v2/commit-revert`). */
   commitReverts: number;
+
   /** Non-conflict commit rejections (`storage.v2/commit-rejected`). */
   commitRejected: number;
+
   /** Reactive-action commit errors that triggered a retry (`scheduler/schedule-run-error`). */
   scheduleRunErrors: number;
+
   /** Event handlers that lost the receipt race permanently (`scheduler/event-lost-race`). */
   eventLostRaces: number;
+
   /** Server-execution v2 stage C tuning T2 (flag-ON clients only, else 0):
    * event-handler echoes dropped at seal because their intent was already
    * terminal (`speculation-overlay/late-echo-dropped`) — the late-echo
    * class the two-browsers lockdown stall belonged to. */
   overlayLateEchoDrops: number;
+
   /** Stage C tuning T2: overlay sweeps the replica's arrival wake ran
    * (`speculation-overlay/arrival-sweep`) — served values arriving
    * decoupled from a watermark advance. */
   overlayArrivalSweeps: number;
+
   /** Stage C design (e): intent checks the overlay's storage-notification
    * listener ran (`speculation-overlay/intent-check`) — one per fire plus
    * one per coalesced sidecar change while intents are outstanding; never
    * a scheduler run. */
   overlayIntentChecks: number;
+
   /** Stage C design (e): intents resolved by their tracked entry's own
    * consequence mark (`speculation-overlay/intent-retired-by-consequence-of`)
    * — the sanctioned `consequenceOf` carrier. */
   overlayIntentsByConsequenceOf: number;
+
   /** Stage C design (e): intent-origin echoes retired by the watermark
    * BACKSTOP instead (`speculation-overlay/intent-echo-retired-by-backstop`). */
   overlayIntentEchoBackstops: number;
+
   /** Stage C W2.1: client CASCADE-child echoes retired because an ancestor
    * intent's terminal consequence arrived (`speculation-overlay/
    * cascade-echo-retired`) — the W0 l3 "duplicate join" class: the join is
    * the click handler's cascade child, its echo carries a client-minted id
    * no mark ever names and writes an entity doc the server never writes. */
   overlayCascadeEchoRetired: number;
+
   /** Stage C W2.1: the subset retired on a consequenced parent's mark
    * while NO doc the echo wrote held a confirmed value at or after the
    * MARK frame's seq (`speculation-overlay/cascade-echo-retired-
@@ -1999,18 +2013,21 @@ export interface ChurnCounters {
 
 export interface BrowserLoadSummary {
   label: string;
+
   /**
    * Main-thread `runtime-client` IPC round-trip timing. p95/max here ballooning
    * (and approaching the 60s request timeout) is the multi-browser-slowness
    * signal: the main thread is waiting on a saturated worker.
    */
   ipc: TimingStatRow[];
+
   /**
    * Requests still in flight on the main thread when the summary was taken
    * ({ type, ageMs }). The completed-timing rows above cannot show a request
    * that never came back; this names it.
    */
   pendingIpc: Array<{ type: string; ageMs: number }>;
+
   /**
    * Worker-side request ledger (`runtime-worker.ipc` counts): how many
    * requests of each type the worker received and answered. A main-side
@@ -2019,10 +2036,13 @@ export interface BrowserLoadSummary {
    * in both means the response was lost in transit.
    */
   workerIpc: Record<string, number>;
+
   /** Worker-side scheduler/runner/storage timing — where the work happens. */
   worker: TimingStatRow[];
+
   /** Conflict / re-run counters — see {@link ChurnCounters}. */
   churn: ChurnCounters;
+
   /**
    * Send/settle timeline of the first IPC requests (the boot window), offsets
    * in ms from the runtime connection's construction. The aggregate rows say a
@@ -2271,12 +2291,16 @@ export async function collectBrowserLoadSummary(
 export type SenderEchoSample = {
   label: string;
   text: string;
+
   /** performance.now() of the last trusted click seen while armed. */
   clickMs: number;
+
   /** performance.now() when the armed text was first observed in the DOM. */
   renderMs: number;
+
   /** renderMs − clickMs: the sender-side speculative echo latency. */
   echoMs: number;
+
   /** Trusted clicks observed while armed (a re-aimed click re-stamps). */
   clicks: number;
 };
@@ -2793,10 +2817,13 @@ type CfInputProbe = {
   readOnly: boolean;
   visible: boolean;
   hostTagName: string;
+
   /** Whether the host custom element's definition was registered/upgraded. */
   hostUpgraded?: boolean;
+
   /** Whether the host exposes `commit()` (a cell-committing form field). */
   hostHasCommit?: boolean;
+
   /**
    * The host's `value` property: `{ kind: "cell", id, space, path }` for a
    * bound cell handle, otherwise `{ kind: typeof value }`. A fill that stalls
@@ -2804,14 +2831,19 @@ type CfInputProbe = {
    * bound cell it points at the cell:set round-trip.
    */
   hostValueBinding?: unknown;
+
   /** Progress ledger left by fillAndVerify for this selector (see there). */
   fill?: unknown;
+
   /** In-flight runtime IPC requests at probe time ({ type, ageMs }). */
   pendingIpc?: unknown;
+
   /** Completed runtime IPC round-trips at probe time ({ count, maxMs }). */
   completedIpc?: unknown;
+
   /** Cell subscription totals (active instances, backend subscribes). */
   subscriptionTotals?: unknown;
+
   /** Bounded tail of the page's console messages (see Page wrapper). */
   consoleTail?: unknown;
 };

@@ -86,8 +86,10 @@ export const MODULE_METADATA: ModuleMetadata = {
 export interface CustomFieldModuleInput {
   /** Field name (e.g., "Employee ID", "SKU") */
   name: string | Default<"">;
+
   /** Field value (stored as string, parsed by UI) */
   value: string | Default<"">;
+
   /** Value type determines input UI */
   valueType: CustomFieldValueType | Default<"text">;
 }
