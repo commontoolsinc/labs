@@ -98,8 +98,27 @@ describe("CFIframe", () => {
   it("lets an explicit bridge load independently of context resolution", () => {
     const element = new CFIframe();
     const bridge: FabricBridge = { resources: {} };
+    const ref: CellRef = {
+      id: "of:ignored-context" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+      schema: { type: "object" },
+    };
+    let requests = 0;
+    const runtime = {
+      [$conn]: () => ({
+        request: () => {
+          requests++;
+          return Promise.reject(new Error("ignored context refused"));
+        },
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+        signal: { aborted: false },
+      }),
+    } as unknown as RuntimeClient;
     element.src = "<p>ready</p>";
-    element.context = {};
+    element.context = new CellHandle(runtime, ref);
     element.bridge = bridge;
 
     internals(element).willUpdate(contextChange());
@@ -108,9 +127,11 @@ describe("CFIframe", () => {
       bridge,
       "<p>ready</p>",
     ]);
+    expect(requests).toBe(0);
+    expect(element._errorDetails).toBeNull();
   });
 
-  it("renders context resolution failures as iframe errors", async () => {
+  it("retries context resolution when its error is dismissed", async () => {
     const ref: CellRef = {
       id: "of:context" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
@@ -118,21 +139,33 @@ describe("CFIframe", () => {
       path: [],
       schema: { type: "object" },
     };
+    let requestCount = 0;
     const runtime = {
       [$conn]: () => ({
-        request: () => Promise.reject(new Error("context refused")),
+        request: (request: { type: RequestType }) => {
+          requestCount++;
+          if (requestCount === 1) {
+            return Promise.reject(new Error("context refused"));
+          }
+          return request.type === RequestType.CellResolveAsCell
+            ? Promise.resolve({
+              cell: { ...ref, id: "of:resolved" as CellRef["id"] },
+            })
+            : Promise.resolve({ value: {} });
+        },
         subscribe: () => Promise.resolve(),
         unsubscribe: () => Promise.resolve(),
         signal: { aborted: false },
       }),
     } as unknown as RuntimeClient;
     const element = new CFIframe();
+    element.src = "<p>recovered</p>";
     element.context = new CellHandle(runtime, ref);
-    const updated = Promise.withResolvers<void>();
-    element.requestUpdate = () => updated.resolve();
+    const failed = Promise.withResolvers<void>();
+    element.requestUpdate = () => failed.resolve();
 
     internals(element).willUpdate(contextChange());
-    await updated.promise;
+    await failed.promise;
 
     expect(element._errorDetails).toEqual({
       description: "context refused",
@@ -142,6 +175,16 @@ describe("CFIframe", () => {
       stacktrace: expect.stringContaining("context refused"),
     });
     expect(templateValues(element).at(-1)).not.toBe("");
+
+    const recovered = Promise.withResolvers<void>();
+    element.requestUpdate = () => {
+      if (templateValues(element)[1] === element.src) recovered.resolve();
+    };
+    internals(element).dismissError();
+    await recovered.promise;
+
+    expect(element._errorDetails).toBeNull();
+    expect(templateValues(element)[1]).toBe(element.src);
   });
 
   it("translates sandbox events into component state and events", () => {

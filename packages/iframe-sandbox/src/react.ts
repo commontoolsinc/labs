@@ -59,6 +59,10 @@ export function createFabricReact(react: ReactHooks, client: FabricClient) {
       cell.getSnapshot,
       cell.getSnapshot,
     );
+    const writes = react.useMemo(
+      () => ({ tail: Promise.resolve() }),
+      [cell],
+    );
 
     react.useEffect(() => {
       if (cell.getSnapshot().status === "loading") {
@@ -67,16 +71,20 @@ export function createFabricReact(react: ReactHooks, client: FabricClient) {
     }, [cell]);
 
     const set = react.useCallback(
-      async (next: T | ((current: T) => T)) => {
-        const current = cell.getSnapshot();
-        const value = typeof next === "function"
-          ? (next as (current: T) => T)(
-            current.status === "ready" ? current.value : await cell.read(),
-          )
-          : next;
-        await cell.write(value);
+      (next: T | ((current: T) => T)) => {
+        const writing = writes.tail.then(async () => {
+          const current = cell.getSnapshot();
+          const value = typeof next === "function"
+            ? (next as (current: T) => T)(
+              current.status === "ready" ? current.value : await cell.read(),
+            )
+            : next;
+          await cell.write(value);
+        });
+        writes.tail = writing.catch(() => {});
+        return writing;
       },
-      [cell],
+      [cell, writes],
     );
 
     return {
@@ -122,8 +130,8 @@ export function createFabricReact(react: ReactHooks, client: FabricClient) {
     }, [database, sql, paramsKey]);
 
     react.useEffect(() => {
-      void refresh();
       const unsubscribe = database.subscribeInvalidation(() => void refresh());
+      void refresh();
       return () => {
         generation.current++;
         unsubscribe();

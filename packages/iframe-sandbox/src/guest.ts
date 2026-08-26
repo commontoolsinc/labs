@@ -95,11 +95,12 @@ export class RemoteCell<T = FabricValue> {
 
   async write(value: T): Promise<void> {
     try {
+      const before = this.#snapshot;
       await this.#client.request("write", {
         resource: this.#name,
         value: value as FabricValue,
       });
-      this.#setReady(value);
+      if (this.#snapshot === before) this.#setReady(value);
     } catch (error) {
       this.#setError(error);
       throw error;
@@ -283,6 +284,15 @@ export class FabricClient {
     if (this.#disconnected) return;
     this.#disconnected = true;
     globalThis.removeEventListener("message", this.#onHandoff);
+    if (this.#port) {
+      this.#send({
+        protocol: BRIDGE_PROTOCOL,
+        version: BRIDGE_VERSION,
+        type: "request",
+        id: this.#nextRequestId++,
+        operation: "disconnect",
+      });
+    }
     this.#port?.close();
     this.#port = undefined;
     const error = new FabricBridgeError({

@@ -39,6 +39,12 @@ describe("ipc", () => {
         ...HEADER,
         type: "request",
         id: 1,
+        operation: "disconnect",
+      })).toBe(true);
+      expect(isBridgeRequest({
+        ...HEADER,
+        type: "request",
+        id: 2,
         operation: "write",
         resource: "count",
         value: 1,
@@ -46,7 +52,7 @@ describe("ipc", () => {
       expect(isBridgeRequest({
         ...HEADER,
         type: "request",
-        id: 2,
+        id: 3,
         operation: "call",
         resource: "database",
         method: "query",
@@ -54,7 +60,7 @@ describe("ipc", () => {
       expect(isBridgeRequest({
         ...HEADER,
         type: "request",
-        id: 3,
+        id: 4,
         operation: "subscribe",
         resource: "count",
         subscription: "s1",

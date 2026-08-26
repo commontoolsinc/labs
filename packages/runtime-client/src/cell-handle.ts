@@ -186,6 +186,16 @@ export class CellHandle<T = unknown> {
     //
     // TODO(danfuzz): constrain `T`, once those types are assignable.
     const serialized = CellHandle.serialize(value as ClientCellValue);
+    const cell = this.ref();
+
+    if (propagateFailure) {
+      return this.#conn.request<RequestType.CellSet>({
+        type: RequestType.CellSet,
+        cell,
+        value: serialized,
+        awaitCommit: true,
+      });
+    }
 
     this.#value = value;
 
@@ -198,7 +208,6 @@ export class CellHandle<T = unknown> {
       }
     }
 
-    const cell = this.ref();
     const request = type === RequestType.CellPush
       ? this.#conn.request<RequestType.CellPush>({
         type: RequestType.CellPush,
@@ -210,7 +219,6 @@ export class CellHandle<T = unknown> {
         cell,
         value: serialized,
       });
-    if (propagateFailure) return request;
     return request.catch((error) => {
       if (!this.#conn.signal.aborted) {
         console.error("[CellHandle] Write failed:", error);
@@ -232,6 +240,7 @@ export class CellHandle<T = unknown> {
       type: RequestType.CellSend,
       cell: this.ref(),
       event: CellHandle.serialize(event as ClientCellValue),
+      ...(propagateFailure && { awaitCommit: true }),
     });
     if (propagateFailure) return request;
     return request.catch((error) => {

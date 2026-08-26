@@ -3014,12 +3014,14 @@ describe("runtime-processor", () => {
       },
     };
 
-    const createProcessor = () => {
+    const createProcessor = (
+      commitResult: { ok?: object; error?: { message: string } } = { ok: {} },
+    ) => {
       let prepared = false;
       const tx = {
         commit: () => {
           expect(prepared).toBe(true);
-          return Promise.resolve({ ok: {} });
+          return Promise.resolve(commitResult);
         },
       };
       const cellWithTx = {
@@ -3041,9 +3043,7 @@ describe("runtime-processor", () => {
         }),
       };
       return {
-        processor: {
-          // handleCellSet/handleCellPush delegate to the shared applyCellWrite.
-          applyCellWrite: RuntimeProcessor.prototype.applyCellWrite,
+        processor: Object.assign(Object.create(RuntimeProcessor.prototype), {
           runtime: {
             edit: () => tx,
             prepareTxForCommit: (candidate: unknown) => {
@@ -3060,7 +3060,7 @@ describe("runtime-processor", () => {
               };
             },
           },
-        } as unknown as RuntimeProcessor,
+        }) as RuntimeProcessor,
       };
     };
 
@@ -3092,6 +3092,32 @@ describe("runtime-processor", () => {
         cell: ref,
         event: "new value",
       });
+    });
+
+    it("returns a strict set commit refusal to the caller", async () => {
+      const { processor } = createProcessor({
+        error: { message: "set refused" },
+      });
+
+      await expect(RuntimeProcessor.prototype.handleCellSet.call(processor, {
+        type: RequestType.CellSet,
+        cell: ref,
+        value: "new value",
+        awaitCommit: true,
+      })).rejects.toThrow("set refused");
+    });
+
+    it("returns a strict send commit refusal to the caller", async () => {
+      const { processor } = createProcessor({
+        error: { message: "send refused" },
+      });
+
+      await expect(RuntimeProcessor.prototype.handleCellSend.call(processor, {
+        type: RequestType.CellSend,
+        cell: ref,
+        event: "new value",
+        awaitCommit: true,
+      })).rejects.toThrow("send refused");
     });
   });
 
@@ -4307,13 +4333,55 @@ describe("runtime-processor", () => {
       })).rejects.toThrow("valid SqliteDb cell handle");
     });
 
+    it("rejects a database reference with an unknown scope", async () => {
+      const db = { id: "db-1", tables: { notes: {} }, scope: "tenant" };
+      const processor = processorWith(
+        db,
+        () => Promise.resolve({ rows: [] }),
+      );
+
+      await expect(processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT 1",
+      })).rejects.toThrow("Invalid SQLite database scope: tenant");
+
+      let edited = false;
+      const cell = {
+        pull: () => Promise.resolve(db),
+        getRaw: () => db,
+        asSchema: () => ({ get: () => db }),
+      };
+      const execProcessor = Object.assign(
+        Object.create(RuntimeProcessor.prototype),
+        {
+          runtime: {
+            getCellFromLink: () => cell,
+            editWithRetry: () => {
+              edited = true;
+              return Promise.resolve({ ok: undefined });
+            },
+          },
+        },
+      ) as RuntimeProcessor;
+      await expect(execProcessor.handleSqliteExec({
+        type: RequestType.SqliteExec,
+        cell: ref,
+        sql: "DELETE FROM notes",
+      })).rejects.toThrow("Invalid SQLite database scope: tenant");
+      expect(edited).toBe(false);
+    });
+
     it("commits writes through the database cell's transactional exec", async () => {
       const calls: unknown[][] = [];
+      const db = { id: "db-1", tables: { notes: {} } };
       const cell = {
         pull: () => {
           calls.push(["pull"]);
-          return Promise.resolve({ id: "db-1" });
+          return Promise.resolve(db);
         },
+        getRaw: () => db,
+        asSchema: () => ({ get: () => db }),
         withTx: (tx: unknown) => ({
           exec: (sql: string, params: unknown) => calls.push([tx, sql, params]),
         }),
@@ -4348,8 +4416,11 @@ describe("runtime-processor", () => {
     });
 
     it("reports a transactional SQLite write failure", async () => {
+      const db = { id: "db-1", tables: { notes: {} } };
       const cell = {
-        pull: () => Promise.resolve({ id: "db-1" }),
+        pull: () => Promise.resolve(db),
+        getRaw: () => db,
+        asSchema: () => ({ get: () => db }),
         withTx: () => ({ exec: () => {} }),
       };
       const processor = Object.assign(

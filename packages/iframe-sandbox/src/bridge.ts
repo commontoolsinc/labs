@@ -120,7 +120,13 @@ export class FabricBridgeHost {
   disconnect(): void {
     if (!this.#connected) return;
     this.#connected = false;
-    for (const cancel of this.#subscriptions.values()) cancel();
+    for (const cancel of this.#subscriptions.values()) {
+      try {
+        cancel();
+      } catch {
+        // One broken resource must not retain the rest of the guest session.
+      }
+    }
     this.#subscriptions.clear();
     this.#port.close();
   }
@@ -156,6 +162,10 @@ export class FabricBridgeHost {
   };
 
   async #handle(request: BridgeRequest): Promise<void> {
+    if (request.operation === "disconnect") {
+      this.disconnect();
+      return;
+    }
     try {
       const value = await this.#perform(request);
       this.#post({
@@ -181,9 +191,10 @@ export class FabricBridgeHost {
   async #perform(request: BridgeRequest): Promise<FabricValue | undefined> {
     if (request.operation === "describe") return this.#manifest();
 
-    const resource = request.resource === undefined
-      ? undefined
-      : this.#bridge.resources[request.resource];
+    const resource = request.resource !== undefined &&
+        Object.hasOwn(this.#bridge.resources, request.resource)
+      ? this.#bridge.resources[request.resource]
+      : undefined;
     if (!resource || request.resource === undefined) {
       throw bridgeError(
         "resource-not-found",
@@ -213,9 +224,10 @@ export class FabricBridgeHost {
         await resource.write(request.value as FabricValue);
         return undefined;
       case "call": {
-        const method = request.method === undefined
-          ? undefined
-          : resource.methods?.[request.method];
+        const method = request.method !== undefined &&
+            Object.hasOwn(resource.methods ?? {}, request.method)
+          ? resource.methods?.[request.method]
+          : undefined;
         if (!method) {
           throw bridgeError(
             "method-not-supported",

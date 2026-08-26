@@ -54,12 +54,68 @@ describe("React bridge adapter", () => {
     expect(writes).toEqual([{ count: 3 }]);
   });
 
+  it("serializes overlapping updater writes against the latest snapshot", async () => {
+    type Counter = { count: number };
+    const firstStarted = Promise.withResolvers<void>();
+    const releaseFirst = Promise.withResolvers<void>();
+    const writes: Counter[] = [];
+    let snapshot: ResourceSnapshot<Counter> = {
+      status: "ready",
+      value: { count: 1 },
+    };
+    const remote = {
+      getSnapshot: () => snapshot,
+      subscribe: () => () => {},
+      read: () => Promise.resolve((snapshot as { value: Counter }).value),
+      write: async (value: Counter) => {
+        writes.push(value);
+        if (writes.length === 1) {
+          firstStarted.resolve();
+          await releaseFirst.promise;
+        }
+        snapshot = { status: "ready", value };
+      },
+    };
+    const client = { cell: () => remote } as unknown as FabricClient;
+    const hooks: ReactHooks = {
+      useCallback: (callback) => callback,
+      useEffect: () => {},
+      useMemo: (factory) => factory(),
+      useRef: (initial) => ({ current: initial }),
+      useState: (initial) =>
+        [
+          typeof initial === "function"
+            ? (initial as () => unknown)()
+            : initial,
+          () => {},
+        ] as never,
+      useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot(),
+    };
+    const counter = createFabricReact(hooks, client).useCell<Counter>("count");
+
+    const first = counter.set((value) => ({ count: value.count + 1 }));
+    const second = counter.set((value) => ({ count: value.count + 1 }));
+    await firstStarted.promise;
+    expect(writes).toEqual([{ count: 2 }]);
+
+    releaseFirst.resolve();
+    await Promise.all([first, second]);
+    expect(writes).toEqual([{ count: 2 }, { count: 3 }]);
+  });
+
   it("invalidates an active SQLite query subscription on cleanup", () => {
     let unsubscribed = false;
+    const calls: string[] = [];
     const database = {
-      query: () => Promise.resolve({ rows: [] }),
-      subscribeInvalidation: () => () => {
-        unsubscribed = true;
+      query: () => {
+        calls.push("query");
+        return Promise.resolve({ rows: [] });
+      },
+      subscribeInvalidation: () => {
+        calls.push("subscribe");
+        return () => {
+          unsubscribed = true;
+        };
       },
     };
     const client = { sqlite: () => database } as unknown as FabricClient;
@@ -82,6 +138,7 @@ describe("React bridge adapter", () => {
 
     useSqliteQuery("database", "SELECT 1");
     const cleanup = effects[0]?.();
+    expect(calls).toEqual(["subscribe", "query"]);
     expect(typeof cleanup).toBe("function");
     (cleanup as () => void)();
     expect(unsubscribed).toBe(true);

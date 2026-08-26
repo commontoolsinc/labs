@@ -257,7 +257,9 @@ export class CommonIframeSandboxElement extends LitElement {
   override disconnectedCallback() {
     super.disconnectedCallback();
     globalThis.removeEventListener("message", this.boundOnMessage);
-    this.releaseGuest();
+    queueMicrotask(() => {
+      if (!this.isConnected) this.releaseGuest();
+    });
   }
 
   /** @inheritDoc */

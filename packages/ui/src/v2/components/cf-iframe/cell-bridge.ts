@@ -17,7 +17,11 @@ import {
 import type { JSONSchema } from "@commonfabric/runner/shared";
 
 /** Capability kind assigned to a named context child. */
-export type CellContextResourceKind = "cell" | "stream" | "sqlite";
+export type CellContextResourceKind =
+  | "cell"
+  | "readonly"
+  | "stream"
+  | "sqlite";
 
 function cellKind(schema: JSONSchema | undefined): string | undefined {
   if (!schema || typeof schema !== "object" || !Array.isArray(schema.asCell)) {
@@ -140,7 +144,9 @@ function cellResource(
     kind: "cell",
     ...metadata,
     read: async () => bridgeValue(await cell.sync()),
-    write: async (value) => await cell.setStrict(value),
+    ...(kind !== "readonly" && {
+      write: async (value: FabricValue) => await cell.setStrict(value),
+    }),
     subscribe: (listener) => {
       let initial = true;
       return cell.subscribe((value) => {
@@ -189,7 +195,10 @@ function cellContextResources(
   const resource = (name: string): BridgeResource | undefined => {
     const properties = schemaProperties(root.ref().schema);
     const current = root.get();
-    if (!(name in properties) && !(current && name in current)) {
+    if (
+      !Object.hasOwn(properties, name) &&
+      !(current && Object.hasOwn(current, name))
+    ) {
       return undefined;
     }
     const propertySchema = properties[name];

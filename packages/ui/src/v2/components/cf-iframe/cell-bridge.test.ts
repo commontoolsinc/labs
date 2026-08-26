@@ -27,6 +27,11 @@ describe("cf-iframe cell bridge", () => {
       type: "object",
       properties: {
         count: { type: "number", description: "Shared counter" },
+        locked: {
+          type: "string",
+          asCell: ["readonly"],
+          description: "Read-only value",
+        },
         events: {
           type: "object",
           asCell: ["stream"],
@@ -83,6 +88,7 @@ describe("cf-iframe cell bridge", () => {
         schema: { type: "number", description: "Shared counter" },
       },
       value: 3,
+      awaitCommit: true,
     }]);
   });
 
@@ -144,9 +150,12 @@ describe("cf-iframe cell bridge", () => {
 
     expect(Object.keys(bridge.resources)).toEqual([]);
     await context.setStrict({ command: "" });
+    context[$onCellUpdate]({ command: "" });
 
     expect(Object.keys(bridge.resources)).toEqual(["command"]);
     expect(bridge.resources.missing).toBeUndefined();
+    expect(bridge.resources.constructor).toBeUndefined();
+    expect(bridge.resources.__proto__).toBeUndefined();
     expect(
       Object.getOwnPropertyDescriptor(
         bridge.resources,
@@ -276,6 +285,28 @@ describe("cf-iframe cell bridge", () => {
     const count = createCellContextBridge(context).resources.count;
 
     await expect(count.write!(3)).rejects.toThrow("write refused");
+  });
+
+  it("omits writes from read-only cell capabilities", async () => {
+    const runtime = {
+      [$conn]: () => ({
+        request: (request: { type: RequestType }) =>
+          request.type === RequestType.CellGet
+            ? Promise.resolve({ value: "fixed" })
+            : Promise.resolve({}),
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+        signal: { aborted: false },
+      }),
+    } as unknown as RuntimeClient;
+    const context = new CellHandle(runtime, ref, { locked: "fixed" });
+
+    const locked = createCellContextBridge(context).resources.locked;
+
+    expect(locked.kind).toBe("cell");
+    expect(locked.description).toBe("Read-only value");
+    await expect(locked.read!()).resolves.toBe("fixed");
+    expect(locked.write).toBeUndefined();
   });
 
   it("publishes cell changes after suppressing the initial value", () => {

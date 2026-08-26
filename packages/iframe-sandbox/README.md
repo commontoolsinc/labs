@@ -50,9 +50,10 @@ expanding the core protocol.
 
 The higher-level `cf-iframe` component accepts the same `bridge` property. Its
 `context` convenience property turns top-level Fabric cells into cell resources,
-stream cells into `send` resources, and SQLite database cells into
-`query`/`exec` resources. A pattern can supply a serializable capability hint
-when a context cell's schema is intentionally opaque at the renderer boundary:
+read-only cells into resources without `write`, stream cells into `send`
+resources, and SQLite database cells into `query`/`exec` resources. A pattern
+can supply a serializable capability hint when a context cell's schema is
+intentionally opaque at the renderer boundary:
 
 ```tsx
 <cf-iframe
@@ -62,10 +63,10 @@ when a context cell's schema is intentionally opaque at the renderer boundary:
 />;
 ```
 
-`resourceKinds` is a narrow manifest of `cell`, `stream`, or `sqlite` kinds. It
-does not grant access to another cell: each name must still be present in the
-bound context, and the bridge resolves that cell's concrete scope before the
-guest loads.
+`resourceKinds` is a narrow manifest of `cell`, `readonly`, `stream`, or
+`sqlite` kinds. It does not grant access to another cell: each name must still
+be present in the bound context, and the bridge resolves that cell's concrete
+scope before the guest loads.
 
 ## Guest API
 
@@ -164,7 +165,8 @@ Each loaded document owns a fresh capability session over a `MessagePort`.
 Requests carry a protocol name, version, numeric request ID, operation, resource
 name, and optional method/input. Responses correlate by ID and carry either a
 result or a structured error. Subscriptions have explicit IDs and are cancelled
-when the guest unsubscribes, reloads, or disconnects.
+when the guest unsubscribes, reloads, or sends the session-level `disconnect`
+operation.
 
 The complete request, response, or event is encoded with `codec-realm`. This
 preserves Fabric values such as `FabricBytes` instead of relying on structured

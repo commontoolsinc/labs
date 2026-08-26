@@ -129,6 +129,7 @@ export type BridgeManifest = {
 
 export type BridgeOperation =
   | "describe"
+  | "disconnect"
   | "read"
   | "write"
   | "call"
@@ -188,6 +189,7 @@ export function isBridgeRequest(message: unknown): message is BridgeRequest {
   ) return false;
   switch (message.operation) {
     case "describe":
+    case "disconnect":
       return true;
     case "read":
     case "write":

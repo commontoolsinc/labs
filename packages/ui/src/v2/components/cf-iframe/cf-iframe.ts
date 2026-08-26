@@ -185,52 +185,68 @@ export class CFIframe extends BaseElement {
   }
 
   private dismissError() {
+    const retryContext = this._errorDetails?.source === "cf-iframe context";
     this._errorDetails = null;
+    if (retryContext) this.prepareContextBridge();
   }
 
   private fixError() {
     this.emit("fix", this._errorDetails);
+    const retryContext = this._errorDetails?.source === "cf-iframe context";
     this._errorDetails = null;
+    if (retryContext) this.prepareContextBridge();
+  }
+
+  private prepareContextBridge() {
+    const generation = ++this._contextGeneration;
+    if (this._errorDetails?.source === "cf-iframe context") {
+      this._errorDetails = null;
+    }
+    if (this.bridge || !this.context) {
+      this._contextBridge = { resources: {} };
+      this._contextReady = true;
+    } else if (!isCellHandle<Record<string, unknown>>(this.context)) {
+      this._contextBridge = createCellContextBridge(this.context);
+      this._contextReady = true;
+    } else {
+      const context = this.context;
+      this._contextBridge = { resources: {} };
+      this._contextReady = false;
+      void resolveCellContextBridge(
+        context,
+        this.resourceKinds ?? {},
+      ).then((bridge) => {
+        if (generation !== this._contextGeneration) return;
+        this._contextBridge = bridge;
+        this._contextReady = true;
+        this.requestUpdate();
+      }).catch((error) => {
+        if (generation !== this._contextGeneration) return;
+        const description = error instanceof Error
+          ? error.message
+          : String(error);
+        this._errorDetails = {
+          description,
+          source: "cf-iframe context",
+          lineno: 0,
+          colno: 0,
+          stacktrace: error instanceof Error
+            ? error.stack ?? description
+            : description,
+        };
+        this.requestUpdate();
+      });
+    }
   }
 
   protected override willUpdate(changed: PropertyValues<this>) {
-    if (changed.has("context") || changed.has("resourceKinds")) {
-      const generation = ++this._contextGeneration;
-      if (!this.context) {
-        this._contextBridge = { resources: {} };
-        this._contextReady = true;
-      } else if (!isCellHandle<Record<string, unknown>>(this.context)) {
-        this._contextBridge = createCellContextBridge(this.context);
-        this._contextReady = true;
-      } else {
-        const context = this.context;
-        this._contextBridge = { resources: {} };
-        this._contextReady = false;
-        void resolveCellContextBridge(
-          context,
-          this.resourceKinds ?? {},
-        ).then((bridge) => {
-          if (generation !== this._contextGeneration) return;
-          this._contextBridge = bridge;
-          this._contextReady = true;
-          this.requestUpdate();
-        }).catch((error) => {
-          if (generation !== this._contextGeneration) return;
-          const description = error instanceof Error
-            ? error.message
-            : String(error);
-          this._errorDetails = {
-            description,
-            source: "cf-iframe context",
-            lineno: 0,
-            colno: 0,
-            stacktrace: error instanceof Error
-              ? error.stack ?? description
-              : description,
-          };
-          this.requestUpdate();
-        });
-      }
+    if (
+      changed.has("bridge") || changed.has("context") ||
+      changed.has("resourceKinds") ||
+      (changed.has("src") &&
+        this._errorDetails?.source === "cf-iframe context")
+    ) {
+      this.prepareContextBridge();
     }
   }
 

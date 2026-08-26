@@ -1094,8 +1094,9 @@ export class RuntimeProcessor {
   // blind-vs-CAS decision is made by METHOD — which request type the client sent
   // — not by inspecting the value's shape. Both carry the whole already-resolved
   // value on the wire.
-  handleCellSet(request: CellSetRequest): void {
-    this.applyCellWrite(request, /* blind */ true);
+  handleCellSet(request: CellSetRequest): void | Promise<void> {
+    const commit = this.applyCellWrite(request, /* blind */ true);
+    if (request.awaitCommit) return this.requireCellCommit(commit);
   }
 
   handleCellPush(request: CellPushRequest): void {
@@ -1336,7 +1337,7 @@ export class RuntimeProcessor {
   applyCellWrite(
     request: CellSetRequest | CellPushRequest,
     blind: boolean,
-  ): void {
+  ) {
     const tx = this.runtime.edit();
     const cell = getCell(this.runtime, request.cell);
     const value = mapCellRefsToSigilLinks(request.value);
@@ -1359,19 +1360,25 @@ export class RuntimeProcessor {
     cell.withTx(tx).set(value);
     if (blind) unmarkUiInputBlindWriteTx(tx);
     this.runtime.prepareTxForCommit(tx);
-    // Local visibility is established by commit(); the promise tracks remote
-    // confirmation/rollback and must not block cell IPC.
-    tx.commit();
+    // Local visibility is established by commit(). Ordinary UI writes retain
+    // fire-and-forget latency; capability writes can await this same promise.
+    return tx.commit();
   }
 
-  handleCellSend(request: CellSendRequest): void {
+  handleCellSend(request: CellSendRequest): void | Promise<void> {
     const tx = this.runtime.edit();
     const cell = getCell(this.runtime, request.cell);
     cell.withTx(tx).send(mapCellRefsToSigilLinks(request.event));
     this.runtime.prepareTxForCommit(tx);
-    // Local visibility is established by commit(); the promise tracks remote
-    // confirmation/rollback and must not block cell IPC.
-    tx.commit();
+    const commit = tx.commit();
+    if (request.awaitCommit) return this.requireCellCommit(commit);
+  }
+
+  private async requireCellCommit(
+    commit: ReturnType<ReturnType<Runtime["edit"]>["commit"]>,
+  ): Promise<void> {
+    const result = await commit;
+    if (result.error) throw new Error(result.error.message);
   }
 
   handleCellSubscribe(request: CellSubscribeRequest): BooleanResponse {
@@ -1532,7 +1539,9 @@ export class RuntimeProcessor {
   }
 
   async handleSqliteExec(request: SqliteExecRequest): Promise<void> {
-    await getCell(this.runtime, request.cell).pull();
+    const source = getCell(this.runtime, request.cell);
+    await source.pull();
+    this.readSqliteDbRef(source);
     const params = request.params === undefined
       ? undefined
       : sqliteParamsForRuntime(this.runtime, request.params) as
@@ -1565,6 +1574,17 @@ export class RuntimeProcessor {
       throw new TypeError(
         "SQLite operations require a valid SqliteDb cell handle.",
       );
+    }
+    if (
+      raw.scope !== undefined && raw.scope !== "space" &&
+      raw.scope !== "user" && raw.scope !== "session"
+    ) {
+      throw new TypeError(
+        `Invalid SQLite database scope: ${String(raw.scope)}`,
+      );
+    }
+    if (raw.owner !== undefined && typeof raw.owner !== "string") {
+      throw new TypeError("Invalid SQLite database owner.");
     }
     const materialized = cell.asSchema<{
       tables?: FabricValue;

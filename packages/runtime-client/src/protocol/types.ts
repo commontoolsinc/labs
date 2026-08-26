@@ -819,6 +819,8 @@ export type CellSetRequest = BaseRequest & {
    * The value to store, whole and already resolved.
    */
   value: WireCellValue;
+  /** Wait for commit confirmation and return a refusal to the caller. */
+  awaitCommit?: boolean;
 };
 
 /**
@@ -858,6 +860,8 @@ export type CellSendRequest = BaseRequest & {
    * The event to deliver.
    */
   event: WireCellValue;
+  /** Wait for commit confirmation and return a refusal to the caller. */
+  awaitCommit?: boolean;
 };
 
 /**

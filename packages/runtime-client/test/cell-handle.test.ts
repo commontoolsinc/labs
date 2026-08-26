@@ -853,9 +853,49 @@ describe("cell-handle", () => {
     });
 
     it("rejects a strict set when the runtime refuses the write", async () => {
-      const cell = new CellHandle(runtimeWith(false), ref);
+      const cell = new CellHandle(runtimeWith(false), ref, { n: 0 });
+      const updates: unknown[] = [];
+      const unsubscribe = cell.subscribe((value) => {
+        updates.push(value);
+      });
+      updates.length = 0;
 
       await expect(cell.setStrict({ n: 1 })).rejects.toThrow("aborted");
+      expect(cell.get()).toEqual({ n: 0 });
+      expect(updates).toEqual([]);
+      unsubscribe();
+    });
+
+    it("marks strict writes as commit-confirmed requests", async () => {
+      const requests: unknown[] = [];
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: unknown) => {
+            requests.push(request);
+            return Promise.resolve({});
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle(runtime, ref, { n: 0 });
+
+      await cell.setStrict({ n: 1 });
+      await cell.sendStrict({ n: 2 });
+
+      expect(requests).toEqual([{
+        type: RequestType.CellSet,
+        cell: ref,
+        value: { n: 1 },
+        awaitCommit: true,
+      }, {
+        type: RequestType.CellSend,
+        cell: ref,
+        event: { n: 2 },
+        awaitCommit: true,
+      }]);
+      expect(cell.get()).toEqual({ n: 0 });
     });
   });
 

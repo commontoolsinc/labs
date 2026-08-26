@@ -323,6 +323,35 @@ ${GUEST_EPILOG}`;
   }
 });
 
+Deno.test("same-task reparenting keeps the bridge host alive", async () => {
+  cleanupFixtures();
+  try {
+    const context = new ContextShim();
+    const body = `${GUEST_PROLOG}
+onUpdate = (key, value) => {
+  if (key === "value") write("seen", value);
+};
+subscribe("value");
+write("ready", true);
+${GUEST_EPILOG}`;
+    const iframe = await render(body, context);
+    await waitForContextValue(
+      context,
+      iframe,
+      "ready",
+      (value) => value === true,
+    );
+    assertEquals(context.callbacks.length, 1);
+    const newParent = document.createElement("div");
+    iframe.parentElement!.append(newParent);
+    newParent.append(iframe);
+    await Promise.resolve();
+    assertEquals(context.callbacks.length, 1);
+  } finally {
+    cleanupFixtures();
+  }
+});
+
 Deno.test("a second ready from the frame already in hand is refused", async () => {
   cleanupFixtures();
   try {

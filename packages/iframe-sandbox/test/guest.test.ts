@@ -182,6 +182,33 @@ describe("guest", () => {
       }
     });
 
+    it("preserves an authoritative update that precedes a write response", async () => {
+      const fabric = connectFabric();
+      try {
+        const host = handOffPort();
+        const cell = fabric.cell<number>("count");
+        cell.subscribe(() => {});
+        const subscribe = await receive(host);
+        send(host, response(subscribe.id));
+
+        const writing = cell.write(2);
+        const write = await receive(host);
+        send(host, {
+          protocol: BRIDGE_PROTOCOL,
+          version: BRIDGE_VERSION,
+          type: "event",
+          subscription: subscribe.subscription!,
+          value: 3,
+        });
+        send(host, response(write.id));
+        await writing;
+
+        expect(cell.getSnapshot()).toEqual({ status: "ready", value: 3 });
+      } finally {
+        fabric.disconnect();
+      }
+    });
+
     it("rejects pending work when disconnected", async () => {
       const fabric = connectFabric();
       const pending = fabric.describe();

@@ -130,6 +130,112 @@ describe("Fabric iframe bridge", () => {
     }
   });
 
+  it("refuses inherited resource and method names", async () => {
+    const inheritedResources = Object.create({
+      inherited: {
+        kind: "service",
+        methods: { run: () => "wrong" },
+      },
+    }) as Record<string, {
+      kind: "service";
+      methods: Record<string, () => string>;
+    }>;
+    const methods = Object.create({ inherited: () => "wrong" }) as Record<
+      string,
+      () => string
+    >;
+    methods.own = () => "right";
+    inheritedResources.service = { kind: "service", methods };
+    const channel = new MessageChannel();
+    const host = new FabricBridgeHost(
+      createFabricBridge(inheritedResources),
+      channel.port1,
+    );
+    const client = connectFabric();
+    handOff(channel.port2);
+
+    try {
+      await expect(client.call("inherited", "run")).rejects.toMatchObject({
+        code: "resource-not-found",
+      });
+      await expect(client.call("service", "inherited")).rejects.toMatchObject({
+        code: "method-not-supported",
+      });
+      await expect(client.call("service", "own")).resolves.toBe("right");
+    } finally {
+      client.disconnect();
+      host.disconnect();
+    }
+  });
+
+  it("cancels host subscriptions when the guest disconnects", async () => {
+    const subscribed = Promise.withResolvers<void>();
+    const cancelled = Promise.withResolvers<void>();
+    const channel = new MessageChannel();
+    const host = new FabricBridgeHost(
+      createFabricBridge({
+        watched: {
+          kind: "cell",
+          subscribe: () => {
+            subscribed.resolve();
+            return () => cancelled.resolve();
+          },
+        },
+      }),
+      channel.port1,
+    );
+    const client = connectFabric();
+    handOff(channel.port2);
+
+    client.subscribeResource("watched", () => {});
+    await subscribed.promise;
+    client.disconnect();
+    await cancelled.promise;
+
+    host.disconnect();
+  });
+
+  it("continues host teardown when one cancellation throws", async () => {
+    const firstSubscribed = Promise.withResolvers<void>();
+    const secondSubscribed = Promise.withResolvers<void>();
+    let secondCancelled = false;
+    const channel = new MessageChannel();
+    const host = new FabricBridgeHost(
+      createFabricBridge({
+        first: {
+          kind: "cell",
+          subscribe: () => {
+            firstSubscribed.resolve();
+            return () => {
+              throw new Error("cancel failed");
+            };
+          },
+        },
+        second: {
+          kind: "cell",
+          subscribe: () => {
+            secondSubscribed.resolve();
+            return () => {
+              secondCancelled = true;
+            };
+          },
+        },
+      }),
+      channel.port1,
+    );
+    const client = connectFabric();
+    handOff(channel.port2);
+
+    client.subscribeResource("first", () => {});
+    await firstSubscribed.promise;
+    client.subscribeResource("second", () => {});
+    await secondSubscribed.promise;
+
+    expect(() => host.disconnect()).not.toThrow();
+    expect(secondCancelled).toBe(true);
+    client.disconnect();
+  });
+
   it("normalizes resource errors before sending them to the guest", async () => {
     const channel = new MessageChannel();
     const host = new FabricBridgeHost(
