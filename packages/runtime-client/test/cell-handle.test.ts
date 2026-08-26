@@ -1070,6 +1070,31 @@ describe("cell-handle", () => {
       expect(cell.get()).toEqual({ n: 1 });
     });
 
+    it("preserves nested cell handles in snapshotted sets", async () => {
+      const requests: Array<{ value?: unknown }> = [];
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: { value?: unknown }) => {
+            requests.push(request);
+            return Promise.resolve({});
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const linked = new CellHandle(runtime, {
+        ...ref,
+        id: "of:linked" as CellRef["id"],
+      });
+      const cell = new CellHandle<{ linked: CellHandle }>(runtime, ref);
+
+      await cell.set({ linked });
+
+      expect(cell.get()?.linked).toBe(linked);
+      expect(requests[0].value).toEqual({ linked: linked.ref() });
+    });
+
     it("marks strict writes as commit-confirmed requests", async () => {
       const requests: unknown[] = [];
       const runtime = {

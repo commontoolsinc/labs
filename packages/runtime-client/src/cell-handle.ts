@@ -175,7 +175,9 @@ export class CellHandle<T = unknown> {
     this.#requireSchema("set");
     // A plain set is a blind last-write-wins overwrite (CellSet).
     const serialized = this.#serializeWrite(value);
-    const snapshot = CellHandle.deserialize<T>(this, serialized) as T;
+    const snapshot = CellHandle.snapshotClientValue(
+      value as ClientCellValue,
+    ) as T;
     this.#writeGeneration++;
     this.#publishValue(snapshot);
     await this.#enqueueOperation(async (queue) => {
@@ -192,7 +194,9 @@ export class CellHandle<T = unknown> {
   async setStrict(value: T): Promise<void> {
     this.#requireSchema("setStrict");
     const serialized = this.#serializeWrite(value);
-    const snapshot = CellHandle.deserialize<T>(this, serialized) as T;
+    const snapshot = CellHandle.snapshotClientValue(
+      value as ClientCellValue,
+    ) as T;
     const writeGeneration = this.#writeGeneration;
     await this.#enqueueOperation(async (queue) => {
       const published = await this.#sendStrictWrite(
@@ -363,12 +367,10 @@ export class CellHandle<T = unknown> {
     this: CellHandle<U[]>,
     ...values: T extends (infer U)[] ? U[] : never
   ): void {
-    const snapshots = values.map((value) =>
-      CellHandle.deserialize(
-        this,
-        CellHandle.serialize(value as ClientCellValue),
-      )
-    ) as U[];
+    const snapshots = values.map((value) => {
+      CellHandle.serialize(value as ClientCellValue);
+      return CellHandle.snapshotClientValue(value as ClientCellValue);
+    }) as U[];
     const append = (queue: CellOperationQueue) => {
       const current = (queue.hasValue ? queue.value : this.#value) as unknown[];
       if (!Array.isArray(current)) {
@@ -879,6 +881,26 @@ export class CellHandle<T = unknown> {
     throw new Error(
       `Cannot send a \`${typeof value}\` on this connection: ${String(value)}`,
     );
+  }
+
+  private static snapshotClientValue(
+    value: ClientCellValue,
+  ): ClientCellValue {
+    if (isCellHandle(value) || value instanceof FabricSpecialObject) {
+      return value;
+    }
+    if (Array.isArray(value)) {
+      return value.map((member) => CellHandle.snapshotClientValue(member));
+    }
+    if (isObjectOrArray(value)) {
+      return Object.fromEntries(
+        Object.entries(value).map(([key, member]) => [
+          key,
+          CellHandle.snapshotClientValue(member),
+        ]),
+      );
+    }
+    return value;
   }
 }
 
