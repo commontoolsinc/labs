@@ -8480,11 +8480,6 @@ function normalizePieceSourceOrigin(
 }
 
 /**
- * Verify that a source transition can restore the current source. Recovery
- * paths may omit an unavailable legacy baseline and retain the displaced
- * executable identity outside the restorable history instead.
- */
-/**
  * What a source transition throws when the piece is no longer on the state
  * the transition was prepared against — checked before the write and again
  * inside the transaction that commits it.
@@ -8496,6 +8491,11 @@ function normalizePieceSourceOrigin(
 export const PIECE_SOURCE_MOVED =
   "piece source changed while the source transition was being prepared";
 
+/**
+ * Verify that a source transition can restore the current source. Recovery
+ * paths may omit an unavailable legacy baseline and retain the displaced
+ * executable identity outside the restorable history instead.
+ */
 export async function preparePieceSourceTransitionBaseline(
   runtime: Runtime,
   resultCell: Cell<unknown>,

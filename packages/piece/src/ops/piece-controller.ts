@@ -397,8 +397,9 @@ export class PieceSourceChangedError extends Error {
  * operational failure of unknown state rather than as a row to refuse. The
  * message is matched against the runner's own exported constant, so the two
  * cannot drift into disagreeing about what this is.
+ *
+ * @internal Exported for a focused contract test; not part of the Piece API.
  */
-/** @internal Exported for a focused contract test; not part of the Piece API. */
 export function pinnedSourceMoved(
   error: unknown,
   pinned: { identity: string; symbol: string } | undefined,

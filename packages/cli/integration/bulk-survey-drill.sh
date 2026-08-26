@@ -785,10 +785,14 @@ else
   bad "re-staging the board before the accepted reversal failed"
   sed 's/^/  | /' "$WORK/accepted-restage.err"
 fi
-TARGET_IDENTITY=$(tail -n +2 "$RETARGET_PLAN" |
-  jq -r 'select(has("op")) | .op.patternIdentity' | head -1)
-PRIOR_IDENTITY=$(tail -n +2 "$RETARGET_PLAN" |
-  jq -r 'select(has("op")) | .expect.patternIdentity' | head -1)
+# Both halves of the reference, the way the apply engine compares one: two
+# patterns a module exports share an identity and differ only in symbol, so
+# an identity-only check would call the MemberAlias state of step 17 a match.
+TARGET_REFERENCE=$(tail -n +2 "$RETARGET_PLAN" | jq -rs \
+  'map(select(has("op"))) | first | [.op.patternIdentity, .op.symbol] | @tsv')
+PRIOR_REFERENCE=$(tail -n +2 "$RETARGET_PLAN" | jq -rs \
+  'map(select(has("op"))) | first
+   | [.expect.patternIdentity, .expect.symbol] | @tsv')
 ACCEPTED=$($CF piece rollback -q $ARGS --plan "$UNRETAINED_PLAN" \
   --accept-unretained "$SECOND_MEMBER" --apply --json \
   2>"$WORK/rollback-accepted.err" | sed 's/^fvj1://' |
@@ -797,16 +801,18 @@ ACCEPTED=$($CF piece rollback -q $ARGS --plan "$UNRETAINED_PLAN" \
 check "$(printf '%s\t%s\ttrue\tapplied' "$((MEMBERS_NOW - 1))" \
   "$((MEMBERS_NOW - 1))")" "$ACCEPTED" \
   "every row but the accepted one was reversed, and all of them wrote"
-# The point of the acceptance, asserted by identity rather than by a count:
+# The point of the acceptance, asserted by reference rather than by a count:
 # the accepted piece stayed where the move left it.
 ACCEPTED_NOW=$($CF piece inspect --pattern-identity --json \
-  --piece "$SECOND_MEMBER" $ARGS 2>/dev/null | jq -r '.patternIdentity')
-check "$TARGET_IDENTITY" "$ACCEPTED_NOW" \
-  "the accepted piece was left on the target, not restored"
+  --piece "$SECOND_MEMBER" $ARGS 2>/dev/null |
+  jq -r '[.patternIdentity, .symbol] | @tsv')
+check "$TARGET_REFERENCE" "$ACCEPTED_NOW" \
+  "the accepted piece was left on the exact target reference, not restored"
 OTHER_NOW=$($CF piece inspect --pattern-identity --json \
-  --piece "$FIRST_MEMBER" $ARGS 2>/dev/null | jq -r '.patternIdentity')
-check "$PRIOR_IDENTITY" "$OTHER_NOW" \
-  "every other piece was returned to its recorded reference"
+  --piece "$FIRST_MEMBER" $ARGS 2>/dev/null |
+  jq -r '[.patternIdentity, .symbol] | @tsv')
+check "$PRIOR_REFERENCE" "$OTHER_NOW" \
+  "every other piece returned to the exact reference its row recorded"
 if grep -q "accepted as unrollbackable: $SECOND_MEMBER" \
   "$WORK/rollback-accepted.err"; then
   ok "the accepted piece is named on the run that carried it"
