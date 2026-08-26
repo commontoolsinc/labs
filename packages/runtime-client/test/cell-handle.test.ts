@@ -160,6 +160,42 @@ describe("cell-handle", () => {
         new Uint8Array([4, 5, 6]),
       );
     });
+
+    it("serializes linked and nested SQLite bind values", async () => {
+      const requests: unknown[] = [];
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: unknown) => {
+            requests.push(structuredClone(request));
+            return Promise.resolve({});
+          },
+        }),
+      } as unknown as RuntimeClient;
+      const database = new CellHandle(runtime, ref);
+      const linkedRef = { ...ref, id: "of:linked" as CellRef["id"] };
+      const linked = new CellHandle(runtime, linkedRef);
+      const bytes = new FabricBytes(new Uint8Array([7, 8, 9]));
+
+      await database.execSqlite(
+        "SELECT :linked, :nested",
+        {
+          linked,
+          nested: { bytes, links: [linked] },
+        },
+      );
+
+      const params = (requests[0] as {
+        params: Record<string, RealmEncodedValue>;
+      }).params;
+      expect(fabricFromRealmValue(params.linked!)).toEqual(linkedRef);
+      const nested = fabricFromRealmValue(params.nested!) as {
+        bytes: FabricBytes;
+        links: CellRef[];
+      };
+      expect(nested.bytes).toBeInstanceOf(FabricBytes);
+      expect(nested.bytes.slice()).toEqual(new Uint8Array([7, 8, 9]));
+      expect(nested.links).toEqual([linkedRef]);
+    });
   });
 
   describe("CellHandle CFC label IPC", () => {

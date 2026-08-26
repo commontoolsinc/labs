@@ -63,6 +63,7 @@ import {
   type IOperationStorageCapability,
   isCell,
   isCellResult,
+  markDurableReadTx,
   markRendererInputTx,
   markUiInputBlindWriteTx,
   normalizeSpaceHost,
@@ -1601,19 +1602,26 @@ export class RuntimeProcessor {
 
   async handleSqliteExec(request: SqliteExecRequest): Promise<void> {
     const source = getCell(this.runtime, request.cell);
-    await this.pullSqliteDbRef(source);
+    const db = await this.pullSqliteDbRef(source);
     const params = request.params === undefined
       ? undefined
       : sqliteParamsForRuntime(this.runtime, request.params);
     const result = await this.runtime.editWithRetry((tx) => {
+      markDurableReadTx(tx);
       const cell = getCell(this.runtime, request.cell).withTx(
         tx,
-      ) as unknown as {
+      ) as unknown as Cell<unknown> & {
         exec(
           sql: string,
           params?: ReadonlyArray<unknown> | Record<string, unknown>,
         ): void;
       };
+      if (cell.getRaw({ lastNode: "value" }) === undefined) {
+        cell.asSchema<SqliteDbRef>({
+          type: "object",
+          additionalProperties: true,
+        }).set(db);
+      }
       cell.exec(request.sql, params);
     });
     if (result.error) throw new Error(result.error.message);

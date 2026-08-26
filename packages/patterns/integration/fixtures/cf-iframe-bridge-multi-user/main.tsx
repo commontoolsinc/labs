@@ -25,8 +25,6 @@ export interface BridgeFixtureInput {
   shared?: PerSpace<TextCell>;
   user?: PerUser<TextCell>;
   session?: PerSession<TextCell>;
-  command?: PerSession<TextCell>;
-  status?: PerSession<TextCell>;
   databaseRows?: PerSession<TextCell>;
   userDatabaseRows?: PerSession<TextCell>;
   sessionDatabaseRows?: PerSession<TextCell>;
@@ -37,8 +35,6 @@ interface IframeContextInput {
   shared: TextCell;
   user: TextCell;
   session: TextCell;
-  command: TextCell;
-  status: TextCell;
   databaseRows: TextCell;
   userDatabaseRows: TextCell;
   sessionDatabaseRows: TextCell;
@@ -72,7 +68,10 @@ const GUEST_HTML = `<!doctype html>
   let port;
   let nextRequestId = 0;
   let nextSubscriptionId = 0;
-  let lastCommandId = "";
+  let readyError;
+  let markReady;
+  const ready = new Promise((resolve) => markReady = resolve);
+  const generation = crypto.randomUUID();
   const pending = new Map();
   const subscriptions = new Map();
   const queued = [];
@@ -130,34 +129,41 @@ const GUEST_HTML = `<!doctype html>
     );
   };
 
-  const handleCommand = async (raw) => {
-    if (!raw) return;
-    const command = JSON.parse(raw);
-    if (!command.id || command.id === lastCommandId) return;
-    lastCommandId = command.id;
-    try {
-      await write("command", "");
-      if (command.operation === "write") {
-        await write(command.resource, command.value);
-      } else if (command.operation === "sqlite-insert") {
-        const database = command.database || "database";
-        await call(database, "exec", {
-          sql: "INSERT INTO bridge_items (value) VALUES (?)",
-          params: [command.value],
-        });
-      } else if (command.operation === "sqlite-query") {
-        await refreshRows(command.database || "database");
-      } else if (command.operation === "clear-database-rows") {
-        await Promise.all(
-          Object.values(databaseRows).map((resource) => write(resource, "")),
-        );
-      } else {
-        throw new Error("Unknown command: " + command.operation);
-      }
-      await write("status", "done:" + command.id);
-    } catch (error) {
-      await write("status", "error:" + command.id + ":" + error.message);
+  const handleCommand = async (command) => {
+    if (command.operation === "ping") {
+      await ready;
+      if (readyError) throw readyError;
+    } else if (command.operation === "write") {
+      await write(command.resource, command.value);
+    } else if (command.operation === "sqlite-insert") {
+      const database = command.database || "database";
+      await call(database, "exec", {
+        sql: "INSERT INTO bridge_items (value) VALUES (?)",
+        params: [command.value],
+      });
+    } else if (command.operation === "sqlite-query") {
+      await refreshRows(command.database || "database");
+    } else if (command.operation === "clear-database-rows") {
+      await Promise.all(
+        Object.values(databaseRows).map((resource) => write(resource, "")),
+      );
+    } else {
+      throw new Error("Unknown command: " + command.operation);
     }
+  };
+
+  const reportError = (error) => {
+    document.querySelector("#guest-state").textContent = error.message;
+    globalThis.parent.postMessage({
+      type: "error",
+      data: {
+        description: error.message,
+        source: "cf-iframe multi-user fixture",
+        lineno: 0,
+        colno: 0,
+        stacktrace: error.stack || String(error),
+      },
+    }, "*");
   };
 
   const accept = (message) => {
@@ -177,37 +183,55 @@ const GUEST_HTML = `<!doctype html>
     else entry.reject(new Error(message.error.message));
   };
 
-  globalThis.addEventListener("message", async (event) => {
+  globalThis.addEventListener("message", (event) => {
+    if (event.source !== globalThis.parent.parent) return;
+    if (event.data?.type === "cf-iframe-bridge-test-command") {
+      const command = event.data.command;
+      void handleCommand(command).then(
+        () => globalThis.parent.parent.postMessage({
+          type: "cf-iframe-bridge-test-result",
+          id: command.id,
+          generation,
+          ok: true,
+        }, "*"),
+        (error) => {
+          globalThis.parent.parent.postMessage({
+            type: "cf-iframe-bridge-test-result",
+            id: command.id,
+            generation,
+            ok: false,
+            error: error.message,
+          }, "*");
+          reportError(error);
+        },
+      );
+      return;
+    }
     if (
       port || event.data !== "common-iframe-sandbox:port" ||
-      !event.ports[0] || event.source !== globalThis.parent.parent
+      !event.ports[0]
     ) return;
     port = event.ports[0];
     port.onmessage = (portEvent) => accept(decode(portEvent.data));
     port.start();
     for (const message of queued.splice(0)) send(message);
 
-    try {
-      await subscribe("command", (value) => void handleCommand(value));
+    void (async () => {
       for (const database of Object.keys(databaseRows)) {
         await subscribe(database, () => void refreshRows(database));
       }
       await Promise.all(Object.keys(databaseRows).map(refreshRows));
-      await write("status", "ready");
       document.querySelector("#guest-state").textContent = "ready";
-    } catch (error) {
-      document.querySelector("#guest-state").textContent = error.message;
-      globalThis.parent.postMessage({
-        type: "error",
-        data: {
-          description: error.message,
-          source: "cf-iframe multi-user fixture",
-          lineno: 0,
-          colno: 0,
-          stacktrace: error.stack || String(error),
-        },
+      markReady();
+      globalThis.parent.parent.postMessage({
+        type: "cf-iframe-bridge-test-ready",
+        generation,
       }, "*");
-    }
+    })().catch((error) => {
+      readyError = error;
+      markReady();
+      reportError(error);
+    });
   });
 })();
 </script>
@@ -231,8 +255,6 @@ export default pattern<BridgeFixtureInput, BridgeFixtureOutput>((state) => {
     shared: state.shared,
     user: state.user,
     session: state.session,
-    command: state.command,
-    status: state.status,
     databaseRows: state.databaseRows,
     userDatabaseRows: state.userDatabaseRows,
     sessionDatabaseRows: state.sessionDatabaseRows,
@@ -245,7 +267,6 @@ export default pattern<BridgeFixtureInput, BridgeFixtureOutput>((state) => {
     '"></span>'
   );
   const reloadGuest = action(() => {
-    state.status.set("reloading");
     state.reloadRevision.set(state.reloadRevision.get() + 1);
   });
 
@@ -260,8 +281,6 @@ export default pattern<BridgeFixtureInput, BridgeFixtureOutput>((state) => {
         <div id="bridge-session-database-rows">
           {context.sessionDatabaseRows}
         </div>
-        <div id="bridge-status">{context.status}</div>
-        <cf-input id="bridge-command" $value={context.command} />
         <cf-button id="bridge-reload" onClick={reloadGuest}>
           Reload guest
         </cf-button>

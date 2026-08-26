@@ -2,8 +2,8 @@
  * Browser-level multiplayer coverage for cf-iframe's CellHandle bridge.
  *
  * Alice opens one piece in two independent browser sessions and Bob opens the
- * same piece under a different identity. Every mutation is commanded from the
- * shell page but performed inside its sandboxed iframe. Sibling readouts then
+ * same piece under a different identity. Every mutation is sent directly to
+ * the sandboxed guest and performed through its bridge. Sibling readouts then
  * expose what each runtime sees, covering the real guest port, cf-iframe cell
  * adapter, scoped storage, runtime-client IPC, and SQLite bridge together.
  */
@@ -23,7 +23,6 @@ import {
 } from "./pieces-controller.ts";
 import {
   clickCfButton,
-  fillCfInput,
   waitForRuntimeIdle,
   waitForSettledText,
 } from "./cfc-browser-helpers.ts";
@@ -33,6 +32,7 @@ const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 type BridgeCommand = {
   id: string;
   operation:
+    | "ping"
     | "write"
     | "sqlite-insert"
     | "sqlite-query"
@@ -49,7 +49,12 @@ type BridgeValues = {
   databaseRows: string;
   userDatabaseRows: string;
   sessionDatabaseRows: string;
-  status: string;
+};
+
+type BridgeTestResult = {
+  generation: string;
+  ok: boolean;
+  error?: string;
 };
 
 type ContextHandleProbe = {
@@ -88,7 +93,6 @@ async function readBridgeValues(page: Page): Promise<BridgeValues> {
       databaseRows: text("#bridge-database-rows"),
       userDatabaseRows: text("#bridge-user-database-rows"),
       sessionDatabaseRows: text("#bridge-session-database-rows"),
-      status: text("#bridge-status"),
     };
   });
 }
@@ -199,39 +203,155 @@ async function readContextHandleProbe(page: Page): Promise<ContextHandleProbe> {
   });
 }
 
-async function issueCommand(page: Page, command: BridgeCommand): Promise<void> {
-  await fillCfInput(page, "#bridge-command", JSON.stringify(command));
-  await waitForBridgeStatus(page, `done:${command.id}`);
-  expect((await readBridgeValues(page)).status).toBe(`done:${command.id}`);
+async function installBridgeTestHarness(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    type TestState = {
+      results: Record<string, BridgeTestResult>;
+      readyGeneration?: string;
+      revision: number;
+    };
+    const host = globalThis as typeof globalThis & {
+      __cfIframeBridgeTest?: TestState;
+    };
+    if (host.__cfIframeBridgeTest) return;
+    const state: TestState = { results: {}, revision: 0 };
+    host.__cfIframeBridgeTest = state;
+    globalThis.addEventListener("message", (event) => {
+      if (event.data?.type === "cf-iframe-bridge-test-result") {
+        state.results[event.data.id] = {
+          generation: event.data.generation,
+          ok: event.data.ok,
+          ...(event.data.error && { error: event.data.error }),
+        };
+      } else if (event.data?.type === "cf-iframe-bridge-test-ready") {
+        state.readyGeneration = event.data.generation;
+      } else {
+        return;
+      }
+      document.documentElement.dataset.cfIframeBridgeEvent = String(
+        ++state.revision,
+      );
+    });
+  });
 }
 
-async function waitForBridgeStatus(
+async function waitForGuestFrameLoaded(page: Page): Promise<void> {
+  await waitForCondition(
+    page,
+    (probe) =>
+      probe.collect("common-iframe-sandbox").some((element) =>
+        element.getAttribute("load-state") === "loaded"
+      ),
+  );
+}
+
+async function issueCommand(
   page: Page,
-  expected: string,
+  command: BridgeCommand,
+): Promise<string> {
+  await installBridgeTestHarness(page);
+  await page.evaluate((command) => {
+    const visit = (root: Document | ShadowRoot): Element | undefined => {
+      for (const element of root.querySelectorAll("*")) {
+        if (element.matches("common-iframe-sandbox")) return element;
+        if (element.shadowRoot) {
+          const match = visit(element.shadowRoot);
+          if (match) return match;
+        }
+      }
+      return undefined;
+    };
+    const sandbox = visit(document);
+    const outer = sandbox?.shadowRoot?.querySelector("iframe") as
+      | HTMLIFrameElement
+      | undefined;
+    const guest = outer?.contentWindow?.frames[0];
+    if (!guest) throw new Error("cf-iframe guest window is unavailable");
+    guest.postMessage({
+      type: "cf-iframe-bridge-test-command",
+      command,
+    }, "*");
+  }, { args: [command] });
+  const result = await waitForCondition(
+    page,
+    (probe, commandId) => {
+      const host = globalThis as typeof globalThis & {
+        __cfIframeBridgeTest?: {
+          results: Record<string, BridgeTestResult>;
+        };
+      };
+      const commandResult = host.__cfIframeBridgeTest?.results[commandId];
+      if (commandResult) return commandResult;
+      const error = probe.collect(".error-modal .error-content")[0];
+      return error
+        ? {
+          generation: "",
+          ok: false,
+          error: probe.deepText(error).trim(),
+        }
+        : false;
+    },
+    { args: [command.id] },
+  );
+  if (!result?.ok) {
+    const context = await readContextHandleProbe(page);
+    throw new Error(
+      `cf-iframe command ${JSON.stringify(command.id)} failed: ` +
+        `${result?.error ?? "unknown error"}\nContext probe: ` +
+        JSON.stringify(context, null, 2),
+    );
+  }
+  return result.generation;
+}
+
+async function waitForGuestReload(
+  page: Page,
+  previousGeneration: string,
 ): Promise<void> {
   const result = await waitForCondition(
     page,
-    (probe, expectedStatus) => {
-      const status = probe.collect("#bridge-status")[0];
-      const statusText = status ? probe.deepText(status).trim() : "";
-      if (statusText === expectedStatus) {
-        return { status: statusText, error: "" };
-      }
+    (probe, oldGeneration) => {
+      const host = globalThis as typeof globalThis & {
+        __cfIframeBridgeTest?: { readyGeneration?: string };
+      };
+      const generation = host.__cfIframeBridgeTest?.readyGeneration;
+      if (generation && generation !== oldGeneration) return { error: "" };
       const error = probe.collect(".error-modal .error-content")[0];
-      if (error) {
-        return { status: statusText, error: probe.deepText(error).trim() };
-      }
-      return false;
+      return error ? { error: probe.deepText(error).trim() } : false;
     },
-    { args: [expected] },
+    { args: [previousGeneration] },
   );
   if (result?.error) {
-    const context = await readContextHandleProbe(page);
-    throw new Error(
-      `cf-iframe reported an error while waiting for status ` +
-        `${JSON.stringify(expected)}: ${result.error}\nContext probe: ` +
-        JSON.stringify(context, null, 2),
-    );
+    throw new Error(`cf-iframe reload failed: ${result.error}`);
+  }
+}
+
+async function waitForBridgeRowsEmpty(page: Page): Promise<void> {
+  const result = await waitForCondition(
+    page,
+    async (probe) => {
+      const settle = (globalThis as typeof globalThis & {
+        commonfabric?: { viewSettled?: () => Promise<void> };
+      }).commonfabric?.viewSettled;
+      if (!settle) return false;
+      await settle();
+      const selectors = [
+        "#bridge-database-rows",
+        "#bridge-user-database-rows",
+        "#bridge-session-database-rows",
+      ];
+      if (
+        selectors.every((selector) => {
+          const element = probe.collect(selector)[0];
+          return element && probe.deepText(element).trim() === "";
+        })
+      ) return { error: "" };
+      const error = probe.collect(".error-modal .error-content")[0];
+      return error ? { error: probe.deepText(error).trim() } : false;
+    },
+  );
+  if (result?.error) {
+    throw new Error(`cf-iframe row clearing failed: ${result.error}`);
   }
 }
 
@@ -336,8 +456,11 @@ describe("cf-iframe bridge with multiple users", () => {
       })
     ));
     await Promise.all(pages.map((page) => waitForRuntimeIdle(page)));
-    await Promise.all(
-      pages.map((page) => waitForBridgeStatus(page, "ready")),
+    await Promise.all(pages.map((page) => waitForGuestFrameLoaded(page)));
+    const guestGenerations = await Promise.all(
+      pages.map((page, index) =>
+        issueCommand(page, { id: `ready-${index}`, operation: "ping" })
+      ),
     );
 
     expect((await aliceOneShell.state())?.identityDid).toBe(
@@ -352,7 +475,6 @@ describe("cf-iframe bridge with multiple users", () => {
         shared: "",
         user: "",
         session: "",
-        status: "ready",
       });
     }
 
@@ -398,6 +520,7 @@ describe("cf-iframe bridge with multiple users", () => {
       resource: "user",
       value: "bob-user",
     });
+    await waitForSettledText(pages[2], "#bridge-user", "bob-user");
     await issueCommand(pages[2], {
       id: "bob-user-barrier",
       operation: "write",
@@ -419,6 +542,11 @@ describe("cf-iframe bridge with multiple users", () => {
       resource: "session",
       value: "alice-session-one",
     });
+    await waitForSettledText(
+      pages[0],
+      "#bridge-session",
+      "alice-session-one",
+    );
     await issueCommand(pages[0], {
       id: "session-one-barrier",
       operation: "write",
@@ -439,6 +567,11 @@ describe("cf-iframe bridge with multiple users", () => {
       resource: "session",
       value: "alice-session-two",
     });
+    await waitForSettledText(
+      pages[1],
+      "#bridge-session",
+      "alice-session-two",
+    );
     await issueCommand(pages[1], {
       id: "session-two-barrier",
       operation: "write",
@@ -561,14 +694,10 @@ describe("cf-iframe bridge with multiple users", () => {
       id: "clear-database-readouts",
       operation: "clear-database-rows",
     });
-    expect(await readBridgeValues(pages[0])).toMatchObject({
-      databaseRows: "",
-      userDatabaseRows: "",
-      sessionDatabaseRows: "",
-    });
+    await waitForBridgeRowsEmpty(pages[0]);
 
     await clickCfButton(pages[0], "#bridge-reload");
-    await waitForBridgeStatus(pages[0], "ready");
+    await waitForGuestReload(pages[0], guestGenerations[0]);
     await Promise.all([
       waitForBridgeRowsContaining(pages[0], [aliceRow, bobRow]),
       waitForBridgeRowsContaining(
@@ -589,7 +718,6 @@ describe("cf-iframe bridge with multiple users", () => {
       databaseRows: durableDatabaseRows,
       userDatabaseRows: aliceUserDatabaseRow,
       sessionDatabaseRows: aliceSessionOneDatabaseRow,
-      status: "ready",
     });
     expect(await readBridgeValues(pages[1])).toEqual({
       shared: "space-after-session-two",
@@ -598,7 +726,6 @@ describe("cf-iframe bridge with multiple users", () => {
       databaseRows: durableDatabaseRows,
       userDatabaseRows: aliceUserDatabaseRow,
       sessionDatabaseRows: aliceSessionTwoDatabaseRow,
-      status: "done:sqlite-session-two",
     });
     expect(await readBridgeValues(pages[2])).toEqual({
       shared: "space-after-session-two",
@@ -607,7 +734,6 @@ describe("cf-iframe bridge with multiple users", () => {
       databaseRows: durableDatabaseRows,
       userDatabaseRows: bobUserDatabaseRow,
       sessionDatabaseRows: "",
-      status: "done:sqlite-user-bob",
     });
   });
 });

@@ -4468,6 +4468,40 @@ describe("runtime-processor", () => {
       expect(calls[0]?.[2]).toEqual([new Uint8Array([4, 5, 6])]);
     });
 
+    it("hydrates linked and nested SQLite bind values", async () => {
+      const calls: unknown[][] = [];
+      const processor = processorWith(
+        { id: "db-1", tables: { notes: {} } },
+        (...args) => {
+          calls.push(args);
+          return Promise.resolve({ rows: [] });
+        },
+      );
+      const linked = { ...ref, id: "of:linked" as CellRef["id"] };
+      const bytes = new FabricBytes(new Uint8Array([7, 8, 9]));
+
+      await processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT :linked, :nested",
+        params: {
+          linked: realmFromFabricValue(linked),
+          nested: realmFromFabricValue({
+            bytes,
+            links: [linked],
+          }),
+        },
+      });
+
+      const params = calls[0]?.[2] as Record<string, unknown>;
+      const nested = params.nested as {
+        bytes: Uint8Array;
+        links: unknown[];
+      };
+      expect(params.linked).toBe(nested.links[0]);
+      expect(nested.bytes).toEqual(new Uint8Array([7, 8, 9]));
+    });
+
     it("preserves reserved SQLite column names in query rows", async () => {
       const row = Object.fromEntries([
         ["constructor", "constructor-value"],
@@ -4617,6 +4651,7 @@ describe("runtime-processor", () => {
         getRaw: () => db,
         asSchema: () => ({ get: () => db }),
         withTx: (tx: unknown) => ({
+          getRaw: () => db,
           exec: (sql: string, params: unknown) => calls.push([tx, sql, params]),
         }),
       };
@@ -4649,13 +4684,71 @@ describe("runtime-processor", () => {
       ]]);
     });
 
+    it("materializes a scoped database handle in the same direct transaction as its first write", async () => {
+      const calls: unknown[][] = [];
+      const db = {
+        id: "db-user",
+        tables: { notes: {} },
+        scope: "user" as const,
+        owner: "did:key:alice",
+      };
+      const cell = {
+        pull: () => Promise.resolve(db),
+        getRaw: () => db,
+        asSchema: () => ({ get: () => db }),
+        withTx: (tx: unknown) => ({
+          getRaw: () => undefined,
+          asSchema: () => ({
+            set: (value: unknown) => calls.push([tx, "set", value]),
+          }),
+          exec: (sql: string, params: unknown) =>
+            calls.push([
+              tx,
+              "exec",
+              sql,
+              params,
+            ]),
+        }),
+      };
+      const tx = { id: "transaction" };
+      const processor = Object.assign(
+        Object.create(RuntimeProcessor.prototype),
+        {
+          runtime: {
+            getCellFromLink: () => cell,
+            editWithRetry: (edit: (tx: unknown) => void) => {
+              edit(tx);
+              return Promise.resolve({ ok: undefined });
+            },
+          },
+        },
+      ) as RuntimeProcessor;
+
+      await processor.handleSqliteExec({
+        type: RequestType.SqliteExec,
+        cell: ref,
+        sql: "INSERT INTO notes (title) VALUES (?)",
+        params: [realmFromFabricValue("First")],
+      });
+
+      expect(calls).toEqual([
+        [tx, "set", db],
+        [
+          tx,
+          "exec",
+          "INSERT INTO notes (title) VALUES (?)",
+          ["First"],
+        ],
+      ]);
+    });
+
     it("reports a transactional SQLite write failure", async () => {
       const db = { id: "db-1", tables: { notes: {} } };
       const cell = {
         pull: () => Promise.resolve(db),
         getRaw: () => db,
         asSchema: () => ({ get: () => db }),
-        withTx: () => ({ exec: () => {} }),
+        withTx: () => ({ getRaw: () => db, exec: () => {} }),
       };
       const processor = Object.assign(
         Object.create(RuntimeProcessor.prototype),

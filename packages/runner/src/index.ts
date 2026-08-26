@@ -132,6 +132,7 @@ export {
 export {
   type BlindStructuralTarget,
   isRendererInputTx,
+  markDurableReadTx,
   markRendererInputTx,
   markUiInputBlindWriteTx,
   setBlindStructuralTarget,
