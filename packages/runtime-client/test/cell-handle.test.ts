@@ -25,7 +25,7 @@ import {
   RequestType,
   type RuntimeClient,
 } from "@/mod.ts";
-import { cellRefToKey } from "@/shared/utils.ts";
+import { cellRefToIdentityKey, cellRefToKey } from "@/shared/utils.ts";
 
 describe("cell-handle", () => {
   it("pulls lazy producers before caching the returned value", async () => {
@@ -487,6 +487,24 @@ describe("cell-handle", () => {
       });
       expect(cellRefToKey(withPath(["."]))).not.toEqual(
         cellRefToKey(withPath(["", ""])),
+      );
+
+      // Operation ordering follows only the canonical address. Display schema
+      // and labels can differ between handles without splitting their queue.
+      const address = refFor("of:fid1:abc");
+      expect(cellRefToIdentityKey({
+        ...address,
+        schema: { type: "string" },
+      })).toEqual(cellRefToIdentityKey({
+        ...address,
+        schema: { type: "number" },
+        cfcLabelView: { version: 1, entries: [] },
+      }));
+      expect(cellRefToIdentityKey(address)).not.toEqual(
+        cellRefToIdentityKey({ ...address, scope: "user" }),
+      );
+      expect(cellRefToIdentityKey(withPath(["."]))).not.toEqual(
+        cellRefToIdentityKey(withPath(["", ""])),
       );
 
       // CellHandle.id() is the FULL schemed id — a true identity accessor.
@@ -1203,6 +1221,47 @@ describe("cell-handle", () => {
         RequestType.CellSet,
       ]);
       expect(cell.get()).toEqual({ n: 2 });
+    });
+
+    it("shares operation order across equivalent handles", async () => {
+      const writeResponse = Promise.withResolvers<void>();
+      const requests: RequestType[] = [];
+      const connection = {
+        request: (request: { type: RequestType }) => {
+          requests.push(request.type);
+          return request.type === RequestType.CellSet
+            ? writeResponse.promise.then(() => ({}))
+            : Promise.resolve({ value: { n: 1 } });
+        },
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+        signal: { aborted: false },
+      };
+      const runtime = {
+        [$conn]: () => connection,
+      } as unknown as RuntimeClient;
+      const first = new CellHandle(runtime, {
+        ...ref,
+        schema: { type: "object" },
+      }, { n: 0 });
+      const second = new CellHandle(runtime, {
+        ...ref,
+        schema: {
+          type: "object",
+          properties: { n: { type: "number" } },
+        },
+      }, { n: 0 });
+
+      const writing = first.setStrict({ n: 1 });
+      const reading = second.sync();
+      expect(requests).toEqual([RequestType.CellSet]);
+
+      writeResponse.resolve();
+      await Promise.all([writing, reading]);
+      expect(requests).toEqual([
+        RequestType.CellSet,
+        RequestType.CellGet,
+      ]);
     });
 
     it("waits for every queued strict write before later remote operations", async () => {

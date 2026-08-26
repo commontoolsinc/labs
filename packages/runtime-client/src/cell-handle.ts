@@ -43,10 +43,16 @@ import {
   type WireCellValue,
 } from "./protocol/mod.ts";
 import { $conn, type RuntimeClient } from "./runtime-client.ts";
+import { cellRefToIdentityKey } from "./shared/utils.ts";
 
 // Logger for schema warnings - disabled by default.
 // Enable via: globalThis.commonfabric.logger["cell-handle"].disabled = false
 const logger = getLogger("cell-handle", { enabled: false });
+
+const operationTails = new WeakMap<
+  RuntimeClient,
+  Map<string, Promise<void>>
+>();
 
 export const $onCellUpdate = Symbol("$onCellUpdate");
 
@@ -89,7 +95,6 @@ export class CellHandle<T = unknown> {
   >();
   #nextCallbackId = 0;
   #schemaWarned = false;
-  #operationTail: Promise<void> | undefined;
   #updateGeneration = 0;
 
   constructor(worker: RuntimeClient, cellRef: CellRef, value?: T) {
@@ -173,13 +178,21 @@ export class CellHandle<T = unknown> {
   }
 
   #enqueueOperation<R>(operation: () => Promise<R>): Promise<R> {
-    const result = this.#operationTail
-      ? this.#operationTail.then(operation)
-      : operation();
+    let tails = operationTails.get(this.#rt);
+    if (!tails) {
+      tails = new Map();
+      operationTails.set(this.#rt, tails);
+    }
+    const key = cellRefToIdentityKey(this.#ref);
+    const previous = tails.get(key);
+    const result = previous ? previous.then(operation) : operation();
     const tail = result.then(() => {}, () => {});
-    this.#operationTail = tail;
+    tails.set(key, tail);
     void tail.then(() => {
-      if (this.#operationTail === tail) this.#operationTail = undefined;
+      if (tails.get(key) === tail) {
+        tails.delete(key);
+        if (tails.size === 0) operationTails.delete(this.#rt);
+      }
     });
     return result;
   }
