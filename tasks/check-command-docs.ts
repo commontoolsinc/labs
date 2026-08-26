@@ -46,25 +46,37 @@ export const NO_PROSE = new Map<string, string>([
   ],
 ]);
 
-/** Where the gate looks for prose, relative to the repository root. */
+/**
+ * Where the gate looks for prose, relative to the repository root.
+ *
+ * Each root is somewhere a caller is sent to read: the documentation tree, the
+ * authored skills that people and agents share, and the README of the package
+ * implementing the command. Instructions addressed to one agent are not that —
+ * a command told to an agent mid-task is still a command no caller can look up
+ * — so `.claude/` is no more a root than the source is.
+ */
 export const DOC_ROOTS: readonly string[] = [
   "docs",
   "skills",
-  ".claude",
   "packages",
 ];
 
 /** Documents that record a moment rather than describing the system. */
-function isLiveDoc(path: string): boolean {
-  if (!path.endsWith(".md")) return false;
-  if (path.startsWith("docs/history/")) return false;
+export function isLiveDoc(path: string): boolean {
+  // A repository-relative path arrives spelled with the host's separator and
+  // every rule below is written in slashes, so the path is read in slashes
+  // whichever it arrives in. Untranslated, a Windows `docs\history\report.md`
+  // satisfies no rule here, so every one of them passes it through.
+  const doc = path.replaceAll("\\", "/");
+  if (!doc.endsWith(".md")) return false;
+  if (doc.startsWith("docs/history/")) return false;
   // A plan describes work that is intended, not a surface a reader can use
   // today, so naming a command there is not documenting it.
-  if (path.startsWith("docs/plans/")) return false;
-  if (path.includes("/node_modules/")) return false;
+  if (doc.startsWith("docs/plans/")) return false;
+  if (doc.includes("/node_modules/")) return false;
   // Under `packages/`, only the package's own README is documentation; the
   // rest is source, fixtures and generated output.
-  if (path.startsWith("packages/") && !path.endsWith("README.md")) return false;
+  if (doc.startsWith("packages/") && !doc.endsWith("README.md")) return false;
   return true;
 }
 

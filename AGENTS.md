@@ -268,7 +268,9 @@ Each of these gates fails CI on its own, and none of them run as part of
   obligation to update a document when behavior changes cannot fire for a
   command no document describes, so a command ships and its prose does not.
   Describe it in a live document — the README of the package that implements it
-  is the usual home — or record in the task why it needs none
+  is the usual home — or record in the task why it needs none. It fails the
+  other way round too, on a recorded reason naming a command the tree no longer
+  accepts: a command removed takes its entry with it
 - `deno task check-local-program` — a program built from local files by hand
   rather than through `resolveLocalProgram`, which silently drops any data files
   the caller attached

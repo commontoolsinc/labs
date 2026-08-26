@@ -145,8 +145,11 @@ answer composes into the next command.
   positional instead of on `--piece`: an address begins with `/` and a relative
   path never does, so the two cannot collide.
 - A canonical reference ending `#argument` selects the piece's arguments cell —
-  the same selection `--input` makes. The suffix needs the canonical form, so
-  with `--url` or a bare id, `--input` is the spelling that reaches it.
+  the same selection `--input` makes, and it is accepted exactly where `--input`
+  is: `cf get`, `cf set`, and `cf piece get-label|set-label`. A command that
+  takes no `--input` refuses the suffix rather than ignoring it, `cf call` among
+  them. The suffix also needs the canonical form, so with `--url` or a bare id,
+  `--input` is the spelling that reaches it.
 
 `cf piece get|set|call` name the same commands under a deprecated spelling: they
 work and warn on stderr with the date they stop working. That date lives once,

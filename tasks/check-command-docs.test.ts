@@ -5,6 +5,7 @@ import {
   declaredCommands,
   describeCommandDocFailures,
   documentedCommands,
+  isLiveDoc,
   main,
   NO_PROSE,
   reportCommandDocs,
@@ -43,6 +44,21 @@ describe("check-command-docs", () => {
         new Command().description("d"),
       );
       expect(declaredCommands(tree)).not.toContain("help");
+    });
+  });
+
+  describe("isLiveDoc()", () => {
+    it("reads a path spelled with either separator", () => {
+      // The rules are written in slashes and the path arrives in the host's
+      // separator, so a Windows spelling has to reach the same verdict.
+      expect(isLiveDoc("docs/guide.md")).toBe(true);
+      expect(isLiveDoc("docs\\guide.md")).toBe(true);
+      expect(isLiveDoc("docs/history/report.md")).toBe(false);
+      expect(isLiveDoc("docs\\history\\report.md")).toBe(false);
+      expect(isLiveDoc("docs\\plans\\later.md")).toBe(false);
+      expect(isLiveDoc("packages\\oven\\brew.ts")).toBe(false);
+      expect(isLiveDoc("packages\\oven\\docs\\guide.md")).toBe(false);
+      expect(isLiveDoc("packages\\oven\\README.md")).toBe(true);
     });
   });
 
@@ -103,6 +119,18 @@ describe("check-command-docs", () => {
         "docs/plans/later.md": "`cf brew` will gain a flag.",
       }, async (root) => {
         expect([...await documentedCommands(root, ["brew"])]).toEqual([]);
+      });
+    });
+
+    it("does not take an instruction written for an agent as documentation", async () => {
+      // `.claude/` addresses one agent mid-task. A command it is told to run
+      // is still a command no caller can look up, so it covers nothing.
+      await withDocs({
+        ".claude/agents/baker.md": "Run `cf brew` before you glaze.",
+        "skills/baking/SKILL.md": "`cf glaze set` picks the flavor.",
+      }, async (root) => {
+        const found = await documentedCommands(root, ["brew", "glaze set"]);
+        expect([...found]).toEqual(["glaze set"]);
       });
     });
 
