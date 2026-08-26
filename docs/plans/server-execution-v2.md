@@ -32,11 +32,33 @@ tables with the v2 basis index — and partly a build. The spec §5
 deletion list is enforced by deleting on main and *not rebuilding*,
 with the survival test as the gate on anything that feels needed.
 
-## Coordination state (2026-08-24) — read this first
+## Coordination state (2026-08-26) — read this first
 
 The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
+
+**Delta 2026-08-26: the default-app reload STEP's post-#6292 gate is
+9/10 — NO LIFT. The older read-side residues are likely closed; the
+sole red is a new store-incomplete `pattern-swap-setup-error` shape.**
+The re-measure used the CI ON lane's ensure-off posture, one ON binary,
+a fresh store and posture probe per run, and five quiet plus five loaded
+runs. Nine steps greened in 7–24 seconds. The one red reached the target
+step and exhausted the unchanged 600-second harness bound after six
+durable note appends; the log held one recursive-schema
+`pattern-swap-setup-error`, zero `pattern-load-error`, and a real root
+pattern identity. It is neither the earlier complete-store silent r01
+shape nor r06/r09's keyless-identity whole-piece shape. The earlier
+residues are “likely closed” on different evidence: r01 has #6292's
+matching client-absorb mechanism plus no recurrence, while r06/r09 have
+absence-of-observation only because their mechanism was never
+root-caused. The STEP entry and guard therefore stay, reworded to the
+new observed charge; the 10/10 lift bar is unchanged. Full ledger and
+store/log discriminators:
+[`ow45-default-app-reload-post-6292-remeasure-2026-08-26.md`](../history/plans/server-execution-v2/optimize/ow45-default-app-reload-post-6292-remeasure-2026-08-26.md).
+The current patterns skip census is THREE entries: this default-app
+STEP, the lunch-poll-vote FILE entry, and the topic-board pivot-baseline
+STEP. The flip still requires the list to be empty.
 
 **Delta 2026-08-24 (this PR): the b04 client-start DEATH closed by
 CATCH-UP-AND-START (RULED 2026-08-24); the 10/10 gate found the arm-B

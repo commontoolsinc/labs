@@ -137,7 +137,7 @@ Deno.test("main: empty lists print the report on stderr and nothing on stdout", 
   assertMatch(err[0], /shell: no skips — full suite runs/);
 });
 
-Deno.test("main: the patterns list = the default-app STEP entry (its charge NARROWED 2026-08-24) + the lunch-poll-vote FILE entry (both under OW45 arm B) + the topic-board pivot-baseline STEP entry under issue #6304 (2026-08-25). The b04 client-start death — the flag-ON client's navigate-deferred piece start dying terminally on a stale-confirmed-read ConflictError — is CLOSED by the RULED catch-up-and-start recovery (the refusal is 'the server won the race'; the client awaits the conflict's readiness and starts from the served documents through the ordinary load walk, committing nothing; OW45's CATCH-UP-AND-START block, serving-loop.md §3d RULED 2026-08-24), and the fix-head gate watched the recovery resurrect the notebook space's refused root start in the GREEN runs. What keeps the STEP entry is the gate's 7/10: the arm-B residue is READ-SIDE — a silent sticky readCell of the argument's redirect-linked notes with the piece context fully live (r01), and a stranded whole-piece mid-session read death behind a keyless pattern-load-error, with zero start deaths (r06/r09) — both store-verified zero-loss, neither reachable from the deferred-start error arm. The lunch-poll-vote FILE entry is #5744's 2026-08-24 deliberate re-skip, and its OWN 10-run gate has now RUN at the merged head — 7/10, no lift: the b04 class it was minted for is closed there too (catch-up activations 10/10 runs, zero terminal deferred-start deaths), and the entry now stands on a THIRD, WRITE-SIDE residue member — the guest browser's mid-session profile piece never landing its program-materialization commit, its space stuck at 4 commits with no patternIdentity and zero server-log mentions against the greens' 14-21; refused vs dropped vs never issued is NOT determined. It still lifts only on its own gate evidence at the merged head, a FILE entry because every later step depends on that join. The topic-board entry skips ONE step — the pivot baseline case — because the ON arm's served crossrefs pivot diverges from the durable store (four rows for three topics; the store holds exactly three adds and the topics side is clean), a real serving/delivery defect the case exists to observe; it lifts when #6304 closes and the case greens ON. An EMPTY list is the flip PR's bar; any change here is a deliberate edit that reddens this pin", async () => {
+Deno.test("main: the patterns list carries the three current phase-7 entries and keeps the flip bar explicit", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
   // The step entry never drops its file; the lunch-poll-vote FILE entry
@@ -216,9 +216,8 @@ Deno.test("main: the patterns list = the default-app STEP entry (its charge NARR
     pivotEntry !== undefined,
     "the pivot baseline step's guard entry must resolve",
   );
-  // The guard lookup RESOLVES for the guarded step (the in-file
-  // onArmStepSkip guard binds it under the ON posture), and the reason
-  // names the narrowed residue, not the closed start class.
+  // The guard lookup resolves for the guarded step, and the reason
+  // names the current measured charge and the unchanged lift bar.
   const entry = serverExecutionOnStepSkip(
     "patterns",
     "integration/default-app.test.ts",
@@ -226,9 +225,14 @@ Deno.test("main: the patterns list = the default-app STEP entry (its charge NARR
   );
   assert(entry !== undefined, "the reload step's guard entry must resolve");
   assertEquals(entry.phase, "phase-7");
-  assertMatch(entry.reason, /readCell|rehydrat/);
-  assertMatch(entry.reason, /no data loss/);
+  assertMatch(entry.reason, /9\/10/);
+  assertMatch(entry.reason, /likely closed/);
+  assertMatch(entry.reason, /absence-of-observation only/);
+  assertMatch(entry.reason, /six durable note appends/);
+  assertMatch(entry.reason, /pattern-swap-setup-error/);
+  assertMatch(entry.reason, /zero pattern-load-error/);
   assertMatch(entry.reason, /catch-up-and-start/);
+  assertMatch(entry.reason, /10\/10/);
   // The shard filter drops exactly the FILE entry's file (the shard
   // lanes feed explicit file lists) and passes every other candidate
   // through untouched — remove the lunch-poll-vote entry and this
