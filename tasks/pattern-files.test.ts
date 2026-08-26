@@ -5,6 +5,7 @@ import {
   collectPatternFiles,
   isPatternSource,
   matchesPatternFilter,
+  normalizePatternPath,
   patternKey,
   patternPath,
   patternRoot,
@@ -63,6 +64,26 @@ describe("patternKey", () => {
       patternKey("packages/connectors/github/activity-view/main.tsx"),
     ).toBe("github-activity/main.tsx");
   });
+
+  it("normalizes Windows paths before deriving a deployed key", () => {
+    expect(
+      patternKey("packages\\connectors\\agents\\debug-view\\main.tsx"),
+    ).toBe("agent-sessions-debug/main.tsx");
+    expect(
+      patternKey(
+        "C:\\repo\\packages\\patterns\\system\\home.tsx",
+        "C:\\repo\\packages\\patterns",
+      ),
+    ).toBe("system/home.tsx");
+  });
+});
+
+describe("normalizePatternPath", () => {
+  it("uses repository separators on every platform", () => {
+    expect(normalizePatternPath("packages\\patterns\\main.tsx")).toBe(
+      "packages/patterns/main.tsx",
+    );
+  });
 });
 
 describe("patternPath", () => {
@@ -83,6 +104,15 @@ describe("matchesPatternFilter", () => {
     expect(matchesPatternFilter(path, "agent-sessions-debug")).toBe(true);
     expect(matchesPatternFilter(path, "github-activity")).toBe(false);
   });
+
+  it("matches a preserved key for a Windows source path", () => {
+    expect(
+      matchesPatternFilter(
+        "packages\\connectors\\agents\\debug-view\\main.tsx",
+        "agent-sessions-debug",
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("patternRoot", () => {
@@ -91,6 +121,8 @@ describe("patternRoot", () => {
       "packages/patterns",
     );
     expect(patternRoot("packages/connectors/agents/debug-view/main.tsx"))
+      .toBe(".");
+    expect(patternRoot("packages\\connectors\\agents\\debug-view\\main.tsx"))
       .toBe(".");
   });
 });

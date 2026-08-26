@@ -46,6 +46,11 @@ const NON_PATTERN_PREFIXES = [
   "tools/",
 ];
 
+/** Use repository separators for keys shared across operating systems. */
+export function normalizePatternPath(path: string): string {
+  return path.replaceAll("\\", "/");
+}
+
 /**
  * A pattern's identity in the baseline tree: its path relative to the patterns
  * root, e.g. `system/home.tsx`. This is also the suffix of the toolshed route
@@ -54,24 +59,29 @@ const NON_PATTERN_PREFIXES = [
  * update mechanism keys on.
  */
 export function patternKey(path: string, patternsDir?: string): string {
+  const normalizedPath = normalizePatternPath(path);
   if (patternsDir !== undefined) {
-    const prefix = `${patternsDir}/`;
-    return path.startsWith(prefix) ? path.slice(prefix.length) : path;
+    const prefix = `${normalizePatternPath(patternsDir)}/`;
+    return normalizedPath.startsWith(prefix)
+      ? normalizedPath.slice(prefix.length)
+      : normalizedPath;
   }
   for (const tree of PATTERN_TREES) {
     const prefix = `${tree.directory}/`;
-    if (!path.startsWith(prefix)) continue;
-    const relative = path.slice(prefix.length);
+    if (!normalizedPath.startsWith(prefix)) continue;
+    const relative = normalizedPath.slice(prefix.length);
     return tree.keyPrefix === undefined
       ? relative
       : `${tree.keyPrefix}/${relative}`;
   }
-  return path;
+  return normalizedPath;
 }
 
 /** Whether a pattern path or its deployed key contains a filter. */
 export function matchesPatternFilter(path: string, filter: string): boolean {
-  return path.includes(filter) || patternKey(path).includes(filter);
+  const normalizedPath = normalizePatternPath(path);
+  return normalizedPath.includes(filter) ||
+    patternKey(normalizedPath).includes(filter);
 }
 
 /** Repository-relative source path for a compatibility-baseline key. */
@@ -88,8 +98,10 @@ export function patternPath(key: string): string {
 
 /** Source root containing a repository-relative pattern path. */
 export function patternRoot(path: string): string {
+  const normalizedPath = normalizePatternPath(path);
   return PATTERN_TREES.find((tree) =>
-    path === tree.directory || path.startsWith(`${tree.directory}/`)
+    normalizedPath === tree.directory ||
+    normalizedPath.startsWith(`${tree.directory}/`)
   )?.programRoot ?? PATTERNS_DIR;
 }
 

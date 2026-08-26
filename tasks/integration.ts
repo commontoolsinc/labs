@@ -31,6 +31,7 @@ import {
 } from "./test-records.ts";
 import {
   matchesPatternFilter,
+  normalizePatternPath,
   PATTERN_TREES,
   patternRoot,
 } from "./pattern-files.ts";
@@ -237,7 +238,7 @@ async function findPatternTests(
         exts: [".test.tsx"],
       })
     ) {
-      const relative = path.relative(rootDir, entry.path);
+      const relative = normalizePatternPath(path.relative(rootDir, entry.path));
       if (!nameFilter || matchesPatternFilter(relative, nameFilter)) {
         testFiles.push(relative);
       }
