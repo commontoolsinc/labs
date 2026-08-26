@@ -379,26 +379,47 @@ export class CellHandle<T = unknown> {
       cached,
       this,
     );
-    const append = (queue: CellOperationQueue) => {
+    const writeGeneration = ++this.#writeGeneration;
+    const append = (queue: CellOperationQueue): Promise<void> => {
       const current = (queue.hasValue ? queue.value : fallback) as unknown[];
       if (!Array.isArray(current)) {
         throw new Error("push() can only be used on array cells");
       }
       const value = [...current, ...snapshots] as unknown as U[];
+      const updateGeneration = this.#updateGeneration;
       queue.value = value;
       queue.hasValue = true;
-      this.#writeGeneration++;
-      this.#publishValue(value);
-      return this.#conn.request<RequestType.CellPush>({
-        type: RequestType.CellPush,
-        cell: this.ref(),
-        values: serializedValues,
-        awaitCommit: true,
-      }).catch((error) => {
+      if (writeGeneration === this.#writeGeneration) {
+        this.#publishValue(value);
+      }
+      const rollback = (error: unknown) => {
+        if (updateGeneration === this.#updateGeneration) {
+          // Keep the restored base explicit in the shared queue. A later
+          // append may have captured this append's optimistic publication as
+          // its private fallback before the refusal arrived.
+          queue.hasValue = true;
+          queue.value = current;
+          if (writeGeneration === this.#writeGeneration) {
+            this.#publishValue(current as U[]);
+          }
+        }
         if (!this.#conn.signal.aborted) {
           console.error("[CellHandle] Push failed:", error);
         }
-      });
+      };
+      let request: Promise<unknown>;
+      try {
+        request = this.#conn.request<RequestType.CellPush>({
+          type: RequestType.CellPush,
+          cell: this.ref(),
+          values: serializedValues,
+          awaitCommit: true,
+        });
+      } catch (error) {
+        rollback(error);
+        return Promise.resolve();
+      }
+      return request.then(() => {}, rollback);
     };
     void this.#enqueueOperation(append).catch((error) => {
       if (!this.#conn.signal.aborted) {

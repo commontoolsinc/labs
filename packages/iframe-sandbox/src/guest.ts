@@ -8,6 +8,7 @@ import {
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
 import {
+  cloneIfNecessary,
   type FabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
@@ -163,16 +164,19 @@ export class RemoteCell<T = FabricValue> {
   async #write(value: T): Promise<void> {
     const before = this.#snapshot;
     const eventGeneration = this.#eventGeneration;
+    const snapshot = cloneIfNecessary(value as FabricValue, {
+      frozen: false,
+    }) as T;
     try {
       await this.#client.request("write", {
         resource: this.#name,
-        value: value as FabricValue,
+        value: snapshot as FabricValue,
       });
       if (
         eventGeneration === this.#eventGeneration &&
         this.#snapshot === before
       ) {
-        this.#setReady(value);
+        this.#setReady(snapshot);
       }
     } catch (error) {
       if (

@@ -93,6 +93,10 @@ describe("guest", () => {
         expect(request.value).toEqual({ n: 1 });
         send(host, response(request.id));
         await writing;
+        expect(fabric.cell<{ n: number }>("record").getSnapshot()).toEqual({
+          status: "ready",
+          value: { n: 1 },
+        });
       } finally {
         fabric.disconnect();
       }
@@ -109,13 +113,20 @@ describe("guest", () => {
       try {
         const host = handOffPort();
         const received = receive(host);
-        const writing = fabric.cell<{ n: number }>("record").write({ n: 1 });
+        const value = { n: 1 };
+        const cell = fabric.cell<{ n: number }>("record");
+        const writing = cell.write(value);
 
         expect(cloneCalls).toBe(0);
         const request = await received;
         expect(request.value).toEqual({ n: 1 });
+        value.n = 2;
         send(host, response(request.id));
         await writing;
+        expect(cell.getSnapshot()).toEqual({
+          status: "ready",
+          value: { n: 1 },
+        });
       } finally {
         globalThis.structuredClone = originalStructuredClone;
         fabric.disconnect();

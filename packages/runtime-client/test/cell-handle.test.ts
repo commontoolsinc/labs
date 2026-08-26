@@ -1807,6 +1807,77 @@ describe("cell-handle", () => {
       expect(stored).toEqual([3]);
     });
 
+    it("keeps a later mutation newer than a delayed append", async () => {
+      for (const strict of [false, true]) {
+        const firstEvent = Promise.withResolvers<void>();
+        let stored = [0];
+        const runtime = {
+          [$conn]: () => ({
+            request: (request: {
+              type: RequestType;
+              value?: unknown;
+              values?: unknown[];
+            }) => {
+              if (request.type === RequestType.CellSend) {
+                return firstEvent.promise.then(() => ({}));
+              }
+              if (request.type === RequestType.CellPush) {
+                stored = [...stored, ...request.values as number[]];
+              } else if (request.type === RequestType.CellSet) {
+                stored = request.value as number[];
+              }
+              return Promise.resolve({});
+            },
+            subscribe: () => Promise.resolve(),
+            unsubscribe: () => Promise.resolve(),
+            signal: { aborted: false },
+          }),
+        } as unknown as RuntimeClient;
+        const cell = new CellHandle<number[]>(runtime, ref, [0]);
+
+        const blocking = cell.sendStrict([]);
+        cell.push(1);
+        const replacing = strict ? cell.setStrict([9]) : cell.set([9]);
+        expect(cell.get()).toEqual(strict ? [0] : [9]);
+
+        firstEvent.resolve();
+        await Promise.all([blocking, replacing]);
+
+        expect(stored).toEqual([9]);
+        expect(cell.get()).toEqual([9]);
+      }
+    });
+
+    it("publishes a read invoked after a delayed append", async () => {
+      const firstEvent = Promise.withResolvers<void>();
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: { type: RequestType }) => {
+            if (request.type === RequestType.CellSend) {
+              return firstEvent.promise.then(() => ({}));
+            }
+            if (request.type === RequestType.CellGet) {
+              return Promise.resolve({ value: [0, 8, 1] });
+            }
+            return Promise.resolve({});
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle<number[]>(runtime, ref, [0]);
+
+      const blocking = cell.sendStrict([]);
+      cell.push(1);
+      const reading = cell.sync();
+
+      firstEvent.resolve();
+      expect(await reading).toEqual([0, 8, 1]);
+      expect(cell.get()).toEqual([0, 8, 1]);
+      await blocking;
+    });
+
     it("appends values captured at invocation", async () => {
       const firstWrite = Promise.withResolvers<void>();
       const requests: Array<{
@@ -1963,6 +2034,47 @@ describe("cell-handle", () => {
         const [message, error] = await reported.promise;
         expect(message).toBe("[CellHandle] Push failed:");
         expect(error).toBe(failure);
+        expect(cell.get()).toEqual([0]);
+      } finally {
+        console.error = originalError;
+      }
+    });
+
+    it("rolls back a refused append before a later append", async () => {
+      const failure = new Error("commit refused");
+      const reported = Promise.withResolvers<void>();
+      const secondCommit = Promise.withResolvers<void>();
+      let stored = [0];
+      let appends = 0;
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: { type: RequestType; values?: unknown[] }) => {
+            if (request.type !== RequestType.CellPush) {
+              return Promise.resolve({});
+            }
+            if (++appends === 1) return Promise.reject(failure);
+            stored = [...stored, ...request.values as number[]];
+            secondCommit.resolve();
+            return Promise.resolve({});
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle<number[]>(runtime, ref, [0]);
+      const originalError = console.error;
+      console.error = (...args: unknown[]) => {
+        if (args[0] === "[CellHandle] Push failed:") reported.resolve();
+      };
+
+      try {
+        cell.push(1);
+        cell.push(2);
+        await Promise.all([reported.promise, secondCommit.promise]);
+
+        expect(stored).toEqual([0, 2]);
+        expect(cell.get()).toEqual([0, 2]);
       } finally {
         console.error = originalError;
       }
