@@ -175,8 +175,10 @@ export class CellHandle<T = unknown> {
     this.#requireSchema("set");
     // A plain set is a blind last-write-wins overwrite (CellSet).
     const serialized = this.#serializeWrite(value);
-    const snapshot = CellHandle.snapshotClientValue(
-      value as ClientCellValue,
+    const snapshot = applyValue(
+      CellHandle.#serialize(value as ClientCellValue, "sigil"),
+      value,
+      this,
     ) as T;
     this.#writeGeneration++;
     this.#publishValue(snapshot);
@@ -194,8 +196,10 @@ export class CellHandle<T = unknown> {
   async setStrict(value: T): Promise<void> {
     this.#requireSchema("setStrict");
     const serialized = this.#serializeWrite(value);
-    const snapshot = CellHandle.snapshotClientValue(
-      value as ClientCellValue,
+    const snapshot = applyValue(
+      CellHandle.#serialize(value as ClientCellValue, "sigil"),
+      value,
+      this,
     ) as T;
     const writeGeneration = this.#writeGeneration;
     await this.#enqueueOperation(async (queue) => {
@@ -368,8 +372,11 @@ export class CellHandle<T = unknown> {
     ...values: T extends (infer U)[] ? U[] : never
   ): void {
     const snapshots = values.map((value) => {
-      CellHandle.serialize(value as ClientCellValue);
-      return CellHandle.snapshotClientValue(value as ClientCellValue);
+      const serialized = CellHandle.#serialize(
+        value as ClientCellValue,
+        "sigil",
+      );
+      return applyValue(serialized, value, this);
     }) as U[];
     const append = (queue: CellOperationQueue) => {
       const current = (queue.hasValue ? queue.value : this.#value) as unknown[];
@@ -820,10 +827,24 @@ export class CellHandle<T = unknown> {
    * `CellHandle.deserialize()` is the inverse.
    */
   static serialize(value: ClientCellValue): WireCellValue {
-    if (isCellHandle(value)) return value.ref();
+    return CellHandle.#serialize(value, "ref") as WireCellValue;
+  }
+
+  // The sigil form is the same canonical traversal with hydratable links. It
+  // snapshots local values through applyValue() without confusing an ordinary
+  // record that happens to resemble a CellRef or replacing a live CellHandle.
+  static #serialize(
+    value: ClientCellValue,
+    linkFormat: "ref" | "sigil" = "ref",
+  ): unknown {
+    if (isCellHandle(value)) {
+      return linkFormat === "sigil"
+        ? linkRefFrom<CfcCellLinkRefPayload>(value.ref())
+        : value.ref();
+    }
 
     if (Array.isArray(value)) {
-      return value.map((element) => CellHandle.serialize(element));
+      return value.map((element) => CellHandle.#serialize(element, linkFormat));
     }
 
     // A `FabricSpecialObject` is a `ClientCellValue` -- a cell holds one like
@@ -855,7 +876,7 @@ export class CellHandle<T = unknown> {
       return Object.fromEntries(
         Object.entries(value).map((
           [key, member],
-        ) => [key, CellHandle.serialize(member)]),
+        ) => [key, CellHandle.#serialize(member, linkFormat)]),
       );
     }
 
@@ -882,26 +903,6 @@ export class CellHandle<T = unknown> {
       `Cannot send a \`${typeof value}\` on this connection: ${String(value)}`,
     );
   }
-
-  private static snapshotClientValue(
-    value: ClientCellValue,
-  ): ClientCellValue {
-    if (isCellHandle(value) || value instanceof FabricSpecialObject) {
-      return value;
-    }
-    if (Array.isArray(value)) {
-      return value.map((member) => CellHandle.snapshotClientValue(member));
-    }
-    if (isObjectOrArray(value)) {
-      return Object.fromEntries(
-        Object.entries(value).map(([key, member]) => [
-          key,
-          CellHandle.snapshotClientValue(member),
-        ]),
-      );
-    }
-    return value;
-  }
 }
 
 export function isCellHandle<T = unknown>(
@@ -915,10 +916,10 @@ export function isCellHandle<T = unknown>(
  * Notably, this preserves `CellHandle` instances when encountering
  * a `CellRef` referencing the same `CellHandle`.
  */
-function applyValue(
+function applyValue<T>(
   current: unknown,
   previous: unknown,
-  base: CellHandle,
+  base: CellHandle<T>,
 ): unknown {
   const cellRef = parseAsCellRef(current as JSONValue, base.ref());
 
