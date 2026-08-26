@@ -26,12 +26,17 @@ const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
 type EditorHost = Element & {
   collaborative?: boolean;
+  participantName?: string;
+  presenceUrl?: string;
+  updateComplete?: Promise<unknown>;
   value?: { runtime?: () => unknown };
   _collaboration?: {
     active?: boolean;
     prepareExternalChange?: () => Promise<boolean>;
   };
+  _presenceParticipantId?: string;
   _editorView?: {
+    focus(): void;
     state: {
       doc: { length: number; toString(): string };
       readOnly: boolean;
@@ -80,6 +85,30 @@ const materializedDisplayEquals = (
   const display = probe.collect("#materialized-content")[0];
   return display !== undefined && probe.deepText(display).trim() === expected;
 };
+
+const presenceConnected = (probe: ProbeApi): boolean =>
+  typeof (probe.collect("cf-code-editor")[0] as EditorHost | undefined)
+    ?._presenceParticipantId === "string";
+
+const remoteSelectionVisible = (
+  probe: ProbeApi,
+  participantName: string,
+): boolean =>
+  probe.collect(".cm-remote-presence-name").some((element) =>
+    element.textContent === participantName
+  ) && probe.collect(".cm-remote-presence-selection").some((element) =>
+    element.getAttribute("title") === `${participantName}'s selection`
+  );
+
+const remoteSelectionAbsent = (
+  probe: ProbeApi,
+  participantName: string,
+): boolean =>
+  probe.collect(".cm-remote-presence-name").every((element) =>
+    element.textContent !== participantName
+  ) && probe.collect(".cm-remote-presence-selection").every((element) =>
+    element.getAttribute("title") !== `${participantName}'s selection`
+  );
 
 const reconciliationReached = (probe: ProbeApi): boolean => {
   const editor = probe.collect("cf-code-editor")[0] as EditorHost | undefined;
@@ -131,6 +160,187 @@ async function dispatchEdit(
     if (!view) throw new Error("collaborative editor is not ready");
     view.dispatch({ changes: { from, to, insert } });
   }, { args: [from, to, insert] });
+}
+
+async function enablePresence(
+  page: Page,
+  participantName: string,
+  presenceUrl: string,
+): Promise<void> {
+  await page.evaluate(async (participantName, presenceUrl) => {
+    const collect = (root: Document | ShadowRoot): Element[] => {
+      const result: Element[] = [];
+      for (const element of root.querySelectorAll("*")) {
+        result.push(element);
+        if (element.shadowRoot) result.push(...collect(element.shadowRoot));
+      }
+      return result;
+    };
+    const editor = collect(document).find((element) =>
+      element.localName === "cf-code-editor"
+    ) as EditorHost | undefined;
+    if (!editor) throw new Error("collaborative editor is not available");
+    editor.participantName = participantName;
+    editor.presenceUrl = presenceUrl;
+    await editor.updateComplete;
+  }, { args: [participantName, presenceUrl] });
+}
+
+async function selectEditorText(
+  page: Page,
+  anchor: number,
+  head: number,
+): Promise<void> {
+  await page.evaluate((anchor, head) => {
+    const collect = (root: Document | ShadowRoot): Element[] => {
+      const result: Element[] = [];
+      for (const element of root.querySelectorAll("*")) {
+        result.push(element);
+        if (element.shadowRoot) result.push(...collect(element.shadowRoot));
+      }
+      return result;
+    };
+    const editor = collect(document).find((element) =>
+      element.localName === "cf-code-editor"
+    ) as EditorHost | undefined;
+    const view = editor?._editorView;
+    if (!view) throw new Error("collaborative editor is not ready");
+    view.focus();
+    view.dispatch({ selection: { anchor, head } });
+  }, { args: [anchor, head] });
+}
+
+async function unmountEditor(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const collect = (root: Document | ShadowRoot): Element[] => {
+      const result: Element[] = [];
+      for (const element of root.querySelectorAll("*")) {
+        result.push(element);
+        if (element.shadowRoot) result.push(...collect(element.shadowRoot));
+      }
+      return result;
+    };
+    const editor = collect(document).find((element) =>
+      element.localName === "cf-code-editor"
+    );
+    editor?.remove();
+  });
+}
+
+type RelayRecord = {
+  participantId: string;
+  revision: number;
+  name: string;
+  focused: boolean;
+  cursor: { epoch: number; version: number };
+  selection: unknown;
+  basis: "provisional" | "confirmed";
+};
+
+type RelayClient = {
+  participantId: string;
+  latest?: RelayRecord;
+};
+
+type PresenceRelay = {
+  url: string;
+  close(): Promise<void>;
+};
+
+function startPresenceRelay(): PresenceRelay {
+  const rooms = new Map<string, Map<WebSocket, RelayClient>>();
+  const broadcast = (
+    room: Map<WebSocket, RelayClient>,
+    message: unknown,
+    exclude?: WebSocket,
+  ) => {
+    const encoded = JSON.stringify(message);
+    for (const socket of room.keys()) {
+      if (socket !== exclude && socket.readyState === WebSocket.OPEN) {
+        socket.send(encoded);
+      }
+    }
+  };
+  const server = Deno.serve(
+    { hostname: "127.0.0.1", port: 0, onListen: () => {} },
+    (request) => {
+      const url = new URL(request.url);
+      const match = url.pathname.match(/^\/v1\/rooms\/([^/]+)$/);
+      if (!match) return new Response("Not found", { status: 404 });
+
+      const roomId = decodeURIComponent(match[1]);
+      const room = rooms.get(roomId) ?? new Map<WebSocket, RelayClient>();
+      rooms.set(roomId, room);
+      const { socket, response } = Deno.upgradeWebSocket(request);
+      const client: RelayClient = { participantId: crypto.randomUUID() };
+      room.set(socket, client);
+
+      const remove = () => {
+        if (!room.delete(socket)) return;
+        if (client.latest) {
+          broadcast(room, {
+            v: 1,
+            type: "participant.remove",
+            participantId: client.participantId,
+          });
+        }
+        if (room.size === 0) rooms.delete(roomId);
+      };
+      socket.addEventListener("open", () => {
+        socket.send(JSON.stringify({
+          v: 1,
+          type: "room.snapshot",
+          selfParticipantId: client.participantId,
+          participants: [...room.entries()].flatMap(([peer, state]) =>
+            peer !== socket && state.latest ? [state.latest] : []
+          ),
+        }));
+      });
+      socket.addEventListener("message", (event) => {
+        const message = JSON.parse(String(event.data)) as {
+          v: number;
+          type: string;
+          revision: number;
+          name: string;
+          focused: boolean;
+          cursor: { epoch: number; version: number };
+          selection: unknown;
+          basis: "provisional" | "confirmed";
+        };
+        if (message.v !== 1 || message.type !== "participant.upsert") {
+          socket.close(1002, "invalid_message");
+          return;
+        }
+        client.latest = {
+          participantId: client.participantId,
+          revision: message.revision,
+          name: message.name,
+          focused: message.focused,
+          cursor: message.cursor,
+          selection: message.selection,
+          basis: message.basis,
+        };
+        broadcast(room, {
+          v: 1,
+          type: "participant.upsert",
+          ...client.latest,
+        }, socket);
+      });
+      socket.addEventListener("close", remove);
+      socket.addEventListener("error", remove);
+      return response;
+    },
+  );
+  const address = server.addr as Deno.NetAddr;
+  return {
+    url: `ws://${address.hostname}:${address.port}`,
+    async close() {
+      for (const room of rooms.values()) {
+        for (const socket of room.keys()) socket.close(1001, "test ended");
+      }
+      await server.shutdown();
+    },
+  };
 }
 
 async function dispatchExternalBacklinkRename(
@@ -441,6 +651,7 @@ describe("cf-code-editor collaboration", () => {
   let bob: Identity;
   let cc: PiecesController;
   let pieces: Record<string, PieceController>;
+  let presenceRelay: PresenceRelay;
   const sinkCancels: Array<() => void> = [];
   const latestContent = new Map<string, string>();
   const contentWaiters = new Map<
@@ -500,6 +711,7 @@ describe("cf-code-editor collaboration", () => {
   };
 
   beforeAll(async () => {
+    presenceRelay = startPresenceRelay();
     [alice, bob] = await Promise.all([
       Identity.generate({ implementation: "noble" }),
       Identity.generate({ implementation: "noble" }),
@@ -543,6 +755,10 @@ describe("cf-code-editor collaboration", () => {
         input: { content: "legacy string" },
         start: true,
       }),
+      presenceUnmount: await cc.create(source, {
+        input: { content: "presence" },
+        start: true,
+      }),
     };
 
     await new ACLManager(cc.runtime, cc.getSpace()).set(ANYONE_USER, "WRITE");
@@ -564,6 +780,7 @@ describe("cf-code-editor collaboration", () => {
   afterAll(async () => {
     for (const cancel of sinkCancels) cancel();
     await cc?.dispose();
+    await presenceRelay?.close();
   });
 
   it("converges concurrent same-base edits in both browsers and the ordinary Cell", async () => {
@@ -739,6 +956,53 @@ describe("cf-code-editor collaboration", () => {
     assertEquals(await editorContent(bobPage), "random string!");
     assertEquals(await collaborationErrors(alicePage), []);
     assertEquals(await collaborationErrors(bobPage), []);
+  });
+
+  it("removes a participant selection when its editor is unmounted", async () => {
+    await navigateBoth(pieces.presenceUnmount);
+    const alicePage = aliceShell.page();
+    const bobPage = bobShell.page();
+
+    try {
+      await dispatchEdit(alicePage, "presence".length, "presence".length, "!");
+      await Promise.all([
+        waitForCondition(alicePage, editorContainsTokens, {
+          args: [["presence!"]],
+        }),
+        waitForCondition(bobPage, editorContainsTokens, {
+          args: [["presence!"]],
+        }),
+        awaitMaterialized(
+          "presenceUnmount",
+          (value) => value === "presence!",
+        ),
+      ]);
+
+      await Promise.all([
+        enablePresence(alicePage, "Alice", presenceRelay.url),
+        enablePresence(bobPage, "Bob", presenceRelay.url),
+      ]);
+      await Promise.all([
+        waitForCondition(alicePage, presenceConnected),
+        waitForCondition(bobPage, presenceConnected),
+      ]);
+
+      await selectEditorText(alicePage, 0, 4);
+      await waitForCondition(bobPage, remoteSelectionVisible, {
+        args: ["Alice"],
+      });
+
+      await unmountEditor(alicePage);
+      await waitForCondition(bobPage, remoteSelectionAbsent, {
+        args: ["Alice"],
+      });
+      assertEquals(await collaborationErrors(bobPage), []);
+    } finally {
+      await Promise.all([
+        unmountEditor(alicePage),
+        unmountEditor(bobPage),
+      ]);
+    }
   });
 
   it("dedupes a shared external title rewrite from both browsers", async () => {
