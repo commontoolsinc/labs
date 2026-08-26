@@ -1,7 +1,7 @@
 import type {
   FabricHash as ApiFabricHash,
   FabricHashConstructor as ApiFabricHashConstructor,
-} from "../api.ts";
+} from "@/api.ts";
 import {
   fromBase64url,
   toUnpaddedBase64url,
@@ -280,7 +280,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
 }
 
 // Compile-time check that the exported `FabricHash` constructor matches the
-// `FabricHashConstructor` declared in `../api.ts`. This catches a declared member
+// `FabricHashConstructor` declared in `@/api.ts`. This catches a declared member
 // that is missing here or has the wrong type. It does NOT catch the other
 // direction: `satisfies` is an assignability check, so a public member on this
 // class that the declaration omits passes silently. Members added here need

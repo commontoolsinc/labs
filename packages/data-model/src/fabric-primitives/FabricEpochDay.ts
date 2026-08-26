@@ -1,7 +1,7 @@
 import type {
   FabricEpochDay as ApiFabricEpochDay,
   FabricEpochDayConstructor as ApiFabricEpochDayConstructor,
-} from "../api.ts";
+} from "@/api.ts";
 import {
   bigintFromUnpaddedBase64url,
   bigintToUnpaddedBase64url,
@@ -126,7 +126,7 @@ export class FabricEpochDay extends BaseFabricPrimitive
 }
 
 // Compile-time check that the exported `FabricEpochDay` constructor matches the
-// `FabricEpochDayConstructor` declared in `../api.ts`. This catches a declared member
+// `FabricEpochDayConstructor` declared in `@/api.ts`. This catches a declared member
 // that is missing here or has the wrong type. It does NOT catch the other
 // direction: `satisfies` is an assignability check, so a public member on this
 // class that the declaration omits passes silently. Members added here need

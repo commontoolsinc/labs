@@ -7,7 +7,7 @@ import { toOwnedUint8Array } from "@commonfabric/utils/buffers";
 import type {
   FabricBytes as ApiFabricBytes,
   FabricBytesConstructor as ApiFabricBytesConstructor,
-} from "../api.ts";
+} from "@/api.ts";
 import type { FabricValue } from "@/interface.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { BaseFabricPrimitive } from "@/fabric-bases/BaseFabricPrimitive.ts";
@@ -242,7 +242,7 @@ export class FabricBytes extends BaseFabricPrimitive implements ApiFabricBytes {
 }
 
 // Compile-time check that the exported `FabricBytes` constructor matches the
-// `FabricBytesConstructor` declared in `../api.ts`. This catches a declared member
+// `FabricBytesConstructor` declared in `@/api.ts`. This catches a declared member
 // that is missing here or has the wrong type. It does NOT catch the other
 // direction: `satisfies` is an assignability check, so a public member on this
 // class that the declaration omits passes silently. Members added here need
