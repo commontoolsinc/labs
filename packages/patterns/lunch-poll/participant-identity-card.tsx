@@ -164,8 +164,11 @@ export interface ParticipantIdentityCardInput {
   /** The viewer's resolved display name ("" until `#profileName` resolves). */
   profileName: string;
 
-  /** The viewer's resolved avatar. */
-  profileAvatar: string;
+  /** The viewer's resolved avatar ("" until `#profileAvatar` resolves —
+   * optional-with-default, because a stored vintage may link a slot that
+   * was never written, and a hole must read as absent rather than refuse
+   * the piece). */
+  profileAvatar?: Default<string, "">;
 
   /**
    * The `#profile` wish's built-in create/pick surface, rendered by the parent

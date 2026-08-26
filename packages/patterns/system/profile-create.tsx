@@ -219,7 +219,16 @@ export type TrustedProfileMru = Cfc<
 >;
 
 export type ProfileCreateInput = {
-  profiles: Writable<BackwardsCompatibleProfile[]>;
+  // The wish launches this surface over home roots whose `profiles` key may
+  // never have been written — a space where nobody created a profile stores
+  // no list at all, and the argument's link then points at a confirmed
+  // hole. Optionality states that honestly: a hole reads as absent rather
+  // than refusing the piece, and the create handler's push materializes
+  // the list on first write. Deliberately optional WITHOUT a default — a
+  // default never fills a present link that reads nothing, and a default
+  // under an `asCell` slot is one the compatibility gate cannot prove
+  // stable.
+  profiles?: Writable<BackwardsCompatibleProfile[]>;
   inputId?: string;
   // Optional prefill for the create field. Embedders often already know the
   // user's name (e.g. Loom asks at setup) — without this, first-run re-asks a
