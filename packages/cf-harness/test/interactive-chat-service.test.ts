@@ -1663,10 +1663,22 @@ for (const resultsBeforeFault of FAULT_POINTS) {
         release = () => resolve();
       });
       const { store, snapshots } = recordingStore();
+      const nextTurnTranscripts: (readonly HarnessTranscriptMessage[])[] = [];
+      let turn = 0;
       const service = new HarnessInteractiveChatService({
-        createPromptLoop: faultingToolLoop(resultsBeforeFault, fault, {
-          release: held,
-        }),
+        createPromptLoop: (options) => {
+          turn += 1;
+          return turn === 1
+            ? faultingToolLoop(resultsBeforeFault, fault, { release: held })(
+              options,
+            )
+            : {
+              runTranscript: (runOptions) => {
+                nextTurnTranscripts.push([...runOptions.transcript]);
+                return Promise.resolve(makeResult(runOptions, "Done."));
+              },
+            };
+        },
         now: nextIsoNow(),
         sessionStore: store,
       });
@@ -1716,6 +1728,19 @@ for (const resultsBeforeFault of FAULT_POINTS) {
           resultsBeforeFault,
         );
       }
+
+      // What the rollback is for: the turn after it starts from the checkpoint
+      // and carries no trace of the turn that died.
+      await service.startTurn("req-4", {
+        sessionId: "session-1",
+        turnId: "turn-2",
+        input: { text: "Try again" },
+      });
+      await service.waitForTurn("session-1", "turn-2");
+      assertEquals(nextTurnTranscripts, [[{
+        role: "user",
+        content: "Try again",
+      }]]);
     });
   }
 }

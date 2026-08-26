@@ -828,11 +828,13 @@ export class HarnessInteractiveChatService {
     for (const record of [...this.#sessions.values()]) {
       const recovered = recoverSessionTranscript(record.transcript);
       if (recovered === undefined) {
-        // A recovery that already ran left the session idle and not reusable,
-        // and left behind the resumable prefix that makes its history look
-        // repaired. The flag is the durable half of that decision, so it is
-        // what a later restart reads the refusal back from.
-        if (!record.status.reusable && record.status.status === "idle") {
+        // A recovery that already ran left the session not reusable, and left
+        // behind the resumable prefix that makes its history look repaired.
+        // The flag is the durable half of that decision, so it is what a later
+        // restart reads the refusal back from — whatever status the session
+        // carries, since a failed one accepts a new turn just as an idle one
+        // does.
+        if (!record.status.reusable) {
           record.recoveryError = unresumableSessionError(
             record.status.sessionId,
           );

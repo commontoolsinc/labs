@@ -6,6 +6,7 @@ import {
   HARNESS_CHAT_PROTOCOL_VERSION,
   HARNESS_CHAT_REQUEST_TYPE,
   type HarnessChatListEventsResult,
+  type HarnessChatSessionStatus,
 } from "../src/contracts/interactive-chat.ts";
 import {
   HarnessInteractiveChatService,
@@ -1052,14 +1053,74 @@ Deno.test("sqlite session restore keeps a reusable checkpoint when a turn is int
   }
 });
 
-const recordedSession = (transcript: readonly HarnessTranscriptMessage[]) => ({
-  session: createHarnessChatSessionStatus({
-    sessionId: "session-1",
-    createdAt: "2026-05-27T00:00:01.000Z",
-    workspace: { hostPath: "/workspace" },
-  }),
+const recordedSession = (
+  transcript: readonly HarnessTranscriptMessage[],
+  status: HarnessChatSessionStatus["status"] = "idle",
+) => ({
+  session: {
+    ...createHarnessChatSessionStatus({
+      sessionId: "session-1",
+      createdAt: "2026-05-27T00:00:01.000Z",
+      workspace: { hostPath: "/workspace" },
+    }),
+    status,
+  },
   transcript,
 });
+
+const ORPHAN_TRANSCRIPT: readonly HarnessTranscriptMessage[] = [
+  { role: "user", content: "Read the first file" },
+  {
+    role: "tool",
+    toolCallId: "call-ghost",
+    toolName: "read_file",
+    content: "contents nobody asked for",
+  },
+];
+
+// A refused session is refused whatever status it carries. `failed` is the case
+// that bites: nothing else in `startTurn` turns a failed session away, so if the
+// marker is not read back the next start reopens it.
+for (const status of ["idle", "failed"] as const) {
+  Deno.test(`sqlite session restore keeps refusing a ${status} session a recovery refused`, async () => {
+    const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+    const store = await openSqliteHarnessChatSessionStore({
+      url: toFileUrl(path),
+    });
+    try {
+      await store.saveSession(recordedSession(ORPHAN_TRANSCRIPT, status));
+      for (const attempt of [1, 2]) {
+        const restored = new HarnessInteractiveChatService({
+          createPromptLoop: () => ({
+            runTranscript: (runOptions) =>
+              Promise.resolve(makeResult(runOptions, "Recovered.")),
+          }),
+          now: () => `2026-05-27T00:0${attempt}:00.000Z`,
+          sessionStore: store,
+        });
+        await restored.initializeFromStore();
+        assertEquals(
+          restored.status("session-1").sessions[0].reusable,
+          false,
+          `restart ${attempt} lost the refusal`,
+        );
+        const followUp = await restored.startTurn(`req-${attempt}`, {
+          sessionId: "session-1",
+          turnId: `turn-${attempt}`,
+          input: { text: "Try again" },
+        });
+        assertEquals(followUp.ok, false, `restart ${attempt} reopened it`);
+        assertEquals(
+          followUp.ok === false ? followUp.error.code : "",
+          "incomplete_transcript",
+        );
+      }
+    } finally {
+      store.close();
+      await Deno.remove(path);
+    }
+  });
+}
 
 Deno.test("sqlite session restore rolls a truncated recorded transcript back to its safe boundary", async () => {
   const path = await Deno.makeTempFile({ suffix: ".sqlite" });
