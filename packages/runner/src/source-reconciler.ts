@@ -446,15 +446,16 @@ export class SourceReconciler {
       target.symbol === state.running.symbol
     ) return "current";
 
-    const program = await abortable(
-      () =>
-        runtime.patternManager.getPatternSourceProgramByIdentity(
-          target.identity,
-          sourceSpace,
-          destinationSpace,
-        ),
-      signal,
-    );
+    // Awaited directly rather than through the abort signal. The lookup
+    // synchronizes a source closure against storage, and abandoning the await
+    // would let disposal close storage while that read is still running. The
+    // wait is what keeps teardown behind it.
+    const program = await runtime.patternManager
+      .getPatternSourceProgramByIdentity(
+        target.identity,
+        sourceSpace,
+        destinationSpace,
+      );
     if (program === undefined) return "unavailable";
     return await this.#adopt(
       resultCell,
