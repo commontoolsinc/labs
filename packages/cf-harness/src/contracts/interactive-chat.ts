@@ -244,6 +244,7 @@ export interface HarnessChatError {
     | "turn_already_running"
     | "turn_canceled"
     | "session_closed"
+    | "incomplete_transcript"
     | "browser_access_required"
     | "policy_denied"
     | "provider-configuration-required"
