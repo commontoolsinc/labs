@@ -242,6 +242,44 @@ describe("SqliteDb .exec (commit-folded write)", () => {
     expect(payload).toEqual({ links: [author.toJSON()] });
   });
 
+  it("encodes nested cells in positional statements without a column list", async () => {
+    const dbRef: SqliteDbRef = {
+      id: `of:exec-nested-positional-${crypto.randomUUID()}`,
+      tables: {
+        documents: table({ id: "integer primary key", payload: "text" }),
+      },
+    };
+    const tx = runtime.edit();
+    const author = runtime.getCell<{ name: string }>(
+      space,
+      "nested-positional-author",
+      undefined,
+      tx,
+    );
+    author.set({ name: "Ada" });
+    const db = sqliteDb(dbRef, tx, "db-h");
+    db.exec("INSERT INTO documents VALUES (?, ?)", [
+      1,
+      { links: [author] },
+    ]);
+
+    const res = await tx.commit();
+    expect(res.error).toBeUndefined();
+
+    const provider = storageManager.open(space);
+    const rows = await provider.sqliteQuery!(
+      dbRef,
+      "SELECT payload FROM documents",
+    );
+    const payload = JSON.parse((rows.rows[0] as { payload: string }).payload);
+    expect(payload).toEqual({ links: [author.toJSON()] });
+  });
+
+  it("rejects nested undefined in positional statements without a column list", () => {
+    expect(() => encodeSqliteParams("SELECT ?", [{ value: undefined }]))
+      .toThrow("sqlite: param is undefined");
+  });
+
   it("encodes link cells across a multi-row INSERT (cols cycle per tuple)", async () => {
     const dbRef: SqliteDbRef = {
       id: `of:exec-multi-${crypto.randomUUID()}`,

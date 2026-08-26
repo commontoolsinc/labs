@@ -13,6 +13,6 @@ describe("cf-iframe JSX attributes", () => {
 
     const frame = <cf-iframe src="<main></main>" bridge={bridge} />;
 
-    expect(frame).toBeDefined();
+    expect(frame).toMatchObject({ props: { bridge } });
   });
 });

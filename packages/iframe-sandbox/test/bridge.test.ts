@@ -470,6 +470,33 @@ describe("Fabric iframe bridge", () => {
     }
   });
 
+  it("refuses named methods omitted from the manifest", async () => {
+    const methods: Record<string, () => string> = {};
+    Object.defineProperty(methods, "ping", {
+      value: () => "pong",
+      enumerable: false,
+    });
+    const channel = new MessageChannel();
+    const host = new FabricBridgeHost(
+      createFabricBridge({ service: { kind: "service", methods } }),
+      channel.port1,
+    );
+    const client = connectFabric();
+    handOff(channel.port2);
+
+    try {
+      await expect(client.describe()).resolves.toMatchObject({
+        resources: [{ name: "service", methods: [] }],
+      });
+      await expect(client.call("service", "ping")).rejects.toMatchObject({
+        code: "method-not-supported",
+      });
+    } finally {
+      client.disconnect();
+      host.disconnect();
+    }
+  });
+
   it("cancels host subscriptions when the guest disconnects", async () => {
     const subscribed = Promise.withResolvers<void>();
     const cancelled = Promise.withResolvers<void>();

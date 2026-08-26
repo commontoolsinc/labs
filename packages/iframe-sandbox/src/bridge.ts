@@ -103,7 +103,7 @@ function namedMethod(
     return undefined;
   }
   const descriptor = Object.getOwnPropertyDescriptor(container.value, method);
-  return descriptor && typeof descriptor.value === "function"
+  return descriptor?.enumerable && typeof descriptor.value === "function"
     ? descriptor.value as BridgeMethod
     : undefined;
 }
@@ -279,7 +279,6 @@ export class FabricBridgeHost {
   async #perform(request: BridgeRequest): Promise<FabricValue | undefined> {
     const operation = request.operation;
     if (operation === "describe") return this.#manifest();
-    if (operation === "disconnect") return undefined;
 
     const resource = request.resource !== undefined &&
         Object.hasOwn(this.#bridge.resources, request.resource)

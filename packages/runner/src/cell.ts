@@ -835,7 +835,7 @@ export function encodeSqliteParams(
             "params (:col) so the binding can be verified.",
         );
       }
-      return v;
+      return encodeNested(v);
     }) as SqliteParamsWire;
   }
   return Object.fromEntries(
