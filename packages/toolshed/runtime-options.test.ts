@@ -3,6 +3,7 @@ import { Identity } from "@commonfabric/identity";
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import type { Runtime, RuntimeOptions } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { cfcPosture, publishCfcPosture } from "@/lib/cfc-posture.ts";
 import {
   experimentalPosture,
   publishExperimentalPosture,
@@ -134,6 +135,13 @@ Deno.test("createToolshedRuntime publishes the posture it resolved", async () =>
       (name) => name === "EXPERIMENTAL_MODERN_CELL_REP" ? "true" : undefined,
     );
     const posture = experimentalPosture();
+    // The CFC posture publishes alongside, from the same constructed Runtime
+    // (lib/cfc-posture.ts): the preset core pin plus constructor defaults.
+    const cfc = cfcPosture();
+    assertEquals(cfc?.enforcementMode, "enforce-explicit");
+    assertEquals(cfc?.flowLabels, "off");
+    assertEquals(cfc?.policyDigest, null);
+    assertEquals(cfc?.sinkCeilings, []);
     assertEquals(posture?.modernCellRep, true);
     // Resolved, not passed: the env reader said nothing about these, and a
     // client adopting the posture needs the values in effect rather than the
@@ -147,5 +155,6 @@ Deno.test("createToolshedRuntime publishes the posture it resolved", async () =>
     await runtime?.dispose();
     await storageManager.close();
     publishExperimentalPosture(null);
+    publishCfcPosture(null);
   }
 });

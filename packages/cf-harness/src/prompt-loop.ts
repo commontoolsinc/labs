@@ -50,7 +50,11 @@ import {
   type HarnessToolActivity,
   type HarnessToolPolicyDecision,
 } from "./contracts/run-report.ts";
-import type { HarnessSkillRegistry } from "./contracts/skill.ts";
+import type {
+  HarnessSkillActivation,
+  HarnessSkillRegistry,
+} from "./contracts/skill.ts";
+import { HARNESS_SKILL_ACTIVATIONS_TYPE } from "./contracts/skill.ts";
 import {
   asHarnessSubagentFailureReport,
   BROWSER_SUBAGENT_PROFILE,
@@ -98,10 +102,12 @@ import {
   type CreateHarnessEngineOptions,
 } from "./engine.ts";
 import { OpenAICompatibleGatewayClient } from "./gateway/openai-client.ts";
+import { ADDRESS_HANDLE_TOKEN_PREFIX } from "./contracts/handle-table.ts";
 import {
   createHarnessHandleTable,
   defineOwnEntry,
   mintAddressHandle,
+  resolveHandleRef,
   resolveHandleToken,
   swapLinksForTokens,
   swapTokensForRefs,
@@ -113,8 +119,12 @@ import type {
 } from "./model/client.ts";
 import { OpenAICompatibleGatewayModelClient } from "./model/openai-compatible-gateway.ts";
 import { sumHarnessModelUsage } from "./model/usage.ts";
-import { loadHarnessSkillContext } from "./skills/registry.ts";
+import {
+  loadHarnessSkillContext,
+  loadHarnessSkillContextFromText,
+} from "./skills/registry.ts";
 import { isSealedOpaqueLinkObject } from "./structured-result.ts";
+import { resolveHandleValue } from "./tools/handle-values.ts";
 import {
   parseSubagentReturnJson,
   parseSubagentReturnSchema,
@@ -736,6 +746,18 @@ const parseDelegateTaskInput = (
       },
     };
   }
+  if (
+    input.skillHandle !== undefined &&
+    (typeof input.skillHandle !== "string" ||
+      input.skillHandle.trim().length === 0)
+  ) {
+    return {
+      invalid: {
+        field: "skillHandle",
+        expected: "a non-empty handle string, or omit it",
+      },
+    };
+  }
   let parsedReturnSchema: ReturnType<typeof parseSubagentReturnSchema>;
   try {
     parsedReturnSchema = parseSubagentReturnSchema(input.returnSchema);
@@ -762,6 +784,9 @@ const parseDelegateTaskInput = (
         : {}),
       ...(typeof maxModelTurns === "number" ? { maxModelTurns } : {}),
       ...(returnSchema !== undefined ? { returnSchema } : {}),
+      ...(typeof input.skillHandle === "string"
+        ? { skillHandle: input.skillHandle.trim() }
+        : {}),
     },
   };
 };
@@ -901,6 +926,66 @@ const SCRUBBED_CHILD_HANDLE_TOKEN = "[handle-token-removed]";
  * token grammar would be mangled mid-address, leaving the parent unable to
  * address the very cell the child was reporting.
  */
+const HANDLE_SKILL_TEXT_SCRUBBED = "[handle-delivered skill text withheld]";
+
+/**
+ * Every parent-facing return of a delegation that carried a `skillHandle`
+ * passes through here: the exact injected payload — and its JSON-escaped
+ * spelling, for a child that echoes it inside a structured return string —
+ * is replaced with fixed inert text. This closes the VERBATIM channel: the
+ * cell's payload cannot cross into the parent transcript as itself. It is
+ * deliberately not more than that — a child exists to act on the skill, so
+ * what it DID because of the text (including describing it) is its ordinary,
+ * policy-mediated output, not a leak of the payload.
+ */
+export const scrubHandleSkillText = (
+  text: string,
+  skillText: string,
+): string => {
+  // The payload is never empty here: an empty resolution refuses before any
+  // scrub runs, and the escape of a non-empty string is non-empty.
+  let scrubbed = text;
+  const escaped = JSON.stringify(skillText).slice(1, -1);
+  for (
+    const needle of skillText === escaped ? [skillText] : [skillText, escaped]
+  ) {
+    scrubbed = scrubbed.split(needle).join(HANDLE_SKILL_TEXT_SCRUBBED);
+  }
+  return scrubbed;
+};
+
+/**
+ * {@link scrubHandleSkillText} over every string in a structured value. The
+ * raw-text scrub alone cannot cover a structured return: JSON admits
+ * non-canonical escapes (`\u0043` for `C`), so infinitely many spellings of
+ * the payload survive a substring scrub of the serialized text and DECODE
+ * back to it at `JSON.parse` — the payload has to be scrubbed again where it
+ * would actually reappear, in the parsed strings.
+ */
+export const scrubHandleSkillTextDeep = (
+  value: unknown,
+  skillText: string,
+): unknown => {
+  if (typeof value === "string") {
+    return scrubHandleSkillText(value, skillText);
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => scrubHandleSkillTextDeep(entry, skillText));
+  }
+  if (value !== null && typeof value === "object") {
+    // Keys as well as values: a decoded payload can stand in key position.
+    return Object.fromEntries(
+      Object.entries(value).map((
+        [key, entry],
+      ) => [
+        scrubHandleSkillText(key, skillText),
+        scrubHandleSkillTextDeep(entry, skillText),
+      ]),
+    );
+  }
+  return value;
+};
+
 const resolveChildHandleTokens = (
   childEngine: CfHarnessEngine,
   text: string,
@@ -2599,10 +2684,11 @@ export class CfHarnessPromptLoop {
   /**
    * Helper for `#invokeToolCall()`, which replaces handle tokens in a parsed
    * tool input with their canonical address strings. Two tools are exempt:
-   * `delegate_task`, whose input reaches the child as the model wrote it, and
-   * `describe_handle`, whose input names a token rather than a referent — it
-   * looks the token up in the table itself. Returns `input` itself when no
-   * substitution applies.
+   * `delegate_task`, whose `goal` and `context` reach the child as the model
+   * wrote them (its `skillHandle` is resolved separately, trusted-side,
+   * before dispatch), and `describe_handle`, whose input names a token rather
+   * than a referent — it looks the token up in the table itself. Returns
+   * `input` itself when no substitution applies.
    */
   #resolveHandleTokensInToolInput(
     toolId: string,
@@ -2961,6 +3047,7 @@ export class CfHarnessPromptLoop {
       };
     }
     let delegateInput: DelegateTaskToolInput | undefined;
+    let resolvedDelegateSkill: { text: string; token: string } | undefined;
     if (toolId === "delegate_task") {
       const parsedDelegateInput = parseDelegateTaskInput(input);
       if ("invalid" in parsedDelegateInput) {
@@ -3032,6 +3119,70 @@ export class CfHarnessPromptLoop {
         };
       }
       policyDecisionReasonCodes.push("subagent_profile_allowed");
+      if (delegateInput.skillHandle !== undefined) {
+        // Trusted-side materialization, refused BEFORE dispatch: a handle
+        // this run does not hold is a model-written-call mistake (the same
+        // class as an unknown field), stated in terms of the reference and
+        // never the referent, per `resolveHandleValue`'s contract.
+        const resolution = await resolveHandleValue(
+          this.engine.handleValueResolutionContext,
+          delegateInput.skillHandle,
+          "skillHandle",
+        );
+        if (resolution.error !== undefined) {
+          return await this.#rejectInvalidToolCall({
+            toolCall,
+            invalid: {
+              reason: "invalid-argument",
+              toolId: "delegate_task",
+              field: "skillHandle",
+              expected: resolution.error,
+            },
+            sequence,
+            startedAt: activityStartedAt,
+            effectClass: tool.descriptor.effectClass,
+            ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
+            toolInputSummary,
+            policyEventIndexes,
+            recordActivity,
+          });
+        }
+        if (resolution.value.trimEnd() === "") {
+          // An empty skill is a call mistake, not a delegation: refusing it
+          // here also means the scrub below never sees an empty needle.
+          return await this.#rejectInvalidToolCall({
+            toolCall,
+            invalid: {
+              reason: "invalid-argument",
+              toolId: "delegate_task",
+              field: "skillHandle",
+              expected: "a handle naming non-empty skill text",
+            },
+            sequence,
+            startedAt: activityStartedAt,
+            effectClass: tool.descriptor.effectClass,
+            ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
+            toolInputSummary,
+            policyEventIndexes,
+            recordActivity,
+          });
+        }
+        // The activation records the TOKEN whichever spelling the call used:
+        // the resolution above went through the table, so the entry exists.
+        const table = this.engine.handleTable;
+        const handle = delegateInput.skillHandle;
+        const entry = table === undefined
+          ? undefined
+          : handle.startsWith(ADDRESS_HANDLE_TOKEN_PREFIX)
+          ? resolveHandleToken(table, handle)
+          : resolveHandleRef(table, handle);
+        // trimEnd once HERE: the injected block, the activation digest, and
+        // the return scrub must all speak of the identical payload.
+        resolvedDelegateSkill = {
+          text: resolution.value.trimEnd(),
+          token: entry!.token,
+        };
+      }
     }
     await this.engine.recordPolicyDecision({
       toolActivitySequence: sequence,
@@ -3064,6 +3215,9 @@ export class CfHarnessPromptLoop {
         ? await this.#invokeDelegateTaskTool({
           toolCall,
           input: delegateInput!,
+          ...(resolvedDelegateSkill !== undefined
+            ? { resolvedSkill: resolvedDelegateSkill }
+            : {}),
           model,
           promptSlotBinding,
           signal,
@@ -3419,6 +3573,8 @@ export class CfHarnessPromptLoop {
   async #invokeDelegateTaskTool(options: {
     toolCall: HarnessToolCall;
     input: DelegateTaskToolInput;
+    /** The materialized skillHandle text + token, resolved before dispatch. */
+    resolvedSkill?: { text: string; token: string };
     model: string;
     promptSlotBinding?: PromptSlotBinding;
     signal?: AbortSignal;
@@ -3620,6 +3776,7 @@ export class CfHarnessPromptLoop {
         profileConfig.skillNames !== undefined && skillRegistry !== undefined
           ? availableProfileSkillNames(skillRegistry, profileConfig.skillNames)
           : [];
+      const childActivations: HarnessSkillActivation[] = [];
       if (preloadSkillNames.length > 0 && skillRegistry !== undefined) {
         await childEngine.persistSkillRegistry(skillRegistry);
         const skillContext = await loadHarnessSkillContext({
@@ -3629,8 +3786,30 @@ export class CfHarnessPromptLoop {
           runId: childRunId,
           activatedAt: childCreatedState.updatedAt,
         });
-        await childEngine.persistSkillActivations(skillContext.activations);
+        childActivations.push(...skillContext.activations.activations);
         childSkillContextMessages.push(skillContext.contextText);
+      }
+      if (options.resolvedSkill !== undefined) {
+        // The handle-delivered skill joins the child's context beside the
+        // profile preload, bypassing the registry entirely: transient run
+        // state from a cell, selected by unforgeable table membership rather
+        // than by name.
+        const handleSkill = await loadHarnessSkillContextFromText({
+          text: options.resolvedSkill.text,
+          handleToken: options.resolvedSkill.token,
+          runId: childRunId,
+          activatedAt: childCreatedState.updatedAt,
+        });
+        childActivations.push(handleSkill.activation);
+        childSkillContextMessages.push(handleSkill.contextText);
+      }
+      if (childActivations.length > 0) {
+        await childEngine.persistSkillActivations({
+          type: HARNESS_SKILL_ACTIVATIONS_TYPE,
+          version: 1,
+          generatedAt: childCreatedState.updatedAt,
+          activations: childActivations,
+        });
       }
       const childResult = await childLoop.runPrompt({
         systemPrompt: buildSubagentSystemPrompt(
@@ -3656,9 +3835,21 @@ export class CfHarnessPromptLoop {
       // produced usable by the parent: the parent's outbound swap mints the
       // canonical address into a parent token — the same token for a seeded
       // address, a fresh one for an address only the child ever saw.
+      //
+      // The skill scrub runs on the RAW text, BEFORE token resolution: a
+      // payload that itself contains a seeded token would otherwise be
+      // rewritten by the resolution (token to address) and no longer match
+      // the scrub's needle, walking an echoed skill past it. Scrubbing first
+      // takes any embedded token out with the payload; resolution then runs
+      // over what remains.
       const childFinalText = resolveChildHandleTokens(
         childEngine,
-        childResult.finalAssistantText,
+        options.resolvedSkill === undefined
+          ? childResult.finalAssistantText
+          : scrubHandleSkillText(
+            childResult.finalAssistantText,
+            options.resolvedSkill.text,
+          ),
       );
       summary = childFinalText;
       childModelTurns = childResult.modelTurns;
@@ -3685,8 +3876,18 @@ export class CfHarnessPromptLoop {
           schema: delegateInput.returnSchema,
           handleTable,
         });
-        summary = structured.summary;
-        structuredReturn = structured.structuredReturn;
+        summary = options.resolvedSkill === undefined
+          ? structured.summary
+          : scrubHandleSkillText(
+            structured.summary,
+            options.resolvedSkill.text,
+          );
+        structuredReturn = options.resolvedSkill === undefined
+          ? structured.structuredReturn
+          : scrubHandleSkillTextDeep(
+            structured.structuredReturn,
+            options.resolvedSkill.text,
+          ) as typeof structured.structuredReturn;
         if (structured.handleTable !== undefined) {
           await this.engine.recordHandleTable(structured.handleTable);
         }

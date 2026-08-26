@@ -5651,6 +5651,51 @@ supply; OW29/OW32/OW34 closed):
     same family's second, pre-existing member is `PatternManager`'s
     compile-cache write-backs minted inside `compilePattern` (escape
     the stamp hook; enumerated with the flag in the stage-1 report).
+    **SHARD-10 DISCRIMINATED AND FIXED 2026-08-25 (PR #6320): the
+    ensure-ON board's compile-cache write-back CFC red is NOT this
+    attribution family** — the failing writer is the CLIENT under its
+    own identity in its own space, and no identity/carriage question is
+    open (the stamp-hook escape above stays flagged exactly as
+    written). Root cause, reproduced 3/3 deterministic at the true
+    topology: `loadCompiledClosure`'s `verifiedDoc` returned
+    `cell.get()` docs whose `sourceMap` is a LIVE query-result view;
+    consumers carry the field verbatim into module artifacts (the
+    process byte cache — `putAll` runs on storage-served compiles too
+    and replaces existing entries — storage-served compile bodies,
+    repair/replication write-backs), and written back into ANOTHER
+    space the view serializes as the sigil link it names: a cross-space
+    `/sourceMap` link into the space it was read from. Under ensure-ON
+    the target doc pre-exists with its stored envelope (the ensured
+    default-app closure shares content-addressed helper docs with every
+    pattern's closure), so the link write is CFC-relevant and prepare
+    fail-closes on the unreadable foreign source — `missing link source
+    metadata … at /sourceMap`, the sx2-scale shard-10 red; CFC is
+    CORRECT there. Under ensure-OFF the same corrupt link LANDED
+    SILENTLY AND DURABLY (control run: 10 of 12 fresh spaces held a
+    quoted cross-space link at `/sourceMap`; value-level reads resolve
+    THROUGH the link, which is why the green regime never noticed) — so
+    the ensure exposed a pre-existing silent-corruption class rather
+    than creating one. FIXED red-first at the one read boundary every
+    consumer funnels through: `verifiedDoc` snapshots `sourceMap`
+    exactly as it already snapshots `policyManifests`; enforcement
+    untouched. Pin `compile-cache-storage-served-values.test.ts` (both
+    arms, asserting on the RAW stored value — resolved reads are
+    blind). Live: pre-fix 3/3 red, post-fix 3/3 green ensure-ON, and
+    the ensure-OFF store dump post-fix holds 0 corrupt of 24 stored
+    sourceMap fields. Legacy residual (recorded, not owed): the
+    fleet's EXISTING poisoned docs are never healed in place — a warm
+    hit skips write-back and a runtimeVersion bump orphans rather than
+    rewrites them — but they are inert going forward (the independent
+    review's planted-corruption probes, review-6320-report.md): with
+    the serving space reachable a value read resolves THROUGH the
+    legacy link and post-fix onward write-backs LAUNDER it to the
+    plain value; with the target dangling the doc loads mapless and
+    compiles fine; and a snapshot-time throw (e.g. an
+    unreachable-space authorization error) degrades that one doc to a
+    cache miss instead of failing the closure load. Healing is
+    deliberately out of scope. Expected on #6248's board: shard 10
+    greens (its red is this exact deterministic producer); shards 2/6
+    remain the row's separate profile program-materialization family.
     **SCOPE RULED 2026-08-24 (the owner; verbatim in the stage-1
     report): production ensures a root for EVERY activated space —
     per-space discrimination is DEFERRED to its own design work — and
@@ -6141,7 +6186,73 @@ supply; OW29/OW32/OW34 closed):
     POST-fill shape (shards 2/6: fill succeeded, click landed,
     `#profile` never resolved) is this same clobber on a later
     surface or another member is undetermined — re-measure on that
-    board at a head carrying this fix.
+    board at a head carrying this fix. **RESOLVED 2026-08-25 (the
+    re-measure: CI failure-path store capture at the lane-flip head,
+    run 32929764230, scratch instrumentation branch
+    `claude/server-exec-v2-postfill-diagnosis` — never merged): NOT
+    this clobber — ANOTHER MEMBER, one mechanism across both shards,
+    store-proven in both captures.** The trusted CreateProfile
+    click's durable entry is healthy (seq 17 in both event spaces:
+    `target.value "Ada Lovelace"`, `rendererTrusted: true`, clean
+    admission), and the served dispatch DROPPED it pre-dispatch: the
+    head-event load park awaited a cross-space replica load of the
+    HOME space's ensured `defaultPattern` quote doc — a doc the
+    server's OWN ensure had durably written ONE second earlier — and
+    the load failed `ConnectionError: memory session revoked:
+    unauthorized` (storage/v2.ts sync-load-failure) because the
+    serving plane's home-space session predated the genesis ACL
+    (activation-before-genesis, the recorded boot order) and the ACL
+    landing revoked it (`#revokeDeauthorizedSessions`,
+    memory/v2/server.ts — by design, heal-on-next-mount; a HOME
+    genesis is `{user: OWNER}` with no `"*"`, so the pre-genesis
+    session is de-authorized the moment it lands);
+    `failHeadEventLoadPark` (scheduler/facade.ts) maps ANY load-park
+    failure to the TERMINAL drop arm, and the drain sealed
+    `{status: "dropped", consequenced: true}` with the watermark
+    advanced (seq 18, `consequence_of` naming the eventId) —
+    at-least-once discharged, nothing ever re-runs the event, the
+    authoritative handler never executes, and the surface starves
+    the full 300 s net. This VIOLATES events.md §5's T3 drop
+    predicate ("no runnable handler", never "the run raced"): the
+    handler was runnable and the input doc existed durably; the
+    spec-conforming disposition for an unreachable input is
+    `deferred` (no consequence; re-drain) — the same code's own
+    docstring names the split. Negative discriminators, both stores
+    swept whole: clobber patch signature 0, `sidecarError` 0,
+    `sidecar-run-raced` 0 (this fix HOLDS — no hole); not the
+    read-side r01 member (an error account exists and the
+    consequence is absent, not present-but-unread); not residual
+    (i)'s basis-row gap (the entry is consequenced-dropped, and the
+    only dropped contributions — 3× `compile-cache/writeback` in the
+    speculative profile space's first waves — re-ran and healed in
+    the same second); not OW54's give-up arm (no CFC rejection, no
+    commit attempted) and not OW58's notice wedge (the notice sealed
+    cleanly). A NEW served-event-family member: the pre-dispatch
+    load-park failure arm. Rates at this base: shard 2 red 2/2 CI
+    boards, shard 6 red 2/2, local control 0/12 — the click must
+    land inside the [pre-genesis session open → revocation →
+    re-mount] window with a cross-space read at preflight; slow CI
+    runners do, the local box did not. Shard 9
+    (`cfc-staged-publish`, `TrustedSaveDraft` → `#saved-title`) red
+    1/2 and GREEN on the capture board — UNHARVESTED: symptom-
+    compatible with this member, no store evidence, classification
+    open. Observability, recorded: a terminally dropped served event
+    is invisible in serving stats (`events.*` has no dropped
+    counter; only the scheduler WARN line and the entry's
+    `status: "dropped"` field carry it). Product exposure: an ACL change
+    that REMOVES the serving session's authority or changes its
+    delegated owner revokes that session by design
+    (`#revokeDeauthorizedSessions` — authority-PRESERVING grants
+    leave the session valid; Cubic P2 on this PR scoped the claim),
+    so under ON a served dispatch's cross-space load racing such a
+    revocation permanently and silently discards a user's trusted
+    action; the fix direction (load-park failure →
+    `deferred`/re-park) touches the seal-adjacent path — OW58's
+    "(α)-critical, its own deliberate pass" caution applies, and the
+    disposition (fix-before-flip vs. narrow honest step-skips naming
+    shared-profile's, profile-embed's, and staged-publish's steps
+    with an owed row) is the owner's call, deliberately not taken by
+    the diagnosis seat.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:

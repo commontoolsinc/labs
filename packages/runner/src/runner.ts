@@ -578,6 +578,37 @@ const recordRawBuiltinResultSchemaPolicyInput = (
 };
 
 /**
+ * The kind-free ids of a pattern's derived internal cells on `resultCell` —
+ * the ids a manifest-blind binding conversion mints for a `partialCause`
+ * alias (pattern-binding's descriptor-miss fallback), which is how the
+ * identity bind (CT-1943) renders such an alias. Cause-only by contract:
+ * the coordinates ARE the position-derived identity, and nothing may read
+ * through them — where the descriptor carries a kind, the data lives at the
+ * KINDED entity, so a read here asks about bytes that are never there and
+ * ties the asking transaction to replication state.
+ * {@link firstResolvedOutputRedirect} takes this set to return such links
+ * parsed rather than resolved. The kind is omitted from the mint on
+ * purpose: the hash preimage is kind-free, so one kindless mint per
+ * descriptor names the id the fallback produces whatever the descriptor's
+ * kind is.
+ */
+function causeOnlySpotIds(
+  resultCell: Cell<any>,
+  descriptors: Pattern["derivedInternalCells"],
+): ReadonlySet<string> | undefined {
+  if (descriptors === undefined || descriptors.length === 0) return undefined;
+  const ids = new Set<string>();
+  for (const descriptor of descriptors) {
+    ids.add(
+      getDerivedInternalCellLink(resultCell, {
+        partialCause: descriptor.partialCause,
+      }).id,
+    );
+  }
+  return ids;
+}
+
+/**
  * Find the first write-redirect link within an output binding and return its
  * FULLY RESOLVED normalized link (`id` and `space` populated). The output spot
  * a pattern node writes through is reserved for that node, so its resolved
@@ -586,6 +617,15 @@ const recordRawBuiltinResultSchemaPolicyInput = (
  * pattern object (which drags in the session-varying `program`). Returns
  * undefined if the binding contains no write redirect.
  *
+ * A link whose id is in `causeOnlyIds` (a derived internal cell's kind-free
+ * id — see {@link causeOnlySpotIds}) is returned PARSED, never resolved:
+ * its coordinates are already the identity the caller wants, resolution of
+ * a loaded spot stops there anyway (a stored plain link is not followed
+ * under `writeRedirect`), and reading an absent one ties the scan to
+ * replication state while kicking a doc pull nothing can satisfy — for a
+ * kinded descriptor, the data lives at the KINDED entity and this id is
+ * never written.
+ *
  * Exported for tests only.
  */
 export function firstResolvedOutputRedirect(
@@ -593,6 +633,7 @@ export function firstResolvedOutputRedirect(
   tx: IExtendedStorageTransaction,
   binding: unknown,
   baseCell: Cell<any>,
+  causeOnlyIds?: ReadonlySet<string>,
 ): NormalizedFullLink | undefined {
   if (isWriteRedirectLink(binding) || isAliasBinding(binding)) {
     // A partialCause alias denotes a DERIVED INTERNAL cell — of the child
@@ -610,18 +651,21 @@ export function firstResolvedOutputRedirect(
       return undefined;
     }
     const bindingBase = baseCell.getAsNormalizedFullLink();
-    return resolveLink(
-      runtime,
-      tx,
-      isAliasBinding(binding)
-        ? parseAliasBinding(binding, bindingBase)
-        : parseLink(binding, bindingBase),
-      "writeRedirect",
-    );
+    const parsed = isAliasBinding(binding)
+      ? parseAliasBinding(binding, bindingBase)
+      : parseLink(binding, bindingBase);
+    if (causeOnlyIds?.has(parsed.id)) return parsed;
+    return resolveLink(runtime, tx, parsed, "writeRedirect");
   }
   if (Array.isArray(binding)) {
     for (const child of binding) {
-      const found = firstResolvedOutputRedirect(runtime, tx, child, baseCell);
+      const found = firstResolvedOutputRedirect(
+        runtime,
+        tx,
+        child,
+        baseCell,
+        causeOnlyIds,
+      );
       if (found) return found;
     }
     return undefined;
@@ -633,7 +677,13 @@ export function firstResolvedOutputRedirect(
   // pre-sync keyed off it.
   if (isObjectOrArray(binding) && !isCellLink(binding)) {
     for (const child of Object.values(binding)) {
-      const found = firstResolvedOutputRedirect(runtime, tx, child, baseCell);
+      const found = firstResolvedOutputRedirect(
+        runtime,
+        tx,
+        child,
+        baseCell,
+        causeOnlyIds,
+      );
       if (found) return found;
     }
   }
@@ -4934,11 +4984,14 @@ export class Runner {
           argumentLink,
           resultCell,
         );
+        // The same cause-only skip instantiatePatternNode's spot
+        // derivation applies, so the two derive identical coordinates.
         spotLink = firstResolvedOutputRedirect(
           this.runtime,
           tx,
           unwrappedOutputs,
           resultCell,
+          causeOnlySpotIds(resultCell, pattern.derivedInternalCells),
         );
       } catch (error) {
         // A node whose outputs cannot be bound (e.g. they alias the argument
@@ -7986,11 +8039,17 @@ export class Runner {
         argumentCellLink,
         resultCell,
       );
+      // The manifest-blind bind above renders a partialCause alias as its
+      // derived cell's kind-free id, which is cause-only — resolving it
+      // would read an entity the kinded data never lives at (and kick a
+      // doc pull nothing can satisfy), so the scan is told to take those
+      // coordinates as they stand.
       const outputRedirect = firstResolvedOutputRedirect(
         this.runtime,
         tx,
         mappedOutputBindings,
         resultCell,
+        causeOnlySpotIds(resultCell, pattern.derivedInternalCells),
       );
       if (!outputRedirect) {
         throw new Error(

@@ -549,6 +549,131 @@ Deno.test("parseCfHarnessCliArgs rejects an unknown fabric CFC flow-labels mode"
   );
 });
 
+Deno.test("parseCfHarnessCliArgs carries the fabric CFC posture into the session config", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+      "--fabric-cfc-posture",
+      "max-enforcement",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/tmp/project/keys/agent.pkcs8",
+    space: "my-space",
+    cfcPosture: "max-enforcement",
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs accepts the fabric CFC posture from the environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    {
+      cwd: "/tmp/project",
+      env: {
+        CF_HARNESS_FABRIC_API_URL: "https://toolshed.example/",
+        CF_HARNESS_FABRIC_IDENTITY: "/keys/agent.pkcs8",
+        CF_HARNESS_FABRIC_SPACE: "my-space",
+        CF_HARNESS_FABRIC_CFC_POSTURE: "max-enforcement",
+      },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "my-space",
+    cfcPosture: "max-enforcement",
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs reads the fabric CFC posture from the process environment", async () => {
+  // Through the DEFAULT env projection (no injected `deps.env`), the path a
+  // real invocation takes: a key missing from that projection reads as unset
+  // even when the process environment carries it.
+  const names = [
+    "CF_HARNESS_FABRIC_API_URL",
+    "CF_HARNESS_FABRIC_IDENTITY",
+    "CF_HARNESS_FABRIC_SPACE",
+    "CF_HARNESS_FABRIC_CFC_POSTURE",
+  ] as const;
+  const previous = new Map(names.map((name) => [name, Deno.env.get(name)]));
+  Deno.env.set("CF_HARNESS_FABRIC_API_URL", "https://toolshed.example/");
+  Deno.env.set("CF_HARNESS_FABRIC_IDENTITY", "/keys/agent.pkcs8");
+  Deno.env.set("CF_HARNESS_FABRIC_SPACE", "my-space");
+  Deno.env.set("CF_HARNESS_FABRIC_CFC_POSTURE", "max-enforcement");
+  try {
+    const parsed = await parseCfHarnessCliArgs(
+      ["--prompt", "hi"],
+      { cwd: "/tmp/project" },
+    );
+    if ("help" in parsed) {
+      throw new Error("expected config result");
+    }
+    assertEquals(parsed.fabricSession?.cfcPosture, "max-enforcement");
+  } finally {
+    for (const [name, value] of previous) {
+      if (value === undefined) Deno.env.delete(name);
+      else Deno.env.set(name, value);
+    }
+  }
+});
+
+Deno.test("parseCfHarnessCliArgs rejects an unknown fabric CFC posture", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--fabric-api-url",
+          "https://toolshed.example/",
+          "--fabric-identity",
+          "keys/agent.pkcs8",
+          "--fabric-space",
+          "my-space",
+          "--fabric-cfc-posture",
+          "maximum",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--fabric-cfc-posture must be max-enforcement",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects the fabric CFC posture without a fabric session", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--fabric-cfc-posture",
+          "max-enforcement",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "need --fabric-api-url, --fabric-identity, and --fabric-space",
+  );
+});
+
 Deno.test("parseCfHarnessCliArgs rejects fabric CFC dials without a fabric session", async () => {
   await assertRejects(
     () =>
@@ -2120,6 +2245,63 @@ Deno.test("runCfHarnessCli registers and disposes signal handlers around a run",
       },
     }),
   ]);
+});
+
+Deno.test("runCfHarnessCli prints the fabric-session posture bundle in the operator summary", async () => {
+  const { io, stdout } = createIoBuffers();
+  const exitCode = await runCfHarnessCli(
+    [
+      "--model-provider",
+      "openai-compatible-gateway",
+      "--prompt",
+      "hello",
+      "--gateway-auth-mode",
+      "none",
+    ],
+    {
+      io,
+      env: {},
+      createPromptLoop: () => ({
+        runPrompt: () =>
+          Promise.resolve(
+            ({
+              model: "gpt-5.4",
+              finalAssistantText: "Done.",
+              transcript: [],
+              modelTurns: 1,
+              runState: {
+                runId: "run-postured-summary",
+                status: "completed",
+                createdAt: "2026-04-16T20:10:00.000Z",
+                updatedAt: "2026-04-16T20:10:01.000Z",
+                cfcEnforcementMode: "enforce-explicit",
+                fabricSessionCfc: {
+                  enforcementMode: "enforce-explicit",
+                  enforcementModeSource: "preset-pin",
+                  flowLabels: "persist",
+                  flowLabelsSource: "posture",
+                  posture: "max-enforcement",
+                },
+                currentDir: "/workspace",
+                policyEvents: [],
+                toolOutputs: [],
+              },
+            }) satisfies HarnessPromptLoopResult,
+          ),
+        runTranscript: () =>
+          Promise.reject(new Error("unexpected resume path")),
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  const summary = stdout.join("");
+  assertEquals(
+    summary.includes(
+      "fabricSessionCfc: enforce-explicit (preset-pin), flow-labels persist (posture), posture max-enforcement",
+    ),
+    true,
+  );
 });
 
 Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata", async () => {

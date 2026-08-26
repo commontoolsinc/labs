@@ -112,14 +112,22 @@
  * |                            | toolshed ExecutorHost wiring and the executor    |
  * |                            | test harnesses) marks the serving posture, and   |
  * |                            | it hand-rolls its options deliberately           |
+ *
+ * One named departure a caller can opt into: `cfcPosture: "max-enforcement"`
+ * (a `CoreParams` field) swaps the core-default CFC dial rows above for the
+ * {@link MAX_ENFORCEMENT_CFC_OPTIONS} bundle, for that one runtime. The
+ * per-preset host dials (`cfcEnforcementMode`, `cfcFlowLabels`) still apply
+ * over the bundle, so a session-level raise wins either way.
  */
 
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import type {
   CfcEnforcementMode,
   CfcFlowLabelsMode,
+  SinkMaxConfidentiality,
   TrustSnapshot,
 } from "./cfc/mod.ts";
+import { STANDARD_PROMPT_CAVEAT_POLICY } from "./cfc/mod.ts";
 import type { CommitBackpressurePolicy } from "./scheduler/backpressure.ts";
 import type { PatternCoverageCollector } from "./pattern-coverage.ts";
 import type { IStorageManager } from "./storage/interface.ts";
@@ -507,6 +515,77 @@ export async function experimentalOptionsForDeployedClient(
 }
 
 // ---------------------------------------------------------------------------
+// The max-enforcement CFC posture (CT-2075's named bundle).
+// ---------------------------------------------------------------------------
+
+/**
+ * Names of the CFC posture bundles a preset caller can opt into. One posture
+ * exists today; the type is here so the next one is an addition, not a
+ * redesign.
+ */
+export type CfcPosture = "max-enforcement";
+
+/**
+ * Confidentiality ceilings of the max-enforcement posture: every network-fetch
+ * egress sink is public-only (an empty ceiling admits no confidential atom),
+ * so labeled data cannot leave through the network-fetch sinks.
+ *
+ * The llm sinks (`llm`, `llmDialog`, `generateText`, `generateObject`) carry
+ * no ceiling, and a sink with no ceiling gets NO gate: under this posture,
+ * llm-sink release is ungoverned — any confidentiality, a secret as much as a
+ * risk caveat, reaches the llm sinks without a policy evaluation running for
+ * them. Ungated rather than public-only because ceiling membership is exact
+ * clause subsumption (`atomsOutsideCeiling`) — a ceiling entry cannot admit
+ * "any material-risk caveat regardless of `source`" — while risk-caveated
+ * ingested content is exactly what an llm sink exists to process, so a
+ * public-only ceiling would refuse the flows the sink is for. Governing llm
+ * release needs a boundary-scoped admission mechanism (a public-only ceiling
+ * paired with an exchange rule that admits the material-risk family at
+ * llm-class boundaries), which this posture does not yet carry.
+ */
+export const MAX_ENFORCEMENT_SINK_CEILINGS: SinkMaxConfidentiality = Object
+  .freeze({
+    fetchBinary: Object.freeze([]),
+    fetchText: Object.freeze([]),
+    fetchJson: Object.freeze([]),
+    fetchJsonUnchecked: Object.freeze([]),
+    fetchProgram: Object.freeze([]),
+    streamData: Object.freeze([]),
+  });
+
+/**
+ * The max-enforcement CFC posture: every staged-rollout enforcement dial at
+ * its enforcing value, as one named opt-in bundle (CT-2075 ran them together
+ * and found they co-exist as one system; this is that experiment's dial set,
+ * landed at the seam it designated). A preset caller opts in through
+ * {@link CoreParams.cfcPosture}; the fleet posture in {@link coreOptions}
+ * is unchanged.
+ *
+ * Deliberately NOT in the bundle:
+ * - `cfcEnforcementMode` — the core pin (`enforce-explicit`) stands; a host
+ *   raises one session to `enforce-strict` through its own preset dial
+ *   (remoteClient/browserWorker), and the bundle's `persist` flow labels are
+ *   what make that raise conform (strict requires persist).
+ * - `cfcDecomposedEnvelopes` — gated on every deployed reader resolving
+ *   stored roots' references, a readiness question, not an enforcement one.
+ * - `cfcTrustConfig` — deployment-specific declarations; nothing generic to
+ *   bundle.
+ * - `cfcPrefixProvenanceStats` — measurement, not enforcement.
+ */
+export const MAX_ENFORCEMENT_CFC_OPTIONS = Object.freeze(
+  {
+    cfcFlowLabels: "persist",
+    cfcWriteFloor: "enforce",
+    cfcTriggerReadGating: true,
+    cfcPolicyEvaluation: "enforce",
+    cfcPolicyRecords: Object.freeze([...STANDARD_PROMPT_CAVEAT_POLICY]),
+    cfcDeclaredMonotonicity: "enforce",
+    cfcLabelMetadataProtection: "enforce",
+    cfcSinkMaxConfidentiality: MAX_ENFORCEMENT_SINK_CEILINGS,
+  } as const,
+) satisfies Partial<RuntimeOptions>;
+
+// ---------------------------------------------------------------------------
 // Gate 4: the shared core all presets compose.
 // ---------------------------------------------------------------------------
 
@@ -523,6 +602,14 @@ interface CoreParams {
    * where an omitted field was silent drift.
    */
   experimental: ExperimentalOptions;
+  /**
+   * Opt this runtime into a named CFC posture bundle
+   * ({@link MAX_ENFORCEMENT_CFC_OPTIONS}). Applied in {@link coreOptions},
+   * under the per-preset host dials, so a host that raises
+   * `cfcEnforcementMode` or `cfcFlowLabels` for one session still wins.
+   * Unset means the fleet posture: the core pin plus constructor defaults.
+   */
+  cfcPosture?: CfcPosture;
 }
 
 /**
@@ -569,7 +656,11 @@ function coreOptions(params: CoreParams): RuntimeOptions {
     // cfcDeclaredMonotonicity / cfcPolicyRecords /
     // cfcTrustConfig / cfcSinkMaxConfidentiality ride the constructor
     // defaults (off / none) — deliberately absent here until a first-party
-    // rollout begins.
+    // rollout begins. A caller that opts into `cfcPosture` gets the named
+    // bundle's values instead, for this one runtime.
+    ...(params.cfcPosture === "max-enforcement"
+      ? MAX_ENFORCEMENT_CFC_OPTIONS
+      : {}),
   };
 }
 

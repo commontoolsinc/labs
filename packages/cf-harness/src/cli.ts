@@ -193,6 +193,7 @@ const CLI_STRING_FLAGS = [
   "fabric-space",
   "fabric-cfc-enforcement-mode",
   "fabric-cfc-flow-labels",
+  "fabric-cfc-posture",
   "host-mount",
   "browser-access-lease-id",
   "browser-access-cdp-url",
@@ -538,6 +539,10 @@ Options:
                                 --cfc-enforcement-mode, which governs the harness)
   --fabric-cfc-flow-labels <mode> off | observe | persist flow-label propagation on
                                 the fabric session's runtime
+  --fabric-cfc-posture <name>   max-enforcement: opt the fabric session's runtime
+                                into the named CFC posture bundle (every staged
+                                enforcement dial on); the two dials above still
+                                apply over the bundle
   --host-mount <spec>           Extra host bind mount (repeatable: name=<id>,source=<host>,target=<sandbox>,mode=readonly|writable)
   --max-model-turns <n>         Maximum model turns before aborting
   --print-transcript            Print the final transcript JSON after the response
@@ -561,6 +566,7 @@ Environment:
   CF_HARNESS_FABRIC_SPACE       Default value for --fabric-space
   CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE Default value for --fabric-cfc-enforcement-mode
   CF_HARNESS_FABRIC_CFC_FLOW_LABELS Default value for --fabric-cfc-flow-labels
+  CF_HARNESS_FABRIC_CFC_POSTURE Default value for --fabric-cfc-posture
   CF_HARNESS_SANDBOX_IMAGE      Default value for --sandbox-image
   CF_HARNESS_SANDBOX_DOCKER_RUNTIME Default value for --sandbox-docker-runtime
   ${CFC_RESULT_DIR_ENV} Fallback for --cfc-result-dir
@@ -1362,6 +1368,9 @@ export const parseCfHarnessCliArgs = async (
       CF_HARNESS_FABRIC_CFC_FLOW_LABELS: Deno.env.get(
         "CF_HARNESS_FABRIC_CFC_FLOW_LABELS",
       ),
+      CF_HARNESS_FABRIC_CFC_POSTURE: Deno.env.get(
+        "CF_HARNESS_FABRIC_CFC_POSTURE",
+      ),
       CF_HARNESS_SANDBOX_IMAGE: Deno.env.get("CF_HARNESS_SANDBOX_IMAGE"),
       CF_HARNESS_SANDBOX_DOCKER_RUNTIME: Deno.env.get(
         "CF_HARNESS_SANDBOX_DOCKER_RUNTIME",
@@ -1553,7 +1562,8 @@ export const parseCfHarnessCliArgs = async (
       | "fabric-identity"
       | "fabric-space"
       | "fabric-cfc-enforcement-mode"
-      | "fabric-cfc-flow-labels",
+      | "fabric-cfc-flow-labels"
+      | "fabric-cfc-posture",
     envValue: string | undefined,
   ): string | undefined => {
     const raw = typeof args[flag] === "string"
@@ -1603,6 +1613,17 @@ export const parseCfHarnessCliArgs = async (
       `--fabric-cfc-flow-labels must be off, observe, or persist: ${fabricCfcFlowLabels}`,
     );
   }
+  const fabricCfcPosture = fabricSessionFlagValue(
+    "fabric-cfc-posture",
+    env.CF_HARNESS_FABRIC_CFC_POSTURE,
+  );
+  if (
+    fabricCfcPosture !== undefined && fabricCfcPosture !== "max-enforcement"
+  ) {
+    throw new Error(
+      `--fabric-cfc-posture must be max-enforcement: ${fabricCfcPosture}`,
+    );
+  }
   let fabricSession: HarnessFabricSessionConfig | undefined;
   if (
     fabricApiUrl !== undefined || fabricIdentity !== undefined ||
@@ -1635,12 +1656,16 @@ export const parseCfHarnessCliArgs = async (
       ...(fabricCfcFlowLabels !== undefined
         ? { cfcFlowLabels: fabricCfcFlowLabels }
         : {}),
+      ...(fabricCfcPosture !== undefined
+        ? { cfcPosture: fabricCfcPosture }
+        : {}),
     };
   } else if (
-    fabricCfcEnforcementMode !== undefined || fabricCfcFlowLabels !== undefined
+    fabricCfcEnforcementMode !== undefined ||
+    fabricCfcFlowLabels !== undefined || fabricCfcPosture !== undefined
   ) {
     throw new Error(
-      "--fabric-cfc-enforcement-mode and --fabric-cfc-flow-labels configure the fabric session's runtime and need --fabric-api-url, --fabric-identity, and --fabric-space",
+      "--fabric-cfc-enforcement-mode, --fabric-cfc-flow-labels, and --fabric-cfc-posture configure the fabric session's runtime and need --fabric-api-url, --fabric-identity, and --fabric-space",
     );
   }
   // An allowlisted fabric-session tool with no session to run it against is
@@ -2375,7 +2400,9 @@ export const formatCfHarnessCliResult = (
   if (result.runState.fabricSessionCfc !== undefined) {
     const posture = result.runState.fabricSessionCfc;
     lines.push(
-      `fabricSessionCfc: ${posture.enforcementMode} (${posture.enforcementModeSource}), flow-labels ${posture.flowLabels} (${posture.flowLabelsSource})`,
+      `fabricSessionCfc: ${posture.enforcementMode} (${posture.enforcementModeSource}), flow-labels ${posture.flowLabels} (${posture.flowLabelsSource})${
+        posture.posture !== undefined ? `, posture ${posture.posture}` : ""
+      }`,
     );
   }
   if (
