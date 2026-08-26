@@ -118,10 +118,29 @@ export class SessionRegistry {
         `session ${sessionId} resume token is no longer valid`,
       );
     }
+    const clientSeenSeq = session.seenSeq ?? 0;
     const seenSeq = Math.max(
       existing?.seenSeq ?? 0,
-      session.seenSeq ?? 0,
+      clientSeenSeq,
     );
+    // A resuming client reports the highest server seq it actually
+    // RECEIVED. When that is behind what this session was last synced
+    // to, the frames in between were sent but never arrived — a socket
+    // that dies mid-flight loses "successfully sent" frames, and only a
+    // locally-throwing send is visible in-process for
+    // `rollbackUndeliveredSync` to repair. The delivery cache still
+    // records those documents as delivered, so the next diff would
+    // elide exactly the ones the client is missing, and a schema
+    // document elided that way is unobtainable: the client cannot ask
+    // for it (a watch.add answers from the same cache) and no later
+    // frame re-stages it.
+    //
+    // The client's report is the authority on what it holds, so trust
+    // it and route the next pass through a FULL evaluation, which
+    // re-ships the whole assembled state and puts sent back in step
+    // with held.
+    const missedDelivery = existing !== undefined &&
+      clientSeenSeq < existing.lastSyncedSeq;
     const sessionToken = nextSessionToken();
     const revokedConnectionId = existing?.ownerConnectionId !== undefined &&
         existing.ownerConnectionId !== null &&
@@ -141,7 +160,7 @@ export class SessionRegistry {
         trackedIdsFromEntries(existing?.entities?.values() ?? []),
       caughtUpLocalSeq: existing?.caughtUpLocalSeq ?? 0,
       pendingCaughtUpLocalSeq: existing?.pendingCaughtUpLocalSeq ?? 0,
-      forceFullResync: existing?.forceFullResync ?? false,
+      forceFullResync: (existing?.forceFullResync ?? false) || missedDelivery,
       ...(existing?.leaseHolderReads === true
         ? { leaseHolderReads: true }
         : {}),
