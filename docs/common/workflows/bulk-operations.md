@@ -1,4 +1,4 @@
-# Bulk piece operations
+# The bulk operations session
 
 *What is this, and why is it shaped this way?* A tour of surveying, repairing
 and retargeting a collection of deployed pieces, walked act by act against a
