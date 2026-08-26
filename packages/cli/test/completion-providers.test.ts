@@ -229,6 +229,7 @@ const DIRECTIVE_CASES: Array<[string, string, string | undefined]> = [
   ["cf piece repair --fixer ", "files", "*.ts"],
   ["cf piece repair --plan ", "files", undefined],
   ["cf piece survey --validator ", "files", undefined],
+  ["cf piece survey --diff ", "files", undefined],
   ["cf test --pattern-coverage-dir ", "dirs", undefined],
   ["cf test --timing-measures-out ", "files", undefined],
   ["cf fuse mount --cfc-writeback-state ", "files", undefined],
