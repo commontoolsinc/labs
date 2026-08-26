@@ -670,6 +670,67 @@ describe("piece source reconciliation", () => {
       expect(getPatternIdentityRef(piece)).toEqual(movedRef);
     });
 
+    it("picks up a source that moves while a pass is running", async () => {
+      // A pass reads its target once. A move that lands after that read could
+      // not have been seen by it, so another pass has to follow the one in
+      // flight rather than the move being lost.
+      const piece = await preparePiece(refuseEveryFetch);
+      const upstream = runtime.getCell(
+        piece.space,
+        `reconcile-upstream-${crypto.randomUUID()}`,
+      );
+      await runtime.setup(
+        undefined,
+        await compileMarkerPattern("v1"),
+        {},
+        upstream,
+      );
+      await stampSource(
+        piece,
+        `cf:/${piece.space}/${upstream.getAsNormalizedFullLink().id}`,
+      );
+      expect(await reconcile(piece)).toBe("current");
+
+      const entered = defer<void>();
+      const held = defer<void>();
+      const manager = runtime.patternManager;
+      const program = manager.getPatternSourceProgramByIdentity.bind(manager);
+      manager.getPatternSourceProgramByIdentity = async (
+        ...args: Parameters<typeof program>
+      ) => {
+        entered.resolve();
+        await held.promise;
+        return await program(...args);
+      };
+
+      const third = await compileMarkerPattern("v3");
+      const thirdRef = runtime.patternManager.getArtifactEntryRef(third)!;
+      const reached = defer<void>();
+      const cancel = piece.sinkMeta("patternIdentity", (value) => {
+        const ref = value as { identity?: string } | undefined;
+        if (ref?.identity === thirdRef.identity) reached.resolve();
+      });
+      try {
+        // The watcher starts a pass, which blocks in its source lookup.
+        await runtime.setup(
+          undefined,
+          await compileMarkerPattern("v2"),
+          {},
+          upstream,
+        );
+        await entered.promise;
+        // The source moves again while that pass is held.
+        await runtime.setup(undefined, third, {}, upstream);
+        held.resolve();
+        await reached.promise;
+      } finally {
+        cancel();
+        manager.getPatternSourceProgramByIdentity = program;
+      }
+      await runtime.sourceReconciler.idle();
+      expect(getPatternIdentityRef(piece)).toEqual(thirdRef);
+    });
+
     it("stops following once the piece stops", async () => {
       const piece = await preparePiece(refuseEveryFetch);
       const upstreamPiece = runtime.getCell(
@@ -769,6 +830,32 @@ describe("piece source reconciliation", () => {
       manager.loadPatternByIdentity = (...args: Parameters<typeof load>) =>
         args[0] === originalRef.identity
           ? Promise.reject(new Error("the running pattern is gone"))
+          : load(...args);
+      try {
+        expect(await reconcile(piece)).toBe("updated");
+      } finally {
+        manager.loadPatternByIdentity = load;
+      }
+      expect(getPatternIdentityRef(piece)).toEqual(changedRef);
+    });
+
+    it("adopts a contract-moving candidate when the running pattern is absent", async () => {
+      // The same waiver as above, for a pattern index that answers rather than
+      // fails: no pattern to compare against is no comparison either way.
+      const piece = await preparePiece(refuseEveryFetch);
+      const originalRef = getPatternIdentityRef(piece)!;
+      const changed = await runtime.patternManager.compilePattern(
+        parentProgram(sourceWithChangedContract("v2")),
+        { space: piece.space },
+      );
+      const changedRef = runtime.patternManager.getArtifactEntryRef(changed)!;
+      await stampSource(piece, `cf:pattern:${changedRef.identity}`);
+
+      const manager = runtime.patternManager;
+      const load = manager.loadPatternByIdentity.bind(manager);
+      manager.loadPatternByIdentity = (...args: Parameters<typeof load>) =>
+        args[0] === originalRef.identity
+          ? Promise.resolve(undefined)
           : load(...args);
       try {
         expect(await reconcile(piece)).toBe("updated");
