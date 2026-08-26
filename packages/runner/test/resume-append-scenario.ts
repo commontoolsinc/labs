@@ -44,6 +44,7 @@ class Gate {
   #held: string[] = [];
   #deliver: (payload: string) => void = () => {};
   #firstHeldResolve: (() => void) | undefined;
+
   /**
    * Resolves the first time a matching document is held back — the edge that the
    * coordinator has reconciled the resume batch (it has read, and so requested,
@@ -72,10 +73,12 @@ class Gate {
       setCloseReceiver: (r: (e?: Error) => void) => inner.setCloseReceiver?.(r),
     };
   }
+
   /** How many matching documents are currently held back. */
   get heldCount(): number {
     return this.#held.length;
   }
+
   /** Open the gate and flush every held document to the client. */
   release(): void {
     this.#open = true;
@@ -133,20 +136,27 @@ export interface AppendScenario {
   readonly space: MemorySpace;
   readonly server: MemoryV2Server.Server;
   readonly program: RuntimeProgram;
+
   /** Result cell id in the space. */
   readonly cellId: string;
+
   /** Result field the aggregate is published under (e.g. "kept"/"values"). */
   readonly resultKey: string;
+
   /** Initial input list. */
   readonly items: readonly unknown[];
+
   /** Element appended during the resume window. */
   readonly appended: unknown;
+
   /** Replace the default append with another input-list update. */
   readonly updateItems?: (current: unknown[]) => unknown[];
+
   /** Extract the comparable aggregate from the result cell for assertions. */
   readonly read: (
     rc: { key: (k: string) => { getAsQueryResult: () => unknown } },
   ) => unknown[];
+
   /** Expected aggregate after the first-runtime build. */
   readonly buildExpected: unknown[];
 }

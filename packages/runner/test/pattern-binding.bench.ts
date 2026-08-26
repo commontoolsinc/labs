@@ -132,8 +132,10 @@ const noSchema = {
 type BuildOpts = {
   /** number of `$alias` leaves (≈ the cell references in the binding) */
   aliases: number;
+
   /** depth of each alias path into the schema (1..4) */
   pathDepth?: number;
+
   /** put an explicit asCell schema on each alias (as the transformer emits) */
   aliasSchema?: boolean;
 };

@@ -141,6 +141,7 @@ const unbindableOutputsPattern = {
 type SkipCase = {
   name: string;
   pattern: Pattern;
+
   /**
    * Seed the result cell with a prior run, so the run under test resumes a
    * stored root whose argument meta link is already written.
@@ -149,8 +150,10 @@ type SkipCase = {
   level: "debug" | "warn";
   message: string;
   node: string;
+
   /** Parts the call carries ahead of the identity payload. */
   leadingParts: number;
+
   /** How the run under test is expected to end. */
   rejectsWith?: RegExp;
 };
