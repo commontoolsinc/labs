@@ -152,8 +152,10 @@ const frameSizeLogger = getLogger("memory-socket", {
 // approaching that cap is an outage in the making, not a curiosity — and a
 // payload regression looks like timeouts from the outside (labs#6319).
 // Warning at a quarter of the cap surfaces the growth while every client
-// still loads.
-const OUTBOUND_FRAME_WARN_CODE_UNITS = 16 * 1024 * 1024;
+// still loads. The cap is in bytes, so the check measures encoded bytes;
+// a string's UTF-8 byte length falls in [length, 3 × length], and the
+// cheap code-unit bound below spares ordinary frames the encode pass.
+const OUTBOUND_FRAME_WARN_BYTES = 16 * 1024 * 1024;
 
 export const attachMemorySocketPipeline = (
   socket: WebSocket,
@@ -182,16 +184,19 @@ export const attachMemorySocketPipeline = (
       return;
     }
     const encoded = encodeMemoryBoundary(message);
-    if (encoded.length > OUTBOUND_FRAME_WARN_CODE_UNITS) {
-      frameSizeLogger.warn("oversized-outbound-frame", () => [
-        "outbound memory frame at",
-        encoded.length,
-        "code units approaches the 64 MiB client cap;",
-        "type:",
-        (message as { type?: string }).type ?? "unknown",
-        "space:",
-        (message as { space?: string }).space ?? "unknown",
-      ]);
+    if (encoded.length * 3 > OUTBOUND_FRAME_WARN_BYTES) {
+      const frameBytes = TEXT_ENCODER.encode(encoded).byteLength;
+      if (frameBytes > OUTBOUND_FRAME_WARN_BYTES) {
+        frameSizeLogger.warn("oversized-outbound-frame", () => [
+          "outbound memory frame at",
+          frameBytes,
+          "bytes approaches the 64 MiB client cap;",
+          "type:",
+          (message as { type?: string }).type ?? "unknown",
+          "space:",
+          (message as { space?: string }).space ?? "unknown",
+        ]);
+      }
     }
     socket.send(encoded);
   });
