@@ -90,10 +90,13 @@ export const CFC_GRANT_ABSENT_DIGEST = "absent";
 export type CfcGrantIdentity = {
   /** Governing space the document lives in (== `owner` in this PR). */
   readonly space: string;
+
   /** Grant kind matched by `policyState` guards ("ShareGrant", …). */
   readonly kind: string;
+
   /** DID whose release authority this grant spends. */
   readonly owner: string;
+
   /** What it releases: a doc reference (URI string) or an atom-pattern
    * scope record (design §2.1 `Reference | AtomPattern`). */
   readonly resource: unknown;
@@ -102,13 +105,16 @@ export type CfcGrantIdentity = {
 /** A verified grant record (design doc §2.1 shape). */
 export type CfcGrant = CfcGrantIdentity & {
   readonly version: typeof CFC_GRANT_VERSION;
+
   /** Principal-like atoms (§3.1.8-validated) the release extends to. */
   readonly audience: readonly unknown[];
   readonly grantedAt: number;
   readonly expiresAt?: number;
+
   /** §6 intent attribution once the intent substrate exists. */
   readonly sourceIntentId?: string;
   readonly revoked?: { readonly at: number; readonly by: string };
+
   /**
    * Single-use release (design §2.2 "Single-use releases", spec §6.5.1-.2):
    * the grant satisfies a `policyState` guard only while its consumption
@@ -130,13 +136,16 @@ export type CfcGrantWriteInput = {
   readonly owner: string;
   readonly resource: unknown;
   readonly audience: readonly unknown[];
+
   /** Defaults to `owner` — the v1 governing-space posture (module doc). */
   readonly space?: string;
+
   /** Defaults to the runner clock at write time. */
   readonly grantedAt?: number;
   readonly expiresAt?: number;
   readonly sourceIntentId?: string;
   readonly revoked?: { readonly at: number; readonly by: string };
+
   /** See {@link CfcGrant.singleUse}: boolean-true or absent, else refused. */
   readonly singleUse?: true;
 };
@@ -204,8 +213,10 @@ export const cfcGrantConsumedReceiptId = (grantId: string): URI =>
 export type CfcGrantConsumptionReceipt = {
   readonly version: typeof CFC_GRANT_VERSION;
   readonly grantConsumed: { readonly grantId: string };
+
   /** Governing space (== the grant's space; the receipt lives beside it). */
   readonly space: string;
+
   /** Runner clock at claim time — captured once per transaction so repeated
    * prepares of the same tx stage a byte-identical receipt. */
   readonly consumedAt: number;
@@ -738,6 +749,7 @@ export const createTxCfcGrantResolver = (
   tx: IExtendedStorageTransaction,
   opts: {
     readonly now?: () => number;
+
     /**
      * Out-record set when a grant lookup could not be READ (the catch arm
      * below) — as opposed to resolving to no facts. A boundary decision that
