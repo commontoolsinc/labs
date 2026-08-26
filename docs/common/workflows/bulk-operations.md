@@ -61,16 +61,25 @@ the pair the row recorded. The classification is a read taken some way before
 the write, not a condition on it.
 
 What the classification catches is a piece standing on neither of the row's two
-references. At the preflight that reads every row before the first write, such a
-piece keeps the run from starting at all; in a row's own read it stops the run
-there, and every piece after it is named unattempted. What it does not catch has
-two shapes, and a reader should assume neither is caught. A piece that something
-else moved onto the row's own target classifies as landed — the same verdict a
-resume produces — so the run leaves it alone and reports nothing unusual about
-it. And a piece moved during the sequence above is carried to the row's target
-from wherever it had been taken, because the row's pair is never consulted
-again. A retarget plan is a record of what a run intended and a check on what it
-finds, not an interlock against a second writer working the same pieces.
+references. At the preflight that reads every row before the first write, such
+a piece keeps the run from starting at all; in a row's own read it stops the run
+there, and every piece after it is named unattempted. What it absorbs instead is
+a piece something else moved onto the row's own target: that classifies as
+landed — the same verdict a resume produces — so the run leaves it alone and
+rewrites nothing. Both outcomes are pinned in
+`packages/piece/test/ops/bulk-retarget.test.ts`, which races a writer against a
+group session and asserts the skip in one run and the stop in the other.
+
+Between them one window stays open: a move landing after the row's
+classification returns and before `setPattern` reads the piece for itself. A
+piece moved there is carried to the row's target from the reference the other
+writer left it on, the row's pair never being consulted again. Past that read it
+is covered once more — `runSynced` reasserts the identity `setPattern` loaded
+inside every transaction attempt, so a move landing later is rejected with
+"piece pattern changed while the source update was compiling" rather than
+written over. The window is narrow, but it is open, so a retarget plan is a
+record of what a run intended and a check on what it finds, not an interlock
+against a second writer working the same pieces.
 
 **The verdict is a second look, never the apply's exit code.** An apply that
 exits zero says the writes it attempted returned success, which is not the same
