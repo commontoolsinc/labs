@@ -58,7 +58,9 @@ has landed, archive it under
   `Deno.test` in it is a separate identity, which is where almost all of
   the repository's identities live. For the command-line integration
   script the item is a single-step dispatch arm, which records the one
-  identity named for its step.
+  identity named for its step. [Selecting one test rather than one
+  file](#selecting-one-test-rather-than-one-file) specifies how the item
+  stops being the unit of selection.
 - A **suite** is a named group of tests that share one runner and one
   environment: the workspace unit tests, the pattern integration tests,
   the pattern integration tests under the server-execution flag, and so
@@ -509,6 +511,166 @@ from the selection it enables. A repository that shards by hand pays a
 maintenance cost every time a test's cost changes, and pays it in a file
 nobody thinks about until a shard runs long. Nothing outside the machinery
 listed here reads those tables, so the deletion is clean.
+
+## Selecting one test rather than one file
+
+The store scores identities and the packer chooses items, and for the unit
+suites those are not the same size. A unit-test file holds many
+identities, so choosing one test with a record of catching things drags in
+every test beside it, and skipping one expensive test means skipping its
+whole file. Almost all of the repository's identities sit behind that gap.
+
+Closing it does not need a single test file edited. This section specifies
+how, and says where the gain is real and where it is not.
+
+### Why `deno test --filter` is not the mechanism
+
+The obvious tool does not do the job. `--filter` takes a substring, or a
+pattern between slashes which Deno compiles with Rust's regular expression
+crate. That crate has no lookaround, so "run everything except these
+names" cannot be written at all.
+
+It fails in the worst available way. On Deno 2.9.4 a pattern the crate
+cannot compile does not error: every test is filtered out and the run
+exits zero. A malformed filter is a green run of nothing, which is the one
+result continuous integration must never produce quietly.
+
+Inclusion patterns do compile, and they are the wrong shape anyway: a
+filter listing the tests to run silently drops a test the pull request
+just added, because its name is not on a list built from records that
+predate it.
+
+### The mechanism is the preload the plan already adds
+
+[Part one](#part-one--the-data-and-what-it-already-tells-us) adds a
+preload to `@commonfabric/test-support` that intercepts every `Deno.test`
+to capture the module that registered it. That interception point is all
+this needs.
+
+The preload also reads a **skip list**: the identities this invocation is
+not to run. A listed test is registered with `ignore: true` rather than
+dropped, so it appears in the run's output and in its JUnit report as
+skipped, and the store learns that it was deliberately not run instead of
+watching the identity disappear.
+
+Four properties come from putting it there rather than on the command
+line. The list is a file named by an environment variable, so nothing is
+bounded by argument length. Names match exactly, so nothing needs
+escaping. The list is keyed by registering file and name together, because
+the same test name occurs in more than one file and the preload already
+computes the file for its attribution work. And no test file changes: a
+suite that already passes `--preload` takes a second one, since repeating
+the flag works where the comma-separated form does not.
+
+One consequence is worth stating because it looks like a bug when first
+seen. Wrapping `Deno.test` moves Deno's own JUnit `classname` from the
+test's file to the preload, for skipped and unskipped tests alike. That is
+already why `ingestJUnit` joins on the preload's name-to-file map rather
+than on `classname`, and it is a reason the two features belong in one
+module rather than two.
+
+### The list says what not to run, never what to run
+
+An identity the store has never seen is not on the skip list, so it runs.
+A test the pull request just added runs. A renamed test runs, because the
+new name is not the old one. A test whose file moved runs.
+
+This is [an identity with no records must
+run](#two-rules-that-force-a-test-in) enforced by construction rather than
+by a rule the packer has to remember, and it is the whole reason the
+mechanism is a skip list rather than a selection list.
+
+### What it reaches, and what it does not
+
+One registered `Deno.test` is the floor. In a plain test file that is each
+test. In a file written with `describe` and `it`, `describe` registers one
+`Deno.test` and each `it` is a step inside it, so the finest unit reachable
+is the whole `describe`. Going finer would mean changing the wrappers that
+`describe` and `it` come from, or the test files themselves, which is the
+disruption this design exists to avoid.
+
+The module still loads. Skipping a test inside a file does not avoid
+importing that file, and for some suites the import is most of the cost:
+the reference build's eight runner unit shards hold 1,120 seconds of
+measured tests inside 1,583 seconds of test steps, and the difference is
+largely module loading. So what this buys is the tests' own time and not
+the file's.
+
+That is exactly where the time is. 1,831 executions run for over a second
+and hold 148.6 minutes between them, and they are scattered through files
+whose other tests are cheap. Being able to leave the slow ones out of a
+file the lane is running anyway is the lever the item granularity was
+hiding.
+
+### What replaces the item
+
+The item was doing two jobs, and they separate cleanly.
+
+The **selection unit** becomes the identity. Scores, costs, the two
+exclusion rules, the two mandatory rules, repeats and the manifest all key
+on the complete identity, which is what the store has always spoken in.
+
+The **invocation unit** stays what it was: a file, a script arm, whatever
+the suite's runner can be pointed at. It has to, because identities cannot
+be enumerated from a working tree. Learning a test's name means running the
+file that registers it, so a tree walk can only find containers. That is
+also what keeps a brand-new file discoverable, and it is why `enumerate()`
+survives this change unaltered.
+
+So the topology contract moves by less than the vocabulary does.
+`enumerate()` keeps its job and `locate()` keeps its job. What changes is
+that `command()` takes identities rather than items, and returns one
+invocation per file carrying that file's skip list, with a file whose every
+identity is skipped not invoked at all.
+
+### What it costs to run one test
+
+The cost model gains one term:
+
+```text
+invocationCost(file) = fileOverhead(file)
+                     + sum over the identities not skipped of cost(identity)
+```
+
+`fileOverhead` is fitted per file from the lane runner's own records,
+exactly as `suiteOverhead` and `correction` are, and is measured rather
+than chosen.
+
+The packer changes shape because of it. An identity's cost now depends on
+whether its file is already being invoked: the first identity chosen from
+a file pays the overhead and every later one pays only itself. So the
+density pass sorts by marginal cost rather than by cost, and choosing one
+test from a file makes its siblings cheaper to add. That is a better model
+of the machine than per-file items ever were, and it falls out rather than
+being imposed.
+
+### What does not change
+
+- The per-package coverage gate runs a package's whole measured set, so
+  its invocations carry no skip list.
+- Suites that are not `deno test` keep the granularity they have. The
+  command-line script's arms are already one identity each, and `cf test`
+  writes one record per pattern file.
+- Both halves of the drift guard are unchanged: the tree half still claims
+  files, the store half still claims identities.
+- A repeat names an identity and invokes its file with every other
+  identity in that file skipped.
+
+### The work this adds
+
+- [ ] The preload reads a skip list keyed by registering file and name,
+      and registers a listed test as ignored rather than dropping it.
+- [ ] Every `deno test` suite in the topology passes the preload, appended
+      the way `--junit-path` already is.
+- [ ] `cost` and the packing passes key on identities, with
+      `fileOverhead(file)` fitted from the lane runner's records and the
+      density pass sorting by marginal cost.
+- [ ] `command()` returns one invocation per file with its skip list, and
+      omits a file whose every identity is skipped.
+- [ ] A fixture proving the four properties that make this safe: an
+      unlisted new test runs, a renamed test runs, a listed test is
+      reported as skipped rather than missing, and two files holding the
+      same test name skip independently.
 
 ### The drift guard
 
