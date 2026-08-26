@@ -160,6 +160,7 @@ export interface ExtendedExpected<IsAsync = false> extends Expected<IsAsync> {
   // The modifiers are restated so that they carry the extended type through.
   not: IsAsync extends true ? Async<ExtendedExpected<true>>
     : ExtendedExpected<false>;
+
   /** @inheritDoc */
   resolves: Async<ExtendedExpected<true>>;
 

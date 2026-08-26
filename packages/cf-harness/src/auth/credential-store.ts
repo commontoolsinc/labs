@@ -340,6 +340,7 @@ const parseDocument = (text: string): CredentialDocument => {
 
 export interface FileHarnessCredentialStoreOptions {
   path: string;
+
   /** @internal Observability hook used by lock-contention tests. */
   onLockAcquisitionStarted?: () => void;
 }

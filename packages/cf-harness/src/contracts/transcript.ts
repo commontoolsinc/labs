@@ -71,6 +71,7 @@ export type HarnessTranscriptDefect =
 export interface HarnessTranscriptPairing {
   valid: boolean;
   defects: readonly HarnessTranscriptDefect[];
+
   /**
    * Length of the longest prefix that is itself resumable: the prefix ends
    * where no tool call is left outstanding, and never reaches past a

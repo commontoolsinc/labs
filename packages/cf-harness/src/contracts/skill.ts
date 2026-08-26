@@ -195,6 +195,7 @@ export interface HarnessSkillActivation {
   name: string;
   source: HarnessSkillActivationSource;
   runId: string;
+
   /**
    * The registry paths behind a directory-backed skill. Absent for a
    * `skill-handle` activation, whose text came from a cell rather than a
@@ -208,6 +209,7 @@ export interface HarnessSkillActivation {
   digest: string;
   activatedAt: string;
   cfcPromptRole: HarnessSkillCfcPromptRole;
+
   /**
    * The parent-held handle token a `skill-handle` activation's text was
    * materialized through. Together with {@link digest} this is the

@@ -274,8 +274,10 @@ export class PiecesController<T = unknown> {
     }: {
       apiUrl: URL | string;
       identity: Identity;
+
       /** The space to open, as a `did:key:` DID or as a space name. */
       space: string;
+
       /**
        * Open the space's session without syncing the space cell's contents. A
        * caller that reaches pieces by id, and never reads the space record,

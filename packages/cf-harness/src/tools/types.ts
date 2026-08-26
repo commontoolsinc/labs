@@ -31,6 +31,7 @@ export interface HarnessToolContext {
   allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
   browserAccess?: HarnessBrowserAccessLease;
+
   /**
    * Origins a value materialized from a handle may be sent to. Absent or
    * empty means none: materialization is default-deny by destination, and a
@@ -38,6 +39,7 @@ export interface HarnessToolContext {
    * asking the model where it meant.
    */
   handleValueOrigins?: readonly string[];
+
   /**
    * The run's handle table, as it stands at the invocation. Undefined until
    * the run mints its first handle. `describe_handle` is the only tool that
@@ -45,12 +47,14 @@ export interface HarnessToolContext {
    * addresses by the prompt loop.
    */
   handleTable?: HarnessHandleTable;
+
   /**
    * The run's trusted Fabric session, lazy and cached by the engine.
    * Undefined when the run has no fabric session configured, which also
    * keeps `run_pattern` out of the tool surface.
    */
   getFabricSession?: () => Promise<HarnessFabricSession>;
+
   /**
    * The prompt loop's run-level abort signal, when the invocation came
    * through the loop. The only cancellation source a tool may honor — no
@@ -73,6 +77,7 @@ export interface HarnessToolContext {
     path: string,
     options?: { allowMissing?: boolean },
   ): Promise<boolean>;
+
   /**
    * Host directory for image-attachment snapshots (under the artifact
    * root). Undefined when the run has no artifact store; attachments then

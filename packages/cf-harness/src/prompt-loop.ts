@@ -168,6 +168,7 @@ export interface CreateHarnessPromptLoopOptions
   allowedSubagentProfiles?: readonly HarnessSubagentProfile[];
   nativeModelToolIds?: readonly LLMNativeModelToolId[];
   browserAccess?: HarnessBrowserAccessLease;
+
   /**
    * Stable provider cache affinity. Interactive callers should keep this
    * constant across the turns that replay one append-only transcript.
@@ -208,8 +209,10 @@ export interface HarnessPromptLoopResult {
   finalAssistantText: string;
   transcript: HarnessTranscriptMessage[];
   modelTurns: number;
+
   /** Usage from model turns executed directly by this loop. */
   usage?: HarnessModelUsage;
+
   /** Direct usage plus usage reported by completed descendant loops. */
   totalUsage?: HarnessModelUsage;
   modelUsage?: HarnessModelTurnUsage[];
@@ -1266,6 +1269,7 @@ const createStructuredSubagentReturn = async (
     childRunId: string;
     rawFinalAssistantText: string;
     schema: NonNullable<DelegateTaskToolInput["returnSchema"]>;
+
     /**
      * When present, sealed positions whose raw string is an entity address
      * become handle tokens minted into this table; the updated table comes
@@ -3573,6 +3577,7 @@ export class CfHarnessPromptLoop {
   async #invokeDelegateTaskTool(options: {
     toolCall: HarnessToolCall;
     input: DelegateTaskToolInput;
+
     /** The materialized skillHandle text + token, resolved before dispatch. */
     resolvedSkill?: { text: string; token: string };
     model: string;

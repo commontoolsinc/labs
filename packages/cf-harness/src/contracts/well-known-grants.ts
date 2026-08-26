@@ -11,8 +11,10 @@ export type HarnessWellKnownGrantName = "piece-registry";
 /** One granted reference, as recorded in run state. */
 export interface HarnessWellKnownGrant {
   name: HarnessWellKnownGrantName;
+
   /** The token the model holds. */
   token: string;
+
   /** The canonical reference behind it; never model-facing. */
   ref: string;
 }
