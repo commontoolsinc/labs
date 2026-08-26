@@ -24,6 +24,23 @@ import { inspectOperationFields } from "../operations.ts";
 const append = (length: number, value: string) => [length, [0, value]];
 
 describe("operation field inspection", () => {
+  it("rejects invalid bounds before inspecting store capabilities", async () => {
+    const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+    try {
+      const space = openSpace(path);
+      try {
+        expect(() => inspectOperationFields(space, { fieldLimit: 0 }))
+          .toThrow("between 1 and 1000");
+        expect(() => inspectOperationFields(space, { historyLimit: 1001 }))
+          .toThrow("between 1 and 1000");
+      } finally {
+        space.close();
+      }
+    } finally {
+      await Deno.remove(path);
+    }
+  });
+
   it("treats a metadata-only document root as null", async () => {
     const path = await Deno.makeTempFile({ suffix: ".sqlite" });
     const engine = await open({
@@ -209,6 +226,34 @@ describe("operation field inspection", () => {
           });
       } finally {
         corrupted.close();
+      }
+
+      const materializedDatabase = new Database(path);
+      try {
+        materializedDatabase.prepare(`
+          UPDATE op_field_epoch SET materialized = 'not-a-stored-value'
+          WHERE id = 'of:inspected'
+        `).run();
+      } finally {
+        materializedDatabase.close();
+      }
+      const malformedMaterialized = openSpace(path);
+      try {
+        const report = inspectOperationFields(malformedMaterialized, {
+          id: "of:inspected",
+          scope: "space",
+        });
+        expect(report.fields).toHaveLength(1);
+        expect(report.fields[0].materialized).toMatchObject({
+          stored: "not-a-stored-value",
+        });
+        expect(
+          inspectOperationFields(malformedMaterialized, {
+            scope: "other",
+          }).fields,
+        ).toEqual([]);
+      } finally {
+        malformedMaterialized.close();
       }
 
       const pointerDatabase = new Database(path);

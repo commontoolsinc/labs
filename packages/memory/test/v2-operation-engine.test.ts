@@ -45,6 +45,49 @@ const openTestEngine = async () => {
 };
 
 describe("v2-operation-engine", () => {
+  it("validates operation configuration, addresses, and inactive pruning", async () => {
+    await expect(open({
+      url: new URL("memory://invalid-operation-checkpoint"),
+      operationCheckpointInterval: 0,
+    })).rejects.toThrow("positive safe integer");
+
+    const { engine, path } = await openTestEngine();
+    try {
+      expect(() =>
+        queryOperationField(engine, {
+          id: "",
+          path: toValuePath([]),
+        })
+      ).toThrow("id is malformed");
+      expect(() =>
+        queryOperationField(engine, {
+          id: "of:missing",
+          path: toValuePath([]),
+          after: { epoch: 0, version: -1 },
+        })
+      ).toThrow("cursor is malformed");
+      expect(queryOperationField(engine, {
+        id: "of:missing",
+        path: toValuePath(["absent"]),
+      })).toMatchObject({ active: false, materialized: null });
+      expect(() =>
+        pruneOperationFieldHistory(engine, {
+          id: "",
+          path: toValuePath([]),
+        })
+      ).toThrow("id is malformed");
+      expect(() =>
+        pruneOperationFieldHistory(engine, {
+          id: "of:missing",
+          path: toValuePath([]),
+        })
+      ).toThrow("only active operation field history");
+    } finally {
+      close(engine);
+      await Deno.remove(path);
+    }
+  });
+
   it("activates a field and atomically materializes its first operation", async () => {
     const { engine, path } = await openTestEngine();
 

@@ -53,6 +53,7 @@ import {
   lineNumbers,
   placeholder,
   rectangularSelection,
+  type ViewUpdate,
 } from "@codemirror/view";
 import type { DID } from "@commonfabric/identity";
 import { parseFabricUrl } from "@commonfabric/runner/fabric-url";
@@ -1229,6 +1230,36 @@ export class CFCodeEditor extends BaseElement {
     this._updateMentionedFromContent();
   }
 
+  private _handleEditorUpdate(update: ViewUpdate): void {
+    const isCellSync = update.transactions.some(
+      (transaction) => transaction.annotation(CFCodeEditor._cellSyncAnnotation),
+    );
+    if (!update.docChanged || isCellSync) return;
+
+    const value = update.state.doc.toString();
+    const isRemote = update.transactions.some((transaction) =>
+      transaction.annotation(Transaction.remote)
+    );
+    if (!this.readonly && !isRemote) {
+      if (this._collaboration?.active) {
+        this._collaboration.localDocChanged();
+        this.emit("cf-change", {
+          value,
+          oldValue: update.startState.doc.toString(),
+          language: this.language,
+        });
+      } else {
+        this.setValue(value);
+      }
+    }
+    this._updateMentionedFromContent(value);
+    this._setupPieceNameSubscriptions();
+    if (!this.readonly && !isRemote) {
+      this._detectAndSyncNameChanges();
+      this._syncMentionRefs();
+    }
+  }
+
   private _cellSyncUnsub: (() => void) | null = null;
 
   private _setupCellSyncHandler(): void {
@@ -1962,42 +1993,9 @@ export class CFCodeEditor extends BaseElement {
         this.mode === "prose" ? createProseMarkdownPlugin() : [],
       ),
       this._collaborationComp.of([]),
-      EditorView.updateListener.of((update) => {
-        // Only process user-initiated changes, not Cell-originated updates.
-        // Check if any transaction has the Cell sync annotation - if so, skip.
-        // This prevents the feedback loop: Cell → Editor → setValue → Cell...
-        const isCellSync = update.transactions.some(
-          (tr) => tr.annotation(CFCodeEditor._cellSyncAnnotation),
-        );
-        if (update.docChanged && !isCellSync) {
-          const value = update.state.doc.toString();
-          const isRemote = update.transactions.some((transaction) =>
-            transaction.annotation(Transaction.remote)
-          );
-          if (!this.readonly && !isRemote) {
-            if (this._collaboration?.active) {
-              this._collaboration.localDocChanged();
-              this.emit("cf-change", {
-                value,
-                oldValue: update.startState.doc.toString(),
-                language: this.language,
-              });
-            } else {
-              this.setValue(value);
-            }
-          }
-          // Keep $mentioned current as user types
-          this._updateMentionedFromContent(value);
-          // Refresh subscriptions for any new backlinks
-          this._setupPieceNameSubscriptions();
-          if (!this.readonly && !isRemote) {
-            // Sync name changes to linked pieces
-            this._detectAndSyncNameChanges();
-            // Reconcile the reference map with the edited document
-            this._syncMentionRefs();
-          }
-        }
-      }),
+      EditorView.updateListener.of((update) =>
+        this._handleEditorUpdate(update)
+      ),
       // Handle focus/blur events
       EditorView.domEventHandlers({
         focus: () => {

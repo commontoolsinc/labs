@@ -95,6 +95,7 @@ describe("v2-operation-codec", () => {
       { materialized: 1, submitted: update("alice", 1, 0, "x") },
       { materialized: "a", submitted: null },
       { materialized: "a", submitted: { updates: "not-an-array" } },
+      { materialized: "a", submitted: { updates: [], extra: true } },
       {
         materialized: "a",
         submitted: { updates: [{ clientId: "", changes: [1] }] },
