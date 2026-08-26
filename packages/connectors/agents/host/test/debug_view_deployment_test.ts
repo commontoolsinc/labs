@@ -1,7 +1,7 @@
 // Agent-sessions debug view: deployment lifecycle. Shared fixtures live in
 // `debug_view_support.ts`; see there for why the suite spans several files.
 
-import type { Cell } from "../../runner/src/builder/types.ts";
+import type { Cell } from "../../../../runner/src/builder/types.ts";
 import {
   debugCommandWriterAuthorization,
   defaultDebugPatternLocation,

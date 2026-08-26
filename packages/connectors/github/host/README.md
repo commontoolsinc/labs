@@ -60,8 +60,8 @@ mkdir -p "$HOME/Library/Application Support/CommonFabric/bin"
 mkdir -p "$HOME/Library/Application Support/CommonFabric/github-host"
 deno compile -A \
   -o "$HOME/Library/Application Support/CommonFabric/bin/github-host" \
-  packages/github-host/main.ts
-cp packages/github-host/github-host.config.example.jsonc \
+  packages/connectors/github/host/main.ts
+cp packages/connectors/github/host/github-host.config.example.jsonc \
   "$HOME/Library/Application Support/CommonFabric/github-host/config.jsonc"
 ```
 
@@ -71,7 +71,7 @@ first `PATH` entry to the directory containing `gh`, such as `/opt/homebrew/bin`
 on an Apple Silicon Homebrew installation:
 
 ```sh
-cp packages/github-host/deploy/com.commonfabric.github-host.plist.example \
+cp packages/connectors/github/host/deploy/com.commonfabric.github-host.plist.example \
   "$HOME/Library/LaunchAgents/com.commonfabric.github-host.plist"
 launchctl bootstrap "gui/$(id -u)" \
   "$HOME/Library/LaunchAgents/com.commonfabric.github-host.plist"

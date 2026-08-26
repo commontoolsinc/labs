@@ -15,7 +15,7 @@ the connector deliberately leaves to its caller:
 
 The connector remains reusable library code. This package is an operational
 program built on that library. The debug pattern remains separate from both at
-[`../patterns/agent-sessions-debug`](../patterns/agent-sessions-debug/README.md).
+[`../debug-view`](../debug-view/README.md).
 
 ## Run it
 
@@ -155,7 +155,7 @@ The source fields are the connector's `AgentSourceConfig` contract:
 | `allowDangerFullAccess` | Allows the connector's explicitly unrestricted Claude or Codex execution policy |
 
 Provider behavior and the native protocols behind these fields are documented in
-the connector's [`docs/interfaces.md`](../connectors/agents/docs/interfaces.md).
+the connector's [`docs/interfaces.md`](../connector/docs/interfaces.md).
 
 ## Architecture
 
@@ -374,7 +374,8 @@ the narrower startup-cancellation path used by `startAgentsHost()`:
 ## Tests
 
 ```sh
-deno task --cwd packages/agents-host test
-deno task cf check packages/patterns/agent-sessions-debug/main.tsx --no-run
-deno task cf test packages/patterns/agent-sessions-debug/main.test.tsx --verbose
+deno task --cwd packages/connectors/agents/host test
+deno task cf check packages/connectors/agents/debug-view/main.tsx --no-run
+deno task cf test packages/connectors/agents/debug-view/main.test.tsx \
+  --root . --verbose
 ```

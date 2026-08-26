@@ -20,9 +20,9 @@ import {
   type Options,
 } from "@commonfabric/runner/storage/cache.deno";
 import { fromFileUrl } from "@std/path";
-import type { RawDataProvenance } from "../../patterns/agent-sessions-debug/main.tsx";
-import { createBuilder } from "../../runner/src/builder/factory.ts";
-import type { Cell } from "../../runner/src/builder/types.ts";
+import type { RawDataProvenance } from "../../debug-view/main.tsx";
+import { createBuilder } from "../../../../runner/src/builder/factory.ts";
+import type { Cell } from "../../../../runner/src/builder/types.ts";
 import {
   debugCommandWriterAuthorization,
   defaultDebugPatternLocation,

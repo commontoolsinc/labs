@@ -15,7 +15,7 @@ import {
   propsOf,
   readValue,
   textContent,
-} from "../test/vnode-helpers.ts";
+} from "../../../patterns/test/vnode-helpers.ts";
 import DebugView, {
   type AgentCommandValue,
   type HostActivity,

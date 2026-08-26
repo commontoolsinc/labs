@@ -21,14 +21,16 @@ describe("typecheck", () => {
       expect(scopeOfPath("packages/patterns/google/core/util")).toBe(
         "patterns",
       );
-      expect(scopeOfPath("packages/connectors/agents")).toBe(
-        "connectors/agents",
+      expect(scopeOfPath("packages/connectors/agents/connector")).toBe(
+        "connectors/agents/connector",
       );
-      expect(scopeOfPath("packages/connectors/github/src/client.ts")).toBe(
-        "connectors/github",
+      expect(
+        scopeOfPath("packages/connectors/github/connector/src/client.ts"),
+      ).toBe(
+        "connectors/github/connector",
       );
-      expect(scopeOfPath("packages/github-host/src/host.ts")).toBe(
-        "github-host",
+      expect(scopeOfPath("packages/connectors/github/host/src/host.ts")).toBe(
+        "connectors/github/host",
       );
       expect(scopeOfPath("tasks/typecheck.ts")).toBe("tasks");
       expect(scopeOfPath("scripts/bundle.ts")).toBe("scripts");

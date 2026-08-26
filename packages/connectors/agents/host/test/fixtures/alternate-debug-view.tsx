@@ -1,8 +1,5 @@
 import { NAME, pattern, UI, type Writable } from "commonfabric";
-import type {
-  DebugInput,
-  DebugOutput,
-} from "../../../patterns/agent-sessions-debug/main.tsx";
+import type { DebugInput, DebugOutput } from "../../../debug-view/main.tsx";
 
 export default pattern<DebugInput, DebugOutput>(({ commandsCell }) => {
   const protectedCommands: Writable<DebugOutput["commandQueue"]> = commandsCell;

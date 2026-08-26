@@ -286,7 +286,7 @@ views without copying connector state.
 ## Verification
 
 ```sh
-deno task cf check packages/patterns/agent-sessions-debug/main.tsx --no-run
-deno task cf test packages/patterns/agent-sessions-debug/main.test.tsx \
-  --root packages/patterns --verbose
+deno task cf check packages/connectors/agents/debug-view/main.tsx --no-run
+deno task cf test packages/connectors/agents/debug-view/main.test.tsx \
+  --root . --verbose
 ```

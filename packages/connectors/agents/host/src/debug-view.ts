@@ -780,12 +780,15 @@ export function defaultDebugPatternLocation(): {
   mainPath: string;
   rootPath: string;
 } {
-  const rootPath = resolve(dirname(fromFileUrl(import.meta.url)), "../../..");
+  const rootPath = resolve(
+    dirname(fromFileUrl(import.meta.url)),
+    "../../../../..",
+  );
   return {
     rootPath,
     mainPath: join(
       rootPath,
-      "packages/patterns/agent-sessions-debug/main.tsx",
+      "packages/connectors/agents/debug-view/main.tsx",
     ),
   };
 }

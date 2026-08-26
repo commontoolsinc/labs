@@ -1,10 +1,10 @@
 // Agent-sessions debug view: pattern behavior. Shared fixtures live in
 // `debug_view_support.ts`; see there for why the suite spans several files.
 
-import type { RawDataProvenance } from "../../patterns/agent-sessions-debug/main.tsx";
-import { resolvedSchema } from "../../runner/test/schema-ref-helpers.ts";
-import { SESSION_PAGE_SIZE } from "../../patterns/agent-sessions-debug/presentation.ts";
-import type { Cell } from "../../runner/src/builder/types.ts";
+import type { RawDataProvenance } from "../../debug-view/main.tsx";
+import { resolvedSchema } from "../../../../runner/test/schema-ref-helpers.ts";
+import { SESSION_PAGE_SIZE } from "../../debug-view/presentation.ts";
+import type { Cell } from "../../../../runner/src/builder/types.ts";
 import { AgentFabricTarget } from "@commonfabric/agents-connector/fabric";
 import {
   AGENT_CONNECTOR_WRITER_ID,

@@ -4,7 +4,10 @@ import { fromFileUrl } from "@std/path/from-file-url";
 import {
   collectPatternFiles,
   isPatternSource,
+  matchesPatternFilter,
   patternKey,
+  patternPath,
+  patternRoot,
   PATTERNS_DIR,
 } from "./pattern-files.ts";
 
@@ -50,6 +53,45 @@ describe("patternKey", () => {
 
   it("leaves a path that is not under the patterns root alone", () => {
     expect(patternKey("elsewhere/home.tsx")).toBe("elsewhere/home.tsx");
+  });
+
+  it("preserves the deployed keys of connector-owned patterns", () => {
+    expect(
+      patternKey("packages/connectors/agents/debug-view/main.tsx"),
+    ).toBe("agent-sessions-debug/main.tsx");
+    expect(
+      patternKey("packages/connectors/github/activity-view/main.tsx"),
+    ).toBe("github-activity/main.tsx");
+  });
+});
+
+describe("patternPath", () => {
+  it("returns the source path for central and connector-owned patterns", () => {
+    expect(patternPath("system/home.tsx")).toBe(
+      "packages/patterns/system/home.tsx",
+    );
+    expect(patternPath("agent-sessions-debug/main.tsx")).toBe(
+      "packages/connectors/agents/debug-view/main.tsx",
+    );
+  });
+});
+
+describe("matchesPatternFilter", () => {
+  it("matches both source paths and preserved deployed keys", () => {
+    const path = "packages/connectors/agents/debug-view/main.tsx";
+    expect(matchesPatternFilter(path, "debug-view")).toBe(true);
+    expect(matchesPatternFilter(path, "agent-sessions-debug")).toBe(true);
+    expect(matchesPatternFilter(path, "github-activity")).toBe(false);
+  });
+});
+
+describe("patternRoot", () => {
+  it("returns the source root containing a pattern", () => {
+    expect(patternRoot("packages/patterns/system/home.tsx")).toBe(
+      "packages/patterns",
+    );
+    expect(patternRoot("packages/connectors/agents/debug-view/main.tsx"))
+      .toBe(".");
   });
 });
 
