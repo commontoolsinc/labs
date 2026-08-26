@@ -249,8 +249,10 @@ type WishContext = {
   parentCell: Cell<any>;
   spaceCell?: Cell<unknown>;
   scope?: ("~" | "." | "profile" | string)[];
+
   /** Cached #now cell to avoid non-idempotent re-runs from Date.now() */
   nowCell?: Cell<unknown>;
+
   /** The wish node's cause, keying the durable one-shot #now capture cell. */
   nowCause?: Cell<any>[];
   usedHomeSpace?: boolean;
@@ -583,6 +585,7 @@ function searchFavoritesForHashtag(
 
 type HashtagSearchResult = {
   matches: BaseResolution[];
+
   /** true when cell data has loaded (even if empty); false when still pending */
   loaded: boolean;
 };
@@ -1705,8 +1708,10 @@ export const wishSidecarDiagnostics = {
   /** Continuations registered on the profile-create fetch (one per launch
    * that found no cached pattern — the duplicate-launch producer). */
   profileCreateFetchContinuations: 0,
+
   /** runSidecarInOwnTx invocations (instantiation attempts). */
   sidecarRunsStarted: 0,
+
   /** Conflict-class losers that yielded to a materialized winner. */
   sidecarRunsRaced: 0,
 };

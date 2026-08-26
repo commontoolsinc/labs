@@ -17,6 +17,7 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
  */
 export type SetupRecord = {
   needsSetup: boolean;
+
   /** The reconcile that last issued these setup writes. */
   setupIssuance?: object;
 };
@@ -32,10 +33,13 @@ export type ElementRun = SetupRecord & {
 export interface ListSetupRollback {
   /** An entry this reconcile added to the coordinator's element map. */
   created(elementKey: string, entry: ElementRun): void;
+
   /** Setup writes this reconcile staged against a record it already had. */
   setupIssued(record: SetupRecord): void;
+
   /** An index this reconcile moved, with the value it moved away from. */
   indexChanged(entry: ElementRun, previousIndex: number): void;
+
   /** A result container this reconcile installed, with a restore for the old one. */
   resultReplaced(restore: () => void): void;
 }

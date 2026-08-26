@@ -60,6 +60,7 @@ const logger = getLogger("cell-cache");
 export interface ModuleImportRef {
   /** Authored import specifier, e.g. `"./util.ts"`. */
   readonly specifier: string;
+
   /** Content-addressed identity of the imported module's document. */
   readonly identity: string;
 }
@@ -89,10 +90,13 @@ const SOURCE_DELEGATION_PATH = ["delegatedModuleIdentities"] as const;
 interface ModuleDocBase {
   /** Module code: authored TS (source set) or compiled JS (compiled set). */
   readonly code: string;
+
   /** Authored module path, e.g. `/main.tsx`. */
   readonly filename: string;
+
   /** Resolved internal imports; each points at another document by identity. */
   readonly imports: readonly ModuleImportRef[];
+
   /** Predecessor module identities whose writer authority this module inherits. */
   readonly delegatedModuleIdentities?: readonly string[];
 }
@@ -100,6 +104,7 @@ interface ModuleDocBase {
 /** A source-set document (`pattern:<identity>`). */
 export interface SourceDoc extends ModuleDocBase {
   readonly kind: "source";
+
   /**
    * Optional, NON-NORMATIVE product annotations (a name doc, a spec doc,
    * lineage — typically sigil links). The runtime NEVER reads these for
@@ -123,8 +128,10 @@ export interface SourceDoc extends ModuleDocBase {
  */
 export interface CompiledDoc extends ModuleDocBase {
   readonly kind: "compiled" | "data";
+
   /** Per-module source map, if any (registered for authored error stacks). */
   readonly sourceMap?: unknown;
+
   /**
    * Precomputed record surface (Fix B): the direct export names, `export *`
    * target specifiers, and runtime import specifiers derived from `code` at
@@ -135,8 +142,10 @@ export interface CompiledDoc extends ModuleDocBase {
   readonly starTargetSpecs?: readonly string[];
   readonly importSpecs?: readonly string[];
   readonly policyManifests?: readonly unknown[];
+
   /** Debug-only authored builder sites, keyed by runtime artifact symbol. */
   readonly builderSourceSites?: BuilderSourceSitesV1;
+
   /**
    * Authored-line spans for the coverage probes the transformer baked into
    * `code`, keyed by `(fileName, id)`. Present only on documents written by a
@@ -498,10 +507,13 @@ export function buildSourceDocs(
 /** Result of verifying a loaded source-document closure. */
 export interface SourceDocVerification {
   readonly ok: boolean;
+
   /** The entry document's authored filename, when present. */
   readonly entryFilename?: string;
+
   /** Identities whose recomputed Merkle hash does not match their key. */
   readonly mismatches: readonly string[];
+
   /** Import-link target identities absent from the loaded document set. */
   readonly missing: readonly string[];
 }
@@ -1384,6 +1396,7 @@ export function writeCompiledDocs(
   opts: {
     runtimeVersion: string;
     moduleDelegations?: ModuleDelegationMap;
+
     /** See {@link buildSourceDocs}: full-set root links for chunked writes. */
     extraRoots?: readonly string[];
   },
@@ -1489,6 +1502,7 @@ export function writeSourceAndCompiledDocs(
   opts: {
     runtimeVersion: string;
     moduleDelegations?: ModuleDelegationMap;
+
     /** See {@link buildSourceDocs}: full-set root links for chunked writes. */
     extraRoots?: readonly string[];
   },

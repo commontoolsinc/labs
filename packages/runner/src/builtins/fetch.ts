@@ -41,6 +41,7 @@ type FetchRequestOptions = {
   headers?: Record<string, string>;
   cache?: RequestCache;
   redirect?: RequestRedirect;
+
   /**
    * How long (ms) a claimed request mutex stays valid before another tab may
    * take it over. Not part of the request itself: stripped before the request
@@ -52,6 +53,7 @@ type FetchRequestOptions = {
 /** The shape of the fetch builtins' input cells (union across all kinds). */
 type FetchInputs = {
   url?: string;
+
   /** fetchJson only. */
   schema?: JSONSchema;
   options?: FetchRequestOptions;
