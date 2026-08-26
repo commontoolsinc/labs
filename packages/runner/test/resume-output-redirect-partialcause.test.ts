@@ -110,6 +110,72 @@ describe("firstResolvedOutputRedirect vs partialCause aliases", () => {
     tx.abort("test: read-only");
   });
 
+  it("keeps a scoped cause-only link's scope while skipping its read", () => {
+    // Cross-scope id matching is deliberate: the id hashes parent+cause
+    // while scope rides the link, so a per-principal instance of the same
+    // derived cell is recognized by the same set entry — and its scope
+    // must survive untouched, because downstream consumers (the resultFor
+    // cause, the owned-cell pre-sync) address the instance through it.
+    const tx = rt.edit();
+    const base = rt.getCell<Record<string, unknown>>(
+      space,
+      "cause-only-scoped-base",
+      undefined,
+      tx,
+    );
+    const twin = getDerivedInternalCellLink(base, {
+      partialCause: { "$generated": 1 },
+      scope: "user",
+    });
+    const binding = createSigilLinkFromParsedLink(twin, {
+      overwrite: "redirect",
+    });
+
+    const found = firstResolvedOutputRedirect(
+      rt,
+      tx,
+      { generated: binding },
+      base,
+      new Set([twin.id]),
+    );
+    expect(found?.id).toBe(twin.id);
+    expect(found?.scope).toBe("user");
+    const reads = tx.getReactivityLog?.().reads ?? [];
+    expect(reads.filter((read) => read.id === twin.id)).toEqual([]);
+    tx.abort("test: read-only");
+  });
+
+  it("still resolves a spot whose id is not in the cause-only set", () => {
+    // The set bounds the skip: an ordinary reserved spot resolves exactly
+    // as before, even when a cause-only id is supplied for a different
+    // cell of the same pattern.
+    const tx = rt.edit();
+    const base = rt.getCell<Record<string, unknown>>(
+      space,
+      "cause-only-other-base",
+      undefined,
+      tx,
+    );
+    const spot = rt.getCell<Record<string, unknown>>(
+      space,
+      "cause-only-other-spot",
+      undefined,
+      tx,
+    );
+    const twin = getDerivedInternalCellLink(base, {
+      partialCause: { "$generated": 2 },
+    });
+    const found = firstResolvedOutputRedirect(
+      rt,
+      tx,
+      { result: spot.getAsWriteRedirectLink({ base }) },
+      base,
+      new Set([twin.id]),
+    );
+    tx.abort("test: read-only");
+    expect(found?.id).toBe(spot.getAsNormalizedFullLink().id);
+  });
+
   it("returns undefined (not a throw) when outputs hold ONLY such aliases", () => {
     const tx = rt.edit();
     const base = rt.getCell<Record<string, unknown>>(
