@@ -21,6 +21,17 @@ import type {
   RunHarnessTranscriptOptions,
 } from "../src/prompt-loop.ts";
 import type { HarnessChatSessionStore } from "../src/session-store.ts";
+import {
+  type HarnessTranscriptMessage,
+  inspectHarnessTranscriptPairing,
+} from "../src/contracts/transcript.ts";
+import {
+  FAULT_KINDS,
+  FAULT_POINTS,
+  faultingToolLoop,
+  recordingStore,
+  toolCall,
+} from "./support/chat-fault-fixture.ts";
 
 const nextIsoNow = () => {
   let counter = 0;
@@ -1479,4 +1490,341 @@ Deno.test("interactive service preserves every typed provider blocker", async ()
       { code, message: `provider blocker: ${code}` },
     );
   }
+});
+
+Deno.test("a completed turn promotes its transcript independently of the loop's array", async () => {
+  const returnedTranscripts: HarnessTranscriptMessage[][] = [];
+  const seenTranscripts: (readonly HarnessTranscriptMessage[])[] = [];
+  const createPromptLoop: HarnessInteractivePromptLoopFactory = () => ({
+    runTranscript: (options) => {
+      seenTranscripts.push([...options.transcript]);
+      const transcript: HarnessTranscriptMessage[] = [
+        ...options.transcript,
+        { role: "assistant", content: "Done." },
+      ];
+      returnedTranscripts.push(transcript);
+      return Promise.resolve({
+        model: "gpt-test",
+        finalAssistantText: "Done.",
+        transcript,
+        modelTurns: 1,
+        runState: {} as HarnessPromptLoopResult["runState"],
+      });
+    },
+  });
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop,
+    now: nextIsoNow(),
+  });
+
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Hi" },
+  });
+  await service.waitForTurn("session-1", "turn-1");
+
+  // The loop owns the array it returned; the durable checkpoint must not track
+  // an append made to it after the turn settled.
+  returnedTranscripts[0].push({ role: "assistant", content: "Stray." });
+
+  await service.startTurn("req-3", {
+    sessionId: "session-1",
+    turnId: "turn-2",
+    input: { text: "Again" },
+  });
+  await service.waitForTurn("session-1", "turn-2");
+
+  assertEquals(seenTranscripts[1], [
+    { role: "user", content: "Hi" },
+    { role: "assistant", content: "Done." },
+    { role: "user", content: "Again" },
+  ]);
+});
+
+Deno.test("a completed turn whose transcript is unpaired is failed, not promoted", async () => {
+  const { store, snapshots } = recordingStore();
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: () => ({
+      // A loop that reports success while leaving a tool call unanswered. Its
+      // history would be refused by a provider on the following turn.
+      runTranscript: (options) =>
+        Promise.resolve({
+          model: "gpt-test",
+          finalAssistantText: "Reading.",
+          transcript: [...options.transcript, {
+            role: "assistant" as const,
+            content: "Reading.",
+            toolCalls: [toolCall("call-a")],
+          }],
+          modelTurns: 1,
+          runState: {} as HarnessPromptLoopResult["runState"],
+        }),
+    }),
+    now: nextIsoNow(),
+    sessionStore: store,
+  });
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Read a file" },
+  });
+  await service.waitForTurn("session-1", "turn-1");
+
+  for (const snapshot of snapshots) {
+    assertEquals(inspectHarnessTranscriptPairing(snapshot).valid, true);
+  }
+  assertEquals(snapshots[snapshots.length - 1], []);
+  const turn = service.listTurns({ sessionId: "session-1" }).turns[0];
+  assertEquals(turn.turn.status, "failed");
+  assertEquals(turn.turn.error?.code, "incomplete_transcript");
+});
+
+Deno.test("a completion whose persistence fails leaves the previous checkpoint durable", async () => {
+  const snapshots: HarnessTranscriptMessage[][] = [];
+  let failCompletion = false;
+  const store: HarnessChatSessionStore = {
+    saveSession: (snapshot) => {
+      snapshots.push([...snapshot.transcript]);
+    },
+    getSession: () => undefined,
+    listSessions: () => [],
+    saveSessionAndAppendEvent: (snapshot) => {
+      snapshots.push([...snapshot.transcript]);
+    },
+    saveSessionTurnAndAppendEvent: (mutation) => {
+      if (failCompletion && mutation.event.event.kind === "turn_completed") {
+        throw new Error("the session store went away mid-commit");
+      }
+      snapshots.push([...mutation.session.transcript]);
+      return true;
+    },
+    saveTurn: () => {},
+    getTurn: () => undefined,
+    listTurns: () => [],
+    appendEvent: () => {},
+    listEvents: () => [],
+    latestSequence: () => 0,
+  };
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: () => ({
+      runTranscript: (options) => Promise.resolve(makeResult(options, "Done.")),
+    }),
+    now: nextIsoNow(),
+    sessionStore: store,
+  });
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Hi" },
+  });
+  await service.waitForTurn("session-1", "turn-1");
+  const afterFirstTurn = snapshots[snapshots.length - 1];
+
+  failCompletion = true;
+  await service.startTurn("req-3", {
+    sessionId: "session-1",
+    turnId: "turn-2",
+    input: { text: "Again" },
+  });
+  await service.waitForTurn("session-1", "turn-2");
+
+  // The completion never committed, so the turn is failed and the durable
+  // checkpoint is still the one the first turn left behind.
+  assertEquals(
+    service.listTurns({ sessionId: "session-1" }).turns[1].turn.status,
+    "failed",
+  );
+  assertEquals(snapshots[snapshots.length - 1], afterFirstTurn);
+});
+
+// The invariant the whole change exists to hold: whatever a turn does, nothing
+// a provider would reject ever reaches durable storage, and a turn that does
+// not complete leaves the checkpoint before it untouched. Enumerating the fault
+// points beats picking two of them, and asserting over every persisted snapshot
+// beats asserting over the last.
+for (const resultsBeforeFault of FAULT_POINTS) {
+  for (const fault of FAULT_KINDS) {
+    Deno.test(`a turn that hits ${fault} after ${resultsBeforeFault} of two tool results keeps the checkpoint provider-safe`, async () => {
+      let release: (() => void) | undefined;
+      const held = new Promise<void>((resolve) => {
+        release = () => resolve();
+      });
+      const { store, snapshots } = recordingStore();
+      const nextTurnTranscripts: (readonly HarnessTranscriptMessage[])[] = [];
+      let turn = 0;
+      const service = new HarnessInteractiveChatService({
+        createPromptLoop: (options) => {
+          turn += 1;
+          return turn === 1
+            ? faultingToolLoop(resultsBeforeFault, fault, { release: held })(
+              options,
+            )
+            : {
+              runTranscript: (runOptions) => {
+                nextTurnTranscripts.push([...runOptions.transcript]);
+                return Promise.resolve(makeResult(runOptions, "Done."));
+              },
+            };
+        },
+        now: nextIsoNow(),
+        sessionStore: store,
+      });
+      await service.startSession("req-1", {
+        sessionId: "session-1",
+        workspace: { hostPath: "/workspace" },
+      });
+      await service.startTurn("req-2", {
+        sessionId: "session-1",
+        turnId: "turn-1",
+        input: { text: "Read both files" },
+      });
+      if (fault === "cancel") {
+        await service.cancelTurn(
+          "req-3",
+          "session-1",
+          "turn-1",
+          "user_requested",
+        );
+      }
+      release?.();
+      await service.waitForTurn("session-1", "turn-1");
+
+      for (const snapshot of snapshots) {
+        assertEquals(
+          inspectHarnessTranscriptPairing(snapshot).valid,
+          true,
+          `persisted history a provider would reject: ${
+            JSON.stringify(snapshot)
+          }`,
+        );
+      }
+      // The turn rolls back whole, user message included: its tools already ran
+      // and it is never replayed.
+      assertEquals(snapshots[snapshots.length - 1], []);
+      // A failed turn's own history stays on the audit trail even though its
+      // model history went back. A canceled one is not checked here: cancelling
+      // stops reporting the turn, so how much of it reached the log depends on
+      // where the cancel landed.
+      if (fault === "error") {
+        const kinds = service.events("session-1").map((event) =>
+          event.event.kind
+        );
+        assertEquals(kinds.filter((kind) => kind === "tool_started").length, 2);
+        assertEquals(
+          kinds.filter((kind) => kind === "tool_completed").length,
+          resultsBeforeFault,
+        );
+      }
+
+      // What the rollback is for: the turn after it starts from the checkpoint
+      // and carries no trace of the turn that died.
+      await service.startTurn("req-4", {
+        sessionId: "session-1",
+        turnId: "turn-2",
+        input: { text: "Try again" },
+      });
+      await service.waitForTurn("session-1", "turn-2");
+      assertEquals(nextTurnTranscripts, [[{
+        role: "user",
+        content: "Try again",
+      }]]);
+    });
+  }
+}
+
+Deno.test("a session stays reusable after a turn fails mid-tool", async () => {
+  const { store } = recordingStore();
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: faultingToolLoop(1, "error"),
+    now: nextIsoNow(),
+    sessionStore: store,
+  });
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Read both files" },
+  });
+  await service.waitForTurn("session-1", "turn-1");
+
+  const session = service.status("session-1").sessions[0];
+  assertEquals(session.status, "idle");
+  assertEquals(session.reusable, true);
+  assertEquals(
+    service.listTurns({ sessionId: "session-1" }).turns[0].turn.status,
+    "failed",
+  );
+});
+
+Deno.test("a normalization whose write fails leaves the record on the stored history", async () => {
+  const corrupt: HarnessTranscriptMessage[] = [
+    { role: "user", content: "Read both files" },
+    {
+      role: "assistant",
+      content: "Reading both files.",
+      toolCalls: [toolCall("call-a"), toolCall("call-b")],
+    },
+  ];
+  const store: HarnessChatSessionStore = {
+    saveSession: () => {},
+    getSession: () => undefined,
+    listSessions: () => [{
+      session: createHarnessChatSessionStatus({
+        sessionId: "session-1",
+        createdAt: "2026-05-22T00:00:01.000Z",
+        workspace: { hostPath: "/workspace" },
+      }),
+      transcript: corrupt,
+    }],
+    saveSessionAndAppendEvent: () => {
+      throw new Error("the session store went away mid-commit");
+    },
+    saveSessionTurnAndAppendEvent: () => {
+      throw new Error("the session store went away mid-commit");
+    },
+    saveTurn: () => {},
+    getTurn: () => undefined,
+    listTurns: () => [],
+    appendEvent: () => {},
+    listEvents: () => [],
+    latestSequence: () => 0,
+  };
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: () => ({
+      runTranscript: (options) => Promise.resolve(makeResult(options, "Done.")),
+    }),
+    now: nextIsoNow(),
+    sessionStore: store,
+  });
+
+  await assertRejects(() => service.initializeFromStore());
+
+  // The normalization never committed, so the record still names the history
+  // held by the store and remains unavailable for a provider request.
+  const started = await service.startTurn("req-1", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Try again" },
+  });
+  assertEquals(started.ok, false);
+  assertEquals(
+    started.ok === false ? started.error.code : "",
+    "incomplete_transcript",
+  );
 });

@@ -510,7 +510,7 @@ The CFC policy snapshot should eventually include:
 - configured `skillsRoot`
 - loaded skill names and digests
 - activation source (`cli-preload`, `model-tool`, `user-explicit`,
-  `subagent-inherit`)
+  `subagent-inherit`, `skill-handle`)
 - whether skill content was injected as context
 - any skill diagnostics relevant to trust or provenance
 - exact skill script allowlist entries
@@ -562,10 +562,24 @@ skill-activations.json
       "digest": "sha256:...",
       "activatedAt": "...",
       "cfcPromptRole": "context"
+    },
+    {
+      "name": "handle:cfh:a:3kk78",
+      "source": "skill-handle",
+      "runId": "...",
+      "digest": "sha256:...",
+      "activatedAt": "...",
+      "cfcPromptRole": "context",
+      "handleToken": "cfh:a:3kk78"
     }
   ]
 }
 ```
+
+The registry path fields (`skillPath`, `skillDir`, `sandboxSkillPath`,
+`sandboxSkillDir`) are absent for a `skill-handle` activation: its text came
+from a cell the delegation's `skillHandle` named, not from a registry directory,
+and `handleToken` plus `digest` carry its provenance instead.
 
 On resume:
 
