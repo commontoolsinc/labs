@@ -779,7 +779,16 @@ export interface ITransactionWriteRequest {
   delete?: boolean;
 }
 
-export interface IMemoryChange {
+/**
+ * One address's before-and-after across a change.
+ *
+ * A type alias rather than an `interface`, and it has to stay one: its members
+ * are `FabricValue`s and it rides the IPC envelope inside a telemetry marker,
+ * so it must be able to satisfy `FabricPlainObject`. An `interface` never can,
+ * however plain its members -- TypeScript grants the implicit index signature
+ * that requires to an anonymous object type and not to an interface.
+ */
+export type IMemoryChange = {
   /**
    * Memory address that was changed.
    */
@@ -792,7 +801,7 @@ export interface IMemoryChange {
    * Value memory address has after change.
    */
   after: FabricValue;
-}
+};
 
 export type StorageTransactionStatus =
   | { status: "ready"; journal: ITransactionJournal }

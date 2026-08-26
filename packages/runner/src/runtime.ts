@@ -19,7 +19,6 @@ import {
   serverExecutionEnablerCount,
   setCommitPreconditionsConfig,
   setServerExecutionConfig,
-  setSyncSchemaTableConfig,
 } from "@commonfabric/memory/v2";
 import { RuntimeTelemetry } from "@commonfabric/runner";
 import {
@@ -1254,15 +1253,15 @@ export class Runtime {
     );
     this.experimental.contentAddressedSchemas =
       getContentAddressedSchemasConfig();
-    if (this.experimental.contentAddressedSchemas) {
-      // Content-addressed schema references and the sync schema table dedupe
-      // the same link-schema positions; a reference-bearing link never needs
-      // frame compression, so a flag-on process stops negotiating the table
-      // entirely rather than running both mechanisms. Ambient and one-way
-      // like the flag itself: once any runtime in the realm enables the
-      // flag, the table stays off for the process.
-      setSyncSchemaTableConfig(false);
-    }
+    // The sync schema table stays negotiated under this flag: the two
+    // mechanisms dedupe the same link-schema positions and compose (the
+    // table encoder skips reference-only positions), and stored links
+    // minted before the flag still carry inline schemas that only the
+    // table compresses in flight — delivering that stock uncompressed
+    // pushes a large space's sync past Deno's 64 MiB inbound websocket
+    // frame cap (#6319). The table retires by ceasing to match once
+    // reference-bearing links dominate (content-addressed-schemas.md,
+    // Phase 3), not by a construction-time switch.
     setCommitPreconditionsConfig(this.experimental.commitPreconditions);
     this.experimental.commitPreconditions = getCommitPreconditionsConfig();
     // Propagate only when EXPLICITLY set (stage F): a co-hosted serving
