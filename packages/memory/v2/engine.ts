@@ -3881,6 +3881,11 @@ const applyOperation = (
   const { branch, seq, opIndex, operation, principal, sessionId } = options;
   assertDefaultOperationBranch(branch);
   validateApplyOperation(operation);
+  if (isStreamEntriesDocId(operation.id)) {
+    throw new ProtocolError(
+      "apply-op cannot mutate a stream sidecar document",
+    );
+  }
   const scope = normalizeScope(operation.scope);
   const scopeKey = options.scopeKeyOverride ??
     resolveScopeKey(operation.scope, { principal, sessionId });
@@ -3919,6 +3924,7 @@ const applyOperation = (
   if (duplicate) {
     if (
       duplicate.codec !== operation.codec ||
+      (operation.base !== null && operation.base.epoch !== duplicate.epoch) ||
       duplicate.base_version !== (operation.base?.version ?? 0) ||
       (operation.base === null &&
         operation.baselineHash !== priorField?.baseline_hash) ||
@@ -4078,6 +4084,14 @@ const applyOperation = (
       `operation codec produced an invalid Fabric value: ${
         cause instanceof Error ? cause.message : String(cause)
       }`,
+    );
+  }
+  if (
+    result.operations.length === 0 &&
+    !valueEqual(result.materialized, currentMaterialized)
+  ) {
+    throw new OpCodecError(
+      "operation codec changed the materialized value without producing an operation",
     );
   }
 

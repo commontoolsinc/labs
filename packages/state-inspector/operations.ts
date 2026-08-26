@@ -220,9 +220,11 @@ function inspectOperationField(
     path: field.path,
   };
   let path: string[] = [];
+  let pathValid = true;
   try {
     path = parsePointer(field.path);
   } catch {
+    pathValid = false;
     // Consistency is reported as unhealthy below; keep the corrupt pointer in
     // `pathPointer` so an operator can identify the exact durable row.
   }
@@ -231,12 +233,11 @@ function inspectOperationField(
     SELECT epoch, version, op_id, submission_id, payload, commit_seq
     FROM op_integrated
     WHERE branch = :branch AND id = :id AND scope_key = :scope_key
-      AND path = :path AND epoch = :epoch
-    ORDER BY version
+      AND path = :path
+    ORDER BY epoch, version
     LIMIT :limit
   `).all({
     ...address,
-    epoch: field.epoch,
     limit: options.historyLimit + 1,
   }) as IntegratedRow[];
   const integratedTruncated = integratedRows.length > options.historyLimit;
@@ -268,7 +269,7 @@ function inspectOperationField(
       row.version === retainedVersion + index + 1
     );
 
-  const submissionRows = space.db.prepare(`
+  let submissionRows = space.db.prepare(`
     SELECT epoch, submission_id, codec, base_version, submitted_payload,
            integrated_from, integrated_to, integrated_payload, commit_seq,
            op_index
@@ -282,8 +283,41 @@ function inspectOperationField(
     after_seq: options.submissionAfterSeq,
     limit: options.historyLimit + 1,
   }) as SubmissionRow[];
-  const submissionsTruncated = submissionRows.length > options.historyLimit;
-  const visibleSubmissions = submissionRows.slice(0, options.historyLimit);
+  let submissionsTruncated = submissionRows.length > options.historyLimit;
+  if (
+    submissionsTruncated &&
+    submissionRows[options.historyLimit - 1].commit_seq ===
+      submissionRows[options.historyLimit].commit_seq
+  ) {
+    const boundarySeq = submissionRows[options.historyLimit - 1].commit_seq;
+    submissionRows = space.db.prepare(`
+      SELECT epoch, submission_id, codec, base_version, submitted_payload,
+             integrated_from, integrated_to, integrated_payload, commit_seq,
+             op_index
+      FROM op_submission
+      WHERE branch = :branch AND id = :id AND scope_key = :scope_key
+        AND path = :path AND commit_seq > :after_seq
+        AND commit_seq <= :boundary_seq
+      ORDER BY commit_seq, op_index
+    `).all({
+      ...address,
+      after_seq: options.submissionAfterSeq,
+      boundary_seq: boundarySeq,
+    }) as SubmissionRow[];
+    submissionsTruncated = space.db.prepare(`
+      SELECT 1
+      FROM op_submission
+      WHERE branch = :branch AND id = :id AND scope_key = :scope_key
+        AND path = :path AND commit_seq > :boundary_seq
+      LIMIT 1
+    `).get({ ...address, boundary_seq: boundarySeq }) !== undefined;
+  }
+  const visibleSubmissions = submissionsTruncated &&
+      submissionRows.length > options.historyLimit &&
+      submissionRows[options.historyLimit - 1].commit_seq !==
+        submissionRows[options.historyLimit].commit_seq
+    ? submissionRows.slice(0, options.historyLimit)
+    : submissionRows;
 
   const checkpointRows = space.db.prepare(`
     SELECT epoch, version, materialized, commit_seq
@@ -310,11 +344,12 @@ function inspectOperationField(
   });
   const ordinary = document == null || field.active !== 1
     ? null
-    : selectAtPath(document.value, path);
+    : selectAtPath(document.value ?? null, path);
   const ordinaryMaterializedMatches = ordinary === null || !ordinary.found
     ? null
     : valuesMatch(materialized, ordinary.value);
-  const healthy = baselineCheckpointPresent && retainedSuffixContiguous &&
+  const healthy = pathValid && baselineCheckpointPresent &&
+    retainedSuffixContiguous &&
     ordinaryMaterializedMatches !== false &&
     currentCheckpointMatches !== false;
 

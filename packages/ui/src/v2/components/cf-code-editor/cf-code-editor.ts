@@ -1264,8 +1264,13 @@ export class CFCodeEditor extends BaseElement {
 
   private _cleanupCollaboration(): void {
     this._collaborationGeneration++;
-    this._collaboration?.dispose();
+    const collaboration = this._collaboration;
     this._collaboration = undefined;
+    void collaboration?.stop().catch(() => {
+      // The element is disconnecting, so there is no live editor surface on
+      // which to reconcile a failed final send. The controller has already
+      // failed closed and detached its subscription.
+    });
   }
 
   private async _setupCollaboration(): Promise<void> {
@@ -1273,9 +1278,34 @@ export class CFCodeEditor extends BaseElement {
     if (!view) return;
 
     const generation = ++this._collaborationGeneration;
-    this._collaboration?.dispose();
-    this._collaboration = undefined;
+    const previous = this._collaboration;
     this._collaborationFailed = false;
+
+    if (previous !== undefined) {
+      // Freeze editing while the previous controller confirms every local
+      // update. Toggling collaboration or rebinding the cell must never turn
+      // an unconfirmed CodeMirror change into an ordinary whole-value write.
+      view.dispatch({
+        effects: this._readonly.reconfigure(EditorState.readOnly.of(true)),
+      });
+      try {
+        await previous.stop();
+      } catch (cause) {
+        if (generation !== this._collaborationGeneration) return;
+        previous.dispose();
+        if (this._collaboration === previous) {
+          this._collaboration = undefined;
+        }
+        const error = cause instanceof Error ? cause : new Error(String(cause));
+        this._collaborationFailed = true;
+        this.emit("cf-error", { error, message: error.message });
+        return;
+      }
+      if (generation !== this._collaborationGeneration) return;
+      if (this._collaboration === previous) {
+        this._collaboration = undefined;
+      }
+    }
 
     if (!this.collaborative) {
       view.dispatch({
@@ -1939,31 +1969,33 @@ export class CFCodeEditor extends BaseElement {
         const isCellSync = update.transactions.some(
           (tr) => tr.annotation(CFCodeEditor._cellSyncAnnotation),
         );
-        if (update.docChanged && !this.readonly && !isCellSync) {
+        if (update.docChanged && !isCellSync) {
           const value = update.state.doc.toString();
           const isRemote = update.transactions.some((transaction) =>
             transaction.annotation(Transaction.remote)
           );
-          if (this._collaboration?.active) {
-            if (!isRemote) {
+          if (!this.readonly && !isRemote) {
+            if (this._collaboration?.active) {
               this._collaboration.localDocChanged();
               this.emit("cf-change", {
                 value,
                 oldValue: update.startState.doc.toString(),
                 language: this.language,
               });
+            } else {
+              this.setValue(value);
             }
-          } else if (!isRemote) {
-            this.setValue(value);
           }
           // Keep $mentioned current as user types
-          this._updateMentionedFromContent();
-          // Sync name changes to linked pieces
-          this._detectAndSyncNameChanges();
+          this._updateMentionedFromContent(value);
           // Refresh subscriptions for any new backlinks
           this._setupPieceNameSubscriptions();
-          // Reconcile the reference map with the edited document
-          this._syncMentionRefs();
+          if (!this.readonly && !isRemote) {
+            // Sync name changes to linked pieces
+            this._detectAndSyncNameChanges();
+            // Reconcile the reference map with the edited document
+            this._syncMentionRefs();
+          }
         }
       }),
       // Handle focus/blur events
@@ -2287,10 +2319,8 @@ export class CFCodeEditor extends BaseElement {
    * Link syntax: [[Name (id)]]. We parse ids and resolve them against
    * `$mentionable` to produce live Piece instances.
    */
-  private _updateMentionedFromContent(): void {
+  private _updateMentionedFromContent(content = this.getValue() || ""): void {
     if (!this.mentioned) return;
-
-    const content = this.getValue() || "";
 
     if (this._refMode) {
       this._updateMentionedWithRefs(content);

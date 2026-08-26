@@ -111,19 +111,19 @@ messages so serialization cannot collapse the taxonomy into generic
 
 Purpose: pin the cross-layer examples before production implementation.
 
-- [ ] Add shared JSON fixtures for one string baseline, two concurrent
+- [x] Add shared JSON fixtures for one string baseline, two concurrent
       CodeMirror submissions, their canonical integration, materialized string,
       cursors, op ids, and receipt.
-- [ ] Add malformed fixtures: unknown codec, null/non-null cursor mismatch,
+- [x] Add malformed fixtures: unknown codec, null/non-null cursor mismatch,
       future version, wrong epoch, duplicate id with changed payload, invalid
       `ChangeSet`, and oversized batch.
-- [ ] Add a scenario fixture for activation racing an ordinary write; the
+- [x] Add a scenario fixture for activation racing an ordinary write; the
       baseline hash must fail rather than applying an edit to the wrong text.
-- [ ] Add inactive-watch fixtures for an ordinary baseline change, activation,
+- [x] Add inactive-watch fixtures for an ordinary baseline change, activation,
       release, and entity deletion.
-- [ ] Add a scenario fixture for release followed by an ordinary replacement
+- [x] Add a scenario fixture for release followed by an ordinary replacement
       and a later new epoch.
-- [ ] Record the exact CodeMirror payload version and dependency pin in the
+- [x] Record the exact CodeMirror payload version and dependency pin in the
       fixture metadata.
 
 Likely files:
@@ -133,7 +133,7 @@ Likely files:
 
 Completion gate:
 
-- [ ] Fixture validation is green and no production codec or storage behavior
+- [x] Fixture validation is green and no production codec or storage behavior
       has been added yet.
 
 ## WP1 — Editor-neutral codec contract and CodeMirror codec
@@ -141,32 +141,32 @@ Completion gate:
 Purpose: prove deterministic integration without involving persistence or the
 wire protocol.
 
-- [ ] Add the codec types, registry, size limits, and registry lookup under
+- [x] Add the codec types, registry, size limits, and registry lookup under
       `packages/memory/v2/op-codec.ts`.
-- [ ] Make registration reject duplicate ids and ids without an explicit
+- [x] Make registration reject duplicate ids and ids without an explicit
       version suffix.
-- [ ] Implement the CodeMirror codec under
+- [x] Implement the CodeMirror codec under
       `packages/memory/v2/op-codecs/codemirror.ts` using
       `@codemirror/state` and `@codemirror/collab`.
-- [ ] Decode all JSON into fresh trusted values; do not retain mutable request
+- [x] Decode all JSON into fresh trusted values; do not retain mutable request
       objects inside a codec result.
-- [ ] Reject CodeMirror effects/selections in v1 and accept only client id plus
+- [x] Reject CodeMirror effects/selections in v1 and accept only client id plus
       `ChangeSet` JSON.
-- [ ] Return canonical logical operations separately from the materialized
+- [x] Return canonical logical operations separately from the materialized
       string so version counting never depends on submission count.
-- [ ] Add dependency pins according to
+- [x] Add dependency pins according to
       `docs/development/DEPENDENCIES.md`; verify single-copy and unused-dependency
       gates.
 
 Required tests:
 
-- [ ] Same-base inserts from two clients converge in either server commit order.
-- [ ] A stale multi-update batch rebases over the complete integrated suffix.
-- [ ] Malformed changes, non-string baselines, effects, and limits fail before
+- [x] Same-base inserts from two clients converge in either server commit order.
+- [x] A stale multi-update batch rebases over the complete integrated suffix.
+- [x] Malformed changes, non-string baselines, effects, and limits fail before
       producing materialized output.
-- [ ] Repeating the same encoded inputs produces byte-equivalent encoded
+- [x] Repeating the same encoded inputs produces byte-equivalent encoded
       integrated operations and materialized output.
-- [ ] A second synthetic codec over JSON data passes the same registry contract,
+- [x] A second synthetic codec over JSON data passes the same registry contract,
       proving the interface is not text-specific.
 
 Likely files:
@@ -179,27 +179,27 @@ Likely files:
 
 Completion gate:
 
-- [ ] `packages/memory` codec tests pass without opening an Engine or Runtime.
+- [x] `packages/memory` codec tests pass without opening an Engine or Runtime.
 
 ## WP2 — Wire types, negotiation, and strict validation
 
 Purpose: make the new format explicit and safely negotiable before the engine
 accepts it.
 
-- [ ] Add `OpCodecId`, `OpCursor`, `ApplyOpOperation`,
+- [x] Add `OpCodecId`, `OpCursor`, `ApplyOpOperation`,
       `ReleaseOpFieldOperation`, integrated operation records, and
       `ApplyOpResolution` to `packages/memory/v2.ts`.
-- [ ] Extend `Operation`, `AppliedCommit`, and stored commit-resolution types
+- [x] Extend `Operation`, `AppliedCommit`, and stored commit-resolution types
       without changing `PatchOp`.
-- [ ] Add optional `applyOp` handshake support and an advertised codec-id list.
+- [x] Add optional `applyOp` handshake support and an advertised codec-id list.
       Old servers parse as unsupported; old clients ignore the new fields.
-- [ ] Add strict validators for both operation shapes at the server boundary.
+- [x] Add strict validators for both operation shapes at the server boundary.
       Validate path segments, cursor integers, conditional baseline hash,
       submission ids, codec ids, and JSON payload bounds before codec execution.
-- [ ] Repeat security-critical validation inside the Engine so direct tests and
+- [x] Repeat security-critical validation inside the Engine so direct tests and
       in-process callers cannot bypass it.
-- [ ] Preserve typed error names in `ResponseMessage` decoding.
-- [ ] Add encode/decode round-trip fixtures for requests, responses, replayed
+- [x] Preserve typed error names in `ResponseMessage` decoding.
+- [x] Add encode/decode round-trip fixtures for requests, responses, replayed
       resolutions, and handshake downgrade.
 
 Likely files:
@@ -213,7 +213,7 @@ Likely files:
 
 Completion gate:
 
-- [ ] A new client refuses collaborative writes against an old/unsupported
+- [x] A new client refuses collaborative writes against an old/unsupported
       server before issuing `transact`, and all malformed wire fixtures fail at
       the intended boundary.
 
@@ -221,20 +221,20 @@ Completion gate:
 
 Purpose: land storage shapes and read helpers before the atomic apply path.
 
-- [ ] Add `op_field_epoch`, `op_submission`, `op_integrated`, and
+- [x] Add `op_field_epoch`, `op_submission`, `op_integrated`, and
       `op_checkpoint` DDL plus indexes to `packages/memory/v2/engine.ts`.
-- [ ] Use canonical JSON Pointer encoding from the shared Memory path helpers
+- [x] Use canonical JSON Pointer encoding from the shared Memory path helpers
       for `path_key`; do not invent a second escaping implementation.
-- [ ] Include `branch` and resolved `scope_key` in every primary and lookup key.
-- [ ] Add startup migration tests for an existing current Engine database and a
+- [x] Include `branch` and resolved `scope_key` in every primary and lookup key.
+- [x] Add startup migration tests for an existing current Engine database and a
       fresh database. The migration is additive and must not rewrite entity
       revision history.
-- [ ] Add Engine helpers to read the active epoch, read a cursor-bounded
+- [x] Add Engine helpers to read the active epoch, read a cursor-bounded
       integrated suffix, read submitted records, and read the latest compatible
       checkpoint.
-- [ ] Assert contiguous integrated versions and detect corrupted cursor/head
+- [x] Assert contiguous integrated versions and detect corrupted cursor/head
       state loudly.
-- [ ] Add the new core table names to every SQLite builtin guard that protects
+- [x] Add the new core table names to every SQLite builtin guard that protects
       Memory-owned tables.
 
 Likely files:
@@ -247,54 +247,54 @@ Likely files:
 
 Completion gate:
 
-- [ ] Fresh and migrated databases expose identical collaborative schema, and
+- [x] Fresh and migrated databases expose identical collaborative schema, and
       direct Engine read helpers pass branch/scope/path isolation tests.
 
 ## WP4 — Atomic `apply-op` and release in the commit engine
 
 Purpose: make Memory the sole integration authority.
 
-- [ ] Pass the configured codec registry into every Engine opened by the
+- [x] Pass the configured codec registry into every Engine opened by the
       server. Emulated and loopback servers must configure the same registry
       explicitly in tests.
-- [ ] Implement inactive-field activation with null cursor and baseline hash.
-- [ ] Implement active-field integration: load suffix, call codec, allocate
+- [x] Implement inactive-field activation with null cursor and baseline hash.
+- [x] Implement active-field integration: load suffix, call codec, allocate
       contiguous versions/op ids, and advance the field head.
-- [ ] Insert submitted/integrated/checkpoint rows and the derived materializing
+- [x] Insert submitted/integrated/checkpoint rows and the derived materializing
       patch revision inside `applyCommitTransaction`.
-- [ ] Return the canonical operations in `ApplyOpResolution` and encode the
+- [x] Return the canonical operations in `ApplyOpResolution` and encode the
       resolution in the `commit.resolution` column.
-- [ ] Make `(sessionId, localSeq)` replay decode and return the stored operation
+- [x] Make `(sessionId, localSeq)` replay decode and return the stored operation
       resolutions without invoking the codec.
-- [ ] Implement durable submission-id deduplication across new sessions.
-- [ ] Implement `release-op-field`, entity-delete release, and epoch increment.
-- [ ] Validate ordinary `set`/`patch` results against active collaborative paths
+- [x] Implement durable submission-id deduplication across new sessions.
+- [x] Implement `release-op-field`, entity-delete release, and epoch increment.
+- [x] Validate ordinary `set`/`patch` results against active collaborative paths
       in operation-index order. Allow writes that preserve field values; reject
       hidden replacement.
-- [ ] Derive confirmed-read and scheduler touched paths from the materialization
+- [x] Derive confirmed-read and scheduler touched paths from the materialization
       patch, not the opaque submitted payload.
-- [ ] Treat accepted `apply-op` dirty origins as patch-like so the writer gets
+- [x] Treat accepted `apply-op` dirty origins as patch-like so the writer gets
       authoritative materialized state in the covering sync.
-- [ ] Roll back every row, including the commit row, when codec integration,
+- [x] Roll back every row, including the commit row, when codec integration,
       derived patch application, or post-write validation fails.
 
 Required tests:
 
-- [ ] First apply atomically creates an epoch, integrates operations, and changes
+- [x] First apply atomically creates an epoch, integrates operations, and changes
       the ordinary point-in-time entity value.
-- [ ] Two sessions concurrently submit at the same base; server arrival order is
+- [x] Two sessions concurrently submit at the same base; server arrival order is
       the immutable integrated order and both operations survive.
-- [ ] Commit replay and cross-session duplicate submission return the original
+- [x] Commit replay and cross-session duplicate submission return the original
       resolution and do not advance version.
-- [ ] Duplicate id with different content fails.
-- [ ] A codec exception leaves commit, entity revision, op tables, cursor, and
+- [x] Duplicate id with different content fails.
+- [x] A codec exception leaves commit, entity revision, op tables, cursor, and
       snapshots unchanged.
-- [ ] Whole-document and ancestor patches cannot alter an active field; disjoint
+- [x] Whole-document and ancestor patches cannot alter an active field; disjoint
       and value-preserving writes remain valid.
-- [ ] Release plus replacement in one commit works, while replacement before
+- [x] Release plus replacement in one commit works, while replacement before
       release fails.
-- [ ] Scope and branch keys isolate otherwise identical field addresses.
-- [ ] A commit with multiple operations observes prior operation-index results.
+- [x] Scope and branch keys isolate otherwise identical field addresses.
+- [x] A commit with multiple operations observes prior operation-index results.
 
 Likely files:
 
@@ -307,47 +307,47 @@ Likely files:
 
 Completion gate:
 
-- [ ] Independent Memory sessions converge through one Engine with no runtime
+- [x] Independent Memory sessions converge through one Engine with no runtime
       collaboration code and all atomic rollback assertions pass.
 
 ## WP5 — Direct op queries and session-watch delivery
 
 Purpose: provide race-free initialization, incremental updates, and reconnect.
 
-- [ ] Add `op.query` request/result types with explicit `integrated` and
+- [x] Add `op.query` request/result types with explicit `integrated` and
       `submitted` projection selection.
-- [ ] Return an integrated snapshot when no cursor is supplied, the epoch
+- [x] Return an integrated snapshot when no cursor is supplied, the epoch
       differs, or the cursor is older than retained history; otherwise return a
       complete suffix delta.
-- [ ] Represent an inactive field with a null cursor, current materialized
+- [x] Represent an inactive field with a null cursor, current materialized
       value, and baseline hash. Keep inactive watches live across ordinary
       changes, activation, release, and entity deletion.
-- [ ] Add `op-field` to `WatchSpec`. Keep graph watches materialized-only.
-- [ ] Extend session watch state with the last delivered field cursor and extend
+- [x] Add `op-field` to `WatchSpec`. Keep graph watches materialized-only.
+- [x] Extend session watch state with the last delivered field cursor and extend
       `SessionSync` with operation-field effects.
-- [ ] Install the watch and compute its initial snapshot/delta under the same
+- [x] Install the watch and compute its initial snapshot/delta under the same
       per-space publication ordering used by ordinary watch mutations.
-- [ ] Carry op-field dirtiness separately from entity dirty ids while preserving
+- [x] Carry op-field dirtiness separately from entity dirty ids while preserving
       one verdict-before-fan-out order.
-- [ ] Deduplicate receipt and watch delivery by cursor in the client.
-- [ ] Resume retained sessions from server watch state. Reinstall replaced
+- [x] Deduplicate receipt and watch delivery by cursor in the client.
+- [x] Resume retained sessions from server watch state. Reinstall replaced
       sessions using the client's last cursor.
-- [ ] Add submitted-history authorization tests and ensure audit payloads never
+- [x] Add submitted-history authorization tests and ensure audit payloads never
       enter ordinary entity sync.
-- [ ] Add query caps and pagination for audit history before exposing the
+- [x] Add query caps and pagination for audit history before exposing the
       submitted projection through tools.
 
 Required tests:
 
-- [ ] Atomic watch installation cannot miss an operation committed between
+- [x] Atomic watch installation cannot miss an operation committed between
       editor initialization and watch setup.
-- [ ] Initial snapshot, same-epoch delta, wrong-epoch reset, and retained-floor
+- [x] Initial snapshot, same-epoch delta, wrong-epoch reset, and retained-floor
       reset have distinct fixtures.
-- [ ] Disconnect/reconnect delivers each canonical cursor once.
-- [ ] Replaced-session reinstall resumes from the supplied cursor.
-- [ ] Applying a receipt and then receiving its duplicate watch delta advances
+- [x] Disconnect/reconnect delivers each canonical cursor once.
+- [x] Replaced-session reinstall resumes from the supplied cursor.
+- [x] Applying a receipt and then receiving its duplicate watch delta advances
       the cursor exactly once.
-- [ ] Ordinary entity and op-field watches for one commit agree on materialized
+- [x] Ordinary entity and op-field watches for one commit agree on materialized
       content and commit ordering.
 
 Likely files:
@@ -363,7 +363,7 @@ Likely files:
 
 Completion gate:
 
-- [ ] A headless client can initialize, submit, disconnect, resume, and consume
+- [x] A headless client can initialize, submit, disconnect, resume, and consume
       canonical deltas without consulting an ordinary entity update for op
       history.
 
@@ -373,32 +373,32 @@ Purpose: carry operation sessions through the existing authenticated storage
 connection and commit sequence without teaching ordinary Cell transactions
 editor semantics.
 
-- [ ] Add a separate optional `IOperationStorageCapability` beside
+- [x] Add a separate optional `IOperationStorageCapability` beside
       `IStorageManager` in `packages/runner/src/storage/interface.ts`. Do not add
       CodeMirror types to runner interfaces.
-- [ ] Define codec-neutral `openOpField`, `applyOp`, `releaseOpField`, and
+- [x] Define codec-neutral `openOpField`, `applyOp`, `releaseOpField`, and
       subscription/result types using Memory wire values.
-- [ ] Implement the capability in `packages/runner/src/storage/v2.ts` using the
+- [x] Implement the capability in `packages/runner/src/storage/v2.ts` using the
       same per-space `SpaceSession`, local-sequence allocator, reconnect state,
       and pending-commit durability barrier as ordinary writes.
-- [ ] Do not place `apply-op` in `PendingVersion`: the editor owns its immediate
+- [x] Do not place `apply-op` in `PendingVersion`: the editor owns its immediate
       local view, while Memory owns canonical materialization. Ordinary Cell
       state advances from authoritative verdict/sync results.
-- [ ] Ensure a collaboration commit participates in `synced()`, shutdown, route
+- [x] Ensure a collaboration commit participates in `synced()`, shutdown, route
       replacement, authorization errors, and telemetry.
-- [ ] Keep emulated storage behavior on the real loopback Memory server rather
+- [x] Keep emulated storage behavior on the real loopback Memory server rather
       than adding an in-memory alternate transform implementation.
 
 Required tests:
 
-- [ ] Operation and ordinary commits share monotonically ordered local sequence
+- [x] Operation and ordinary commits share monotonically ordered local sequence
       allocation.
-- [ ] `synced()` waits for an in-flight operation commit.
-- [ ] Route replacement and reconnect resend the same submission id and recover
+- [x] `synced()` waits for an in-flight operation commit.
+- [x] Route replacement and reconnect resend the same submission id and recover
       the stored resolution.
-- [ ] Closing the manager releases operation watches without affecting other
+- [x] Closing the manager releases operation watches without affecting other
       subscribers.
-- [ ] Unsupported storage managers fail capability detection explicitly.
+- [x] Unsupported storage managers fail capability detection explicitly.
 
 Likely files:
 
@@ -409,7 +409,7 @@ Likely files:
 
 Completion gate:
 
-- [ ] Runner tests prove the operation capability uses the same authenticated
+- [x] Runner tests prove the operation capability uses the same authenticated
       session and durability lifecycle as ordinary storage work.
 
 ## WP7 — Runtime-client editor-neutral sessions
@@ -417,26 +417,26 @@ Completion gate:
 Purpose: expose collaborative fields to main-thread consumers without moving
 integration authority out of Memory.
 
-- [ ] Add generic operation-session request, response, notification, receipt,
+- [x] Add generic operation-session request, response, notification, receipt,
       and close messages to `packages/runtime-client/src/protocol/`.
-- [ ] Resolve a `CellHandle` to its canonical `(space, id, scope, path)` once in
+- [x] Resolve a `CellHandle` to its canonical `(space, id, scope, path)` once in
       the worker and open the runner operation-storage capability.
-- [ ] Add a generic `OperationSession<TPayload>` main-thread class that exposes
+- [x] Add a generic `OperationSession<TPayload>` main-thread class that exposes
       snapshot/delta subscription, submit, release, close, and abort behavior.
-- [ ] Register listeners before opening so an update cannot land between the
+- [x] Register listeners before opening so an update cannot land between the
       initial response and subscription setup.
-- [ ] Filter duplicate or older cursors but reject gaps; gaps trigger a Memory
+- [x] Filter duplicate or older cursors but reject gaps; gaps trigger a Memory
       snapshot request rather than local log reconstruction.
-- [ ] Keep the worker as a transport/lifecycle adapter. It must not host codec
+- [x] Keep the worker as a transport/lifecycle adapter. It must not host codec
       registries, operation logs, rebasing, or materialization.
 
 Required tests:
 
-- [ ] Open/update/close lifecycle cleans up listeners and worker watches.
-- [ ] An update arriving during open is delivered exactly once.
-- [ ] Abort and runtime disposal reject pending work without leaking a session.
-- [ ] Cursor gap and epoch reset behavior request/accept a canonical snapshot.
-- [ ] A synthetic JSON codec session uses the same runtime-client surface.
+- [x] Open/update/close lifecycle cleans up listeners and worker watches.
+- [x] An update arriving during open is delivered exactly once.
+- [x] Abort and runtime disposal reject pending work without leaking a session.
+- [x] Cursor gap and epoch reset behavior request/accept a canonical snapshot.
+- [x] A synthetic JSON codec session uses the same runtime-client surface.
 
 Likely files:
 
@@ -449,40 +449,40 @@ Likely files:
 
 Completion gate:
 
-- [ ] Runtime-client tests contain no CodeMirror imports outside a dedicated
+- [x] Runtime-client tests contain no CodeMirror imports outside a dedicated
       adapter fixture and no durable collaboration state outside Memory.
 
 ## WP8 — CodeMirror integration in `cf-code-editor`
 
 Purpose: deliver the first product consumer of Memory `apply-op`.
 
-- [ ] Add an opt-in `collaborative` property that activates only for a
+- [x] Add an opt-in `collaborative` property that activates only for a
       `CellHandle<string>` and a server advertising the CodeMirror codec.
-- [ ] Initialize CodeMirror from the operation-session snapshot and its cursor.
-- [ ] Use `@codemirror/collab` locally for pending updates, submission encoding,
+- [x] Initialize CodeMirror from the operation-session snapshot and its cursor.
+- [x] Use `@codemirror/collab` locally for pending updates, submission encoding,
       canonical receipt confirmation, and remote-delta rebasing.
-- [ ] Submit collaborative edits immediately; the whole-value debounce/throttle
+- [x] Submit collaborative edits immediately; the whole-value debounce/throttle
       setting does not govern operation submission.
-- [ ] Route programmatic backlink edits through the same local operation stream.
-- [ ] Keep the editor read-only while opening or resetting a session. A codec or
+- [x] Route programmatic backlink edits through the same local operation stream.
+- [x] Keep the editor read-only while opening or resetting a session. A codec or
       protocol failure emits `cf-error`; it never silently switches to
       last-writer-wins Cell writes.
-- [ ] Preserve the existing behavior for plain strings and non-collaborative
+- [x] Preserve the existing behavior for plain strings and non-collaborative
       Cell bindings.
-- [ ] Do not add presence or selection persistence.
+- [x] Do not add presence or selection persistence.
 
 Required tests:
 
-- [ ] Pure adapter tests cover pending submission, stale-base rebase, own receipt,
+- [x] Pure adapter tests cover pending submission, stale-base rebase, own receipt,
       duplicate watch delta, cursor gap, and epoch reset.
-- [ ] Component tests cover binding replacement, collaborative toggle, disposal,
+- [x] Component tests cover binding replacement, collaborative toggle, disposal,
       runtime abort, ordinary mode, and backlink rewrites.
-- [ ] A browser integration test opens two independent runtimes against one
+- [x] A browser integration test opens two independent runtimes against one
       Memory server, performs overlapping edits without timing sleeps, and
       asserts both editor documents and the ordinary Cell value converge.
-- [ ] Reconnect integration confirms same-epoch offline pending edits retain
+- [x] Reconnect integration confirms same-epoch offline pending edits retain
       their submission ids and rebase after reconnect.
-- [ ] An epoch reset with unconfirmed local edits preserves the local document,
+- [x] An epoch reset with unconfirmed local edits preserves the local document,
       makes the editor read-only, and emits an explicit reconciliation event
       containing local and canonical values; it never silently discards edits.
 
@@ -496,7 +496,7 @@ Likely files:
 
 Completion gate:
 
-- [ ] Two browser clients converge through Memory, the stored Cell remains a
+- [x] Two browser clients converge through Memory, the stored Cell remains a
       plain string for ordinary readers, and disabling collaboration preserves
       current editor behavior byte-for-byte.
 

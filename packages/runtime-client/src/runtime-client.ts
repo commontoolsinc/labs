@@ -5,7 +5,10 @@
  * for interacting with cells across the worker boundary.
  */
 
-import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
@@ -69,7 +72,30 @@ import {
   type SpaceAclView,
   TelemetryNotification,
   type UploadBlobResponse,
+  type WireApplyOpResolution,
+  type WireOperationFieldSnapshot,
 } from "./protocol/mod.ts";
+
+const operationFieldFromWire = (
+  field: WireOperationFieldSnapshot,
+): OperationFieldSnapshot => ({
+  ...field,
+  materialized: fabricFromRealmValue(field.materialized),
+  operations: field.operations.map((operation) => ({
+    ...operation,
+    payload: fabricFromRealmValue(operation.payload),
+  })),
+});
+
+const applyOpResolutionFromWire = (
+  resolution: WireApplyOpResolution,
+): ApplyOpResolution => ({
+  ...resolution,
+  operations: resolution.operations.map((operation) => ({
+    ...operation,
+    payload: fabricFromRealmValue(operation.payload),
+  })),
+});
 
 export interface RuntimeClientOptions
   extends Omit<InitializationData, "apiUrl" | "identity" | "spaceIdentity"> {
@@ -143,7 +169,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       cell: cell.ref(),
       ...(after === undefined ? {} : { after }),
     });
-    return response.field;
+    return operationFieldFromWire(response.field);
   }
 
   async applyOperation<T>(
@@ -160,8 +186,9 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       type: RequestType.OperationApply,
       cell: cell.ref(),
       ...operation,
+      payload: realmFromFabricValue(operation.payload),
     });
-    return response.resolution;
+    return applyOpResolutionFromWire(response.resolution);
   }
 
   async subscribeOperationField<T>(
@@ -185,6 +212,17 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       }
     } catch (error) {
       this.#operationSubscriptions.delete(subscriptionId);
+      try {
+        await this.#conn.request<RequestType.OperationUnsubscribe>({
+          type: RequestType.OperationUnsubscribe,
+          subscriptionId,
+        });
+      } catch {
+        // The connection may have failed with the subscribe response. The
+        // local registration is already gone; a best-effort compensating
+        // unsubscribe prevents a worker-side subscription from leaking when
+        // only that response was lost.
+      }
       throw error;
     }
     return () => {
@@ -911,6 +949,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   };
 
   private _onOperationUpdate = (data: OperationUpdateNotification): void => {
-    this.#operationSubscriptions.get(data.subscriptionId)?.(data.field);
+    this.#operationSubscriptions.get(data.subscriptionId)?.(
+      operationFieldFromWire(data.field),
+    );
   };
 }

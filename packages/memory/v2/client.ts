@@ -939,6 +939,45 @@ export class SpaceSession {
     );
   }
 
+  /** Removes watches from both the live session and reconnect intent. */
+  async watchRemoveSync(
+    watchIds: readonly string[],
+  ): Promise<WatchMutationResult> {
+    const removed = new Set(watchIds);
+    return await this.runWatchMutation(
+      () => {
+        const watches = this.#watchSpecs.filter((watch) =>
+          !removed.has(watch.id)
+        );
+        // Cancellation is local intent even when the request fails: a later
+        // reconnect must not restore a watch its last subscriber removed.
+        this.#watchSpecs = watches;
+        return this.client.request<WatchSetResult>({
+          type: "session.watch.set",
+          requestId: crypto.randomUUID(),
+          space: this.space,
+          sessionId: this.#sessionId,
+          watches,
+        });
+      },
+      (result) => {
+        this.noteResult(result.serverSeq);
+        this.noteOperationWatchCursors(result.sync);
+        if (this.#watchView === null) {
+          this.#watchView = WatchView.fromSync(result.sync);
+        } else {
+          this.#watchView.applySync(result.sync, false);
+        }
+        this.scheduleAck(result.serverSeq);
+        return {
+          view: this.#watchView,
+          precedingSyncs: this.takePrecedingWatchSyncs(),
+          sync: result.sync,
+        };
+      },
+    );
+  }
+
   async ack(seenSeq: number): Promise<void> {
     if (this.#closed) {
       return;
@@ -1198,6 +1237,10 @@ export class SpaceSession {
   private takePrecedingWatchSyncs(): SessionSync[] {
     const syncs = this.#precedingWatchSyncs;
     this.#precedingWatchSyncs = [];
+    // Effects can arrive between request issue and response application. They
+    // were observed against the old watch spec, so replay their operation
+    // cursors after the mutation has installed the new spec as well.
+    for (const sync of syncs) this.noteOperationWatchCursors(sync);
     return syncs;
   }
 

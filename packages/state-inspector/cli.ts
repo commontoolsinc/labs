@@ -8,6 +8,7 @@
 //   inspect commits  <db> [--session <prefix>] [--limit <n>]
 //   inspect hot      <db> [--limit <n>] [--branch <b>]
 //   inspect history  <db> <entity-id> [--scope <s>] [--branch <b>]
+//   inspect operations <db> [entity-id] [--scope <s>] [--branch <b>]
 //   inspect value-at <db> <entity-id> [--seq <n>] [--path a/b/c]
 //                    [--path-json '["a/b",""]'] [--doc] [--full-depth]
 // Multi-space (cross-space convergence):
@@ -180,6 +181,21 @@ function validateNumericFlags(
       !Number.isSafeInteger(value) || value < 0
     ) {
       throw new Error(`\`--${name}\` must be a non-negative integer.`);
+    }
+  }
+}
+
+function validateOperationLimits(
+  command: string,
+  flags: Record<string, string | boolean>,
+): void {
+  if (command !== "operations") return;
+  for (const name of ["limit", "history-limit"]) {
+    const raw = flags[name];
+    if (raw === undefined) continue;
+    const value = typeof raw === "string" ? Number(raw) : Number.NaN;
+    if (!Number.isSafeInteger(value) || value < 1 || value > 1_000) {
+      throw new Error(`\`--${name}\` must be an integer from 1 to 1000.`);
     }
   }
 }
@@ -449,6 +465,7 @@ export function main(argv: string[]): number {
   try {
     validateEmptyFlagValues(flags);
     validateNumericFlags(flags);
+    validateOperationLimits(cmd, flags);
   } catch (e) {
     console.error(`error: ${(e as Error).message}`);
     return 1;
@@ -598,7 +615,8 @@ export function main(argv: string[]): number {
           for (const field of report.fields) {
             console.log(
               `${field.active ? "active" : "inactive"}\t${field.address.id}` +
-                `\t${field.address.pathPointer}\t${field.codec}` +
+                `\t${field.address.scope}\t${field.address.pathPointer}` +
+                `\t${field.codec}` +
                 `\t${field.cursor.epoch}:${field.cursor.version}` +
                 `\tretained=${field.retainedFrom.version}` +
                 `\t${field.consistency.healthy ? "healthy" : "INCONSISTENT"}`,

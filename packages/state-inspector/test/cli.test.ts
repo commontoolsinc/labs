@@ -121,6 +121,21 @@ Deno.test("cli: single-space commands dispatch over a seeded DB", async (t) => {
       },
     );
 
+    await t.step("operations rejects zero and oversized limits", () => {
+      const zero = run(["operations", db, "--limit", "0"]);
+      assertEquals(zero.code, 1);
+      assert(zero.err.includes("integer from 1 to 1000"));
+
+      const oversized = run([
+        "operations",
+        db,
+        "--history-limit",
+        "1001",
+      ]);
+      assertEquals(oversized.code, 1);
+      assert(oversized.err.includes("integer from 1 to 1000"));
+    });
+
     await t.step("--json BEFORE <db> still works (flag-order fix)", () => {
       const { code, out } = run(["summary", "--json", db]);
       assertEquals(code, 0);

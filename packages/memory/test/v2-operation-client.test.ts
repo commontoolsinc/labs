@@ -2,7 +2,12 @@ import { ChangeSet } from "@codemirror/state";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { defer } from "@commonfabric/utils/defer";
-import { connect, loopback, type Transport } from "../v2/client.ts";
+import {
+  connect,
+  loopback,
+  SpaceSession,
+  type Transport,
+} from "../v2/client.ts";
 import { Server, SessionRegistry } from "../v2/server.ts";
 import {
   CODEMIRROR_CHANGESET_CODEC,
@@ -29,6 +34,7 @@ class ReconnectableOperationTransport implements Transport {
   #reconnected = defer<void>();
   #secondWatchSet = defer<void>();
   #reconnectGate: ReturnType<typeof defer<void>> | undefined;
+  #failNextEffect = false;
 
   constructor(private readonly server: Server) {}
 
@@ -92,11 +98,19 @@ class ReconnectableOperationTransport implements Transport {
     this.#reconnectGate?.resolve();
   }
 
+  failNextEffect(): void {
+    this.#failNextEffect = true;
+  }
+
   private connection(): ReturnType<Server["connect"]> {
     if (this.#connection === null) {
       this.connectionCount++;
       if (this.connectionCount >= 2) this.#reconnected.resolve();
       this.#connection = this.server.connect((message) => {
+        if (this.#failNextEffect && message.type === "session/effect") {
+          this.#failNextEffect = false;
+          throw new Error("synthetic operation effect failure");
+        }
         this.#receiver(encodeMemoryBoundary(message));
       });
     }
@@ -105,6 +119,114 @@ class ReconnectableOperationTransport implements Transport {
 }
 
 describe("v2-operation-client", () => {
+  it("replays preceding operation cursors onto a newly installed watch", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const client = {
+      isConnected: () => true,
+      request: (request: Record<string, unknown>) => {
+        requests.push(request);
+        if (request.type === "session.ack") return Promise.resolve({});
+        return Promise.resolve({
+          serverSeq: 1,
+          sync: {
+            type: "sync",
+            fromSeq: 1,
+            toSeq: 1,
+            upserts: [],
+            removes: [],
+          },
+        });
+      },
+    };
+    const session = new SpaceSession(
+      client as never,
+      "did:key:z6Mk-operation-cursor-race",
+      "session:cursor-race",
+      "token",
+      0,
+    );
+    session.handleEffect({
+      type: "sync",
+      fromSeq: 0,
+      toSeq: 1,
+      upserts: [],
+      removes: [],
+      operationFields: [{
+        watchId: "racing-operation",
+        field: {
+          branch: "",
+          id: "of:racing-operation",
+          scopeKey: "space",
+          path: toValuePath(["body"]),
+          active: true,
+          codec: CODEMIRROR_CHANGESET_CODEC,
+          cursor: { epoch: 1, version: 3 },
+          baselineHash: "baseline",
+          materialized: "abc",
+          operations: [],
+        },
+      }],
+    });
+    await session.watchAddSync([{
+      id: "racing-operation",
+      kind: "operation",
+      query: {
+        id: "of:racing-operation",
+        path: toValuePath(["body"]),
+      },
+    }]);
+    await session.watchRemoveSync([]);
+
+    const set = requests.find((request) =>
+      request.type === "session.watch.set"
+    ) as { watches: Array<{ query: { after?: unknown } }> };
+    expect(set.watches[0].query.after).toEqual({ epoch: 1, version: 3 });
+  });
+
+  it("returns a typed error when operation telemetry cannot encode a payload", async () => {
+    const server = new Server({
+      ...testSessionOpenServerOptions,
+      store: new URL("memory://memory-v2-operation-malformed-telemetry"),
+    });
+    const client = await connect({ transport: loopback(server) });
+    const spaceId = "did:key:z6Mk-memory-v2-operation-malformed-telemetry";
+    const session = await client.mount(
+      spaceId,
+      {},
+      testSessionOpenAuthFactory,
+    );
+
+    try {
+      const response = await server.transact({
+        type: "transact",
+        requestId: "malformed-operation-payload",
+        space: spaceId,
+        sessionId: session.sessionId,
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "apply-op",
+            id: "of:malformed-payload",
+            path: toValuePath([]),
+            codec: CODEMIRROR_CHANGESET_CODEC,
+            submissionId: "malformed:1",
+            base: null,
+            baselineHash: operationBaselineHash(null),
+            payload: (() => {}) as never,
+          }],
+        },
+      });
+      expect(response.error?.name).toBe("TransactionError");
+      expect(response.error?.message).toContain(
+        "Cannot encode function",
+      );
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
   it("transacts and queries operation history over a memory session", async () => {
     const server = new Server({
       ...testSessionOpenServerOptions,
@@ -305,6 +427,314 @@ describe("v2-operation-client", () => {
           materialized: null,
         },
       });
+    } finally {
+      await writerClient.close();
+      await watcherClient.close();
+      await server.close();
+    }
+  });
+
+  it("redelivers operation history after a mixed frame send fails", async () => {
+    const server = new Server({
+      ...testSessionOpenServerOptions,
+      store: new URL("memory://memory-v2-operation-mixed-rollback"),
+      subscriptionRefreshDelayMs: "manual",
+    });
+    const transport = new ReconnectableOperationTransport(server);
+    const watcherClient = await connect({ transport });
+    const writerClient = await connect({ transport: loopback(server) });
+    const spaceId = "did:key:z6Mk-memory-v2-operation-mixed-rollback";
+    const watcher = await watcherClient.mount(
+      spaceId,
+      {},
+      testSessionOpenAuthFactory,
+    );
+    const writer = await writerClient.mount(
+      spaceId,
+      {},
+      testSessionOpenAuthFactory,
+    );
+
+    try {
+      await writer.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:mixed",
+          value: { value: { body: "a" } },
+        }],
+      });
+      const watched = await watcher.watchSetSync([{
+        id: "mixed-document",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:mixed",
+            selector: { path: [], schema: false },
+          }],
+        },
+      }, {
+        id: "mixed-operations",
+        kind: "operation",
+        query: {
+          id: "of:mixed",
+          path: toValuePath(["body"]),
+        },
+      }]);
+      const syncs = watched.view.subscribeSync();
+
+      transport.failNextEffect();
+      await writer.transact({
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "apply-op",
+          id: "of:mixed",
+          path: toValuePath(["body"]),
+          codec: CODEMIRROR_CHANGESET_CODEC,
+          submissionId: "writer:mixed",
+          base: null,
+          baselineHash: operationBaselineHash("a"),
+          payload: {
+            updates: [{
+              clientId: "writer",
+              changes: ChangeSet.of({ from: 1, insert: "b" }, 1).toJSON(),
+            }],
+          },
+        }],
+      });
+      await server.flushSessions([spaceId]);
+      await server.flushSessions([spaceId]);
+
+      const delivered = await syncs.next();
+      expect(delivered.value.upserts).toEqual([
+        expect.objectContaining({
+          id: "of:mixed",
+          doc: { value: { body: "ab" } },
+        }),
+      ]);
+      expect(delivered.value.operationFields).toEqual([{
+        watchId: "mixed-operations",
+        field: expect.objectContaining({
+          cursor: { epoch: 1, version: 1 },
+          materialized: "ab",
+          operations: [expect.objectContaining({
+            cursor: { epoch: 1, version: 1 },
+            submissionId: "writer:mixed",
+          })],
+        }),
+      }]);
+    } finally {
+      await writerClient.close();
+      await watcherClient.close();
+      await server.close();
+    }
+  });
+
+  it("does not retain an operation watch whose initial snapshot fails", async () => {
+    const server = new Server({
+      ...testSessionOpenServerOptions,
+      store: new URL("memory://memory-v2-operation-watch-add-staging"),
+    });
+    const writerClient = await connect({ transport: loopback(server) });
+    const watcherClient = await connect({ transport: loopback(server) });
+    const spaceId = "did:key:z6Mk-memory-v2-operation-watch-add-staging";
+    const writer = await writerClient.mount(
+      spaceId,
+      {},
+      testSessionOpenAuthFactory,
+    );
+    const watcher = await watcherClient.mount(
+      spaceId,
+      {},
+      testSessionOpenAuthFactory,
+    );
+
+    try {
+      await writer.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:staged-watch",
+          value: { value: { body: "a" } },
+        }],
+      });
+      await writer.transact({
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "apply-op",
+          id: "of:staged-watch",
+          path: toValuePath(["body"]),
+          codec: CODEMIRROR_CHANGESET_CODEC,
+          submissionId: "writer:staged",
+          base: null,
+          baselineHash: operationBaselineHash("a"),
+          payload: {
+            updates: [{
+              clientId: "writer",
+              changes: ChangeSet.of({ from: 1, insert: "b" }, 1).toJSON(),
+            }],
+          },
+        }],
+      });
+
+      await expect(watcher.watchAddSync([{
+        id: "staged-operations",
+        kind: "operation",
+        query: {
+          id: "of:staged-watch",
+          path: toValuePath(["body"]),
+          after: { epoch: 1, version: 99 },
+        },
+      }])).rejects.toThrow("cursor is in the future");
+
+      const added = await watcher.watchAddSync([{
+        id: "staged-operations",
+        kind: "operation",
+        query: {
+          id: "of:staged-watch",
+          path: toValuePath(["body"]),
+          after: { epoch: 1, version: 0 },
+        },
+      }]);
+      expect(added.sync.operationFields?.[0].field).toMatchObject({
+        cursor: { epoch: 1, version: 1 },
+        materialized: "ab",
+      });
+    } finally {
+      await writerClient.close();
+      await watcherClient.close();
+      await server.close();
+    }
+  });
+
+  it("keeps operation-only watches out of server-execution demand", async () => {
+    const server = new Server({
+      ...testSessionOpenServerOptions,
+      store: new URL("memory://memory-v2-operation-watch-demand"),
+    });
+    const client = await connect({ transport: loopback(server) });
+    const spaceId = "did:key:z6Mk-memory-v2-operation-watch-demand";
+    const session = await client.mount(
+      spaceId,
+      {},
+      testSessionOpenAuthFactory,
+    );
+
+    try {
+      await session.watchSetSync([{
+        id: "operation-only",
+        kind: "operation",
+        query: {
+          id: "of:operation-only",
+          path: toValuePath(["body"]),
+        },
+      }]);
+      expect(server.demandedInstancesForSpace(spaceId)).toEqual([]);
+
+      await session.watchAddSync([{
+        id: "graph-demand",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:operation-only",
+            selector: { path: [], schema: false },
+          }],
+        },
+      }]);
+      expect(server.demandedInstancesForSpace(spaceId)).toMatchObject([{
+        id: "of:operation-only",
+        scope: "space",
+        root: true,
+      }]);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("removes an operation watch without disturbing graph watches", async () => {
+    const server = new Server({
+      ...testSessionOpenServerOptions,
+      store: new URL("memory://memory-v2-operation-watch-remove"),
+      subscriptionRefreshDelayMs: "manual",
+    });
+    const writerClient = await connect({ transport: loopback(server) });
+    const watcherClient = await connect({ transport: loopback(server) });
+    const spaceId = "did:key:z6Mk-memory-v2-operation-watch-remove";
+    const writer = await writerClient.mount(
+      spaceId,
+      {},
+      testSessionOpenAuthFactory,
+    );
+    const watcher = await watcherClient.mount(
+      spaceId,
+      {},
+      testSessionOpenAuthFactory,
+    );
+
+    try {
+      await writer.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:removed-watch",
+          value: { value: { body: "a" } },
+        }],
+      });
+      const watched = await watcher.watchSetSync([{
+        id: "removed-document",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:removed-watch",
+            selector: { path: [], schema: false },
+          }],
+        },
+      }, {
+        id: "removed-operations",
+        kind: "operation",
+        query: {
+          id: "of:removed-watch",
+          path: toValuePath(["body"]),
+        },
+      }]);
+      const removed = await watcher.watchRemoveSync(["removed-operations"]);
+      expect(removed.sync.operationFields).toBeUndefined();
+      const syncs = watched.view.subscribeSync();
+
+      await writer.transact({
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "apply-op",
+          id: "of:removed-watch",
+          path: toValuePath(["body"]),
+          codec: CODEMIRROR_CHANGESET_CODEC,
+          submissionId: "writer:removed",
+          base: null,
+          baselineHash: operationBaselineHash("a"),
+          payload: {
+            updates: [{
+              clientId: "writer",
+              changes: ChangeSet.of({ from: 1, insert: "b" }, 1).toJSON(),
+            }],
+          },
+        }],
+      });
+      await server.flushSessions([spaceId]);
+      const delivered = await syncs.next();
+      expect(delivered.value.operationFields).toBeUndefined();
+      expect(delivered.value.upserts).toEqual([
+        expect.objectContaining({
+          id: "of:removed-watch",
+          doc: { value: { body: "ab" } },
+        }),
+      ]);
     } finally {
       await writerClient.close();
       await watcherClient.close();

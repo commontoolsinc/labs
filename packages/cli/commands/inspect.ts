@@ -769,7 +769,8 @@ export const inspect = new Command()
         for (const field of report.fields) {
           console.log(
             `${field.active ? "active" : "inactive"}\t${field.address.id}` +
-              `\t${field.address.pathPointer}\t${field.codec}` +
+              `\t${field.address.scope}\t${field.address.pathPointer}` +
+              `\t${field.codec}` +
               `\t${field.cursor.epoch}:${field.cursor.version}` +
               `\tretained=${field.retainedFrom.version}` +
               `\t${field.consistency.healthy ? "healthy" : "INCONSISTENT"}`,

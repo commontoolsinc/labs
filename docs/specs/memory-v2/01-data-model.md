@@ -484,7 +484,7 @@ current value. Patch operations are inspired by
 - **Custom `splice` operation** for efficient array manipulation.
 - Collaborative editor operations are a distinct top-level `apply-op` write
   class rather than `PatchOp` extensions. The server derives an ordinary patch
-  revision from each accepted batch; see
+  revision from each accepted non-empty batch; see
   [Collaborative Operations, Views, and Anchors](./07-op-views-and-annotations.md).
 
 ```typescript

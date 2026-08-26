@@ -532,6 +532,31 @@ const graphWatchRoots = (watches: readonly WatchSpec[]) =>
     .filter((watch) => watch.kind !== "operation")
     .flatMap((watch) => watch.query.roots);
 
+type ReadAdmissionRoot = {
+  id: string;
+  scope?: CellScope;
+  entityScopeKey?: ScopeKey;
+};
+
+const watchReadRoots = (
+  watches: readonly WatchSpec[],
+): ReadAdmissionRoot[] => {
+  const roots: ReadAdmissionRoot[] = [];
+  for (const watch of watches) {
+    if (watch.kind === "operation") {
+      roots.push({
+        id: watch.query.id,
+        ...(watch.query.scope === undefined
+          ? {}
+          : { scope: watch.query.scope }),
+      });
+    } else {
+      roots.push(...watch.query.roots);
+    }
+  }
+  return roots;
+};
+
 const graphWatchRootQueries = (watches: readonly WatchSpec[]) =>
   watches
     .filter((watch) => watch.kind !== "operation")
@@ -2941,11 +2966,16 @@ export class Server {
           operation.op === "apply-op"
         );
         for (const operation of applyOperations) {
-          operationPayloadBytes.record(
-            new TextEncoder().encode(encodeMemoryBoundary(operation.payload))
-              .byteLength,
-            { codec: operation.codec },
-          );
+          try {
+            operationPayloadBytes.record(
+              new TextEncoder().encode(encodeMemoryBoundary(operation.payload))
+                .byteLength,
+              { codec: operation.codec },
+            );
+          } catch {
+            // Admission below reports malformed Fabric values as a typed
+            // protocol error. Telemetry must not pre-empt that response.
+          }
         }
         span.setAttribute("commit.kind", commitTelemetry.kind);
         span.setAttribute("entity.count", commitTelemetry.entityCount);
@@ -3390,6 +3420,17 @@ export class Server {
           deny,
         );
       }
+      const denyForeign = this.#denyForeignServingScopedRead(
+        message.space,
+        session,
+        [{ id: message.query.id, scope: message.query.scope }],
+      );
+      if (denyForeign) {
+        return respondTypedError<OperationFieldQueryResult>(
+          message.requestId,
+          denyForeign,
+        );
+      }
       const field = Engine.queryOperationField(engine, {
         ...message.query,
         principal: session.principal,
@@ -3591,7 +3632,7 @@ export class Server {
       const denyForeign = this.#denyForeignServingScopedRead(
         message.space,
         session,
-        graphWatchRoots(message.watches),
+        watchReadRoots(message.watches),
       );
       if (denyForeign) {
         return respondTypedError<WatchSetResult>(
@@ -3719,7 +3760,7 @@ export class Server {
       const denyForeign = this.#denyForeignServingScopedRead(
         message.space,
         session,
-        graphWatchRoots(message.watches),
+        watchReadRoots(message.watches),
       );
       if (denyForeign) {
         return respondTypedError<WatchAddResult>(
@@ -3842,47 +3883,30 @@ export class Server {
         }
       }
 
-      // Diff first, commit the session cache after (review finding S4 —
-      // the build-then-commit discipline the push path's commitEntities
-      // states): the cache is the delivered-entries diff base, so any
-      // failure between here and the response must leave it untouched —
-      // a cache that already claims the frame's entries delivered while
-      // the requester got a QueryError elides them from every later
-      // diff, a durable silent under-delivery for the session. This
-      // also keeps the catch's "evaluation state is staged" comment
-      // true. No throw-capable step sits between the diff and the
-      // commit TODAY (the closure pass that motivated the reorder was
-      // removed with the per-frame resend — OW61's reversal ruling);
-      // the ordering is kept as hygiene so the next inserted step does
-      // not silently reintroduce the poisoning.
+      // Build the complete result before mutating the session. Its entity
+      // cache is the delivered-entry diff base, and operation snapshot
+      // attachment can reject a stale or future cursor. A failed watch.add
+      // must leave both kinds of delivery state untouched or later syncs can
+      // omit data the requester never received.
       const upserts: SessionCacheEntry[] = [];
       for (const [key, entry] of updates) {
         if (!sameSnapshot(session.entities.get(key), entry)) {
           upserts.push(entry);
         }
       }
-      for (const [key, entry] of updates) {
-        session.entities.set(key, entry);
-        session.trackedIds.add(toDirtyKey(entry.id, entry.scopeKey));
-      }
-
       const serverSeq = Engine.serverSeq(engine);
       const fromSeq = session.lastSyncedSeq;
-      session.graphs = graphs;
-      session.watches = nextWatches;
-      addOperationWatchTrackedIds(session.trackedIds, nextWatches, {
+      const entities = new Map(session.entities);
+      const trackedIds = new Set(session.trackedIds);
+      for (const [key, entry] of updates) {
+        entities.set(key, entry);
+        trackedIds.add(toDirtyKey(entry.id, entry.scopeKey));
+      }
+      addOperationWatchTrackedIds(trackedIds, nextWatches, {
         principal: session.principal,
         sessionId: message.sessionId,
       });
-      this.#addMissedToTrackedIds(session.trackedIds, graphs.values());
-      session.lastSyncedSeq = serverSeq;
-      this.#notifyDemandChanged(message.space, "watch", session.principal);
-      recordSlowQueryDuration(
-        "session.watch.add",
-        message.space,
-        startedAt,
-        { watches: message.watches.length },
-      );
+      this.#addMissedToTrackedIds(trackedIds, graphs.values());
       const sync: SessionSync = {
         type: "sync",
         fromSeq,
@@ -3900,7 +3924,19 @@ export class Server {
         newWatches,
         nextOperationCursors,
       );
+      session.entities = entities;
+      session.trackedIds = trackedIds;
+      session.graphs = graphs;
+      session.watches = nextWatches;
+      session.lastSyncedSeq = serverSeq;
       session.operationCursors = nextOperationCursors;
+      this.#notifyDemandChanged(message.space, "watch", session.principal);
+      recordSlowQueryDuration(
+        "session.watch.add",
+        message.space,
+        startedAt,
+        { watches: message.watches.length },
+      );
       return {
         type: "response",
         requestId: message.requestId,
@@ -4042,6 +4078,13 @@ export class Server {
     // its own here). The session-identity recovery below remains as the
     // fallback for frames without a record (none are built today).
     const record = this.#deliveredFrameEntries.get(undelivered);
+    for (const delivery of sync.operationFields ?? []) {
+      // A failed send did not advance the client. Forget the delivery cursor so
+      // the recomputed frame includes a complete safe snapshot rather than
+      // risking a gap. Mixed document/operation frames also carry a delivery
+      // record, so this rollback belongs before either document path returns.
+      session.operationCursors.delete(delivery.watchId);
+    }
     // Wire frames carry scope NAMES; the session's own identity recovers
     // the instance keys (M4). An unresolvable scope cannot have been in a
     // frame built FOR this session — skip defensively rather than throw
@@ -4130,12 +4173,6 @@ export class Server {
       ids.push(toDirtyKey(remove.id, scopeKey));
     }
     this.#rollbackCaughtUpMarker(session, sync);
-    for (const delivery of sync.operationFields ?? []) {
-      // A failed send did not advance the client. Forget the delivery cursor so
-      // the recomputed frame includes a complete safe snapshot rather than
-      // risking a gap.
-      session.operationCursors.delete(delivery.watchId);
-    }
     this.markSpaceDirty(space, ids);
   }
 
@@ -4878,9 +4915,9 @@ export class Server {
   /**
    * (d′) — the space's DEMAND SET (design §2.1's definition;
    * the successor of `watchedRootsForSpace`): the union over the space's
-   * CLIENT sessions of `session.trackedIds` — memory v2's schema-narrowed,
-   * instance-keyed closure of each session's watches (roots and every doc
-   * the selectors' schemas reach, absent targets included) — one row per
+   * CLIENT sessions of each graph watch's schema-narrowed, instance-keyed
+   * closure (roots and every doc the selectors' schemas reach, absent targets
+   * included) — one row per
    * (instance key, session), each carrying the session's demanding
    * identity, `root: true` on the rows that are watch ROOTS. The service
    * principal's sessions are excluded (their watches are the serving
@@ -4934,6 +4971,12 @@ export class Server {
           }
         }
       }
+      // Operation watches share session dirtiness tracking so their updates
+      // wake the push loop, but they are not graph execution demand. Rebuild
+      // the graph-only provenance from delivered entries plus traversal misses
+      // before producing demand rows.
+      const graphTrackedIds = trackedIdsFromEntries(session.entities.values());
+      this.#addMissedToTrackedIds(graphTrackedIds, session.graphs.values());
       const emit = (dirtyKey: string, root: boolean) => {
         const rowKey = `${dirtyKey}\0${session.id}`;
         if (rows.has(rowKey)) {
@@ -4955,7 +4998,9 @@ export class Server {
         });
       };
       for (const dirtyKey of session.trackedIds) {
-        emit(dirtyKey, rootKeys.has(dirtyKey));
+        if (graphTrackedIds.has(dirtyKey)) {
+          emit(dirtyKey, rootKeys.has(dirtyKey));
+        }
       }
       for (const dirtyKey of rootKeys) emit(dirtyKey, true);
     }
@@ -5341,7 +5386,7 @@ export class Server {
   #denyForeignServingScopedRead(
     space: string,
     session: SessionState,
-    roots: Iterable<GraphQuery["roots"][number]>,
+    roots: Iterable<ReadAdmissionRoot>,
   ): V2Error | undefined {
     if (!getServerExecutionConfig()) return undefined;
     if (session.principal === undefined) return undefined;

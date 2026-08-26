@@ -23,8 +23,13 @@ import {
 import {
   CODEMIRROR_CHANGESET_CODEC,
   operationBaselineHash,
+  OperationCodecRegistry,
 } from "../v2/operation-codec.ts";
-import { type ApplyOpOperation, toValuePath } from "../v2.ts";
+import {
+  type ApplyOpOperation,
+  streamEntriesDocId,
+  toValuePath,
+} from "../v2.ts";
 
 const changes = (
   length: number,
@@ -290,6 +295,19 @@ describe("v2-operation-engine", () => {
             operations: [{
               ...bobCommit.operations[0],
               base: { epoch: 1, version: 1 },
+            }],
+          },
+        })
+      ).toThrow(OpSubmissionMismatchError);
+      expect(() =>
+        applyCommit(engine, {
+          sessionId: "session:bob",
+          commit: {
+            ...bobCommit,
+            localSeq: 4,
+            operations: [{
+              ...bobCommit.operations[0],
+              base: { epoch: 2, version: 0 },
             }],
           },
         })
@@ -1039,6 +1057,68 @@ describe("v2-operation-engine", () => {
         ...operation,
         payload: { oversized: "x".repeat(1_000_001) },
       }, OpCodecError);
+      fail({
+        ...operation,
+        id: streamEntriesDocId({ id: "of:stream", path: ["events"] }),
+        path: toValuePath([]),
+        baselineHash: operationBaselineHash(null),
+      }, ProtocolError);
+    } finally {
+      close(engine);
+      await Deno.remove(path);
+    }
+  });
+
+  it("rejects a codec that changes materialized state without an operation", async () => {
+    const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+    const engine = await open({
+      url: toFileUrl(path),
+      operationCodecs: new OperationCodecRegistry([{
+        id: "empty-change@1",
+        integrate: () => ({ materialized: "changed", operations: [] }),
+      }]),
+    });
+
+    try {
+      applyCommit(engine, {
+        sessionId: "session:setup",
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:empty-change",
+            value: { value: { body: "original" } },
+          }],
+        },
+      });
+
+      expect(() =>
+        applyCommit(engine, {
+          sessionId: "session:codec",
+          commit: {
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "apply-op",
+              id: "of:empty-change",
+              path: toValuePath(["body"]),
+              codec: "empty-change@1",
+              submissionId: "codec:1",
+              base: null,
+              baselineHash: operationBaselineHash("original"),
+              payload: {},
+            }],
+          },
+        })
+      ).toThrow(OpCodecError);
+      expect(read(engine, { id: "of:empty-change" })).toEqual({
+        value: { body: "original" },
+      });
+      expect(queryOperationField(engine, {
+        id: "of:empty-change",
+        path: toValuePath(["body"]),
+      })).toMatchObject({ active: false, cursor: null });
     } finally {
       close(engine);
       await Deno.remove(path);

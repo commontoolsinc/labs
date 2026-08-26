@@ -48,6 +48,13 @@ const editorReady = (probe: ProbeApi): boolean =>
     ?._editorView !==
     undefined;
 
+const collaborationStopped = (probe: ProbeApi): boolean => {
+  const editor = probe.collect("cf-code-editor")[0] as EditorHost | undefined;
+  return editor?.collaborative === false &&
+    editor._collaboration === undefined &&
+    editor._editorView?.state.readOnly === false;
+};
+
 const editorContainsTokens = (
   probe: ProbeApi,
   tokens: readonly string[],
@@ -325,6 +332,24 @@ async function releaseCollaboration(page: Page): Promise<void> {
   });
 }
 
+async function disableCollaboration(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const collect = (root: Document | ShadowRoot): Element[] => {
+      const result: Element[] = [];
+      for (const element of root.querySelectorAll("*")) {
+        result.push(element);
+        if (element.shadowRoot) result.push(...collect(element.shadowRoot));
+      }
+      return result;
+    };
+    const editor = collect(document).find((element) =>
+      element.localName === "cf-code-editor"
+    ) as EditorHost | undefined;
+    if (!editor) throw new Error("collaborative editor is not available");
+    editor.collaborative = false;
+  });
+}
+
 describe("cf-code-editor collaboration", () => {
   const aliceShell = new ShellIntegration();
   const bobShell = new ShellIntegration();
@@ -417,6 +442,10 @@ describe("cf-code-editor collaboration", () => {
       }),
       reload: await cc.create(source, {
         input: { content: "reload" },
+        start: true,
+      }),
+      toggle: await cc.create(source, {
+        input: { content: "toggle" },
         start: true,
       }),
       reconcile: await cc.create(source, {
@@ -552,6 +581,30 @@ describe("cf-code-editor collaboration", () => {
     ]);
     assertEquals(aliceContent, bobContent);
     assertEquals(materialized, aliceContent);
+    assertEquals(await collaborationErrors(alicePage), []);
+    assertEquals(await collaborationErrors(bobPage), []);
+  });
+
+  it("flushes an in-flight edit before collaborative mode is disabled", async () => {
+    await navigateBoth(pieces.toggle);
+    const alicePage = aliceShell.page();
+    const bobPage = bobShell.page();
+
+    await installNextApplyGate(alicePage);
+    await dispatchEdit(alicePage, 6, 6, "!");
+    await awaitApplyCaptured(alicePage);
+    await disableCollaboration(alicePage);
+    await releaseApplyGate(alicePage);
+    await awaitApplyCompleted(alicePage);
+
+    await Promise.all([
+      waitForCondition(alicePage, collaborationStopped),
+      waitForCondition(alicePage, editorContainsTokens, { args: [["!"]] }),
+      waitForCondition(bobPage, editorContainsTokens, { args: [["!"]] }),
+      awaitMaterialized("toggle", (value) => value === "toggle!"),
+    ]);
+    assertEquals(await editorContent(alicePage), "toggle!");
+    assertEquals(await editorContent(bobPage), "toggle!");
     assertEquals(await collaborationErrors(alicePage), []);
     assertEquals(await collaborationErrors(bobPage), []);
   });

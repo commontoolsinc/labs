@@ -33,6 +33,8 @@ Implemented on the current branch:
 - a codec-neutral runner and runtime-client collaboration capability plus an
   opt-in CodeMirror adapter in `cf-code-editor`; ordinary Cell readers continue
   to consume the derived string value
+- storage-owned checkpoints and retention floors, submitted-history operator
+  inspection, reconnect recovery, and multi-browser collaboration coverage
 - session-scoped watch-union sync with catch-up frames, `removes`, and
   per-verdict catch-up markers with client-side verdict parking (conflicts
   and accepts, CT-1927)
@@ -54,9 +56,7 @@ Explicitly deferred:
 - public branch lifecycle commands on the v2 wire protocol
 - merge proposal generation, merge conflict workflows, and advanced branch
   live-sync optimizations
-- collaborative-field checkpoints, retention floors, submitted-history
-  operator tooling, exhaustive reconnect/browser race coverage, and the
-  structured-codec readiness proof required before a WordGard integration
+- the structured-codec readiness proof required before a WordGard integration
 - broad protocol-spec reconciliation outside these implementation notes
 
 This is a clean break:

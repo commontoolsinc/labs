@@ -29,7 +29,11 @@ import type { Program } from "@commonfabric/js-compiler";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { setLLMUrl } from "@commonfabric/llm";
 import { type ACL, isACLUser, isCapability } from "@commonfabric/memory/acl";
-import { toValuePath } from "@commonfabric/memory/v2";
+import {
+  type ApplyOpResolution,
+  type OperationFieldSnapshot,
+  toValuePath,
+} from "@commonfabric/memory/v2";
 import {
   PieceController,
   PiecesController,
@@ -188,8 +192,31 @@ import {
   type VDomMountRequest,
   type VDomMountResponse,
   type VDomUnmountRequest,
+  type WireApplyOpResolution,
+  type WireOperationFieldSnapshot,
   type WriteStackTraceResponse,
 } from "@/protocol/mod.ts";
+
+const operationFieldToWire = (
+  field: OperationFieldSnapshot,
+): WireOperationFieldSnapshot => ({
+  ...field,
+  materialized: realmFromFabricValue(field.materialized),
+  operations: field.operations.map((operation) => ({
+    ...operation,
+    payload: realmFromFabricValue(operation.payload),
+  })),
+});
+
+const applyOpResolutionToWire = (
+  resolution: ApplyOpResolution,
+): WireApplyOpResolution => ({
+  ...resolution,
+  operations: resolution.operations.map((operation) => ({
+    ...operation,
+    payload: realmFromFabricValue(operation.payload),
+  })),
+});
 import type { VDomOp } from "@/protocol/types.ts";
 import { cellRefToKey, describeFailure } from "@/shared/utils.ts";
 import { postToClient } from "./post-to-client.ts";
@@ -1038,7 +1065,7 @@ export class RuntimeProcessor {
         path: toValuePath(request.cell.path),
         ...(request.after === undefined ? {} : { after: request.after }),
       });
-    return { field };
+    return { field: operationFieldToWire(field) };
   }
 
   async handleOperationApply(
@@ -1056,9 +1083,9 @@ export class RuntimeProcessor {
         ...(request.baselineHash === undefined
           ? {}
           : { baselineHash: request.baselineHash }),
-        payload: request.payload,
+        payload: fabricFromRealmValue(request.payload),
       });
-    return { resolution };
+    return { resolution: applyOpResolutionToWire(resolution) };
   }
 
   async handleOperationSubscribe(
@@ -1078,7 +1105,7 @@ export class RuntimeProcessor {
           self.postMessage({
             type: NotificationType.OperationUpdate,
             subscriptionId: request.subscriptionId,
-            field,
+            field: operationFieldToWire(field),
           })
         );
       });

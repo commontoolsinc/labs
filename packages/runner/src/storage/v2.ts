@@ -2559,6 +2559,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     string,
     Set<(snapshot: OperationFieldSnapshot) => void>
   >();
+  readonly #operationWatchRemovals = new Map<string, Promise<void>>();
   #watchView: MemoryV2Client.WatchView | null = null;
   // The specific view instance that `consumeUpdates` is iterating. This can
   // diverge from `#watchView` (the client may hand back a fresh view instance
@@ -3059,8 +3060,9 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     callbacks.add(callback);
 
     try {
+      await this.#operationWatchRemovals.get(watchId);
       const { session } = await this.activeSessionHandle();
-      const { view, sync } = await session.watchAddSync([{
+      const { view, precedingSyncs, sync } = await session.watchAddSync([{
         id: watchId,
         kind: "operation",
         query,
@@ -3070,19 +3072,11 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
         throw new Error("memory replica closed");
       }
       this.#watchView = view;
-      this.applySessionSync(sync, "integrate");
-      if (this.#updatePromises.size === 0) {
-        this.#subscribedWatchView = view;
-        const updates = this.consumeUpdates(view.subscribeSync())
-          .finally(() => {
-            this.#updatePromises.delete(updates);
-            if (this.#subscribedWatchView === view) {
-              this.#subscribedWatchView = null;
-              this.applyParkedAcceptsNow();
-            }
-          });
-        this.#updatePromises.add(updates);
+      for (const precedingSync of precedingSyncs) {
+        this.applySessionSync(precedingSync, "integrate");
       }
+      this.applySessionSync(sync, "integrate");
+      this.#consumeWatchView(view);
     } catch (error) {
       callbacks.delete(callback);
       if (callbacks.size === 0) this.#operationSinks.delete(watchId);
@@ -3092,8 +3086,38 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     return () => {
       const current = this.#operationSinks.get(watchId);
       current?.delete(callback);
-      if (current?.size === 0) this.#operationSinks.delete(watchId);
+      if (current?.size !== 0) return;
+      this.#operationSinks.delete(watchId);
+      const removal = this.#removeOperationWatch(watchId).finally(() => {
+        if (this.#operationWatchRemovals.get(watchId) === removal) {
+          this.#operationWatchRemovals.delete(watchId);
+        }
+      });
+      this.#operationWatchRemovals.set(watchId, removal);
     };
+  }
+
+  async #removeOperationWatch(watchId: string): Promise<void> {
+    try {
+      const { session } = await this.activeSessionHandle();
+      const { view, precedingSyncs, sync } = await session.watchRemoveSync([
+        watchId,
+      ]);
+      if (this.#closed) {
+        view.close();
+        return;
+      }
+      this.#watchView = view;
+      for (const precedingSync of precedingSyncs) {
+        this.applySessionSync(precedingSync, "integrate");
+      }
+      this.applySessionSync(sync, "integrate");
+      this.#consumeWatchView(view);
+    } catch (error) {
+      if (!this.#closed) {
+        console.warn("failed to remove operation watch", error);
+      }
+    }
   }
 
   async sqliteQuery(
@@ -3457,6 +3481,8 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     ]);
     await Promise.allSettled([...this.#syncPromises]);
     await Promise.allSettled([...this.#updatePromises]);
+    await Promise.allSettled([...this.#operationWatchRemovals.values()]);
+    this.#operationWatchRemovals.clear();
     this.#syncTasks.clear();
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>(
       () => this.#scopeKeyIdentity(),
@@ -3591,6 +3617,8 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     // verdicts settle off the same teardown rejection.
     void Promise.allSettled([...this.#syncPromises]);
     void Promise.allSettled([...this.#updatePromises]);
+    void Promise.allSettled([...this.#operationWatchRemovals.values()]);
+    this.#operationWatchRemovals.clear();
     void Promise.allSettled([...this.#suppressedVerdicts]);
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
     this.#syncTasks.clear();
@@ -4291,22 +4319,27 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
         view.close();
         throw error;
       }
-      if (this.#updatePromises.size === 0) {
-        this.#subscribedWatchView = view;
-        const updates = this.consumeUpdates(view.subscribeSync())
-          .finally(() => {
-            this.#updatePromises.delete(updates);
-            if (this.#subscribedWatchView === view) {
-              this.#subscribedWatchView = null;
-              this.applyParkedAcceptsNow();
-            }
-          });
-        this.#updatePromises.add(updates);
-      }
+      this.#consumeWatchView(view);
       return { ok: {} };
     } catch (error) {
       return { error: toPullError(error) };
     }
+  }
+
+  #consumeWatchView(view: MemoryV2Client.WatchView): void {
+    if (this.#subscribedWatchView === view) return;
+    const previous = this.#subscribedWatchView;
+    this.#subscribedWatchView = view;
+    previous?.close();
+    const updates = this.consumeUpdates(view.subscribeSync())
+      .finally(() => {
+        this.#updatePromises.delete(updates);
+        if (this.#subscribedWatchView === view) {
+          this.#subscribedWatchView = null;
+          this.applyParkedAcceptsNow();
+        }
+      });
+    this.#updatePromises.add(updates);
   }
 
   private enqueueWatchRefresh(

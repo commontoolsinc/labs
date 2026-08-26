@@ -8,6 +8,7 @@ import type { DID } from "@commonfabric/identity";
 import { type Program } from "@commonfabric/js-compiler/interface";
 import type {
   ApplyOpResolution,
+  IntegratedOperation,
   OpCursor,
   OperationFieldSnapshot,
 } from "@commonfabric/memory/v2";
@@ -923,7 +924,7 @@ export type OperationApplyRequest = BaseRequest & {
   submissionId: string;
   base: OpCursor | null;
   baselineHash?: string;
-  payload: FabricValue;
+  payload: RealmEncodedValue;
 };
 
 /** The {@link RequestType.OperationSubscribe} request. */
@@ -950,7 +951,7 @@ export type OperationUnsubscribeRequest = BaseRequest & {
 
 /** A response carrying one operation-backed field snapshot. */
 export type OperationFieldResponse = {
-  field: OperationFieldSnapshot;
+  field: WireOperationFieldSnapshot;
 };
 
 /** A response naming the operation codecs available for a cell. */
@@ -960,8 +961,29 @@ export type OperationCapabilitiesResponse = {
 
 /** A response carrying the authoritative resolution of an operation. */
 export type OperationApplyResponse = {
-  resolution: ApplyOpResolution;
+  resolution: WireApplyOpResolution;
 };
+
+/** An integrated operation encoded for a structured-clone boundary. */
+export type WireIntegratedOperation = Omit<IntegratedOperation, "payload"> & {
+  payload: RealmEncodedValue;
+};
+
+/** An apply result encoded for a structured-clone boundary. */
+export type WireApplyOpResolution = Omit<ApplyOpResolution, "operations"> & {
+  operations: WireIntegratedOperation[];
+};
+
+/** An operation field encoded for a structured-clone boundary. */
+export type WireOperationFieldSnapshot =
+  & Omit<
+    OperationFieldSnapshot,
+    "materialized" | "operations"
+  >
+  & {
+    materialized: RealmEncodedValue;
+    operations: WireIntegratedOperation[];
+  };
 
 /**
  * The {@link RequestType.GetCell} request. `cause` is what derives the
@@ -2802,7 +2824,7 @@ export type VDomBatchNotification = {
 export type OperationUpdateNotification = {
   type: NotificationType.OperationUpdate;
   subscriptionId: string;
-  field: OperationFieldSnapshot;
+  field: WireOperationFieldSnapshot;
 };
 
 /**

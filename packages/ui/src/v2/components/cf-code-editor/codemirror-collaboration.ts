@@ -14,6 +14,7 @@ import {
 } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import {
+  type ApplyOpResolution,
   type CellHandle,
   CODEMIRROR_CHANGESET_CODEC,
   type JSONValue,
@@ -176,6 +177,7 @@ export class CodeMirrorCollaborationController {
   #cursor: OpCursor | null = null;
   #baselineHash = "";
   #unsubscribe: (() => void) | undefined;
+  #flushPromise: Promise<void> | undefined;
   #ready = false;
   #sending = false;
   #releasing = false;
@@ -217,9 +219,9 @@ export class CodeMirrorCollaborationController {
     this.#unsubscribe = unsubscribe;
   }
 
-  localDocChanged(): void {
+  async localDocChanged(): Promise<void> {
     if (!this.active || this.#failed) return;
-    void this.#flush();
+    await this.#flush();
   }
 
   dispose(): void {
@@ -230,11 +232,31 @@ export class CodeMirrorCollaborationController {
     this.#unsubscribe = undefined;
   }
 
+  /** Flushes local updates before detaching without releasing durable state. */
+  async stop(): Promise<void> {
+    if (this.#disposed) return;
+    if (!this.#ready) {
+      // Setup can be superseded while its initial query is in flight. The
+      // editor is read-only until installation finishes, so this controller
+      // cannot own local updates yet and can be cancelled without consulting
+      // CodeMirror's not-yet-installed collaboration state field.
+      this.dispose();
+      return;
+    }
+    await this.#flushAll();
+    if (sendableUpdates(this.#view.state).length !== 0) {
+      throw new Error(
+        "CodeMirror collaboration cannot stop with local edits pending",
+      );
+    }
+    this.dispose();
+  }
+
   async release(): Promise<void> {
     if (!this.active) {
       throw new Error("CodeMirror collaboration is not active");
     }
-    await this.#flush();
+    await this.#flushAll();
     if (sendableUpdates(this.#view.state).length !== 0) {
       throw new Error(
         "CodeMirror collaboration cannot be released with local edits pending",
@@ -300,6 +322,16 @@ export class CodeMirrorCollaborationController {
         throw new Error("CodeMirror collaboration requires a string field");
       }
       if (!snapshot.active || snapshot.cursor === null) {
+        if (
+          this.#cursor === null && this.#sending &&
+          snapshot.baselineHash === this.#baselineHash
+        ) {
+          // The first apply activates the field asynchronously. A concurrent
+          // sync can still carry the unchanged inactive baseline while that
+          // submission is in flight; it says nothing newer about the local
+          // edit and must not be mistaken for an epoch reset.
+          return;
+        }
         if (this.#cursor !== null) {
           if (this.#releasing) {
             this.#cursor = null;
@@ -395,7 +427,29 @@ export class CodeMirrorCollaborationController {
   }
 
   async #flush(): Promise<void> {
-    if (!this.active || this.#sending || this.#failed) return;
+    if (this.#flushPromise !== undefined) {
+      return await this.#flushPromise;
+    }
+    if (!this.active || this.#failed) return;
+    const pending = this.#flushOnce();
+    this.#flushPromise = pending;
+    try {
+      await pending;
+    } finally {
+      if (this.#flushPromise === pending) this.#flushPromise = undefined;
+    }
+  }
+
+  async #flushAll(): Promise<void> {
+    await this.#flush();
+    while (
+      this.active && sendableUpdates(this.#view.state).length !== 0
+    ) {
+      await this.#flush();
+    }
+  }
+
+  async #flushOnce(): Promise<void> {
     const submission = codeMirrorSubmission(this.#view.state);
     if (submission === undefined) return;
     this.#sending = true;
@@ -404,13 +458,14 @@ export class CodeMirrorCollaborationController {
       const base = this.#cursor === null
         ? null
         : { epoch: this.#cursor.epoch, version: submission.baseVersion };
-      await this.#runtime.applyOperation(this.#cell, {
+      const resolution = await this.#runtime.applyOperation(this.#cell, {
         codec: CODEMIRROR_CHANGESET_CODEC,
         submissionId: crypto.randomUUID(),
         base,
         ...(base === null ? { baselineHash: this.#baselineHash } : {}),
         payload: submission.payload,
       });
+      this.#receiveResolution(resolution);
       const snapshot = await this.#runtime.queryOperationField(
         this.#cell,
         this.#cursor ?? undefined,
@@ -430,9 +485,58 @@ export class CodeMirrorCollaborationController {
     }
   }
 
+  /** Confirms a contiguous apply response before a later watch/query races it. */
+  #receiveResolution(resolution: ApplyOpResolution): void {
+    if (resolution.codec !== CODEMIRROR_CHANGESET_CODEC) {
+      throw new Error(
+        `CodeMirror received operation codec ${resolution.codec}, expected ` +
+          CODEMIRROR_CHANGESET_CODEC,
+      );
+    }
+    const syncedVersion = getSyncedVersion(this.#view.state);
+    const current = this.#cursor ?? {
+      epoch: resolution.from.epoch,
+      version: syncedVersion,
+    };
+    if (
+      current.epoch === resolution.to.epoch &&
+      syncedVersion === resolution.to.version
+    ) {
+      this.#cursor = resolution.to;
+      return;
+    }
+    if (
+      current.epoch !== resolution.from.epoch ||
+      syncedVersion !== resolution.from.version
+    ) {
+      // A subscription has not yet supplied the intervening canonical suffix.
+      // The follow-up query below requests it from the last installed cursor.
+      return;
+    }
+    const snapshot: OperationFieldSnapshot = {
+      ...resolution.address,
+      active: true,
+      codec: resolution.codec,
+      cursor: resolution.to,
+      baselineHash: this.#baselineHash,
+      materialized: this.#view.state.doc.toString(),
+      operations: resolution.operations,
+    };
+    const updates = codeMirrorIntegratedUpdates(snapshot, current);
+    if (updates.length !== 0) {
+      this.#view.dispatch(receiveUpdates(this.#view.state, updates));
+    }
+    this.#cursor = {
+      epoch: resolution.to.epoch,
+      version: getSyncedVersion(this.#view.state),
+    };
+  }
+
   #fail(cause: unknown): void {
     if (this.#failed || this.#disposed) return;
     this.#failed = true;
+    this.#unsubscribe?.();
+    this.#unsubscribe = undefined;
     const error = cause instanceof Error ? cause : new Error(String(cause));
     this.#onError(error);
   }

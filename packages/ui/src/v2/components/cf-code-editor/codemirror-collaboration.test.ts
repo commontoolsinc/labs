@@ -1,10 +1,23 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { receiveUpdates, sendableUpdates } from "@codemirror/collab";
-import { ChangeSet, EditorState, Text } from "@codemirror/state";
-import type { OperationFieldSnapshot } from "@commonfabric/runtime-client";
+import {
+  ChangeSet,
+  Compartment,
+  EditorState,
+  Text,
+  type TransactionSpec,
+} from "@codemirror/state";
+import type { EditorView } from "@codemirror/view";
+import type {
+  ApplyOpResolution,
+  CellHandle,
+  OperationFieldSnapshot,
+  RuntimeClient,
+} from "@commonfabric/runtime-client";
 import {
   codeMirrorCollaboration,
+  CodeMirrorCollaborationController,
   codeMirrorIntegratedUpdates,
   codeMirrorSubmission,
 } from "./codemirror-collaboration.ts";
@@ -148,7 +161,220 @@ describe("CodeMirror operation collaboration", () => {
       codeMirrorIntegratedUpdates(snapshot, { epoch: 1, version: 1 }),
     ).toEqual([]);
   });
+
+  it("ignores the unchanged inactive baseline while activation is in flight", async () => {
+    const initial = inactiveSnapshot("abc");
+    const accepted = acceptedResolution("abc", 1, "X");
+    let subscriber: ((snapshot: OperationFieldSnapshot) => void) | undefined;
+    const { controller, view, errors } = controllerHarness({
+      initial,
+      followup: activeSnapshot("aXbc", accepted),
+      subscribe(callback) {
+        subscriber = callback;
+      },
+      apply() {
+        subscriber?.(initial);
+        return accepted;
+      },
+    });
+
+    await controller.start();
+    view.dispatch({ changes: { from: 1, insert: "X" } });
+    await controller.localDocChanged();
+
+    expect(errors).toEqual([]);
+    expect(view.state.doc.toString()).toBe("aXbc");
+    expect(sendableUpdates(view.state)).toHaveLength(0);
+  });
+
+  it("confirms the apply response before a released follow-up snapshot", async () => {
+    const accepted = acceptedResolution("abc", 1, "X");
+    const { controller, view, errors } = controllerHarness({
+      initial: inactiveSnapshot("abc"),
+      followup: inactiveSnapshot("aXbc"),
+      apply: () => accepted,
+    });
+
+    await controller.start();
+    view.dispatch({ changes: { from: 1, insert: "X" } });
+    await controller.localDocChanged();
+
+    expect(errors).toEqual([]);
+    expect(view.state.doc.toString()).toBe("aXbc");
+    expect(sendableUpdates(view.state)).toHaveLength(0);
+  });
+
+  it("flushes pending edits before stopping collaboration", async () => {
+    const accepted = acceptedResolution("abc", 1, "X");
+    const applied = Promise.withResolvers<ApplyOpResolution>();
+    let cancellations = 0;
+    const { controller, view } = controllerHarness({
+      initial: inactiveSnapshot("abc"),
+      followup: activeSnapshot("aXbc", accepted),
+      apply: () => applied.promise,
+      cancel: () => cancellations++,
+    });
+
+    await controller.start();
+    view.dispatch({ changes: { from: 1, insert: "X" } });
+    const sending = controller.localDocChanged();
+    await Promise.resolve();
+    const stopped = controller.stop();
+    let settled = false;
+    void stopped.finally(() => settled = true);
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    applied.resolve(accepted);
+    await Promise.all([sending, stopped]);
+    expect(sendableUpdates(view.state)).toHaveLength(0);
+    expect(cancellations).toBe(1);
+  });
+
+  it("cancels superseded setup before collaboration state is installed", async () => {
+    let subscriptions = 0;
+    const { controller } = controllerHarness({
+      initial: inactiveSnapshot("abc"),
+      followup: inactiveSnapshot("abc"),
+      apply: () => acceptedResolution("abc", 1, "X"),
+      subscribe: () => subscriptions++,
+    });
+
+    const starting = controller.start();
+    await controller.stop();
+    await starting;
+
+    expect(controller.active).toBe(false);
+    expect(subscriptions).toBe(0);
+  });
+
+  it("unsubscribes when a remote snapshot fails", async () => {
+    let subscriber: ((snapshot: OperationFieldSnapshot) => void) | undefined;
+    let cancellations = 0;
+    const { controller, errors } = controllerHarness({
+      initial: inactiveSnapshot("abc"),
+      followup: inactiveSnapshot("abc"),
+      apply: () => acceptedResolution("abc", 1, "X"),
+      subscribe: (callback) => subscriber = callback,
+      cancel: () => cancellations++,
+    });
+
+    await controller.start();
+    subscriber?.({ ...inactiveSnapshot("abc"), materialized: 42 });
+
+    expect(errors).toHaveLength(1);
+    expect(cancellations).toBe(1);
+  });
 });
+
+function inactiveSnapshot(materialized: string): OperationFieldSnapshot {
+  return {
+    branch: "",
+    id: "of:editor",
+    scopeKey: "space",
+    path,
+    active: false,
+    codec: null,
+    cursor: null,
+    baselineHash: `baseline:${materialized}`,
+    materialized,
+    operations: [],
+  };
+}
+
+function acceptedResolution(
+  document: string,
+  from: number,
+  insert: string,
+): ApplyOpResolution {
+  const payload = {
+    updates: [{
+      clientId: "alice",
+      changes: ChangeSet.of({ from, insert }, document.length).toJSON(),
+    }],
+  };
+  return {
+    operationIndex: 0,
+    address: {
+      branch: "",
+      id: "of:editor",
+      scopeKey: "space",
+      path,
+    },
+    codec: "codemirror-changeset@1",
+    submissionId: "alice:1",
+    from: { epoch: 1, version: 0 },
+    to: { epoch: 1, version: 1 },
+    operations: [{
+      opId: "op:alice-1",
+      cursor: { epoch: 1, version: 1 },
+      submissionId: "alice:1",
+      payload,
+    }],
+    duplicate: false,
+  };
+}
+
+function activeSnapshot(
+  materialized: string,
+  resolution: ApplyOpResolution,
+): OperationFieldSnapshot {
+  return {
+    ...resolution.address,
+    active: true,
+    codec: resolution.codec,
+    cursor: resolution.to,
+    baselineHash: "baseline:abc",
+    materialized,
+    operations: [],
+  };
+}
+
+function controllerHarness(options: {
+  initial: OperationFieldSnapshot;
+  followup: OperationFieldSnapshot;
+  apply: () => ApplyOpResolution | Promise<ApplyOpResolution>;
+  subscribe?: (callback: (snapshot: OperationFieldSnapshot) => void) => void;
+  cancel?: () => void;
+}) {
+  const compartment = new Compartment();
+  let state = EditorState.create({
+    doc: options.initial.materialized as string,
+    extensions: [compartment.of([])],
+  });
+  const view = {
+    get state() {
+      return state;
+    },
+    dispatch(...specs: readonly TransactionSpec[]) {
+      state = state.update(...specs).state;
+    },
+  } as unknown as EditorView;
+  let queryCount = 0;
+  const runtime = {
+    operationCodecs: () => Promise.resolve(["codemirror-changeset@1"]),
+    queryOperationField: () =>
+      Promise.resolve(queryCount++ === 0 ? options.initial : options.followup),
+    subscribeOperationField: (
+      _cell: CellHandle<string>,
+      callback: (snapshot: OperationFieldSnapshot) => void,
+    ) => {
+      options.subscribe?.(callback);
+      return Promise.resolve(() => options.cancel?.());
+    },
+    applyOperation: () => Promise.resolve(options.apply()),
+  } as unknown as RuntimeClient;
+  const errors: Error[] = [];
+  const controller = new CodeMirrorCollaborationController({
+    runtime,
+    cell: {} as CellHandle<string>,
+    view,
+    compartment,
+    clientId: "alice",
+    onError: (error) => errors.push(error),
+  });
+  return { controller, view, errors };
+}
 
 function receiveState(
   state: EditorState,
