@@ -84,6 +84,7 @@ class GatedStorageManager extends EmulatedStorageManager {
   settleGateWhen: (() => boolean) | undefined;
   syncGate: Promise<void> | undefined;
   syncGateWhen: ((id: string) => boolean) | undefined;
+
   /** How many syncs the sync gate has parked (a pin's evidence that a
    * drain WAS held in the window it constructs). */
   syncGateHits = 0;
@@ -105,6 +106,7 @@ class GatedStorageManager extends EmulatedStorageManager {
    * runtime tenures (each with a fresh manager), and the seam must hold
    * across every tenure of the pass under test. */
   static syncThrowWhen: ((id: string) => boolean) | undefined;
+
   /** How many syncs the throw seam refused — each drain pass that
    * touched the failing sidecar counts one. */
   static syncThrowHits = 0;
@@ -266,6 +268,7 @@ describe("Phase 3 events-down (serving side)", () => {
   let clientRuntime: Runtime;
   let extraManagers: EmulatedStorageManager[];
   let extraRuntimes: Runtime[];
+
   /** The live serving runtime/manager (set by newHost's createRuntime)
    * — the C8d raced-cascade test reads sealed state through them and
    * closes the settle gate. */
@@ -2201,6 +2204,7 @@ describe("Phase 3 events-down (serving side)", () => {
     const entriesOf = (sidecarId: string) =>
       ((Engine.read(engine, { id: sidecarId })?.value ??
         {}) as StreamEventsDocValue).entries ?? [];
+
     /** Derived commits whose consequenceOf names `eventId` — the
      * store-side per-event completed-run count (events.md §4: per-event
      * run counts are the signature; `processed == appended` is not). */

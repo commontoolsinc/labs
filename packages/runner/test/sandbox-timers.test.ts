@@ -1,4 +1,5 @@
 /// <reference path="./clock.d.ts" />
+
 /**
  * The SES pattern compartment endows no timers (part of the structural barrier
  * pinned by security-timing.test.ts). Code that wants a delay in both a host

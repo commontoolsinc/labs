@@ -29,8 +29,10 @@ import type { IAttestation } from "../src/storage/interface.ts";
 export interface WrittenValue {
   /** The document the write landed in. */
   id: string;
+
   /** Where in the document it landed. */
   path: readonly string[];
+
   /** What it put there; undefined when the write removed the slot. */
   value: unknown;
 }
@@ -39,6 +41,7 @@ export interface WrittenValue {
 export interface WriteAccount {
   /** Documents the transaction wrote to. */
   docs: number;
+
   /** JSON bytes it wrote into them. */
   bytes: number;
 }

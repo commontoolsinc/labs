@@ -69,8 +69,10 @@ class ResumeBatchGate {
   readonly #open: [boolean, boolean] = [false, false];
   readonly #resolve: [(() => void) | undefined, (() => void) | undefined];
   #deliver: (payload: string) => void = () => {};
+
   /** Resolves once a top-level document has been held back. */
   readonly topHeld: Promise<void>;
+
   /** Resolves once a per-element document has been held back. */
   readonly elementsHeld: Promise<void>;
   constructor() {
@@ -109,10 +111,12 @@ class ResumeBatchGate {
       setCloseReceiver: (r: (e?: Error) => void) => inner.setCloseReceiver?.(r),
     };
   }
+
   /** How many documents of a stage are currently held back. */
   heldCount(stage: 0 | 1): number {
     return this.#held[stage].length;
   }
+
   /** Open a stage and flush every document it holds. */
   release(stage: 0 | 1): void {
     this.#open[stage] = true;

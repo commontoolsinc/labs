@@ -1,4 +1,5 @@
 /// <reference path="./clock.d.ts" />
+
 /**
  * Integration tests for generateObject with tool calling support.
  *

@@ -702,6 +702,7 @@ const W21_SIDECAR = "of:stream-events:w21-click";
  * notifications (the production carrier). */
 const cascadeDestination = () => {
   let nextLocalSeq = 10;
+
   /** The confirmed read seq the NEXT seal reports (the entry's floor). */
   let nextFloor = 40;
   const confirmedSeqs = new Map<string, number>();
@@ -744,6 +745,7 @@ const cascadeDestination = () => {
     getCellFromLink: () => ({ sink: () => () => {} }),
   } as never;
   const destination = new SpeculationOverlayDestination(runtime);
+
   /** An event-handler echo's transaction: `writes` are whole-doc sets
    * (the lunch shape: the list doc + the new user's entity doc); an
    * empty list seals NOTHING (a child that only forwards). */
@@ -753,6 +755,7 @@ const cascadeDestination = () => {
       parentEventId?: string;
       writes: string[];
       floor?: number;
+
       /** Hold `sealInto` open until this settles — the mid-seal window
        * (the post-await re-check's subject: a mark landing while the
        * seal is in flight). */
@@ -799,6 +802,7 @@ const cascadeDestination = () => {
     });
     return tx;
   };
+
   /** Land P's append, then its consequenced mark, as two notifications;
    * `landed` sets the confirmed seqs the mark's frame carries (the
    * server's cascade child landing in the same wave, or not). */
@@ -811,6 +815,7 @@ const cascadeDestination = () => {
       })),
     });
   };
+
   /** The mark's frame: the sidecar itself lands at `markSeq` (the mark
    * is written in the consequence commit), and `landed` names the docs
    * that commit — or an earlier one — also moved, with their seqs. */

@@ -87,6 +87,7 @@ const DEPLOYMENT_FACING: PresetName[] = [
 ];
 
 type MinimalTreatment =
+
   /** Equals the sentinel passed in, in every preset. */
   | { treat: "per-site" }
   /** Present in every preset with this exact shared value. */
