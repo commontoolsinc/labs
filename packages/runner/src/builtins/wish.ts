@@ -36,6 +36,7 @@ import {
   getMetaLink,
   toMemorySpaceAddress,
 } from "../link-utils.ts";
+import { systemPatternSource } from "../pattern-source-scheme.ts";
 import { setRunnableName } from "../runner-utils.ts";
 import { type Runtime, spaceCellSchema } from "../runtime.ts";
 import { type Action, type ReactivityLog } from "../scheduler.ts";
@@ -1610,6 +1611,11 @@ export function createSidecarPatternCache(options: {
   });
 
   return {
+    // The `system:` provenance ref this cache's pattern is served under.
+    // Every run of the pattern stamps it on the minted piece
+    // (`RunnerRunOptions.patternSource`), so the pattern updater's route
+    // check covers wish sidecars the same way it covers default roots.
+    sourceRef: systemPatternSource(`system/${options.name}`),
     // Pattern from a completed fetch for the current environment's URL.
     cached(): Pattern | undefined {
       return fetchUrl === patternUrl() ? pattern : undefined;
@@ -2362,7 +2368,10 @@ export function wish(
               pattern,
               slot.input,
               slot.resultCell,
-              sidecarRunOptions,
+              {
+                ...sidecarRunOptions,
+                patternSource: suggestionPatternCache.sourceRef,
+              },
             );
           }
         },
@@ -2375,7 +2384,10 @@ export function wish(
           cachedSuggestionPattern,
           slot.input,
           slot.resultCell,
-          sidecarRunOptions,
+          {
+            ...sidecarRunOptions,
+            patternSource: suggestionPatternCache.sourceRef,
+          },
         );
       }
     }
@@ -2438,6 +2450,7 @@ export function wish(
     resultCell: Cell<any>,
     pattern: Pattern,
     inputForTx: (tx: IExtendedStorageTransaction) => unknown,
+    patternSource: string,
   ): Promise<void> {
     wishSidecarDiagnostics.sidecarRunsStarted += 1;
     // A conflict-class failure means SOME other writer advanced a doc this
@@ -2491,7 +2504,7 @@ export function wish(
           pattern,
           inputForTx(runTx),
           resultCell.withTx(runTx),
-          sidecarRunOptions,
+          { ...sidecarRunOptions, patternSource },
         );
         runtime.prepareTxForCommit(runTx);
         const { error } = await runTx.commit();
@@ -2665,6 +2678,7 @@ export function wish(
               slot.resultCell,
               pattern,
               profileCreateInputForTx,
+              profileCreatePatternCache.sourceRef,
             );
           }
           // Fetch/compile failed, or a later fetch for a changed apiUrl
@@ -2691,7 +2705,10 @@ export function wish(
         cachedProfileCreatePattern,
         profileCreateInputForTx(tx),
         slot.resultCell.withTx(tx),
-        sidecarRunOptions,
+        {
+          ...sidecarRunOptions,
+          patternSource: profileCreatePatternCache.sourceRef,
+        },
       );
     }
 
@@ -2800,6 +2817,7 @@ export function wish(
               slot.resultCell,
               pattern,
               pickerInputForTx,
+              profilePickerPatternCache.sourceRef,
             );
           } else {
             // Fetch/compile failed (createSidecarPatternCache swallows the
@@ -2831,7 +2849,10 @@ export function wish(
         cachedProfilePickerPattern,
         pickerInputForTx(tx),
         slot.resultCell.withTx(tx),
-        sidecarRunOptions,
+        {
+          ...sidecarRunOptions,
+          patternSource: profilePickerPatternCache.sourceRef,
+        },
       );
     }
 

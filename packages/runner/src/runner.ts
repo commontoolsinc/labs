@@ -982,6 +982,12 @@ type RunnerRunOptions = {
   // instance) run supply resolves a nested piece's demanded instances
   // through the OUTER piece a client watches (server-execution v2 Phase 7).
   parentPieceRootId?: string;
+  // Provenance stamped into `patternSource` — in the same transaction as the
+  // run, so a piece minted outside the controller paths (a wish sidecar) is
+  // born carrying the origin the pattern updater's route check follows. A
+  // piece already carrying a source keeps it: this fills the detached case
+  // only, and never repoints one.
+  patternSource?: string;
 };
 
 // Placeholder standing in for an argument slot whose stored value routes
@@ -4307,6 +4313,13 @@ export class Runner {
       argument,
       resultCell,
     );
+
+    if (
+      options.patternSource !== undefined &&
+      getPatternSource(resultCell.withTx(tx)) === undefined
+    ) {
+      setPatternSource(resultCell, tx, options.patternSource);
+    }
 
     let installedCancel: Cancel | undefined;
     let cancelDeferredStart: Cancel | undefined;

@@ -1249,7 +1249,11 @@ The implementation evidence for this table is concentrated in:
 - System space roots carry a `system:` `patternSource` ref when created through
   `ensureDefaultPattern`, naming a pattern the toolshed serves relative to its
   patterns route. Roots can check that source and replace `patternIdentity`
-  before starting. Other successfully instantiated patterns are checked in the
+  before starting. Wish sidecar pieces (the profile create/picker and
+  suggestion surfaces) carry the same ref, stamped by the run that mints them
+  (`RunnerRunOptions.patternSource`); a sidecar minted before the stamp
+  existed gains it on its next launch, since the stamp fills only the
+  detached case. Other successfully instantiated patterns are checked in the
   background, and only a `system:` ref is fetched. This is a transitional
   implementation and migration input. Under the design above a `system:` ref
   still selects a policy — its releases are gated where they are made, so its
