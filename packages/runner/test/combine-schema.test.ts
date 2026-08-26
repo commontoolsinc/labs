@@ -627,6 +627,79 @@ describe("combineSchemaForLink reader precedence", () => {
     expect(combineSchemaForLink(true, labeledLink)).toEqual(labeledLink);
   });
 
+  // `default` crosses the precedence line: a value's default is inherited
+  // from the last crossed schema that declares one, the nearest declaration
+  // to the data being the aptest.
+  it("inherits the link's default onto a shaped reader", () => {
+    const defaultedLink = {
+      ...linkContactSchema,
+      default: { name: "someone" },
+    } as const satisfies JSONSchema;
+
+    expect(combineSchemaForLink(readerSchema, defaultedLink)).toEqual({
+      ...readerSchema,
+      default: { name: "someone" },
+    });
+  });
+
+  it("prefers the link's default over the reader's own", () => {
+    const defaultedReader = {
+      ...readerSchema,
+      default: { name: "reader" },
+    } as const satisfies JSONSchema;
+    const defaultedLink = {
+      ...linkContactSchema,
+      default: { name: "link" },
+    } as const satisfies JSONSchema;
+
+    expect(combineSchemaForLink(defaultedReader, defaultedLink)).toEqual({
+      ...readerSchema,
+      default: { name: "link" },
+    });
+  });
+
+  it("keeps the reader's default when the link declares none", () => {
+    const defaultedReader = {
+      ...readerSchema,
+      default: { name: "reader" },
+    } as const satisfies JSONSchema;
+
+    expect(combineSchemaForLink(defaultedReader, linkContactSchema)).toEqual(
+      defaultedReader,
+    );
+  });
+
+  it("keeps a default-only reader's default across a defaultless link", () => {
+    expect(
+      combineSchemaForLink({ default: { name: "seed" } }, linkContactSchema),
+    )
+      .toEqual({
+        ...linkContactSchema,
+        default: { name: "seed" },
+      });
+  });
+
+  it("takes the later link's default across two hops", () => {
+    const firstLink = {
+      ...linkContactSchema,
+      default: { name: "first" },
+    } as const satisfies JSONSchema;
+    const secondLink = {
+      ...linkContactSchema,
+      default: { name: "second" },
+    } as const satisfies JSONSchema;
+
+    const afterFirst = combineSchemaForLink(readerSchema, firstLink);
+    expect(combineSchemaForLink(afterFirst, secondLink)).toEqual({
+      ...readerSchema,
+      default: { name: "second" },
+    });
+    expect(combineSchemaForLink(afterFirst, linkContactSchema)).toEqual({
+      ...readerSchema,
+      default: { name: "first" },
+    });
+  });
+
   // The `readerSchemaPrecedence` experimental flag
   // (docs/development/EXPERIMENTAL_OPTIONS.md) is the rollback override.
   it("restores the strict pseudo-intersection when the rollback flag is off", () => {

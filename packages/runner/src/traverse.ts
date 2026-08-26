@@ -161,6 +161,9 @@ export type IMemorySpaceValueAttestation = IMemorySpaceAttestation & {
 const INTERN_CACHE_MAX = 10_000;
 const _mergeSchemaOptionCache = new Map<string, JSONSchema>();
 const _combineSchemaCache = new Map<string, JSONSchema>();
+// combineSchemaForLink's minting arms only (a carried `default` builds a new
+// schema); its pass-through arms return existing references uncached.
+const _combineLinkSchemaCache = new Map<string, JSONSchema>();
 const _mergeSchemaFlagsCache = new Map<string, JSONSchema>();
 const _mergeAnyOfBranchCache = new Map<string, JSONSchema | null>();
 
@@ -2965,6 +2968,14 @@ export function combineSchema(
  *   ignored — including a `false` link schema, which blocks only readers
  *   that brought no shape of their own.
  *
+ * `default` is the one keyword that crosses the precedence line: a value's
+ * default is inherited from the LAST crossed schema that declares one. Each
+ * hop's stored schema describes that hop's target, so the nearest
+ * declaration is the aptest — a link's top-level `default` overrides
+ * earlier links' and the reader's own, and where no link declares one the
+ * reader's (including a default-only reader's, which is otherwise a true
+ * schema) stands.
+ *
  * A discarded link schema's `ifc` does NOT ride onto the result. Write
  * policy consumes declared schemas verbatim (`recordSchemaWritePolicyInput`),
  * so transplanting flow-control clauses between schemas corrupts the
@@ -2990,10 +3001,48 @@ export function combineSchemaForLink(
   if (ContextualFlowControl.isFalseSchema(parentSchema)) {
     return parentSchema;
   }
+  // A value's `default` is inherited from the last crossed schema that
+  // declares one: each hop's stored schema describes that hop's target, so
+  // the nearest declaration is the aptest, overriding earlier links' and
+  // the reader's own. Hops compose left to right, so carrying the link's
+  // default over the accumulated schema at each hop yields exactly that.
   if (ContextualFlowControl.isTrueSchema(parentSchema)) {
-    return mergeSchemaFlags(parentSchema, linkSchema);
+    const adopted = mergeSchemaFlags(parentSchema, linkSchema);
+    // A default-only reader is a true schema; its declared default is
+    // still the latest one when the adopted link schema carries none.
+    const parentDefault = isObjectOrArray(parentSchema)
+      ? parentSchema.default
+      : undefined;
+    if (
+      parentDefault === undefined ||
+      (isObjectOrArray(adopted) && adopted.default !== undefined) ||
+      ContextualFlowControl.isFalseSchema(adopted)
+    ) {
+      return adopted;
+    }
+    const key = internSchemaPairAsKey(parentSchema, linkSchema);
+    const cached = _combineLinkSchemaCache.get(key);
+    if (cached !== undefined) return cached;
+    return internSet(
+      _combineLinkSchemaCache,
+      key,
+      schemaWithProperties(adopted, { default: parentDefault }),
+    );
   }
-  return parentSchema;
+  const linkDefault = isObjectOrArray(linkSchema)
+    ? linkSchema.default
+    : undefined;
+  if (linkDefault === undefined) {
+    return parentSchema;
+  }
+  const key = internSchemaPairAsKey(parentSchema, linkSchema);
+  const cached = _combineLinkSchemaCache.get(key);
+  if (cached !== undefined) return cached;
+  return internSet(
+    _combineLinkSchemaCache,
+    key,
+    schemaWithProperties(parentSchema, { default: linkDefault }),
+  );
 }
 
 function schemaTypesAreDisjoint(

@@ -200,5 +200,39 @@ describe("stored-link-schema-precedence", () => {
         title: "cruller",
       });
     });
+
+    // `default` crosses the precedence line: narrowed to the read path, the
+    // stored schema's default is inherited onto the reader's schema and
+    // stands in for the absent value.
+    it("inherits the stored schema's default for an absent selected field", () => {
+      const defaultedStoredSchema = {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          glaze: { type: "string", default: "maple" },
+        },
+      } as const satisfies JSONSchema;
+      const row = runtime.getCell(space, `row-${seq}-default`, undefined, tx);
+      row.setRaw({ title: "cruller" });
+      const holder = runtime.getCell<Holder>(
+        space,
+        `holder-${seq}-default`,
+        holderSchema,
+        tx,
+      );
+      holder.setRaw(
+        { rows: [linkCarrying(row, defaultedStoredSchema)] } as never,
+      );
+
+      const glaze = holder.key("rows").key(0)
+        .asSchema(
+          {
+            type: "object",
+            properties: { glaze: { type: "string" } },
+          } as const satisfies JSONSchema,
+        )
+        .key("glaze").get();
+      expect(glaze).toEqual("maple");
+    });
   });
 });

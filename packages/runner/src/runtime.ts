@@ -27,6 +27,7 @@ import {
 } from "./schema-doc-config.ts";
 import {
   getReaderSchemaPrecedenceConfig,
+  resetReaderSchemaPrecedenceConfig,
   setReaderSchemaPrecedenceConfig,
 } from "./reader-schema-precedence-config.ts";
 import { StaticCache } from "@commonfabric/static";
@@ -1954,6 +1955,7 @@ export class Runtime {
       // catch), so a REJECTING async teardown cannot leak the enabler.
       resetModernCellRepConfig();
       resetCommitPreconditionsConfig();
+      resetReaderSchemaPrecedenceConfig();
     }
   }
 

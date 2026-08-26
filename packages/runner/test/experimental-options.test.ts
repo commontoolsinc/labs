@@ -23,6 +23,10 @@ import { newSharedServer } from "./memory-v2-test-utils.ts";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { Runtime } from "../src/runtime.ts";
+import {
+  getReaderSchemaPrecedenceConfig,
+  resetReaderSchemaPrecedenceConfig,
+} from "../src/reader-schema-precedence-config.ts";
 
 const signer = await Identity.fromPassphrase("test experimental");
 
@@ -31,6 +35,7 @@ describe("ExperimentalOptions", () => {
     resetModernCellRepConfig();
     resetCommitPreconditionsConfig();
     resetServerExecutionConfig();
+    resetReaderSchemaPrecedenceConfig();
   });
 
   describe("Runtime construction", () => {
@@ -45,6 +50,7 @@ describe("ExperimentalOptions", () => {
           plainResultReceipts: false,
           computedCellIds: false,
           lazyMaterialization: false,
+          readerSchemaPrecedence: false,
         },
       });
       expect(runtime.experimental).toEqual({
@@ -54,6 +60,7 @@ describe("ExperimentalOptions", () => {
         plainResultReceipts: false,
         computedCellIds: false,
         lazyMaterialization: false,
+        readerSchemaPrecedence: false,
         serverExecution: false,
       });
       await runtime.dispose();
@@ -76,6 +83,7 @@ describe("ExperimentalOptions", () => {
         plainResultReceipts: true,
         computedCellIds: true,
         lazyMaterialization: true,
+        readerSchemaPrecedence: true,
         serverExecution: false,
       });
       await runtime.dispose();
@@ -96,6 +104,7 @@ describe("ExperimentalOptions", () => {
         plainResultReceipts: true,
         computedCellIds: true,
         lazyMaterialization: true,
+        readerSchemaPrecedence: true,
         serverExecution: false,
       });
       await runtime.dispose();
@@ -181,6 +190,23 @@ describe("ExperimentalOptions", () => {
 
       await runtime.dispose();
       await sm.close();
+    });
+
+    it("constructing Runtime with readerSchemaPrecedence false sets global config, and dispose restores it", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: { readerSchemaPrecedence: false },
+      });
+
+      expect(getReaderSchemaPrecedenceConfig()).toBe(false);
+      expect(runtime.experimental.readerSchemaPrecedence).toBe(false);
+
+      await runtime.dispose();
+      await sm.close();
+
+      expect(getReaderSchemaPrecedenceConfig()).toBe(true);
     });
 
     it("disposing Runtime resets global config to the default", async () => {

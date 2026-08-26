@@ -368,6 +368,13 @@ combined schema:
   is ignored — a `false` reference schema blocks only traversals that brought
   no shape of their own.
 
+`default` is the one keyword that crosses the precedence line: a value's
+default is inherited from the last crossed schema that declares one. Each
+hop's stored schema describes that hop's target, so the nearest declaration
+wins — a reference's top-level `default` overrides earlier references' and
+the traversal's own, and where no reference declares one the traversal's
+stands.
+
 A discarded reference schema's `ifc` does not ride onto the result: write
 policy consumes declared schemas verbatim, so transplanting flow-control
 clauses between schemas would corrupt the declaration they came from. Instead
