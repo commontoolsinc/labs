@@ -84,6 +84,15 @@ The current package provides:
   boundary, reaching the parent as a parent-resolvable token, and any
   token-shaped text still standing after that resolution is scrubbed to fixed
   inert text so it cannot resolve later in the parent's own table;
+- skill by handle: `delegate_task` takes an optional `skillHandle` naming a cell
+  whose string value is skill text for the child, materialized trusted-side at
+  child spawn under `resolveHandleValue`'s contract (table membership,
+  string-only, same-space-only, structured refusal before any child exists) and
+  injected as a `<skill_context source="handle:<token>">` block beside the
+  profile preload; it bypasses the registry — no resource index, no scripts,
+  name-based selection retired for the delegated path — and the child's
+  activation records `source: "skill-handle"` with the token and the digest of
+  the injected text;
 - shape captured where it is free and read back by token: a handle entry may
   carry the schema of its referent — a `run_pattern` result reference records
   the compiled pattern's result schema, marked `schemaSource: "harness"` — while

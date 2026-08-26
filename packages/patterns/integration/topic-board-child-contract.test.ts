@@ -61,42 +61,6 @@ function onArmStepSkip(step: string): { ignore: boolean } {
   return { ignore: true };
 }
 
-/**
- * Held across both suites: a live controller keeps a lease on the runner's
- * process-wide schema-document registry, which clears when the last lease in
- * the process releases — and with two suites that each build their own
- * controller, that clear lands exactly between them. The compiled topics
- * pattern is reused across the clear with its binding schemas already
- * externalized to `cid:` references, and nothing re-registers the documents
- * behind them, so the second suite's first sync sends the server a selector
- * naming a schema document no one can supply. The server rejects the query
- * ("Selector references schema document ... which is not stored in this
- * space"), the rejected load makes the scheduler drop the next verb event
- * undispatched, and a wait on that event's consequence hangs. Holding one
- * lease open for the whole file keeps every suite inside the epoch that
- * registered the documents. Remove once serialized-pattern reuse registers
- * its schema documents across registry epochs.
- *
- * This guard settles only that. A second symptom — `crossrefs` serving four
- * rows for three topics, while the durable store holds exactly three — is
- * #6304, not covered here: the pivot suite's baseline case observes it and
- * carries a registered ON-arm step skip
- * (tasks/server-execution-on-skips.ts) until that issue is fixed.
- */
-let epochHolder: PiecesController | undefined;
-
-beforeAll(async () => {
-  epochHolder = await initializePiecesController({
-    space: SPACE_NAME,
-    apiUrl: new URL(API_URL),
-    identity: await Identity.generate({ implementation: "noble" }),
-  });
-});
-
-afterAll(async () => {
-  await epochHolder?.dispose();
-});
-
 describe("topic-board-child-contract", () => {
   let cc: PiecesController;
   let board: PieceController;
