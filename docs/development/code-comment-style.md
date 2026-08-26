@@ -440,9 +440,11 @@ export interface Donut {
 }
 ```
 
-Parentheses are the one construct the rule does not reach past that first
-position: `deno fmt` removes a blank line between two items of a parenthesized
-list, so a documented parameter or argument list runs unbroken.
+Past that first position the rule reaches as far as `deno fmt` will let it,
+which is everywhere but two constructs. The formatter removes a blank line
+between two items of a parenthesized list, and between two arms of a union or
+intersection type. A documented parameter list, argument list, or union
+therefore runs unbroken:
 
 ```ts
 // Shown at module scope.
@@ -454,7 +456,19 @@ export function fry(
   /** Desired fryer temperature, in Kelvin. */
   temperature: number,
 ): void {}
+
+/** What a fryer is doing right now. */
+export type FryerState =
+  /** Idle, at whatever temperature it last held. */
+  | { readonly kind: "idle" }
+  /** Coming up to temperature, with the shortfall in Kelvin. */
+  | { readonly kind: "heating"; readonly shortfall: number }
+  /** Frying, with the count of donuts in the basket. */
+  | { readonly kind: "frying"; readonly count: number };
 ```
+
+Object types, tuple types, array literals, and class and interface bodies all
+keep their blank lines, so the rule holds in full there.
 
 ### What gets one
 
