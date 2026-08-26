@@ -2183,20 +2183,22 @@ export type BooleanResponse = {
  * A cell's value on its way _out_ of the worker, which `WireCellValue` is on
  * its way in.
  *
- * TODO(danfuzz): the two directions want the same type and do not have it.
- * `JSONValue` cannot carry the whole `FabricValue` domain either, and this
- * direction loses where the inbound one throws: the producer hands over a
- * value with its `FabricPrimitive`s intact and structured clone strips each to
- * `{}` (see `handleCellGet` in `backends/runtime-processor.ts`).
- * `codec-realm` is the mechanism, and closing this gap and `WireCellValue`'s
- * is one change.
+ * A `FabricValue`, because that is what the producer hands over:
+ * `convertCellsToLinks()` preserves a `FabricPrimitive` by identity, so
+ * `handleCellGet()` in `backends/runtime-processor.ts` can return one.
+ *
+ * TODO(danfuzz): the crossing does not yet carry what this declares.
+ * Structured clone strips a `FabricPrimitive` to `{}` on the way to the main
+ * thread, silently, where the inbound direction throws instead (see the marker
+ * on `WireCellValue`). `codec-realm` is the mechanism, and closing this gap
+ * and `WireCellValue`'s is one change.
  */
 export type JSONValueResponse = {
   /**
    * The value read. `undefined` is a value a cell can hold, so it is not
    * the same as the read having found nothing.
    */
-  value: JSONValue | undefined;
+  value: FabricValue | undefined;
 };
 
 /**
@@ -2318,12 +2320,12 @@ export type CellUpdateNotification = {
    */
   cell: CellRef;
   /**
-   * Its new value.
+   * Its new value. The push form of the same read `JSONValueResponse` carries,
+   * produced by the same conversion, and so the same type.
    *
-   * TODO(danfuzz): the same gap `JSONValueResponse` is marked with. This is
-   * the push form of the same read, produced by the same conversion.
+   * TODO(danfuzz): the same gap `JSONValueResponse` is marked with.
    */
-  value: JSONValue;
+  value: FabricValue;
   /**
    * The cell's current display label, present only for a subscription that
    * opted in through `includeCfcLabel`, so the client re-renders on a label
