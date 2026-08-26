@@ -1,0 +1,52 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "note": {
+        "default": "# Collaborative note\n\nStart writing together.",
+        "description": "Note body shared by every viewer of this piece.",
+        "scope": "space",
+        "type": "string"
+      },
+      "presenceRoom": {
+        "description": "Opaque high-entropy room shared by this piece's co-presence sessions.",
+        "scope": "space",
+        "type": "string"
+      }
+    },
+    "required": [
+      "presenceRoom"
+    ],
+    "type": "object"
+  },
+  "pattern": "collaborative-note/main.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "note": {
+        "default": "# Collaborative note\n\nStart writing together.",
+        "scope": "space",
+        "type": "string"
+      },
+      "participantName": {
+        "type": "string"
+      },
+      "presenceRoom": {
+        "scope": "space",
+        "type": "string"
+      }
+    },
+    "required": [
+      "note",
+      "presenceRoom",
+      "participantName",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}
