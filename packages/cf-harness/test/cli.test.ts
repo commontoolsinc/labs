@@ -549,6 +549,99 @@ Deno.test("parseCfHarnessCliArgs rejects an unknown fabric CFC flow-labels mode"
   );
 });
 
+Deno.test("parseCfHarnessCliArgs carries the fabric CFC posture into the session config", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+      "--fabric-cfc-posture",
+      "max-enforcement",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/tmp/project/keys/agent.pkcs8",
+    space: "my-space",
+    cfcPosture: "max-enforcement",
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs accepts the fabric CFC posture from the environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    {
+      cwd: "/tmp/project",
+      env: {
+        CF_HARNESS_FABRIC_API_URL: "https://toolshed.example/",
+        CF_HARNESS_FABRIC_IDENTITY: "/keys/agent.pkcs8",
+        CF_HARNESS_FABRIC_SPACE: "my-space",
+        CF_HARNESS_FABRIC_CFC_POSTURE: "max-enforcement",
+      },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "my-space",
+    cfcPosture: "max-enforcement",
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs rejects an unknown fabric CFC posture", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--fabric-api-url",
+          "https://toolshed.example/",
+          "--fabric-identity",
+          "keys/agent.pkcs8",
+          "--fabric-space",
+          "my-space",
+          "--fabric-cfc-posture",
+          "maximum",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--fabric-cfc-posture must be max-enforcement",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects the fabric CFC posture without a fabric session", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--fabric-cfc-posture",
+          "max-enforcement",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "need --fabric-api-url, --fabric-identity, and --fabric-space",
+  );
+});
+
 Deno.test("parseCfHarnessCliArgs rejects fabric CFC dials without a fabric session", async () => {
   await assertRejects(
     () =>

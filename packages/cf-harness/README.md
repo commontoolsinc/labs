@@ -937,8 +937,8 @@ space's authorization, and only a healthy session is cached for the run. A
 session that fails to build surfaces as an ordinary tool-output error rather
 than a run failure, and the next tool call retries the construction.
 
-Two further flags set the session runtime's CFC dials, and both need the three
-session flags present. `--fabric-cfc-enforcement-mode`
+Three further flags set the session runtime's CFC dials, and each needs the
+three session flags present. `--fabric-cfc-enforcement-mode`
 (`CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE`) accepts `enforce-explicit` or
 `enforce-strict` — raise-only, since the session's runtime preset already pins
 `enforce-explicit`; under `enforce-strict`, a pattern whose writes carry
@@ -946,15 +946,25 @@ confidentiality its target's declared policy does not admit has its commit
 refused. `--fabric-cfc-flow-labels` (`CF_HARNESS_FABRIC_CFC_FLOW_LABELS`)
 accepts `off`, `observe`, or `persist`; `persist` stamps the derived flow labels
 onto everything a pattern's transaction writes, which is what makes a labelled
-read visible to that refusal. These dials govern the fabric session's runtime
-only — `--cfc-enforcement-mode` remains the harness's own dial for tool policy
-and the sandbox, and the two are set independently.
+read visible to that refusal. `--fabric-cfc-posture`
+(`CF_HARNESS_FABRIC_CFC_POSTURE`) accepts `max-enforcement` and opts the
+session's runtime into the named CFC posture bundle
+(`MAX_ENFORCEMENT_CFC_OPTIONS` in the runner's presets): every staged
+enforcement dial on, the standard prompt-caveat policy loaded, and public-only
+ceilings on the network-fetch sinks. The two per-dial flags still apply over the
+bundle, so
+`--fabric-cfc-posture max-enforcement
+--fabric-cfc-enforcement-mode enforce-strict`
+is the full-strictness configuration. These dials govern the fabric session's
+runtime only — `--cfc-enforcement-mode` remains the harness's own dial for tool
+policy and the sandbox, and the two are set independently.
 
 A run states both postures rather than leaving them to be inferred: the resolved
 fabric-session posture — each dial's value and whether the operator configured
-it or the preset supplied it — is recorded as `fabricSessionCfc` in
-`run-state.json` and the run report, and the operator summary prints it beside
-the harness's own `cfcMode`.
+it, the named posture bundle supplied it, or the preset's default stood — is
+recorded as `fabricSessionCfc` in `run-state.json` and the run report (with the
+selected bundle, when there is one, as its `posture` field), and the operator
+summary prints it beside the harness's own `cfcMode`.
 
 The tool takes `sourceText` (inline pattern source, at most 256 KiB — an
 over-cap source is a structured tool error), an optional `inputs` object, and an

@@ -55,6 +55,7 @@ import {
   setPatternSource,
   type SpaceCellContents,
 } from "@commonfabric/runner";
+import type { CfcPosture } from "@commonfabric/runner";
 import type {
   CfcEnforcementMode,
   CfcFlowLabelsMode,
@@ -269,6 +270,7 @@ export class PiecesController<T = unknown> {
       navigateCallback,
       cfcEnforcementMode,
       cfcFlowLabels,
+      cfcPosture,
     }: {
       apiUrl: URL | string;
       identity: Identity;
@@ -302,6 +304,10 @@ export class PiecesController<T = unknown> {
       // preset; unset means the preset's first-party posture.
       cfcEnforcementMode?: CfcEnforcementMode;
       cfcFlowLabels?: CfcFlowLabelsMode;
+      // Named CFC posture bundle for this controller's runtime (the
+      // remoteClient preset's `cfcPosture` opt-in); the two dials above still
+      // apply over it.
+      cfcPosture?: CfcPosture;
     },
   ): Promise<PiecesController> {
     const api = new URL(apiUrl);
@@ -334,6 +340,7 @@ export class PiecesController<T = unknown> {
       patternCoverage,
       ...(cfcEnforcementMode !== undefined ? { cfcEnforcementMode } : {}),
       ...(cfcFlowLabels !== undefined ? { cfcFlowLabels } : {}),
+      ...(cfcPosture !== undefined ? { cfcPosture } : {}),
       ...(navigateCallback !== undefined ? { navigateCallback } : {}),
       trustSnapshotProvider: () => ({
         id: `principal:${session.as.did()}`,

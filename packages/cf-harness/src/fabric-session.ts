@@ -45,6 +45,9 @@ async () => {
     ...(config.cfcFlowLabels !== undefined
       ? { cfcFlowLabels: config.cfcFlowLabels }
       : {}),
+    ...(config.cfcPosture !== undefined
+      ? { cfcPosture: config.cfcPosture }
+      : {}),
   });
   return { pieces };
 };

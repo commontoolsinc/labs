@@ -1,6 +1,7 @@
 import * as HttpStatusCodes from "stoker/http-status-codes";
 import { z } from "zod";
 import { resolveGitSha, shellServerExecutionDefine } from "@/lib/build-info.ts";
+import { cfcPosture } from "@/lib/cfc-posture.ts";
 import { experimentalPosture } from "@/lib/experimental-posture.ts";
 import { identity } from "@/lib/identity.ts";
 import type { AppRouteHandler } from "@/lib/types.ts";
@@ -26,6 +27,23 @@ export const MetaResponseSchema = z.object({
   // An omitted flag means this server said nothing about it, and `null` means
   // it has no Runtime yet; a client keeps its built-in default for either.
   experimental: z.record(z.string(), z.boolean()).nullable(),
+  // The CFC posture this server's Runtime resolved — the enforcement dials,
+  // the policy-snapshot digest, and which sinks carry a confidentiality
+  // ceiling — so a deployment's enforcement is readable rather than
+  // indistinguishable from the default (lib/cfc-posture.ts). `null` means no
+  // Runtime yet.
+  cfc: z.object({
+    enforcementMode: z.string(),
+    flowLabels: z.string(),
+    writeFloor: z.string(),
+    triggerReadGating: z.boolean(),
+    decomposedEnvelopes: z.boolean(),
+    policyEvaluation: z.string(),
+    labelMetadataProtection: z.string(),
+    declaredMonotonicity: z.string(),
+    policyDigest: z.string().nullable(),
+    sinkCeilings: z.array(z.string()),
+  }).nullable(),
 });
 export type MetaResponse = z.infer<typeof MetaResponseSchema>;
 
@@ -35,6 +53,7 @@ export const index: AppRouteHandler<IndexRoute> = (c) => {
     gitSha: GIT_SHA,
     shellServerExecutionDefine,
     experimental: experimentalPosture(),
+    cfc: cfcPosture(),
   };
   return c.json(response, HttpStatusCodes.OK);
 };

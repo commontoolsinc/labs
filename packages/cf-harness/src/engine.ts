@@ -566,10 +566,18 @@ export class CfHarnessEngine {
           this.config.fabricSession.cfcEnforcementMode !== undefined
             ? "configured" as const
             : "preset-pin" as const,
-        flowLabels: this.config.fabricSession.cfcFlowLabels ?? "off" as const,
+        flowLabels: this.config.fabricSession.cfcFlowLabels ??
+          (this.config.fabricSession.cfcPosture === "max-enforcement"
+            ? "persist" as const
+            : "off" as const),
         flowLabelsSource: this.config.fabricSession.cfcFlowLabels !== undefined
           ? "configured" as const
+          : this.config.fabricSession.cfcPosture === "max-enforcement"
+          ? "posture" as const
           : "default" as const,
+        ...(this.config.fabricSession.cfcPosture !== undefined
+          ? { posture: this.config.fabricSession.cfcPosture }
+          : {}),
       }
       : undefined;
     this.#runState = options.runState ??

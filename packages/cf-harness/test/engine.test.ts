@@ -189,6 +189,25 @@ Deno.test("CfHarnessEngine records the fabric session's resolved CFC posture in 
     flowLabelsSource: "default",
   });
 
+  // The named bundle supplies persist when the operator selects the posture
+  // and leaves the flow-labels dial unset; a configured dial would still win.
+  const postured = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSession: {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+      cfcPosture: "max-enforcement",
+    },
+  });
+  assertEquals(postured.getRunState().fabricSessionCfc, {
+    enforcementMode: "enforce-explicit",
+    enforcementModeSource: "preset-pin",
+    flowLabels: "persist",
+    flowLabelsSource: "posture",
+    posture: "max-enforcement",
+  });
+
   const sessionless = new CfHarnessEngine({
     workspaceHostPath: "/host/project",
   });
