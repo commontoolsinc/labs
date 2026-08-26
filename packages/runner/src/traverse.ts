@@ -59,6 +59,7 @@ import {
   registerSchemaDocument,
 } from "./schema-registry.ts";
 import { getReaderSchemaPrecedenceConfig } from "./reader-schema-precedence-config.ts";
+import { schemaHasIfc } from "./schema-ifc.ts";
 import type {
   CellScope,
   JSONObject,
@@ -2355,6 +2356,14 @@ function followPointer(
   // doc.address's path doesn't have the same value nesting semantics as
   // link path, but we don't use the path field from that argument.
   let link = parseLink(doc.value, doc.address)!;
+  // A crossing's stored schema can carry flow-control marking that the
+  // combined selector will not (reader precedence keeps a shaped reader's
+  // schema free of it), so cfc relevance is marked at the hop itself. The
+  // predicate is memoized; unlabeled links (the common case) cost one
+  // cached lookup.
+  if (link.schema !== undefined && schemaHasIfc(link.schema)) {
+    tx.markCfcRelevant(`schema-ifc-hop:${link.id}`);
+  }
   // We may access portions of the doc outside what we have in our doc
   // attestation, so set the target to the top level doc from the manager.
   const target: IMemorySpaceValueAddress = {
@@ -2981,10 +2990,12 @@ export function combineSchema(
  * so transplanting flow-control clauses between schemas corrupts the
  * declaration they came from — an `ownerPrincipal` clause grafted onto a
  * reader's schema reads as a different declaration than the one the owner
- * authored. The read entry point instead marks its transaction
- * cfc-relevant off the link schema directly (`validateAndTransform`'s
- * `schemaHasIfc` gate), and enforcement reads stored cfc metadata and
- * label views rather than combined schemas.
+ * authored. The marking is independent of the combination instead: the
+ * read entry point gates off the resolved link schemas directly
+ * (`validateAndTransform`'s `schemaHasIfc` checks), the traversal marks
+ * every link hop it crosses whose stored schema carries `ifc`
+ * (`followPointer`), and enforcement reads stored cfc metadata and label
+ * views rather than combined schemas.
  */
 export function combineSchemaForLink(
   parentSchema: JSONSchema,
@@ -5610,10 +5621,12 @@ function getNextCellLink(
   // that location, so we effectively follow one more link if available.
   const lastLink = parseLink(doc.value, doc.address);
   if (lastLink !== undefined) {
-    // The link may not have the asCell flags, so pull that from itemSchema
+    // The link may not have the asCell flags, so pull that from itemSchema.
+    // Reader precedence, like every other crossing: the handle must not
+    // carry the link's wider schema past the reader's.
     return {
       ...lastLink,
-      schema: combineSchema(schema, lastLink.schema ?? true),
+      schema: combineSchemaForLink(schema, lastLink.schema ?? true),
     };
   }
   // It's fine if we don't have a pointer. In that case, just use the doc

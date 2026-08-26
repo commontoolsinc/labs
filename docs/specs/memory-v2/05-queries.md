@@ -378,10 +378,12 @@ stands.
 A discarded reference schema's `ifc` does not ride onto the result: write
 policy consumes declared schemas verbatim, so transplanting flow-control
 clauses between schemas would corrupt the declaration they came from. Instead
-the read entry point marks its transaction cfc-relevant when either the
-traversal's schema or the reference's schema carries `ifc` (`schemaHasIfc`),
-and enforcement reads stored cfc metadata and label views rather than
-combined schemas.
+the marking is independent of the combination: the read entry point marks its
+transaction cfc-relevant when the traversal's schema, the write-redirect
+resolution's schema, or the full value resolution's schema carries `ifc`
+(`schemaHasIfc`), the traversal marks every reference hop it crosses whose
+stored schema carries one, and enforcement reads stored cfc metadata and
+label views rather than combined schemas.
 
 The sibling `combineSchema` is the strict best-effort pseudo-intersection,
 used to merge a compound schema's base keywords with its own `anyOf`/`oneOf`

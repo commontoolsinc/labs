@@ -51,7 +51,6 @@ import {
   createDefaultTraversalContext,
   IObjectCreator,
   mergeAnyOfMatches,
-  mergeSchemaFlags,
   SchemaObjectTraverser,
 } from "@commonfabric/runner/traverse";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -78,14 +77,10 @@ import {
   rebaseCfcLabelView,
 } from "./cfc/label-view-state.ts";
 import { storedCfcMetadataAppliesToPath } from "./cfc/metadata.ts";
-import {
-  cfcSchemaChildRoot,
-  resolveCfcSchemaRefRoot,
-} from "./cfc/schema-refs.ts";
+import { schemaHasIfc } from "./schema-ifc.ts";
 import type { CfcAddress } from "./cfc/types.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import { arrayMatchesPositionally } from "./schema-match.ts";
-import { forEachSubschema } from "./schema-walk.ts";
 import { canFollowScopedLink, isCellScope } from "./scope.ts";
 import { internalVerifierRead } from "./storage/reactivity-log.ts";
 
@@ -540,111 +535,7 @@ export function resolveSchemaForValue(
     : narrowed;
 }
 
-// Memo for `schemaHasIfc` top-level calls. Safe **only** because entries
-// are populated under an `isDeepFrozen` guard below: the predicate's
-// answer depends on the entire subtree's shape, so caching against a
-// merely-TS-`readonly` or shallow-frozen input would be unsound — a
-// future sub-schema swap would silently invalidate the cached answer.
-// A future contributor must not relax the populate guard to accept
-// non-deep-frozen inputs. `Object.isFrozen` is **not** sufficient; it
-// is shallow-only.
-let _hasIfcCache = new WeakMap<JSONSchemaObj, boolean>();
-// A verdict computed over registry content must not outlive the lease epoch
-// that made the content available; the clear swaps the cache.
-onSchemaRegistryClear(() => {
-  _hasIfcCache = new WeakMap();
-});
-
-interface SchemaHasIfcContext {
-  seenByRoot: WeakMap<object, WeakSet<object>>;
-}
-
-export function schemaHasIfc(
-  schema: JSONSchema | undefined,
-  seen: Set<JSONSchema> = new Set(),
-  fullSchema: JSONSchema | undefined = schema,
-): boolean {
-  if (schema === undefined || typeof schema === "boolean") {
-    return false;
-  }
-  // Top-level calls (the default entry from cell.ts / schema.ts) can
-  // consult the memo. Recursive calls carry caller-provided `seen` and
-  // `fullSchema`, which aren't captured in the cache key, so they must
-  // bypass.
-  const isTopLevel = seen.size === 0 && fullSchema === schema;
-  if (isTopLevel) {
-    const cached = _hasIfcCache.get(schema);
-    if (cached !== undefined) return cached;
-  }
-  const context: SchemaHasIfcContext = { seenByRoot: new WeakMap() };
-  if (seen.size > 0) {
-    const initialRoot = cfcSchemaChildRoot(schema, fullSchema ?? schema);
-    const rootKey = isObjectOrArray(initialRoot) ? initialRoot : schema;
-    const initialSeen = new WeakSet<object>();
-    for (const item of seen) {
-      if (isObjectOrArray(item)) initialSeen.add(item);
-    }
-    context.seenByRoot.set(rootKey, initialSeen);
-  }
-  const missesBefore = externalResolutionMissCount();
-  const result = _schemaHasIfcUncached(schema, fullSchema, context);
-  // Populate only under a deep-frozen guard (see the invariant comment
-  // above `_hasIfcCache`), and only when no `cid:` resolution missed while
-  // computing — a verdict computed over an absent schema document must not
-  // outlive the document's arrival.
-  if (
-    isTopLevel && isDeepFrozen(schema) &&
-    externalResolutionMissCount() === missesBefore
-  ) {
-    _hasIfcCache.set(schema, result);
-  }
-  return result;
-}
-
-function _schemaHasIfcUncached(
-  schema: JSONSchemaObj,
-  fullSchema: JSONSchema | undefined,
-  context: SchemaHasIfcContext,
-): boolean {
-  const schemaRoot = cfcSchemaChildRoot(schema, fullSchema ?? schema);
-  const rootKey = isObjectOrArray(schemaRoot) ? schemaRoot : schema;
-  let seen = context.seenByRoot.get(rootKey);
-  if (seen?.has(schema)) return false;
-  if (!seen) {
-    seen = new WeakSet();
-    context.seenByRoot.set(rootKey, seen);
-  }
-  seen.add(schema);
-
-  const resolved = typeof schema.$ref === "string"
-    ? ContextualFlowControl.resolveSchemaRefs(schema, schemaRoot)
-    : schema;
-  if (resolved === true || resolved === false || !isObjectOrArray(resolved)) {
-    return false;
-  }
-  const childFullSchema = cfcSchemaChildRoot(
-    resolved,
-    typeof schema.$ref === "string"
-      ? resolveCfcSchemaRefRoot(schema, schemaRoot)
-      : schemaRoot,
-  );
-  if (resolved.ifc !== undefined) {
-    return true;
-  }
-
-  // Descend every structural subschema via the shared vocabulary. Previously
-  // this hand-listed only anyOf/oneOf/allOf/properties/additionalProperties/
-  // items and silently skipped prefixItems, patternProperties, contains,
-  // if/then/else, not, propertyNames, dependentSchemas, and contentSchema — so
-  // an `ifc` in a tuple element or pattern property went undetected. `$defs`
-  // bodies are reached through `$ref` resolution above, not walked directly.
-  return forEachSubschema(
-    resolved,
-    (child) =>
-      isObjectOrArray(child) &&
-      _schemaHasIfcUncached(child, childFullSchema, context),
-  );
-}
+export { schemaHasIfc };
 
 const _filterAsCellCache = new WeakMap<
   JSONSchemaObj,
@@ -1273,6 +1164,13 @@ export function validateAndTransform(
       options?.viewChild === true,
     ),
   ]);
+  // The write-redirect pass the gate above resolved cannot see a plain
+  // value link at the entry path; the full resolution can. Same cheap
+  // schema check, same marking — reader precedence keeps the crossing's
+  // `ifc` off the combined schema, so the marking must not depend on it.
+  if (schemaHasIfc(resolvedValueLink.schema)) {
+    tx.markCfcRelevant(`schema-ifc-read:${link.id}`);
+  }
   objectCreator.setBase(resolvedValueLink, cfcLabelView);
 
   // If our link is asCell/asStream, and we don't have any path portions, we
@@ -1301,17 +1199,23 @@ export function validateAndTransform(
         : effectiveSchema!;
       link = { ...next, schema: mergedSchema };
     }
-    // If our ref has a schema, merge our schema flags into that schema
-    // This will overwrite any schema that we got from the first non-redirect
-    // link, but this one should be more accurate
-    // Otherwise, we won't return a cell like we are supposed to.
+    // The fully value-resolved link is the last crossing of the chain, so
+    // its schema combines onto the result preserved above under the same
+    // reader precedence as every other hop: an agnostic reader adopts the
+    // final target's schema under its own asCell wrapper, a shaped reader
+    // stands (inheriting only the crossing's `default`), and the handle
+    // must never carry the link's wider schema past the reader's — a
+    // stored `required` the reader did not ask for would void the read
+    // through the handle. The result stays a cell (the reader's asCell
+    // survives every arm); the effectiveSchema fallback guards the
+    // combination ever losing it.
     if (resolvedValueLink.schema !== undefined) {
-      const mergedSchemaFlags = mergeSchemaFlags(
-        effectiveSchema!,
+      const combined = combineSchemaForLink(
+        link.schema ?? effectiveSchema!,
         resolvedValueLink.schema,
       );
-      link.schema = SchemaObjectTraverser.hasAsCell(mergedSchemaFlags)
-        ? mergedSchemaFlags
+      link.schema = SchemaObjectTraverser.hasAsCell(combined)
+        ? combined
         : effectiveSchema!;
     }
     objectCreator.setBase(link, cfcLabelView);

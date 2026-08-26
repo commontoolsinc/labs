@@ -2,11 +2,12 @@
  * Reading through a link whose stored schema carries `ifc` marks the
  * transaction cfc-relevant even though reader precedence
  * (`combineSchemaForLink`) keeps the link's `ifc` off the combined schema.
- * The read entry point consults the link schema on its own
- * (`validateAndTransform`'s `schemaHasIfc` gate), so the marking does not
- * depend on which side won the combination — and no flow-control clause is
- * ever transplanted onto the reader's schema, which write policy consumes
- * verbatim.
+ * The marking never depends on which side won a combination — and no
+ * flow-control clause is ever transplanted onto the reader's schema, which
+ * write policy consumes verbatim. Three seams carry it: the read entry
+ * point checks the write-redirect-resolved link's schema and the fully
+ * value-resolved link's (`schema-ifc-read`), and the traversal marks every
+ * link hop it actually crosses (`schema-ifc-hop`).
  */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
@@ -85,6 +86,18 @@ describe("link-ifc-read-relevance", () => {
     });
   };
 
+  /** A stored plain value link to `cell` carrying `schema`. */
+  const plainLinkCarrying = (cell: Cell<unknown>, schema: JSONSchema) => {
+    const link = cell.getAsNormalizedFullLink();
+    return linkRefFrom<CellLinkRefPayload>({
+      id: link.id,
+      space: link.space,
+      scope: link.scope,
+      path: [...link.path],
+      schema,
+    });
+  };
+
   const holderOverLinkCarrying = (storedSchema: JSONSchema): Cell<Holder> => {
     const target = runtime.getCell(space, `target-${seq}`, undefined, tx);
     target.setRaw({ name: "Ada" });
@@ -103,8 +116,54 @@ describe("link-ifc-read-relevance", () => {
       reason.startsWith("schema-ifc-read:")
     );
 
+  const schemaIfcHopReasons = () =>
+    tx.getCfcState().diagnostics.filter((reason) =>
+      reason.startsWith("schema-ifc-hop:")
+    );
+
   it("marks a read through an ifc-carrying link cfc-relevant", () => {
     const holder = holderOverLinkCarrying(labeledLinkSchema);
+
+    expect(holder.key("item").get()).toEqual({ name: "Ada" });
+    expect(tx.getCfcState().relevant).toBe(true);
+    expect(schemaIfcReadReasons().length).toBeGreaterThan(0);
+  });
+
+  it("marks an eager read crossing a nested ifc-carrying link cfc-relevant", () => {
+    const target = runtime.getCell(
+      space,
+      `target-${seq}-nested`,
+      undefined,
+      tx,
+    );
+    target.setRaw({ name: "Ada" });
+    const holder = runtime.getCell<Holder>(
+      space,
+      `holder-${seq}-nested`,
+      readerSchema,
+      tx,
+    );
+    holder.setRaw(
+      { item: plainLinkCarrying(target, labeledLinkSchema) } as never,
+    );
+
+    expect(holder.get()).toEqual({ item: { name: "Ada" } });
+    expect(tx.getCfcState().relevant).toBe(true);
+    expect(schemaIfcHopReasons().length).toBeGreaterThan(0);
+  });
+
+  it("marks a read entered through a plain ifc-carrying link cfc-relevant", () => {
+    const target = runtime.getCell(space, `target-${seq}-plain`, undefined, tx);
+    target.setRaw({ name: "Ada" });
+    const holder = runtime.getCell<Holder>(
+      space,
+      `holder-${seq}-plain`,
+      readerSchema,
+      tx,
+    );
+    holder.setRaw(
+      { item: plainLinkCarrying(target, labeledLinkSchema) } as never,
+    );
 
     expect(holder.key("item").get()).toEqual({ name: "Ada" });
     expect(tx.getCfcState().relevant).toBe(true);

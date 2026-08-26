@@ -201,6 +201,34 @@ describe("stored-link-schema-precedence", () => {
       });
     });
 
+    // An asCell reader crossing the link gets a handle whose schema keeps
+    // reader precedence: the stored schema's extra requirement must not
+    // ride the handle and void a read of a target that satisfies
+    // everything the reader itself demanded.
+    it("hands an asCell reader a handle that reads a row missing a stored-required field", () => {
+      const row = runtime.getCell(space, `row-${seq}-handle`, undefined, tx);
+      row.setRaw({ title: "cruller" });
+      const holder = runtime.getCell<Holder>(
+        space,
+        `holder-${seq}-handle`,
+        holderSchema,
+        tx,
+      );
+      holder.setRaw({ rows: [linkCarrying(row, wideStoredSchema)] } as never);
+
+      const handle = holder.key("rows").key(0)
+        .asSchema(
+          {
+            type: "object",
+            properties: { title: { type: "string" } },
+            required: ["title"],
+            asCell: ["cell"],
+          } as const satisfies JSONSchema,
+        )
+        .get() as unknown as Cell<Row>;
+      expect(projectionOf(handle.get())).toEqual({ title: "cruller" });
+    });
+
     // `default` crosses the precedence line: narrowed to the read path, the
     // stored schema's default is inherited onto the reader's schema and
     // stands in for the absent value.
