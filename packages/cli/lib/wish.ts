@@ -33,15 +33,19 @@ import { throwOnSpaceAuthorizationError } from "./utils.ts";
 export interface WishReadConfig extends SpaceConfig {
   /** Wish target, e.g. "#profile" or "#profileName". */
   query: string;
+
   /** Extra path segments appended to the resolved target cell. */
   path?: string[];
+
   /** Optional result JSON schema (shapes/labels the projected value). */
   schema?: JSONSchema;
+
   /**
    * Search scope for hashtag queries: "~" (favorites/home), "." (mentionables /
    * current space), "profile" (profile elements), or arbitrary space DIDs.
    */
   scope?: (DID | "~" | "." | "profile")[];
+
   /** `--filter`/`--select`/`--schema`: the shape the caller asked the resolved
    * target to arrive in, read through the same step every other arrival reads
    * through. See {@link WishSpec.selection} for where it applies. */
@@ -51,6 +55,7 @@ export interface WishReadConfig extends SpaceConfig {
 export interface WishReadResult {
   /** The resolved value (dereferenced), or null when the wish produced none. */
   result: unknown;
+
   /** The error message a failed wish surfaced, if any (e.g. no profile yet). */
   error?: string;
 }
@@ -61,6 +66,7 @@ export interface WishSpec {
   path?: string[];
   schema?: JSONSchema;
   scope?: (DID | "~" | "." | "profile")[];
+
   /**
    * The caller's `--filter`/`--select`/`--schema`, applied to the cell the
    * wish resolved to.

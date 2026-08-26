@@ -88,12 +88,16 @@ async function resolveSelector(
 /** What one repair run is asked to do, parsed off the command line. */
 export interface RepairRunRequest {
   selector: PieceSelector;
+
   /** The fixer module's absolute path, for the import. */
   fixerPath: string;
+
   /** The fixer's name as supplied, recorded in the emitted plan. */
   fixerName: string;
+
   /** A plan file to execute, row for row, under its preconditions. */
   planPath?: string;
+
   /** Write the fixer's documents; absent, the run is the dry report. */
   apply?: boolean;
 }
@@ -102,13 +106,16 @@ export interface RepairRunDependencies {
   loadPieces?: typeof loadPieces;
   resolvePieceAddress?: typeof resolvePieceAddress;
   readTextFile?: (path: string) => Promise<string>;
+
   /**
    * Resolve the fixer's closure snapshot — the one read of the authored
    * sources that both the identity and the execution come from.
    */
   resolveFixerProgram?: (path: string) => Promise<RuntimeProgram>;
+
   /** The snapshot's closure identity. */
   programIdentity?: (program: RuntimeProgram) => Promise<string>;
+
   /** Execute the snapshot — never the path it was read from. */
   importProgram?: (program: RuntimeProgram) => Promise<unknown>;
 }
@@ -221,10 +228,13 @@ export interface RetargetRunRequest {
    * moves to, so a retarget carries no selection of its own.
    */
   planPath: string;
+
   /** Write each row's source; absent, the run is the classification alone. */
   apply?: boolean;
+
   /** Pieces one session serves before it is replaced. */
   groupSize?: number;
+
   /** Called as each row settles, for reporting as the run proceeds. */
   onRow?: (row: RetargetRow) => void;
 }
@@ -322,14 +332,17 @@ export interface PhaseRetarget {
 export interface SurveyRunRequest {
   selector: PieceSelector;
   retargets?: readonly PhaseRetarget[];
+
   /**
    * Stamped onto every retarget row as `op.allowIncompatible` — the plan
    * shows which rows would run with the compatibility gate open, and the
    * apply honors only the row field.
    */
   allowIncompatible?: boolean;
+
   /** Path to a JSON-schema file each piece's result is read under. */
   validatorPath?: string;
+
   /** The plan header's `takenAt`; defaults to now. */
   takenAt?: string;
 }

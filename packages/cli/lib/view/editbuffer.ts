@@ -21,20 +21,26 @@ export interface LineEndingProvenance {
 
 export class EditBuffer {
   lines: string[];
+
   /** 0-based cursor line. */
   row = 0;
+
   /** 0-based cursor column, in code points within the line. */
   col = 0;
+
   /** The "goal" column for vertical motion, so up/down keep the column over
    * short lines (Emacs/most editors). -1 means "track the current column". */
   private goalCol = -1;
+
   /** Mark for region operations (C-Space … C-w), or null. */
   mark: { row: number; col: number } | null = null;
 
   /** The kill ring, most-recent first. */
   killRing: string[] = [];
+
   /** Index of the entry the next yank-pop will use; -1 when not yank-popping. */
   private yankIndex = -1;
+
   /** [row, col] span the last yank inserted, for yank-pop to replace. */
   private lastYank:
     | { row: number; col: number; endRow: number; endCol: number }

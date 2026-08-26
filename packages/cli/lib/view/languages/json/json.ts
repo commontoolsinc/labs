@@ -33,6 +33,7 @@ interface Token {
   readonly start: number;
   readonly end: number;
   readonly cls: TokenClass;
+
   /** Nesting depth for `bracket` tokens, for rainbow coloring. */
   readonly depth?: number;
 }

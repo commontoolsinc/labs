@@ -16,8 +16,10 @@ import {
 export interface CallableCommandExecutionResult<TResolved> {
   helpText?: string;
   outputText?: string;
+
   /** Handler invocation outcome, passed through from ExecutedCallable. */
   invocation?: InvocationOutcome;
+
   /** Tool result cell address, passed through from ExecutedCallable. */
   resultRef?: CallableResultRef;
   parsed: ParsedExecArgs;
@@ -33,6 +35,7 @@ export interface CallableCommandExecutionOptions<
   commandSpec: ExecCommandSpec;
   rawArgs: string[];
   deps?: TDeps;
+
   /** Render the help page, once the parse has established one was asked for.
    *
    * Allowed to be async so a renderer can resolve something it needs ONLY
