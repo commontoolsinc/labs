@@ -4,10 +4,10 @@
 // the client (runner) before/after these calls.
 
 import { type BindValue, Database } from "@db/sqlite";
-import type { FabricPlainObject } from "@commonfabric/api";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { isPlainObject } from "@commonfabric/utils/types";
+import type { SqliteNativeRow } from "../../v2.ts";
 import { assertReadOnly, assertWriteSafe } from "./guard.ts";
 import { columnOrigins } from "./column-origin.ts";
 import { createTableSQL, type TableSchema } from "./schema.ts";
@@ -106,7 +106,7 @@ export function bindArgs(params?: SqliteParams): BindValue[] {
     )]) as BindValue[];
 }
 
-function rowFromNative<Row extends FabricPlainObject>(
+function rowFromNative<Row extends SqliteNativeRow>(
   names: string[],
   values: unknown[],
 ): Row {
@@ -119,7 +119,7 @@ function rowFromNative<Row extends FabricPlainObject>(
 }
 
 /** Run a single guarded read-only SELECT and return all rows. */
-export function runQuery<Row extends FabricPlainObject = FabricPlainObject>(
+export function runQuery<Row extends SqliteNativeRow = SqliteNativeRow>(
   db: Database,
   sql: string,
   params?: SqliteParams,
@@ -151,7 +151,7 @@ export type QueryColumn = {
  * declares per-column `ifc` (zero overhead otherwise — callers use `runQuery`).
  */
 export function runQueryWithOrigins<
-  Row extends FabricPlainObject = FabricPlainObject,
+  Row extends SqliteNativeRow = SqliteNativeRow,
 >(
   db: Database,
   sql: string,

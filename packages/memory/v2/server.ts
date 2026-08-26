@@ -1,7 +1,6 @@
 import * as FS from "@std/fs";
 import * as Path from "@std/path";
 
-import type { FabricPlainObject } from "@commonfabric/api";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { metrics, SpanStatusCode, trace } from "@opentelemetry/api";
@@ -62,6 +61,7 @@ import {
   type SessionSync,
   type SqliteDbRef,
   type SqliteNamedParamsWire,
+  type SqliteNativeRow,
   type SqliteParamsWire,
   type SqliteQueryRequest,
   type SqliteQueryWireResult,
@@ -1981,7 +1981,7 @@ export class Server {
     params: SqliteParamsWire | undefined,
     scopeKey: string,
     wantColumns: boolean,
-  ): Promise<{ rows: FabricPlainObject[]; columns?: SqliteResultColumn[] }> {
+  ): Promise<{ rows: SqliteNativeRow[]; columns?: SqliteResultColumn[] }> {
     // Apply the statement guard BEFORE the file-existence short-circuit, so a
     // rejected statement (non-SELECT, core-table/qualified ref, ATTACH/PRAGMA,
     // multi-statement) is refused even against a never-written cell-db rather

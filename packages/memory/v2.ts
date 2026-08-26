@@ -1,8 +1,4 @@
-import type {
-  FabricPlainObject,
-  FabricValue,
-  SchemaPathSelector,
-} from "@commonfabric/api";
+import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import {
   type EntityRef,
   getModernCellRepConfig,
@@ -1402,9 +1398,13 @@ export function dbNeedsColumnProvenance(
   return false;
 }
 
-export type SqliteQueryResult = {
-  rows: FabricPlainObject[];
+/** A native SQLite result row. Column names are arbitrary SQLite aliases,
+ *  including names that the Fabric object domain reserves. Values remain
+ *  Fabric values, but the row object itself is not a `FabricPlainObject`. */
+export type SqliteNativeRow = Record<string, FabricValue>;
 
+export type SqliteQueryResult = {
+  rows: SqliteNativeRow[];
   /** Per-result-column origin, present ONLY when the db needs provenance for
    *  CFC labeling — any column declares `ifc` (Phase 2) or any table declares
    *  a per-row label rule (Phase 3); see `dbNeedsColumnProvenance`. An aliased
@@ -1418,7 +1418,7 @@ export type SqliteQueryResult = {
  * are unsafe object keys use entries so the JSON codec can carry them without
  * losing or rejecting a legal SQLite alias. */
 export type SqliteRowWire =
-  | FabricPlainObject
+  | SqliteNativeRow
   | Array<[string, FabricValue]>;
 
 /** The transport form of a SQLite query result. */
@@ -1428,15 +1428,13 @@ export type SqliteQueryWireResult = {
 };
 
 /** Convert a native query row to the backward-compatible memory wire form. */
-export function sqliteRowToWire(row: FabricPlainObject): SqliteRowWire {
+export function sqliteRowToWire(row: SqliteNativeRow): SqliteRowWire {
   return unsafeObjectKeyIn(row) === undefined ? row : Object.entries(row);
 }
 
 /** Reconstruct a query row after it crosses the memory protocol. */
-export function sqliteRowFromWire(row: SqliteRowWire): FabricPlainObject {
-  return Array.isArray(row)
-    ? Object.fromEntries(row) as FabricPlainObject
-    : row;
+export function sqliteRowFromWire(row: SqliteRowWire): SqliteNativeRow {
+  return Array.isArray(row) ? Object.fromEntries(row) as SqliteNativeRow : row;
 }
 
 // NOTE: there is no `sqlite.execute` write verb. Writes go through the commit
