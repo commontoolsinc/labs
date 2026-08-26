@@ -1,7 +1,4 @@
-import {
-  newDefaultJsonCodecEngine,
-  realmFromFabricValue,
-} from "@commonfabric/data-model/codecs";
+import { newDefaultJsonCodecEngine } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { toStructuredDebugValue } from "@commonfabric/data-model/value-debug";
@@ -476,33 +473,6 @@ export function toConsoleDebugValue(value: unknown): FabricValue {
   );
 }
 
-/**
- * Converts one of a pattern's `console.*` arguments into the value the
- * notification carries, which the envelope then encodes along with everything
- * else.
- *
- * The argument is proved encodable here rather than left for the envelope. An
- * object forged onto a `FabricPrimitive`'s prototype is a `FabricValue` by
- * every check and still has no encoding, and one such argument reaching the
- * envelope would throw there -- losing the whole notification rather than the
- * one argument that earned it. So this encodes as a probe and discards the
- * result, which costs a second walk of a value only on the console path, and
- * substitutes a token for an argument that cannot cross. What a reader needs
- * is the argument's position in the call, and that arrives either way.
- *
- * Exported for testing.
- */
-export function toConsoleWireValue(value: unknown): FabricValue {
-  const debugValue = toConsoleDebugValue(value);
-
-  try {
-    realmFromFabricValue(debugValue);
-    return debugValue;
-  } catch {
-    return { "/unconvertible": "no encoding for value" };
-  }
-}
-
 export const hasExplicitSubscriptionSchema = (schema: unknown): boolean =>
   schema === true ||
   (schema !== undefined && schema !== false &&
@@ -626,7 +596,7 @@ export class RuntimeProcessor {
           type: NotificationType.ConsoleMessage,
           metadata,
           method,
-          args: args.map((arg) => toConsoleWireValue(arg)),
+          args: args.map((arg) => toConsoleDebugValue(arg)),
         });
         return args;
       },
@@ -1684,10 +1654,11 @@ export class RuntimeProcessor {
       `/${request.space}/blobs/upload.${encodeURIComponent(suffix)}`,
       host,
     );
-    // `request.body` is ceded to the decode rather than copied for it. That is
-    // legitimate because a handler owns the values its request carries, per
-    // `BaseRequest`, so nothing else can be reading this tree. What comes back
-    // is a `FabricValue`, of which only the one arm is a blob's bytes.
+    // The envelope's decode already produced this; `request.body` is a
+    // `FabricBytes` by the time it arrives, and a handler owns the values its
+    // request carries per `BaseRequest`, so nothing else is reading it. The
+    // check is on the arm rather than the decode: the declared type is what
+    // the client is meant to send, not what a malformed message can hold.
     const bytes = request.body;
     if (!(bytes instanceof FabricBytes)) {
       throw new Error("uploadBlob requires bytes as its body");

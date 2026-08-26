@@ -775,6 +775,21 @@ describe("cell-handle", () => {
   });
 
   describe("CellHandle carries a special object", () => {
+    const makeRuntime = () =>
+      ({
+        [$conn]: () => ({
+          request: () => Promise.resolve({ value: undefined }),
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+        }),
+      }) as unknown as RuntimeClient;
+    const makeRef = (): CellRef => ({
+      id: "of:special-object-cell" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    });
+
     // A `FabricSpecialObject` is a `ClientCellValue` -- a cell holds one like
     // any other value -- and it now crosses as itself. What this pins is that
     // `serialize()` hands it on WHOLE rather than walking it: rebuilding one
@@ -808,6 +823,33 @@ describe("cell-handle", () => {
       const wire = CellHandle.serialize([bytes]) as unknown[];
 
       expect(wire[0]).toBe(bytes);
+    });
+
+    it("hydrates a `FabricBytes` as itself, not as a record", () => {
+      // The inbound counterpart of the three above. `deserialize()` walks what
+      // the worker sent, and its record branch rebuilds from enumerable own
+      // properties a fabric class does not have -- so without the same
+      // ordering the value the connection just carried whole arrives as `{}`.
+      const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+      const handle = new CellHandle(makeRuntime(), makeRef());
+
+      const hydrated = CellHandle.deserialize(handle, bytes);
+
+      expect(hydrated).toBe(bytes);
+    });
+
+    it("hydrates one nested in a record and in an array as itself", () => {
+      const nsec = new FabricEpochNsec(1n);
+      const bytes = new FabricBytes(new Uint8Array([7]));
+      const handle = new CellHandle(makeRuntime(), makeRef());
+
+      const hydrated = CellHandle.deserialize(handle, {
+        a: { b: nsec },
+        c: [bytes],
+      }) as { a: { b: unknown }; c: unknown[] };
+
+      expect(hydrated.a.b).toBe(nsec);
+      expect(hydrated.c[0]).toBe(bytes);
     });
 
     it("returns a `bigint` and a `symbol` as themselves", () => {

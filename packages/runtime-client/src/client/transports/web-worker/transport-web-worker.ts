@@ -92,6 +92,21 @@ export class WebWorkerRuntimeTransport
       // may not always hold. When it does not, losing one message loudly beats
       // an exception leaving this listener, which would take the connection's
       // whole dispatch with it.
+      //
+      // Before the worker has reported ready, though, there is no dispatch to
+      // protect and no one listening for the report: what a failure costs
+      // there is `ready()` never settling, and a caller waiting on a promise
+      // that will not resolve has no way back. So the failure lands where
+      // `_handleError()` puts a pre-ready one, on the promise itself.
+      if (!this._ready) {
+        this._readyPromise.reject(
+          new Error(
+            `Undecodable message from the worker: ${describeFailure(error)}`,
+          ),
+        );
+        return;
+      }
+
       this.emit("message", {
         type: NotificationType.ErrorReport,
         message: `Undecodable message from the worker: ${

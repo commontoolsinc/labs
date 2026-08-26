@@ -504,6 +504,13 @@ export class CellHandle<T = unknown> {
       return value.map((item) => CellHandle.deserialize(base, item));
     }
 
+    // Hydrated whole, as `serialize()` sends one whole, and for the same
+    // reason: this goes _before_ the record branch, which rebuilds from
+    // enumerable own properties a fabric class does not have and would put
+    // `{}` here in place of the value the connection just carried. Nothing is
+    // lost by not descending -- a sigil link cannot be inside one.
+    if (value instanceof FabricSpecialObject) return value;
+
     if (isObjectOrArray(value)) {
       const reference = parseAsCellRef(
         value as JSONValue | undefined,
@@ -608,6 +615,12 @@ function applyValue(
     return current.map((item, index) =>
       applyValue(item, prevArray[index], base)
     );
+  }
+
+  // Carried through whole, as `deserialize()` hydrates one: the record branch
+  // below would rebuild it from enumerable own properties it does not have.
+  if (current instanceof FabricSpecialObject) {
+    return current;
   }
 
   // For plain objects, recursively apply to each property

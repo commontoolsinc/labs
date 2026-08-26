@@ -80,6 +80,10 @@ describe("WebWorkerRuntimeTransport", () => {
       transport.on("message", (m) => emitted.push(m));
       const handle = handlerOf(transport);
 
+      // Ready first: before that there is no dispatch to keep standing, and a
+      // decode failure lands on `ready()` instead (see below).
+      handle(posted({ type: TransportNotificationType.WorkerReady }));
+
       // Not an encoding at all, which is what a non-conforming sender or a
       // damaged one would deliver. The worker proves each payload encodable
       // before sending, so this should never happen -- the point is what
@@ -97,10 +101,33 @@ describe("WebWorkerRuntimeTransport", () => {
       expect(emitted).toHaveLength(2);
     });
 
+    it("rejects `ready()` when it arrives before the worker is ready", async () => {
+      // `connect()` awaits `ready()`, so a pre-ready failure reported into an
+      // emitter nobody is listening to yet would leave that promise pending
+      // for good -- and a caller waiting on a promise that will not settle has
+      // no way back. `_handleError()` puts a pre-ready worker error on the
+      // promise for the same reason; this is the decode's half of that.
+      const transport = makeTransport();
+      const emitted: unknown[] = [];
+      transport.on("message", (m) => emitted.push(m));
+
+      handlerOf(transport)(
+        new MessageEvent("message", { data: { not: "an encoding" } }),
+      );
+
+      await expect(transport.ready()).rejects.toThrow("Undecodable message");
+      expect(emitted).toHaveLength(0);
+
+      await transport.dispose();
+    });
+
     it("reports a failure that refuses to be stringified", () => {
       const transport = makeTransport();
       const emitted: unknown[] = [];
       transport.on("message", (m) => emitted.push(m));
+      handlerOf(transport)(
+        posted({ type: TransportNotificationType.WorkerReady }),
+      );
 
       // A decode failure can throw a value with no `toString` to reach, and
       // deriving the report's text must not fail in turn.

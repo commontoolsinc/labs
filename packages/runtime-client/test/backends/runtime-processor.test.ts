@@ -49,7 +49,6 @@ import {
   renderMembershipProviderFor,
   RuntimeProcessor,
   toConsoleDebugValue,
-  toConsoleWireValue,
 } from "@/backends/runtime-processor.ts";
 import {
   assertFabricLoggerFlags,
@@ -1214,14 +1213,13 @@ describe("runtime-processor", () => {
     describe("what the transport accepts", () => {
       /**
        * Puts `value` through the ends the notification actually uses: the
-       * producer's `toConsoleWireValue()`, then the envelope's own encode,
+       * producer's `toConsoleDebugValue()`, the envelope's encode,
        * `postMessage`'s structured clone, and the decode the transport does on
-       * arrival. The encode is the envelope's now rather than the argument's,
-       * which is the only thing that moved.
+       * arrival. There is one encode, the envelope's.
        */
       function acrossTheWire(value: unknown): unknown {
         return fabricFromRealmValue(
-          structuredClone(realmFromFabricValue(toConsoleWireValue(value))),
+          structuredClone(realmFromFabricValue(toConsoleDebugValue(value))),
         );
       }
 
@@ -1447,27 +1445,16 @@ describe("runtime-processor", () => {
           .toEqual({ a: Symbol.for("tag") });
       });
 
-      it("returns a forged `FabricPrimitive` as `/unconvertible`, not a throw", () => {
+      it("leaves a forged `FabricPrimitive` for the encode to refuse", () => {
         // An object on a `FabricPrimitive`'s prototype passes every membership
         // check and has no encoding: `isValidFabricValue()` says true and the
-        // encode refuses. The handler must not throw over it, since the throw
-        // would abort the pattern's own `console.log()`. Nothing is said about
-        // what the value was -- it was built to defeat exactly this.
+        // encode refuses. Producing one takes deliberate effort, so it is not
+        // worth a second walk of every console argument to find early; it is
+        // left to fail where the encoding is actually done.
         const forged = Object.create(FabricBytes.prototype);
         expect(isValidFabricValue(toConsoleDebugValue(forged))).toBe(true);
         expect(() => realmFromFabricValue(toConsoleDebugValue(forged)))
           .toThrow();
-        expect(toConsoleWireValue(forged))
-          .toEqual({ "/unconvertible": "no encoding for value" });
-      });
-
-      it("returns `/unconvertible` for the whole argument a forgery is buried in", () => {
-        // The failure is the argument's, not the position's: nothing of the
-        // surrounding value survives, which is the price of not sifting a
-        // hostile graph for the piece that broke.
-        const forged = Object.create(FabricBytes.prototype);
-        expect(toConsoleWireValue({ a: 1, forged }))
-          .toEqual({ "/unconvertible": "no encoding for value" });
       });
 
       it("returns a unique symbol as its marker", () => {

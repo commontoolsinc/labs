@@ -28,6 +28,7 @@ import {
 import { RuntimeProcessor } from "@/backends/mod.ts";
 import { postToClient } from "@/backends/post-to-client.ts";
 import { describeFailure } from "@/shared/utils.ts";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 // Count-only ledger of request traffic as seen by the worker: one
 // `received/<type>` per request that reached this message handler and one
@@ -265,8 +266,27 @@ self.addEventListener("message", async (event: MessageEvent) => {
     const code = error instanceof CompilerStackLoadError
       ? RuntimeErrorCode.CompilerStackLoadFailed
       : undefined;
+
+    // A reply is addressed by `msgId`, and what reaches here need not have
+    // one: the decode above admits every `FabricValue`, `undefined` and a
+    // `bigint` among them, and `Invalid IPC request` is thrown precisely for
+    // what is no message at all. Reading `msgId` off that would throw from
+    // inside this `catch`, which is the one place a throw has nowhere to go --
+    // out of an async listener it surfaces as an unhandled rejection, taking
+    // with it the report it was in the middle of making.
+    const msgId = isObjectNotArray(message) && typeof message.msgId === "number"
+      ? message.msgId
+      : undefined;
+    if (msgId === undefined) {
+      postToClient({
+        type: NotificationType.ErrorReport,
+        message: `Malformed message from the client: ${describeFailure(error)}`,
+      });
+      return;
+    }
+
     postToClient({
-      msgId: message.msgId,
+      msgId,
       error: describeFailure(error),
       ...(code ? { code } : {}),
     });
