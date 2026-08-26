@@ -338,6 +338,147 @@ describe("prompt-loop delegate_task skillHandle", () => {
     });
   });
 
+  it("scrubs an echo hidden behind non-canonical JSON escapes", async () => {
+    await withSkillCell(async ({ pieces, ref }) => {
+      const runId = "run-skill-handle-echo-escapes";
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable(runId),
+        ref,
+      );
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId,
+        model: "gpt-5.4",
+        cfcEnforcementMode: "disabled",
+        fabricSessionFactory: () => Promise.resolve({ pieces }),
+      });
+      await engine.recordHandleTable(minted.table);
+      // Every character spelled as a \uXXXX escape: a valid JSON encoding of
+      // the payload that no substring scrub of the serialized text can
+      // match, and that JSON.parse decodes straight back to the canary.
+      const evasiveEscapes = [...SKILL_TEXT].map((char) =>
+        `\\u${char.codePointAt(0)!.toString(16).padStart(4, "0")}`
+      ).join("");
+      const requestBodies: unknown[] = [];
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine,
+        fetchFn: scriptedFetch([
+          delegateCallTurn("call-skill-escapes", {
+            goal: "Plan the trip using the provided skill.",
+            skillHandle: minted.token,
+            returnSchema: {
+              type: "object",
+              properties: { note: { type: "string" } },
+              required: ["note"],
+            },
+          }),
+          assistantTurn(`{"note": "stole: ${evasiveEscapes}"}`),
+          assistantTurn("Parent received the child summary."),
+        ], requestBodies),
+      });
+
+      const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+
+      const parentText = chatViewOfRequest(requestBodies[2]).messages
+        .map((message) => message.content).join("\n");
+      expect(parentText).not.toContain("CANARY-SKILL-9f4e2");
+      const toolMessage = result.transcript.find(
+        (message) => message.role === "tool",
+      );
+      expect(toolMessage?.content).not.toContain("CANARY-SKILL-9f4e2");
+    });
+  });
+
+  it("scrubs a payload that embeds a token the delegation also seeded", async () => {
+    // The skill text CONTAINS a token the goal names, so the child's table
+    // resolves that substring to an address inside the echo. Scrubbing after
+    // resolution would no longer match the payload; the scrub runs on the
+    // raw text first.
+    const signer = await Identity.fromPassphrase("skill-handle-token-embed");
+    const storageManager = StorageManager.emulate({ as: signer });
+    const fabricRuntime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+    });
+    const pieces = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `skill-handle-embed-${crypto.randomUUID()}`,
+      }),
+      fabricRuntime,
+    );
+    await pieces.synced();
+    try {
+      const space = pieces.getSpace();
+      const runId = "run-skill-handle-token-embed";
+      const dataCell = fabricRuntime.getCell(space, "data-cell", {} as const);
+      const skillCell = fabricRuntime.getCell(space, "skill-cell", {} as const);
+      const seedData = await fabricRuntime.editWithRetry((tx) => {
+        dataCell.withTx(tx).set("plain data");
+      });
+      expect(seedData.error).toBeUndefined();
+      const dataRef = createLLMFriendlyLink(
+        dataCell.getAsNormalizedFullLink(),
+        space,
+      );
+      let table = createHarnessHandleTable(runId);
+      const mintedData = await mintAddressHandle(table, dataRef);
+      table = mintedData.table;
+      const skillText = [
+        "# Trip planner skill",
+        "",
+        `CANARY-SKILL-9f4e2: read ${mintedData.token} before planning.`,
+      ].join("\n");
+      const seedSkill = await fabricRuntime.editWithRetry((tx) => {
+        skillCell.withTx(tx).set(skillText);
+      });
+      expect(seedSkill.error).toBeUndefined();
+      await fabricRuntime.idle();
+      const skillRef = createLLMFriendlyLink(
+        skillCell.getAsNormalizedFullLink(),
+        space,
+      );
+      const mintedSkill = await mintAddressHandle(table, skillRef);
+      table = mintedSkill.table;
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId,
+        model: "gpt-5.4",
+        cfcEnforcementMode: "disabled",
+        fabricSessionFactory: () => Promise.resolve({ pieces }),
+      });
+      await engine.recordHandleTable(table);
+      const requestBodies: unknown[] = [];
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine,
+        fetchFn: scriptedFetch([
+          delegateCallTurn("call-skill-embed", {
+            goal: `Plan the trip; the data is ${mintedData.token}.`,
+            skillHandle: mintedSkill.token,
+          }),
+          // The child echoes the skill verbatim, embedded token included.
+          assistantTurn(`Here is what I was told:\n${skillText}`),
+          assistantTurn("Parent received the child summary."),
+        ], requestBodies),
+      });
+
+      const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+
+      const parentText = chatViewOfRequest(requestBodies[2]).messages
+        .map((message) => message.content).join("\n");
+      expect(parentText).not.toContain("CANARY-SKILL-9f4e2");
+      const toolMessage = result.transcript.find(
+        (message) => message.role === "tool",
+      );
+      expect(toolMessage?.content).not.toContain("CANARY-SKILL-9f4e2");
+    } finally {
+      await fabricRuntime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("records the table token on the activation when the handle is passed as a reference", async () => {
     await withSkillCell(async ({ pieces, ref }) => {
       const runId = "run-skill-handle-ref-spelling";

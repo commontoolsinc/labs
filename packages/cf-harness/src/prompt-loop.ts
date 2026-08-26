@@ -950,6 +950,34 @@ const scrubHandleSkillText = (text: string, skillText: string): string => {
   return scrubbed;
 };
 
+/**
+ * {@link scrubHandleSkillText} over every string in a structured value. The
+ * raw-text scrub alone cannot cover a structured return: JSON admits
+ * non-canonical escapes (`\u0043` for `C`), so infinitely many spellings of
+ * the payload survive a substring scrub of the serialized text and DECODE
+ * back to it at `JSON.parse` — the payload has to be scrubbed again where it
+ * would actually reappear, in the parsed strings.
+ */
+const scrubHandleSkillTextDeep = (
+  value: unknown,
+  skillText: string,
+): unknown => {
+  if (typeof value === "string") {
+    return scrubHandleSkillText(value, skillText);
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => scrubHandleSkillTextDeep(entry, skillText));
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map((
+        [key, entry],
+      ) => [key, scrubHandleSkillTextDeep(entry, skillText)]),
+    );
+  }
+  return value;
+};
+
 const resolveChildHandleTokens = (
   childEngine: CfHarnessEngine,
   text: string,
@@ -3779,20 +3807,22 @@ export class CfHarnessPromptLoop {
       // produced usable by the parent: the parent's outbound swap mints the
       // canonical address into a parent token — the same token for a seeded
       // address, a fresh one for an address only the child ever saw.
-      // Scrubbed BEFORE the summary and the structured-return parse, so both
-      // parent-facing paths see the mediated text.
-      const childFinalText = options.resolvedSkill === undefined
-        ? resolveChildHandleTokens(
-          childEngine,
-          childResult.finalAssistantText,
-        )
-        : scrubHandleSkillText(
-          resolveChildHandleTokens(
-            childEngine,
+      //
+      // The skill scrub runs on the RAW text, BEFORE token resolution: a
+      // payload that itself contains a seeded token would otherwise be
+      // rewritten by the resolution (token to address) and no longer match
+      // the scrub's needle, walking an echoed skill past it. Scrubbing first
+      // takes any embedded token out with the payload; resolution then runs
+      // over what remains.
+      const childFinalText = resolveChildHandleTokens(
+        childEngine,
+        options.resolvedSkill === undefined
+          ? childResult.finalAssistantText
+          : scrubHandleSkillText(
             childResult.finalAssistantText,
+            options.resolvedSkill.text,
           ),
-          options.resolvedSkill.text,
-        );
+      );
       summary = childFinalText;
       childModelTurns = childResult.modelTurns;
       const childUsage = childResult.totalUsage ?? childResult.usage;
@@ -3818,8 +3848,18 @@ export class CfHarnessPromptLoop {
           schema: delegateInput.returnSchema,
           handleTable,
         });
-        summary = structured.summary;
-        structuredReturn = structured.structuredReturn;
+        summary = options.resolvedSkill === undefined
+          ? structured.summary
+          : scrubHandleSkillText(
+            structured.summary,
+            options.resolvedSkill.text,
+          );
+        structuredReturn = options.resolvedSkill === undefined
+          ? structured.structuredReturn
+          : scrubHandleSkillTextDeep(
+            structured.structuredReturn,
+            options.resolvedSkill.text,
+          ) as typeof structured.structuredReturn;
         if (structured.handleTable !== undefined) {
           await this.engine.recordHandleTable(structured.handleTable);
         }
