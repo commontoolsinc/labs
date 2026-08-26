@@ -206,6 +206,15 @@ A verb decides what it returns; the caller decides how much of it to look at.
 `cf wish` and `cf exec` take, with the same grammar — shape the `result` before
 it reaches stdout, and go before the callable name:
 
+Where they go depends on whether a callable's own vocabulary stands between the
+command and them. `cf get` and `cf wish` have none, so the three flags sit on
+the line like any others. `cf call` and `cf exec` do, so the flags precede the
+name that opens it — the callable name on `call`, the mounted file on `exec` —
+and everything after that name belongs to the callable. `--` is what ends the
+callable's section, which is why it is written on those two and refused on
+`cf get`, `cf set` and `cf wish`: there is no section for it to close, and a
+marker on one of those would set aside words nothing reads.
+
 ```bash
 cf call --piece <topic> --select comment.writtenAt addComment \
   '{"body":"first","agentName":"Sol"}'
