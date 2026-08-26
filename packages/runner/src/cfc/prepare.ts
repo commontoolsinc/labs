@@ -3755,7 +3755,11 @@ const verifyInputRequirements = (
           const fits = outcome.exhausted === false &&
             atomsOutsideCeiling(outcome.confidentiality, maxConfidentiality)
                 .length === 0;
-          if (!fits && outcome.resolutionFailures.length > 0) {
+          if (
+            !fits &&
+            (outcome.resolutionFailures.length > 0 ||
+              outcome.grantResolutionUnavailable)
+          ) {
             // The miss was evaluated over a manifest or grant that did not
             // resolve, so the label kept atoms a rewrite might have cleared:
             // not a verdict (see the return-type note above).
@@ -4947,7 +4951,7 @@ const evaluateGatedConfidentiality = (
   grantResolutionUnavailable: boolean;
 } => {
   const state = tx.getCfcState();
-  let grantResolutionUnavailable = false;
+  const grantAvailability = { unavailable: false };
   const result = evaluateExchangeRules(
     { confidentiality: [...confidentiality] },
     state.policySnapshot,
@@ -4963,9 +4967,7 @@ const evaluateGatedConfidentiality = (
       // digest binding. Rides the same cfcPolicyEvaluation dial as the rest
       // of this evaluation — this function only runs when the dial is on.
       grantResolver: createTxCfcGrantResolver(tx, {
-        onUnavailable: () => {
-          grantResolutionUnavailable = true;
-        },
+        availability: grantAvailability,
       }),
       grantConsumption: consumption,
       modulePolicyResolver: createTxCfcModulePolicyResolver(
@@ -4989,7 +4991,7 @@ const evaluateGatedConfidentiality = (
     exhausted: result.exhausted,
     firings: result.firings.length,
     resolutionFailures: result.resolutionFailures,
-    grantResolutionUnavailable,
+    grantResolutionUnavailable: grantAvailability.unavailable,
   };
 };
 

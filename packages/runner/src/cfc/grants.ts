@@ -739,13 +739,13 @@ export const createTxCfcGrantResolver = (
   opts: {
     readonly now?: () => number;
     /**
-     * Invoked when a grant lookup could not be READ (the catch arm below) —
-     * as opposed to resolving to no facts. A boundary decision that consults
-     * this resolver is only a deterministic verdict when no lookup was
-     * unavailable: an unsynced grant might discharge on the attempt that
-     * syncs it, so the caller uses this to withhold the terminal tag.
+     * Out-record set when a grant lookup could not be READ (the catch arm
+     * below) — as opposed to resolving to no facts. A boundary decision that
+     * consults this resolver is only a deterministic verdict when no lookup
+     * was unavailable: an unsynced grant might discharge on the attempt that
+     * syncs it, so the caller reads this to withhold the terminal tag.
      */
-    readonly onUnavailable?: () => void;
+    readonly availability?: { unavailable: boolean };
   } = {},
 ): CfcGrantResolver => {
   const now = opts.now ?? Date.now;
@@ -812,7 +812,7 @@ export const createTxCfcGrantResolver = (
       // undigestable bound field refuses identically every time): the cost
       // of over-reporting is a bounded retry, the cost of under-reporting is
       // a write that never lands.
-      opts.onUnavailable?.();
+      if (opts.availability !== undefined) opts.availability.unavailable = true;
       return [];
     }
     return facts;

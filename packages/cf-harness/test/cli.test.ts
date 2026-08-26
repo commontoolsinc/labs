@@ -2247,6 +2247,63 @@ Deno.test("runCfHarnessCli registers and disposes signal handlers around a run",
   ]);
 });
 
+Deno.test("runCfHarnessCli prints the fabric-session posture bundle in the operator summary", async () => {
+  const { io, stdout } = createIoBuffers();
+  const exitCode = await runCfHarnessCli(
+    [
+      "--model-provider",
+      "openai-compatible-gateway",
+      "--prompt",
+      "hello",
+      "--gateway-auth-mode",
+      "none",
+    ],
+    {
+      io,
+      env: {},
+      createPromptLoop: () => ({
+        runPrompt: () =>
+          Promise.resolve(
+            ({
+              model: "gpt-5.4",
+              finalAssistantText: "Done.",
+              transcript: [],
+              modelTurns: 1,
+              runState: {
+                runId: "run-postured-summary",
+                status: "completed",
+                createdAt: "2026-04-16T20:10:00.000Z",
+                updatedAt: "2026-04-16T20:10:01.000Z",
+                cfcEnforcementMode: "enforce-explicit",
+                fabricSessionCfc: {
+                  enforcementMode: "enforce-explicit",
+                  enforcementModeSource: "preset-pin",
+                  flowLabels: "persist",
+                  flowLabelsSource: "posture",
+                  posture: "max-enforcement",
+                },
+                currentDir: "/workspace",
+                policyEvents: [],
+                toolOutputs: [],
+              },
+            }) satisfies HarnessPromptLoopResult,
+          ),
+        runTranscript: () =>
+          Promise.reject(new Error("unexpected resume path")),
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  const summary = stdout.join("");
+  assertEquals(
+    summary.includes(
+      "fabricSessionCfc: enforce-explicit (preset-pin), flow-labels persist (posture), posture max-enforcement",
+    ),
+    true,
+  );
+});
+
 Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata", async () => {
   const { io, stdout, stderr } = createIoBuffers();
   let createdOptions: Record<string, unknown> | undefined;

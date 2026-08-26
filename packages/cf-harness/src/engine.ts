@@ -584,15 +584,26 @@ export class CfHarnessEngine {
     // config that resolves to a DIFFERENT posture would put the artifacts in
     // contradiction with the Runtime that executes: refuse rather than let
     // either record win silently. A run resumed without a session keeps its
-    // record as history (no runtime exists for it to contradict), and a
-    // legacy record that never captured a posture stays absent rather than
-    // being backfilled.
-    if (
-      options.runState?.fabricSessionCfc !== undefined &&
-      fabricSessionCfc !== undefined
-    ) {
+    // record as history (no runtime exists for it to contradict). A LEGACY
+    // record — one that never captured a posture — stays absent rather than
+    // being backfilled, and stays frozen as history: resuming such a run
+    // with plain session dials is allowed (the flags may simply restate the
+    // original invocation, which the record predates), but resuming it under
+    // the named posture bundle is refused — no legacy run can have run the
+    // bundle, so that resume would execute enforcement the artifacts cannot
+    // attest.
+    if (options.runState !== undefined && fabricSessionCfc !== undefined) {
       const recorded = options.runState.fabricSessionCfc;
-      if (
+      if (recorded === undefined) {
+        if (fabricSessionCfc.posture !== undefined) {
+          throw new Error(
+            `fabric session CFC posture mismatch on resume: run state ` +
+              `records no fabric-session posture, so it cannot attest the ` +
+              `${fabricSessionCfc.posture} bundle the session ` +
+              `configuration resolves`,
+          );
+        }
+      } else if (
         recorded.enforcementMode !== fabricSessionCfc.enforcementMode ||
         recorded.flowLabels !== fabricSessionCfc.flowLabels ||
         recorded.posture !== fabricSessionCfc.posture

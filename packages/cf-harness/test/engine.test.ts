@@ -267,6 +267,35 @@ Deno.test("CfHarnessEngine refuses to resume under a fabric-session posture that
     detached.getRunState().fabricSessionCfc?.posture,
     "max-enforcement",
   );
+
+  // A legacy record (no posture ever captured) stays frozen as history:
+  // plain session dials may restate the original invocation, but the named
+  // bundle cannot have been what the run ran, so a posture resume is refused.
+  const legacyState = {
+    ...runState,
+    fabricSessionCfc: undefined,
+  } as typeof runState;
+  const legacyWithDials = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSession: {
+      apiUrl: posturedSession.apiUrl,
+      identityKeyPath: posturedSession.identityKeyPath,
+      space: posturedSession.space,
+      cfcEnforcementMode: "enforce-strict",
+    },
+    runState: legacyState,
+  });
+  assertEquals(legacyWithDials.getRunState().fabricSessionCfc, undefined);
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        workspaceHostPath: "/host/project",
+        fabricSession: posturedSession,
+        runState: legacyState,
+      }),
+    Error,
+    "records no fabric-session posture",
+  );
 });
 
 Deno.test("CfHarnessEngine grants no well-known handles without a fabric session", async () => {

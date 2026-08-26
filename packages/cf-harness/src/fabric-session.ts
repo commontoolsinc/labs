@@ -23,6 +23,32 @@ export interface HarnessFabricSession {
 export type HarnessFabricSessionFactory = () => Promise<HarnessFabricSession>;
 
 /**
+ * The `PiecesController.initialize` options a session config resolves to,
+ * identity aside: the space and whichever CFC dials the config carries — an
+ * unset dial stays absent so the remoteClient preset's own posture governs.
+ * Pure so the resolution is testable without touching disk or network.
+ */
+export const harnessFabricSessionControllerOptions = (
+  config: HarnessFabricSessionConfig,
+): {
+  apiUrl: URL;
+  space: string;
+  cfcEnforcementMode?: HarnessFabricSessionConfig["cfcEnforcementMode"];
+  cfcFlowLabels?: HarnessFabricSessionConfig["cfcFlowLabels"];
+  cfcPosture?: HarnessFabricSessionConfig["cfcPosture"];
+} => ({
+  apiUrl: new URL(config.apiUrl),
+  space: config.space,
+  ...(config.cfcEnforcementMode !== undefined
+    ? { cfcEnforcementMode: config.cfcEnforcementMode }
+    : {}),
+  ...(config.cfcFlowLabels !== undefined
+    ? { cfcFlowLabels: config.cfcFlowLabels }
+    : {}),
+  ...(config.cfcPosture !== undefined ? { cfcPosture: config.cfcPosture } : {}),
+});
+
+/**
  * Default factory over `config`: loads the PKCS#8 identity from disk and
  * connects a `PiecesController` to the deployed API. An unauthorized space
  * fails construction rather than yielding a session whose every read is a
@@ -36,18 +62,8 @@ async () => {
     await Deno.readFile(config.identityKeyPath),
   );
   const pieces = await PiecesController.initialize({
-    apiUrl: new URL(config.apiUrl),
+    ...harnessFabricSessionControllerOptions(config),
     identity,
-    space: config.space,
-    ...(config.cfcEnforcementMode !== undefined
-      ? { cfcEnforcementMode: config.cfcEnforcementMode }
-      : {}),
-    ...(config.cfcFlowLabels !== undefined
-      ? { cfcFlowLabels: config.cfcFlowLabels }
-      : {}),
-    ...(config.cfcPosture !== undefined
-      ? { cfcPosture: config.cfcPosture }
-      : {}),
   });
   return { pieces };
 };
