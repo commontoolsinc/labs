@@ -49,9 +49,15 @@ import { cellRefToIdentityKey } from "./shared/utils.ts";
 // Enable via: globalThis.commonfabric.logger["cell-handle"].disabled = false
 const logger = getLogger("cell-handle", { enabled: false });
 
-const operationTails = new WeakMap<
+interface CellOperationQueue {
+  tail: Promise<void> | undefined;
+  hasValue: boolean;
+  value: unknown;
+}
+
+const operationQueues = new WeakMap<
   RuntimeClient,
-  Map<string, Promise<void>>
+  Map<string, CellOperationQueue>
 >();
 
 export const $onCellUpdate = Symbol("$onCellUpdate");
@@ -169,38 +175,62 @@ export class CellHandle<T = unknown> {
     this.#requireSchema("set");
     // A plain set is a blind last-write-wins overwrite (CellSet).
     const serialized = this.#serializeWrite(value);
+    const snapshot = CellHandle.deserialize<T>(this, serialized) as T;
     this.#writeGeneration++;
-    this.#publishValue(value);
-    await this.#enqueueOperation(() =>
-      this.#sendWrite(serialized, RequestType.CellSet)
-    );
+    this.#publishValue(snapshot);
+    await this.#enqueueOperation(async (queue) => {
+      const updateGeneration = this.#updateGeneration;
+      await this.#sendWrite(serialized, RequestType.CellSet);
+      if (updateGeneration === this.#updateGeneration) {
+        queue.value = snapshot;
+        queue.hasValue = true;
+      }
+    });
   }
 
   /** Set the cell's value and reject when the runtime refuses the write. */
   async setStrict(value: T): Promise<void> {
     this.#requireSchema("setStrict");
     const serialized = this.#serializeWrite(value);
-    const writeGeneration = ++this.#writeGeneration;
-    await this.#enqueueOperation(() =>
-      this.#sendStrictWrite(value, serialized, writeGeneration)
-    );
+    const snapshot = CellHandle.deserialize<T>(this, serialized) as T;
+    const writeGeneration = this.#writeGeneration;
+    await this.#enqueueOperation(async (queue) => {
+      const published = await this.#sendStrictWrite(
+        snapshot,
+        serialized,
+        writeGeneration,
+      );
+      if (published || !queue.hasValue) {
+        queue.value = snapshot;
+        queue.hasValue = true;
+      }
+    });
   }
 
-  #enqueueOperation<R>(operation: () => Promise<R>): Promise<R> {
-    let tails = operationTails.get(this.#rt);
-    if (!tails) {
-      tails = new Map();
-      operationTails.set(this.#rt, tails);
+  #enqueueOperation<R>(
+    operation: (queue: CellOperationQueue) => Promise<R>,
+  ): Promise<R> {
+    let queues = operationQueues.get(this.#rt);
+    if (!queues) {
+      queues = new Map();
+      operationQueues.set(this.#rt, queues);
     }
     const key = cellRefToIdentityKey(this.#ref);
-    const previous = tails.get(key);
-    const result = previous ? previous.then(operation) : operation();
+    let queue = queues.get(key);
+    if (!queue) {
+      queue = { tail: undefined, hasValue: false, value: undefined };
+      queues.set(key, queue);
+    }
+    const previous = queue.tail;
+    const result = previous
+      ? previous.then(() => operation(queue))
+      : operation(queue);
     const tail = result.then(() => {}, () => {});
-    tails.set(key, tail);
+    queue.tail = tail;
     void tail.then(() => {
-      if (tails.get(key) === tail) {
-        tails.delete(key);
-        if (tails.size === 0) operationTails.delete(this.#rt);
+      if (queue.tail === tail) {
+        queues.delete(key);
+        if (queues.size === 0) operationQueues.delete(this.#rt);
       }
     });
     return result;
@@ -249,7 +279,7 @@ export class CellHandle<T = unknown> {
     value: T,
     serialized: WireCellValue,
     writeGeneration: number,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const before = this.#value;
     const updateGeneration = this.#updateGeneration;
     return this.#conn.request<RequestType.CellSet>({
@@ -258,13 +288,11 @@ export class CellHandle<T = unknown> {
       value: serialized,
       awaitCommit: true,
     }).then(() => {
-      if (
-        writeGeneration === this.#writeGeneration &&
+      const publish = writeGeneration === this.#writeGeneration &&
         updateGeneration === this.#updateGeneration &&
-        this.#value === before
-      ) {
-        this.#publishValue(value);
-      }
+        this.#value === before;
+      if (publish) this.#publishValue(value);
+      return publish;
     });
   }
 
@@ -281,19 +309,21 @@ export class CellHandle<T = unknown> {
   }
 
   async send(event: T): Promise<void> {
-    await this.#enqueueOperation(() => this.#send(event));
+    const serialized = CellHandle.serialize(event as ClientCellValue);
+    await this.#enqueueOperation(() => this.#send(serialized));
   }
 
   /** Send a stream event and reject when the runtime refuses it. */
   async sendStrict(event: T): Promise<void> {
-    await this.#enqueueOperation(() => this.#send(event, true));
+    const serialized = CellHandle.serialize(event as ClientCellValue);
+    await this.#enqueueOperation(() => this.#send(serialized, true));
   }
 
-  #send(event: T, propagateFailure = false): Promise<void> {
+  #send(event: WireCellValue, propagateFailure = false): Promise<void> {
     const request = this.#conn.request<RequestType.CellSend>({
       type: RequestType.CellSend,
       cell: this.ref(),
-      event: CellHandle.serialize(event as ClientCellValue),
+      event,
       ...(propagateFailure && { awaitCommit: true }),
     });
     if (propagateFailure) return request;
@@ -333,13 +363,21 @@ export class CellHandle<T = unknown> {
     this: CellHandle<U[]>,
     ...values: T extends (infer U)[] ? U[] : never
   ): void {
-    const append = () => {
-      const current = this.#value as unknown as unknown[];
+    const snapshots = values.map((value) =>
+      CellHandle.deserialize(
+        this,
+        CellHandle.serialize(value as ClientCellValue),
+      )
+    ) as U[];
+    const append = (queue: CellOperationQueue) => {
+      const current = (queue.hasValue ? queue.value : this.#value) as unknown[];
       if (!Array.isArray(current)) {
         throw new Error("push() can only be used on array cells");
       }
-      const value = [...current, ...values] as unknown as U[];
+      const value = [...current, ...snapshots] as unknown as U[];
       const serialized = this.#serializeWrite(value);
+      queue.value = value;
+      queue.hasValue = true;
       this.#writeGeneration++;
       this.#publishValue(value);
       return this.#sendWrite(serialized, RequestType.CellPush);
@@ -443,30 +481,52 @@ export class CellHandle<T = unknown> {
    */
   async sync(): Promise<Readonly<T> | undefined> {
     const writeGeneration = this.#writeGeneration;
-    const response = await this.#enqueueOperation(() =>
-      this.#conn.request<RequestType.CellGet>({
+    const updateGeneration = this.#updateGeneration;
+    const value = await this.#enqueueOperation(async (queue) => {
+      const response = await this.#conn.request<RequestType.CellGet>({
         type: RequestType.CellGet,
         cell: this.ref(),
-      })
-    );
+      });
+      const value = CellHandle.deserialize<T>(this, response.value) as T;
+      if (updateGeneration === this.#updateGeneration) {
+        queue.value = value;
+        queue.hasValue = true;
+      }
+      return value;
+    });
 
-    const value = CellHandle.deserialize<T>(this, response.value) as T;
-    if (writeGeneration === this.#writeGeneration) this.#value = value;
+    if (
+      writeGeneration === this.#writeGeneration &&
+      updateGeneration === this.#updateGeneration
+    ) {
+      this.#value = value;
+    }
     return value;
   }
 
   /** Demand lazy producers before fetching the current value. */
   async pull(): Promise<Readonly<T> | undefined> {
     const writeGeneration = this.#writeGeneration;
-    const response = await this.#enqueueOperation(() =>
-      this.#conn.request<RequestType.CellPull>({
+    const updateGeneration = this.#updateGeneration;
+    const value = await this.#enqueueOperation(async (queue) => {
+      const response = await this.#conn.request<RequestType.CellPull>({
         type: RequestType.CellPull,
         cell: this.ref(),
-      })
-    );
+      });
+      const value = CellHandle.deserialize<T>(this, response.value) as T;
+      if (updateGeneration === this.#updateGeneration) {
+        queue.value = value;
+        queue.hasValue = true;
+      }
+      return value;
+    });
 
-    const value = CellHandle.deserialize<T>(this, response.value) as T;
-    if (writeGeneration === this.#writeGeneration) this.#value = value;
+    if (
+      writeGeneration === this.#writeGeneration &&
+      updateGeneration === this.#updateGeneration
+    ) {
+      this.#value = value;
+    }
     return value;
   }
 
@@ -500,13 +560,16 @@ export class CellHandle<T = unknown> {
     sql: string,
     params?: ReadonlyArray<ClientCellValue> | Record<string, ClientCellValue>,
   ): Promise<Row[]> {
+    const serializedParams = params === undefined
+      ? undefined
+      : CellHandle.serializeSqliteParams(params);
     const response = await this.#enqueueOperation(() =>
       this.#conn.request<RequestType.SqliteQuery>({
         type: RequestType.SqliteQuery,
         cell: this.ref(),
         sql,
-        ...(params !== undefined && {
-          params: CellHandle.serializeSqliteParams(params),
+        ...(serializedParams !== undefined && {
+          params: serializedParams,
         }),
       })
     );
@@ -525,13 +588,16 @@ export class CellHandle<T = unknown> {
     sql: string,
     params?: ReadonlyArray<ClientCellValue> | Record<string, ClientCellValue>,
   ): Promise<void> {
+    const serializedParams = params === undefined
+      ? undefined
+      : CellHandle.serializeSqliteParams(params);
     await this.#enqueueOperation(() =>
       this.#conn.request<RequestType.SqliteExec>({
         type: RequestType.SqliteExec,
         cell: this.ref(),
         sql,
-        ...(params !== undefined && {
-          params: CellHandle.serializeSqliteParams(params),
+        ...(serializedParams !== undefined && {
+          params: serializedParams,
         }),
       })
     );
@@ -621,6 +687,13 @@ export class CellHandle<T = unknown> {
       this.#value,
       this as CellHandle<unknown>,
     ) as T;
+    const queue = operationQueues.get(this.#rt)?.get(
+      cellRefToIdentityKey(this.#ref),
+    );
+    if (queue) {
+      queue.value = applied;
+      queue.hasValue = true;
+    }
     const valueChanged = !valuesOrCellsEqual(applied, this.#value);
     // A label-only change (value identical) still fires label-aware subscribers.
     // `labelUpdate` is present only on notifications that carried a label, so a
@@ -648,8 +721,6 @@ export class CellHandle<T = unknown> {
     base: CellHandle<T>,
     value: unknown,
   ): unknown {
-    if (value instanceof FabricSpecialObject) return value;
-
     if (
       !value && typeof value === "string" || typeof value === "boolean" ||
       typeof value === "number"
