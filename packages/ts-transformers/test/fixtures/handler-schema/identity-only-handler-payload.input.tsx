@@ -20,17 +20,17 @@ const addPiece = handler<
   }
 });
 
-const trackRecent = handler<
+const prioritizePiece = handler<
   { piece: MentionablePiece },
-  { recentPieces: Writable<MentionablePiece[]> }
->(({ piece }, { recentPieces }) => {
-  const current = recentPieces.get();
+  { pinnedPieces: Writable<MentionablePiece[]> }
+>(({ piece }, { pinnedPieces }) => {
+  const current = pinnedPieces.get();
   const filtered = current.filter((c) => !equals(c, piece));
   const updated = [piece, ...filtered].slice(0, 10);
-  recentPieces.set(updated);
+  pinnedPieces.set(updated);
 });
 
 // FIXTURE: identity-only-handler-payload
 // Verifies: handler payloads and array items used only for identity/passthrough
 // shrink to unknown instead of retaining full recursive structural schemas.
-export { addPiece, trackRecent };
+export { addPiece, prioritizePiece };

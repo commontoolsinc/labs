@@ -478,14 +478,3 @@ export const listMentionable = pattern<
   }));
   return { result };
 });
-
-export const listRecent = pattern<
-  { recentPieces: Array<MentionablePiece> },
-  { result: Array<{ label: string; piece: MentionablePiece }> }
->(({ recentPieces }) => {
-  const namesList = recentPieces.map((c) => ({
-    label: c[NAME]!,
-    piece: c,
-  }));
-  return { result: namesList };
-});

@@ -73,7 +73,7 @@ const addPiece = handler({
         pieceRegistry.push(piece);
     }
 });
-const trackRecent = handler({
+const prioritizePiece = handler({
     type: "object",
     properties: {
         piece: {
@@ -110,7 +110,7 @@ const trackRecent = handler({
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
-        recentPieces: {
+        pinnedPieces: {
             type: "array",
             items: {
                 type: "unknown",
@@ -119,17 +119,17 @@ const trackRecent = handler({
             asCell: ["cell"]
         }
     },
-    required: ["recentPieces"]
-} as const satisfies __cfHelpers.JSONSchema, ({ piece }, { recentPieces }) => {
-    const current = recentPieces.get();
+    required: ["pinnedPieces"]
+} as const satisfies __cfHelpers.JSONSchema, ({ piece }, { pinnedPieces }) => {
+    const current = pinnedPieces.get();
     const filtered = current.filter((c) => !equals(c, piece));
     const updated = [piece, ...filtered].slice(0, 10);
-    recentPieces.set(updated);
+    pinnedPieces.set(updated);
 });
 // FIXTURE: identity-only-handler-payload
 // Verifies: handler payloads and array items used only for identity/passthrough
 // shrink to unknown instead of retaining full recursive structural schemas.
-export { addPiece, trackRecent };
+export { addPiece, prioritizePiece };
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

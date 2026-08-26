@@ -109,7 +109,7 @@ Deno.test("debug replacement stops every superseded local runner", async () => {
 
     assertEquals(stopCalls, 2);
     assertEquals(
-      (await registeredPieceIds(defaultPattern, "pieceRegistry")).includes(
+      (await registeredPieceIds(defaultPattern)).includes(
         originalPieceId,
       ),
       false,
