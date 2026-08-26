@@ -612,10 +612,11 @@ describe("cell-handle", () => {
       expect(calls.length).toBe(after + 1);
     });
 
-    it("refuses a `FabricInstance` rather than compare one", () => {
-      // A tripwire: nothing delivers an instance today, the transport striping
-      // a fabric class before it arrives. Reached here directly, because a
-      // walk that cannot descend a container must say so rather than answer.
+    it("refuses a `FabricInstance` rather than apply one", () => {
+      // A tripwire: nothing delivers an instance today, the transport
+      // stripping a fabric class before it arrives. This is `applyValue()`'s
+      // refusal -- it runs first, which is why the comparison after it needs
+      // no arm of its own.
       const cell = new CellHandle<unknown>(makeRuntime(), ref);
       cell.subscribe(() => {});
       const link = new FabricLink(
@@ -820,6 +821,51 @@ describe("cell-handle", () => {
       cell[$onCellUpdate]("not an array" as unknown as number[]);
       expect(() => cell.push(1)).toThrow(
         "push() can only be used on array cells",
+      );
+    });
+  });
+
+  describe("CellHandle hydration meets a fabric class", () => {
+    const makeRuntime = () =>
+      ({
+        [$conn]: () => ({
+          request: () => Promise.resolve({ value: undefined }),
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+        }),
+      }) as unknown as RuntimeClient;
+    const makeHandle = () =>
+      new CellHandle(makeRuntime(), {
+        id: "of:hydration-cell" as CellRef["id"],
+        space: "did:key:test" as CellRef["space"],
+        scope: "space",
+        path: [],
+      });
+
+    it("hydrates a `FabricPrimitive` as itself, not as a record", () => {
+      // A leaf: stopping at it is the whole job, and it must be stopped at
+      // before the record branch, which would rebuild it from enumerable own
+      // properties it does not have and yield `{}`.
+      const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+
+      expect(CellHandle.deserialize(makeHandle(), bytes)).toBe(bytes);
+      expect(
+        (CellHandle.deserialize(makeHandle(), { a: [bytes] }) as {
+          a: unknown[];
+        }).a[0],
+      ).toBe(bytes);
+    });
+
+    it("refuses a `FabricInstance` rather than hydrate one", () => {
+      // A container, reached by its codec contents rather than by property
+      // name, so a sigil link can sit inside one where this walk cannot see
+      // it. Nothing delivers one today; this is the tripwire.
+      const link = new FabricLink(
+        Object.freeze({ id: "of:fid1:hydration-refusal", path: [] }),
+      );
+
+      expect(() => CellHandle.deserialize(makeHandle(), link)).toThrow(
+        "Cannot yet handle `FabricLink` (a `FabricInstance`)",
       );
     });
   });

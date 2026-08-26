@@ -711,9 +711,6 @@ function cellRefsEqual(a: CellRef, b: CellRef): boolean {
  * by content, and this also knows about cells. A `CellHandle` compares by the
  * cell it names rather than by what that cell holds, so two handles on one
  * cell are equal and a handle is equal to nothing else.
- *
- * @throws If either side is a `FabricInstance`, whose outgoing references this
- *   walk cannot reach.
  */
 function valuesOrCellsEqual(a: unknown, b: unknown): boolean {
   // `Object.is`, not `===`: an unchanged `NaN` leaf must compare equal (else
@@ -738,20 +735,13 @@ function valuesOrCellsEqual(a: unknown, b: unknown): boolean {
   // `FabricBytes` over different bytes both present as `{}` there and would
   // compare equal. A primitive is a leaf, so comparing its content is the
   // whole comparison.
+  //
+  // There is no arm for a `FabricInstance`. `applyValue()` is this function's
+  // only caller and refuses one before it returns, so neither argument can
+  // hold one -- an arm here would be unreachable rather than defensive, and
+  // untestable with it.
   if (a instanceof FabricPrimitive || b instanceof FabricPrimitive) {
     return valueEqual(a as FabricValue, b as FabricValue);
-  }
-
-  // An instance is not a leaf, and `valueEqual()` would settle its outgoing
-  // references by the data model's rules where this walk has its own -- a
-  // handle compares by the cell it names, not by content. Rather than answer
-  // with a comparison that is right for one of those and wrong for the other,
-  // this refuses. Unreachable for the same reason as in `deserialize()`.
-  if (a instanceof FabricInstance || b instanceof FabricInstance) {
-    refuseFabricInstance(
-      (a instanceof FabricInstance ? a : b) as FabricInstance,
-      "when comparing a delivered value against the cached one",
-    );
   }
   if (Array.isArray(a)) {
     if (!Array.isArray(b)) return false;
