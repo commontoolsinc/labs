@@ -195,7 +195,7 @@ jobs:
           deno task run-recorded gate repo check-completion-slots --
           deno task check-completion-slots
 
-      - name: 📖 Guard against a CLI command nobody documented
+      - name: 🚧 Guard against a CLI command nobody documented
         timeout-minutes: *work-timeout
         run: >-
           deno task run-recorded gate repo check-command-docs --
