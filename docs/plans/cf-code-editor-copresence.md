@@ -128,10 +128,10 @@ it is stable within the connection without becoming server state.
 Presence errors emit `cf-presence-error` and clear remote decorations. They do
 not reuse `cf-collaboration-reconcile`, change `collaborative`, or stop document
 editing. The event exposes a safe error category and not the room id, name, or
-raw server payload. Connection and protocol failures retry only after focus,
-selection, user-edit, browser-online, or page-visible signals; no timer or retry
-loop runs. Invalid configuration is reported once and remains disabled until
-its room, name, or effective endpoint changes.
+raw server payload. Connection and protocol failures retry only after a browser
+`online` event or the page becoming visible; no timer or retry loop runs.
+Invalid configuration is reported once and remains disabled until its room,
+name, or effective endpoint changes.
 
 ## Versioned presence protocol
 
@@ -244,8 +244,8 @@ shown. At no point does presence hold back the Memory transaction.
 - Send an unfocused replacement on ordinary blur. Socket close remains the
   authoritative removal if the page disappears before the message is sent.
 - On a transient socket close, remove remote state and reconnect using the
-  browser's next explicit online/visibility lifecycle signal or a user action.
-  The first slice does not add a retry timer.
+  browser's next explicit online/visibility lifecycle signal. The first slice
+  does not add a retry timer or reconnect on each editor interaction.
 - Treat malformed server data as a presence failure local to that socket.
   Document collaboration continues.
 - On service deployment or Durable Object hibernation, connected sockets remain

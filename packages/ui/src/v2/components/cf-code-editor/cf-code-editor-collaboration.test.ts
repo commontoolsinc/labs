@@ -1,15 +1,24 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
-import { Compartment, EditorState, Transaction } from "@codemirror/state";
+import {
+  Compartment,
+  EditorState,
+  Transaction,
+  type TransactionSpec,
+} from "@codemirror/state";
+import type { EditorView } from "@codemirror/view";
 import {
   CellHandle,
   CODEMIRROR_CHANGESET_CODEC,
+  type OperationFieldSnapshot,
 } from "@commonfabric/runtime-client";
 import { CFCodeEditor } from "./cf-code-editor.ts";
+import { CodeMirrorCollaborationController } from "./codemirror-collaboration.ts";
+import { codeMirrorPresenceState } from "./codemirror-presence.ts";
 import { backlinkField } from "./features/backlinks.ts";
 import { mentionRefField } from "./features/mention-refs.ts";
 
-const operationPath = [] as never[];
+const operationPath = [] as unknown as OperationFieldSnapshot["path"];
 
 function inactiveSnapshot(materialized = "abc") {
   return {
@@ -94,7 +103,6 @@ describe("CFCodeEditor collaboration", () => {
       readonly: false,
       language: "text/markdown",
       _collaboration: collaboration,
-      _retryPresenceFromSignal: () => calls.push("presence retry"),
       _publishPresence: () => calls.push("presence"),
       emit: () => calls.push("change"),
       setValue: () => calls.push("value"),
@@ -121,7 +129,6 @@ describe("CFCodeEditor collaboration", () => {
     invoke(undefined);
     expect(calls).toEqual([
       "operation",
-      "presence retry",
       "presence",
       "change",
       "mentioned",
@@ -141,7 +148,7 @@ describe("CFCodeEditor collaboration", () => {
     expect(calls).toEqual([]);
 
     invoke(undefined, false, true);
-    expect(calls).toEqual(["presence retry", "presence"]);
+    expect(calls).toEqual(["presence"]);
 
     calls.length = 0;
     self._collaboration = undefined as never;
@@ -827,6 +834,107 @@ describe("CFCodeEditor collaboration", () => {
       expect((element as any)._collaboration).toBe(collaboration);
       (element as any)._cleanupPresence();
     } finally {
+      Object.defineProperty(globalThis, "WebSocket", {
+        configurable: true,
+        value: originalWebSocket,
+      });
+    }
+  });
+
+  it("clears presence before a new Memory epoch replaces the document", async () => {
+    const originalWebSocket = globalThis.WebSocket;
+    MockPresenceWebSocket.instances = [];
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: MockPresenceWebSocket,
+    });
+    const initial: OperationFieldSnapshot = {
+      branch: "",
+      id: "of:editor",
+      scopeKey: "",
+      path: operationPath,
+      active: true,
+      codec: CODEMIRROR_CHANGESET_CODEC,
+      cursor: { epoch: 1, version: 0 },
+      baselineHash: "baseline:1",
+      materialized: "abc",
+      operations: [],
+    };
+    let subscriber:
+      | ((snapshot: OperationFieldSnapshot) => void)
+      | undefined;
+    const runtime = {
+      operationCodecs: () => Promise.resolve([CODEMIRROR_CHANGESET_CODEC]),
+      queryOperationField: () => Promise.resolve(initial),
+      subscribeOperationField: (
+        _cell: CellHandle<string>,
+        callback: (snapshot: OperationFieldSnapshot) => void,
+      ) => {
+        subscriber = callback;
+        return Promise.resolve(() => {});
+      },
+      closeOperationSession: () => Promise.resolve(),
+    };
+    const element = new CFCodeEditor();
+    const collaborationComp = (element as any)
+      ._collaborationComp as Compartment;
+    const presenceComp = (element as any)._presenceComp as Compartment;
+    let state = EditorState.create({
+      doc: "abc",
+      extensions: [collaborationComp.of([]), presenceComp.of([])],
+    });
+    let presenceInstalledAtReplacement: boolean | undefined;
+    const view = {
+      hasFocus: false,
+      get state() {
+        return state;
+      },
+      dispatch(...specs: readonly TransactionSpec[]) {
+        const transaction = state.update(...specs);
+        if (
+          transaction.docChanged && transaction.newDoc.toString() === "reset"
+        ) {
+          presenceInstalledAtReplacement =
+            codeMirrorPresenceState(state) !== undefined;
+        }
+        state = transaction.state;
+      },
+    } as unknown as EditorView;
+    const controller = new CodeMirrorCollaborationController({
+      runtime: runtime as never,
+      cell: operationCell(runtime),
+      view,
+      compartment: collaborationComp,
+      onError: (error) => {
+        throw error;
+      },
+    });
+
+    try {
+      await controller.start();
+      (element as any)._editorView = view;
+      (element as any)._collaboration = controller;
+      element.collaborative = true;
+      element.presenceRoom = "abcdefghijklmnopqrstuv";
+      element.participantName = "Ada";
+      element.presenceUrl = "wss://presence.example";
+      (element as any)._observeCollaboration(controller);
+      expect(codeMirrorPresenceState(view.state)).toBeDefined();
+
+      subscriber?.({
+        ...initial,
+        cursor: { epoch: 2, version: 0 },
+        baselineHash: "baseline:2",
+        materialized: "reset",
+      });
+
+      expect(presenceInstalledAtReplacement).toBe(false);
+      expect(view.state.doc.toString()).toBe("reset");
+      expect((element as any)._presenceEpoch).toBe(2);
+    } finally {
+      (element as any)._collaborationSyncUnsub?.();
+      (element as any)._cleanupPresence();
+      controller.dispose();
       Object.defineProperty(globalThis, "WebSocket", {
         configurable: true,
         value: originalWebSocket,

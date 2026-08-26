@@ -523,6 +523,25 @@ describe("codemirror-presence", () => {
       expect(codeMirrorPresenceState(cleared)?.participants.size).toBe(0);
       expect(decorationValues(cleared)).toHaveLength(0);
     });
+
+    it("does not retain more than the room participant limit", () => {
+      const participants = Array.from(
+        { length: 128 },
+        (_, index) => participant({ participantId: `participant-${index}` }),
+      );
+      const full = createState().update({
+        effects: participants.map((record) => upsert(record)),
+      }).state;
+
+      const overflow = full.update({
+        effects: upsert(participant({ participantId: "overflow" })),
+      }).state;
+
+      expect(codeMirrorPresenceState(overflow)?.participants.size).toBe(128);
+      expect(
+        codeMirrorPresenceState(overflow)?.participants.has("overflow"),
+      ).toBe(false);
+    });
   });
 
   describe("remote decorations", () => {

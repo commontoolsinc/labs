@@ -27,6 +27,7 @@ import {
   CodeMirrorReconciliationError,
   codeMirrorRewriteDedupeEffect,
   codeMirrorSubmission,
+  type CodeMirrorSynchronizationSnapshot,
 } from "./codemirror-collaboration.ts";
 
 const path = [] as unknown as OperationFieldSnapshot["path"];
@@ -567,6 +568,8 @@ describe("CodeMirror operation collaboration", () => {
       subscribe: (callback) => subscriber = callback,
     });
     await controller.start();
+    const observed: Array<CodeMirrorSynchronizationSnapshot | null> = [];
+    controller.observeSynchronization((snapshot) => observed.push(snapshot));
     subscriber?.({
       ...inactiveSnapshot("abc"),
       active: true,
@@ -576,6 +579,13 @@ describe("CodeMirror operation collaboration", () => {
 
     expect(errors).toEqual([]);
     expect(controller.active).toBe(true);
+    expect(observed).toEqual([
+      null,
+      {
+        confirmedCursor: { epoch: 1, version: 0 },
+        pendingChanges: [],
+      },
+    ]);
   });
 
   it("starts a clean operation baseline after an inactive ordinary replacement", async () => {

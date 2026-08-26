@@ -47,6 +47,18 @@ function snapshot(participants: unknown[] = []) {
   });
 }
 
+function participant(index: number) {
+  return {
+    participantId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    revision: 1,
+    name: `Participant ${index}`,
+    focused: false,
+    cursor: { epoch: 1, version: 0 },
+    selection: null,
+    basis: "confirmed",
+  };
+}
+
 describe("copresence-client", () => {
   describe("CopresenceSession", () => {
     describe("constructor()", () => {
@@ -208,6 +220,37 @@ describe("copresence-client", () => {
           socket.emit("close");
 
           expect(failures).toEqual(["connection"]);
+          expect(socket.closes).toEqual([[1002, "Presence session failed"]]);
+        });
+
+        it("fails when incremental upserts exceed the participant limit", () => {
+          const socket = new MockSocket();
+          const failures: string[] = [];
+          const messages: unknown[] = [];
+          new CopresenceSession({
+            serviceUrl: "wss://presence.example",
+            room,
+            createSocket: () => socket,
+            onMessage: (message) => messages.push(message),
+            onFailure: (category) => failures.push(category),
+          });
+          socket.readyState = 1;
+          socket.emit("message", {
+            data: snapshot(
+              Array.from({ length: 128 }, (_, index) => participant(index)),
+            ),
+          });
+
+          socket.emit("message", {
+            data: JSON.stringify({
+              v: 1,
+              type: "participant.upsert",
+              ...participant(128),
+            }),
+          });
+
+          expect(messages).toHaveLength(1);
+          expect(failures).toEqual(["protocol"]);
           expect(socket.closes).toEqual([[1002, "Presence session failed"]]);
         });
       });

@@ -4020,6 +4020,9 @@ interface CFCodeEditorAttributes<T> extends CFHTMLAttributes<T> {
   "disabled"?: boolean;
   "readonly"?: boolean;
   "collaborative"?: boolean;
+  "presenceRoom"?: string;
+  "participantName"?: string;
+  "presenceUrl"?: string;
   "placeholder"?: string;
   "timingStrategy"?: string;
   "timingDelay"?: number;
@@ -4046,6 +4049,7 @@ interface CFCodeEditorAttributes<T> extends CFHTMLAttributes<T> {
   "oncf-file-paste"?: any;
   "oncf-error"?: any;
   "oncf-collaboration-reconcile"?: any;
+  "oncf-presence-error"?: any;
   "onbacklink-click"?: any;
   "onbacklink-create"?: any;
   "onmention-ref-label-changed"?: any;

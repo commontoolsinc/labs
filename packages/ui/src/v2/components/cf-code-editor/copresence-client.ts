@@ -5,9 +5,10 @@
  * @module
  */
 
-import type {
-  ParticipantPresence,
-  PresenceCursor,
+import {
+  MAX_PRESENCE_PARTICIPANTS,
+  type ParticipantPresence,
+  type PresenceCursor,
 } from "./codemirror-presence.ts";
 
 const protocolVersion = 1;
@@ -17,7 +18,6 @@ const participantIdPattern =
 const maximumNameCodePoints = 80;
 const maximumNameBytes = 256;
 const maximumSelectionRanges = 16;
-const maximumSnapshotParticipants = 128;
 const maximumPosition = 2_147_483_647;
 const maximumUpsertMessageBytes = 8 * 1024;
 const maximumServerMessageBytes = 2 * 1024 * 1024;
@@ -262,7 +262,7 @@ export function decodePresenceServerMessage(
         "selfParticipantId",
         "participants",
       ]) || !Array.isArray(value.participants) ||
-      value.participants.length > maximumSnapshotParticipants
+      value.participants.length > MAX_PRESENCE_PARTICIPANTS
     ) {
       throw new Error("Presence snapshot message is invalid");
     }
@@ -329,6 +329,7 @@ export class CopresenceSession {
   #pending: PresencePublication | undefined;
   #frame: number | undefined;
   #snapshotReceived = false;
+  #participantIds = new Set<string>();
   #disposed = false;
   #failed = false;
   #socketClosed = false;
@@ -437,8 +438,23 @@ export class CopresenceSession {
         throw new Error("Presence message is too large");
       }
       if (message.type === "room.snapshot") {
+        this.#participantIds = new Set(
+          message.snapshot.participants.map((participant) =>
+            participant.participantId
+          ),
+        );
         this.#snapshotReceived = true;
         this.#schedule();
+      } else if (message.type === "participant.upsert") {
+        if (
+          !this.#participantIds.has(message.participant.participantId) &&
+          this.#participantIds.size >= MAX_PRESENCE_PARTICIPANTS
+        ) {
+          throw new Error("Presence room participant limit was exceeded");
+        }
+        this.#participantIds.add(message.participant.participantId);
+      } else {
+        this.#participantIds.delete(message.participantId);
       }
       this.#onMessage(message);
     } catch {

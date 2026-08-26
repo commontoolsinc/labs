@@ -107,6 +107,9 @@ export interface CodeMirrorPresenceState {
 /** Maximum Unicode code points shown in a remote participant label. */
 export const MAX_RENDERED_PRESENCE_NAME_LENGTH = 80;
 
+/** Maximum remote participant records retained by one editor. */
+export const MAX_PRESENCE_PARTICIPANTS = 128;
+
 /** Upsert input together with the receiver's current local overlay. */
 export interface CodeMirrorPresenceUpsert {
   /** Remote record expressed in its confirmed Memory coordinates. */
@@ -510,6 +513,12 @@ const presenceField = StateField.define<CodeMirrorPresenceState>({
           continue;
         }
         if (record.cursor.version < cursor.version) continue;
+        if (
+          existing === undefined &&
+          participants.size >= MAX_PRESENCE_PARTICIPANTS
+        ) {
+          continue;
+        }
         if (record.cursor.version > cursor.version) {
           participants.set(record.participantId, {
             latest: record,

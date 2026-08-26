@@ -442,6 +442,9 @@ export class CodeMirrorCollaborationController {
     }
     const version = snapshot.cursor?.version ?? 0;
     this.#ready = false;
+    // Invalidate observer state before any transaction can map ephemeral
+    // coordinates through a replacement from another operation epoch.
+    this.#notifySynchronization();
     // A document-changing transaction that installs the collab extension is
     // observed by CodeMirror as a local update before the new client ID facet
     // is available. Clear the old epoch and synchronize the document first,
@@ -535,9 +538,11 @@ export class CodeMirrorCollaborationController {
         return;
       }
 
-      if (this.#cursor === null) {
+      const previousCursor = this.#cursor;
+      const becameActive = previousCursor === null;
+      if (becameActive) {
         this.#cursor = { epoch: snapshot.cursor.epoch, version: 0 };
-      } else if (this.#cursor.epoch !== snapshot.cursor.epoch) {
+      } else if (previousCursor.epoch !== snapshot.cursor.epoch) {
         if (sendableUpdates(this.#view.state).length !== 0) {
           throw new CodeMirrorReconciliationError(
             this.#view.state.doc.toString(),
@@ -550,8 +555,12 @@ export class CodeMirrorCollaborationController {
         return;
       }
 
+      const activeCursor = this.#cursor;
+      if (activeCursor === null) {
+        throw new Error("Active CodeMirror snapshot has no operation cursor");
+      }
       const current = {
-        epoch: this.#cursor.epoch,
+        epoch: activeCursor.epoch,
         version: getSyncedVersion(this.#view.state),
       };
       if (snapshot.cursor.version < current.version) return;
@@ -565,6 +574,7 @@ export class CodeMirrorCollaborationController {
             "CodeMirror snapshot disagrees at the current operation cursor",
           );
         }
+        if (becameActive) this.#notifySynchronization();
         return;
       }
       const updates = codeMirrorIntegratedUpdates(snapshot, current);

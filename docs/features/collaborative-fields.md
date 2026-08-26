@@ -48,11 +48,12 @@ origins and use opaque high-entropy room identifiers, which limit accidental
 access but are not authorization.
 
 After a socket or protocol failure, the editor does not retry on a timer.
-Focus, selection, or user-edit activity, a browser `online` event, or the page
-becoming visible may start a new session. Invalid configuration is reported
-once and remains disabled until the room, participant name, or effective
-endpoint changes. These failures clear only ephemeral decorations and never
-make Memory collaboration read-only.
+A browser `online` event or the page becoming visible may start a new session.
+Editor focus, selection, and user-edit activity do not create repeated
+connection attempts while a service is unavailable. Invalid configuration is
+reported once and remains disabled until the room, participant name, or
+effective endpoint changes. These failures clear only ephemeral decorations
+and never make Memory collaboration read-only.
 
 ## Authority and lifecycle
 

@@ -1291,7 +1291,6 @@ export class CFCodeEditor extends BaseElement {
       transaction.annotation(Transaction.remote)
     );
     if (update.selectionSet && !isCellSync && !isRemote) {
-      this._retryPresenceFromSignal();
       this._publishPresence();
     }
     if (!update.docChanged || isCellSync) return;
@@ -1300,7 +1299,6 @@ export class CFCodeEditor extends BaseElement {
     if (!this.readonly && !isRemote) {
       if (this._collaboration?.active) {
         this._collaboration.localDocChanged();
-        this._retryPresenceFromSignal();
         this._publishPresence();
         this.emit("cf-change", {
           value,
@@ -2320,7 +2318,6 @@ export class CFCodeEditor extends BaseElement {
         focus: () => {
           this._cellController.onFocus();
           this.emit("cf-focus");
-          this._retryPresenceFromSignal();
           this._publishPresence();
           return false;
         },
