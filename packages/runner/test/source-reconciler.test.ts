@@ -6,6 +6,7 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import {
   type Cell,
   getPatternIdentityRef,
+  getPatternSetupIdentityRef,
   getPatternSource,
   getPieceSourceRevisions,
   resolveEntryIdentity,
@@ -332,6 +333,13 @@ describe("piece source reconciliation", () => {
 
       expect(await reconcile(piece)).toBe("updated");
       await runtime.idle();
+      // Staging belongs to the transaction that moves the pointer whether or
+      // not the piece is running, so the completion marker names the candidate
+      // and the watcher re-instantiates over a document already set up for it.
+      expect(getPatternSetupIdentityRef(piece)).toEqual({
+        identity: v2Identity,
+        symbol: SYMBOL,
+      });
       expect((await piece.pull())?.marker).toBe("v2");
     });
 
