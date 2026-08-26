@@ -558,12 +558,13 @@ Still unbuilt, and recorded in the plan: handlers materialize eagerly.
 - **Toggle via.** `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` environment variable
   (through the canonical env registry) or
   `RuntimeOptions.experimental.readerSchemaPrecedence`. The ambient control
-  point is `setReaderSchemaPrecedenceConfig` in
+  point is
   [`packages/runner/src/reader-schema-precedence-config.ts`](../../packages/runner/src/reader-schema-precedence-config.ts).
-  Runtime-local: the one `"client"`-authority flag in
-  `EXPERIMENTAL_FLAG_AUTHORITY` — it is not published at `/api/meta`, clients
-  do not adopt it from a server, and nothing about it is negotiated or carried
-  on the wire; each process resolves its own link crossings.
+  Server-authoritative in `EXPERIMENTAL_FLAG_AUTHORITY`: a server publishes
+  its resolved posture at `/api/meta` and a deployed client adopts it (an
+  explicit `EXPERIMENTAL_*` override still wins), because the server's
+  traversal decides what a subscription ships and both sides must resolve
+  hops under the same combine rule.
 - **Added by.** Robin McCollum, in #6338.
 - **Purpose.** Resolves the schema at a link crossing by reader precedence
   (`combineSchemaForLink` in
@@ -574,20 +575,31 @@ Still unbuilt, and recorded in the plan: handlers materialize eagerly.
   link routinely describes (and requires) more of its target than the reader
   asked for; under the legacy strict pseudo-intersection those extras widened
   what a read loaded and tracked, and a link-only `required` entry could void
-  the reader's narrower view. Spec:
+  the reader's narrower view. `default` is the exception that crosses the
+  precedence line: a value's default is inherited from the last crossed
+  schema that declares one. Spec:
   [`docs/specs/memory-v2/05-queries.md`](../specs/memory-v2/05-queries.md)
   §5.3.4.
 - **Current default and planned end state.** On by default; an explicit
   `false` restores the strict pseudo-intersection (`combineSchema`) at link
-  crossings as a rollback override. The flag gates only the combine rule: the
-  cfc relevance marking off the link schema (`schemaHasIfc` in
-  `validateAndTransform`) is unconditional in both arms.
-- **Status on 2026-08-26.** Landed on by default in #6338; the rollback arm is
-  covered by a unit test in `packages/runner/test/combine-schema.test.ts`.
+  crossings as a rollback override. The rollback is an OWNED process-global
+  claim mirroring the server-execution enabler's lifecycle: each
+  rollback-holding Runtime acquires a disabler released on dispose (or by a
+  throwing construction), a co-hosted default-arm runtime's dispose cannot
+  lift a live claim, and an explicit `true` beside a live claim is a
+  conflict the rollback wins, with a warning. The flag gates only the
+  combine rule: the cfc relevance marking off link schemas (`schemaHasIfc`
+  at the read entry point and at traversal hops) is unconditional in both
+  arms.
+- **Status on 2026-08-26.** Landed on by default in #6338; the rollback arm,
+  the claim lifecycle (co-hosted dispose, throwing construction, conflict),
+  and the default inheritance are covered by unit tests in
+  `packages/runner/test/combine-schema.test.ts` and
+  `packages/runner/test/experimental-options.test.ts`.
 - **Path to removal.** Soak the default; then remove the env mapping, the
-  runtime option, the ambient config module, the rollback branch in
-  `combineSchemaForLink` and its unit test, and the combine-mode bit in the
-  link-hop selector memo key.
+  runtime option and its authority entry, the ambient config module and
+  claim lifecycle, the rollback branch in `combineSchemaForLink` and its
+  unit tests, and the combine-mode bit in the link-hop selector memo key.
 
 ## Category 2: Contextual Flow Control enforcement rollout dials
 

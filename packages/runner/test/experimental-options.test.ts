@@ -351,3 +351,81 @@ describe("serverExecution ambient-flag ownership", () => {
     await sm.close();
   });
 });
+
+// ---------------------------------------------------------------------------
+// The readerSchemaPrecedence rollback-claim OWNERSHIP family, mirroring the
+// serverExecution one above: the rollback is a process-global claim, so its
+// lifecycle must survive co-hosted construction/dispose and construction
+// failures without being stomped or leaked.
+// ---------------------------------------------------------------------------
+
+describe("readerSchemaPrecedence ambient-flag ownership", () => {
+  afterEach(() => {
+    resetModernCellRepConfig();
+    resetCommitPreconditionsConfig();
+    resetServerExecutionConfig();
+    resetReaderSchemaPrecedenceConfig();
+  });
+
+  it("a co-hosted default runtime's dispose must not lift a live rollback claim", async () => {
+    const smHolder = StorageManager.emulate({ as: signer });
+    const holder = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: smHolder,
+      experimental: { readerSchemaPrecedence: false },
+    });
+    expect(getReaderSchemaPrecedenceConfig()).toBe(false);
+
+    const smDefault = StorageManager.emulate({ as: signer });
+    const plain = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: smDefault,
+    });
+    await plain.dispose();
+    await smDefault.close();
+    // The rollback-holding runtime survives its neighbor's dispose.
+    expect(getReaderSchemaPrecedenceConfig()).toBe(false);
+
+    await holder.dispose();
+    await smHolder.close();
+    expect(getReaderSchemaPrecedenceConfig()).toBe(true);
+  });
+
+  it("a THROWING construction releases its rollback claim", async () => {
+    const smBad = StorageManager.emulate({ as: signer });
+    expect(() =>
+      new Runtime({
+        apiUrl: "::not a url::" as never,
+        storageManager: smBad,
+        experimental: { readerSchemaPrecedence: false },
+      })
+    ).toThrow();
+    expect(getReaderSchemaPrecedenceConfig()).toBe(true);
+    await smBad.close();
+  });
+
+  it("an explicit true beside a live rollback claim reads back the effective false", async () => {
+    const smHolder = StorageManager.emulate({ as: signer });
+    const holder = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: smHolder,
+      experimental: { readerSchemaPrecedence: false },
+    });
+
+    const smWants = StorageManager.emulate({ as: signer });
+    const wantsPrecedence = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: smWants,
+      experimental: { readerSchemaPrecedence: true },
+    });
+    // The rollback wins the conflict; the read-back says what is in effect.
+    expect(wantsPrecedence.experimental.readerSchemaPrecedence).toBe(false);
+    expect(getReaderSchemaPrecedenceConfig()).toBe(false);
+
+    await wantsPrecedence.dispose();
+    await smWants.close();
+    await holder.dispose();
+    await smHolder.close();
+    expect(getReaderSchemaPrecedenceConfig()).toBe(true);
+  });
+});

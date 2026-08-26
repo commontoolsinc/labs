@@ -527,7 +527,8 @@ any document-level caching.
 
 - **Link identity**: `areNormalizedLinksSame` and `addressKey` exclude
   schema today and continue to.
-- **Schema semantics**: combination (pseudo-intersection), narrowing,
+- **Schema semantics**: combination (reader precedence at link hops,
+  pseudo-intersection for compound branches), narrowing,
   `additionalProperties` handling, and the CFC `ifc` vocabulary operate on
   the dereferenced schema and behave identically. `ifc` annotations are
   ordinary schema content, covered by the hash.

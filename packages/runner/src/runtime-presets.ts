@@ -309,13 +309,13 @@ export type ExperimentalFlagAuthority = "server" | "client";
  * on this?" is a decision on record rather than whatever the default happened
  * to be.
  *
- * Nearly every flag is server-authoritative. That is the safe direction
- * rather than a coincidence — each one is visible in what gets written (the
- * link and entity-id encodings, receipt contents, schema references), in what
- * the server admits (commit preconditions, per-class admission), or in which
- * side runs the compute at all. `readerSchemaPrecedence` is the one
- * `"client"` flag: it gates a read-side rule with nothing written or
- * admitted differently.
+ * Every flag is server-authoritative today. That is the safe direction rather
+ * than a coincidence — each one is visible in what gets written (the link and
+ * entity-id encodings, receipt contents, schema references), in what the
+ * server admits (commit preconditions, per-class admission), in which side
+ * runs the compute at all, or in which documents a subscription ships.
+ * `"client"` is here for the flag that gates a purely local experiment;
+ * nothing qualifies yet.
  */
 export const EXPERIMENTAL_FLAG_AUTHORITY = {
   // Link serialization: the two encodings are a hard mismatch, which the
@@ -344,11 +344,12 @@ export const EXPERIMENTAL_FLAG_AUTHORITY = {
   lazyMaterialization: "server",
   // The whole point of the flag is which side computes what is stored.
   serverExecution: "server",
-  // Read-side only: the combine rule at a link crossing shapes what a
-  // process's own reads select, and nothing written, admitted, or negotiated
-  // differs between the arms. Each process resolves its own hops; a mixed
-  // fleet reads the same stored data either way.
-  readerSchemaPrecedence: "client",
+  // The server's traversal decides what a subscription loads, tracks, and
+  // ships; a client resolving hops under the other combine rule expects
+  // documents the server did not send (or ignores ones it did). The arms
+  // read the same stored data, so adoption is safe either way — but both
+  // sides must run the same one.
+  readerSchemaPrecedence: "server",
 } as const satisfies Record<
   keyof ExperimentalOptions,
   ExperimentalFlagAuthority

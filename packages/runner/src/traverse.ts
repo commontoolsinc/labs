@@ -3004,8 +3004,8 @@ export function combineSchemaForLink(
   // The `readerSchemaPrecedence` experimental flag
   // (docs/development/EXPERIMENTAL_OPTIONS.md) is the rollback override:
   // off restores the strict pseudo-intersection at link crossings. The
-  // flag is runtime-local — each process resolves its own hops; nothing
-  // is negotiated or carried on the wire.
+  // flag is server-authoritative — deployed clients adopt the server's
+  // published posture, so both sides resolve hops under one rule.
   if (!getReaderSchemaPrecedenceConfig()) {
     return combineSchema(parentSchema, linkSchema);
   }

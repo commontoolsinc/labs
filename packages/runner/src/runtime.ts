@@ -26,9 +26,8 @@ import {
   setContentAddressedSchemasConfig,
 } from "./schema-doc-config.ts";
 import {
+  acquireReaderSchemaPrecedenceDisabler,
   getReaderSchemaPrecedenceConfig,
-  resetReaderSchemaPrecedenceConfig,
-  setReaderSchemaPrecedenceConfig,
 } from "./reader-schema-precedence-config.ts";
 import { StaticCache } from "@commonfabric/static";
 import {
@@ -274,10 +273,11 @@ export interface ExperimentalOptions {
    * Resolve the schema at a link crossing by reader precedence
    * (`combineSchemaForLink`): the reader's schema stands as-is, and the
    * link's schema is adopted only where the reader is agnostic (true or
-   * empty; a false reader stays false). Runtime-local — nothing is
-   * negotiated or carried on the wire. On by default; pass `false` as a
-   * temporary rollback override to the legacy strict pseudo-intersection
-   * at hops.
+   * empty; a false reader stays false). Server-authoritative: a deployed
+   * client adopts the posture the server publishes at `/api/meta`, since
+   * both sides must resolve hops under the same rule. On by default; an
+   * explicit `false` is a temporary rollback override held as an owned
+   * process-global claim (released on dispose, exception-safe).
    */
   readerSchemaPrecedence?: boolean | undefined;
 
@@ -967,6 +967,7 @@ export class Runtime {
   // `derived` for every other owner's in-flight wave commit (the
   // admission plane reads the ambient value).
   #serverExecutionRelease: (() => void) | undefined;
+  #readerSchemaPrecedenceRelease: (() => void) | undefined;
 
   /** Serving posture (RuntimeOptions.servingPosture): true only for the
    * SpaceServer's own runtime. Gates the Phase-2 speculation-overlay
@@ -1331,7 +1332,27 @@ export class Runtime {
     );
     this.experimental.contentAddressedSchemas =
       getContentAddressedSchemasConfig();
-    setReaderSchemaPrecedenceConfig(this.experimental.readerSchemaPrecedence);
+    // The rollback is an OWNED process-global claim, not a stomped boolean
+    // (mirroring the server-execution enabler): an explicit `false` acquires
+    // a disabler released on dispose — or by a throwing construction — a
+    // default-arm runtime touches nothing, and an explicit `true` beside a
+    // live disabler is a conflict the rollback wins, warned below, because
+    // the combine is process-global and the conservative arm must not be
+    // un-claimed mid-flight. The read-back reflects what is actually in
+    // effect for this process.
+    if (this.experimental.readerSchemaPrecedence === false) {
+      this.#readerSchemaPrecedenceRelease =
+        acquireReaderSchemaPrecedenceDisabler();
+    } else if (
+      this.experimental.readerSchemaPrecedence === true &&
+      !getReaderSchemaPrecedenceConfig()
+    ) {
+      console.warn(
+        "[runtime] readerSchemaPrecedence: true requested while a co-hosted " +
+          "runtime holds the rollback; the strict combine stays in effect " +
+          "process-wide until that claim releases.",
+      );
+    }
     this.experimental.readerSchemaPrecedence =
       getReaderSchemaPrecedenceConfig();
     // The sync schema table stays negotiated under this flag: the two
@@ -1540,6 +1561,7 @@ export class Runtime {
       this.defaultFrame = pushFrame({ runtime: this });
     } catch (error) {
       this.#releaseServerExecutionEnabler();
+      this.#releaseReaderSchemaPrecedenceDisabler();
       throw error;
     }
   }
@@ -1832,6 +1854,7 @@ export class Runtime {
       // Exception-safe: a rejecting teardown step must not leak the
       // process-global enabler (the reset would then never fire).
       this.#releaseServerExecutionEnabler();
+      this.#releaseReaderSchemaPrecedenceDisabler();
     }
 
     // Clear the current runtime reference
@@ -1955,8 +1978,16 @@ export class Runtime {
       // catch), so a REJECTING async teardown cannot leak the enabler.
       resetModernCellRepConfig();
       resetCommitPreconditionsConfig();
-      resetReaderSchemaPrecedenceConfig();
     }
+  }
+
+  /** Release this runtime's reader-schema-precedence rollback claim
+   * (idempotent — the handle guards re-entry; dispose() may run twice,
+   * and the constructor catch also calls this). */
+  #releaseReaderSchemaPrecedenceDisabler(): void {
+    const release = this.#readerSchemaPrecedenceRelease;
+    this.#readerSchemaPrecedenceRelease = undefined;
+    release?.();
   }
 
   /** Release this runtime's server-execution enabler (idempotent — the
