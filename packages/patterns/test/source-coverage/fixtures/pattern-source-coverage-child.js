@@ -3,10 +3,12 @@
 // measure.
 
 import {
+  clearFetchJsonResult,
   clearGenerateTextResult,
   clearWishResults,
   findEventHandlers,
   NAME,
+  setFetchJsonResult,
   setGenerateTextResult,
   setWishResult,
   textContent,
@@ -269,6 +271,60 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
       ),
       "extractor omits OCR error text when no OCR error is present",
     );
+    clearGenerateTextResult();
+
+    const { default: GithubActivity } = await import(
+      "../../../../connectors/github/activity-view/main.tsx"
+    );
+    setFetchJsonResult([
+      {
+        sha: "abc123",
+        html_url: "https://github.com/acme/project/commit/abc123",
+        commit: {
+          message: "Ship connector tests\n\nMore detail",
+          author: { name: "Ada", date: "2026-08-26T00:00:00.000Z" },
+        },
+      },
+    ]);
+    setGenerateTextResult({
+      pending: false,
+      result: "Connector coverage improved.",
+      error: undefined,
+    });
+    const githubActivity = instantiatePattern(GithubActivity, {
+      repoUrl: new Writable("https://github.com/acme/project"),
+    });
+    assert(
+      githubActivity[NAME] === "GitHub Activity: acme/project",
+      "GitHub activity names the parsed repository",
+    );
+    assert(
+      textContent(uiOf(githubActivity)).includes("Ship connector tests") &&
+        textContent(uiOf(githubActivity)).includes(
+          "Connector coverage improved.",
+        ),
+      "GitHub activity renders commit and summary details",
+    );
+
+    setFetchJsonResult([]);
+    setGenerateTextResult({
+      pending: true,
+      result: undefined,
+      error: undefined,
+    });
+    const pendingGithubActivity = instantiatePattern(GithubActivity, {
+      repoUrl: new Writable("not a GitHub URL"),
+    });
+    assert(
+      pendingGithubActivity[NAME] === "GitHub Activity: GitHub Activity",
+      "GitHub activity falls back for an invalid repository URL",
+    );
+    assert(
+      textContent(uiOf(pendingGithubActivity)).includes("Generating summary") &&
+        textContent(uiOf(pendingGithubActivity)).includes("No commits found"),
+      "GitHub activity renders pending and empty states",
+    );
+    clearFetchJsonResult();
     clearGenerateTextResult();
   });
 }

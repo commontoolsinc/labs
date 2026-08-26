@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { dirname, fromFileUrl, join } from "@std/path";
 import { acceptedBreakKey } from "./pattern-compat-lib.ts";
-import { PATTERNS_DIR } from "./pattern-files.ts";
+import { patternPath, PATTERNS_DIR } from "./pattern-files.ts";
 import { ACCEPTED_CONTRACT_BREAKS } from "./pattern-compat-accepted-breaks.ts";
 
 const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
@@ -28,7 +28,7 @@ describe("pattern-compat-accepted-breaks", () => {
     it("names a pattern file that exists for every entry", async () => {
       for (const accepted of ACCEPTED_CONTRACT_BREAKS) {
         expect(
-          await exists(join(REPO_ROOT, PATTERNS_DIR, accepted.pattern)),
+          await exists(join(REPO_ROOT, patternPath(accepted.pattern))),
           `${accepted.pattern} does not exist`,
         ).toBe(true);
       }
