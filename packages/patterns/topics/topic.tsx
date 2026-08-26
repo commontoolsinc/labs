@@ -660,11 +660,8 @@ export const rejectMutation = (verb: string, reason: string): never => {
  * explicitly because they share the authenticated principal's identity key. */
 export const topicAuthorLabel = (
   author: TopicAuthor | undefined,
-  legacyName: string | undefined = "",
 ): string => {
-  const name = (author?.name ?? "").trim() ||
-    (legacyName ?? "").trim() ||
-    "someone";
+  const name = (author?.name ?? "").trim() || "someone";
   return author?.kind === "agent" ? `${name} (agent)` : name;
 };
 

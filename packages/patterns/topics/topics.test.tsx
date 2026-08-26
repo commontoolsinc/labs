@@ -589,10 +589,10 @@ export default pattern(() => {
     isSafeLinkUrl("HTTP://EXAMPLE.COM") === true &&
     isSafeLinkUrl("javascript:alert(1)") === false &&
     isSafeLinkUrl("   ") === false &&
-    topicAuthorLabel(
-        { kind: "person", name: "" },
-        "Legacy Person",
-      ) === "Legacy Person"
+    // An author with no name reads as "someone" rather than as blank; the
+    // legacy display name that used to stand in here is retired.
+    topicAuthorLabel({ kind: "person", name: "" }) === "someone" &&
+    topicAuthorLabel({ kind: "agent", name: "Sol" }) === "Sol (agent)"
   );
 
   // --- index: the board's bounded discovery surface ---
