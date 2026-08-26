@@ -405,8 +405,12 @@ a `//` block; see [Section markers](#section-markers) above.
 
 ### The blank line above
 
-A blank line goes above every doc comment. It is what separates a documented
-declaration from whatever precedes it, and it holds uniformly: a function after
+A doc comment takes a blank line above it, except where it is the first thing
+in its file or bracketed block, and except in the two constructs `deno fmt`
+will not keep one in.
+
+That blank line is what separates a documented declaration from whatever
+precedes it, and within those bounds it holds uniformly: a function after
 another function, an interface property after another property, an array
 element after another element.
 
@@ -440,11 +444,10 @@ export interface Donut {
 }
 ```
 
-Past that first position the rule reaches as far as `deno fmt` will let it,
-which is everywhere but two constructs. The formatter removes a blank line
-between two items of a parenthesized list, and between two arms of a union or
-intersection type. A documented parameter list, argument list, or union
-therefore runs unbroken:
+Two constructs are exempt because the formatter overrules the rule there.
+`deno fmt` removes a blank line between two items of a parenthesized list, and
+between two arms of a union or intersection type, so a documented parameter
+list, argument list, or union runs unbroken:
 
 ```ts
 // Shown at module scope.
