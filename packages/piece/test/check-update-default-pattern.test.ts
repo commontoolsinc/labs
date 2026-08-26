@@ -2648,6 +2648,28 @@ describe("opening a space root", () => {
     ).toBe(false);
   });
 
+  it("falls back to the system source when the home space cannot be read", async () => {
+    await setup();
+    // Reading the configured source is a convenience, not a precondition. A
+    // home space this session cannot reach yields no configured value, and
+    // the root is created from the source this deployment serves.
+    const original = runtime.getHomeSpaceCell.bind(runtime);
+    runtime.getHomeSpaceCell = () => {
+      throw new Error("the home space is not reachable");
+    };
+    try {
+      await controller.recreateDefaultPattern();
+    } finally {
+      runtime.getHomeSpaceCell = original;
+    }
+
+    const root = (await controller.getDefaultPattern(false))!;
+    expect(getPatternSource(root)).toBe(DEFAULT_APP_PATTERN_SOURCE);
+    expect(getPatternIdentityRef(root)?.identity).toBe(
+      await identityForSource(SOURCE_V1),
+    );
+  });
+
   it("ignores a configured defaultAppUrl that is not a string", async () => {
     await setup();
     await configureDefaultAppUrl(42);
