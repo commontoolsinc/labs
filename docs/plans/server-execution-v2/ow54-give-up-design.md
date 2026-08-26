@@ -68,9 +68,11 @@ Every acceptable option must preserve all of these:
    give-up budget.
 6. **No string-based policy.** Failure class is typed at the producer; error
    text is diagnostic, not a control channel.
-7. **No new operation timeout.** The budget changes disposition after an
-   observed failure. It does not cancel a still-running load or turn a slow but
-   eventually successful operation into a failure.
+7. **Explicit policy exception, no operation cancellation.** A failed-state
+   budget is an upper bound on eventual automatic delivery and therefore needs
+   an explicit owner exception to this repository's no-timeout rule. It changes
+   disposition only after an observed failure and never cancels a still-running
+   load. At budget expiry, current recovery state is checked before sealing.
 8. **Settlement is not failure.** Dirty-input recomputation, continuation
    waves, and pending foreign replica loads spend no delivery-failure budget.
 9. **OFF is unchanged.** The design applies only to durable served entries.
@@ -80,11 +82,11 @@ Every acceptable option must preserve all of these:
 
 | Question | Options | Recommendation, pending owner ruling |
 | --- | --- | --- |
-| Give-up predicate | attempt count; elapsed age; class-specific count/age; explicit health signal; hybrid class + cumulative failed-state time + health wake | **Hybrid.** Persist cumulative time in confirmed failure episodes, classify the failure, pause while typed recovery or ordinary dependency settlement progresses, and terminalize at a failed-state budget. Counts are observability only. |
+| Give-up predicate | attempt count; elapsed age; class-specific count/age; explicit health signal; hybrid class + cumulative failed-state time + health wake | **Hybrid.** Persist cumulative time in confirmed failure episodes, classify the failure, pause after a positive recovery signal while its retry and dependency settlement progress, and terminalize at a failed-state budget. Waiting for a recovery signal remains failed time. This upper bound requires an explicit owner exception to the no-timeout rule; counts are observability only. |
 | Cross-space settlement | latest committed foreign value; explicit target-side demand and coverage | **Explicit freshness obligation when freshness is part of handler correctness.** Spaces still settle independently; waiting or continuation is not a delivery failure. This is an adjacent currentness design, not an OW54 timeout. |
 | Terminal disposition | reuse `dropped`; reuse `error`; use only an entry-local `needs-attention` notice; pair the entry notice with a per-space unresolved-attention index | **New entry-local `needs-attention` terminal kind plus a derived per-space index.** The entry is authoritative; the index makes unresolved notices discoverable after a fresh client process. |
 | Ordering release | never step over; release only the affected stream; release the space after the notice commits | **Release the space after durable cover.** The notice occupies the failed event's arrival position; later outcomes may commit in the same or a later wave, never without it. |
-| Re-arm | automatically reopen the same entry on ACL/session change; explicit retry with a new event ID; terminal means no retry | **Explicit retry with a new event ID and `retryOf`.** The original stays terminal; current client authority is revalidated and exactly-once remains per event ID. |
+| Re-arm | automatically reopen the same entry on ACL/session change; explicit retry with a new event ID; terminal means no retry | **Explicit retry with a new event ID and `retryOf`, atomically CASed with resolution.** The original stays terminal; current client authority is revalidated, concurrent/replayed requests return the one recorded retry ID, and exactly-once remains per event ID. |
 | Commit-preparation crash | keep immediate error; leave unconsequenced; classify and budget with load failure | **Classify and budget.** Deterministic CFC policy refusals remain immediate errors; an actual preparation crash gets the same bounded `needs-attention` destination as dispatch failure. |
 | Observability | per-attempt warnings only; counters only; transition logs + counters + client outcome | **All three surfaces, transition-oriented.** Keep work counters, add precise terminal/seal counters, rate-limit repeat logs, and add a structured client outcome. |
 
@@ -116,6 +118,9 @@ single ceiling.
 
 - Stable across retry cadence, remounts, and process restart.
 - Directly bounds how long the user's action blocks the stream.
+- Is a timeout-like upper bound on eventual automatic success and conflicts
+  with the repository's ordinary no-timeout posture unless the owner explicitly
+  approves this narrow terminal-disposition exception.
 - Treats a known self-healing revocation and an unknown slow backend failure
   alike.
 - Charges ordinary recovery work after the failed boundary has healed. A
@@ -175,6 +180,7 @@ type DeliveryDeferral = {
   firstFailureAt: number;
   lastFailureAt: number;
   accumulatedFailureMs: number;
+  failureCount: number;
   activeFailureStartedAt?: number;
   state: "failed" | "recovering";
   recoveryEpoch?: string;
@@ -184,8 +190,9 @@ type DeliveryDeferral = {
 The checkpoint is not a consequence: it does not set `consequenced`, appear in
 `consequenceOf`, or advance the watermark. It changes only on a failure or
 recovery transition, including when a more specific failure class becomes
-known. Per-attempt counts stay in stats rather than producing a durable write
-every 250 ms.
+known. `failureCount` increments only on a typed failed-head observation, which
+already causes a checkpoint transition; scheduler-attempt counts stay in stats
+rather than producing a durable write every 250 ms.
 
 The proposed policy is:
 
@@ -195,11 +202,18 @@ The proposed policy is:
   retry on that event, not every backstop tick;
 - `timeout`, `unknown`, and `commit-preparation` receive one clean reattempt,
   then retry only on a relevant input/runtime change;
-- an actual typed failure starts or resumes an active failure episode;
-- a typed positive recovery signal for that same boundary closes the episode,
-  adds its duration to `accumulatedFailureMs`, and wakes one retry; ordinary
-  dirty-input settlement and pending replica loads are `recovering`, not
-  `failed`;
+- an actual typed failure enters `failed` and starts or resumes an active
+  failure episode. Waiting for the next recovery signal, including a long
+  remount, reconnect, backoff, or relevant-input wait, remains `failed` and
+  spends budget because the system has no positive evidence of progress;
+- a typed positive recovery signal for that same boundary closes the active
+  episode, adds its duration to `accumulatedFailureMs`, enters `recovering`, and
+  wakes exactly one retry. That retry and the dirty-input, continuation-wave,
+  and pending-replica-load settlement it starts remain `recovering` and spend no
+  budget;
+- if the recovery attempt returns a typed failure, the checkpoint re-enters
+  `failed` at that observation and starts a new episode; a scheduled retry
+  backoff by itself is not positive recovery evidence;
 - recovery, remount, failure-class change, and scheduler attempts never erase
   accumulated failed-state time; only a committed handler consequence or
   terminal notice clears the checkpoint; and
@@ -211,8 +225,13 @@ For the last comparison, spent budget is
 `accumulatedFailureMs + (now - activeFailureStartedAt)` while `state` is
 `failed`, and only `accumulatedFailureMs` while `recovering`. Entering `failed`
 schedules one policy wake at the remaining budget boundary. That wake evaluates
-terminal disposition; it does not cancel or time out a storage operation and is
-not a retry cadence.
+current typed recovery state before terminal disposition: a changed recovery
+epoch or other positive signal enters `recovering` and receives its one retry;
+only an unchanged active failure may seal. Activation after restart or lease
+handoff performs the same recovery-state comparison before evaluating the
+budget. The wake does not cancel a storage operation and is not a retry cadence,
+but the terminal upper bound is still the explicit timeout-policy exception in
+OQ-2.
 
 The draft value is **60 seconds of confirmed failed-state time**, deliberately
 much longer than the current roughly two-second cold-view creation-race window.
@@ -287,8 +306,10 @@ charge it against the delivery-failure budget.
 ### 4.3 Predicate owner questions
 
 - **OQ-1:** Ratify the hybrid predicate, or choose A–D.
-- **OQ-2:** Ratify the recommended 60-second cumulative failed-state budget,
-  choose a different value, or make it deployment-configured.
+- **OQ-2:** Ratify the recommended 60-second cumulative failed-state budget as
+  an explicit narrow exception to the repository's no-timeout rule, choose a
+  different value, choose deployment configuration, or reject automatic
+  time-based terminalization.
 - **OQ-3:** Ratify the immediate-terminal classes
   (`authorization`/`protocol`) and the initial recoverable class set.
 - **OQ-4:** Is a persisted server wall-clock time acceptable across lease
@@ -352,10 +373,17 @@ type NeedsAttentionTerminalCover = {
     firstFailureAt: number,
     lastFailureAt: number,
     accumulatedFailureMs: number,
+    failureCount: number,
     recovery: "explicit-retry"
   }
 };
 ```
+
+`attention` above is the authoritative client-safe field set. `failureCount`
+counts typed failed-head observations only, never arrival-barrier followers.
+The runtime-client outcome carries this same object without dropping fields;
+the unresolved-attention index remains a deliberately smaller discovery hint
+whose entry reference resolves to the authoritative cover.
 
 The notice commit names the event in `consequenceOf` and advances the stream
 watermark. Raw payload, credentials, cross-space document keys, and raw backend
@@ -398,7 +426,8 @@ for discovery; a product-wide inbox may later project from it.
   separate authoritative attention document.
 - **OQ-8:** Ratify the client-safe field set. Recommendation: stable phase,
   class, code, first/last failure times, accumulated failed-state time, count,
-  and recovery mode; raw keys and raw error text stay server-side.
+  and recovery mode in both the terminal cover and runtime-client outcome; raw
+  keys and raw error text stay server-side.
 - **OQ-9:** Does explicit dismissal count as recovery, or may an unresolved
   notice be cleared only by a retry? Recommendation: support both, recording
   `dismissed` or the new retry event ID as the resolution.
@@ -468,16 +497,27 @@ still pending; they never reopen a terminal ID.
 
 #### B. Explicit retry creates a new event ID
 
-The current client explicitly requests retry. The runtime copies the original
-stream and captured payload into a new entry, authenticates it as the current
-client, and writes `retryOf: <originalEventId>` for audit. The original remains
-terminal. Exactly-once remains ordinary: each ID can consequence once, and the
-relation does not alter dedupe.
+The current client sends an authenticated recovery request. The serving
+recovery path copies the original stream and captured payload into a new entry,
+authenticates it under the requesting client's current authority, and writes
+`retryOf: <originalEventId>` for audit. The original remains terminal.
 
-The original notice records `resolution: { kind: "retried", eventId }` only
-after the retry append is durable. A dismissal records
-`resolution: { kind: "dismissed" }`. Resolution permits later compaction; it
-does not rewrite the original outcome.
+Retry is one same-space atomic transaction with a compare-and-swap precondition
+that the authoritative original notice is still unresolved. The winning
+transaction appends exactly one fresh retry event ID, records
+`resolution: { kind: "retried", eventId }` on the original, and removes the
+unresolved-attention index item. A concurrent request that loses the CAS appends
+nothing and returns the already-recorded resolution. A replay after a lost
+response likewise returns that same retry event ID instead of minting another.
+Exactly-once remains ordinary: each ID can consequence once, while the atomic
+resolution guarantees at most one retry ID per terminal original.
+
+Dismiss uses the same CAS, writing `resolution: { kind: "dismissed" }` and
+removing the index item without an append. A Retry/Dismiss race therefore has
+one winner and no half-resolved state. Resolution permits later compaction; it
+does not rewrite the original terminal outcome. Clients cannot write processing
+fields directly—the authenticated recovery request reaches the serving path
+that owns the resolution field and performs the atomic transaction.
 
 **Recommendation: choose B.**
 
@@ -517,8 +557,9 @@ subcase.
 
 ### 7.3 Re-arm and preparation owner questions
 
-- **OQ-12:** Ratify explicit retry as a new event ID with `retryOf`, and reject
-  automatic reopening of a terminal event ID.
+- **OQ-12:** Ratify explicit retry as one new event ID with `retryOf`, created in
+  the same CAS transaction that resolves the original and removes its index
+  item; reject automatic reopening and non-atomic append-then-resolution.
 - **OQ-13:** Must retry copy the exact original payload, or may the client edit
   it? Recommendation: exact copy for “Retry”; an edited action is a new action
   without `retryOf`.
@@ -595,13 +636,19 @@ type NeedsAttentionClientOutcome = {
     failureClass: DeliveryFailureClass;
     code: "delivery-failure-budget-exhausted" |
       "permanent-delivery-failure";
+    firstFailureAt: number;
+    lastFailureAt: number;
     accumulatedFailureMs: number;
+    failureCount: number;
+    recovery: "explicit-retry";
   };
 };
 ```
 
 It retires the speculative echo exactly as drop/error does, but also exposes
-Retry and Dismiss. The signal must cross the runtime-client boundary and reach
+Retry and Dismiss. Its `attention` value is byte-for-byte the authoritative
+client-safe object in §5.1.C; the runtime-client boundary does not project away
+fields. The signal must cross the runtime-client boundary and reach
 a persistent shell surface; an internal callback with no production consumer
 does not satisfy “visible”. An in-process reconnect rediscovers the retained
 entry through the restored stream watch; a fresh process discovers unresolved
@@ -646,21 +693,29 @@ until §10 is resolved.
 > `dropped`. The first actual failure of that event records a processing-side
 > delivery-deferral checkpoint on its stream entry. The checkpoint accumulates
 > only intervals in which a typed delivery failure remains active. A typed
-> positive recovery signal closes the active interval and wakes one retry;
-> dirty-input recomputation, ordinary wave continuation, and an in-flight
-> replica load are settlement, not failure, and spend no budget. Recovery,
-> remount, failure-class change, and scheduler attempts do not erase accumulated
-> failed-state time. Only a committed handler consequence or terminal notice
-> clears the checkpoint. An event held only behind an earlier arrival records no
-> checkpoint and spends no budget.
+> failure remains active, and spends budget, while the system waits without
+> positive recovery evidence—including during remount, reconnect, backoff, or a
+> relevant-input wait. A typed positive recovery signal closes that active
+> interval, enters recovery, and wakes one retry. That retry's dirty-input
+> recomputation, ordinary wave continuation, and in-flight replica loads are
+> settlement, not failure, and spend no budget. A typed failure from the retry
+> starts a new active failure interval. Recovery, failure-class change, and
+> scheduler attempts do not erase accumulated failed-state time. Only a
+> committed handler consequence or terminal notice clears the checkpoint. An
+> event held only behind an earlier arrival records no checkpoint and spends no
+> budget.
 >
 > **DRAFT — pending owner ruling.** A typed permanent authorization or protocol
 > failure seals immediately. Every other covered failure retries when its typed
 > recovery signal changes and may receive one clean reattempt, but seals when
 > `accumulatedFailureMs` reaches `MAX_EVENT_DELIVERY_FAILURE_BUDGET` (DRAFT
 > value: 60 seconds). Attempt counts are observations, never the terminal
-> predicate. The budget does not cancel an in-flight operation and is evaluated
-> only while the system holds an observed failure verdict.
+> predicate. On a budget wake, activation, restart, or lease handoff, the server
+> evaluates current typed recovery state before the budget: a new positive
+> signal receives its recovery retry; only an unchanged active failure may seal.
+> The budget does not cancel an in-flight operation, but its upper bound on
+> eventual automatic delivery is an explicit owner-approved exception to the
+> repository's no-timeout rule.
 >
 > **DRAFT — pending owner ruling. Cross-space settlement.** Event preflight
 > makes the handler's home-scheduler read closure current before dispatch. A
@@ -677,9 +732,10 @@ until §10 is resolved.
 > is `{ consequenced: true, status: "needs-attention", reason, attention }` on
 > the event's own stream entry. `attention` carries a stable phase, failure
 > class, reason code, first/last failure times, and
-> accumulated failed-state time plus `recovery: "explicit-retry"`; it carries no
-> payload, credentials, cross-space document keys, or raw backend error. The
-> commit writes the notice as that event's consequence, names the event in
+> accumulated failed-state time, typed failed-head count, and
+> `recovery: "explicit-retry"`; it carries no payload, credentials, cross-space
+> document keys, or raw backend error. The commit writes the notice as that
+> event's consequence, names the event in
 > `consequenceOf`, and advances `eventWatermark` past it. `needs-attention` is a
 > terminal kind beside T3 `dropped`, not a widening of T3 and not a claim that
 > the handler ran.
@@ -689,13 +745,17 @@ until §10 is resolved.
 > wave adds its reference and safe summary to the well-known per-space
 > unresolved-attention index; that index is for discovery and the entry remains
 > authoritative. The client retires the speculative echo, emits a structured
-> `needs-attention` outcome, and offers Retry and Dismiss. Retry appends the same
-> captured stream and payload under the client's current authority with a new
-> `eventId` and `retryOf: <originalEventId>`; the original entry remains
-> terminal and records the new ID as its resolution after that append is
-> durable. Dismiss records a dismissed resolution. Resolution atomically
-> removes the index item, and a resolved entry may compact under the ordinary
-> watermark rule. Neither action reopens the original event ID.
+> `needs-attention` outcome carrying that same complete client-safe `attention`
+> object, and offers Retry and Dismiss. An authenticated Retry is one atomic
+> same-space transaction: compare-and-swap the original from unresolved,
+> append the same captured stream and payload under the client's current
+> authority with one new `eventId` and `retryOf: <originalEventId>`, record that
+> ID as the original's resolution, and remove the index item. A concurrent or
+> replayed request that loses the CAS appends nothing and returns the recorded
+> retry ID. Dismiss atomically CASes the unresolved original to a dismissed
+> resolution and removes the index item without an append. A resolved entry may
+> compact under the ordinary watermark rule. Neither action reopens the original
+> event ID, and clients never write processing fields directly.
 >
 > **DRAFT — pending owner ruling. Commit preparation.** A deterministic CFC
 > policy verdict remains an immediate error consequence. A typed crash while
@@ -734,17 +794,21 @@ until §10 is resolved.
 >
 > **DRAFT — pending owner ruling. Proposed close.** Distinguish an actually
 > failing head from arrival-barrier followers; persist cumulative time in typed
-> failed-state episodes; classify failures with typed producer data; pause the
-> budget while recovery and dependency settlement make progress; retry on
-> recovery epochs; and after the ratified failure budget seal an entry-local
-> `{ status: "needs-attention", consequenced: true }` notice. The notice is a
+> failed-state episodes; classify failures with typed producer data; spend
+> budget while waiting without positive recovery evidence; pause after a
+> recovery signal while its retry and dependency settlement make progress;
+> retry on recovery epochs; and after the explicitly ratified failure budget,
+> seal an entry-local `{ status: "needs-attention", consequenced: true }`
+> notice. The notice is a
 > new terminal kind beside T3 drop, occupies the event's arrival position,
 > blocks later durable outcomes until its cover joins a successful wave, stays
 > uncompactable until Retry or Dismiss resolves it, is discoverable from a
 > derived per-space unresolved-attention index, and reaches stats plus a
-> client-visible attention surface. Retry creates a new event ID linked by
-> `retryOf`; the original never re-arms. Deterministic CFC verdicts remain
-> immediate error consequences; typed commit-preparation crashes use the same
+> client-visible attention surface. Retry atomically CASes the unresolved
+> original, creates exactly one new event ID linked by `retryOf`, records that
+> resolution, and removes the discovery item; the original never re-arms.
+> Deterministic CFC verdicts remain immediate error consequences; typed
+> commit-preparation crashes use the same
 > bounded attention path as dispatch-load failures. OPEN until the owner rules
 > OQ-1 through OQ-19 in the design document and the later build lands with the
 > flapping, seal-failure, order-release, client-reconnect, and exactly-once
@@ -756,8 +820,10 @@ Nothing below is decided by this document.
 
 1. **Predicate:** adopt hybrid typed class + health wake + cumulative durable
    failed-state time?
-2. **Budget:** adopt 60 seconds of confirmed failed-state time, another
-   constant, or deployment configuration?
+2. **Budget:** explicitly except this terminal-disposition budget from the
+   repository's no-timeout rule and adopt 60 seconds of confirmed failed-state
+   time, another constant, or deployment configuration—or reject automatic
+   time-based terminalization?
 3. **Classes:** which failures are immediately terminal, and which are
    recoverable?
 4. **Clock:** accept persisted server wall clock and the stated skew behavior?
@@ -771,7 +837,9 @@ Nothing below is decided by this document.
 10. **Ordering:** let the committed terminal notice occupy the event's arrival
     position and release later events?
 11. **Same wave:** allow later outcomes in the same atomic wave as the notice?
-12. **Re-arm:** retry only with a new event ID and `retryOf`?
+12. **Re-arm:** retry only with one new event ID and `retryOf`, atomically CASed
+    with original resolution and index removal so concurrent/replayed requests
+    append nothing and return the recorded ID?
 13. **Payload:** require Retry to copy the exact captured payload?
 14. **Preparation:** split typed preparation crashes from deterministic CFC
     verdicts?
@@ -785,11 +853,11 @@ Nothing below is decided by this document.
     per-space value, or must handler preflight carry target-side demand and a
     coverage obligation when freshness is part of correctness?
 
-The recommendation is **yes to all nineteen**, with the 60-second failed-state
-budget called out as the least evidence-backed recommendation and therefore the
-first one to replace if the owner has a product latency target. Question 19's
-implementation remains a separate currentness design rather than expanding the
-OW54 build.
+The recommendation is **yes to all nineteen**, including OQ-2's explicit
+timeout-policy exception. The 60-second failed-state budget is the least
+evidence-backed recommendation and therefore the first one to replace if the
+owner has a product latency target. Question 19's implementation remains a
+separate currentness design rather than expanding the OW54 build.
 
 ## 11. Later build shape and blast radius
 
@@ -822,13 +890,17 @@ expected to touch these seams:
    memory-v2 event admission/engine compaction, stream-entry validation, and a
    well-known per-space unresolved-attention index. Admit no client-supplied
    processing fields; retain unresolved attention entries; update the index in
-   the same atomic wave as terminalization and resolution.
+   the same atomic wave as terminalization. Resolution uses a server-owned
+   same-space CAS transaction that also appends the one retry when selected and
+   removes the index item.
 7. **Stats** — `packages/runner/src/executor/stats.ts`, health serialization,
    and serving-loop.md §7 after the owner ratifies the exact shape.
 8. **Client absorption and UI** —
    `packages/runner/src/speculation/overlay-destination.ts`, runtime-client IPC,
-   and the shell's persistent attention surface. Retry must use current client
-   authority and a fresh ID.
+   and the shell's persistent attention surface. The client outcome carries the
+   complete authoritative safe field set. Retry submits authenticated current
+   client authority to the atomic recovery path and returns its recorded fresh
+   ID on concurrent/replayed requests.
 9. **Live contract and register** — events.md §2/§5, serving-loop.md §7, and the
    OW54 row only after the implementation proves the ruled sentences.
 
@@ -842,9 +914,10 @@ client absorption, and retention all exist.
 
 The later build is not complete without red-first, mutation-watched pins for:
 
-1. a failed head accumulates the full failure budget while a flapping session
-   changes recovery epoch repeatedly; recovery intervals pause but never erase
-   spent budget, and exactly one attention notice commits;
+1. a failed head accumulates the full failure budget while waiting without a
+   positive recovery signal; a flapping session's signaled recovery attempts
+   pause but never erase spent budget, each repeat failure resumes it, and
+   exactly one attention notice commits;
 2. a barrier follower never creates a checkpoint or terminalizes merely
    because the head does;
 3. a fast session-revocation recovery before the budget is spent runs the
@@ -855,16 +928,21 @@ The later build is not complete without red-first, mutation-watched pins for:
    and prevents a later outcome from committing;
 6. a successful notice occupies the earlier arrival position and later events
    then consequence in order;
-7. the original terminal ID never runs again; explicit retry uses a new ID,
-   runs at most once, and records `retryOf`;
+7. the original terminal ID never runs again; concurrent Retry/Retry,
+   Retry/Dismiss, and lost-response replay races produce at most one appended
+   retry ID, return the recorded winner, atomically resolve/remove the index,
+   run that ID at most once, and record `retryOf`;
 8. reconnecting after terminalization still discovers an unresolved notice;
    compaction cannot retire it before resolution;
 9. deterministic CFC refusal remains an immediate error consequence while a
    typed preparation crash follows the bounded attention path;
 10. client-side and stream-entry-less LT1 events retain their existing
-    behavior; and
-11. stats distinguish barrier work, actual head failures, active failure time,
-    committed notices, and failed notice seals without relying on log text; and
+    behavior;
+11. the terminal cover, runtime-client outcome, and persistent shell receive the
+    same client-safe phase, class, code, first/last failure times, accumulated
+    failure time, failure count, and recovery mode; stats distinguish barrier
+    work, actual head failures, active failure time, committed notices, and
+    failed notice seals without relying on log text; and
 12. a dirty event input whose recompute reads a foreign space spends no failure
     budget while the load and continuation waves make progress, never nests the
     spaces' waves, and dispatches at most once after the ratified freshness
