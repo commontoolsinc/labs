@@ -356,7 +356,10 @@ say "whether the piece runs it now."
 MEMBER=$(sed -n 2p "$WORK/retarget.jsonl" | jq -r .piece)
 run cf piece restore -s "$SPACE" --piece "$MEMBER"
 say "Naming one is the preflight for that revision alone; --apply writes it."
-FORWARD=$(cf piece restore -s "$SPACE" --piece "$MEMBER" --json 2>/dev/null |
+say "The same listing as JSON, so the act picks its revision out of a run the"
+say "reader watched rather than one hidden from the transcript."
+run cf piece restore -s "$SPACE" --piece "$MEMBER" --json
+FORWARD=$(printf '%s' "$OUT" |
   jq -r '.revisions | map(select(.current == false)) | last | .revisionId')
 run cf piece restore -s "$SPACE" --piece "$MEMBER" --revision "$FORWARD"
 run_loud cf piece restore -s "$SPACE" --piece "$MEMBER" --revision "$FORWARD" \

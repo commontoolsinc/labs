@@ -4,7 +4,12 @@ import { createSession, Identity } from "@commonfabric/identity";
 import { Runtime, type RuntimeProgram } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
-import type { PieceController } from "../../src/ops/piece-controller.ts";
+import {
+  type PieceController,
+  PieceSourceChangedError,
+  pinnedSourceMoved,
+} from "../../src/ops/piece-controller.ts";
+import { PIECE_SOURCE_MOVED } from "@commonfabric/runner";
 import { PiecesController } from "../../src/ops/pieces-controller.ts";
 
 const signer = await Identity.fromPassphrase("piece controller edit");
@@ -96,6 +101,37 @@ describe("piece-controller", () => {
       expect(result).toEqual({ wrote: true });
       expect(seen).toBe(0);
       expect(await readN()).toBe(7);
+    });
+  });
+
+  describe("pinnedSourceMoved()", () => {
+    const pinned = { identity: "idA", symbol: "Member" };
+
+    it("translates the transition layer's stale-source failure for a pinned write", () => {
+      // The window's second half: this guard fires inside the transaction
+      // that commits, and throws the runtime's generic error. A pinned
+      // caller has to read it as a row to refuse, not as an operational
+      // failure of unknown state.
+      const translated = pinnedSourceMoved(
+        new Error(PIECE_SOURCE_MOVED),
+        pinned,
+      );
+      expect(translated).toBeInstanceOf(PieceSourceChangedError);
+      expect((translated as Error).message).toContain("moved off idA#Member");
+    });
+
+    it("leaves the same failure alone when the caller pinned nothing", () => {
+      // Without a pin there is no proved reference to name, and the caller
+      // asked for no such guarantee.
+      const error = new Error(PIECE_SOURCE_MOVED);
+      expect(pinnedSourceMoved(error, undefined)).toBe(error);
+    });
+
+    it("passes every other failure through untouched", () => {
+      // Translating on anything but this message would turn real breakage
+      // into a refusal and hide it.
+      const error = new Error("the runtime would not shut down");
+      expect(pinnedSourceMoved(error, pinned)).toBe(error);
     });
   });
 });

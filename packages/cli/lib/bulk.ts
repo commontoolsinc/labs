@@ -446,6 +446,10 @@ export async function runRestore(
       ? {}
       : { revisionId: request.revisionId }),
     ...(request.apply === true ? { apply: true } : {}),
+    // The scope the address carried, threaded the way `readSourcePin`
+    // threads it: a scoped reference names a different cell, so a run that
+    // dropped it would list and restore a piece nobody asked about.
+    ...(config.pieceScope === undefined ? {} : { scope: config.pieceScope }),
   });
 }
 

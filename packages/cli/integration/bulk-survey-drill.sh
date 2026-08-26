@@ -408,7 +408,7 @@ ACCEPTED_FORWARD=$($CF piece retarget -q $ARGS --plan "$GATE_PLAN" \
   jq -r '[(.complete|tostring), (.applied|tostring)] | @tsv')
 check "$(printf 'true\t1')" "$ACCEPTED_FORWARD" \
   "the accepted move runs, and its row lands"
-if grep -q "accepted as unrollbackable, moved anyway: $GATE_PIECE" \
+if grep -q "accepted as unrollbackable: $GATE_PIECE" \
   "$WORK/forward-accepted.err"; then
   ok "the accepted piece is named on the run that moved it"
 else
@@ -774,19 +774,51 @@ else
   bad "the refusal does not name the idle acceptance"
   sed 's/^/  | /' "$WORK/rollback-idle-accept.err"
 fi
+# What acceptance actually does is leave one piece behind while the rest are
+# returned, and only a run that writes can show it. Step 23 left the whole
+# board reversed, so the rows are re-staged first: without this the assertion
+# below would be about a derived row count and nothing else.
+if $CF piece retarget -q $ARGS --plan "$RETARGET_PLAN" --apply >/dev/null \
+  2>"$WORK/accepted-restage.err"; then
+  ok "re-staged the board so the acceptance has something to leave behind"
+else
+  bad "re-staging the board before the accepted reversal failed"
+  sed 's/^/  | /' "$WORK/accepted-restage.err"
+fi
+TARGET_IDENTITY=$(tail -n +2 "$RETARGET_PLAN" |
+  jq -r 'select(has("op")) | .op.patternIdentity' | head -1)
+PRIOR_IDENTITY=$(tail -n +2 "$RETARGET_PLAN" |
+  jq -r 'select(has("op")) | .expect.patternIdentity' | head -1)
 ACCEPTED=$($CF piece rollback -q $ARGS --plan "$UNRETAINED_PLAN" \
-  --accept-unretained "$SECOND_MEMBER" --json \
+  --accept-unretained "$SECOND_MEMBER" --apply --json \
   2>"$WORK/rollback-accepted.err" | sed 's/^fvj1://' |
-  jq -r '.rows | length')
-check "$((MEMBERS_NOW - 1))" "$ACCEPTED" \
-  "the accepted piece is left out, and every other row is reversed"
-if grep -q "accepted as unrollbackable, not reversed: $SECOND_MEMBER" \
+  jq -r '[(.rows | length | tostring), (.applied|tostring), (.complete|tostring),
+    (.rows | map(.verdict) | unique | join(","))] | @tsv')
+check "$(printf '%s\t%s\ttrue\tapplied' "$((MEMBERS_NOW - 1))" \
+  "$((MEMBERS_NOW - 1))")" "$ACCEPTED" \
+  "every row but the accepted one was reversed, and all of them wrote"
+# The point of the acceptance, asserted by identity rather than by a count:
+# the accepted piece stayed where the move left it.
+ACCEPTED_NOW=$($CF piece inspect --pattern-identity --json \
+  --piece "$SECOND_MEMBER" $ARGS 2>/dev/null | jq -r '.patternIdentity')
+check "$TARGET_IDENTITY" "$ACCEPTED_NOW" \
+  "the accepted piece was left on the target, not restored"
+OTHER_NOW=$($CF piece inspect --pattern-identity --json \
+  --piece "$FIRST_MEMBER" $ARGS 2>/dev/null | jq -r '.patternIdentity')
+check "$PRIOR_IDENTITY" "$OTHER_NOW" \
+  "every other piece was returned to its recorded reference"
+if grep -q "accepted as unrollbackable: $SECOND_MEMBER" \
   "$WORK/rollback-accepted.err"; then
   ok "the accepted piece is named on the run that carried it"
 else
   bad "the accepted piece is not named"
   sed 's/^/  | /' "$WORK/rollback-accepted.err"
 fi
+# Return the one piece the acceptance left behind, so the steps below meet a
+# fully reversed board again.
+$CF piece setsrc -q --piece "$SECOND_MEMBER" --main-export Member \
+  "$MEMBER_FIXTURE" $ARGS >/dev/null 2>"$WORK/accepted-reset.err" ||
+  bad "returning the accepted piece after the reversal failed"
 
 step "25. cf piece restore returns one piece to a revision of its own log"
 # The single-piece seam the bulk rollback is built on, useful on its own.

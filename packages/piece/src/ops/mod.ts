@@ -31,8 +31,9 @@ export {
 } from "./bulk-plan.ts";
 export { type RollbackOptions, rollbackPieces } from "./bulk-rollback.ts";
 export {
-  readRestorableRevisions,
+  readRestorableSource,
   type RestorableRevision,
+  type RestorableSource,
   type RestoreOptions,
   type RestoreOutcome,
   restorePiece,

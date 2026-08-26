@@ -459,6 +459,73 @@ describe("bulk-rollback", () => {
     expect(report.rows[1].verdict).toBe("unattempted");
   });
 
+  it("carries the runtime's warning on a row whose restore landed", async () => {
+    // A restore that commits and then has its post-commit refresh fail comes
+    // back applied with an `executionWarning`. The row landed, so it is not
+    // a refusal — but an operator told nothing would read a silent success,
+    // so the warning rides the row and the run still completes.
+    const { plan, ids } = await retargeted(2);
+    const rollback = deriveRollbackPlan(plan, "later");
+    const warned = new Set<string>();
+    const warning = "the restored piece would not refresh";
+    const warningSessions: ApplySessions = {
+      open: async () => {
+        const pieces = await sessions.open();
+        return new Proxy(pieces, {
+          get(target, prop, receiver) {
+            if (prop === "get") {
+              return async (...args: unknown[]) => {
+                const controller = await (target.get as unknown as (
+                  ...a: unknown[]
+                ) => Promise<Record<string, unknown>>)(...args);
+                return new Proxy(controller, {
+                  get(inner, name, innerReceiver) {
+                    if (name === "changeSource") {
+                      return async (...callArgs: unknown[]) => {
+                        const result = await (inner.changeSource as (
+                          ...a: unknown[]
+                        ) => Promise<{ status: string }>).apply(
+                          inner,
+                          callArgs,
+                        );
+                        if (result.status === "applied") {
+                          warned.add(String(args[0]));
+                          return { ...result, executionWarning: warning };
+                        }
+                        return result;
+                      };
+                    }
+                    const value = Reflect.get(inner, name, innerReceiver);
+                    return typeof value === "function"
+                      ? value.bind(inner)
+                      : value;
+                  },
+                });
+              };
+            }
+            const value = Reflect.get(target, prop, receiver);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        }) as PiecesController;
+      },
+      close: (pieces) => sessions.close(pieces),
+    };
+    const report = await rollbackPieces(warningSessions, {
+      plan: rollback,
+      apply: true,
+    });
+    expect(warned.size).toBe(2);
+    expect(report.rows.map((row) => row.verdict)).toEqual([
+      "applied",
+      "applied",
+    ]);
+    expect(report.rows.map((row) => row.warning)).toEqual([warning, warning]);
+    // The writes landed, so the run is complete and nothing was refused.
+    expect(report.applied).toBe(2);
+    expect(report.complete).toBe(true);
+    for (const id of ids) expect(await versionOf(id)).toBe("one");
+  });
+
   it("throws for a plan carrying an operation this run does not apply", async () => {
     const { plan } = await retargeted(1);
     await expect(rollbackPieces(sessions, { plan, apply: true })).rejects

@@ -26,7 +26,7 @@ import {
 import type { RestoreOp } from "./bulk-plan.ts";
 import { PieceSourceChangedError } from "./piece-controller.ts";
 import {
-  readRestorableRevisions,
+  readRestorableSource,
   selectRestoreRevision,
 } from "./piece-restore.ts";
 import type { PiecesController } from "./pieces-controller.ts";
@@ -46,7 +46,7 @@ const ROLLBACK: PlanOperation<RestoreOp> = {
   noun: "restore",
   async write(pieces: PiecesController, row) {
     const controller = await pieces.get(row.piece, false);
-    const revisions = await readRestorableRevisions(pieces, controller);
+    const { revisions } = await readRestorableSource(pieces, controller);
     const selected = selectRestoreRevision(revisions, {
       patternIdentity: row.op.patternIdentity,
       symbol: row.op.symbol,
@@ -54,7 +54,7 @@ const ROLLBACK: PlanOperation<RestoreOp> = {
         ? {}
         : { revisionId: row.op.revisionId }),
     });
-    if ("problem" in selected) return selected.problem;
+    if ("problem" in selected) return { refused: selected.problem };
     let result;
     try {
       // The reference the engine's recheck just proved, handed to the write
@@ -75,7 +75,9 @@ const ROLLBACK: PlanOperation<RestoreOp> = {
       // A piece something else moved is a row this run must not apply, not
       // a write that broke — so it is refused by name rather than reported
       // as an operational failure.
-      if (error instanceof PieceSourceChangedError) return error.message;
+      if (error instanceof PieceSourceChangedError) {
+        return { refused: error.message };
+      }
       throw error;
     }
     // A compatibility verdict is a row this run must not apply rather than
@@ -90,7 +92,13 @@ const ROLLBACK: PlanOperation<RestoreOp> = {
     // after the fact, so the row still names the piece and the reason and
     // still reports that nothing was written. Both stop the run; they
     // differ only in which verdict the row carries.
-    return result.status === "incompatible" ? result.message : undefined;
+    if (result.status === "incompatible") return { refused: result.message };
+    // The restore committed and its execution complained. The row landed, so
+    // this is not a refusal — but an operator told nothing would read a
+    // silent success, so the warning rides the row it belongs to.
+    return result.executionWarning === undefined
+      ? undefined
+      : { warning: result.executionWarning };
   },
 };
 

@@ -65,8 +65,10 @@ const RETARGET: PlanOperation<RetargetOp> = {
     );
     const identity = await programEntryIdentity(program);
     if (identity !== row.op.patternIdentity) {
-      return `The source resolves to ${identity}, not the ` +
-        `${row.op.patternIdentity} this row recorded.`;
+      return {
+        refused: `The source resolves to ${identity}, not the ` +
+          `${row.op.patternIdentity} this row recorded.`,
+      };
     }
     // No separate export check: the codec refuses a row whose symbol
     // disagrees with its source's requested export, and the resolver
@@ -97,7 +99,9 @@ const RETARGET: PlanOperation<RetargetOp> = {
       // A piece something else moved is a row this run must not apply, not
       // a write that broke — refused by name, exactly as the rollback's
       // write step refuses one.
-      if (error instanceof PieceSourceChangedError) return error.message;
+      if (error instanceof PieceSourceChangedError) {
+        return { refused: error.message };
+      }
       throw error;
     }
     return undefined;

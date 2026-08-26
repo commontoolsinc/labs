@@ -3827,6 +3827,7 @@ export function formatApplyRow(row: ApplyRow): string {
     row.piece,
     ...(row.phase === undefined ? [] : [row.phase]),
     ...(row.elapsedMs === undefined ? [] : [`${row.elapsedMs}ms`]),
+    ...(row.warning === undefined ? [] : [`! ${row.warning}`]),
     ...(row.problem === undefined ? [] : [`- ${row.problem}`]),
   ].join(" ");
 }
@@ -3872,10 +3873,14 @@ export async function retargetFromCommand(
   // Every accepted piece by name, through the note so `--quiet` cannot
   // silence it: a piece this move could not be reversed for is the fact the
   // operator most needs in front of them, and it is being recorded at the
-  // only moment the acceptance is still a decision.
+  // only moment the acceptance is still a decision. The line states that
+  // decision rather than an outcome — it is printed before the run's rows
+  // are known, and on a dry run nothing moved at all.
   const printNote = deps.printNote ?? note;
   for (const piece of options.acceptUnretained ?? []) {
-    printNote(`accepted as unrollbackable, moved anyway: ${piece}`);
+    printNote(
+      `accepted as unrollbackable: ${piece} (moving it leaves no reversal)`,
+    );
   }
   await reportApplyRun(report, {
     verb: "Retarget",
@@ -3921,6 +3926,14 @@ async function reportApplyRun(
       `written: ${report.applied}`,
     ].join(" · "),
   );
+  // A row that landed and was warned about is a success the operator still
+  // has to read. It rides the report itself, so `--json` and `--out` carry
+  // it whatever the hint does; this is the human copy.
+  for (const row of report.rows) {
+    if (row.warning !== undefined) {
+      printHint(`${row.verdict}: ${row.piece} warned: ${row.warning}`);
+    }
+  }
   if (!report.complete) {
     const settled = (row: ApplyRow) =>
       row.verdict === "landed" || row.verdict === "applied" ||
@@ -4014,7 +4027,9 @@ export async function rollbackFromCommand(
   // inferable only from a row that is missing.
   const printNote = deps.printNote ?? note;
   for (const piece of options.acceptUnretained ?? []) {
-    printNote(`accepted as unrollbackable, not reversed: ${piece}`);
+    printNote(
+      `accepted as unrollbackable: ${piece} (left out of this reversal)`,
+    );
   }
   await reportApplyRun(report, {
     verb: "Rollback",

@@ -13,7 +13,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { resolveLocalSourceProgram } from "../../src/ops/bulk-local.deno.ts";
 import {
-  readRestorableRevisions,
+  readRestorableSource,
   type RestorableRevision,
   restorePiece,
   selectRestoreRevision,
@@ -164,7 +164,7 @@ describe("piece-restore", () => {
       const controller = await pieces.get(piece.id, false);
       await controller.setPattern(v2);
       await pieces.synced();
-      const revisions = await readRestorableRevisions(pieces, controller);
+      const { revisions } = await readRestorableSource(pieces, controller);
       return { id: piece.id, v1: revisions[0].revisionId };
     }
 
@@ -222,7 +222,8 @@ describe("piece-restore", () => {
       const { id, v1 } = await movedPiece();
       await restorePiece(pieces, id, { revisionId: v1, apply: true });
       const controller = await pieces.get(id, false);
-      const before = (await readRestorableRevisions(pieces, controller)).length;
+      const before =
+        (await readRestorableSource(pieces, controller)).revisions.length;
       const again = await restorePiece(pieces, id, {
         revisionId: v1,
         apply: true,
@@ -232,7 +233,9 @@ describe("piece-restore", () => {
       expect(again.restored).toBe(false);
       expect(again.problem).toBeUndefined();
       expect(again.selected?.current).toBe(true);
-      expect((await readRestorableRevisions(pieces, controller)).length).toBe(
+      expect(
+        (await readRestorableSource(pieces, controller)).revisions.length,
+      ).toBe(
         before,
       );
     });
@@ -278,7 +281,7 @@ describe("piece-restore", () => {
         dangerouslyAllowIncompatibleSchema: true,
       });
       await pieces.synced();
-      const revisions = await readRestorableRevisions(pieces, controller);
+      const { revisions } = await readRestorableSource(pieces, controller);
       const textRevision = revisions[0].revisionId;
       const outcome = await restorePiece(pieces, piece.id, {
         revisionId: textRevision,
@@ -288,7 +291,10 @@ describe("piece-restore", () => {
       expect(outcome.selected?.revisionId).toBe(textRevision);
       expect(outcome.problem).toBeDefined();
       // Nothing written: the piece still runs what it was running.
-      const after = await readRestorableRevisions(pieces, controller);
+      const { revisions: after } = await readRestorableSource(
+        pieces,
+        controller,
+      );
       expect(after.map((entry) => entry.revisionId)).toEqual(
         revisions.map((entry) => entry.revisionId),
       );
@@ -335,7 +341,7 @@ describe("piece-restore", () => {
       await controller.setPattern(wide);
       await controller.input.set(7, ["title"]);
       await pieces.synced();
-      const revisions = await readRestorableRevisions(pieces, controller);
+      const { revisions } = await readRestorableSource(pieces, controller);
       const strictRevision = revisions[0].revisionId;
       // An argument the candidate cannot use at all is the runtime's own
       // hard refusal: it throws rather than reporting a compatibility
@@ -348,11 +354,74 @@ describe("piece-restore", () => {
       ).rejects.toThrow("updated arguments do not match the candidate schema");
       // The piece keeps running what it was running: a refused restore
       // leaves it where it stood, appending no revision.
-      const after = await readRestorableRevisions(pieces, controller);
+      const { revisions: after } = await readRestorableSource(
+        pieces,
+        controller,
+      );
       expect(after.map((entry) => entry.revisionId)).toEqual(
         revisions.map((entry) => entry.revisionId),
       );
       expect(after.at(-1)?.current).toBe(true);
+    });
+
+    it("refuses a restore when another writer moved the piece since the read", async () => {
+      // Finding 1's window: the listing this run reported is the proof it
+      // writes against, so a writer landing between the read and the write
+      // is refused rather than written over. The race is injected exactly
+      // there — the controller's `changeSource` is the write, so moving the
+      // piece on its way in lands after `readRestorableSource` observed it.
+      const { id, v1 } = await movedPiece();
+      await Deno.writeTextFile(`${dir}/member-v3.tsx`, memberSource("three"));
+      const third = await resolveLocalSourceProgram(runtime, {
+        main: `${dir}/member-v3.tsx`,
+      });
+      let raced = false;
+      const racing = new Proxy(pieces, {
+        get(target, prop, receiver) {
+          if (prop === "get") {
+            return async (...args: unknown[]) => {
+              const controller = await (target.get as unknown as (
+                ...a: unknown[]
+              ) => Promise<Record<string, unknown>>)(...args);
+              return new Proxy(controller, {
+                get(inner, name, innerReceiver) {
+                  if (name === "changeSource") {
+                    return async (...callArgs: unknown[]) => {
+                      if (!raced) {
+                        raced = true;
+                        const victim = await target.get(id, false);
+                        await victim.setPattern(third, {
+                          dangerouslyAllowIncompatibleSchema: true,
+                        });
+                        await target.synced();
+                      }
+                      return await (inner.changeSource as (
+                        ...a: unknown[]
+                      ) => Promise<unknown>).apply(inner, callArgs);
+                    };
+                  }
+                  const value = Reflect.get(inner, name, innerReceiver);
+                  return typeof value === "function"
+                    ? value.bind(inner)
+                    : value;
+                },
+              });
+            };
+          }
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }) as PiecesController;
+      const outcome = await restorePiece(racing, id, {
+        revisionId: v1,
+        apply: true,
+      });
+      expect(raced).toBe(true);
+      expect(outcome.restored).toBe(false);
+      expect(outcome.problem).toContain("proved against");
+      // The other writer's change stands.
+      const after = await pieces.get(id, false);
+      expect(await after.result.get(["version"])).toBe("three");
     });
 
     it("names every revision it does hold for an id it does not", async () => {

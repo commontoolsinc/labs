@@ -16,10 +16,14 @@
  * revision can be restored at all.
  */
 
+import type { CellScope } from "@commonfabric/api";
 import type { Cell } from "@commonfabric/runner";
 
 import { isSourceRetained } from "./bulk-survey.ts";
-import type { PieceController } from "./piece-controller.ts";
+import {
+  type PieceController,
+  PieceSourceChangedError,
+} from "./piece-controller.ts";
 import {
   type PieceSourceRevisionState,
   readPieceSourceMetadata,
@@ -94,18 +98,40 @@ export interface RestoreOptions {
   revisionId?: string;
   /** Perform the restore. Absent, the run reads and writes nothing. */
   apply?: boolean;
+  /**
+   * The piece scope to read and write under, when the caller named one. A
+   * scoped reference names a different cell from the default-scope one, so a
+   * run that dropped it would list and restore a piece nobody asked about.
+   */
+  scope?: CellScope;
+}
+
+/** What one read of a piece's source state yields a restore. */
+export interface RestorableSource {
+  /**
+   * The reference the piece runs, as THIS read observed it. A caller that
+   * goes on to write pins it, so a writer landing between the read and the
+   * write is refused rather than written over; deriving it from `revisions`
+   * instead would lose exactly the case that matters, a piece running
+   * something its own log does not hold. Absent when the piece carries no
+   * pattern identity at all.
+   */
+  pattern?: { identity: string; symbol: string };
+  /** Every revision the log holds, oldest first. */
+  revisions: RestorableRevision[];
 }
 
 /**
- * Read every revision a piece could be returned to, oldest first, each
- * carrying whether its source is still retained and whether the piece runs
- * it now. One synced read of the piece plus one retained-source load per
- * distinct identity in its log — the piece is never run.
+ * Read a piece's source state: the reference it runs, and every revision it
+ * could be returned to, oldest first, each carrying whether its source is
+ * still retained and whether the piece runs it now. One synced read of the
+ * piece plus one retained-source load per distinct identity in its log — the
+ * piece is never run.
  */
-export async function readRestorableRevisions(
+export async function readRestorableSource(
   pieces: PiecesController,
   controller: PieceController<unknown>,
-): Promise<RestorableRevision[]> {
+): Promise<RestorableSource> {
   const state = readPieceSourceMetadata(
     pieces.runtime,
     controller.getCell() as Cell<unknown>,
@@ -129,7 +155,10 @@ export async function readRestorableRevisions(
         state.pattern.symbol === revision.pattern.symbol,
     });
   }
-  return revisions;
+  return {
+    ...(state.pattern === undefined ? {} : { pattern: state.pattern }),
+    revisions,
+  };
 }
 
 /** The reference a restore is asked to return a piece to. */
@@ -224,8 +253,8 @@ export async function restorePiece(
   piece: string,
   options: RestoreOptions = {},
 ): Promise<RestoreOutcome> {
-  const controller = await pieces.get(piece, false);
-  const revisions = await readRestorableRevisions(pieces, controller);
+  const controller = await pieces.get(piece, false, undefined, options.scope);
+  const { pattern, revisions } = await readRestorableSource(pieces, controller);
   const outcome: RestoreOutcome = {
     piece: controller.id,
     revisions,
@@ -259,10 +288,25 @@ export async function restorePiece(
   if (named.current || options.apply !== true) {
     return { ...outcome, selected: { ...named } };
   }
-  const result = await controller.changeSource({
-    kind: "restore",
-    revisionId: named.revisionId,
-  });
+  let result;
+  try {
+    // The reference the read above observed, handed to the write as its own
+    // precondition — the same rule the bulk paths hold to. Without it this
+    // write would adopt whatever it found and commit over a change made
+    // since the listing this run reported.
+    result = await controller.changeSource({
+      kind: "restore",
+      revisionId: named.revisionId,
+    }, ...(pattern === undefined ? [] : [{ expectedPattern: pattern }]));
+  } catch (error) {
+    // A piece something else moved is this run's answer, not a crash: it is
+    // reported the way an incompatible restore is, so the caller exits
+    // nonzero with the reason rather than a stack.
+    if (error instanceof PieceSourceChangedError) {
+      return { ...outcome, selected: { ...named }, problem: error.message };
+    }
+    throw error;
+  }
   if (result.status === "incompatible") {
     return { ...outcome, selected: { ...named }, problem: result.message };
   }

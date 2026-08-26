@@ -188,6 +188,7 @@ export {
   isStoredArgumentSchemaRefusal,
   mergeSchemaDefaults,
   patternIdentityKey,
+  PIECE_SOURCE_MOVED,
   type PieceSourceRevision,
   type PieceSourceRevisionOperation,
   type PieceSourceSnapshot,

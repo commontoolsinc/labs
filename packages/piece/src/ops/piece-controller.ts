@@ -27,6 +27,7 @@ import {
   parseFabricRef,
   parseLinkOrThrow,
   type Pattern,
+  PIECE_SOURCE_MOVED,
   type PieceSourceRevision,
   type PieceSourceSnapshot,
   type PieceSourceTransition,
@@ -383,6 +384,32 @@ export class PieceSourceChangedError extends Error {
     super(message);
     this.name = "PieceSourceChangedError";
   }
+}
+
+/**
+ * Translate the transition layer's stale-source failure into the refusal a
+ * pinned caller can act on, and leave every other error alone.
+ *
+ * A pinned change is guarded twice: once against the snapshot this call
+ * reads, and again inside the transaction that commits it. Only the first
+ * throws {@link PieceSourceChangedError} on its own; the second is the
+ * runtime's generic error, which a caller would otherwise read as an
+ * operational failure of unknown state rather than as a row to refuse. The
+ * message is matched against the runner's own exported constant, so the two
+ * cannot drift into disagreeing about what this is.
+ */
+/** @internal Exported for a focused contract test; not part of the Piece API. */
+export function pinnedSourceMoved(
+  error: unknown,
+  pinned: { identity: string; symbol: string } | undefined,
+): unknown {
+  if (pinned === undefined) return error;
+  const message = error instanceof Error ? error.message : String(error);
+  if (!message.includes(PIECE_SOURCE_MOVED)) return error;
+  return new PieceSourceChangedError(
+    `The piece moved off ${pinned.identity}#${pinned.symbol} before the ` +
+      `change proved against it could commit.`,
+  );
 }
 
 export type PieceSourceAction =
@@ -3983,7 +4010,7 @@ export class PieceController<T = unknown> {
           };
         }
       }
-      throw error;
+      throw pinnedSourceMoved(error, pinned);
     }
   }
 
@@ -4161,7 +4188,7 @@ export class PieceController<T = unknown> {
         );
         return;
       }
-      throw error;
+      throw pinnedSourceMoved(error, options?.expectedPattern);
     }
   }
 

@@ -234,7 +234,7 @@ describe("piece-rollback", () => {
       // to be inferred from a row that is missing — and it goes to the note
       // rather than a hint, which `--quiet` would silence.
       expect(notes).toEqual([
-        `accepted as unrollbackable, not reversed: fid1:${OTHER_HANDLE}`,
+        `accepted as unrollbackable: fid1:${OTHER_HANDLE} (left out of this reversal)`,
       ]);
       expect(hints.join("\n")).not.toContain("unrollbackable");
     });
@@ -334,7 +334,7 @@ describe("piece-rollback", () => {
         console.error = original;
       }
       expect(errors).toContain(
-        `accepted as unrollbackable, not reversed: fid1:${OTHER_HANDLE}`,
+        `accepted as unrollbackable: fid1:${OTHER_HANDLE} (left out of this reversal)`,
       );
     });
 

@@ -381,7 +381,7 @@ describe("piece-retarget", () => {
       );
       expect(accepted).toEqual(["fid1:aaa"]);
       expect(notes).toEqual([
-        "accepted as unrollbackable, moved anyway: fid1:aaa",
+        "accepted as unrollbackable: fid1:aaa (moving it leaves no reversal)",
       ]);
       expect(hints.join("\n")).not.toContain("unrollbackable");
     });

@@ -86,6 +86,14 @@ export interface ApplyRow {
    */
   problem?: string;
   /**
+   * What the runtime warned about a write that DID land — the source was
+   * saved and something after it complained. Distinct from `problem`, which
+   * belongs to a row that did not apply: a warned row is a success the
+   * operator still has to read about, so it rides the report rather than
+   * only a console nobody keeps.
+   */
+  warning?: string;
+  /**
    * The row's wall-clock cost in milliseconds, present on every row an
    * apply session began work on: a row reclassified as landed, moved, or
    * refused cost the reads and resolution that reclassified it, and reports
@@ -103,10 +111,13 @@ export interface ApplyReport {
   /** Operations applied. Zero on a dry run and on a fully landed re-run. */
   applied: number;
   /**
-   * True when every row is `landed` (or, on a dry run, `outstanding` —
-   * that is the dry run's answer, not a defect) and no session boundary
-   * failed: nothing moved, nothing refused, nothing failed, nothing
-   * unattempted, and every session this run opened was released.
+   * True when every row reached what this run was for and no session
+   * boundary failed: under `apply`, every row is `landed` or `applied`;
+   * on a dry run, every row is `landed` or `outstanding`, that being the
+   * dry run's answer rather than a defect. Either way nothing moved,
+   * nothing was refused, nothing failed, nothing went unattempted, and
+   * every session this run opened was released. A row that landed with a
+   * `warning` is still complete: the write happened.
    */
   complete: boolean;
   /**
@@ -139,6 +150,17 @@ export interface WorkRow<Op extends ReferenceOp> {
 }
 
 /**
+ * What a write step reports back. `undefined` is the ordinary case: the
+ * write landed and there is nothing to add.
+ */
+export interface WriteOutcome {
+  /** Why this row must not apply. Nothing was written. */
+  refused?: string;
+  /** What the runtime warned about a write that landed anyway. */
+  warning?: string;
+}
+
+/**
  * The one step that differs between the write stages: what a row's write
  * does, and what this run calls itself when it refuses a plan it cannot
  * run.
@@ -156,9 +178,10 @@ export interface PlanOperation<Op extends ReferenceOp> {
   /**
    * Write one outstanding row, in the session in hand, immediately after
    * its precondition was proved. Returns `undefined` when the write landed
-   * and a reason when the row must be refused instead — a refusal being a
-   * row this run must not apply, as opposed to a throw, which is an
-   * operational failure the engine state-checks after the fact.
+   * with nothing to say, `{refused}` when the row must not apply — as
+   * opposed to a throw, which is an operational failure the engine
+   * state-checks after the fact — and `{warning}` when the write DID land
+   * and the runtime complained about it.
    *
    * The proof is `row.expect`, and carrying it into the write is this
    * step's obligation rather than the engine's: the engine's read can only
@@ -170,7 +193,7 @@ export interface PlanOperation<Op extends ReferenceOp> {
   write(
     pieces: PiecesController,
     row: WorkRow<Op>,
-  ): Promise<string | undefined>;
+  ): Promise<WriteOutcome | undefined>;
 }
 
 export interface ApplyOptions<Op extends ReferenceOp> {
@@ -546,13 +569,13 @@ export async function applyPlan<Op extends ReferenceOp>(
             stopped = true;
             continue;
           }
-          const refusal = await operation.write(pieces, row);
-          if (refusal !== undefined) {
+          const outcome = await operation.write(pieces, row);
+          if (outcome?.refused !== undefined) {
             report({
               piece: row.piece,
               ...phase,
               verdict: "refused",
-              problem: refusal,
+              problem: outcome.refused,
               elapsedMs: now() - startedAt,
             });
             stopped = true;
@@ -563,6 +586,9 @@ export async function applyPlan<Op extends ReferenceOp>(
             piece: row.piece,
             ...phase,
             verdict: "applied",
+            ...(outcome?.warning === undefined
+              ? {}
+              : { warning: outcome.warning }),
             elapsedMs: now() - startedAt,
           });
         } catch (error) {
