@@ -108,12 +108,12 @@ ninety-five distinct complete identities. The runners' own measurements of
 those executions add up to a hundred and sixty-six minutes and two seconds.
 The distribution is extremely skewed:
 
-| Executions | Count | Summed duration | Share of summed duration |
-| --- | --- | --- | --- |
-| Over sixty seconds | 15 | 30.2 minutes | 18% |
-| Over ten seconds | 163 | 78.0 minutes | 47% |
-| Over one second | 1,831 | 148.6 minutes | 89% |
-| Under one hundred milliseconds | 14,032 | 2.6 minutes | 1.6% |
+| Executions | Count | Share of executions | Summed duration | Share of summed duration |
+| --- | --- | --- | --- | --- |
+| Over sixty seconds | 15 | 0.08% | 30.2 minutes | 18% |
+| Over ten seconds | 163 | 0.9% | 78.0 minutes | 47% |
+| Over one second | 1,831 | 10% | 148.6 minutes | 89% |
+| Under one hundred milliseconds | 14,032 | 78% | 2.6 minutes | 1.6% |
 
 This was the latest successful `main` run when the census was taken. It
 includes the server-execution record marking. The `server-execution`
@@ -128,10 +128,13 @@ such as an `integration.sh` invocation and the steps inside it, so summed
 record duration is not unique wall time and cannot be added directly into
 item cost. None of these counts becomes a policy constant.
 
-Just under four fifths of the executions finish in under a tenth of a
-second, and together they account for two minutes and thirty-five seconds
-of measured time. Nine tenths of the time is spent in about one tenth of
-the executions.
+Both share columns are against the run's whole seventeen thousand nine
+hundred and ninety-nine executions, and the first three rows nest: every
+execution over sixty seconds is also one over ten. Read down the two
+together and the skew is the gap between them. A tenth of the executions
+hold nine tenths of the time. Just under four fifths finish in under a
+tenth of a second and hold one and a half percent of it, which is two
+minutes and thirty-five seconds across all of them.
 
 That skew is what makes this cheap. The objective is to run the tests that
 find things, and those are few. What the skew adds is a bonus: the cheap
