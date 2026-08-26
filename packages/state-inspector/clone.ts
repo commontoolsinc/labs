@@ -413,12 +413,12 @@ export interface VerifyResult {
     added: number;
 
     /**
-     * Entities the baseline hashed and this store's manifests call generated.
-     * They are present in both stores, so they are not removed; the two sides
-     * derive their exclusions from their own pieces, and a migration that
-     * adopts an unlisted cell into a generated slot moves it from one list to
-     * the other. Reported rather than dropped: a number that silently
-     * disappears is one nobody can check.
+     * Entities the baseline hashed and this store's manifests call generated at
+     * that same (id, scope). They are present in both stores, so they are not
+     * removed; the two sides derive their exclusions from their own pieces, and
+     * a migration that adopts an unlisted cell into a generated slot moves it
+     * from one list to the other. Reported rather than dropped: a number that
+     * silently disappears is one nobody can check.
      */
     reclassifiedGenerated: number;
 
@@ -518,7 +518,7 @@ export async function verifyClone(dir: string): Promise<VerifyResult> {
       // is honest here and costs nothing: the reclassification below reads
       // the WORKING store's exclusions, which is the side that can turn a
       // present entity into an absent row.
-      excludedGeneratedIds: [],
+      excludedGeneratedAddresses: [],
       ambiguous: [],
       unhashable: [],
       perEntity: rows,
@@ -534,28 +534,33 @@ export async function verifyClone(dir: string): Promise<VerifyResult> {
   }
 
   const d = diffFingerprints(before, fingerprint);
+  // Keyed by id AND scope throughout: one id can hold a shared space value plus
+  // per-user/per-session overrides that are genuinely different entities, and a
+  // by-id lookup would let the last scope win — misclassifying the tally, and
+  // clearing a removal below because some OTHER scope of the same id is
+  // generated. `diffFingerprints` reports the address it compared by, so there
+  // is nothing left to guess at here.
+  const addressKey = (at: ScopedEntity) => `${at.id} ${at.scope}`;
   // A removal is an entity gone from the store, never one this store's own
   // manifests reclassified. The two sides compute their exclusions
   // independently — the baseline from the pristine pieces, this from the
   // working ones — so a cell no pristine manifest listed and a migrated piece
   // now calls generated is present in both stores and absent from one list.
   // Subtracting them here is what keeps `removed` meaning destroyed content,
-  // which is the verdict the runbook tells an operator to stop on.
-  const excludedNow = new Set(fingerprint.excludedGeneratedIds);
-  const reclassifiedGenerated = d.removed.filter((at) =>
-    excludedNow.has(at.id)
+  // which is the verdict the runbook tells an operator to stop on. A manifest
+  // link carries no scope, so an adopted id is excluded in every scope that
+  // holds it: only the addresses this store actually enumerated are subtracted,
+  // and a scope whose rows are gone is not among them.
+  const excludedNow = new Set(
+    fingerprint.excludedGeneratedAddresses.map(addressKey),
   );
-  const removed = d.removed.filter((at) => !excludedNow.has(at.id));
-  // Keyed by id AND scope throughout: one id can hold a shared space value plus
-  // per-user/per-session overrides that are genuinely different entities, and a
-  // by-id lookup would let the last scope win and misclassify the tally —
-  // exactly the precision ("74 pieces vs 73 cells") the diff exists to provide.
-  // `diffFingerprints` reports the address it compared by, so there is nothing
-  // left to guess at here.
+  const reclassifiedGenerated = d.removed.filter((at) =>
+    excludedNow.has(addressKey(at))
+  );
+  const removed = d.removed.filter((at) => !excludedNow.has(addressKey(at)));
   const kindIndex = (rows: FingerprintReport["perEntity"]) => {
-    const byAddress = new Map(rows.map((e) => [`${e.id} ${e.scope}`, e.kind]));
-    return (at: ScopedEntity) =>
-      byAddress.get(`${at.id} ${at.scope}`) ?? "unknown";
+    const byAddress = new Map(rows.map((e) => [addressKey(e), e.kind]));
+    return (at: ScopedEntity) => byAddress.get(addressKey(at)) ?? "unknown";
   };
   const kindOf = kindIndex(fingerprint.perEntity);
   const kindWas = kindIndex(before.perEntity);
