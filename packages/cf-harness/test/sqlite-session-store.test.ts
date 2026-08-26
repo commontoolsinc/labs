@@ -924,9 +924,20 @@ Deno.test("sqlite session restore heals terminal legacy transcripts idempotently
     const createRestored = () =>
       new HarnessInteractiveChatService({
         createPromptLoop: () => ({
-          runTranscript: (options) => {
+          runTranscript: async (options) => {
             restoredInputs.push([...options.transcript]);
-            return Promise.resolve(makeResult(options, "Recovered."));
+            for (const message of options.transcript) {
+              await options.onTranscriptEvent?.({
+                message,
+                transcript: options.transcript,
+              });
+            }
+            const result = makeResult(options, "Recovered.");
+            await options.onTranscriptEvent?.({
+              message: result.transcript[result.transcript.length - 1],
+              transcript: result.transcript,
+            });
+            return result;
           },
         }),
         now: () => "2026-05-27T00:01:00.000Z",
@@ -970,6 +981,18 @@ Deno.test("sqlite session restore heals terminal legacy transcripts idempotently
       role: "user",
       content: "Continue carefully",
     });
+    assertEquals(
+      secondRestore.listEvents({
+        sessionId: session.sessionId,
+        afterSequence: sequenceAfterFirstRestore,
+      }).events.map((event) => event.event.kind),
+      [
+        "turn_started",
+        "assistant_delta",
+        "assistant_completed",
+        "turn_completed",
+      ],
+    );
   } finally {
     store.close();
     await Deno.remove(path);

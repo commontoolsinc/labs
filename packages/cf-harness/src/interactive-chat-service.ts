@@ -1266,6 +1266,10 @@ export class HarnessInteractiveChatService {
           : {}),
       },
     ];
+    // Prompt loops replay their initial transcript through onTranscriptEvent.
+    // Those messages are durable history, not activity from this turn: in
+    // particular, a recovered unknown-outcome result must not be re-emitted as
+    // a newly completed tool call.
     let observedTranscriptLength = transcript.length;
 
     try {
