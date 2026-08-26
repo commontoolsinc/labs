@@ -21,99 +21,14 @@ import { expect } from "@std/expect";
 
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 
-import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
-  internSchemaPairAsKey,
-  isNontrivialSchema,
   schemaWithoutProperties,
   schemaWithProperties,
-} from "@/schema-utils.ts";
+} from "@/schema-rewrite.ts";
 import { internSchema, isInternedSchema } from "@/schema-intern.ts";
 import { toDeepFrozenSchema } from "@/schema-copy.ts";
 
-describe("schema-utils", () => {
-  describe("isNontrivialSchema()", () => {
-    describe("nullish inputs", () => {
-      it("returns `false` for `undefined`", () => {
-        expect(isNontrivialSchema(undefined)).toBe(false);
-      });
-
-      it("returns `false` for `null`", () => {
-        expect(isNontrivialSchema(null)).toBe(false);
-      });
-    });
-
-    describe("boolean schemas", () => {
-      it("returns `false` for `true`", () => {
-        expect(isNontrivialSchema(true)).toBe(false);
-      });
-
-      it("returns `false` for `false`", () => {
-        expect(isNontrivialSchema(false)).toBe(false);
-      });
-    });
-
-    describe("empty object schema", () => {
-      it("returns `false` for `{}`", () => {
-        expect(isNontrivialSchema({})).toBe(false);
-      });
-    });
-
-    describe("non-trivial schemas", () => {
-      it("returns `true` for a schema with `type`", () => {
-        expect(isNontrivialSchema({ type: "string" })).toBe(true);
-      });
-
-      it("returns `true` for a schema with `properties`", () => {
-        const schema: JSONSchemaObj = {
-          type: "object",
-          properties: { name: { type: "string" } },
-        };
-        expect(isNontrivialSchema(schema)).toBe(true);
-      });
-
-      it("returns `true` for a schema with only `$ref`", () => {
-        expect(isNontrivialSchema({ $ref: "#/definitions/Foo" })).toBe(true);
-      });
-
-      it("returns `true` for a schema with `anyOf`", () => {
-        expect(
-          isNontrivialSchema({
-            anyOf: [{ type: "string" }, { type: "number" }],
-          }),
-        ).toBe(true);
-      });
-
-      it("returns `true` for a frozen non-empty schema", () => {
-        const schema = Object.freeze({ type: "number" as const });
-        expect(isNontrivialSchema(schema)).toBe(true);
-      });
-
-      it("returns `true` for a deep-frozen schema", () => {
-        const schema: JSONSchemaObj = deepFreeze({
-          type: "object",
-          properties: { x: { type: "number" } },
-        });
-        expect(isNontrivialSchema(schema)).toBe(true);
-      });
-    });
-
-    describe("type narrowing", () => {
-      it("narrows to `JSONSchemaObj` (allows property access)", () => {
-        const schema: JSONSchemaObj | undefined = {
-          type: "object",
-          properties: { a: { type: "string" } },
-        };
-        if (isNontrivialSchema(schema)) {
-          expect(schema.type).toBe("object");
-          expect(typeof schema.properties).toBe("object");
-        } else {
-          throw new Error("Expected isNontrivialSchema to return true");
-        }
-      });
-    });
-  });
-
+describe("schema-rewrite", () => {
   describe("schemaWithProperties()", () => {
     it("returns a new object with overrides applied", () => {
       const schema: JSONSchemaObj = { type: "object", description: "old" };
@@ -385,72 +300,6 @@ describe("schema-utils", () => {
         expect(result).toBe(schema);
         expect(isInternedSchema(result)).toBe(true);
       });
-    });
-  });
-
-  describe("internSchemaPairAsKey()", () => {
-    it("composes the two interned `.taggedHashString`s with `|`", () => {
-      const a: JSONSchema = { type: "number" };
-      const b: JSONSchema = { type: "string" };
-      const aHash = internSchema(a, true).taggedHashString;
-      const bHash = internSchema(b, true).taggedHashString;
-      expect(internSchemaPairAsKey(a, b)).toBe(`${aHash}|${bHash}`);
-    });
-
-    it("builds the pair key from either side's boolean schema", () => {
-      const obj: JSONSchema = { type: "number" };
-      const objHash = internSchema(obj, true).taggedHashString;
-      const trueHash = internSchema(true, true).taggedHashString;
-      const falseHash = internSchema(false, true).taggedHashString;
-      expect(internSchemaPairAsKey(true, obj)).toBe(`${trueHash}|${objHash}`);
-      expect(internSchemaPairAsKey(obj, false)).toBe(`${objHash}|${falseHash}`);
-      expect(internSchemaPairAsKey(true, false)).toBe(
-        `${trueHash}|${falseHash}`,
-      );
-    });
-
-    it("is order-sensitive", () => {
-      const a: JSONSchema = { type: "number" };
-      const b: JSONSchema = { type: "string" };
-      expect(internSchemaPairAsKey(a, b)).not.toEqual(
-        internSchemaPairAsKey(b, a),
-      );
-    });
-
-    it("matches for structurally-equal inputs", () => {
-      const a1: JSONSchema = {
-        type: "object",
-        properties: { x: { type: "string" } },
-      };
-      const a2: JSONSchema = {
-        type: "object",
-        properties: { x: { type: "string" } },
-      };
-      const b1: JSONSchema = { type: "array", items: { type: "number" } };
-      const b2: JSONSchema = { type: "array", items: { type: "number" } };
-      expect(internSchemaPairAsKey(a1, b1)).toBe(internSchemaPairAsKey(a2, b2));
-    });
-
-    it("interns both inputs as a side effect", () => {
-      // Content-unique keys guarantee no prior interning has seen
-      // these exact schemas, so `isInternedSchema` reflects what
-      // THIS call did.
-      const stamp = `${Date.now()}-${Math.random()}`;
-      const a: JSONSchemaObj = {
-        type: "number",
-        title: `schemaHashTestAt${stamp}-a`,
-      };
-      const b: JSONSchemaObj = {
-        type: "string",
-        title: `schemaHashTestAt${stamp}-b`,
-      };
-      expect(isInternedSchema(a)).toBe(false);
-      expect(isInternedSchema(b)).toBe(false);
-      internSchemaPairAsKey(a, b);
-      expect(isInternedSchema(a)).toBe(true);
-      expect(isInternedSchema(b)).toBe(true);
-      expect(isDeepFrozen(a)).toBe(true);
-      expect(isDeepFrozen(b)).toBe(true);
     });
   });
 });

@@ -18,6 +18,7 @@ export {
   findInternedSchema,
   internSchema,
   internSchemaAsTaggedHashString,
+  internSchemaPairAsKey,
   isInternedSchema,
 } from "./schema-intern.ts";
 
@@ -31,11 +32,11 @@ export {
 
 export { emptySchemaObject, schemaForValueType } from "./basic-schemas.ts";
 
+export { isNontrivialSchema } from "./isNontrivialSchema.ts";
+
 export {
-  internSchemaPairAsKey,
-  isNontrivialSchema,
   schemaWithoutProperties,
   schemaWithProperties,
-} from "./schema-utils.ts";
+} from "./schema-rewrite.ts";
 
 export { cloneSchemaMutable, toDeepFrozenSchema } from "./schema-copy.ts";

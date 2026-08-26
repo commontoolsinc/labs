@@ -1,4 +1,4 @@
-/** Runtime utilities for working with JSONSchema values. */
+/** Rewriting a JSONSchema: adding and removing properties. */
 
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 
@@ -6,35 +6,8 @@ import {
   type FabricValue,
   shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
-import {
-  internSchema,
-  internSchemaAsTaggedHashString,
-  isInternedSchema,
-} from "./schema-intern.ts";
+import { internSchema, isInternedSchema } from "./schema-intern.ts";
 import { toDeepFrozenSchema } from "./schema-copy.ts";
-
-/**
- * Indicates if the given (nullable) schema is in fact a non-trivial schema. A
- * non-trivial schema is defined as one that is an `object` with at least one
- * property. If it returns `true`, type-narrowing ensures that the schema
- * _object_ can be treated as such.
- *
- * **Note:** Because of TS narrowing rules, when this function returns `false`
- * given `{}` (empty object), TS will mistakenly treat this as type `boolean |
- * undefined | null`. This is technically wrong but, given the meaning of this
- * method, effectively safe in that the point of this method is enabling easy
- * object use in the `true` cases and pretty much saying "don't mess with the
- * value" in `false` cases.
- */
-export function isNontrivialSchema(
-  schema: JSONSchema | undefined | null,
-): schema is JSONSchemaObj {
-  if ((schema === null) || (typeof schema !== "object")) {
-    return false;
-  }
-
-  return Object.keys(schema).length !== 0;
-}
 
 /**
  * Returns a deep-frozen shallow copy of a schema with the given property
@@ -136,16 +109,4 @@ export function schemaWithoutProperties(
     // a no-op if `schema` was already deep-frozen (including interned).
     return toDeepFrozenSchema(schema);
   }
-}
-
-/**
- * Returns a cache-key string for an ordered pair of schemas, each interned
- * (and thus deep-frozen) via `internSchema()`. The `|` delimiter is outside
- * the base64url alphabet used by hash strings, so the two halves cannot
- * merge ambiguously.
- */
-export function internSchemaPairAsKey(a: JSONSchema, b: JSONSchema): string {
-  return `${internSchemaAsTaggedHashString(a)}|${
-    internSchemaAsTaggedHashString(b)
-  }`;
 }

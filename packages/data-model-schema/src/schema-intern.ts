@@ -278,3 +278,15 @@ export function internSchemaAsTaggedHashString(
 ): string {
   return internSchema(schema, true).taggedHashString;
 }
+
+/**
+ * Returns a cache-key string for an ordered pair of schemas, each interned
+ * (and thus deep-frozen) via `internSchema()`. The `|` delimiter is outside
+ * the base64url alphabet used by hash strings, so the two halves cannot
+ * merge ambiguously.
+ */
+export function internSchemaPairAsKey(a: JSONSchema, b: JSONSchema): string {
+  return `${internSchemaAsTaggedHashString(a)}|${
+    internSchemaAsTaggedHashString(b)
+  }`;
+}
