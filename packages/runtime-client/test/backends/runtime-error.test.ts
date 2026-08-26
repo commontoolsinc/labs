@@ -6,10 +6,7 @@ import {
   postContextualRuntimeError,
   postRuntimeError,
 } from "@/backends/runtime-error.ts";
-import {
-  fabricFromRealmValue,
-  realmFromFabricValue,
-} from "@commonfabric/data-model/codecs";
+import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
 
 describe("runtime error notifications", () => {
   it("classifies compiler-load failures in contextual and renderer errors", () => {

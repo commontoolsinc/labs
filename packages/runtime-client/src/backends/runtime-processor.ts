@@ -1,9 +1,7 @@
 import {
-  fabricFromRealmValue,
   newDefaultJsonCodecEngine,
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
-import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { toStructuredDebugValue } from "@commonfabric/data-model/value-debug";
@@ -19,12 +17,7 @@ import {
   type RenderDeclassificationPolicy,
   WorkerReconciler,
 } from "@commonfabric/html/worker";
-import {
-  DID,
-  Identity,
-  keyPairFromRealmValue,
-  type Session,
-} from "@commonfabric/identity";
+import { DID, Identity, type Session } from "@commonfabric/identity";
 import type { Program } from "@commonfabric/js-compiler";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { setLLMUrl } from "@commonfabric/llm";

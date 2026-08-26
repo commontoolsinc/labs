@@ -1,5 +1,3 @@
-import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { defer, type Deferred } from "@commonfabric/utils/defer";
 import { getLogger } from "@commonfabric/utils/logger";
 import { unrefTimer } from "@commonfabric/utils/sleep";
@@ -11,7 +9,6 @@ import {
   CommandResponse,
   Commands,
   ConsoleMessage,
-  ConsoleNotification,
   ErrorNotification,
   InitializationData,
   IPCClientNotification,

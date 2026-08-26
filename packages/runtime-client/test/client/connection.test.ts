@@ -9,7 +9,6 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { RuntimeConnection } from "@/client/connection.ts";
 import { EventEmitter } from "@/client/emitter.ts";
 import {
-  type ConsoleNotification,
   type InitializationData,
   type IPCClientMessage,
   type IPCClientNotification,

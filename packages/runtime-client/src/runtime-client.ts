@@ -5,14 +5,9 @@
  * for interacting with cells across the worker boundary.
  */
 
-import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import {
-  type DID,
-  type Identity,
-  realmValueFromKeyPair,
-} from "@commonfabric/identity";
+import type { DID, Identity } from "@commonfabric/identity";
 import { Program } from "@commonfabric/js-compiler/interface";
 import { NameSchema } from "@commonfabric/runner/schemas";
 import type {

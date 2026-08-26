@@ -119,10 +119,14 @@ class InProcessWorkerTransport extends EventEmitter<RuntimeTransportEvents>
   }
 
   send(original: IPCClientMessage | IPCClientNotification): void {
-    // Cloned, as a real transport delivers it: `BaseRequest` entitles a handler
-    // to own what its request carries, and handing over the sender's own object
-    // would let a handler that cedes a payload reach back into the sender.
-    const message = structuredClone(original);
+    // Encoded and decoded, as the real transport delivers it: the worker entry
+    // decodes what `send()` encoded. The round trip also copies, which the
+    // handler is entitled to -- `BaseRequest` lets it own what its request
+    // carries, and handing over the sender's own object would let a handler
+    // that cedes a payload reach back into the sender.
+    const message = fabricFromRealmValue(
+      realmFromFabricValue(original),
+    ) as IPCClientMessage | IPCClientNotification;
     if (!("msgId" in message)) {
       throw new Error("This test sends no one-way client notifications");
     }

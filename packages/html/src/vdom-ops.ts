@@ -6,7 +6,7 @@
  */
 
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import type { CellRef, JSONValue } from "@commonfabric/runtime-client";
+import type { CellRef } from "@commonfabric/runtime-client";
 
 /**
  * Reserved node ID for the container element. The main thread registers the
