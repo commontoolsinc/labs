@@ -1280,9 +1280,11 @@ export class Scheduler {
     eventLink: NormalizedFullLink,
     event: any,
     // Whether a transient commit failure converges via the backoff window (and
-    // the inSpace-name resolution path re-runs the handler). `false` opts out:
-    // the event drops on the first failure without retrying. Defaults to `true`
-    // so every real user event through `cell.send` gets backpressure.
+    // the inSpace-name resolution path re-runs an unserved handler). `false`
+    // opts out: the event drops on the first failure without retrying. A served
+    // RetryImmediately still re-runs in its current wave; commit retry remains
+    // disabled. Defaults to `true` so every real user event through `cell.send`
+    // gets backpressure.
     retries: boolean = true,
     // Internal-only commit callback. This runs after the final commit result,
     // including a dropped failure, so it must not perform external side

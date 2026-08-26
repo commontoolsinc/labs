@@ -380,9 +380,10 @@ export type QueuedEvent = {
    * Whether a transient failure for this event should be retried. `true` routes
    * a transient commit failure through the exponential-backoff window and lets
    * the inSpace-name resolution path (RetryImmediately) re-run the handler;
-   * `false` makes both drop on the first failure (a speculative lineage origin or
-   * an internal one-shot opts out this way). There is no retry count: a windowed
-   * commit failure is bounded by the retry window, and RetryImmediately is
+   * `false` drops an unserved one-shot on either failure. A served event still
+   * re-runs RetryImmediately in its current wave: the server owns the result,
+   * while transient commit retries remain disabled and belong to the drain's
+   * wave cadence. There is no name-resolution retry count: RetryImmediately is
    * bounded by the monotonic space-name cache (each re-run resolves at least one
    * previously-unresolved name, and a resolved name never becomes pending again).
    */
