@@ -71,12 +71,14 @@ export interface ResumeRepublisher {
 export interface ResumeRepublisherOptions {
   runtime: Runtime;
   logger: Logger;
+
   /**
    * False once the coordinator is torn down. A republish outstanding at that
    * moment has a container nothing owns any more, so it is dropped rather than
    * written.
    */
   isActive: () => boolean;
+
   /**
    * The result container is bound after the builtin's setup, so it is read
    * lazily on each republish rather than captured once.
@@ -87,10 +89,13 @@ export interface ResumeRepublisherOptions {
   resultSchema: JSONSchema;
   elementRuns: ElementRuns;
   contribute: ElementContribution;
+
   /** The aggregate's noun for logs, e.g. "filtered list" / "flatMap result". */
   aggregateNoun: string;
+
   /** The per-element noun for logs, e.g. "predicate" / "result". */
   elementNoun: string;
+
   /**
    * Re-arm the coordinator's reconcile. Only a reconcile can issue an owed
    * element setup (`needsSetup`), and it declines to while that element's

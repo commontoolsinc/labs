@@ -32,6 +32,7 @@ import type {
 export interface OtelBridgeOptions {
   tracer: Tracer;
   meter: Meter;
+
   /**
    * Attributes stamped on every emitted span and metric — the dimensions the
    * markers themselves don't carry. Set here once at attach time from the host's
@@ -39,6 +40,7 @@ export interface OtelBridgeOptions {
    *   { "user.did": principal, "space.did": space, "ct.runtime": "bg-piece" }
    */
   attributes?: Attributes;
+
   /**
    * Attributes stamped on METRICS ONLY, merged over `attributes`. Backends
    * don't map OTel resource attributes onto metric datapoint labels, so pass
@@ -48,6 +50,7 @@ export interface OtelBridgeOptions {
    * bare key ambiguous (resource vs attribute context) in SigNoz queries.
    */
   metricAttributes?: Attributes;
+
   /**
    * Minimum action-run duration that earns a retroactive `scheduler.action.run`
    * span. Measured on the lunch-poll diagnose workload: ~4.4% of runs exceed
@@ -62,6 +65,7 @@ export interface OtelBridgeOptions {
 export interface RuntimeTelemetryOtelBridge {
   /** Translate a single marker into spans/metrics. Safe to call for any type. */
   handleMarker(marker: RuntimeTelemetryMarkerResult): void;
+
   /** Close any spans still open (e.g. storage ops without a completion). */
   shutdown(): void;
 }

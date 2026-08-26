@@ -84,8 +84,10 @@ function followResultCellChain(
 export type EnsurePieceVerdict = {
   /** The owning piece is (now) running. */
   started: boolean;
+
   /** Why a `started: false` verdict could not start the piece. */
   reason?:
+
     /** Result-metadata cycle, or traversal depth exceeded. */
     | "chain-cycle"
     /** The chain's owning doc carries no `patternIdentity` meta — as
@@ -101,10 +103,12 @@ export type EnsurePieceVerdict = {
      * UNCONFIRMED — no terminal decision; the caller's deferred arm
      * retries next cycle. */
     | "confirm-pull-failed";
+
   /** The owning result doc's id (the chain terminus) where the chain
    * resolved — present for `started`, `no-pattern-meta`, and
    * `pattern-unloadable`. */
   rootId?: string;
+
   /** Every doc id the traversal read (the demanded root plus chain
    * links): the demand cycle's commit-triggered re-arm watches these. */
   observedDocIds: string[];

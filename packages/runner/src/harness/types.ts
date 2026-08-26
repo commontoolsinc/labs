@@ -12,6 +12,7 @@ export type RuntimeProgram = Program & {
   // The named export from the program's entry file to run.
   // Defaults to "default".
   mainExport?: string;
+
   /** Source entry points retained and compiled without being executed. */
   sourceRoots?: string[];
 };
@@ -55,6 +56,7 @@ export interface TypeScriptHarnessProcessOptions {
   // on a miss/partial hit: freshly compiled bodies are always SES-verified.
   // Never set for direct `precompiledModules` injection (untrusted bytes).
   trustedBodies?: boolean;
+
   /**
    * Enables fabric (cf:) imports for this compile: the space whose cell-cache
    * source docs fabric refs are fetched from and verified against. Absent means
@@ -65,6 +67,7 @@ export interface TypeScriptHarnessProcessOptions {
 
 export interface FabricImportOptions {
   space: MemorySpace;
+
   /**
    * Dev-only: resolve unpinned mutable refs by chasing the live pointer.
    * The resulting compile is NOT cacheable — module identity folds the
@@ -88,8 +91,10 @@ export interface CompiledModuleArtifact {
   js: string;
   sourceMap?: unknown;
   patternCoverageSpans?: PatternCoverageSpan[];
+
   /** Debug-only authored sites, keyed by runtime artifact symbol. */
   builderSourceSites?: BuilderSourceSitesV1;
+
   /** Compiler-issued policy manifests, transported separately from JS exports. */
   policyManifests?: readonly unknown[];
 }
@@ -102,12 +107,16 @@ export interface CompiledModuleArtifact {
 export interface CacheableModule extends CompiledModuleArtifact {
   /** Prefix-free content identity (the `cf:module/<hash>` hash, no scheme). */
   identity: string;
+
   /** Normalized authored module path (no `/<id>` prefix; e.g. `/main.tsx`). */
   filename: string;
+
   /** Resolved TypeScript source whose bytes are folded into `identity`. */
   source: string;
+
   /** Internal import edges: specifier → the dependency module's identity. */
   imports: { specifier: string; targetIdentity: string }[];
+
   /**
    * This entry carries data rather than code. A data entry's compiled form is
    * its own bytes, so `js` repeats `source` and the compiled set carries what a
@@ -122,6 +131,7 @@ export type Exports = Record<string, any>;
 export interface EvaluateResult {
   main?: Exports;
   exportMap?: Record<string, Exports>;
+
   /**
    * Per-module namespaces keyed by content identity (the prefix-free
    * `cf:module/<identity>` hash). Lets the runner register every module in a
@@ -131,6 +141,7 @@ export interface EvaluateResult {
    * Populated only on the ESM evaluate paths.
    */
   exportsByIdentity?: Map<string, Exports>;
+
   /**
    * Module content identity → the authored file it came from.
    *
@@ -140,6 +151,7 @@ export interface EvaluateResult {
    * and `PatternManager` stamps it onto each indexed artifact.
    */
   sourcePathByIdentity?: Map<string, string>;
+
   /**
    * Hoist registrations collected during this evaluation (`__cfReg`): module
    * content identity → (symbol → live builder artifact). The PatternManager turns

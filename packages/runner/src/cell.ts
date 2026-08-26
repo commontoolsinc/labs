@@ -178,6 +178,7 @@ const logger = getLogger("cell", { level: "warn" });
 
 type SinkOptions = {
   changeGroup?: ChangeGroup;
+
   /**
    * Read the cell's display CFC label as part of the sink's tracked read set
    * and pass it to the callback as a second argument. Reading it on the sink's
@@ -353,6 +354,7 @@ const mintedRuntimeInjectedKeys = new WeakSet<readonly string[]>();
  * is ignored and the closed-world gate judges the key like any other
  * undeclared field.
  */
+
 /** An error-status VIEW of a transaction (the durable-ack coupling;
  * verdict blocker, 2026-08-12): everything passes through except
  * `status()`, which reports the append/consequence failure — so a
@@ -511,6 +513,7 @@ declare module "@commonfabric/api" {
       },
     ): SigilWriteRedirectLink;
     getRaw(options?: RawCellReadOptions): Immutable<T> | undefined;
+
     /**
      * Reads the cell's raw value as a `FabricValue`, bypassing the
      * cell's type parameter `T`. Use this when the stored data may not
@@ -530,6 +533,7 @@ declare module "@commonfabric/api" {
     ): FabricValue;
     getRawUntyped(options?: RawCellReadOptions): FabricValue;
     setRaw(value: (NoInfer<T> & FabricValue) | undefined): void;
+
     /**
      * Sets the raw cell value to any `FabricValue`, bypassing the cell's
      * type parameter `T`. Use this when writing a pre-formed `FabricValue`
@@ -552,6 +556,7 @@ declare module "@commonfabric/api" {
       onlyIfDifferent?: boolean,
       schemaRole?: "output",
     ): void;
+
     /**
      * Applies this cell's CFC schema to its existing stored value without
      * rewriting that value.
@@ -2061,6 +2066,7 @@ export class CellImpl<T extends FabricValue>
   send(
     ...args: T extends void ? [] | [AnyCellWrapping<T>] | [
         AnyCellWrapping<T>,
+
         /**
          * Internal-only commit callback. This runs after the final commit
          * result, including failure, so it must remain non-effectful. Use the
@@ -2075,6 +2081,7 @@ export class CellImpl<T extends FabricValue>
       ]
       : [AnyCellWrapping<T>] | [
         AnyCellWrapping<T>,
+
         /**
          * Internal-only commit callback. This runs after the final commit
          * result, including failure, so it must remain non-effectful. Use the
@@ -2085,6 +2092,7 @@ export class CellImpl<T extends FabricValue>
       ] | [
         AnyCellWrapping<T>,
         ((tx: IExtendedStorageTransaction) => void) | undefined,
+
         /**
          * Internal-only stream-send options (see {@link StreamSendOptions}):
          * `eventId` passes a caller-supplied durable event id through to the

@@ -57,6 +57,7 @@ type SendValueToBindingOptions = {
 type UnwrapOneLevelOptions = {
   targetSchema?: JSONSchema;
   derivedInternalCells?: readonly DerivedInternalCellDescriptor[];
+
   /**
    * The containing pattern's authored argument schema, used as the source of
    * declared cell scopes when serializing binding aliases (see

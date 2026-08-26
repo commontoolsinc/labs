@@ -663,6 +663,7 @@ type QueryState = {
   result?: unknown[];
   error?: unknown;
   requestHash?: string;
+
   /** CFC Phase 3.b read-time clearance audit: how many rows the acting reader
    *  could not read were withheld (a declared existence release). Absent when
    *  no clearance was requested. */
@@ -699,8 +700,10 @@ type QueryState = {
 export function sqliteQueryMemoDecision(options: {
   stored: { pending?: boolean; requestHash?: string } | undefined;
   hash: string;
+
   /** This node instance holds the RPC in flight right now. */
   inFlightHere: boolean;
+
   /** The evaluation runs as a stamped serving run (a wave run context
    * is present — the serving loop's signature; ON-arm client
    * speculation and the OFF arm are unstamped). */
@@ -725,6 +728,7 @@ export function sqliteQuery(
   let initialized = false;
   let result: Cell<QueryState>;
   let resultScope: CellScope | undefined;
+
   /** Hashes whose RPC this node instance currently has in flight — the
    * in-process half of the memo decision above. */
   const inFlightIssues = new Set<string>();
