@@ -15,23 +15,37 @@
 import type { RealmEncodedValue } from "@/codec-realm/interface.ts";
 import { fabricFromRealmValue } from "@/codecs.ts";
 
-/** What a benchmark asks the far side to do with what it sent. */
-export type IpcRequest = {
-  /**
-   * `decode` reconstructs the value; `clone` leaves it alone, so that the
-   * difference between the two is the decode and nothing else. `status-quo`
-   * is neither: the payload arrived unencoded, as a connection relying on
-   * structured cloning alone sends it, and there is nothing for this side to
-   * do -- which is the point, that being the whole of the old far side's work.
-   */
-  readonly kind: "decode" | "clone" | "status-quo";
+/**
+ * What a benchmark asks the far side to do with what it sent.
+ *
+ * Discriminated on `kind` rather than widened to cover both payload shapes:
+ * `RealmEncodedValue | unknown` is just `unknown`, the top type absorbing
+ * every other member, which would let a `decode` request carry anything at all
+ * without a compile error and leave the far side casting on faith.
+ */
+export type IpcRequest =
+  | {
+    /**
+     * `decode` reconstructs the value; `clone` leaves it alone, so that the
+     * difference between the two is the decode and nothing else.
+     */
+    readonly kind: "decode" | "clone";
 
-  /**
-   * What was sent: a realm-encoded tree for `decode` and `clone`, and the
-   * bare value for `status-quo`.
-   */
-  readonly payload: RealmEncodedValue | unknown;
-};
+    /** The realm-encoded tree. */
+    readonly payload: RealmEncodedValue;
+  }
+  | {
+    /**
+     * Neither: the payload arrived unencoded, as a connection relying on
+     * structured cloning alone sends it, and there is nothing for this side
+     * to do -- which is the point, that being the whole of that far side's
+     * work.
+     */
+    readonly kind: "status-quo";
+
+    /** The bare value, as it was handed to `postMessage()`. */
+    readonly payload: unknown;
+  };
 
 /** What the far side reports. One boolean, so the return leg costs nothing. */
 export type IpcAck = {
@@ -40,13 +54,14 @@ export type IpcAck = {
 };
 
 self.onmessage = (ev: MessageEvent<IpcRequest>) => {
-  const { kind, payload } = ev.data;
+  const request = ev.data;
 
   try {
-    if (kind === "decode") {
+    if (request.kind === "decode") {
       // The result is dropped, but the walk has run in full: `decode()` is
-      // eager, so there is no lazy remainder for dropping it to skip.
-      fabricFromRealmValue(payload as RealmEncodedValue);
+      // eager, so there is no lazy remainder for dropping it to skip. No cast:
+      // the discriminant is what says this payload is an encoding.
+      fabricFromRealmValue(request.payload);
     }
     // `clone` and `status-quo` both do nothing here, for different reasons:
     // the first to isolate the decode, the second because the old far side

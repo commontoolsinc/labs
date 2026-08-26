@@ -65,6 +65,23 @@ class FarSide {
       if (ev.data.ok) pending?.resolve();
       else pending?.reject(new Error(`Far side refused: ${ev.data.error}`));
     };
+
+    // A worker that fails to start, or throws where nothing catches, sends no
+    // ack -- and a benchmark waiting on one that will never arrive hangs
+    // rather than failing, which is the worst way for a measurement to end.
+    // `messageerror` covers the far side receiving something it cannot
+    // deserialize, which no `error` event reports.
+    this.#worker.onerror = (ev: ErrorEvent) => {
+      const pending = this.#pending;
+      this.#pending = undefined;
+      pending?.reject(new Error(`Far side failed: ${ev.message}`));
+    };
+
+    this.#worker.onmessageerror = () => {
+      const pending = this.#pending;
+      this.#pending = undefined;
+      pending?.reject(new Error("Far side could not deserialize the message"));
+    };
   }
 
   /**
