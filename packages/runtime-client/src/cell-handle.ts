@@ -89,7 +89,7 @@ export class CellHandle<T = unknown> {
   >();
   #nextCallbackId = 0;
   #schemaWarned = false;
-  #strictWriteTail: Promise<void> | undefined;
+  #operationTail: Promise<void> | undefined;
   #updateGeneration = 0;
 
   constructor(worker: RuntimeClient, cellRef: CellRef, value?: T) {
@@ -159,7 +159,7 @@ export class CellHandle<T = unknown> {
   async set(value: T): Promise<void> {
     this.#requireSchema("set");
     // A plain set is a blind last-write-wins overwrite (CellSet).
-    await this.#afterStrictWrites(() =>
+    await this.#enqueueOperation(() =>
       this.#applyLocalAndSend(value, RequestType.CellSet)
     );
   }
@@ -167,26 +167,21 @@ export class CellHandle<T = unknown> {
   /** Set the cell's value and reject when the runtime refuses the write. */
   async setStrict(value: T): Promise<void> {
     this.#requireSchema("setStrict");
-    await this.#enqueueStrictCommit(() =>
+    await this.#enqueueOperation(() =>
       this.#applyLocalAndSend(value, RequestType.CellSet, true)
     );
   }
 
-  #enqueueStrictCommit(operation: () => Promise<void>): Promise<void> {
-    const writing = this.#strictWriteTail
-      ? this.#strictWriteTail.then(operation)
+  #enqueueOperation<R>(operation: () => Promise<R>): Promise<R> {
+    const result = this.#operationTail
+      ? this.#operationTail.then(operation)
       : operation();
-    const tail = writing.catch(() => {});
-    this.#strictWriteTail = tail;
+    const tail = result.then(() => {}, () => {});
+    this.#operationTail = tail;
     void tail.then(() => {
-      if (this.#strictWriteTail === tail) this.#strictWriteTail = undefined;
+      if (this.#operationTail === tail) this.#operationTail = undefined;
     });
-    return writing;
-  }
-
-  #afterStrictWrites<R>(operation: () => Promise<R>): Promise<R> {
-    const writes = this.#strictWriteTail;
-    return writes ? writes.then(operation) : operation();
+    return result;
   }
 
   // Optimistic local update (mirrors the old set()) plus the remote write. The
@@ -267,12 +262,12 @@ export class CellHandle<T = unknown> {
   }
 
   async send(event: T): Promise<void> {
-    await this.#afterStrictWrites(() => this.#send(event));
+    await this.#enqueueOperation(() => this.#send(event));
   }
 
   /** Send a stream event and reject when the runtime refuses it. */
   async sendStrict(event: T): Promise<void> {
-    await this.#enqueueStrictCommit(() => this.#send(event, true));
+    await this.#enqueueOperation(() => this.#send(event, true));
   }
 
   #send(event: T, propagateFailure = false): Promise<void> {
@@ -329,11 +324,7 @@ export class CellHandle<T = unknown> {
         RequestType.CellPush,
       );
     };
-    if (!this.#strictWriteTail) {
-      void append();
-      return;
-    }
-    void this.#afterStrictWrites(append).catch((error) => {
+    void this.#enqueueOperation(append).catch((error) => {
       if (!this.#conn.signal.aborted) {
         console.error("[CellHandle] Push failed:", error);
       }
@@ -431,7 +422,7 @@ export class CellHandle<T = unknown> {
    * If the value is itself a link, follows it to get the actual value.
    */
   async sync(): Promise<Readonly<T> | undefined> {
-    const response = await this.#afterStrictWrites(() =>
+    const response = await this.#enqueueOperation(() =>
       this.#conn.request<RequestType.CellGet>({
         type: RequestType.CellGet,
         cell: this.ref(),
@@ -444,7 +435,7 @@ export class CellHandle<T = unknown> {
 
   /** Demand lazy producers before fetching the current value. */
   async pull(): Promise<Readonly<T> | undefined> {
-    const response = await this.#afterStrictWrites(() =>
+    const response = await this.#enqueueOperation(() =>
       this.#conn.request<RequestType.CellPull>({
         type: RequestType.CellPull,
         cell: this.ref(),
@@ -460,7 +451,7 @@ export class CellHandle<T = unknown> {
    * Returns a new CellHandle pointing to the resolved cell.
    */
   async resolveAsCell(): Promise<CellHandle<T>> {
-    const response = await this.#afterStrictWrites(() =>
+    const response = await this.#enqueueOperation(() =>
       this.#conn.request<RequestType.CellResolveAsCell>({
         type: RequestType.CellResolveAsCell,
         cell: this.ref(),
@@ -471,7 +462,7 @@ export class CellHandle<T = unknown> {
   }
 
   async getCfcLabel(): Promise<CfcLabelView | undefined> {
-    const response = await this.#afterStrictWrites(() =>
+    const response = await this.#enqueueOperation(() =>
       this.#conn.request<RequestType.CellGetCfcLabel>({
         type: RequestType.CellGetCfcLabel,
         cell: this.ref(),
@@ -485,7 +476,7 @@ export class CellHandle<T = unknown> {
     sql: string,
     params?: ReadonlyArray<ClientCellValue> | Record<string, ClientCellValue>,
   ): Promise<Row[]> {
-    const response = await this.#afterStrictWrites(() =>
+    const response = await this.#enqueueOperation(() =>
       this.#conn.request<RequestType.SqliteQuery>({
         type: RequestType.SqliteQuery,
         cell: this.ref(),
@@ -510,7 +501,7 @@ export class CellHandle<T = unknown> {
     sql: string,
     params?: ReadonlyArray<ClientCellValue> | Record<string, ClientCellValue>,
   ): Promise<void> {
-    await this.#afterStrictWrites(() =>
+    await this.#enqueueOperation(() =>
       this.#conn.request<RequestType.SqliteExec>({
         type: RequestType.SqliteExec,
         cell: this.ref(),

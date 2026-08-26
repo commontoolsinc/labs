@@ -1149,6 +1149,62 @@ describe("cell-handle", () => {
       ]);
     });
 
+    it("keeps a queued read ahead of a later strict write", async () => {
+      const firstWrite = Promise.withResolvers<void>();
+      const readResponse = Promise.withResolvers<void>();
+      const readStarted = Promise.withResolvers<void>();
+      const requests: RequestType[] = [];
+      let stored = { n: 0 };
+      let writes = 0;
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: {
+            type: RequestType;
+            value?: { n: number };
+          }) => {
+            requests.push(request.type);
+            if (request.type === RequestType.CellSet) {
+              const commit = () => {
+                stored = request.value!;
+                return {};
+              };
+              return ++writes === 1
+                ? firstWrite.promise.then(commit)
+                : Promise.resolve(commit());
+            }
+            const captured = stored;
+            readStarted.resolve();
+            return readResponse.promise.then(() => ({ value: captured }));
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle(runtime, ref, stored);
+
+      const first = cell.setStrict({ n: 1 });
+      const reading = cell.sync();
+      const second = cell.setStrict({ n: 2 });
+      expect(requests).toEqual([RequestType.CellSet]);
+
+      firstWrite.resolve();
+      await readStarted.promise;
+      expect(requests).toEqual([
+        RequestType.CellSet,
+        RequestType.CellGet,
+      ]);
+
+      readResponse.resolve();
+      await Promise.all([first, reading, second]);
+      expect(requests).toEqual([
+        RequestType.CellSet,
+        RequestType.CellGet,
+        RequestType.CellSet,
+      ]);
+      expect(cell.get()).toEqual({ n: 2 });
+    });
+
     it("waits for every queued strict write before later remote operations", async () => {
       const requests: RequestType[] = [];
       const firstWrite = Promise.withResolvers<void>();
@@ -1331,6 +1387,37 @@ describe("cell-handle", () => {
       } finally {
         console.error = originalError;
       }
+    });
+
+    it("keeps a later read behind an in-flight append", async () => {
+      const appendResponse = Promise.withResolvers<void>();
+      const requests: RequestType[] = [];
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: { type: RequestType }) => {
+            requests.push(request.type);
+            if (request.type === RequestType.CellPush) {
+              return appendResponse.promise.then(() => ({}));
+            }
+            return Promise.resolve({ value: [0, 1] });
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle<number[]>(runtime, ref, [0]);
+
+      cell.push(1);
+      const reading = cell.sync();
+      expect(requests).toEqual([RequestType.CellPush]);
+
+      appendResponse.resolve();
+      await reading;
+      expect(requests).toEqual([
+        RequestType.CellPush,
+        RequestType.CellGet,
+      ]);
     });
   });
 
