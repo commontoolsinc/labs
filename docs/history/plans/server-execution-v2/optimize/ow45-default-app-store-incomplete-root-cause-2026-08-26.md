@@ -21,12 +21,15 @@ does not change production behavior or lift the guarded STEP.
   `codex/server-exec-v2-default-app-setup-error-rootcause`
 - Worktree:
   `/Users/berni/labs-worktrees/default-app-setup-error-rootcause`
-- PR #6367 head and analysis base:
+- PR #6367 head and live-analysis base:
   `672890c094c6b148f5f3fbc44f2266deca7140bb`
 - `origin/main` fetched at worktree creation:
   `53632a88fa40d18ae68ee217999edd7b425ec147`
 - Merge base at worktree creation:
   `3c6e296ba571c6dbaafb51f716f09478de66c2b2`
+- PR #6367 merged during handoff as `bb45dc41c`; the documentation branch was
+  then rebased onto current `origin/main`:
+  `c89b58eca80dbf48b285745f694a90f504b01602`
 - Clean analysis-head ON binary SHA-256:
   `bf713bac43366a341dbf6ecafa351ecefd891987ebe32ec6bdfe5c860f94168f`
 - Diagnostic-instrumentation ON binary SHA-256:
