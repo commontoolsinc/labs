@@ -80,8 +80,9 @@ export function patternKey(path: string, patternsDir?: string): string {
 /** Whether a pattern path or its deployed key contains a filter. */
 export function matchesPatternFilter(path: string, filter: string): boolean {
   const normalizedPath = normalizePatternPath(path);
-  return normalizedPath.includes(filter) ||
-    patternKey(normalizedPath).includes(filter);
+  const normalizedFilter = normalizePatternPath(filter);
+  return normalizedPath.includes(normalizedFilter) ||
+    patternKey(normalizedPath).includes(normalizedFilter);
 }
 
 /** Repository-relative source path for a compatibility-baseline key. */

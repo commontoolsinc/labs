@@ -113,6 +113,15 @@ describe("matchesPatternFilter", () => {
       ),
     ).toBe(true);
   });
+
+  it("normalizes a Windows path filter", () => {
+    expect(
+      matchesPatternFilter(
+        "packages\\connectors\\agents\\debug-view\\main.tsx",
+        "packages\\connectors\\agents\\debug-view",
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("patternRoot", () => {
