@@ -104,6 +104,100 @@ describe("a builtin whose staged request is abandoned", () => {
     expect(result.withTx().key("pending").get()).toBe(false);
   });
 
+  it("reports the refusal on generateText's error cell", async () => {
+    const { pattern, generateText, Cell: BuilderCell } = commonfabric;
+    const testPattern = pattern<Record<string, never>>(() => {
+      const messages = BuilderCell.of([{
+        role: "user",
+        content: "a briefing the result store does not declare",
+      }], {
+        type: "array",
+        items: { type: "object", additionalProperties: true },
+        ifc: { confidentiality: [PROMPT_INFLUENCE] },
+      });
+      // deno-lint-ignore no-explicit-any
+      return generateText({ messages } as any);
+    });
+    const resultCell = runtime.getCell(
+      space,
+      "generateText-abandoned",
+      testPattern.resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+
+    const settled = await waitForError(result);
+    await runtime.settled();
+
+    expect(settled.error).toContain("was refused before it started");
+    expect(settled.error).not.toContain(PROMPT_INFLUENCE.source);
+    expect(result.withTx().key("pending").get()).toBe(false);
+  });
+
+  it("reports the refusal on llm's error cell", async () => {
+    const { pattern, llm, Cell: BuilderCell } = commonfabric;
+    const testPattern = pattern<Record<string, never>>(() => {
+      const messages = BuilderCell.of([{
+        role: "user",
+        content: "a briefing the result store does not declare",
+      }], {
+        type: "array",
+        items: { type: "object", additionalProperties: true },
+        ifc: { confidentiality: [PROMPT_INFLUENCE] },
+      });
+      // deno-lint-ignore no-explicit-any
+      return llm({ messages } as any);
+    });
+    const resultCell = runtime.getCell(
+      space,
+      "llm-abandoned",
+      testPattern.resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+
+    const settled = await waitForError(result);
+    await runtime.settled();
+
+    expect(settled.error).toContain("was refused before it started");
+    expect(settled.error).not.toContain(PROMPT_INFLUENCE.source);
+    expect(result.withTx().key("pending").get()).toBe(false);
+  });
+
+  it("reports the refusal on fetchProgram's error cell", async () => {
+    const { pattern, fetchProgram, Cell: BuilderCell } = commonfabric;
+    const testPattern = pattern<Record<string, never>>(() => {
+      const url = BuilderCell.of("https://example.invalid/program.js", {
+        type: "string",
+        ifc: { confidentiality: [PROMPT_INFLUENCE] },
+      });
+      // deno-lint-ignore no-explicit-any
+      return fetchProgram({ url } as any);
+    });
+    const resultCell = runtime.getCell(
+      space,
+      "fetchProgram-abandoned",
+      testPattern.resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+
+    // A run derives these cells from its cache entry, and an abandoned
+    // request has no following run to do it.
+    const settled = await waitForError(result);
+    await runtime.settled();
+
+    expect(settled.error).toContain("was refused before it started");
+    expect(settled.error).not.toContain(PROMPT_INFLUENCE.source);
+    expect(result.withTx().key("pending").get()).toBe(false);
+  });
+
   it("reports the refusal on fetchJson's error cell", async () => {
     const { pattern, fetchJson, Cell: BuilderCell } = commonfabric;
     const testPattern = pattern<Record<string, never>>(() => {
