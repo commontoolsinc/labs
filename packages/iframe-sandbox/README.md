@@ -159,10 +159,10 @@ are available for unlabeled databases. A database whose schema needs CFC column
 provenance is refused because the direct response has no Fabric result cell on
 which to persist derived labels; query that database inside a pattern instead.
 
-The multiplayer browser integration runs in both the default and
-server-execution ON pattern suites. It exercises `PerSpace`, `PerUser`, and
-`PerSession` cells and SQLite databases across two sessions for one identity, a
-second identity, and a page reload.
+The same `cf-iframe-bridge-multi-user.test.ts` multiplayer browser integration
+runs without a skip in both the default and server-execution ON pattern suites.
+It exercises `PerSpace`, `PerUser`, and `PerSession` cells and SQLite databases
+across two sessions for one identity, a second identity, and a page reload.
 
 ## Protocol
 
