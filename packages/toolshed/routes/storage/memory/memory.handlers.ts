@@ -154,8 +154,33 @@ const frameSizeLogger = getLogger("memory-socket", {
 // Warning at a quarter of the cap surfaces the growth while every client
 // still loads. The cap is in bytes, so the check measures encoded bytes;
 // a string's UTF-8 byte length falls in [length, 3 × length], and the
-// cheap code-unit bound below spares ordinary frames the encode pass.
+// cheap code-unit bound spares ordinary frames the encode pass.
 const OUTBOUND_FRAME_WARN_BYTES = 16 * 1024 * 1024;
+
+export const warnOnOversizedOutboundFrame = (
+  encoded: string,
+  message: unknown,
+  warnBytes: number = OUTBOUND_FRAME_WARN_BYTES,
+  warn: (key: string, lazyArgs: () => unknown[]) => void = (key, lazyArgs) =>
+    frameSizeLogger.warn(key, lazyArgs),
+): void => {
+  if (encoded.length * 3 <= warnBytes) {
+    return;
+  }
+  const frameBytes = TEXT_ENCODER.encode(encoded).byteLength;
+  if (frameBytes <= warnBytes) {
+    return;
+  }
+  warn("oversized-outbound-frame", () => [
+    "outbound memory frame at",
+    frameBytes,
+    "bytes approaches the 64 MiB client cap;",
+    "type:",
+    (message as { type?: string }).type ?? "unknown",
+    "space:",
+    (message as { space?: string }).space ?? "unknown",
+  ]);
+};
 
 export const attachMemorySocketPipeline = (
   socket: WebSocket,
@@ -184,20 +209,7 @@ export const attachMemorySocketPipeline = (
       return;
     }
     const encoded = encodeMemoryBoundary(message);
-    if (encoded.length * 3 > OUTBOUND_FRAME_WARN_BYTES) {
-      const frameBytes = TEXT_ENCODER.encode(encoded).byteLength;
-      if (frameBytes > OUTBOUND_FRAME_WARN_BYTES) {
-        frameSizeLogger.warn("oversized-outbound-frame", () => [
-          "outbound memory frame at",
-          frameBytes,
-          "bytes approaches the 64 MiB client cap;",
-          "type:",
-          (message as { type?: string }).type ?? "unknown",
-          "space:",
-          (message as { space?: string }).space ?? "unknown",
-        ]);
-      }
-    }
+    warnOnOversizedOutboundFrame(encoded, message);
     socket.send(encoded);
   });
   const closeConnection = () => {
