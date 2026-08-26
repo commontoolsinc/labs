@@ -241,6 +241,27 @@ describe("guest", () => {
       }
     });
 
+    it("publishes the later of two overlapping reads", async () => {
+      const responses = [
+        Promise.withResolvers<FabricValue | undefined>(),
+        Promise.withResolvers<FabricValue | undefined>(),
+      ];
+      let request = 0;
+      const client = {
+        request: () => responses[request++]!.promise,
+      } as unknown as FabricClient;
+      const cell = new RemoteCell<number>(client, "count");
+
+      const first = cell.read();
+      const second = cell.read();
+      responses[0].resolve(1);
+      await expect(first).resolves.toBe(1);
+      responses[1].resolve(2);
+      await expect(second).resolves.toBe(2);
+
+      expect(cell.getSnapshot()).toEqual({ status: "ready", value: 2 });
+    });
+
     it("serializes overlapping writes before publishing the latest value", async () => {
       const firstResponse = Promise.withResolvers<FabricValue | undefined>();
       const writes: number[] = [];

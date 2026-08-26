@@ -1,6 +1,5 @@
 import type { MetaField } from "@commonfabric/api";
 import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
-import type { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type {
   FabricPlainObject,
   FabricValue,
@@ -1026,8 +1025,8 @@ export type WireOperationFieldSnapshot =
     operations: WireIntegratedOperation[];
   };
 
-/** A SQLite value as the realm-coded main-thread connection carries it. */
-export type SqliteWireValue = WireCellValue | FabricBytes;
+/** A SQLite value encoded for the worker realm boundary. */
+export type SqliteWireValue = RealmEncodedValue;
 
 /** SQLite bind values as the main-thread connection carries them. */
 export type SqliteParams =

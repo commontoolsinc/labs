@@ -9,7 +9,10 @@ import {
   type FabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 import { DID } from "@commonfabric/identity";
 import { type CfcCellLinkRefPayload } from "@commonfabric/runner/cfc";
 import {
@@ -458,7 +461,14 @@ export class CellHandle<T = unknown> {
         params: CellHandle.serializeSqliteParams(params),
       }),
     });
-    return response.rows.map((row) => CellHandle.deserialize(this, row) as Row);
+    return response.rows.map((row) =>
+      Object.fromEntries(
+        Object.entries(row).map(([key, value]) => [
+          key,
+          CellHandle.deserialize(this, fabricFromRealmValue(value)),
+        ]),
+      ) as Row
+    );
   }
 
   /** Commit a SQL write when this handle refers to a SQLite database. */
@@ -641,10 +651,27 @@ export class CellHandle<T = unknown> {
     params: ReadonlyArray<ClientCellValue> | Record<string, ClientCellValue>,
   ): SqliteParams {
     const serialize = (value: ClientCellValue) =>
-      value instanceof FabricBytes ? value : CellHandle.serialize(value);
+      realmFromFabricValue(CellHandle.sqliteFabricValue(value));
     return Array.isArray(params) ? params.map(serialize) : Object.fromEntries(
       Object.entries(params).map(([key, value]) => [key, serialize(value)]),
     );
+  }
+
+  private static sqliteFabricValue(value: ClientCellValue): FabricValue {
+    if (isCellHandle(value)) return value.ref();
+    if (value instanceof FabricSpecialObject) return value;
+    if (Array.isArray(value)) {
+      return value.map((member) => CellHandle.sqliteFabricValue(member));
+    }
+    if (isObjectOrArray(value)) {
+      return Object.fromEntries(
+        Object.entries(value).map(([key, member]) => [
+          key,
+          CellHandle.sqliteFabricValue(member),
+        ]),
+      );
+    }
+    return value as FabricValue;
   }
 
   /**

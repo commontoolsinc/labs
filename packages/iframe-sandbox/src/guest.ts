@@ -54,6 +54,7 @@ export class RemoteCell<T = FabricValue> {
   #snapshot: ResourceSnapshot<T> = { status: "loading" };
   #unsubscribeRemote: (() => void) | undefined;
   #writeTail: Promise<void> | undefined;
+  #readGeneration = 0;
 
   constructor(client: FabricClient, name: string) {
     this.#client = client;
@@ -83,14 +84,19 @@ export class RemoteCell<T = FabricValue> {
 
   async read(): Promise<T> {
     const before = this.#snapshot;
+    const generation = ++this.#readGeneration;
     try {
       const value = await this.#client.request("read", {
         resource: this.#name,
       }) as T;
-      if (this.#snapshot === before) this.#setReady(value);
+      if (generation === this.#readGeneration && this.#snapshot === before) {
+        this.#setReady(value);
+      }
       return value;
     } catch (error) {
-      if (this.#snapshot === before) this.#setError(error);
+      if (generation === this.#readGeneration && this.#snapshot === before) {
+        this.#setError(error);
+      }
       throw error;
     }
   }

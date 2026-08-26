@@ -3,6 +3,11 @@ import { describe, it } from "@std/testing/bdd";
 
 import { FabricLink } from "@commonfabric/data-model/fabric-instances";
 import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
+import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
+import {
   FabricBytes,
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-primitives";
@@ -65,7 +70,10 @@ describe("cell-handle", () => {
           request: (request: unknown) => {
             requests.push(request);
             return Promise.resolve({
-              rows: [{ title: "One", source: linkRefFrom(linked) }],
+              rows: [{
+                title: realmFromFabricValue("One"),
+                source: realmFromFabricValue(linkRefFrom(linked)),
+              }],
             });
           },
         }),
@@ -81,7 +89,7 @@ describe("cell-handle", () => {
         type: RequestType.SqliteQuery,
         cell: ref,
         sql: "SELECT title, source FROM notes WHERE id = ?",
-        params: [1],
+        params: [realmFromFabricValue(1)],
       }]);
       expect(rows[0]?.title).toBe("One");
       expect(rows[0]?.source).toBeInstanceOf(CellHandle);
@@ -109,7 +117,7 @@ describe("cell-handle", () => {
         type: RequestType.SqliteExec,
         cell: ref,
         sql: "INSERT INTO notes (title) VALUES (:title)",
-        params: { title: "New" },
+        params: { title: realmFromFabricValue("New") },
       }]);
     });
 
@@ -120,10 +128,12 @@ describe("cell-handle", () => {
       const runtime = {
         [$conn]: () => ({
           request: (request: { type: RequestType }) => {
-            requests.push(request);
+            requests.push(structuredClone(request));
             return Promise.resolve(
               request.type === RequestType.SqliteQuery
-                ? { rows: [{ payload: output }] }
+                ? structuredClone({
+                  rows: [{ payload: realmFromFabricValue(output) }],
+                })
                 : {},
             );
           },
@@ -141,7 +151,14 @@ describe("cell-handle", () => {
 
       expect(rows[0]?.payload).toBeInstanceOf(FabricBytes);
       expect(rows[0]?.payload.slice()).toEqual(new Uint8Array([1, 2, 3]));
-      expect(requests[1]).toMatchObject({ params: [input] });
+      const request = requests[1] as { params: [unknown] };
+      const parameter = fabricFromRealmValue(
+        request.params[0] as RealmEncodedValue,
+      );
+      expect(parameter).toBeInstanceOf(FabricBytes);
+      expect((parameter as FabricBytes).slice()).toEqual(
+        new Uint8Array([4, 5, 6]),
+      );
     });
   });
 

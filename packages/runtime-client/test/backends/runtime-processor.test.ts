@@ -7,6 +7,7 @@ import {
   fabricFromRealmValue,
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
+import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import {
   FabricBytes,
@@ -4389,8 +4390,10 @@ describe("runtime-processor", () => {
         type: RequestType.SqliteQuery,
         cell: ref,
         sql: "SELECT title FROM notes WHERE id = ?",
-        params: [1],
-      })).resolves.toEqual({ rows: [{ title: "One" }] });
+        params: [realmFromFabricValue(1)],
+      })).resolves.toEqual({
+        rows: [{ title: realmFromFabricValue("One") }],
+      });
       expect(calls).toEqual([[
         { id: "db-1", tables: { notes: {} }, scope: "user" },
         "SELECT title FROM notes WHERE id = ?",
@@ -4398,19 +4401,15 @@ describe("runtime-processor", () => {
       ]]);
     });
 
-    it("loads a newly materialized database handle before querying it", async () => {
+    it("uses the handle materialized by pull before querying it", async () => {
       const calls: string[] = [];
       const db = { id: "db-1", tables: { notes: {} }, scope: "user" };
       let loaded = false;
       const cell = {
         pull: () => {
           calls.push("pull");
-          return Promise.resolve();
-        },
-        sync: () => {
-          calls.push("sync");
           loaded = true;
-          return Promise.resolve(db);
+          return Promise.resolve();
         },
         getRaw: () => loaded ? db : undefined,
         asSchema: () => ({ get: () => loaded ? db : undefined }),
@@ -4438,7 +4437,7 @@ describe("runtime-processor", () => {
         sql: "SELECT * FROM notes",
       });
 
-      expect(calls).toEqual(["pull", "sync", "query"]);
+      expect(calls).toEqual(["pull", "query"]);
     });
 
     it("converts native SQLite BLOB rows and parameters at the IPC boundary", async () => {
@@ -4458,14 +4457,48 @@ describe("runtime-processor", () => {
         type: RequestType.SqliteQuery,
         cell: ref,
         sql: "SELECT payload FROM blobs WHERE payload = ?",
-        params: [input],
+        params: [realmFromFabricValue(input)],
       });
 
-      expect(result.rows[0]?.payload).toBeInstanceOf(FabricBytes);
-      expect((result.rows[0]?.payload as FabricBytes).slice()).toEqual(
+      const output = fabricFromRealmValue(result.rows[0]!.payload);
+      expect(output).toBeInstanceOf(FabricBytes);
+      expect((output as FabricBytes).slice()).toEqual(
         new Uint8Array([1, 2, 3]),
       );
       expect(calls[0]?.[2]).toEqual([new Uint8Array([4, 5, 6])]);
+    });
+
+    it("preserves reserved SQLite column names in query rows", async () => {
+      const row = Object.fromEntries([
+        ["constructor", "constructor-value"],
+        ["__proto__", "proto-value"],
+      ]);
+      const processor = processorWith(
+        { id: "db-1", tables: { notes: {} } },
+        () => Promise.resolve({ rows: [row] }),
+      );
+
+      const result = await processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: 'SELECT 1 AS "constructor", 2 AS "__proto__"',
+      });
+
+      expect(Object.hasOwn(result.rows[0]!, "constructor")).toBe(true);
+      expect(Object.hasOwn(result.rows[0]!, "__proto__")).toBe(true);
+      const resultRow = result.rows[0] as Record<string, RealmEncodedValue>;
+      const constructorValue = Object.getOwnPropertyDescriptor(
+        resultRow,
+        "constructor",
+      )!.value as RealmEncodedValue;
+      const prototypeValue = Object.getOwnPropertyDescriptor(
+        resultRow,
+        "__proto__",
+      )!.value as RealmEncodedValue;
+      expect(fabricFromRealmValue(constructorValue)).toBe("constructor-value");
+      expect(fabricFromRealmValue(prototypeValue)).toBe(
+        "proto-value",
+      );
     });
 
     it("refuses a direct query whose result needs CFC provenance", async () => {
@@ -4604,7 +4637,7 @@ describe("runtime-processor", () => {
         type: RequestType.SqliteExec,
         cell: ref,
         sql: "INSERT INTO notes (title) VALUES (:title)",
-        params: { title: "New" },
+        params: { title: realmFromFabricValue("New") },
       });
 
       expect(calls).toEqual([[

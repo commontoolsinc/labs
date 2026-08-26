@@ -3,6 +3,7 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
+import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
 import {
   $conn,
   $onCellUpdate,
@@ -373,7 +374,9 @@ describe("cf-iframe cell bridge", () => {
         request: (request: { type: RequestType }) => {
           requests.push(request);
           if (request.type === RequestType.SqliteQuery) {
-            return Promise.resolve({ rows: [{ title: "One" }] });
+            return Promise.resolve({
+              rows: [{ title: realmFromFabricValue("One") }],
+            });
           }
           return Promise.resolve({});
         },
@@ -423,12 +426,12 @@ describe("cf-iframe cell bridge", () => {
       type: RequestType.SqliteQuery,
       cell: databaseRef,
       sql: "SELECT title FROM notes WHERE id = ?",
-      params: [1],
+      params: [realmFromFabricValue(1)],
     }, {
       type: RequestType.SqliteExec,
       cell: databaseRef,
       sql: "INSERT INTO notes (title) VALUES (:title)",
-      params: { title: "New" },
+      params: { title: realmFromFabricValue("New") },
     }]);
   });
 

@@ -198,8 +198,10 @@ import {
   type SpaceResponse,
   type SpaceSetAclEntryRequest,
   type SqliteExecRequest,
+  type SqliteParams,
   type SqliteQueryRequest,
   type SqliteQueryResponse,
+  type SqliteWireValue,
   type TriggerTraceResponse,
   type UploadBlobRequest,
   type UploadBlobResponse,
@@ -315,24 +317,39 @@ function isSqliteDbRefValue(value: unknown): boolean {
     (candidate.owner === undefined || typeof candidate.owner === "string");
 }
 
-function sqliteParamsForRuntime(
+function sqliteParamForRuntime(
   runtime: Runtime,
   value: FabricValue,
 ): unknown {
   if (value instanceof FabricBytes) return value.slice();
   if (isCellRef(value)) return getCell(runtime, value);
   if (Array.isArray(value)) {
-    return value.map((member) => sqliteParamsForRuntime(runtime, member));
+    return value.map((member) => sqliteParamForRuntime(runtime, member));
   }
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value).map(([key, member]) => [
         key,
-        sqliteParamsForRuntime(runtime, member),
+        sqliteParamForRuntime(runtime, member),
       ]),
     );
   }
   return value;
+}
+
+function sqliteParamsForRuntime(
+  runtime: Runtime,
+  params: SqliteParams,
+): ReadonlyArray<unknown> | Record<string, unknown> {
+  const decode = (value: SqliteWireValue) =>
+    sqliteParamForRuntime(runtime, fabricFromRealmValue(value));
+  return Array.isArray(params) ? params.map(decode) : Object.fromEntries(
+    Object.entries(params).map(([key, value]) => [key, decode(value)]),
+  );
+}
+
+function sqliteValueForClient(value: unknown): SqliteWireValue {
+  return realmFromFabricValue(fabricFromNativeValue(value));
 }
 
 function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
@@ -1567,13 +1584,18 @@ export class RuntimeProcessor {
       ? undefined
       : encodeSqliteParams(
         request.sql,
-        sqliteParamsForRuntime(this.runtime, request.params) as
-          | ReadonlyArray<unknown>
-          | Record<string, unknown>,
+        sqliteParamsForRuntime(this.runtime, request.params),
       );
     const result = await provider.sqliteQuery(db, request.sql, params);
     return {
-      rows: fabricFromNativeValue(result.rows) as SqliteQueryResponse["rows"],
+      rows: result.rows.map((row) =>
+        Object.fromEntries(
+          Object.entries(row).map(([key, value]) => [
+            key,
+            sqliteValueForClient(value),
+          ]),
+        )
+      ),
     };
   }
 
@@ -1582,9 +1604,7 @@ export class RuntimeProcessor {
     await this.pullSqliteDbRef(source);
     const params = request.params === undefined
       ? undefined
-      : sqliteParamsForRuntime(this.runtime, request.params) as
-        | ReadonlyArray<unknown>
-        | Record<string, unknown>;
+      : sqliteParamsForRuntime(this.runtime, request.params);
     const result = await this.runtime.editWithRetry((tx) => {
       const cell = getCell(this.runtime, request.cell).withTx(
         tx,
@@ -1601,12 +1621,6 @@ export class RuntimeProcessor {
 
   private async pullSqliteDbRef(cell: Cell<unknown>): Promise<SqliteDbRef> {
     await cell.pull();
-    if (cell.getRaw({ lastNode: "value" }) === undefined) {
-      // A resolved scoped target can be demanded before its lazy factory write
-      // reaches this client. Load only that first missing value; established
-      // handles stay on the non-blocking pull path for later queries and writes.
-      await cell.sync();
-    }
     return this.readSqliteDbRef(cell);
   }
 
