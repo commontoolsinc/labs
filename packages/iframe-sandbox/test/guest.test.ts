@@ -6,7 +6,12 @@ import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import { connectFabric, reportGuestError } from "../src/guest.ts";
+import {
+  connectFabric,
+  type FabricClient,
+  RemoteCell,
+  reportGuestError,
+} from "../src/guest.ts";
 import {
   BRIDGE_PROTOCOL,
   BRIDGE_VERSION,
@@ -207,6 +212,34 @@ describe("guest", () => {
       } finally {
         fabric.disconnect();
       }
+    });
+
+    it("serializes overlapping writes before publishing the latest value", async () => {
+      const firstResponse = Promise.withResolvers<FabricValue | undefined>();
+      const writes: number[] = [];
+      const client = {
+        request: (
+          operation: string,
+          fields: { value?: FabricValue },
+        ) => {
+          expect(operation).toBe("write");
+          writes.push(fields.value as number);
+          return writes.length === 1
+            ? firstResponse.promise
+            : Promise.resolve(undefined);
+        },
+      } as unknown as FabricClient;
+      const cell = new RemoteCell<number>(client, "count");
+
+      const first = cell.write(1);
+      const second = cell.write(2);
+      await Promise.resolve();
+      expect(writes).toEqual([1]);
+
+      firstResponse.resolve(undefined);
+      await Promise.all([first, second]);
+      expect(writes).toEqual([1, 2]);
+      expect(cell.getSnapshot()).toEqual({ status: "ready", value: 2 });
     });
 
     it("rejects pending work when disconnected", async () => {

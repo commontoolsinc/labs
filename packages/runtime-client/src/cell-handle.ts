@@ -84,6 +84,7 @@ export class CellHandle<T = unknown> {
   >();
   #nextCallbackId = 0;
   #schemaWarned = false;
+  #strictWriteTail: Promise<void> = Promise.resolve();
 
   constructor(worker: RuntimeClient, cellRef: CellRef, value?: T) {
     this.#rt = worker;
@@ -158,7 +159,11 @@ export class CellHandle<T = unknown> {
   /** Set the cell's value and reject when the runtime refuses the write. */
   async setStrict(value: T): Promise<void> {
     this.#requireSchema("setStrict");
-    await this.#applyLocalAndSend(value, RequestType.CellSet, true);
+    const writing = this.#strictWriteTail.then(() =>
+      this.#applyLocalAndSend(value, RequestType.CellSet, true)
+    );
+    this.#strictWriteTail = writing.catch(() => {});
+    await writing;
   }
 
   // Optimistic local update (mirrors the old set()) plus the remote write. The
@@ -189,24 +194,18 @@ export class CellHandle<T = unknown> {
     const cell = this.ref();
 
     if (propagateFailure) {
+      const before = this.#value;
       return this.#conn.request<RequestType.CellSet>({
         type: RequestType.CellSet,
         cell,
         value: serialized,
         awaitCommit: true,
+      }).then(() => {
+        if (this.#value === before) this.#publishValue(value);
       });
     }
 
-    this.#value = value;
-
-    for (const callback of this.#callbacks.values()) {
-      try {
-        // Optimistic local update doesn't change the label; carry the current one.
-        callback(value as Readonly<T>, this.#cfcLabel);
-      } catch (error) {
-        console.error("[CellHandle] Callback error:", error);
-      }
-    }
+    this.#publishValue(value);
 
     const request = type === RequestType.CellPush
       ? this.#conn.request<RequestType.CellPush>({
@@ -224,6 +223,18 @@ export class CellHandle<T = unknown> {
         console.error("[CellHandle] Write failed:", error);
       }
     });
+  }
+
+  #publishValue(value: T): void {
+    this.#value = value;
+    for (const callback of this.#callbacks.values()) {
+      try {
+        // A local update does not change the label; carry the current one.
+        callback(value as Readonly<T>, this.#cfcLabel);
+      } catch (error) {
+        console.error("[CellHandle] Callback error:", error);
+      }
+    }
   }
 
   async send(event: T): Promise<void> {

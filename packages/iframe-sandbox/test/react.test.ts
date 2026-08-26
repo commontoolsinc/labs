@@ -103,6 +103,65 @@ describe("React bridge adapter", () => {
     expect(writes).toEqual([{ count: 2 }, { count: 3 }]);
   });
 
+  it("keeps the write queue when React discards memoized values", async () => {
+    type Counter = { count: number };
+    const firstStarted = Promise.withResolvers<void>();
+    const releaseFirst = Promise.withResolvers<void>();
+    const writes: Counter[] = [];
+    let snapshot: ResourceSnapshot<Counter> = {
+      status: "ready",
+      value: { count: 1 },
+    };
+    const remote = {
+      getSnapshot: () => snapshot,
+      subscribe: () => () => {},
+      read: () => Promise.resolve((snapshot as { value: Counter }).value),
+      write: async (value: Counter) => {
+        writes.push(value);
+        if (writes.length === 1) {
+          firstStarted.resolve();
+          await releaseFirst.promise;
+        }
+        snapshot = { status: "ready", value };
+      },
+    };
+    const client = { cell: () => remote } as unknown as FabricClient;
+    const refs: Array<{ current: unknown }> = [];
+    let refIndex = 0;
+    const hooks: ReactHooks = {
+      useCallback: (callback) => callback,
+      useEffect: () => {},
+      useMemo: (factory) => factory(),
+      useRef: (initial) => {
+        const index = refIndex++;
+        refs[index] ??= { current: initial };
+        return refs[index] as { current: typeof initial };
+      },
+      useState: (initial) =>
+        [
+          typeof initial === "function"
+            ? (initial as () => unknown)()
+            : initial,
+          () => {},
+        ] as never,
+      useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot(),
+    };
+    const render = () => {
+      refIndex = 0;
+      return createFabricReact(hooks, client).useCell<Counter>("count");
+    };
+
+    const first = render().set((value) => ({ count: value.count + 1 }));
+    await firstStarted.promise;
+    const second = render().set((value) => ({ count: value.count + 1 }));
+    await Promise.resolve();
+    expect(writes).toEqual([{ count: 2 }]);
+
+    releaseFirst.resolve();
+    await Promise.all([first, second]);
+    expect(writes).toEqual([{ count: 2 }, { count: 3 }]);
+  });
+
   it("invalidates an active SQLite query subscription on cleanup", () => {
     let unsubscribed = false;
     const calls: string[] = [];

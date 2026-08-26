@@ -1097,10 +1097,16 @@ export class RuntimeProcessor {
   handleCellSet(request: CellSetRequest): void | Promise<void> {
     const commit = this.applyCellWrite(request, /* blind */ true);
     if (request.awaitCommit) return this.requireCellCommit(commit);
+    void commit.catch((error) => {
+      console.error("[RuntimeProcessor] Cell set commit failed:", error);
+    });
   }
 
   handleCellPush(request: CellPushRequest): void {
-    this.applyCellWrite(request, /* blind */ false);
+    const commit = this.applyCellWrite(request, /* blind */ false);
+    void commit.catch((error) => {
+      console.error("[RuntimeProcessor] Cell push commit failed:", error);
+    });
   }
 
   private operationSessionKey(cell: CellGetRequest["cell"]): string {
@@ -1372,6 +1378,9 @@ export class RuntimeProcessor {
     this.runtime.prepareTxForCommit(tx);
     const commit = tx.commit();
     if (request.awaitCommit) return this.requireCellCommit(commit);
+    void commit.catch((error) => {
+      console.error("[RuntimeProcessor] Cell send commit failed:", error);
+    });
   }
 
   private async requireCellCommit(

@@ -3016,11 +3016,13 @@ describe("runtime-processor", () => {
 
     const createProcessor = (
       commitResult: { ok?: object; error?: { message: string } } = { ok: {} },
+      commitFailure?: Error,
     ) => {
       let prepared = false;
       const tx = {
         commit: () => {
           expect(prepared).toBe(true);
+          if (commitFailure) return Promise.reject(commitFailure);
           return Promise.resolve(commitResult);
         },
       };
@@ -3092,6 +3094,51 @@ describe("runtime-processor", () => {
         cell: ref,
         event: "new value",
       });
+    });
+
+    it("observes rejected fire-and-forget cell commits", async () => {
+      const calls: unknown[][] = [];
+      const original = console.error;
+      console.error = (...args: unknown[]) => calls.push(args);
+      try {
+        const set = createProcessor(
+          { ok: {} },
+          new Error("set commit rejected"),
+        );
+        const push = createProcessor(
+          { ok: {} },
+          new Error("push commit rejected"),
+        );
+        const send = createProcessor(
+          { ok: {} },
+          new Error("send commit rejected"),
+        );
+
+        RuntimeProcessor.prototype.handleCellSet.call(set.processor, {
+          type: RequestType.CellSet,
+          cell: ref,
+          value: "new value",
+        });
+        RuntimeProcessor.prototype.handleCellPush.call(push.processor, {
+          type: RequestType.CellPush,
+          cell: ref,
+          value: "new value",
+        });
+        RuntimeProcessor.prototype.handleCellSend.call(send.processor, {
+          type: RequestType.CellSend,
+          cell: ref,
+          event: "new value",
+        });
+        await Promise.resolve();
+
+        expect(calls.map(([message]) => message)).toEqual([
+          "[RuntimeProcessor] Cell set commit failed:",
+          "[RuntimeProcessor] Cell push commit failed:",
+          "[RuntimeProcessor] Cell send commit failed:",
+        ]);
+      } finally {
+        console.error = original;
+      }
     });
 
     it("returns a strict set commit refusal to the caller", async () => {

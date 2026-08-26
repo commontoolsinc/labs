@@ -880,6 +880,11 @@ describe("cell-handle", () => {
         }),
       } as unknown as RuntimeClient;
       const cell = new CellHandle(runtime, ref, { n: 0 });
+      const updates: unknown[] = [];
+      const unsubscribe = cell.subscribe((value) => {
+        updates.push(value);
+      });
+      updates.length = 0;
 
       await cell.setStrict({ n: 1 });
       await cell.sendStrict({ n: 2 });
@@ -895,7 +900,9 @@ describe("cell-handle", () => {
         event: { n: 2 },
         awaitCommit: true,
       }]);
-      expect(cell.get()).toEqual({ n: 0 });
+      expect(cell.get()).toEqual({ n: 1 });
+      expect(updates).toEqual([{ n: 1 }]);
+      unsubscribe();
     });
   });
 

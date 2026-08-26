@@ -53,6 +53,7 @@ export class RemoteCell<T = FabricValue> {
   readonly #listeners = new Set<SnapshotListener<T>>();
   #snapshot: ResourceSnapshot<T> = { status: "loading" };
   #unsubscribeRemote: (() => void) | undefined;
+  #writeTail: Promise<void> = Promise.resolve();
 
   constructor(client: FabricClient, name: string) {
     this.#client = client;
@@ -93,7 +94,13 @@ export class RemoteCell<T = FabricValue> {
     }
   }
 
-  async write(value: T): Promise<void> {
+  write(value: T): Promise<void> {
+    const writing = this.#writeTail.then(() => this.#write(value));
+    this.#writeTail = writing.catch(() => {});
+    return writing;
+  }
+
+  async #write(value: T): Promise<void> {
     try {
       const before = this.#snapshot;
       await this.#client.request("write", {

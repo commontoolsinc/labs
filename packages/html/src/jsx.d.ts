@@ -3590,7 +3590,10 @@ interface CFIframeAttributes<T> extends CFHTMLAttributes<T> {
   "src": string;
   "context"?: object;
   "$context"?: CellLike<any>;
-  "resourceKinds"?: Record<string, "cell" | "stream" | "sqlite">;
+  "resourceKinds"?: Record<
+    string,
+    "cell" | "readonly" | "stream" | "sqlite"
+  >;
 }
 
 interface CFRenderAttributes<T> extends CFHTMLAttributes<T> {

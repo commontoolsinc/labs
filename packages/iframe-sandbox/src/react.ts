@@ -59,10 +59,10 @@ export function createFabricReact(react: ReactHooks, client: FabricClient) {
       cell.getSnapshot,
       cell.getSnapshot,
     );
-    const writes = react.useMemo(
-      () => ({ tail: Promise.resolve() }),
-      [cell],
-    );
+    const writes = react.useRef({ cell, tail: Promise.resolve() });
+    if (writes.current.cell !== cell) {
+      writes.current = { cell, tail: Promise.resolve() };
+    }
 
     react.useEffect(() => {
       if (cell.getSnapshot().status === "loading") {
@@ -72,7 +72,7 @@ export function createFabricReact(react: ReactHooks, client: FabricClient) {
 
     const set = react.useCallback(
       (next: T | ((current: T) => T)) => {
-        const writing = writes.tail.then(async () => {
+        const writing = writes.current.tail.then(async () => {
           const current = cell.getSnapshot();
           const value = typeof next === "function"
             ? (next as (current: T) => T)(
@@ -81,7 +81,7 @@ export function createFabricReact(react: ReactHooks, client: FabricClient) {
             : next;
           await cell.write(value);
         });
-        writes.tail = writing.catch(() => {});
+        writes.current.tail = writing.catch(() => {});
         return writing;
       },
       [cell, writes],
