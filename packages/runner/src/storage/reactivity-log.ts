@@ -257,6 +257,31 @@ export function clearSchemaRefusalTx(tx: object, refusal: unknown): void {
   }
 }
 
+// Link targets an eager read crossed and the local replica could not serve,
+// accumulated per transaction in encounter order. The read itself resolves to
+// `undefined` and stays a registered dependency, and the runtime kicks an
+// asynchronous load — this record is what lets a caller that judges the
+// materialized value (setup's argument validation) distinguish "a value was
+// read and found wanting" from "a value could not be read at all", which is
+// the line between refusing and waiting for convergence.
+const missingLinkTargets = new WeakMap<object, unknown[]>();
+
+export function noteMissingLinkTargetTx(tx: object, link: unknown): void {
+  for (const layer of blindWriteTxChain(tx)) {
+    const list = missingLinkTargets.get(layer);
+    if (list === undefined) missingLinkTargets.set(layer, [link]);
+    else list.push(link);
+  }
+}
+
+export function missingLinkTargetsTx(tx: object): readonly unknown[] {
+  for (const layer of blindWriteTxChain(tx)) {
+    const list = missingLinkTargets.get(layer);
+    if (list !== undefined) return list;
+  }
+  return [];
+}
+
 export function isLazyMaterializationTx(tx: object): boolean {
   // Walk the chain rather than testing the object: a wrapper built over a
   // transaction that was marked earlier has never been marked itself, and must

@@ -1737,13 +1737,31 @@ export class StorageManager implements IStorageManager {
     cell: Cell<T>,
     options?: { scopeKeyIdentity?: ScopeKeyIdentity },
   ): Promise<Cell<T>> {
+    await this.syncCellWithFailure(cell, options);
+    return cell;
+  }
+
+  /**
+   * {@link syncCell}, resolving with the pull's FAILURE — or `undefined`
+   * when the sync delivered. A pull that "succeeds" while carrying an error
+   * (an ACL denial, a transport failure) resolves `syncCell` normally, and
+   * a caller that treats that resolution as "the replica has now seen the
+   * doc" turns the failure into a judged absence nobody can retry. The
+   * missing-doc kick paths consume this instead, so a carried failure hands
+   * back its reservation and the absence stays provisional.
+   */
+  async syncCellWithFailure<T>(
+    cell: Cell<T>,
+    options?: { scopeKeyIdentity?: ScopeKeyIdentity },
+  ): Promise<unknown> {
     const { space, id, schema, scope } = cell.getAsNormalizedFullLink();
     if (!space) {
       throw new Error("No space set");
     }
 
     if (hasDataUriScheme(id)) {
-      return this.syncDataURICell(cell, space, id, schema, scope);
+      await this.syncDataURICell(cell, space, id, schema, scope);
+      return undefined;
     }
 
     const provider = this.open(space);
@@ -1782,11 +1800,12 @@ export class StorageManager implements IStorageManager {
       // transport failure) otherwise resolves this sync() normally and the
       // caller reads the doc as absent — deny, error, and absent all collapse
       // into the same silent undefined. Surface the failure; the pending-load
-      // ledger below still carries it to scheduler waiters.
+      // ledger below still carries it to scheduler waiters, and the resolved
+      // value carries it to the kick paths.
       if (loadFailure !== undefined) {
         this.logSyncLoadFailure(space, id, loadFailure);
       }
-      return cell;
+      return loadFailure;
     } catch (error) {
       loadFailure = error;
       throw error;

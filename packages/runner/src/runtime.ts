@@ -2174,6 +2174,118 @@ export class Runtime {
   // doc suffices. Scope is part of the key: scoped instances (user/session)
   // are distinct docs, and a kick for one scope must not suppress another's.
   private missingDocLoadKicks = new Set<string>();
+  // Reference counts for missing-doc loads whose sync has not settled yet,
+  // fed by every kick that FETCHES A MISSING DOC on a reader's behalf: this
+  // runtime's `ensureLinkedDocLoaded`, and link-resolution's RESERVED
+  // same-space pull. The resolver's unreserved cross-space kick stays out
+  // on purpose — it is a liveness refresh that fires on every resolution,
+  // present targets and settled absences alike, and registering it would
+  // re-mark a confirmed absence as provisional forever (see
+  // `missingDocAbsenceIsProvisional`, whose invariant this tracker serves).
+  // Distinct from the permanent dedup above because the two answer
+  // different questions: the dedup answers "has a kick ever been taken",
+  // which must stay true for the manager's lifetime, while a caller asking
+  // whether an absence is still unresolved ("cannot read yet" versus "read
+  // as absent") needs a key that CLEARS when the load settles — a settled
+  // load means the replica now holds the doc's state or its confirmed
+  // absence, and treating the doc as pending past that point turns every
+  // confirmed absence into a permanent postponement. A count rather than a
+  // set, so two kicks tracking the same doc cannot have the first
+  // settlement erase the second's pending state.
+  private missingDocLoadsInFlight = new Map<string, number>();
+
+  private missingDocLoadKey(
+    space: MemorySpace,
+    id: URI,
+    scope?: NormalizedFullLink["scope"],
+    identity?: ScopeKeyIdentity,
+  ): string {
+    return `${space}\0${
+      resolveScopeKey(scope, identity ?? this.scopeKeyIdentity)
+    }\0${id}`;
+  }
+
+  /**
+   * Register a missing-doc load as in flight and hand back its settle
+   * callback. Every kick that fetches a missing doc on a reader's behalf
+   * registers here, whichever machinery performs the sync, so
+   * {@link isMissingDocLoadInFlight} answers for all of them; a liveness
+   * refresh sync deliberately does not (the field comment on
+   * `missingDocLoadsInFlight` says why).
+   */
+  trackMissingDocLoadInFlight(
+    space: MemorySpace,
+    id: URI,
+    scope?: NormalizedFullLink["scope"],
+    identity?: ScopeKeyIdentity,
+  ): () => void {
+    const key = this.missingDocLoadKey(space, id, scope, identity);
+    this.missingDocLoadsInFlight.set(
+      key,
+      (this.missingDocLoadsInFlight.get(key) ?? 0) + 1,
+    );
+    let settled = false;
+    return () => {
+      if (settled) return;
+      settled = true;
+      const count = this.missingDocLoadsInFlight.get(key) ?? 0;
+      if (count <= 1) this.missingDocLoadsInFlight.delete(key);
+      else this.missingDocLoadsInFlight.set(key, count - 1);
+    };
+  }
+
+  /**
+   * Whether some REGISTERED load for this doc — a missing-doc fetch kicked
+   * by any read, in any transaction — is still unsettled. The answer a
+   * reader needs to tell an absence it must wait out from one the replica
+   * has confirmed: a reservation consumed by another transaction's kick
+   * reads as "seen" to `shouldPullDoc`, while the doc is in truth still on
+   * the wire. Liveness refresh syncs never register, so they never answer
+   * here.
+   */
+  isMissingDocLoadInFlight(
+    space: MemorySpace,
+    id: URI,
+    scope?: NormalizedFullLink["scope"],
+    identity?: ScopeKeyIdentity,
+  ): boolean {
+    return this.missingDocLoadsInFlight.has(
+      this.missingDocLoadKey(space, id, scope, identity),
+    );
+  }
+
+  /**
+   * The one verdict every miss-classification site consults: whether a read
+   * that found `link`'s doc missing is looking at a PROVISIONAL absence — a
+   * load is in flight, or this call just warranted and kicked one — rather
+   * than the replica's settled knowledge (the doc's state, or its confirmed
+   * absence, with nothing on the wire). A provisional absence must be
+   * waited out, never judged; a settled one is the data as it stands.
+   *
+   * Centralized because the two halves come from different bookkeeping and
+   * every partial answer has been wrong somewhere: the in-flight tracker
+   * covers every registered missing-doc fetch, whichever kick path in
+   * whichever transaction took it (a reservation consumed by a concurrent
+   * kick reads as "seen" to `shouldPullDoc` while the doc is
+   * mid-transfer), and {@link ensureLinkedDocLoaded} owns the
+   * permanent-dedup-versus-seen distinction and kicks the load that makes a
+   * provisional verdict healable. Liveness refresh syncs (the resolver's
+   * per-resolution cross-space kick) deliberately do not register with the
+   * tracker, so a doc whose absence one fetch already confirmed stays
+   * settled however often a hop re-syncs it.
+   */
+  missingDocAbsenceIsProvisional(
+    link: NormalizedFullLink,
+    sourceSpace?: MemorySpace,
+    identity?: ScopeKeyIdentity,
+  ): boolean {
+    if (
+      this.isMissingDocLoadInFlight(link.space, link.id, link.scope, identity)
+    ) {
+      return true;
+    }
+    return this.ensureLinkedDocLoaded(link, sourceSpace, identity);
+  }
 
   /**
    * Asynchronously load a link target that a read found absent from the
@@ -2199,7 +2311,11 @@ export class Runtime {
      * from the runtime's own. Absent = the runtime's own identity, the
      * pre-stage-A path byte for byte. */
     identity?: ScopeKeyIdentity,
-  ): void {
+    /** Whether a load is warranted or already in flight — `false` exactly
+     * when the local replica has SEEN the doc (its state, or its confirmed
+     * absence) and no fetch is pending, so a caller distinguishing "cannot
+     * read yet" from "read as absent" can gate on it. */
+  ): boolean {
     const { space, id, scope } = link;
     // Kick keys are per scope INSTANCE (key-vocabulary.md §5's stage-F
     // serving-hazard list): name-keyed, A's kick suppressed B's load and
@@ -2208,36 +2324,60 @@ export class Runtime {
     // partition is unchanged at cardinality 1 (key-vocabulary.md §2) — or
     // against the served run's identity for a per-instance read (stage
     // A): each demanded instance's absent read kicks its own load.
-    const key = `${space}\0${
-      resolveScopeKey(scope, identity ?? this.scopeKeyIdentity)
-    }\0${id}`;
-    if (this.missingDocLoadKicks.has(key)) return;
+    const key = this.missingDocLoadKey(space, id, scope, identity);
+    if (this.missingDocLoadKicks.has(key)) {
+      // Kicked before: pending exactly while that load is still in flight.
+      // Settled means the replica has seen the doc (its state or its
+      // confirmed absence), so the absence a reader found is a judged one.
+      return this.missingDocLoadsInFlight.has(key);
+    }
     // A same-space target the replica already has state for (or a manager
     // without lazy replication) needs no fetch.
     const sameSpace = sourceSpace === space;
     const mgr = this.storageManager;
     const reserved = sameSpace &&
       mgr.shouldPullDoc?.(space, id, scope, identity) === true;
-    if (sameSpace && !reserved) return;
+    if (sameSpace && !reserved) return false;
     this.missingDocLoadKicks.add(key);
-    const load = identity === undefined
-      ? this.getCellFromLink(link).sync()
-      // The instance-named load: the storage manager names the run's
-      // instance on the wire (lease-holder-only at admission) and lands
-      // the doc under it; an own-identity run takes the ordinary sync.
-      : mgr.syncCell(this.getCellFromLink(link), {
-        scopeKeyIdentity: identity,
-      });
-    mgr.trackUntilSettled(
-      load.catch(() => {
-        // Allow a retry on failure (e.g. transient disconnect): clear this
-        // dedup set, and hand back the storage manager's reservation when
-        // THIS kick took it — a cross-space kick never reserved, and must
-        // not clear a reservation a concurrent same-space read holds.
-        this.missingDocLoadKicks.delete(key);
-        if (reserved) mgr.retractDocPullKick?.(space, id, scope, identity);
-      }),
+    const settled = this.trackMissingDocLoadInFlight(
+      space,
+      id,
+      scope,
+      identity,
     );
+    // The instance option names the run's instance on the wire
+    // (lease-holder-only at admission) and lands the doc under it; an
+    // own-identity load names nothing and takes the ordinary path. The
+    // failure-reporting sync is preferred because a pull can RESOLVE while
+    // carrying an error (an ACL denial, a transport failure) — such a sync
+    // delivered nothing, and only the carried failure tells this
+    // bookkeeping so.
+    const syncOptions = identity !== undefined
+      ? { scopeKeyIdentity: identity }
+      : undefined;
+    const load = mgr.syncCellWithFailure !== undefined
+      ? mgr.syncCellWithFailure(this.getCellFromLink(link), syncOptions)
+      : mgr.syncCell(this.getCellFromLink(link), syncOptions).then(() =>
+        undefined
+      );
+    // A load that delivered nothing — rejected, or resolved carrying a
+    // failure — must not read as "the replica has seen the doc": clear the
+    // dedup so a later read retries, and hand back the storage manager's
+    // reservation when THIS kick took it (a cross-space kick never
+    // reserved, and must not clear a reservation a concurrent same-space
+    // read holds). The in-flight count clears either way; with the dedup
+    // gone the doc reads as never-kicked, so the absence stays provisional
+    // on the next ask.
+    const failed = () => {
+      this.missingDocLoadKicks.delete(key);
+      if (reserved) mgr.retractDocPullKick?.(space, id, scope, identity);
+    };
+    mgr.trackUntilSettled(
+      load.then((failure) => {
+        if (failure !== undefined) failed();
+      }, failed).finally(settled),
+    );
+    return true;
   }
 
   getCfcStats(): Readonly<CfcRuntimeStats> {
