@@ -16,7 +16,7 @@
 import type {
   FabricError as ApiFabricError,
   FabricErrorConstructor as ApiFabricErrorConstructor,
-} from "@commonfabric/api";
+} from "../api.ts";
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
@@ -528,9 +528,9 @@ export class FabricError extends FabricNativeWrapper<Error>
 }
 
 // Compile-time check that the exported `FabricError` constructor matches the
-// `FabricErrorConstructor` declared in `@commonfabric/api`. This catches a
-// declared member that is missing here or has the wrong type. It does NOT
-// catch the other direction: `satisfies` is an assignability check, so a
-// public member on this class that the declaration omits passes silently.
-// Members added here need adding there by hand.
+// `FabricErrorConstructor` declared in `../api.ts`. This catches a declared member
+// that is missing here or has the wrong type. It does NOT catch the other
+// direction: `satisfies` is an assignability check, so a public member on this
+// class that the declaration omits passes silently. Members added here need
+// adding there by hand.
 FabricError satisfies ApiFabricErrorConstructor;

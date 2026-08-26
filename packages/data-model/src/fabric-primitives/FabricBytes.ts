@@ -4,6 +4,10 @@ import {
 } from "@commonfabric/utils/base64url";
 import { toOwnedUint8Array } from "@commonfabric/utils/buffers";
 
+import type {
+  FabricBytes as ApiFabricBytes,
+  FabricBytesConstructor as ApiFabricBytesConstructor,
+} from "../api.ts";
 import type { FabricValue } from "@/interface.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { BaseFabricPrimitive } from "@/fabric-bases/BaseFabricPrimitive.ts";
@@ -31,7 +35,7 @@ import {
  * instance owns its bytes outright, holding a buffer no other code can reach.
  * (JS cannot freeze `ArrayBuffer` contents, so sole ownership is the defense.)
  */
-export class FabricBytes extends BaseFabricPrimitive {
+export class FabricBytes extends BaseFabricPrimitive implements ApiFabricBytes {
   /**
    * Private byte storage. Guaranteed to be backed by an exact-sized and
    * unshared `ArrayBuffer`.
@@ -236,3 +240,11 @@ export class FabricBytes extends BaseFabricPrimitive {
     return this.#realmCodec;
   }
 }
+
+// Compile-time check that the exported `FabricBytes` constructor matches the
+// `FabricBytesConstructor` declared in `../api.ts`. This catches a declared member
+// that is missing here or has the wrong type. It does NOT catch the other
+// direction: `satisfies` is an assignability check, so a public member on this
+// class that the declaration omits passes silently. Members added here need
+// adding there by hand.
+FabricBytes satisfies ApiFabricBytesConstructor;
