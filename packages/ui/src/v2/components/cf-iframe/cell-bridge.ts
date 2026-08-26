@@ -100,6 +100,7 @@ function cellResource(
   cell: CellHandle<unknown>,
   schema: JSONSchema | undefined,
   kindHint?: CellContextResourceKind,
+  prepareSqliteOperation?: () => Promise<void>,
 ): BridgeResource {
   const kind = kindHint ?? cellKind(schema);
   const description = schema && typeof schema === "object" &&
@@ -131,6 +132,7 @@ function cellResource(
       },
       methods: {
         query: async (value) => {
+          await prepareSqliteOperation?.();
           const { sql, params } = sqliteInput(value);
           const rows = await cell.querySqlite(sql, params);
           return {
@@ -143,6 +145,7 @@ function cellResource(
           };
         },
         exec: async (value) => {
+          await prepareSqliteOperation?.();
           const { sql, params } = sqliteInput(value);
           await cell.execSqlite(sql, params);
         },
@@ -292,18 +295,30 @@ export async function resolveCellContextBridge(
       ? resourceKinds[name]
       : undefined;
     const declaredKind = kindHint ?? cellKind(properties[name]);
-    if (declaredKind === "sqlite") {
-      // Pull the source path, not only its resolved target. A scoped SQLite
-      // factory can be lazy for this browser session; the source path retains
-      // the producer edge that materializes its concrete handle. The resolved
-      // target remains the capability authority exposed below.
-      await source.pull();
+    const prepareSqliteOperation = declaredKind === "sqlite"
+      ? async () => {
+        // Pull the source path, not only its resolved target. A scoped SQLite
+        // factory can be lazy for this browser session; the source path retains
+        // the producer edge that materializes its concrete handle. Repeat this
+        // demand when an operation starts because initial bridge resolution can
+        // precede producer registration. The resolved target below remains the
+        // fixed capability authority.
+        await source.pull();
+      }
+      : undefined;
+    if (prepareSqliteOperation) {
+      await prepareSqliteOperation();
     }
     const cell = await source.resolveAsCell();
     const resolvedSchema = cell.ref().schema;
     return [
       name,
-      cellResource(cell, resolvedSchema, kindHint),
+      cellResource(
+        cell,
+        resolvedSchema,
+        kindHint,
+        prepareSqliteOperation,
+      ),
     ] as const;
   }));
   return createFabricBridge(Object.fromEntries(entries));
