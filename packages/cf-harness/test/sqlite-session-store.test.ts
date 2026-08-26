@@ -1171,6 +1171,33 @@ Deno.test("sqlite session restore refuses a structurally corrupt recorded transc
     const stored = (await store.getSession("session-1"))?.transcript ?? [];
     assertEquals(stored, [{ role: "user", content: "Read the first file" }]);
     assertEquals(inspectHarnessTranscriptPairing(stored).valid, true);
+
+    // Writing the safe prefix back makes the stored history look repaired, so
+    // a later restart has only the flag to read the refusal from. It has to be
+    // enough: the refusal must survive as many restarts as the session does.
+    const secondRestart = new HarnessInteractiveChatService({
+      createPromptLoop: () => ({
+        runTranscript: (runOptions) => {
+          reachedTheLoop = true;
+          return Promise.resolve(makeResult(runOptions, "Recovered."));
+        },
+      }),
+      now: () => "2026-05-27T00:03:00.000Z",
+      sessionStore: store,
+    });
+    await secondRestart.initializeFromStore();
+    assertEquals(secondRestart.status("session-1").sessions[0].reusable, false);
+    const afterRestart = await secondRestart.startTurn("req-2", {
+      sessionId: "session-1",
+      turnId: "turn-2",
+      input: { text: "Try again" },
+    });
+    assertEquals(afterRestart.ok, false);
+    assertEquals(
+      afterRestart.ok === false ? afterRestart.error.code : "",
+      "incomplete_transcript",
+    );
+    assertEquals(reachedTheLoop, false);
   } finally {
     store.close();
     await Deno.remove(path);

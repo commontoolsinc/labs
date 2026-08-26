@@ -330,6 +330,12 @@ const interruptedTurnError = (
   },
 });
 
+const unresumableSessionError = (sessionId: string): HarnessChatError => ({
+  code: "incomplete_transcript",
+  message:
+    `chat session was marked not reusable by an earlier recovery: ${sessionId}`,
+});
+
 /** A prompt loop reported success with history a provider would reject. */
 class HarnessIncompleteTranscriptError extends Error {
   constructor(turnId: string) {
@@ -822,17 +828,26 @@ export class HarnessInteractiveChatService {
     for (const record of [...this.#sessions.values()]) {
       const recovered = recoverSessionTranscript(record.transcript);
       if (recovered === undefined) {
+        // A recovery that already ran left the session idle and not reusable,
+        // and left behind the resumable prefix that makes its history look
+        // repaired. The flag is the durable half of that decision, so it is
+        // what a later restart reads the refusal back from.
+        if (!record.status.reusable && record.status.status === "idle") {
+          record.recoveryError = unresumableSessionError(
+            record.status.sessionId,
+          );
+        }
         continue;
       }
       const updatedAt = this.#now();
       if (!("unrecoverable" in recovered)) {
-        // `#emitImmediately` persists `record.transcript` alongside the event,
-        // so the rollback and the record of it commit together.
-        record.transcript = recovered.transcript;
+        // Passing the prefix through the emit adopts it only once the write
+        // commits, so a failed write leaves the record on the history the store
+        // still holds rather than on a prefix it never saved.
         await this.#emit(record.status.sessionId, undefined, {
           kind: "status_changed",
           session: { ...record.status, updatedAt },
-        });
+        }, { transcript: recovered.transcript });
         continue;
       }
       // The session is refused either way, but the corrupt history must not be

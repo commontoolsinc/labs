@@ -1746,3 +1746,60 @@ Deno.test("a session stays reusable after a turn fails mid-tool", async () => {
     "failed",
   );
 });
+
+Deno.test("a rollback whose write fails leaves the record on the stored history", async () => {
+  const corrupt: HarnessTranscriptMessage[] = [
+    { role: "user", content: "Read both files" },
+    {
+      role: "assistant",
+      content: "Reading both files.",
+      toolCalls: [toolCall("call-a"), toolCall("call-b")],
+    },
+  ];
+  const store: HarnessChatSessionStore = {
+    saveSession: () => {},
+    getSession: () => undefined,
+    listSessions: () => [{
+      session: createHarnessChatSessionStatus({
+        sessionId: "session-1",
+        createdAt: "2026-05-22T00:00:01.000Z",
+        workspace: { hostPath: "/workspace" },
+      }),
+      transcript: corrupt,
+    }],
+    saveSessionAndAppendEvent: () => {
+      throw new Error("the session store went away mid-commit");
+    },
+    saveSessionTurnAndAppendEvent: () => {
+      throw new Error("the session store went away mid-commit");
+    },
+    saveTurn: () => {},
+    getTurn: () => undefined,
+    listTurns: () => [],
+    appendEvent: () => {},
+    listEvents: () => [],
+    latestSequence: () => 0,
+  };
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: () => ({
+      runTranscript: (options) => Promise.resolve(makeResult(options, "Done.")),
+    }),
+    now: nextIsoNow(),
+    sessionStore: store,
+  });
+
+  await assertRejects(() => service.initializeFromStore());
+
+  // The rollback never committed, so the record must still name the history the
+  // store holds rather than a prefix that only ever existed in memory.
+  const started = await service.startTurn("req-1", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Try again" },
+  });
+  assertEquals(started.ok, false);
+  assertEquals(
+    started.ok === false ? started.error.code : "",
+    "incomplete_transcript",
+  );
+});
