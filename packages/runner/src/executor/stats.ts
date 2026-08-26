@@ -406,6 +406,34 @@ export type ServingLoopStats = {
      * intent tx) fold into the refusal. Counted once per refused EVENT,
      * however many contributions folded. */
     orphanDeliveriesRefused: number;
+    /** The pre-dispatch LOAD-PARK deferrals (verification-coverage.md's
+     * OW45 residue member, fixed 2026-08-26): a served event's dispatch
+     * preflight parked on an in-flight replica load its closure reads
+     * and that load FAILED, so the event — and every later-arrived
+     * event behind it in the same space — deferred to a later drain
+     * instead of being sealed `{status: "dropped"}`. Counted per
+     * DEFERRAL, head and barrier alike, so a persistently failing load
+     * reads as a growing count rather than a single event. Nonzero is
+     * not by itself a fault (a revoked-then-remounted session heals in
+     * a cycle or two); a count that grows without `processed` moving
+     * names a load that never heals, and the WARN beside each deferral
+     * carries the failing doc key and the error. */
+    loadParkDeferrals: number;
+    /** Terminal drop/error notices SEALED onto a durable entry
+     * (events.md §5: the notice IS the consequence and the frontier
+     * advances past it). DROPS ONLY — a handler that THREW seals an
+     * error consequence and is deliberately not counted here, matching
+     * serving-loop.md §7's wording (independent review F8: this comment
+     * used to say "drop/error", which the increment never did).
+     * Recorded observability gap, closed with the
+     * load-park fix: a terminally discharged served event used to be
+     * invisible in serving stats — `appended == processed` reads clean
+     * while a user's action is permanently gone — so only the WARN line
+     * and the entry's own `status` field carried it. Routine causes
+     * exist (a piece that can never start hardens here after its
+     * bounded creation-race window), so read it against
+     * `loadParkDeferrals` and the WARNs, not alone. */
+    dropped: number;
   };
   memo: { hits: number; misses: number; inflight: number };
   outbox: {
@@ -515,6 +543,8 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
     lt1LeftoversPurged: 0,
     lt1LateSealsRefused: 0,
     orphanDeliveriesRefused: 0,
+    loadParkDeferrals: 0,
+    dropped: 0,
   },
   memo: { hits: 0, misses: 0, inflight: 0 },
   outbox: { queued: 0, completed: 0, failed: 0, budgetDeferrals: 0 },

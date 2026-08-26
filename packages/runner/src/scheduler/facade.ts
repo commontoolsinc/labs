@@ -2840,22 +2840,86 @@ export class Scheduler {
     this.queueExecution();
   }
 
+  /**
+   * The head event's required replica load FAILED.
+   *
+   * events.md §5's T3 drop predicate is "no runnable handler", never
+   * "the run raced" — and a load failure is the second: the doc the
+   * closure reads EXISTS durably, only the read path failed. The live
+   * shape (verification-coverage.md's OW45 residue member, store-proven
+   * on CI run 32929764230) is a serving session revoked by the genesis
+   * ACL landing after activation — `unauthorized` on a cross-space read
+   * of a doc the server itself wrote one second earlier, healing by
+   * design on the next mount. Sealing §5's dropped-event notice for
+   * that DISCHARGED at-least-once on a healthy trusted user action and
+   * advanced the watermark past it, so nothing ever re-ran it: the
+   * click was silently lost.
+   *
+   * A SERVED event therefore DEFERS — no consequence written, the
+   * durable entry left pending and UNCONSEQUENCED, a later drain
+   * re-delivering it. The deferral carries the drain's arrival-order
+   * BARRIER with it (events.md §2, mirroring the sidecar-sync-failure
+   * arm): every later-arrived durable served entry behind it IN THE
+   * SAME SPACE defers too, or a later arrival's consequence lands ahead
+   * of an earlier one. Two exclusions, both deliberate: cross-space
+   * queue neighbours (§2's order is per-space) and LT1 in-process
+   * copies (`served` with no `streamEntry`), which have no durable
+   * entry to re-drain and are a running event's same-wave cascade
+   * children rather than later arrivals.
+   *
+   * Client-side (no `served`) there is no durable entry to re-drain, so
+   * the drop keeps today's shape — the same split events.ts makes for a
+   * piece-load failure.
+   */
   private failHeadEventLoadPark(event: QueuedEvent, error: unknown): void {
     if (this.headEventLoadPark?.eventId !== event.id) return;
+    const keys = this.headEventLoadPark.keys.join(", ");
     this.headEventLoadPark = null;
     this.headEventLoadParkHistory = null;
     const detail = error instanceof Error ? error.message : String(error);
+    if (event.served === undefined) {
+      this.dropEvent(
+        event,
+        `Event dropped: required replica load failed before dispatch (${detail})`,
+      );
+      this.queueExecution();
+      return;
+    }
+    // WARN per deferral, naming the failing doc keys and the error: a
+    // deferral that never clears is a user action that never lands, and
+    // `events.loadParkDeferrals` counts what the log spells out.
     this.dropEvent(
       event,
-      `Event dropped: required replica load failed before dispatch (${detail})`,
+      `Event deferred: required replica load failed before dispatch ` +
+        `(${keys}: ${detail}); the entry stays pending and a later drain ` +
+        `re-delivers it`,
+      { servedKind: "deferred", cause: "load-park" },
     );
+    for (const later of [...this.eventQueue]) {
+      if (later.eventLink.space !== event.eventLink.space) continue;
+      if (later.served?.streamEntry === undefined) continue;
+      this.dropEvent(
+        later,
+        `Event deferred: held behind ${event.id}, whose required replica ` +
+          `load failed before dispatch (${keys}); later-arrived events wait ` +
+          `behind it`,
+        { servedKind: "deferred", cause: "load-park" },
+      );
+    }
     this.queueExecution();
   }
 
   private dropEvent(
     event: QueuedEvent,
     reason: string,
-    options: { quiet?: boolean } = {},
+    options: {
+      quiet?: boolean;
+      /** Defaults to the terminal `dropped` arm. `deferred` leaves the
+       * durable entry UNCONSEQUENCED for a later drain (events.md §5);
+       * only meaningful for a served event. */
+      servedKind?: "dropped" | "deferred";
+      cause?: "load-park";
+    } = {},
   ): void {
     if (this.headEventLoadPark?.eventId === event.id) {
       this.headEventLoadPark = null;
@@ -2873,7 +2937,7 @@ export class Scheduler {
       },
       event,
       reason,
-      "dropped",
+      options.servedKind ?? "dropped",
       options,
     );
   }
