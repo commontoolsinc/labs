@@ -431,10 +431,8 @@ row whose fixed document the schema refuses — is completed the same way, by
 re-invoking with an amended fixer, and the rows that landed are not rewritten.
 
 [`bulk-ops-demo.sh`](../../packages/cli/integration/bulk-ops-demo.sh) shows the
-same surface live: it narrates each command and then runs it, and each act
-re-parses its own displayed line and compares the words against the argv that
-ran, so a line a reader retypes is the line that executed. Run it against any
-host:
+same surface live, narrating each command and then running it. Run it against
+any host:
 
 ```bash
 API_URL=http://localhost:8000 packages/cli/integration/bulk-ops-demo.sh

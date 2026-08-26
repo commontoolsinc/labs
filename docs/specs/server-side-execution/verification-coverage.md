@@ -6155,7 +6155,8 @@ supply; OW29/OW32/OW34 closed):
     complains when it succeeds), which is what makes the store the
     only usable witness; the worker console bridge was verified live
     at all three levels first, so the silence is a finding rather
-    than a blind instrument. **NOT DETERMINED, deliberately:**
+    than a blind instrument. **CAMPAIGN FORK, DELIBERATELY LEFT
+    UNDETERMINED AT THAT HEAD:**
     whether that commit was REFUSED, DROPPED in flight, or NEVER
     ISSUED. The guest's space appears in NO server-side line at all —
     including none of the 50-73 per-run
@@ -6219,12 +6220,34 @@ supply; OW29/OW32/OW34 closed):
     here is WRITE-direction and occurs at ensure-OFF, so OW61's
     separate client-side ABSORB investigation is not expected to
     close this shape.
-    **DISPOSITION: NO LIFT. The entry STAYS, its reason reworded to
-    the narrowed charge — the b04 class it was minted for is closed
-    at this head, and it now stands on the guest-profile
-    program-materialization loss. The lift bar is UNCHANGED: this
-    entry's own gate evidence at the merged head, 10/10, never by
-    inference from the default-app gate.**
+    **SUPERSEDED CAMPAIGN DISPOSITION: NO LIFT.** The 2026-08-24
+    campaign kept the entry on the narrowed guest-profile
+    program-materialization charge and left the mechanism fork open.
+    **CURRENT DISPOSITION: RESOLVED — the server never issued the
+    materialization commit on its first served attempt.** Under ON the
+    client may run the handler speculatively, but intentionally discards
+    that seal and waits for the authoritative server transaction.
+    **OWNER RULING 2026-08-26:** “with ON, the transaction should go
+    through the server. it's in this case fine for the client to just
+    wait for that to complete vs speculatively running things.” The
+    server reached `ProfileHome.inSpace()` before the anonymous target
+    name was cached; name resolution warmed the cache and threw
+    `RetryImmediately`, but `retries: false` caused the served event to
+    be dropped instead of rerun. The scheduler now preserves the served
+    carriage across that name-resolution requeue and reruns it in the
+    same settle. Ordinary transient commit retries remain disabled. The
+    red-first scheduler regression failed at one attempt before the fix
+    and passes at two; production-shaped ensure-OFF ON evidence moved
+    from 2/8 target-member reds on current main to 0/8, with all eight
+    guest stores carrying the 98-operation `patternIdentity`
+    materialization. Baseline head: `37b45336a`; diagnostic fix head:
+    `8524f4ec1`; rebased smokes: f10 at `622ef2bda` and f11 at
+    `e158eb0c3`. The run stores and logs remain on the measuring box at
+    `/Users/berni/labs-worktrees/lunch-member-evidence/`; the running
+    report is `/Users/berni/labs-worktrees/lunch-member-report.md`.
+    This was neither a server refusal nor loss of a required client wire
+    send; it was the server name-resolution retry gate preventing
+    issuance.
     **THE ENSURE-ON PROFILE-SURFACE MEMBER ROOT-CAUSED AND FIXED
     2026-08-25 (PR #6312) — the n=3 side probe's "create surface never renders"
     shape and the #6248 board's profile-shard family, reproduced
@@ -6310,8 +6333,13 @@ supply; OW29/OW32/OW34 closed):
     re-runs; its own defect, untouched. (iii) The lunch FILE entry's
     third member (ensure-OFF: the guest's ~98-101-op
     program-materialization commit never landing) is a DIFFERENT,
-    post-click stage and is untouched — the entry and its lift bar
-    stand exactly as written. (iv) Whether the #6248 board's
+    post-click stage; it is now resolved by the served-event
+    name-resolution requeue described in that entry's current
+    disposition. The 2026-08-26 owner ruling and evidence recorded there
+    supersede the earlier 10/10 lift bar with the requested approximately
+    eight-run re-baseline, a red-first mechanism regression, and eight
+    post-fix runs. (iv)
+    Whether the #6248 board's
     POST-fill shape (shards 2/6: fill succeeded, click landed,
     `#profile` never resolved) is this same clobber on a later
     surface or another member is undetermined — re-measure on that
@@ -7812,7 +7840,7 @@ supply; OW29/OW32/OW34 closed):
     subscription (`piece/src/ops/pieces-controller.ts` —
     `runtime.getSpaceCell(space).sync()`, no root-aware demand) —
     constructed by the CLI (`cli/lib/piece.ts`), agents-host
-    (`agents-host/src/fabric-runtime.ts`), AND cf-harness's
+    (`connectors/agents/host/src/fabric-runtime.ts`), AND cf-harness's
     run_pattern session (`cf-harness/src/fabric-session.ts`), so
     yes: cf-harness is also that shape, and the containment covers
     all three. Residual trigger: any live `schema-doc-quarantine` log

@@ -5314,16 +5314,19 @@ export class Runner {
       switch (module.type) {
         case "ref": {
           const refName = module.implementation as string;
-          const resolved = this.runtime.moduleRegistry.getModule(refName);
           // `.asScope(scope)` records its scope on the *ref* module (the node's
           // module), but resolving the ref swaps in the registry's module — so
-          // carry the declared default scope across, or it is silently dropped
-          // and the node falls back to "space".
+          // hand the declared default scope to the registry, or it is silently
+          // dropped and the node falls back to "space". The registry owns
+          // applying it, because the copy it takes to do so must also carry
+          // the module's `debugName` (its policy identity) across.
+          const resolved = this.runtime.moduleRegistry.getModule(
+            refName,
+            module.defaultScope,
+          );
           this.instantiateNode(
             tx,
-            module.defaultScope !== undefined
-              ? { ...resolved, defaultScope: module.defaultScope }
-              : resolved,
+            resolved,
             inputBindings,
             outputBindings,
             resultCell,

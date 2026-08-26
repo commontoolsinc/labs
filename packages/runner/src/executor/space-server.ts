@@ -395,8 +395,8 @@ export class SpaceServer implements TransactionSealDestination {
    * `requeuedEventIds` after `commitWave` — every abort arm reports its
    * event-handler contributions as requeued), a DEFERRED dispatch (no
    * mark, `#armDeferredRescan` retries), the queued copy's final callback
-   * while still `queued` (a name-resolution drop, an aborted run — no
-   * mark), a notice that failed to stage/seal, and park (the queue dies
+   * while still `queued` (an aborted run — no mark), a notice that
+   * failed to stage/seal, and park (the queue dies
    * with the runtime). Releasing at the copy's SEAL was not enough (self-
    * review finding 1): the mark rides an uncommitted wave while the entry
    * is still pending in the store, and a re-drain that hit a real await
@@ -2660,10 +2660,9 @@ export class SpaceServer implements TransactionSealDestination {
             // re-arm rescans it — the wave IS the retry cadence.
             false,
             // The queued copy's FINAL callback (every terminal path of the
-            // dispatch — commit result, drop, deferral, name-resolution
-            // drop, error): releases the guard ONLY while the copy is
-            // still `queued`, i.e. nothing of it reached a wave (an
-            // aborted run, a name-resolution drop). A `marked` copy is
+            // dispatch — commit result, drop, deferral, error): releases the
+            // guard ONLY while the copy is still `queued`, i.e. nothing of
+            // it reached a wave (an aborted run). A `marked` copy is
             // released by the wave outcome. Tenure-checked: a callback
             // from a parked runtime's last pass must not release the next
             // tenure's copy.

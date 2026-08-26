@@ -70,8 +70,9 @@ async function initializedConnection(
 }
 
 /**
- * Transport whose `send()` throws, as the real one does when the envelope
- * holds a value the encoding cannot carry.
+ * Transport whose `send()` throws, as the real one does two ways: the
+ * envelope's encode refuses a value that has no encoding, and `postMessage()`
+ * refuses one structured cloning cannot carry.
  */
 class ThrowingTransport extends EventEmitter<RuntimeTransportEvents>
   implements RuntimeTransport {

@@ -176,8 +176,8 @@ Deno.test("main: the patterns list carries the three current phase-7 entries and
   assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[1].step, undefined);
   assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[1].phase, "phase-7");
   // Its reason names the NARROWED charge the entry's own gate found
-  // (2026-08-24) — the guest profile piece's program materialization
-  // never landing — not the b04 client-start class that gate closed,
+  // (2026-08-24), the pinned never-issued mechanism, and the completed
+  // post-fix gate — not the b04 client-start class that gate closed,
   // whose fork memo the reason keeps as history.
   assertMatch(
     SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
@@ -187,6 +187,11 @@ Deno.test("main: the patterns list carries the three current phase-7 entries and
     SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
     /ow45-armb-client-start-fork\.md/,
   );
+  assertMatch(
+    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
+    /never issued/i,
+  );
+  assertMatch(SERVER_EXECUTION_ON_SKIPS.patterns[1].reason, /0\/8/);
   // The topic-board entry is STEP-level under issue #6304: the pivot
   // baseline case's row-count assertion fails on the ON arm's served-view
   // divergence (four rows for three topics; the durable store holds

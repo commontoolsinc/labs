@@ -307,8 +307,10 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     // means no reply is coming and the promise is never returned, so that
     // bookkeeping would outlive its only holder and reject it into nobody:
     // sixty seconds later at the timeout, or sooner at disposal, as an
-    // unhandled rejection. `send()` can throw now that the envelope is encoded
-    // there, and `T` is unconstrained, so an ordinary bad value reaches it.
+    // unhandled rejection. `send()` can throw two ways here -- the envelope's
+    // encode refuses a value that has none, and `postMessage()` refuses one
+    // structured cloning cannot carry -- and `T` is unconstrained, so an
+    // ordinary bad value reaches both.
     //
     // `#settle()` clears the three, and deliberately does not settle the
     // deferred: an unsettled promise nobody holds is collected, where a

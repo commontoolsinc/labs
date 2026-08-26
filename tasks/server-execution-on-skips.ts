@@ -259,10 +259,11 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
       // exactly 4 commits (byte-identical across all three reds), no
       // patternIdentity anywhere, and appears in ZERO toolshed log
       // lines — greens reach 14-21 commits with patternIdentity named
-      // 57-216 times. Refused vs dropped vs never issued is NOT
-      // determined: the space is absent even from the 50-73 per-run
-      // foreign-write refusals, which name other spaces and fire as
-      // often in greens. Flagged there, not here: S-B's barrier
+      // 57-216 times. That campaign deliberately left refused vs
+      // dropped vs never issued undetermined. PR #6378 later pinned the
+      // mechanism: the authoritative server attempt was dropped on its
+      // `RetryImmediately` name-resolution signal before it could issue
+      // the transaction. Flagged there, not here: S-B's barrier
       // cannot cover a write that is never in flight, and the S-C
       // skip ruling's premise (waitForRuntimeIdle before any reload)
       // does not reach a surface with no reload. Recorded so nobody
@@ -282,18 +283,21 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "optimize/ow45-armb-client-start-fork.md) is CLOSED at that " +
         "head: catch-up activations in 10/10 runs, zero terminal " +
         "deferred-start deaths, zero recovery failures, zero " +
-        "pattern-load-error. The entry now stands on a THIRD, " +
-        "WRITE-SIDE residue member: the GUEST browser's mid-session " +
-        "profile piece never lands its program-materialization " +
-        "commit (~98-101 ops), so its space holds 4 commits with NO " +
-        "patternIdentity and is named zero times in the server log " +
-        "while greens reach 14-21 — the serving loop never engages, " +
-        "the wish #profile never resolves, and #lp-join-button never " +
-        "renders. Whether that commit was refused, dropped, or never " +
-        "issued is NOT determined. Every later step depends on that " +
-        "join, so the whole file waits. Lift bar UNCHANGED: this " +
-        "entry's own gate evidence at the merged head, 10/10, never " +
-        "by inference from the default-app gate.",
+        "pattern-load-error. The entry's THIRD, WRITE-SIDE residue " +
+        "member is RESOLVED by PR #6378: the authoritative server " +
+        "attempt reached ProfileHome.inSpace() before the anonymous " +
+        "target name was cached, then retries: false dropped its " +
+        "RetryImmediately signal. The ~98-101-op " +
+        "program-materialization transaction was therefore never " +
+        "issued; this was neither a refusal nor loss of a required " +
+        "client wire send. The 2026-08-26 owner ruling makes the " +
+        "server transaction authoritative under ON. Current-main " +
+        "evidence moved from 2/8 target-member reds to 0/8 after the " +
+        "scheduler retained the served carriage across the " +
+        "name-resolution requeue. The prior 10/10 lift bar is " +
+        "superseded by that owner-directed approximately eight-run " +
+        "pin. This FILE entry remains explicit until the phase-7 " +
+        "coordinator lifts it.",
     },
     {
       // Filed 2026-08-25 from PR #6267's ON-lane investigation (issue

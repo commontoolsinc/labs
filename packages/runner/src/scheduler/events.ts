@@ -1341,20 +1341,14 @@ export async function dispatchQueuedEvent(state: {
   // originStatus() fallback ("confirmed") would let a descendant of a failed
   // origin run.
   const requeueForNameResolution = () => {
-    // The rebuilt entry does NOT carry `served`, and no served copy may
-    // reach this path: both served constructors (the drain's and cell.ts's
-    // LT1 emission) queue with retries: false, whose RetryImmediately
-    // branch drops instead of requeueing. Requeueing one anyway would
-    // silently shed the acting identity and the failure hook — and what a
-    // served RETRY even means (which wave owns it, who re-seals) is
-    // UNSTATED semantics that must be decided, not defaulted, if this
-    // assert ever fires.
-    if (queuedEvent.served !== undefined) {
-      throw new Error(
-        "requeueForNameResolution reached with a served event; served " +
-          "retry semantics are undecided (see the comment at this assert)",
-      );
-    }
+    // A served name-resolution retry re-enters this scheduler settle. If it
+    // runs before the flush deadline, the installed destination seals its
+    // warmed-cache run into the current wave; a cut instead leaves the
+    // existing LT1-purge/durable-drain cadence in charge. The retry keeps the
+    // served carriage: acting identity, stream-entry consequence mark, LT1
+    // ownership, and failure hook. This does not opt the event into commit
+    // retries; `retry` remains false and a failed commit still belongs to the
+    // wave/drain cadence.
     const requeued: QueuedEvent = {
       id: queuedEvent.id,
       // The flag rides every requeue with the id it describes: dropping it
@@ -1371,6 +1365,9 @@ export async function dispatchQueuedEvent(state: {
       runtimeInjectedEventKeys: queuedEvent.runtimeInjectedEventKeys,
       retry,
       onCommit,
+      ...(queuedEvent.served !== undefined
+        ? { served: queuedEvent.served }
+        : {}),
     };
     insertInEnqueueOrder(state.eventQueue, requeued);
     if (requeued.originTx !== undefined) {
@@ -1453,10 +1450,12 @@ export async function dispatchQueuedEvent(state: {
       if (tx.status().status === "ready") {
         tx.abort(error);
       }
-      if (retry) {
+      if (retry || served !== undefined) {
         requeueForNameResolution();
       } else {
-        // retries: false is a one-shot; it does not re-run to resolve names.
+        // An unserved retries:false event is a one-shot; it does not re-run to
+        // resolve names. Served events take the same-wave arm above because
+        // the server, not a later client speculation, owns their result.
         logger.warn(
           "scheduler",
           "Event handler needed inSpace-name resolution but opted out of " +
