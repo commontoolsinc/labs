@@ -74,11 +74,17 @@ export function mapCellRefsToSigilLinks(value: FabricValue): FabricValue {
     // through whole would leave any link inside it unmapped.
     //
     // Nothing reaches this in production today, de facto rather than by
-    // construction: no flag gates it. The two callers pass a value that
-    // arrived by structured cloning, which strips a fabric class, so one
-    // cannot reach them as an instance at all; what would reach this is a
-    // direct caller, and there is none. `CellHandle.serialize()` in
-    // `../cell-handle.ts` refuses a `FabricSpecialObject` earlier still.
+    // construction: no flag gates it. What keeps it unreachable is the
+    // refusal at the other end of the same crossing -- `CellHandle.serialize()`
+    // in `../cell-handle.ts` refuses a `FabricInstance` before the value is
+    // sent, so neither caller here can be handed one. The transport itself no
+    // longer helps: the envelope's encoding carries an instance across with
+    // its class, where structured cloning used to strip it to `{}`.
+    //
+    // The two refusals are a matched pair and move together, along with
+    // `convertCellsToLinks()`'s in `@commonfabric/runner`, which is the same
+    // refusal on the outbound side. Lifting one alone would leave an instance
+    // able to reach a walk that cannot descend it.
     //
     // TODO(danfuzz): descend by codec-mediated traversal into instance state,
     // at which point this becomes a walk rather than a refusal.

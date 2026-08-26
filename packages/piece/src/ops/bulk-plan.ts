@@ -139,10 +139,17 @@ export interface RetargetSource {
 }
 
 /**
- * Return a piece to a retained revision — the reversal of a retarget. A
- * restore carries no compatibility override: whether returning to a
- * reference the piece already ran needs one is stage 4's question, and the
- * derivation deliberately records nothing it cannot answer.
+ * Return a piece to a retained revision — the reversal of a retarget.
+ *
+ * A restore carries no compatibility override. Returning to a reference the
+ * piece already ran can still be refused — the piece's documents have moved
+ * on since, and the restored source may not accept what they now hold — but
+ * a refusal there is a stop naming the piece and the reason, not a gate to
+ * open. Getting one piece back over that refusal means retargeting it onto
+ * that source, where the row-level override already lives and is recorded
+ * per row. A field here would make the decision a property of the
+ * derivation instead, which is the many-decisions-as-one risk that override
+ * exists to avoid.
  */
 export interface RestoreOp {
   kind: "restore";
@@ -318,6 +325,72 @@ export function normalizePlan(
 }
 
 /**
+ * What a derivation is allowed to leave out of the rollback it produces.
+ */
+export interface RollbackDerivationOptions {
+  /**
+   * Pieces the operator has accepted, by name, as ones this rollback cannot
+   * return: their prior source is not retained, so no restore exists for
+   * them. See {@link acceptUnretained} for the rule every acceptance is
+   * held to.
+   */
+  accepted?: readonly string[];
+}
+
+/**
+ * Hold a plan's unretained rows against the acceptances an operator named,
+ * and return the accepted addresses in canonical form.
+ *
+ * A retarget row whose prior source is not retained is a piece that cannot
+ * be returned once it moves. Both moments in the arc turn on it — the
+ * forward run must not start over such a row, and the reversal cannot
+ * derive one — so both hold acceptances to one rule, stated once here:
+ *
+ * - Every unretained row must be accepted by name, or the operation is
+ *   refused naming the rows that are not. Accepting is per piece and there
+ *   is deliberately no blanket form: one flag covering every row would turn
+ *   many decisions into one, which is a different risk from the same
+ *   decision taken many times.
+ * - An acceptance that covers no unretained row of this plan is refused
+ *   rather than ignored. The operator believes they have accounted for a
+ *   piece, and accounting for none looks exactly like accounting for one.
+ *
+ * `lead` names the moment in the refusal, since the two read differently to
+ * whoever is holding the plan.
+ */
+export function acceptUnretained(
+  rows: readonly PiecePlanRow[],
+  accepted: readonly string[] | undefined,
+  lead: string,
+): Set<string> {
+  const named = new Set(
+    (accepted ?? []).map((piece) => canonicalPieceAddress(piece)),
+  );
+  const unretained = rows.filter((row) =>
+    row.op?.kind === "retarget" && !row.expect.retained
+  );
+  const covers = new Set(unretained.map((row) => row.piece));
+  const idle = [...named].filter((piece) => !covers.has(piece));
+  if (idle.length > 0) {
+    throw new Error(
+      `${lead}: nothing accepts as unrollbackable for ` + idle.join(", ") +
+        " — no retarget row of this plan names them with an unretained " +
+        "prior source.",
+    );
+  }
+  const refused = unretained.filter((row) => !named.has(row.piece));
+  if (refused.length > 0) {
+    throw new Error(
+      `${lead}: the prior source is not retained for ` +
+        refused.map((row) => row.piece).join(", ") +
+        ", so a move could not be reversed. Supply the legacy source for " +
+        "each, or accept each by name.",
+    );
+  }
+  return named;
+}
+
+/**
  * Derive the rollback of a retarget plan, row by row: the precondition
  * becomes the reference the retarget produced, and the operation restores the
  * retained revision carrying the reference the row recorded. Nothing is
@@ -331,7 +404,10 @@ export function normalizePlan(
  * A retarget row whose prior source is not retained is refused by name
  * before any rollback row is produced: a restore of an unretained source is
  * an operation nothing can perform, and a plan carrying one would read as a
- * rollback while not being one.
+ * rollback while not being one. The operator's way past that is to name the
+ * piece in `accepted`, which leaves it out — the other way being to supply
+ * the legacy source and retarget onto it, which is a retarget plan and not
+ * this derivation's business.
  *
  * A derived row's `retained` is true by construction: the retarget stored the
  * source it applied, so the reference it produced is a retained one.
@@ -339,6 +415,7 @@ export function normalizePlan(
 export function deriveRollbackPlan(
   plan: PiecePlan,
   takenAt: string,
+  options: RollbackDerivationOptions = {},
 ): PiecePlan {
   if (
     (plan.header.problems?.length ?? 0) > 0 ||
@@ -359,17 +436,13 @@ export function deriveRollbackPlan(
         "reversal — " + repairs.map((row) => row.piece).join(", ") + ".",
     );
   }
-  const unretained = plan.rows.filter((row) =>
-    row.op?.kind === "retarget" && !row.expect.retained
+  const accepted = acceptUnretained(
+    plan.rows,
+    options.accepted,
+    "No rollback can be derived",
   );
-  if (unretained.length > 0) {
-    throw new Error(
-      "No rollback can be derived: the prior source is not retained for " +
-        unretained.map((row) => row.piece).join(", ") + ".",
-    );
-  }
   const rows = plan.rows.flatMap((row): PiecePlanRow[] => {
-    if (row.op?.kind !== "retarget") return [];
+    if (row.op?.kind !== "retarget" || accepted.has(row.piece)) return [];
     return [{
       piece: row.piece,
       ...(row.phase === undefined ? {} : { phase: row.phase }),
@@ -389,7 +462,13 @@ export function deriveRollbackPlan(
     }];
   });
   if (rows.length === 0) {
-    throw new Error("Plan has no retarget rows to derive a rollback from.");
+    throw new Error(
+      accepted.size === 0
+        ? "Plan has no retarget rows to derive a rollback from."
+        : "Every retarget row of this plan was accepted as unrollbackable, " +
+          "so the rollback would be empty — an empty rollback reads as " +
+          "having one.",
+    );
   }
   return {
     header: {

@@ -60,6 +60,12 @@ describe("JSON command contracts", () => {
       .toBe(true);
     expect(reservesStdoutForCommandOutput(["piece", "retarget", "--plan", "p"]))
       .toBe(true);
+    expect(reservesStdoutForCommandOutput(["piece", "rollback", "--plan", "p"]))
+      .toBe(true);
+    // The restore streams its revision listing to stdout in every mode, so
+    // it reserves stdout as the plan-driven commands above do.
+    expect(reservesStdoutForCommandOutput(["piece", "restore", "--piece", "b"]))
+      .toBe(true);
     expect(
       reservesStdoutForCommandOutput([
         "piece",

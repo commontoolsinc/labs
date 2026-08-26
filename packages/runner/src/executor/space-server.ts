@@ -739,6 +739,18 @@ export class SpaceServer implements TransactionSealDestination {
    * EVENT_PREQUEUE_STUCK_AFTER. */
   #preQueueDeferralStreaks = new Map<string, number>();
 
+  /** Set when a LOAD-PARK deferral fires while a drain pass is running
+   * (verification-coverage.md's OW45 residue member). The scheduler's
+   * own arrival-order barrier holds every later-arrived durable entry
+   * that is already QUEUED behind the deferred one, but an entry this
+   * pass has not reached yet is out of its reach — and the pass awaits
+   * TWICE per entry (a new sidecar's `sync()`, then the stream doc's),
+   * so a park failure genuinely can land in either gap. The drain reads
+   * this immediately before queueing each entry — past both awaits —
+   * and stops the pass, the same barrier `break` the sidecar-sync-
+   * failure arm makes. Cleared at the top of every pass. */
+  #loadParkDeferredInPass = false;
+
   /** Post-commit effects of sealed transactions, deferred per wave
    * (serving-loop.md §3: effects hand to the outbox POST-commit, never
    * at seal). Admitted to the outbox after the wave's commit step;
@@ -2441,6 +2453,9 @@ export class SpaceServer implements TransactionSealDestination {
     const pendingDocs = Engine.selectPendingStreamEventDocs(engine);
     if (pendingDocs.length === 0) return 0;
     let queued = 0;
+    // The load-park barrier's mid-pass half (see #loadParkDeferredInPass).
+    // Cleared here so each pass judges its own deferrals.
+    this.#loadParkDeferredInPass = false;
     // Pending entries process ACROSS sidecars in append commit-seq
     // order — events.md §2: per stream, commit-seq order; across streams
     // in one space, arrival order. A deferral (a lagging sidecar view or
@@ -2601,6 +2616,23 @@ export class SpaceServer implements TransactionSealDestination {
         } catch {
           // A cold stream doc defers like a cold piece load below.
         }
+        // The load-park barrier's OTHER half, and it sits HERE — past
+        // every await in the iteration, immediately before the queue —
+        // on purpose. The scheduler-side barrier
+        // (failHeadEventLoadPark) can only hold entries already IN the
+        // event queue; an entry this pass has not queued YET is out of
+        // its reach, and the gap is real because this loop awaits both
+        // a new sidecar's `sync()` above and the stream doc's `sync()`
+        // just now. A rejection landing in EITHER window sweeps only
+        // what was queued at that instant, so a check placed before
+        // one of them would let the entry queue anyway and commit
+        // ahead of the deferred one (independent review P1). Stopping
+        // the pass is the same `break` the sidecar-sync-failure arm
+        // makes; the rescan re-drains from arrival position.
+        if (this.#loadParkDeferredInPass) {
+          this.#armDeferredRescan();
+          break;
+        }
         try {
           // The renderer-trust RE-MARK (fan-out stage B, OW34 — the
           // sister of the injected-keys re-mint below): an entry the
@@ -2690,6 +2722,41 @@ export class SpaceServer implements TransactionSealDestination {
                 streamEntry,
                 onFailure: (outcome) => {
                   if (this.#runtime !== tenure) return;
+                  if (
+                    outcome.kind === "deferred" &&
+                    outcome.cause === "load-park"
+                  ) {
+                    // The pre-dispatch LOAD-PARK deferral
+                    // (verification-coverage.md's OW45 residue member).
+                    // Deliberately NOT on the bounded creation-race
+                    // budget below: that budget exists because a piece
+                    // which never materializes has no runnable handler
+                    // and must eventually harden into §5's drop, while
+                    // here the input doc EXISTS durably and only the
+                    // read path failed — hardening it would restore
+                    // exactly the at-least-once discharge this arm was
+                    // added to prevent. So a persistently failing load
+                    // defers INDEFINITELY: durable, unconsequenced,
+                    // re-tried every drain, WARNed per deferral by the
+                    // scheduler and counted here. The accepted cost is
+                    // that the backstop rescan keeps ticking, so a
+                    // never-healing load holds the space out of its
+                    // idle park; a give-up arm for that is OW54's
+                    // separately tracked territory, not this fix's.
+                    this.#options.stats.events.loadParkDeferrals += 1;
+                    // The barrier's mid-pass half: a drain pass in
+                    // flight must stop before queueing an entry that
+                    // arrived after this one.
+                    this.#loadParkDeferredInPass = true;
+                    // Never mix budgets: if this entry later defers for
+                    // the cold-view reason, that count starts fresh.
+                    this.#eventDeferrals.delete(entry.eventId);
+                    // The copy left no mark: release the guard so the
+                    // rescan can queue it again.
+                    this.#drainInFlight.delete(eventId);
+                    this.#armDeferredRescan();
+                    return;
+                  }
                   if (outcome.kind === "deferred") {
                     const deferrals =
                       (this.#eventDeferrals.get(entry.eventId) ?? 0) + 1;
@@ -2808,6 +2875,16 @@ export class SpaceServer implements TransactionSealDestination {
             path: ["entries", String(streamEntry.index), "error"],
           }).withTx(tx).set(outcome.message);
         } else {
+          // The recorded observability gap (verification-coverage.md's
+          // OW45 residue record), closed with the load-park fix: a
+          // terminally discharged served event used to leave NO trace
+          // in serving stats — `appended == processed` reads clean
+          // while the user's action is permanently gone. Counted at the
+          // DECISION, so a notice whose commit is refused and re-drains
+          // counts again; read it with the WARNs, never alone.
+          if (outcome.kind === "dropped") {
+            this.#options.stats.events.dropped += 1;
+          }
           runtime.getCellFromLink<string>({
             ...base,
             path: ["entries", String(streamEntry.index), "status"],

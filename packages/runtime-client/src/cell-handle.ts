@@ -509,19 +509,23 @@ export class CellHandle<T = unknown> {
       return value.map((item) => CellHandle.deserialize(base, item));
     }
 
-    // A `FabricPrimitive` is a leaf, so stopping at it has already done the
-    // right thing -- and this goes _before_ the record branch, which rebuilds
-    // from enumerable own properties a fabric class does not have and would
-    // put `{}` here in place of the value the connection just carried.
+    // A `FabricPrimitive` is a leaf, so a walk that stops at it has already
+    // done the right thing -- and this goes _before_ the record branch, which
+    // rebuilds from enumerable own properties a fabric class does not have and
+    // would put `{}` here in place of the value.
     if (value instanceof FabricPrimitive) return value;
 
     // An instance is a container, reached by its codec contents rather than by
     // property name, so a sigil link can sit inside one where this walk cannot
     // see it -- and a value handed back unhydrated would carry that link where
-    // a `CellHandle` belongs. Refused rather than passed through, per
-    // "Flag-gated tripwires" in `docs/development/EXPERIMENTAL_OPTIONS.md`.
-    // Nothing reaches this de facto rather than by construction: the worker's
-    // outbound walk refuses an instance too.
+    // a `CellHandle` belongs.
+    //
+    // Nothing reaches this today, de facto rather than by construction. The
+    // transport no longer helps: the envelope's encoding carries an instance
+    // across with its class, where structured cloning used to strip it. What
+    // keeps it unreachable is the refusal at each of the other ends of the
+    // crossing -- `convertCellsToLinks()` on the way out of the worker, and
+    // `serialize()` below on the way in.
     if (value instanceof FabricInstance) {
       refuseFabricInstance(value, "when hydrating a value off the connection");
     }
@@ -651,6 +655,7 @@ function applyValue(
 
   // A container this walk cannot descend, so it cannot preserve a handle
   // inside one against the incoming value the way it does for a record.
+  // Unreachable for the same reason as in `deserialize()`.
   if (current instanceof FabricInstance) {
     refuseFabricInstance(current, "when applying a delivered value");
   }
@@ -691,9 +696,6 @@ function cellRefsEqual(a: CellRef, b: CellRef): boolean {
  * by content, and this also knows about cells. A `CellHandle` compares by the
  * cell it names rather than by what that cell holds, so two handles on one
  * cell are equal and a handle is equal to nothing else.
- *
- * @throws If either side is a `FabricInstance`, whose outgoing references this
- *   walk cannot reach.
  */
 function valuesOrCellsEqual(a: unknown, b: unknown): boolean {
   // `Object.is`, not `===`: an unchanged `NaN` leaf must compare equal (else
@@ -703,36 +705,28 @@ function valuesOrCellsEqual(a: unknown, b: unknown): boolean {
   if (a == null || b == null) return a === b;
   if (typeof a !== typeof b) return false;
   if (typeof a !== "object") return false;
-  // Either side being a handle is enough to ask, as with the instances below.
-  // A handle holds its state privately, so the record branch would read `{}`
-  // off it and call it equal to anything else without enumerable own keys --
-  // `{}` itself among them. A handle is a reference to a cell and equals only
+  // Either side being a handle is enough to ask. A handle holds its state
+  // privately, so the record branch below would read `{}` off it and call it
+  // equal to anything else without enumerable own keys -- `{}` itself among
+  // them, so replacing a handle with a record would be judged a no-change and
+  // reach no subscriber. A handle is a reference to a cell and equals only
   // another reference to the same cell.
   if (isCellHandle(a) || isCellHandle(b)) {
     return isCellHandle(a) && isCellHandle(b) && a.equals(b);
   }
 
   // A `FabricPrimitive` is compared by the data model rather than by this
-  // walk, and _before_ the record branch, which reads enumerable own
-  // properties a fabric class does not have: two `FabricBytes` over different
-  // bytes both present as `{}` there and would compare equal, keeping the old
-  // value and telling no subscriber. Either side is enough to ask, so one
-  // never compares equal to a plain record that mimics it. A primitive is a
-  // leaf, so comparing its content is the whole comparison.
+  // walk, and _before_ the record branch, for the same reason: two
+  // `FabricBytes` over different bytes both present as `{}` there and would
+  // compare equal. A primitive is a leaf, so comparing its content is the
+  // whole comparison.
+  //
+  // There is no arm for a `FabricInstance`. `applyValue()` is this function's
+  // only caller and refuses one before it returns, so neither argument can
+  // hold one -- an arm here would be unreachable rather than defensive, and
+  // untestable with it.
   if (a instanceof FabricPrimitive || b instanceof FabricPrimitive) {
     return valueEqual(a as FabricValue, b as FabricValue);
-  }
-
-  // An instance is not, and `valueEqual()` would settle its outgoing
-  // references by the data model's rules where this walk has its own -- a
-  // handle compares by the cell it names, not by content. Rather than answer
-  // with a comparison that is right for one of those and wrong for the other,
-  // this refuses.
-  if (a instanceof FabricInstance || b instanceof FabricInstance) {
-    refuseFabricInstance(
-      (a instanceof FabricInstance ? a : b) as FabricInstance,
-      "when comparing a delivered value against the cached one",
-    );
   }
   if (Array.isArray(a)) {
     if (!Array.isArray(b)) return false;

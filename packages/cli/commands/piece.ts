@@ -2,6 +2,8 @@ import { Command, ValidationError } from "@cliffy/command";
 import { Table } from "@cliffy/table";
 import type { CellScope } from "@commonfabric/api";
 import {
+  type ApplyReport,
+  type ApplyRow,
   decodePlan,
   diffPlan,
   encodePlan,
@@ -11,8 +13,8 @@ import {
   type PiecePatternRef,
   type PieceSelector,
   type PlanDiff,
+  type RestorableRevision,
 } from "@commonfabric/piece/ops";
-import type { RetargetRow } from "@commonfabric/piece/ops/bulk-retarget";
 import ports from "@commonfabric/ports" with { type: "json" };
 import { parseCellPath, UI } from "@commonfabric/runner";
 import {
@@ -26,7 +28,9 @@ import {
   readSourcePin,
   type RepairRunRequest,
   runRepair,
+  runRestore,
   runRetarget,
+  runRollback,
   runSurvey,
 } from "../lib/bulk.ts";
 import { addressArgument, VerbInputValidationError } from "../lib/callable.ts";
@@ -113,6 +117,16 @@ function hint(message: string, showQuietTip = true) {
     const quietTip = showQuietTip ? "\n\n(Use --quiet to suppress hints)" : "";
     console.error(`\n${message}${quietTip}`);
   }
+}
+
+/**
+ * A fact the operator is owed whether or not they asked for quiet: what a
+ * run deliberately left out of what it was asked to do. A hint is advice and
+ * `--quiet` silences it; this is not advice, and a quiet script is the
+ * caller most in need of it.
+ */
+function note(message: string) {
+  console.error(message);
 }
 
 export function normalizeApiUrl(apiUrl: string): string {
@@ -2462,6 +2476,11 @@ export const piece = targetOptions(
     { required: true },
   )
   .option(
+    "--accept-unretained <piece:string>",
+    "Accept, by name, that this piece could not be rolled back once moved — its prior source is not retained — and move it anyway. Required by --apply for every such row; a dry run needs none. The refusal that asks for the acceptance names each such piece in exactly the form this flag takes. Repeatable, one piece at a time: there is no flag that accepts all of them. The other way past is to supply the legacy source, so a reversal has something to restore.",
+    { collect: true },
+  )
+  .option(
     "--apply",
     "Write each row's source. Without it the run is the classification alone: where every piece stands against its own row, and no write at all.",
   )
@@ -2479,6 +2498,71 @@ export const piece = targetOptions(
     { conflicts: ["out"] },
   )
   .action(retargetFromCommand)
+  /* piece rollback */
+  .command(
+    "rollback",
+    "Reverse a retarget from its own plan: each row returns to the retained revision carrying the reference it recorded, under the same preconditions, stop, and resume the retarget runs on. Dry by default.",
+  )
+  .usage(spaceUsage)
+  .example(
+    cliText(`cf piece rollback ${EX_ID} ${EX_COMP} --plan plan.jsonl --apply`),
+    "Return every piece the retarget moved to the revision it was on.",
+  )
+  .option(
+    "--plan <file:string>",
+    "The retarget plan this run reverses. There is no second artifact: the rollback is derived from it, each row's precondition being the reference that row produced.",
+    { required: true },
+  )
+  .option(
+    "--accept-unretained <piece:string>",
+    "Accept, by name, that this piece cannot be rolled back — its prior source is not retained — and leave it out of the reversal. The refusal that asks for the acceptance names each such piece in exactly the form this flag takes. Repeatable, one piece at a time: there is no flag that accepts all of them. The other way past an unretained row is to supply its legacy source and retarget onto it.",
+    { collect: true },
+  )
+  .option(
+    "--apply",
+    "Restore each row's revision. Without it the run is the classification alone: where every piece stands against its own row, and no write at all.",
+  )
+  .option(
+    "--group-size <count:integer>",
+    "Pieces one session serves before it is replaced, so the warm-up amortizes while the pieces live at once stay bounded. A group boundary is a resume point.",
+  )
+  .option(
+    "--out <file:string>",
+    "Write the report to a file instead of streaming it to stdout, in the canonical FabricValue JSON encoding.",
+  )
+  .option(
+    "--json",
+    "Write the whole report to stdout as one document in the canonical FabricValue JSON encoding, instead of streaming a line per row.",
+    { conflicts: ["out"] },
+  )
+  .action(rollbackFromCommand)
+  /* piece restore */
+  .command(
+    "restore",
+    "Return one piece to a retained revision of its own source log. Dry by default: without --revision the run lists what the piece could be returned to, and with one but without --apply it is the preflight for that revision.",
+  )
+  .usage(pieceUsage)
+  .example(
+    cliText(`cf piece restore ${EX_ID} ${EX_COMP_PIECE}`),
+    "List the revisions this piece could be returned to.",
+  )
+  .option(
+    "-c,--piece <piece:string>",
+    `${PIECE_OPTION_HELP} The piece to restore.`,
+  )
+  .option(
+    "--revision <id:string>",
+    "The revision to restore, from the piece's own source log. Without it the run lists them.",
+  )
+  .option(
+    "--apply",
+    "Restore the named revision. Without it nothing is written.",
+  )
+  .option(
+    "--json",
+    "Write the whole outcome to stdout as JSON instead of a line per revision.",
+  )
+  .action(restoreFromCommand)
   /* piece view */
   .command("view", "Display the rendered view for a piece")
   .usage(pieceUsage)
@@ -3711,18 +3795,24 @@ export interface RetargetCLIOptions extends PieceCLIOptions {
   /** Inherited from the `piece` mount's global target options. */
   quiet?: boolean;
   plan: string;
+  acceptUnretained?: string[];
   apply?: boolean;
   groupSize?: number;
   out?: string;
 }
 
-export interface RetargetCommandDependencies {
-  runRetarget?: typeof runRetarget;
+/** What every plan-driven apply command needs to report and to exit. */
+export interface ApplyCommandDependencies {
   render?: typeof render;
   writeTextFile?: typeof Deno.writeTextFile;
   printError?: (message: string) => void;
   printHint?: (message: string) => void;
   exit?: (code: number) => never;
+}
+
+export interface RetargetCommandDependencies extends ApplyCommandDependencies {
+  runRetarget?: typeof runRetarget;
+  printNote?: (message: string) => void;
 }
 
 /**
@@ -3731,12 +3821,13 @@ export interface RetargetCommandDependencies {
  * because a run whose cost per piece is unknown cannot be improved, and the
  * number has to arrive while there is still a run to reason about.
  */
-export function formatRetargetRow(row: RetargetRow): string {
+export function formatApplyRow(row: ApplyRow): string {
   return [
     row.verdict,
     row.piece,
     ...(row.phase === undefined ? [] : [row.phase]),
     ...(row.elapsedMs === undefined ? [] : [`${row.elapsedMs}ms`]),
+    ...(row.warning === undefined ? [] : [`! ${row.warning}`]),
     ...(row.problem === undefined ? [] : [`- ${row.problem}`]),
   ].join(" ");
 }
@@ -3765,28 +3856,64 @@ export async function retargetFromCommand(
   // between two rows of a machine-readable stream.
   const spaceConfig = { ...parseSpaceOptions(options), jsonOutput: true };
   const print = deps.render ?? render;
-  const printHint = deps.printHint ?? hint;
   const streaming = options.json !== true && options.out === undefined;
   const report = await (deps.runRetarget ?? runRetarget)(spaceConfig, {
     planPath: absPath(options.plan),
+    ...(options.acceptUnretained === undefined
+      ? {}
+      : { accept: options.acceptUnretained }),
     ...(options.apply === true ? { apply: true } : {}),
     ...(options.groupSize === undefined
       ? {}
       : { groupSize: options.groupSize }),
     ...(streaming
-      ? { onRow: (row: RetargetRow) => print(formatRetargetRow(row)) }
+      ? { onRow: (row: ApplyRow) => print(formatApplyRow(row)) }
       : {}),
   });
+  // Every accepted piece by name, through the note so `--quiet` cannot
+  // silence it: a piece this move could not be reversed for is the fact the
+  // operator most needs in front of them, and it is being recorded at the
+  // only moment the acceptance is still a decision. The line states that
+  // decision rather than an outcome — it is printed before the run's rows
+  // are known, and on a dry run nothing moved at all.
+  const printNote = deps.printNote ?? note;
+  for (const piece of options.acceptUnretained ?? []) {
+    printNote(
+      `accepted as unrollbackable: ${piece} (moving it leaves no reversal)`,
+    );
+  }
+  await reportApplyRun(report, {
+    verb: "Retarget",
+    ...(options.apply === true ? { apply: true } : {}),
+    ...(options.out === undefined ? {} : { out: options.out }),
+    ...(options.json === true ? { json: true } : {}),
+  }, deps);
+}
+
+/**
+ * The tail every plan-driven apply command shares: the report to its one
+ * destination, the verdict tally, and the exit discipline. Retarget and
+ * rollback report identically because they run identically — one engine,
+ * one vocabulary of verdicts — and a second copy of this would be the place
+ * the two started saying different things about the same outcome.
+ */
+async function reportApplyRun(
+  report: ApplyReport,
+  run: { verb: string; apply?: boolean; out?: string; json?: boolean },
+  deps: ApplyCommandDependencies,
+): Promise<void> {
+  const print = deps.render ?? render;
+  const printHint = deps.printHint ?? hint;
   // The canonical FabricValue encoding, as the repair's report uses: one
   // encoding for one document, whichever destination it goes to.
   const encoded = jsonFromFabricValue(report as unknown as FabricValue);
-  if (options.out !== undefined) {
+  if (run.out !== undefined) {
     await (deps.writeTextFile ?? Deno.writeTextFile)(
-      options.out,
+      run.out,
       `${encoded}\n`,
     );
-    printHint(`Wrote ${report.rows.length} report rows to ${options.out}`);
-  } else if (options.json) {
+    printHint(`Wrote ${report.rows.length} report rows to ${run.out}`);
+  } else if (run.json) {
     print(encoded);
   }
   const tally = new Map<string, number>();
@@ -3799,16 +3926,24 @@ export async function retargetFromCommand(
       `written: ${report.applied}`,
     ].join(" · "),
   );
+  // A row that landed and was warned about is a success the operator still
+  // has to read. It rides the report itself, so `--json` and `--out` carry
+  // it whatever the hint does; this is the human copy.
+  for (const row of report.rows) {
+    if (row.warning !== undefined) {
+      printHint(`${row.verdict}: ${row.piece} warned: ${row.warning}`);
+    }
+  }
   if (!report.complete) {
-    const settled = (row: RetargetRow) =>
+    const settled = (row: ApplyRow) =>
       row.verdict === "landed" || row.verdict === "applied" ||
-      (options.apply !== true && row.verdict === "outstanding");
+      (run.apply !== true && row.verdict === "outstanding");
     exitWithDataError(
       {
         message: [
-          options.apply === true
-            ? "Retarget did not complete; re-running resumes it."
-            : "Retarget found rows an apply would refuse.",
+          run.apply === true
+            ? `${run.verb} did not complete; re-running resumes it.`
+            : `${run.verb} found rows an apply would refuse.`,
           // The run's own trouble, as opposed to any piece's: a session that
           // would not open, would not release, or answered for another space.
           ...(report.stopReason === undefined
@@ -3826,6 +3961,186 @@ export async function retargetFromCommand(
         ].join("\n"),
       },
       deps,
+    );
+  }
+}
+
+export interface RollbackCLIOptions extends PieceCLIOptions {
+  /** Inherited from the `piece` mount's global target options. */
+  quiet?: boolean;
+  plan: string;
+  acceptUnretained?: string[];
+  apply?: boolean;
+  groupSize?: number;
+  out?: string;
+}
+
+export interface RollbackCommandDependencies extends ApplyCommandDependencies {
+  runRollback?: typeof runRollback;
+  printNote?: (message: string) => void;
+}
+
+/**
+ * `cf piece rollback`: the retarget's reversal, run from the retarget's own
+ * plan. There is no second artifact — the rollback is derived from the plan
+ * the retarget ran from — so this command takes that plan and nothing else
+ * about the selection. Dry by default, and reported exactly as the retarget
+ * reports, because it runs on the same engine.
+ *
+ * A piece whose prior source is not retained has no restore to run. Those
+ * rows refuse the derivation by name, and the only way past is to name each
+ * one on `--accept-unretained`, which leaves that piece out of the reversal
+ * and says so. There is deliberately no flag that accepts all of them: one
+ * flag over many rows turns many decisions into one.
+ */
+export async function rollbackFromCommand(
+  options: RollbackCLIOptions,
+  deps: RollbackCommandDependencies = {},
+): Promise<void> {
+  setQuietMode(!!options.quiet);
+  // Every mode reserves stdout for the report, as the retarget does and for
+  // the same reason: this run starts the pieces it restores.
+  const spaceConfig = { ...parseSpaceOptions(options), jsonOutput: true };
+  const print = deps.render ?? render;
+  const printHint = deps.printHint ?? hint;
+  const streaming = options.json !== true && options.out === undefined;
+  const { report, plan } = await (deps.runRollback ?? runRollback)(
+    spaceConfig,
+    {
+      planPath: absPath(options.plan),
+      ...(options.acceptUnretained === undefined
+        ? {}
+        : { accept: options.acceptUnretained }),
+      ...(options.apply === true ? { apply: true } : {}),
+      ...(options.groupSize === undefined
+        ? {}
+        : { groupSize: options.groupSize }),
+      ...(streaming
+        ? { onRow: (row: ApplyRow) => print(formatApplyRow(row)) }
+        : {}),
+    },
+  );
+  printHint(`Derived ${plan.rows.length} rollback rows from ${options.plan}`);
+  // Every accepted piece by name, on every run that carried one — through
+  // the note rather than a hint, so `--quiet` does not silence it. A piece
+  // this reversal cannot return is not advice, and it must not be
+  // inferable only from a row that is missing.
+  const printNote = deps.printNote ?? note;
+  for (const piece of options.acceptUnretained ?? []) {
+    printNote(
+      `accepted as unrollbackable: ${piece} (left out of this reversal)`,
+    );
+  }
+  await reportApplyRun(report, {
+    verb: "Rollback",
+    ...(options.apply === true ? { apply: true } : {}),
+    ...(options.out === undefined ? {} : { out: options.out }),
+    ...(options.json === true ? { json: true } : {}),
+  }, deps);
+}
+
+export interface RestoreCLIOptions extends PieceCLIOptions {
+  /** Inherited from the `piece` mount's global target options. */
+  quiet?: boolean;
+  revision?: string;
+  apply?: boolean;
+}
+
+export interface RestoreCommandDependencies {
+  runRestore?: typeof runRestore;
+  render?: typeof render;
+  printError?: (message: string) => void;
+  printHint?: (message: string) => void;
+  exit?: (code: number) => never;
+}
+
+/**
+ * One revision of a piece's source log as a line: when it was accepted,
+ * which reference it carries, the transition that recorded it, whether its
+ * source is still there to restore, and whether the piece runs it now.
+ */
+export function formatRestorableRevision(
+  revision: RestorableRevision,
+): string {
+  return [
+    revision.revisionId,
+    new Date(revision.timestamp).toISOString(),
+    `${revision.patternIdentity}#${revision.symbol}`,
+    revision.operation,
+    revision.retained ? "retained" : "not-retained",
+    ...(revision.current ? ["current"] : []),
+  ].join(" ");
+}
+
+/**
+ * `cf piece restore`: the single-piece restore, in front of the runtime's
+ * own restore of a retained revision. Dry by default, like every other
+ * operation in this group — without `--revision` the run is the listing of
+ * what this piece could be returned to, and with one but without `--apply`
+ * it is the preflight for that revision alone.
+ *
+ * A piece already standing where the restore would leave it — running the
+ * named revision's reference and following no origin — is reported as such
+ * and not rewritten, which is what makes restoring resumable one piece at a
+ * time as much as in bulk. A piece that runs the reference while still
+ * following an origin is not there: the restore severs the origin, so the
+ * run has work to do and says which origin it would cut.
+ */
+export async function restoreFromCommand(
+  options: RestoreCLIOptions,
+  deps: RestoreCommandDependencies = {},
+): Promise<void> {
+  setQuietMode(!!options.quiet);
+  // A restore starts the piece it writes, so the runtime's console goes to
+  // stderr and stdout stays the report's, `--json` or not.
+  const pieceConfig = { ...parsePieceOptions(options), jsonOutput: true };
+  const print = deps.render ?? render;
+  const printHint = deps.printHint ?? hint;
+  const outcome = await (deps.runRestore ?? runRestore)(pieceConfig, {
+    ...(options.revision === undefined ? {} : { revisionId: options.revision }),
+    ...(options.apply === true ? { apply: true } : {}),
+  });
+  if (options.json) {
+    print(outcome, { json: true });
+  } else if (options.revision === undefined) {
+    // The listing is the answer to "what could this piece be returned to?",
+    // so it goes to stdout rather than riding a hint: a script asking that
+    // question is asking for these lines.
+    for (const revision of outcome.revisions) {
+      print(formatRestorableRevision(revision));
+    }
+  } else if (outcome.selected !== undefined) {
+    print(formatRestorableRevision(outcome.selected));
+  }
+  if (outcome.warning !== undefined) {
+    printHint(`the restored source ran with a warning: ${outcome.warning}`);
+  }
+  if (outcome.problem !== undefined) {
+    exitWithDataError({ message: outcome.problem }, deps);
+    return;
+  }
+  if (options.revision === undefined) {
+    printHint(
+      `${outcome.revisions.length} revision(s); name one with --revision`,
+    );
+  } else if (outcome.restored) {
+    printHint(`restored ${outcome.piece} to ${options.revision}`);
+  } else if (outcome.selected?.current === true) {
+    // Running the reference is not the same as standing where the restore
+    // would leave the piece: one that still follows an origin has the
+    // detach ahead of it, so reporting it as needing nothing would hide the
+    // write the operator asked for.
+    printHint(
+      outcome.origin === undefined
+        ? `${outcome.piece} already runs ${options.revision}`
+        : `${outcome.piece} runs the reference of ${options.revision} but ` +
+          `follows ${outcome.origin}; --apply restores it and severs that ` +
+          `origin`,
+    );
+  } else {
+    printHint(
+      `${outcome.piece} would be restored to ${options.revision}; ` +
+        `--apply writes it`,
     );
   }
 }

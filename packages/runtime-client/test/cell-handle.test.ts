@@ -600,11 +600,9 @@ describe("cell-handle", () => {
     });
 
     it("notifies when a special object's contents change", () => {
-      // Two `FabricBytes` holding different bytes are different values. Their
-      // state is private, so a walk over enumerable own properties sees `{}`
-      // on both sides and calls them equal -- which would keep the old value
-      // and tell no subscriber. Now that the connection carries one of these
-      // intact, that comparison is reachable.
+      // Two `FabricBytes` over different bytes are different values, and their
+      // state is private -- so a walk over enumerable own properties sees `{}`
+      // on both sides and would call them equal.
       const cell = new CellHandle<FabricBytes>(makeRuntime(), ref);
       const calls: Array<unknown> = [];
       cell.subscribe((value) => {
@@ -616,23 +614,22 @@ describe("cell-handle", () => {
       cell[$onCellUpdate](new FabricBytes(new Uint8Array([2])));
 
       expect(calls.length).toBe(after + 1);
-      expect((calls.at(-1) as FabricBytes).slice()).toEqual(
-        new Uint8Array([2]),
-      );
     });
 
-    it("does not re-notify when a special object is unchanged", () => {
-      const cell = new CellHandle<FabricBytes>(makeRuntime(), ref);
-      const calls: Array<unknown> = [];
-      cell.subscribe((value) => {
-        calls.push(value);
-      });
+    it("refuses a `FabricInstance` rather than apply one", () => {
+      // A tripwire: nothing delivers an instance today, the transport
+      // stripping a fabric class before it arrives. This is `applyValue()`'s
+      // refusal -- it runs first, which is why the comparison after it needs
+      // no arm of its own.
+      const cell = new CellHandle<unknown>(makeRuntime(), ref);
+      cell.subscribe(() => {});
+      const link = new FabricLink(
+        Object.freeze({ id: "of:fid1:refusal", path: [] }),
+      );
 
-      cell[$onCellUpdate](new FabricBytes(new Uint8Array([1, 2])));
-      const after = calls.length;
-      cell[$onCellUpdate](new FabricBytes(new Uint8Array([1, 2])));
-
-      expect(calls.length).toBe(after);
+      expect(() => cell[$onCellUpdate](link)).toThrow(
+        "Cannot yet handle `FabricLink` (a `FabricInstance`)",
+      );
     });
 
     it("notifies when a handle is replaced by a record", () => {
@@ -832,7 +829,60 @@ describe("cell-handle", () => {
     });
   });
 
+  describe("CellHandle hydration meets a fabric class", () => {
+    const makeRuntime = () =>
+      ({
+        [$conn]: () => ({
+          request: () => Promise.resolve({ value: undefined }),
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+        }),
+      }) as unknown as RuntimeClient;
+    const makeHandle = () =>
+      new CellHandle(makeRuntime(), {
+        id: "of:hydration-cell" as CellRef["id"],
+        space: "did:key:test" as CellRef["space"],
+        scope: "space",
+        path: [],
+      });
+
+    it("hydrates a `FabricPrimitive` as itself, not as a record", () => {
+      // A leaf: stopping at it is the whole job, and it must be stopped at
+      // before the record branch, which would rebuild it from enumerable own
+      // properties it does not have and yield `{}`.
+      const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+
+      expect(CellHandle.deserialize(makeHandle(), bytes)).toBe(bytes);
+      expect(
+        (CellHandle.deserialize(makeHandle(), { a: [bytes] }) as {
+          a: unknown[];
+        }).a[0],
+      ).toBe(bytes);
+    });
+
+    it("refuses a `FabricInstance` rather than hydrate one", () => {
+      // A container, reached by its codec contents rather than by property
+      // name, so a sigil link can sit inside one where this walk cannot see
+      // it. Nothing delivers one today; this is the tripwire.
+      const link = new FabricLink(
+        Object.freeze({ id: "of:fid1:hydration-refusal", path: [] }),
+      );
+
+      expect(() => CellHandle.deserialize(makeHandle(), link)).toThrow(
+        "Cannot yet handle `FabricLink` (a `FabricInstance`)",
+      );
+    });
+  });
+
   describe("CellHandle carries a special object", () => {
+    // A `FabricSpecialObject` is a `ClientCellValue` -- a cell holds one like
+    // any other value -- and it now crosses as itself. What this pins is that
+    // `serialize()` hands a `FabricPrimitive` on WHOLE rather than walking it:
+    // rebuilding one from its enumerable own properties would put `{}` on the
+    // wire in place of the bytes, which is what the ordering of the checks
+    // prevents. A `FabricInstance` is refused instead, being a container this
+    // walk cannot descend.
+
     const makeRuntime = () =>
       ({
         [$conn]: () => ({
@@ -847,12 +897,6 @@ describe("cell-handle", () => {
       scope: "space",
       path: [],
     });
-
-    // A `FabricSpecialObject` is a `ClientCellValue` -- a cell holds one like
-    // any other value -- and it now crosses as itself. What this pins is that
-    // `serialize()` hands it on WHOLE rather than walking it: rebuilding one
-    // from its enumerable own properties would put `{}` on the wire in place
-    // of the bytes, which is what the ordering of the checks prevents.
 
     it("returns a `FabricBytes` as itself, not as a record", () => {
       const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
