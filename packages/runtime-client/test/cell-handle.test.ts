@@ -1109,6 +1109,46 @@ describe("cell-handle", () => {
       ]);
     });
 
+    it("waits for every queued strict event before later operations", async () => {
+      const requests: RequestType[] = [];
+      const firstEvent = Promise.withResolvers<void>();
+      let events = 0;
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: { type: RequestType }) => {
+            requests.push(request.type);
+            if (request.type === RequestType.CellSend && ++events === 1) {
+              return firstEvent.promise.then(() => ({}));
+            }
+            if (request.type === RequestType.CellGet) {
+              return Promise.resolve({ value: { n: 3 } });
+            }
+            return Promise.resolve({});
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle(runtime, ref, { n: 0 });
+
+      const first = cell.sendStrict({ n: 1 });
+      const second = cell.sendStrict({ n: 2 });
+      const setting = cell.set({ n: 3 });
+      const reading = cell.sync();
+      await Promise.resolve();
+      expect(requests).toEqual([RequestType.CellSend]);
+
+      firstEvent.resolve();
+      await Promise.all([first, second, setting, reading]);
+      expect(requests).toEqual([
+        RequestType.CellSend,
+        RequestType.CellSend,
+        RequestType.CellSet,
+        RequestType.CellGet,
+      ]);
+    });
+
     it("waits for every queued strict write before later remote operations", async () => {
       const requests: RequestType[] = [];
       const firstWrite = Promise.withResolvers<void>();

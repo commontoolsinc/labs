@@ -167,17 +167,21 @@ export class CellHandle<T = unknown> {
   /** Set the cell's value and reject when the runtime refuses the write. */
   async setStrict(value: T): Promise<void> {
     this.#requireSchema("setStrict");
+    await this.#enqueueStrictCommit(() =>
+      this.#applyLocalAndSend(value, RequestType.CellSet, true)
+    );
+  }
+
+  #enqueueStrictCommit(operation: () => Promise<void>): Promise<void> {
     const writing = this.#strictWriteTail
-      ? this.#strictWriteTail.then(() =>
-        this.#applyLocalAndSend(value, RequestType.CellSet, true)
-      )
-      : this.#applyLocalAndSend(value, RequestType.CellSet, true);
+      ? this.#strictWriteTail.then(operation)
+      : operation();
     const tail = writing.catch(() => {});
     this.#strictWriteTail = tail;
     void tail.then(() => {
       if (this.#strictWriteTail === tail) this.#strictWriteTail = undefined;
     });
-    await writing;
+    return writing;
   }
 
   #afterStrictWrites<R>(operation: () => Promise<R>): Promise<R> {
@@ -268,7 +272,7 @@ export class CellHandle<T = unknown> {
 
   /** Send a stream event and reject when the runtime refuses it. */
   async sendStrict(event: T): Promise<void> {
-    await this.#afterStrictWrites(() => this.#send(event, true));
+    await this.#enqueueStrictCommit(() => this.#send(event, true));
   }
 
   #send(event: T, propagateFailure = false): Promise<void> {
