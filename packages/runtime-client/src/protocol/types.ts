@@ -2193,12 +2193,13 @@ export type BooleanResponse = {
  * on `WireCellValue`). `codec-realm` is the mechanism, and closing this gap
  * and `WireCellValue`'s is one change.
  */
-export type JSONValueResponse = {
+export type CellValueResponse = {
   /**
-   * The value read. `undefined` is a value a cell can hold, so it is not
-   * the same as the read having found nothing.
+   * The value read. A read that finds nothing is not distinguishable here:
+   * `undefined` is a `FabricValue` and a value a cell can hold, so it is what
+   * both answers look like.
    */
-  value: FabricValue | undefined;
+  value: FabricValue;
 };
 
 /**
@@ -2206,7 +2207,7 @@ export type JSONValueResponse = {
  * it, and `cell` only when it asked and the read resolved to a cell -- a raw
  * metadata read has none to name.
  */
-export type CellGetResponse = JSONValueResponse & {
+export type CellGetResponse = CellValueResponse & {
   /**
    * The cell's display label, present only where the request set
    * `includeCfcLabel`. `undefined` is a valid value, the cell carrying no
@@ -2320,10 +2321,10 @@ export type CellUpdateNotification = {
    */
   cell: CellRef;
   /**
-   * Its new value. The push form of the same read `JSONValueResponse` carries,
+   * Its new value. The push form of the same read `CellValueResponse` carries,
    * produced by the same conversion, and so the same type.
    *
-   * TODO(danfuzz): the same gap `JSONValueResponse` is marked with.
+   * TODO(danfuzz): the same gap `CellValueResponse` is marked with.
    */
   value: FabricValue;
   /**
@@ -2515,7 +2516,7 @@ export type RemoteResponse =
   | EmptyResponse
   | NullResponse
   | BooleanResponse
-  | JSONValueResponse
+  | CellValueResponse
   | CellGetResponse
   | CellResponse
   | CfcLabelViewResponse

@@ -938,7 +938,7 @@ export class RuntimeProcessor {
       } else {
         // For meta cells that aren't link cells, return the raw data
         return {
-          value: rootCell.getMetaRaw(request.meta) as FabricValue | undefined,
+          value: rootCell.getMetaRaw(request.meta) as FabricValue,
         };
       }
     }
@@ -964,7 +964,7 @@ export class RuntimeProcessor {
         doNotConvertCellResults: true,
         includeCfcLabelView: true,
       }),
-    ) as FabricValue | undefined;
+    ) as FabricValue;
     // The resolved cell's own schema-bearing ref, when asked for — for a meta
     // link read this addresses the linked cell itself, so the caller can
     // subscribe to it or consult its schema's declarations.
