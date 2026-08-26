@@ -21,8 +21,10 @@ import { type Environment, readEnv } from "@commonfabric/test-support/records";
 export interface AgentHarness {
   /** What the harness is called, for what the tool prints. */
   name: string;
+
   /** The directory whose presence means the harness is installed. */
   home: (home: string) => string;
+
   /** The configuration file, which need not exist yet. */
   config: (home: string) => string;
 }
@@ -53,6 +55,7 @@ export type ConfigWriter = (
 
 /** What one harness configuration's update did. */
 export type AgentConfigOutcome =
+
   /** The variable was written into the configuration. */
   | "added"
   /** The configuration already carries the variable with this value. */
@@ -68,6 +71,7 @@ export interface AgentConfigUpdate {
   harness: string;
   path: string;
   outcome: AgentConfigOutcome;
+
   /** The value already there, for a conflict. */
   existing?: string;
 }

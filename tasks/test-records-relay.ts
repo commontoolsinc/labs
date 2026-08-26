@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-env --allow-net
+
 /**
  * The relay: the one CI principal that writes to the store. Runs in the
  * workflow_run follower with base-repository credentials, walks the
@@ -49,8 +50,10 @@ export interface RunFacts {
   headSha: string;
   headBranch?: string;
   runStartedAt: string;
+
   /** True when the head repository differs from the base repository. */
   fork: boolean;
+
   /** Numeric id of the user whose push or pull request ran, when known. */
   actorId?: string;
 }

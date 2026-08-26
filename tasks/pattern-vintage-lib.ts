@@ -102,12 +102,16 @@ export interface VintageRef {
    * test instantiates, which is routinely several patterns.
    */
   testKey: string;
+
   /** `pinned` or `auto`. */
   tier: string;
+
   /** Capture timestamp, ISO-8601 with `:` replaced (filenames). */
   stamp: string;
+
   /** Identity of the pattern version that WROTE this state. */
   identity: string;
+
   /** Repo-relative path to the fixture file. */
   path: string;
 }
@@ -472,6 +476,7 @@ export function uncoveredRequiredPatterns(
 export interface ReplayFailure {
   /** The TEST whose fixture this failure came from. */
   testKey: string;
+
   /** Repo-relative fixture path. */
   path: string;
   detail: string;

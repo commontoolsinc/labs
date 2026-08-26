@@ -229,6 +229,7 @@ export interface TypecheckOptions {
   list?: boolean;
   reload?: boolean;
   check?: typeof checkGroup;
+
   /**
    * Spool one typecheck record per scope.
    *

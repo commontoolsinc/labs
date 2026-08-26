@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-env --allow-sys --allow-ffi
+
 /**
  * Fails when a slot the CLI accepts has not been decided about for completion.
  *
@@ -173,10 +174,13 @@ export interface SlotReport {
    * enumerated set, and no allowlist entry.
    */
   readonly undecidedOptions: string[];
+
   /** Positionals with no provider and no allowlist entry. */
   readonly undecidedPositionals: string[];
+
   /** Provider entries matching no slot on the tree. */
   readonly unreachableProviders: string[];
+
   /** Allowlist entries that decide no slot on the tree. */
   readonly staleAllowlist: string[];
 }

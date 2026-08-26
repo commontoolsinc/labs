@@ -29,12 +29,16 @@ const banner = (lines: string[]): string => {
 
 export interface Tripwire {
   name: string;
+
   /** The unit test that must remain present and intact. */
   testFile: string;
+
   /** A marker the test file must still contain, so gutting it is caught. */
   sentinel: string;
+
   /** True while the weakness is still present. Resolving it fails the check. */
   stillWeak: () => Promise<boolean>;
+
   /** Printed when the weakness is resolved: what the resolver must now do. */
   obligation: string[];
 }

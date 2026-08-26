@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-env --allow-net --allow-run=gh
+
 /**
  * The personal key tool, in one command that finishes the job and two that
  * split it.
@@ -98,6 +99,7 @@ export interface KeyToolDeps {
   env: Environment;
   fetchImpl: typeof fetch;
   githubToken: () => Promise<string | undefined>;
+
   /** Waits out one polling interval. */
   pause: () => Promise<void>;
 }
@@ -261,6 +263,7 @@ function mintWorkflowUrl(): string {
 interface DispatchResult {
   dispatched: boolean;
   username?: string;
+
   /** GitHub's clock at the dispatch, which bounds the run's creation. */
   at?: number;
 }
@@ -337,6 +340,7 @@ interface MintRun {
 /** A minting run this requester's, and the delivery it published. */
 interface RunMatch {
   run: MintRun;
+
   /** The delivery artifact, when one identified the run. */
   artifact?: number;
 }
@@ -347,6 +351,7 @@ interface RunSearch {
   recipient: string;
   artifactName: string;
   login: string;
+
   /**
    * GitHub's clock at the moment this attempt began, bounding how far
    * back a run can be and still be this attempt's. Unset examines every
@@ -358,6 +363,7 @@ interface RunSearch {
 
 interface RunSearchResult {
   match?: RunMatch;
+
   /** GitHub's clock at the listing, for bounding later searches. */
   serverDate?: number;
 }

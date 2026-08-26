@@ -13,8 +13,10 @@ export interface LcovFileCoverage {
    * `mapPath` turned it into the key this entry is stored under.
    */
   sourcePath: string;
+
   /** The `TN:` name from the first record for this file that carried one. */
   testName?: string;
+
   /** Execution count per line number, summed over every record read. */
   lineHits: Map<number, number>;
 }

@@ -1,4 +1,5 @@
 #!/usr/bin/env deno run -A
+
 /**
  * bench-setup.ts — CT-1409+ benchmark space deployer
  *

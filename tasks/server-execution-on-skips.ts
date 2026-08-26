@@ -42,10 +42,13 @@ export type ServerExecutionOnSkip = {
   /** Test file, relative to the suite's package root (the directory the
    * suite's `deno test` runs from), e.g. "integration/counter.test.ts". */
   file: string;
+
   /** The plan phase that, once landed, unskips this file (or step). */
   phase: ServerExecutionPhase;
+
   /** Why the ON arm cannot run this file (or step) before that phase. */
   reason: string;
+
   /**
    * STEP-LEVEL entry (Phase 7 fixer, 2026-08-16): the exact name of ONE
    * `it`/step inside `file` that the ON arm skips while the REST of the
@@ -126,6 +129,7 @@ const SUITE_PACKAGE_DIR: Record<ServerExecutionSuite, string> = {
  * residual; its sibling `cfc-group-chat-demo-two-browsers` was
  * un-skipped by fan-out stage B (2026-08-17, 3/3 green).
  */
+
 /**
  * The two-browser gates' Phase-7 reason (the client-side
  * `scheduler-non-settling` loop, verification-coverage.md OW32) RETIRED

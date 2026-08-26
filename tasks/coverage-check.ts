@@ -345,8 +345,10 @@ export async function fetchAncestorRanks(
 export interface BaselineRunReading {
   /** The run's uncovered-line count per metric, from its baseline artifact. */
   samples: Map<string, BaselineSample>;
+
   /** What the run's merged pull request accepted, when it has one. */
   overrides: BaselineOverrides | null;
+
   /** True when the run compiled patterns from scratch. */
   cold: boolean;
 }
@@ -357,10 +359,13 @@ export interface WalkBaselineRunsOptions {
    * because a one-shot iterator would leave a second pass over it empty.
    */
   metrics: readonly string[];
+
   /** Recent `main` runs, newest first. */
   runs: WorkflowRun[];
+
   /** Reads one run. Called only for the runs the walk reaches. */
   readRun: (run: WorkflowRun) => Promise<BaselineRunReading>;
+
   /**
    * How far back from the base-branch commit this run merged each recent commit
    * sits, or null when there is no base-branch commit to measure against.
@@ -538,8 +543,10 @@ export function isComparableBaseline(
 
 export interface MetricBaseline {
   sample?: BaselineSample;
+
   /** Whether the ratchet may fail this metric against that sample. */
   comparable: boolean;
+
   /**
    * The base-branch commit the comparison was judged against: the commit this
    * run merges the pull request into. Absent on a `main` push run, and when
@@ -551,8 +558,10 @@ export interface MetricBaseline {
 export interface SelectBaselinesOptions {
   /** The metrics to gate; an array, as in {@link WalkBaselineRunsOptions}. */
   metrics: readonly string[];
+
   /** Recent `main` runs, newest first. */
   runs: WorkflowRun[];
+
   /** Reads one baseline run; called only for the runs the walk reaches. */
   readRun: (run: WorkflowRun) => Promise<BaselineRunReading>;
   isPullRequest: boolean;
@@ -562,6 +571,7 @@ export interface SelectBaselinesOptions {
     baselineSha: string,
     baseSha: string,
   ) => Promise<Set<string>>;
+
   /** Wraps the GitHub calls made here so a rate limit skips the check. */
   guard?: <T>(description: string, operation: () => Promise<T>) => Promise<T>;
   log?: (message: string) => void;
@@ -1142,14 +1152,19 @@ export interface Row {
   metric: string;
   status: Status;
   current: number;
+
   /** Uncovered lines the chosen `main` run measured for this metric. */
   baseline?: number;
+
   /** Head SHA of the run that baseline came from. */
   baselineSha?: string;
+
   /** Id of the run that baseline came from. */
   baselineRunId?: number;
+
   /** Id of the run that measured `current`. */
   measuredRunId?: number;
+
   /**
    * The base-branch commit that run merged this pull request into. A
    * `pull_request` run measures `refs/pull/<number>/merge`, so this is the
@@ -1178,14 +1193,17 @@ export interface BuildCoverageRowsOptions {
   currentMetrics: Map<string, BaselineSample>;
   baselineByMetric: Map<string, MetricBaseline>;
   overrides: BaselineOverrides;
+
   /** Undefined when the PR's changed files could not be read. */
   changedCoverageGroups: Set<string> | undefined;
 }
 
 export interface CoverageRows {
   rows: Row[];
+
   /** The subset of `rows` that fails the gate. */
   failures: Row[];
+
   /** Groups whose baseline could not be held against this run. */
   ungatedGroups: Set<string>;
 }
@@ -1497,6 +1515,7 @@ export interface UnattributedRegressionOptions {
   groups: CoverageSuggestionGroup[];
   coverageFailures: Row[];
   prFiles: PRFile[];
+
   /** LCOV from this run. */
   lcov: string;
   readBaselineLcov: (runId: number) => Promise<string | null>;
