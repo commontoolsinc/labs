@@ -86,6 +86,37 @@ describe("cell-handle", () => {
         params: { title: "New" },
       }]);
     });
+
+    it("preserves BLOB values in query rows and bind parameters", async () => {
+      const requests: unknown[] = [];
+      const output = new FabricBytes(new Uint8Array([1, 2, 3]));
+      const input = new FabricBytes(new Uint8Array([4, 5, 6]));
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: { type: RequestType }) => {
+            requests.push(request);
+            return Promise.resolve(
+              request.type === RequestType.SqliteQuery
+                ? { rows: [{ payload: output }] }
+                : {},
+            );
+          },
+        }),
+      } as unknown as RuntimeClient;
+      const database = new CellHandle(runtime, ref);
+
+      const rows = await database.querySqlite<{ payload: FabricBytes }>(
+        "SELECT payload FROM blobs",
+      );
+      await database.execSqlite(
+        "INSERT INTO blobs (payload) VALUES (?)",
+        [input],
+      );
+
+      expect(rows[0]?.payload).toBeInstanceOf(FabricBytes);
+      expect(rows[0]?.payload.slice()).toEqual(new Uint8Array([1, 2, 3]));
+      expect(requests[1]).toMatchObject({ params: [input] });
+    });
   });
 
   describe("CellHandle CFC label IPC", () => {
@@ -903,6 +934,29 @@ describe("cell-handle", () => {
       expect(cell.get()).toEqual({ n: 1 });
       expect(updates).toEqual([{ n: 1 }]);
       unsubscribe();
+    });
+
+    it("starts the first strict write before a later read", async () => {
+      const requests: RequestType[] = [];
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: { type: RequestType }) => {
+            requests.push(request.type);
+            return Promise.resolve(
+              request.type === RequestType.CellGet ? { value: { n: 1 } } : {},
+            );
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle(runtime, ref, { n: 0 });
+
+      const writing = cell.setStrict({ n: 1 });
+      const reading = cell.sync();
+      expect(requests).toEqual([RequestType.CellSet, RequestType.CellGet]);
+      await Promise.all([writing, reading]);
     });
   });
 

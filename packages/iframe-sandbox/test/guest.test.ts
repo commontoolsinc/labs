@@ -214,6 +214,33 @@ describe("guest", () => {
       }
     });
 
+    it("preserves an authoritative update that precedes a read response", async () => {
+      const fabric = connectFabric();
+      try {
+        const host = handOffPort();
+        const cell = fabric.cell<number>("count");
+        cell.subscribe(() => {});
+        const subscribe = await receive(host);
+        send(host, response(subscribe.id));
+
+        const reading = cell.read();
+        const read = await receive(host);
+        send(host, {
+          protocol: BRIDGE_PROTOCOL,
+          version: BRIDGE_VERSION,
+          type: "event",
+          subscription: subscribe.subscription!,
+          value: 2,
+        });
+        send(host, response(read.id, 1));
+        await expect(reading).resolves.toBe(1);
+
+        expect(cell.getSnapshot()).toEqual({ status: "ready", value: 2 });
+      } finally {
+        fabric.disconnect();
+      }
+    });
+
     it("serializes overlapping writes before publishing the latest value", async () => {
       const firstResponse = Promise.withResolvers<FabricValue | undefined>();
       const writes: number[] = [];

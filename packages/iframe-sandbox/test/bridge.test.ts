@@ -2,6 +2,7 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 
 import { createFabricBridge, FabricBridgeHost } from "../src/bridge.ts";
 import { connectFabric } from "../src/guest.ts";
@@ -14,6 +15,18 @@ function handOff(port: MessagePort): void {
       ports: [port],
     }),
   );
+}
+
+function nextTask(): Promise<void> {
+  const channel = new MessageChannel();
+  return new Promise((resolve) => {
+    channel.port1.onmessage = () => {
+      channel.port1.close();
+      channel.port2.close();
+      resolve();
+    };
+    channel.port2.postMessage(undefined);
+  });
 }
 
 describe("Fabric iframe bridge", () => {
@@ -72,13 +85,15 @@ describe("Fabric iframe bridge", () => {
 
   it("calls SQLite methods through the same discoverable resource", async () => {
     const calls: Array<{ method: string; input: unknown }> = [];
+    const output = new FabricBytes(new Uint8Array([1, 2, 3]));
+    const input = new FabricBytes(new Uint8Array([4, 5, 6]));
     const bridge = createFabricBridge({
       app: {
         kind: "sqlite",
         methods: {
           query: (input) => {
             calls.push({ method: "query", input });
-            return { rows: [{ id: 1, title: "Ship it" }] };
+            return { rows: [{ id: 1, title: "Ship it", payload: output }] };
           },
           exec: (input) => {
             calls.push({ method: "exec", input });
@@ -93,24 +108,97 @@ describe("Fabric iframe bridge", () => {
 
     try {
       const db = client.sqlite("app");
-      await expect(db.query("SELECT * FROM todos")).resolves.toEqual({
-        rows: [{ id: 1, title: "Ship it" }],
-      });
-      await db.exec("INSERT INTO todos(title) VALUES (?)", ["Test it"]);
-      expect(calls).toEqual([{
+      const result = await db.query<{ payload: FabricBytes }>(
+        "SELECT * FROM todos",
+      );
+      expect(result.rows[0]?.payload).toBeInstanceOf(FabricBytes);
+      expect(result.rows[0]?.payload.slice()).toEqual(
+        new Uint8Array([1, 2, 3]),
+      );
+      await db.exec("INSERT INTO todos(title, payload) VALUES (?, ?)", [
+        "Test it",
+        input,
+      ]);
+      expect(calls[0]).toEqual({
         method: "query",
         input: { sql: "SELECT * FROM todos" },
-      }, {
+      });
+      expect(calls[1]).toMatchObject({
         method: "exec",
         input: {
-          sql: "INSERT INTO todos(title) VALUES (?)",
-          params: ["Test it"],
+          sql: "INSERT INTO todos(title, payload) VALUES (?, ?)",
         },
-      }]);
+      });
+      const params = (calls[1]?.input as { params: unknown[] }).params;
+      expect(params[1]).toBeInstanceOf(FabricBytes);
+      expect((params[1] as FabricBytes).slice()).toEqual(
+        new Uint8Array([4, 5, 6]),
+      );
     } finally {
       client.disconnect();
       host.disconnect();
     }
+  });
+
+  it("completes earlier writes before later reads", async () => {
+    let value = 0;
+    const writeStarted = Promise.withResolvers<void>();
+    const releaseWrite = Promise.withResolvers<void>();
+    const channel = new MessageChannel();
+    const host = new FabricBridgeHost(
+      createFabricBridge({
+        count: {
+          kind: "cell",
+          read: () => value,
+          write: async (next) => {
+            writeStarted.resolve();
+            await releaseWrite.promise;
+            value = next as number;
+          },
+        },
+      }),
+      channel.port1,
+    );
+    const client = connectFabric();
+    handOff(channel.port2);
+
+    try {
+      const writing = client.cell<number>("count").write(1);
+      await writeStarted.promise;
+      const reading = client.cell<number>("count").read();
+      await nextTask();
+      releaseWrite.resolve();
+
+      await writing;
+      await expect(reading).resolves.toBe(1);
+    } finally {
+      client.disconnect();
+      host.disconnect();
+    }
+  });
+
+  it("drops queued capability calls after host disconnect", async () => {
+    let calls = 0;
+    const channel = new MessageChannel();
+    const host = new FabricBridgeHost(
+      createFabricBridge({
+        service: {
+          kind: "service",
+          methods: { mutate: () => calls++ },
+        },
+      }),
+      channel.port1,
+    );
+    const client = connectFabric();
+    handOff(channel.port2);
+
+    const pending = client.call("service", "mutate");
+    host.disconnect();
+    await nextTask();
+    await nextTask();
+    expect(calls).toBe(0);
+    client.disconnect();
+    await pending.catch(() => {});
   });
 
   it("returns structured errors for missing capabilities", async () => {

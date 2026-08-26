@@ -4363,6 +4363,33 @@ describe("runtime-processor", () => {
       ]]);
     });
 
+    it("converts native SQLite BLOB rows and parameters at the IPC boundary", async () => {
+      const calls: unknown[][] = [];
+      const processor = processorWith(
+        { id: "db-1", tables: { blobs: {} } },
+        (...args) => {
+          calls.push(args);
+          return Promise.resolve({
+            rows: [{ payload: new Uint8Array([1, 2, 3]) }],
+          });
+        },
+      );
+      const input = new FabricBytes(new Uint8Array([4, 5, 6]));
+
+      const result = await processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT payload FROM blobs WHERE payload = ?",
+        params: [input],
+      });
+
+      expect(result.rows[0]?.payload).toBeInstanceOf(FabricBytes);
+      expect((result.rows[0]?.payload as FabricBytes).slice()).toEqual(
+        new Uint8Array([1, 2, 3]),
+      );
+      expect(calls[0]?.[2]).toEqual([new Uint8Array([4, 5, 6])]);
+    });
+
     it("refuses a direct query whose result needs CFC provenance", async () => {
       let queried = false;
       const processor = processorWith({

@@ -7,6 +7,7 @@ import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
   cloneIfNecessary,
+  fabricFromNativeValue,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import { toStructuredDebugValue } from "@commonfabric/data-model/value-debug";
@@ -317,6 +318,7 @@ function sqliteParamsForRuntime(
   runtime: Runtime,
   value: FabricValue,
 ): unknown {
+  if (value instanceof FabricBytes) return value.slice();
   if (isCellRef(value)) return getCell(runtime, value);
   if (Array.isArray(value)) {
     return value.map((member) => sqliteParamsForRuntime(runtime, member));
@@ -1560,7 +1562,9 @@ export class RuntimeProcessor {
           | Record<string, unknown>,
       );
     const result = await provider.sqliteQuery(db, request.sql, params);
-    return { rows: result.rows as SqliteQueryResponse["rows"] };
+    return {
+      rows: fabricFromNativeValue(result.rows) as SqliteQueryResponse["rows"],
+    };
   }
 
   async handleSqliteExec(request: SqliteExecRequest): Promise<void> {

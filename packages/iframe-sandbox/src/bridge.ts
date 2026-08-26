@@ -107,6 +107,7 @@ export class FabricBridgeHost {
   readonly #bridge: FabricBridge;
   readonly #port: MessagePort;
   readonly #subscriptions = new Map<string, BridgeCancel>();
+  #operationTail: Promise<void> | undefined;
   #connected = true;
 
   constructor(bridge: FabricBridge, port: MessagePort) {
@@ -151,6 +152,7 @@ export class FabricBridgeHost {
   }
 
   #onMessage = (event: MessageEvent): void => {
+    if (!this.#connected) return;
     let decoded: FabricValue;
     try {
       decoded = fabricFromRealmValue(event.data);
@@ -158,14 +160,23 @@ export class FabricBridgeHost {
       return;
     }
     if (!isBridgeRequest(decoded)) return;
-    void this.#handle(decoded);
-  };
-
-  async #handle(request: BridgeRequest): Promise<void> {
-    if (request.operation === "disconnect") {
+    if (decoded.operation === "disconnect") {
       this.disconnect();
       return;
     }
+    const handling = this.#operationTail
+      ? this.#operationTail.then(() => {
+        if (this.#connected) return this.#handle(decoded);
+      })
+      : this.#handle(decoded);
+    const tail = handling.catch(() => {});
+    this.#operationTail = tail;
+    void tail.then(() => {
+      if (this.#operationTail === tail) this.#operationTail = undefined;
+    });
+  };
+
+  async #handle(request: BridgeRequest): Promise<void> {
     try {
       const value = await this.#perform(request);
       this.#post({

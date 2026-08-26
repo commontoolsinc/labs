@@ -48,6 +48,15 @@ export type QuerySnapshot<Row> =
   | { status: "ready"; rows: Row[]; error: undefined }
   | { status: "error"; rows: undefined; error: Error };
 
+type KeyedQuerySnapshot<Row> = {
+  key: string;
+  snapshot: QuerySnapshot<Row>;
+};
+
+function loadingQuery<Row>(): QuerySnapshot<Row> {
+  return { status: "loading", rows: undefined, error: undefined };
+}
+
 /** Builds hooks against the React instance already used by the guest app. */
 export function createFabricReact(react: ReactHooks, client: FabricClient) {
   function useCell<T = FabricValue>(
@@ -59,10 +68,7 @@ export function createFabricReact(react: ReactHooks, client: FabricClient) {
       cell.getSnapshot,
       cell.getSnapshot,
     );
-    const writes = react.useRef({ cell, tail: Promise.resolve() });
-    if (writes.current.cell !== cell) {
-      writes.current = { cell, tail: Promise.resolve() };
-    }
+    const writeTails = react.useRef(new WeakMap<object, Promise<void>>());
 
     react.useEffect(() => {
       if (cell.getSnapshot().status === "loading") {
@@ -72,7 +78,7 @@ export function createFabricReact(react: ReactHooks, client: FabricClient) {
 
     const set = react.useCallback(
       (next: T | ((current: T) => T)) => {
-        const writing = writes.current.tail.then(async () => {
+        const write = async () => {
           const current = cell.getSnapshot();
           const value = typeof next === "function"
             ? (next as (current: T) => T)(
@@ -80,11 +86,19 @@ export function createFabricReact(react: ReactHooks, client: FabricClient) {
             )
             : next;
           await cell.write(value);
+        };
+        const previous = writeTails.current.get(cell);
+        const writing = previous ? previous.then(write) : write();
+        const tail = writing.catch(() => {});
+        writeTails.current.set(cell, tail);
+        void tail.then(() => {
+          if (writeTails.current.get(cell) === tail) {
+            writeTails.current.delete(cell);
+          }
         });
-        writes.current.tail = writing.catch(() => {});
         return writing;
       },
-      [cell, writes],
+      [cell, writeTails],
     );
 
     return {
@@ -101,33 +115,42 @@ export function createFabricReact(react: ReactHooks, client: FabricClient) {
   ): QuerySnapshot<Row> & { refresh(): Promise<void> } {
     const database = react.useMemo(() => client.sqlite(name), [name]);
     const paramsKey = hashStringOf(params ?? null);
+    const queryKey = hashStringOf({ name, sql, params: params ?? null });
     const generation = react.useRef(0);
-    const [snapshot, setSnapshot] = react.useState<QuerySnapshot<Row>>({
-      status: "loading",
-      rows: undefined,
-      error: undefined,
+    const [state, setState] = react.useState<KeyedQuerySnapshot<Row>>({
+      key: queryKey,
+      snapshot: loadingQuery(),
     });
+    const snapshot = state.key === queryKey
+      ? state.snapshot
+      : loadingQuery<Row>();
 
     const refresh = react.useCallback(async () => {
       const request = ++generation.current;
-      setSnapshot({ status: "loading", rows: undefined, error: undefined });
+      setState({ key: queryKey, snapshot: loadingQuery() });
       try {
         const result = await database.query<Row>(sql, params);
         if (request !== generation.current) return;
-        setSnapshot({
-          status: "ready",
-          rows: result.rows,
-          error: undefined,
+        setState({
+          key: queryKey,
+          snapshot: {
+            status: "ready",
+            rows: result.rows,
+            error: undefined,
+          },
         });
       } catch (cause) {
         if (request !== generation.current) return;
-        setSnapshot({
-          status: "error",
-          rows: undefined,
-          error: cause instanceof Error ? cause : new Error(String(cause)),
+        setState({
+          key: queryKey,
+          snapshot: {
+            status: "error",
+            rows: undefined,
+            error: cause instanceof Error ? cause : new Error(String(cause)),
+          },
         });
       }
-    }, [database, sql, paramsKey]);
+    }, [database, sql, paramsKey, queryKey]);
 
     react.useEffect(() => {
       const unsubscribe = database.subscribeInvalidation(() => void refresh());

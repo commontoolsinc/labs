@@ -32,8 +32,13 @@ const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
 type BridgeCommand = {
   id: string;
-  operation: "write" | "sqlite-insert" | "sqlite-query";
+  operation:
+    | "write"
+    | "sqlite-insert"
+    | "sqlite-query"
+    | "clear-database-rows";
   resource?: "shared" | "user" | "session";
+  database?: "database" | "userDatabase" | "sessionDatabase";
   value?: string;
 };
 
@@ -42,6 +47,8 @@ type BridgeValues = {
   user: string;
   session: string;
   databaseRows: string;
+  userDatabaseRows: string;
+  sessionDatabaseRows: string;
   status: string;
 };
 
@@ -79,6 +86,8 @@ async function readBridgeValues(page: Page): Promise<BridgeValues> {
       user: text("#bridge-user"),
       session: text("#bridge-session"),
       databaseRows: text("#bridge-database-rows"),
+      userDatabaseRows: text("#bridge-user-database-rows"),
+      sessionDatabaseRows: text("#bridge-session-database-rows"),
       status: text("#bridge-status"),
     };
   });
@@ -229,11 +238,13 @@ async function waitForBridgeStatus(
 async function waitForBridgeRowsContaining(
   page: Page,
   expected: readonly string[],
+  selector = "#bridge-database-rows",
 ): Promise<void> {
   const result = await waitForCondition(
     page,
-    (probe, expectedRows) => {
-      const rows = probe.collect("#bridge-database-rows")[0];
+    (probe, options) => {
+      const { expectedRows, rowSelector } = options;
+      const rows = probe.collect(rowSelector)[0];
       const values = rows
         ? probe.deepText(rows).trim().split(",").filter(Boolean)
         : [];
@@ -246,7 +257,7 @@ async function waitForBridgeRowsContaining(
       }
       return false;
     },
-    { args: [expected] },
+    { args: [{ expectedRows: expected, rowSelector: selector }] },
   );
   if (result?.error) {
     throw new Error(
@@ -478,13 +489,106 @@ describe("cf-iframe bridge with multiple users", () => {
       ),
     );
 
+    const aliceUserDatabaseRow = `alice-user-db-${pieceId}`;
+    const bobUserDatabaseRow = `bob-user-db-${pieceId}`;
+    await issueCommand(pages[0], {
+      id: "sqlite-user-alice",
+      operation: "sqlite-insert",
+      database: "userDatabase",
+      value: aliceUserDatabaseRow,
+    });
+    await Promise.all(
+      pages.slice(0, 2).map((page) =>
+        waitForBridgeRowsContaining(
+          page,
+          [aliceUserDatabaseRow],
+          "#bridge-user-database-rows",
+        )
+      ),
+    );
+    expect((await readBridgeValues(pages[2])).userDatabaseRows).toBe("");
+
+    await issueCommand(pages[2], {
+      id: "sqlite-user-bob",
+      operation: "sqlite-insert",
+      database: "userDatabase",
+      value: bobUserDatabaseRow,
+    });
+    await waitForBridgeRowsContaining(
+      pages[2],
+      [bobUserDatabaseRow],
+      "#bridge-user-database-rows",
+    );
+    expect((await readBridgeValues(pages[0])).userDatabaseRows).toBe(
+      aliceUserDatabaseRow,
+    );
+    expect((await readBridgeValues(pages[1])).userDatabaseRows).toBe(
+      aliceUserDatabaseRow,
+    );
+
+    const aliceSessionOneDatabaseRow = `alice-session-1-db-${pieceId}`;
+    const aliceSessionTwoDatabaseRow = `alice-session-2-db-${pieceId}`;
+    await issueCommand(pages[0], {
+      id: "sqlite-session-one",
+      operation: "sqlite-insert",
+      database: "sessionDatabase",
+      value: aliceSessionOneDatabaseRow,
+    });
+    await waitForBridgeRowsContaining(
+      pages[0],
+      [aliceSessionOneDatabaseRow],
+      "#bridge-session-database-rows",
+    );
+    expect((await readBridgeValues(pages[1])).sessionDatabaseRows).toBe("");
+    expect((await readBridgeValues(pages[2])).sessionDatabaseRows).toBe("");
+
+    await issueCommand(pages[1], {
+      id: "sqlite-session-two",
+      operation: "sqlite-insert",
+      database: "sessionDatabase",
+      value: aliceSessionTwoDatabaseRow,
+    });
+    await waitForBridgeRowsContaining(
+      pages[1],
+      [aliceSessionTwoDatabaseRow],
+      "#bridge-session-database-rows",
+    );
+    expect((await readBridgeValues(pages[0])).sessionDatabaseRows).toBe(
+      aliceSessionOneDatabaseRow,
+    );
+
+    await issueCommand(pages[0], {
+      id: "clear-database-readouts",
+      operation: "clear-database-rows",
+    });
+    expect(await readBridgeValues(pages[0])).toMatchObject({
+      databaseRows: "",
+      userDatabaseRows: "",
+      sessionDatabaseRows: "",
+    });
+
     await clickCfButton(pages[0], "#bridge-reload");
     await waitForBridgeStatus(pages[0], "ready");
+    await Promise.all([
+      waitForBridgeRowsContaining(pages[0], [aliceRow, bobRow]),
+      waitForBridgeRowsContaining(
+        pages[0],
+        [aliceUserDatabaseRow],
+        "#bridge-user-database-rows",
+      ),
+      waitForBridgeRowsContaining(
+        pages[0],
+        [aliceSessionOneDatabaseRow],
+        "#bridge-session-database-rows",
+      ),
+    ]);
     expect(await readBridgeValues(pages[0])).toEqual({
       shared: "space-after-session-two",
       user: "alice-user",
       session: "alice-session-one",
       databaseRows: durableDatabaseRows,
+      userDatabaseRows: aliceUserDatabaseRow,
+      sessionDatabaseRows: aliceSessionOneDatabaseRow,
       status: "ready",
     });
     expect(await readBridgeValues(pages[1])).toEqual({
@@ -492,14 +596,18 @@ describe("cf-iframe bridge with multiple users", () => {
       user: "alice-user",
       session: "alice-session-two",
       databaseRows: durableDatabaseRows,
-      status: "done:session-two-barrier",
+      userDatabaseRows: aliceUserDatabaseRow,
+      sessionDatabaseRows: aliceSessionTwoDatabaseRow,
+      status: "done:sqlite-session-two",
     });
     expect(await readBridgeValues(pages[2])).toEqual({
       shared: "space-after-session-two",
       user: "bob-user",
       session: "",
       databaseRows: durableDatabaseRows,
-      status: "done:sqlite-bob",
+      userDatabaseRows: bobUserDatabaseRow,
+      sessionDatabaseRows: "",
+      status: "done:sqlite-user-bob",
     });
   });
 });

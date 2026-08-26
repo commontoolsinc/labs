@@ -1,5 +1,6 @@
 import type { MetaField } from "@commonfabric/api";
 import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
+import type { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type {
   FabricPlainObject,
   FabricValue,
@@ -1009,10 +1010,13 @@ export type WireOperationFieldSnapshot =
     operations: WireIntegratedOperation[];
   };
 
+/** A SQLite value as the realm-coded main-thread connection carries it. */
+export type SqliteWireValue = WireCellValue | FabricBytes;
+
 /** SQLite bind values as the main-thread connection carries them. */
 export type SqliteParams =
-  | readonly WireCellValue[]
-  | { readonly [key: string]: WireCellValue };
+  | readonly SqliteWireValue[]
+  | { readonly [key: string]: SqliteWireValue };
 
 /** The {@link RequestType.SqliteQuery} request. */
 export type SqliteQueryRequest = BaseRequest & {
@@ -2559,7 +2563,9 @@ export type CellGetResponse = CellValueResponse & {
 
 /** Rows returned by {@link RequestType.SqliteQuery}. */
 export type SqliteQueryResponse = {
-  rows: readonly WireCellValue[];
+  rows: readonly {
+    readonly [key: string]: SqliteWireValue;
+  }[];
 };
 
 /** A reference to one cell, for a request whose answer is which cell. */

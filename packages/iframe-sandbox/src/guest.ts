@@ -82,14 +82,15 @@ export class RemoteCell<T = FabricValue> {
   };
 
   async read(): Promise<T> {
+    const before = this.#snapshot;
     try {
       const value = await this.#client.request("read", {
         resource: this.#name,
       }) as T;
-      this.#setReady(value);
+      if (this.#snapshot === before) this.#setReady(value);
       return value;
     } catch (error) {
-      this.#setError(error);
+      if (this.#snapshot === before) this.#setError(error);
       throw error;
     }
   }

@@ -28,6 +28,8 @@ export interface BridgeFixtureInput {
   command?: PerSession<TextCell>;
   status?: PerSession<TextCell>;
   databaseRows?: PerSession<TextCell>;
+  userDatabaseRows?: PerSession<TextCell>;
+  sessionDatabaseRows?: PerSession<TextCell>;
   reloadRevision?: PerSession<RevisionCell>;
 }
 
@@ -38,7 +40,11 @@ interface IframeContextInput {
   command: TextCell;
   status: TextCell;
   databaseRows: TextCell;
+  userDatabaseRows: TextCell;
+  sessionDatabaseRows: TextCell;
   database: SqliteDb;
+  userDatabase: SqliteDb;
+  sessionDatabase: SqliteDb;
 }
 
 export interface IframeContextOutput extends IframeContextInput {}
@@ -103,12 +109,23 @@ const GUEST_HTML = `<!doctype html>
     await request("subscribe", { resource, subscription });
   };
 
-  const refreshRows = async () => {
-    const result = await call("database", "query", {
-      sql: "SELECT value FROM bridge_items ORDER BY id",
-    });
+  const databaseRows = {
+    database: "databaseRows",
+    userDatabase: "userDatabaseRows",
+    sessionDatabase: "sessionDatabaseRows",
+  };
+
+  const refreshRows = async (database) => {
+    let result;
+    try {
+      result = await call(database, "query", {
+        sql: "SELECT value FROM bridge_items ORDER BY id",
+      });
+    } catch (error) {
+      throw new Error(database + ": " + error.message);
+    }
     await write(
-      "databaseRows",
+      databaseRows[database],
       result.rows.map((row) => row.value).join(","),
     );
   };
@@ -123,12 +140,17 @@ const GUEST_HTML = `<!doctype html>
       if (command.operation === "write") {
         await write(command.resource, command.value);
       } else if (command.operation === "sqlite-insert") {
-        await call("database", "exec", {
+        const database = command.database || "database";
+        await call(database, "exec", {
           sql: "INSERT INTO bridge_items (value) VALUES (?)",
           params: [command.value],
         });
       } else if (command.operation === "sqlite-query") {
-        await refreshRows();
+        await refreshRows(command.database || "database");
+      } else if (command.operation === "clear-database-rows") {
+        await Promise.all(
+          Object.values(databaseRows).map((resource) => write(resource, "")),
+        );
       } else {
         throw new Error("Unknown command: " + command.operation);
       }
@@ -167,10 +189,12 @@ const GUEST_HTML = `<!doctype html>
 
     try {
       await subscribe("command", (value) => void handleCommand(value));
-      await subscribe("database", () => void refreshRows());
+      for (const database of Object.keys(databaseRows)) {
+        await subscribe(database, () => void refreshRows(database));
+      }
+      await Promise.all(Object.keys(databaseRows).map(refreshRows));
       await write("status", "ready");
       document.querySelector("#guest-state").textContent = "ready";
-      await refreshRows();
     } catch (error) {
       document.querySelector("#guest-state").textContent = error.message;
       globalThis.parent.postMessage({
@@ -192,14 +216,25 @@ const GUEST_HTML = `<!doctype html>
 
 export default pattern<BridgeFixtureInput, BridgeFixtureOutput>((state) => {
   const { table } = cfSqlite;
-  const database = sqliteDatabase({
-    tables: {
-      bridge_items: table({
-        id: "integer primary key",
-        value: "text",
-      }),
-    },
-  });
+  const tables = {
+    bridge_items: table({
+      id: "integer primary key",
+      value: "text",
+    }),
+  };
+  const database = sqliteDatabase({ tables });
+  const userDatabase: PerUser<SqliteDb> = sqliteDatabase({ tables });
+  const sessionDatabase: PerSession<SqliteDb> = sqliteDatabase(
+    { tables },
+  );
+  const userDatabaseProbe = userDatabase.query<{ value: string }>(
+    "SELECT value FROM bridge_items",
+    { reactOn: userDatabase },
+  );
+  const sessionDatabaseProbe = sessionDatabase.query<{ value: string }>(
+    "SELECT value FROM bridge_items",
+    { reactOn: sessionDatabase },
+  );
   const context = IframeContext({
     shared: state.shared,
     user: state.user,
@@ -207,11 +242,17 @@ export default pattern<BridgeFixtureInput, BridgeFixtureOutput>((state) => {
     command: state.command,
     status: state.status,
     databaseRows: state.databaseRows,
+    userDatabaseRows: state.userDatabaseRows,
+    sessionDatabaseRows: state.sessionDatabaseRows,
     database,
+    userDatabase,
+    sessionDatabase,
   });
   const source = computed(() =>
-    GUEST_HTML + '<span hidden data-reload="' + state.reloadRevision.get() +
-    '"></span>'
+    userDatabaseProbe.pending || sessionDatabaseProbe.pending
+      ? ""
+      : GUEST_HTML + '<span hidden data-reload="' +
+        state.reloadRevision.get() + '"></span>'
   );
   const reloadGuest = action(() => {
     state.status.set("reloading");
@@ -225,6 +266,10 @@ export default pattern<BridgeFixtureInput, BridgeFixtureOutput>((state) => {
         <div id="bridge-user">{context.user}</div>
         <div id="bridge-session">{context.session}</div>
         <div id="bridge-database-rows">{context.databaseRows}</div>
+        <div id="bridge-user-database-rows">{context.userDatabaseRows}</div>
+        <div id="bridge-session-database-rows">
+          {context.sessionDatabaseRows}
+        </div>
         <div id="bridge-status">{context.status}</div>
         <cf-input id="bridge-command" $value={context.command} />
         <cf-button id="bridge-reload" onClick={reloadGuest}>
@@ -234,7 +279,11 @@ export default pattern<BridgeFixtureInput, BridgeFixtureOutput>((state) => {
           <cf-iframe
             src={source}
             $context={context}
-            resourceKinds={{ database: "sqlite" }}
+            resourceKinds={{
+              database: "sqlite",
+              userDatabase: "sqlite",
+              sessionDatabase: "sqlite",
+            }}
           />
         </div>
       </div>

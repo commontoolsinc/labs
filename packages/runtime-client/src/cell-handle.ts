@@ -9,6 +9,7 @@ import {
   type FabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { DID } from "@commonfabric/identity";
 import { type CfcCellLinkRefPayload } from "@commonfabric/runner/cfc";
 import {
@@ -84,7 +85,7 @@ export class CellHandle<T = unknown> {
   >();
   #nextCallbackId = 0;
   #schemaWarned = false;
-  #strictWriteTail: Promise<void> = Promise.resolve();
+  #strictWriteTail: Promise<void> | undefined;
 
   constructor(worker: RuntimeClient, cellRef: CellRef, value?: T) {
     this.#rt = worker;
@@ -159,10 +160,16 @@ export class CellHandle<T = unknown> {
   /** Set the cell's value and reject when the runtime refuses the write. */
   async setStrict(value: T): Promise<void> {
     this.#requireSchema("setStrict");
-    const writing = this.#strictWriteTail.then(() =>
-      this.#applyLocalAndSend(value, RequestType.CellSet, true)
-    );
-    this.#strictWriteTail = writing.catch(() => {});
+    const writing = this.#strictWriteTail
+      ? this.#strictWriteTail.then(() =>
+        this.#applyLocalAndSend(value, RequestType.CellSet, true)
+      )
+      : this.#applyLocalAndSend(value, RequestType.CellSet, true);
+    const tail = writing.catch(() => {});
+    this.#strictWriteTail = tail;
+    void tail.then(() => {
+      if (this.#strictWriteTail === tail) this.#strictWriteTail = undefined;
+    });
     await writing;
   }
 
@@ -437,7 +444,7 @@ export class CellHandle<T = unknown> {
       cell: this.ref(),
       sql,
       ...(params !== undefined && {
-        params: CellHandle.serialize(params) as SqliteParams,
+        params: CellHandle.serializeSqliteParams(params),
       }),
     });
     return response.rows.map((row) => CellHandle.deserialize(this, row) as Row);
@@ -453,7 +460,7 @@ export class CellHandle<T = unknown> {
       cell: this.ref(),
       sql,
       ...(params !== undefined && {
-        params: CellHandle.serialize(params) as SqliteParams,
+        params: CellHandle.serializeSqliteParams(params),
       }),
     });
   }
@@ -568,6 +575,8 @@ export class CellHandle<T = unknown> {
     base: CellHandle<T>,
     value: unknown,
   ): unknown {
+    if (value instanceof FabricSpecialObject) return value;
+
     if (
       !value && typeof value === "string" || typeof value === "boolean" ||
       typeof value === "number"
@@ -615,6 +624,16 @@ export class CellHandle<T = unknown> {
     }
 
     return value;
+  }
+
+  private static serializeSqliteParams(
+    params: ReadonlyArray<ClientCellValue> | Record<string, ClientCellValue>,
+  ): SqliteParams {
+    const serialize = (value: ClientCellValue) =>
+      value instanceof FabricBytes ? value : CellHandle.serialize(value);
+    return Array.isArray(params) ? params.map(serialize) : Object.fromEntries(
+      Object.entries(params).map(([key, value]) => [key, serialize(value)]),
+    );
   }
 
   /**

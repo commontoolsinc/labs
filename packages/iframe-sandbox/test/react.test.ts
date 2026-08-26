@@ -125,7 +125,16 @@ describe("React bridge adapter", () => {
         snapshot = { status: "ready", value };
       },
     };
-    const client = { cell: () => remote } as unknown as FabricClient;
+    const other = {
+      ...remote,
+      getSnapshot: () => ({
+        status: "ready",
+        value: { count: 100 },
+      } as const),
+    };
+    const client = {
+      cell: (name: string) => name === "count" ? remote : other,
+    } as unknown as FabricClient;
     const refs: Array<{ current: unknown }> = [];
     let refIndex = 0;
     const hooks: ReactHooks = {
@@ -146,14 +155,15 @@ describe("React bridge adapter", () => {
         ] as never,
       useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot(),
     };
-    const render = () => {
+    const render = (name: string) => {
       refIndex = 0;
-      return createFabricReact(hooks, client).useCell<Counter>("count");
+      return createFabricReact(hooks, client).useCell<Counter>(name);
     };
 
-    const first = render().set((value) => ({ count: value.count + 1 }));
+    const first = render("count").set((value) => ({ count: value.count + 1 }));
     await firstStarted.promise;
-    const second = render().set((value) => ({ count: value.count + 1 }));
+    render("discarded");
+    const second = render("count").set((value) => ({ count: value.count + 1 }));
     await Promise.resolve();
     expect(writes).toEqual([{ count: 2 }]);
 
@@ -201,5 +211,81 @@ describe("React bridge adapter", () => {
     expect(typeof cleanup).toBe("function");
     (cleanup as () => void)();
     expect(unsubscribed).toBe(true);
+  });
+
+  it("returns loading when the SQLite query identity changes", async () => {
+    const aliceReady = Promise.withResolvers<void>();
+    const databases = {
+      alice: {
+        query: () => Promise.resolve({ rows: [{ owner: "alice" }] }),
+        subscribeInvalidation: () => () => {},
+      },
+      bob: {
+        query: () => Promise.resolve({ rows: [{ owner: "bob" }] }),
+        subscribeInvalidation: () => () => {},
+      },
+    };
+    const client = {
+      sqlite: (name: keyof typeof databases) => databases[name],
+    } as unknown as FabricClient;
+    const refs: Array<{ current: unknown }> = [];
+    const states: unknown[] = [];
+    let refIndex = 0;
+    let stateIndex = 0;
+    let effects: Array<() => void | (() => void)> = [];
+    const hooks: ReactHooks = {
+      useCallback: (callback) => callback,
+      useEffect: (effect) => effects.push(effect),
+      useMemo: (factory) => factory(),
+      useRef: (initial) => {
+        const index = refIndex++;
+        refs[index] ??= { current: initial };
+        return refs[index] as { current: typeof initial };
+      },
+      useState: (initial) => {
+        const index = stateIndex++;
+        states[index] ??= typeof initial === "function"
+          ? (initial as () => unknown)()
+          : initial;
+        return [
+          states[index],
+          (next: unknown) => {
+            states[index] = typeof next === "function"
+              ? (next as (current: unknown) => unknown)(states[index])
+              : next;
+            if (
+              (states[index] as { snapshot?: { status?: string } }).snapshot
+                ?.status === "ready"
+            ) {
+              aliceReady.resolve();
+            }
+          },
+        ] as never;
+      },
+      useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot(),
+    };
+    const { useSqliteQuery } = createFabricReact(hooks, client);
+    const render = (name: string) => {
+      refIndex = 0;
+      stateIndex = 0;
+      effects = [];
+      return useSqliteQuery(name, "SELECT owner FROM notes");
+    };
+
+    expect(render("alice").status).toBe("loading");
+    effects[0]?.();
+    await aliceReady.promise;
+    expect(render("alice")).toMatchObject({
+      status: "ready",
+      rows: [{ owner: "alice" }],
+    });
+
+    const bob = render("bob");
+    expect(bob).toMatchObject({
+      status: "loading",
+      rows: undefined,
+      error: undefined,
+    });
+    expect(typeof bob.refresh).toBe("function");
   });
 });
