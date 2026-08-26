@@ -5,10 +5,11 @@
  * `import type` is used) so that it can be imported by any module without
  * creating circular dependencies.
  *
- * NOTE: `packages/api/index.ts` mirrors these types (and those from
+ * NOTE: `api.ts` mirrors these types (and those from
  * `fabric-primitives/FabricHash.ts`, `fabric-primitives/FabricEpochNsec.ts`)
- * for the pattern compiler. Changes here must be kept in sync with the
- * corresponding declarations there.
+ * for the pattern compiler, which reaches them through `@commonfabric/api`.
+ * Changes here must be kept in sync with the corresponding declarations
+ * there.
  */
 
 //
@@ -32,9 +33,9 @@
  *
  * It is a well-known string key rather than a `unique symbol` because that
  * would require importing a symbol *value*, and this file is deliberately free
- * of runtime imports (see the file header). `packages/api/index.ts` declares
- * the identical member; the two must agree exactly, or a value branded by one
- * will not satisfy the other.
+ * of runtime imports (see the file header). `api.ts` declares the
+ * identical member; the two must agree exactly, or a value branded by one will
+ * not satisfy the other.
  */
 export abstract class FabricSpecialObject {
   declare readonly "@commonfabric/FabricSpecialObject": true;
