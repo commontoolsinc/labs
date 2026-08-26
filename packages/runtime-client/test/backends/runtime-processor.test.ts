@@ -18,7 +18,10 @@ import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import { getLogger } from "@commonfabric/utils/logger";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
-import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
+import {
+  decodeMemoryBoundary,
+  type SqliteDbRef,
+} from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { siteTableCause, siteTableSchema } from "@commonfabric/home-schemas";
@@ -31,7 +34,10 @@ import {
   runtimePresets,
   RuntimeTelemetry,
 } from "@commonfabric/runner";
-import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
+import {
+  atomsOutsideCeiling,
+  cfcLabelViewForCell,
+} from "@commonfabric/runner/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { parseLink } from "@commonfabric/runner";
@@ -4738,6 +4744,124 @@ describe("runtime-processor", () => {
         "INSERT INTO notes (title) VALUES (:title)",
         { title: "New" },
       ]]);
+    });
+
+    it("uses durable labels for Cells bound to direct SQLite writes", async () => {
+      const signer = await Identity.fromPassphrase(
+        `sqlite-durable-label-${crypto.randomUUID()}`,
+      );
+      const space = signer.did();
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("http://localhost/"),
+        storageManager,
+        experimental: { serverExecution: true },
+      });
+
+      try {
+        const secret = runtime.getCell(
+          space,
+          "sqlite-durable-secret",
+          { type: "string", ifc: { confidentiality: ["secret"] } },
+        );
+        await secret.sync();
+        {
+          const tx = runtime.edit();
+          secret.withTx(tx).set("classified");
+          runtime.prepareTxForCommit(tx);
+          expect((await tx.commit()).error).toBeUndefined();
+        }
+
+        const dbRef: SqliteDbRef = {
+          id: `of:sqlite-durable-label-${crypto.randomUUID()}`,
+          tables: {
+            documents: {
+              type: "object",
+              properties: {
+                id: {
+                  type: "integer",
+                  sqlType: "integer primary key",
+                },
+                target_cf_link: {
+                  type: "string",
+                  sqlType: "text",
+                  ifc: { maxConfidentiality: [] },
+                },
+              },
+              required: [],
+            },
+          },
+        };
+        const database = runtime.getCell(space, "sqlite-durable-db");
+        await database.sync();
+        {
+          const tx = runtime.edit();
+          database.withTx(tx).set(dbRef);
+          expect((await tx.commit()).error).toBeUndefined();
+        }
+        await storageManager.synced();
+
+        const processor = Object.assign(
+          Object.create(RuntimeProcessor.prototype),
+          { runtime },
+        ) as RuntimeProcessor;
+        const exec = (id: number) =>
+          processor.handleSqliteExec({
+            type: RequestType.SqliteExec,
+            cell: createCellRef(database),
+            sql: "INSERT INTO documents (id, target_cf_link) VALUES (?, ?)",
+            params: {
+              kind: "positional",
+              values: [
+                realmFromFabricValue(id),
+                realmFromFabricValue(createCellRef(secret)),
+              ],
+            },
+          });
+
+        await expect(exec(1)).rejects.toThrow("exceeds its maxConfidentiality");
+
+        const replica = storageManager.open(space).replica;
+        const link = secret.getAsNormalizedFullLink();
+        const durableDocument = replica.getDocument(link.id, link.scope);
+        expect(durableDocument).toBeDefined();
+        const verdict = Promise.withResolvers<{
+          withdrawn: { message: string };
+        }>();
+        const sealed = replica.sealNative!(
+          {
+            operations: [{
+              op: "set",
+              id: link.id,
+              type: "application/json",
+              value: {
+                ...(durableDocument as Record<string, unknown>),
+                cfc: { version: 1, labelMap: { version: 1, entries: [] } },
+              } as never,
+            }],
+          },
+          undefined,
+          verdict.promise,
+          { speculative: true },
+        );
+        try {
+          expect(cfcLabelViewForCell(secret)).toBeUndefined();
+          await expect(exec(2)).rejects.toThrow(
+            "exceeds its maxConfidentiality",
+          );
+          const rows = await storageManager.open(space).sqliteQuery!(
+            dbRef,
+            "SELECT id FROM documents ORDER BY id",
+          );
+          expect(rows.rows).toEqual([]);
+        } finally {
+          verdict.resolve({ withdrawn: { message: "test complete" } });
+          await sealed.settled;
+        }
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
     });
 
     it("materializes a scoped database handle in the same direct transaction as its first write", async () => {

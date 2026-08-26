@@ -311,6 +311,81 @@ describe("Fabric iframe bridge", () => {
     }
   });
 
+  it("refuses non-enumerable resources omitted from the manifest", async () => {
+    const resources: Record<
+      string,
+      Parameters<
+        typeof createFabricBridge
+      >[0][string]
+    > = {};
+    Object.defineProperty(resources, "hidden", {
+      enumerable: false,
+      value: {
+        kind: "service",
+        methods: { reveal: () => "secret" },
+      },
+    });
+    const channel = new MessageChannel();
+    const host = new FabricBridgeHost(
+      createFabricBridge(resources),
+      channel.port1,
+    );
+    const client = connectFabric();
+    handOff(channel.port2);
+
+    try {
+      await expect(client.describe()).resolves.toMatchObject({ resources: [] });
+      await expect(client.call("hidden", "reveal")).rejects.toMatchObject({
+        code: "resource-not-found",
+      });
+    } finally {
+      client.disconnect();
+      host.disconnect();
+    }
+  });
+
+  it("refuses resource accessors without invoking them", async () => {
+    let accesses = 0;
+    const resources: Record<
+      string,
+      Parameters<
+        typeof createFabricBridge
+      >[0][string]
+    > = {};
+    Object.defineProperty(resources, "secret", {
+      enumerable: true,
+      get: () => {
+        accesses++;
+        return {
+          kind: "service",
+          methods: { reveal: () => "secret" },
+        };
+      },
+    });
+    const channel = new MessageChannel();
+    const host = new FabricBridgeHost(
+      createFabricBridge(resources),
+      channel.port1,
+    );
+    const client = connectFabric();
+    handOff(channel.port2);
+
+    try {
+      await expect(client.describe()).rejects.toMatchObject({
+        code: "operation-failed",
+        message: "Bridge resource `secret` must be an own data property.",
+      });
+      await expect(client.call("secret", "reveal")).rejects.toMatchObject({
+        code: "operation-failed",
+        message: "Bridge resource `secret` must be an own data property.",
+      });
+      expect(accesses).toBe(0);
+    } finally {
+      client.disconnect();
+      host.disconnect();
+    }
+  });
+
   it("refuses inherited resource operations and method containers", async () => {
     let inheritedWrites = 0;
     const inherited = {
@@ -403,6 +478,10 @@ describe("Fabric iframe bridge", () => {
 
     try {
       await expect(client.describe()).rejects.toMatchObject({
+        code: "operation-failed",
+        message: "Bridge resource `service` must declare its own valid kind.",
+      });
+      await expect(client.call("service", "ping")).rejects.toMatchObject({
         code: "operation-failed",
         message: "Bridge resource `service` must declare its own valid kind.",
       });

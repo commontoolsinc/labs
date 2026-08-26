@@ -60,6 +60,7 @@ import {
   getCellOrThrow,
   getPatternIdentityRef,
   hasOperationStorageCapability,
+  type IExtendedStorageTransaction,
   type IOperationStorageCapability,
   isCell,
   isCellResult,
@@ -321,17 +322,21 @@ function isSqliteDbRefValue(value: unknown): boolean {
 function sqliteParamForRuntime(
   runtime: Runtime,
   value: FabricValue,
+  tx?: IExtendedStorageTransaction,
 ): unknown {
   if (value instanceof FabricBytes) return value;
-  if (isCellRef(value)) return getCell(runtime, value);
+  if (isCellRef(value)) {
+    const cell = getCell(runtime, value);
+    return tx ? cell.withTx(tx) : cell;
+  }
   if (Array.isArray(value)) {
-    return value.map((member) => sqliteParamForRuntime(runtime, member));
+    return value.map((member) => sqliteParamForRuntime(runtime, member, tx));
   }
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value).map(([key, member]) => [
         key,
-        sqliteParamForRuntime(runtime, member),
+        sqliteParamForRuntime(runtime, member, tx),
       ]),
     );
   }
@@ -341,9 +346,10 @@ function sqliteParamForRuntime(
 function sqliteParamsForRuntime(
   runtime: Runtime,
   params: SqliteParams,
+  tx?: IExtendedStorageTransaction,
 ): ReadonlyArray<unknown> | Record<string, unknown> {
   const decode = (value: SqliteWireValue) =>
-    sqliteParamForRuntime(runtime, fabricFromRealmValue(value));
+    sqliteParamForRuntime(runtime, fabricFromRealmValue(value), tx);
   return params.kind === "positional"
     ? params.values.map(decode)
     : Object.fromEntries(
@@ -1605,11 +1611,11 @@ export class RuntimeProcessor {
   async handleSqliteExec(request: SqliteExecRequest): Promise<void> {
     const source = getCell(this.runtime, request.cell);
     const db = await this.pullSqliteDbRef(source);
-    const params = request.params === undefined
-      ? undefined
-      : sqliteParamsForRuntime(this.runtime, request.params);
     const result = await this.runtime.editWithRetry((tx) => {
       markDurableReadTx(tx);
+      const params = request.params === undefined
+        ? undefined
+        : sqliteParamsForRuntime(this.runtime, request.params, tx);
       const cell = getCell(this.runtime, request.cell).withTx(
         tx,
       ) as unknown as Cell<unknown> & {

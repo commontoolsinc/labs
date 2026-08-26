@@ -58,6 +58,36 @@ export function createFabricBridge(
 
 const CORE_OPERATIONS = new Set(["read", "write", "subscribe"]);
 
+type CoreOperation = "read" | "write" | "subscribe";
+
+function coreOperation<K extends CoreOperation>(
+  resource: BridgeResource,
+  operation: K,
+): BridgeResource[K] | undefined {
+  const property = Object.getOwnPropertyDescriptor(resource, operation);
+  return property && "value" in property &&
+      typeof property.value === "function"
+    ? property.value as BridgeResource[K]
+    : undefined;
+}
+
+function resourceKind(
+  name: string,
+  resource: BridgeResource,
+): BridgeResourceKind {
+  const kind = Object.getOwnPropertyDescriptor(resource, "kind");
+  if (
+    !kind || !("value" in kind) ||
+    kind.value !== "cell" && kind.value !== "stream" &&
+      kind.value !== "sqlite" && kind.value !== "service"
+  ) {
+    throw new TypeError(
+      `Bridge resource \`${name}\` must declare its own valid kind.`,
+    );
+  }
+  return kind.value;
+}
+
 function namedMethodNames(
   name: string,
   resource: BridgeResource,
@@ -112,43 +142,54 @@ function descriptor(
   name: string,
   resource: BridgeResource,
 ): BridgeResourceDescriptor {
-  if (
-    !Object.hasOwn(resource, "kind") ||
-    resource.kind !== "cell" && resource.kind !== "stream" &&
-      resource.kind !== "sqlite" && resource.kind !== "service"
-  ) {
-    throw new TypeError(
-      `Bridge resource \`${name}\` must declare its own valid kind.`,
-    );
-  }
+  const kind = resourceKind(name, resource);
   const methods: string[] = [];
-  if (Object.hasOwn(resource, "read") && typeof resource.read === "function") {
+  if (coreOperation(resource, "read")) {
     methods.push("read");
   }
-  if (
-    Object.hasOwn(resource, "write") && typeof resource.write === "function"
-  ) {
+  if (coreOperation(resource, "write")) {
     methods.push("write");
   }
-  if (
-    Object.hasOwn(resource, "subscribe") &&
-    typeof resource.subscribe === "function"
-  ) {
+  if (coreOperation(resource, "subscribe")) {
     methods.push("subscribe");
   }
   methods.push(...namedMethodNames(name, resource));
+  const schema = Object.getOwnPropertyDescriptor(resource, "schema");
+  const description = Object.getOwnPropertyDescriptor(resource, "description");
   return {
     name,
-    kind: resource.kind,
+    kind,
     methods,
-    ...(Object.hasOwn(resource, "schema") && resource.schema !== undefined && {
-      schema: resource.schema,
+    ...(schema && "value" in schema && schema.value !== undefined && {
+      schema: schema.value,
     }),
-    ...(Object.hasOwn(resource, "description") &&
-      resource.description !== undefined && {
-      description: resource.description,
+    ...(description && "value" in description &&
+      description.value !== undefined && {
+      description: description.value,
     }),
   };
+}
+
+function discoverResource(
+  resources: FabricBridge["resources"],
+  name: string,
+): BridgeResource | undefined {
+  const property = Object.getOwnPropertyDescriptor(resources, name);
+  if (!property?.enumerable) return undefined;
+  if (!("value" in property)) {
+    throw new TypeError(
+      `Bridge resource \`${name}\` must be an own data property.`,
+    );
+  }
+  if (
+    property.value === null || typeof property.value !== "object" ||
+    Array.isArray(property.value)
+  ) {
+    throw new TypeError(`Bridge resource \`${name}\` must be an object.`);
+  }
+  const resource = property.value as BridgeResource;
+  resourceKind(name, resource);
+  return resource;
 }
 
 function bridgeError(
@@ -221,8 +262,12 @@ export class FabricBridgeHost {
     return {
       protocol: BRIDGE_PROTOCOL,
       version: BRIDGE_VERSION,
-      resources: Object.entries(this.#bridge.resources).map(
-        ([name, resource]) => descriptor(name, resource),
+      resources: Object.keys(this.#bridge.resources).map(
+        (name) =>
+          descriptor(
+            name,
+            discoverResource(this.#bridge.resources, name)!,
+          ),
       ),
     };
   }
@@ -280,9 +325,8 @@ export class FabricBridgeHost {
     const operation = request.operation;
     if (operation === "describe") return this.#manifest();
 
-    const resource = request.resource !== undefined &&
-        Object.hasOwn(this.#bridge.resources, request.resource)
-      ? this.#bridge.resources[request.resource]
+    const resource = request.resource !== undefined
+      ? discoverResource(this.#bridge.resources, request.resource)
       : undefined;
     if (!resource || request.resource === undefined) {
       throw bridgeError(
@@ -293,31 +337,29 @@ export class FabricBridgeHost {
     }
 
     switch (operation) {
-      case "read":
-        if (
-          !Object.hasOwn(resource, "read") ||
-          typeof resource.read !== "function"
-        ) {
+      case "read": {
+        const read = coreOperation(resource, "read");
+        if (!read) {
           throw bridgeError(
             "method-not-supported",
             `Resource \`${request.resource}\` is not readable.`,
             request.resource,
           );
         }
-        return await resource.read();
-      case "write":
-        if (
-          !Object.hasOwn(resource, "write") ||
-          typeof resource.write !== "function"
-        ) {
+        return await read.call(resource);
+      }
+      case "write": {
+        const write = coreOperation(resource, "write");
+        if (!write) {
           throw bridgeError(
             "method-not-supported",
             `Resource \`${request.resource}\` is not writable.`,
             request.resource,
           );
         }
-        await resource.write(request.value as FabricValue);
+        await write.call(resource, request.value as FabricValue);
         return undefined;
+      }
       case "call": {
         const method = namedMethod(resource, request.method);
         if (!method) {
@@ -332,10 +374,9 @@ export class FabricBridgeHost {
         return await method(request.value);
       }
       case "subscribe": {
+        const subscribe = coreOperation(resource, "subscribe");
         if (
-          !Object.hasOwn(resource, "subscribe") ||
-          typeof resource.subscribe !== "function" ||
-          request.subscription === undefined
+          !subscribe || request.subscription === undefined
         ) {
           throw bridgeError(
             "method-not-supported",
@@ -345,7 +386,7 @@ export class FabricBridgeHost {
         }
         this.#subscriptions.get(request.subscription)?.();
         const subscription = request.subscription;
-        const cancel = resource.subscribe((value) => {
+        const cancel = subscribe.call(resource, (value) => {
           this.#post({
             protocol: BRIDGE_PROTOCOL,
             version: BRIDGE_VERSION,

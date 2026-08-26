@@ -78,7 +78,13 @@ ${GUEST_EPILOG}`;
 Deno.test("subscribes", async () => {
   cleanupFixtures();
   try {
-    const context = new ContextShim({ a: 1 });
+    const context = new ContextShim({ a: 1 }, [
+      "barrier",
+      "barrier-seen",
+      "ready",
+      "unsubscribed",
+      "updates",
+    ]);
 
     // "barrier" stays subscribed after "a" is unsubscribed, so a write to it
     // can be used to mark a point in the update stream. It reports arrivals
@@ -148,8 +154,8 @@ ${GUEST_EPILOG}`;
 Deno.test("handles multiple iframes", async () => {
   cleanupFixtures();
   try {
-    const context1 = new ContextShim({ a: 1 });
-    const context2 = new ContextShim({ b: 100 });
+    const context1 = new ContextShim({ a: 1 }, ["b"]);
+    const context2 = new ContextShim({ b: 100 }, ["a"]);
 
     const body1 = `${GUEST_PROLOG}
 write("b", 1);
@@ -182,7 +188,7 @@ ${GUEST_EPILOG}`;
 Deno.test("handles loading new documents", async () => {
   cleanupFixtures();
   try {
-    const context = new ContextShim({ a: 1 });
+    const context = new ContextShim({ a: 1 }, ["b", "c"]);
 
     const body1 = `${GUEST_PROLOG}
 write("b", 1);
@@ -203,7 +209,13 @@ ${GUEST_EPILOG}`;
 Deno.test("cancels subscriptions between documents", async () => {
   cleanupFixtures();
   try {
-    const context = new ContextShim({ a: 1 });
+    const context = new ContextShim({ a: 1 }, [
+      "b",
+      "got-a-update",
+      "got-b-update",
+      "ready1",
+      "ready2",
+    ]);
 
     const body1 = `${GUEST_PROLOG}
 subscribe("a");
@@ -256,7 +268,7 @@ ${GUEST_EPILOG}`;
 Deno.test("what a guest posts outside its port raises an alarm, not a write", async () => {
   cleanupFixtures();
   try {
-    const context = new ContextShim();
+    const context = new ContextShim({}, ["after"]);
     const errors: string[] = [];
     const onError = (event: Event) =>
       errors.push((event as CustomEvent).detail.description);
@@ -298,7 +310,7 @@ ${GUEST_EPILOG}`;
 Deno.test("a reattached element loads its document into the frame it gets", async () => {
   cleanupFixtures();
   try {
-    const context = new ContextShim();
+    const context = new ContextShim({}, ["ran"]);
     const body = `${GUEST_PROLOG}
 write("ran", 1);
 ${GUEST_EPILOG}`;
@@ -326,7 +338,7 @@ ${GUEST_EPILOG}`;
 Deno.test("same-task reparenting keeps the bridge host alive", async () => {
   cleanupFixtures();
   try {
-    const context = new ContextShim();
+    const context = new ContextShim({}, ["ready", "seen", "value"]);
     const body = `${GUEST_PROLOG}
 onUpdate = (key, value) => {
   if (key === "value") write("seen", value);
@@ -355,7 +367,7 @@ ${GUEST_EPILOG}`;
 Deno.test("a second ready from the frame already in hand is refused", async () => {
   cleanupFixtures();
   try {
-    const context = new ContextShim();
+    const context = new ContextShim({}, ["ran"]);
     const body = `${GUEST_PROLOG}
 write("ran", 1);
 ${GUEST_EPILOG}`;
@@ -389,7 +401,7 @@ ${GUEST_EPILOG}`;
 Deno.test("an element that gets a frame and has no source says nothing is loaded", async () => {
   cleanupFixtures();
   try {
-    const context = new ContextShim();
+    const context = new ContextShim({}, ["ran"]);
     const body = `${GUEST_PROLOG}
 write("ran", 1);
 ${GUEST_EPILOG}`;
@@ -416,7 +428,7 @@ ${GUEST_EPILOG}`;
 Deno.test("a subscription is cancelled against the bridge that issued it", async () => {
   cleanupFixtures();
   try {
-    const first = new ContextShim({ watched: 1 });
+    const first = new ContextShim({ watched: 1 }, ["ready"]);
     const body = `${GUEST_PROLOG}
 subscribe("watched");
 write("ready", true);
@@ -434,7 +446,7 @@ ${GUEST_EPILOG}`;
     // a consumer may reassign. Swapping it here and then asking for a new
     // document distinguishes cancelling the old session from touching the new
     // bridge.
-    const second = new ContextShim();
+    const second = new ContextShim({}, ["second-ran"]);
     iframe.bridge = second.bridge;
     // @ts-ignore This is a lit property.
     iframe.src = `${GUEST_PROLOG}
@@ -458,7 +470,7 @@ Deno.test("carries a value structured cloning would flatten", async () => {
   try {
     const context = new ContextShim({
       payload: new FabricBytes(new Uint8Array([1, 2, 3])),
-    });
+    }, ["bytes-seen", "echo"]);
 
     // The guest reports the bytes it can read out of what arrived, and echoes
     // the value back. Reading them takes a live `FabricBytes`, which is what

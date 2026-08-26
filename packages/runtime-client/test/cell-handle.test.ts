@@ -1108,6 +1108,69 @@ describe("cell-handle", () => {
         RequestType.CellGet,
       ]);
     });
+
+    it("waits for every queued strict write before later remote operations", async () => {
+      const requests: RequestType[] = [];
+      const firstWrite = Promise.withResolvers<void>();
+      let writes = 0;
+      const resolvedRef = {
+        ...ref,
+        id: "of:strict-resolved" as CellRef["id"],
+      };
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: { type: RequestType }) => {
+            requests.push(request.type);
+            if (request.type === RequestType.CellSet) {
+              writes++;
+              return writes === 1
+                ? firstWrite.promise.then(() => ({}))
+                : Promise.resolve({});
+            }
+            switch (request.type) {
+              case RequestType.CellResolveAsCell:
+                return Promise.resolve({ cell: resolvedRef });
+              case RequestType.CellGetCfcLabel:
+                return Promise.resolve({ cfcLabel: undefined });
+              case RequestType.SqliteQuery:
+                return Promise.resolve({ rows: [] });
+              default:
+                return Promise.resolve({});
+            }
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle(runtime, ref, { n: 0 });
+
+      const first = cell.setStrict({ n: 1 });
+      const second = cell.setStrict({ n: 2 });
+      const later = [
+        cell.set({ n: 3 }),
+        cell.send({ n: 4 }),
+        cell.resolveAsCell(),
+        cell.getCfcLabel(),
+        cell.querySqlite("SELECT 1"),
+        cell.execSqlite("DELETE FROM notes"),
+      ];
+      await Promise.resolve();
+      expect(requests).toEqual([RequestType.CellSet]);
+
+      firstWrite.resolve();
+      await Promise.all([first, second, ...later]);
+      expect(requests).toEqual([
+        RequestType.CellSet,
+        RequestType.CellSet,
+        RequestType.CellSet,
+        RequestType.CellSend,
+        RequestType.CellResolveAsCell,
+        RequestType.CellGetCfcLabel,
+        RequestType.SqliteQuery,
+        RequestType.SqliteExec,
+      ]);
+    });
   });
 
   describe("CellHandle push (read-modify-write)", () => {
@@ -1153,6 +1216,45 @@ describe("cell-handle", () => {
       expect(() => cell.push(1)).toThrow(
         "push() can only be used on array cells",
       );
+    });
+
+    it("appends after queued strict writes", async () => {
+      const firstWrite = Promise.withResolvers<void>();
+      const requests: Array<{ type: RequestType; value?: unknown }> = [];
+      let writes = 0;
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: { type: RequestType; value?: unknown }) => {
+            requests.push(request);
+            if (request.type === RequestType.CellSet && ++writes === 1) {
+              return firstWrite.promise.then(() => ({}));
+            }
+            return Promise.resolve({});
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle<number[]>(runtime, ref, [0]);
+
+      const first = cell.setStrict([1]);
+      const second = cell.setStrict([2]);
+      cell.push(3);
+      await Promise.resolve();
+      expect(requests.map(({ type }) => type)).toEqual([
+        RequestType.CellSet,
+      ]);
+
+      firstWrite.resolve();
+      await Promise.all([first, second]);
+      await Promise.resolve();
+      expect(requests.map(({ type }) => type)).toEqual([
+        RequestType.CellSet,
+        RequestType.CellSet,
+        RequestType.CellPush,
+      ]);
+      expect(requests.at(-1)?.value).toEqual([2, 3]);
     });
   });
 

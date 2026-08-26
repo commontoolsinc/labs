@@ -234,11 +234,16 @@ function cellContextResources(
   };
 
   return new Proxy<Record<string, BridgeResource>>({}, {
-    get: (_target, key) => typeof key === "string" ? resource(key) : undefined,
+    get: (_target, key) =>
+      typeof key === "string" && names().has(key) ? resource(key) : undefined,
     ownKeys: () => [...names()],
     getOwnPropertyDescriptor: (_target, key) =>
       typeof key === "string" && names().has(key)
-        ? { configurable: true, enumerable: true }
+        ? {
+          configurable: true,
+          enumerable: true,
+          value: resource(key),
+        }
         : undefined,
   });
 }

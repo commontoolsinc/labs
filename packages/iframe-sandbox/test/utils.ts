@@ -11,25 +11,33 @@ interface Context {
 
 export class ContextShim {
   data: Context;
+  resourceNames: Set<string>;
   callbacks: [number, string, Callback][];
   receiptIds: number;
   observers: [string, Callback][];
   bridge: FabricBridge;
 
-  constructor(object = {}) {
+  constructor(object: Context = {}, resourceNames: Iterable<string> = []) {
     this.data = object;
+    this.resourceNames = new Set([...Object.keys(object), ...resourceNames]);
     this.callbacks = [];
     this.receiptIds = 0;
     this.observers = [];
     this.bridge = {
       resources: new Proxy<Record<string, BridgeResource>>({}, {
         get: (_target, key) =>
-          typeof key === "string" ? this.resource(key) : undefined,
-        ownKeys: () => Object.keys(this.data),
-        getOwnPropertyDescriptor: () => ({
-          configurable: true,
-          enumerable: true,
-        }),
+          typeof key === "string" && this.resourceNames.has(key)
+            ? this.resource(key)
+            : undefined,
+        ownKeys: () => [...this.resourceNames],
+        getOwnPropertyDescriptor: (_target, key) =>
+          typeof key === "string" && this.resourceNames.has(key)
+            ? {
+              configurable: true,
+              enumerable: true,
+              value: this.resource(key),
+            }
+            : undefined,
       }),
     };
   }
