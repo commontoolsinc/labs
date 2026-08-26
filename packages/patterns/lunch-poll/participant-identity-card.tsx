@@ -178,10 +178,13 @@ export interface ParticipantIdentityCardInput {
 export interface ParticipantIdentityCardOutput {
   [NAME]: string;
   [UI]: VNode;
+
   /** Whether the viewer has joined this poll. */
   isJoined: boolean;
+
   /** Whether the viewer hosts this poll. */
   isAdmin: boolean;
+
   /**
    * Why this viewer's last join attempt was rejected, or "" — the loud
    * counterpart of the join gate. Headless callers read it (a CLI smoke test

@@ -124,8 +124,10 @@ export interface User {
    * so its person can re-join with a profile and appear as themselves.
    */
   profile?: LunchProfileCell;
+
   /** Display name at join time — cosmetic, may duplicate another participant. */
   name: string;
+
   /** Avatar URL or glyph, snapshotted from the joiner's shared profile. */
   avatar?: string;
   color: string;
@@ -153,6 +155,7 @@ export const DEFAULT_HOST: PollHost = {};
  */
 export interface ViewerOverride {
   readonly profile?: LunchProfileCell;
+
   /** Stands in for `#profileName` / `#profileAvatar`, which also need a wish. */
   readonly name?: string;
   readonly avatar?: string;
@@ -174,6 +177,7 @@ export interface Option {
   id: string;
   title: string;
   addedByName: string;
+
   /**
    * Persisted generated-art data URL (`""` until the host's client generates
    * and syncs it). Every viewer renders this stored value; generation only
@@ -194,6 +198,7 @@ export interface Vote {
   voter?: LunchProfileCell;
   optionId: string;
   voteType: VoteColor;
+
   /**
    * When the vote was cast (ms epoch), stamped by `castVote`. Optional for
    * votes stored before this field existed — those count as not-today, so the
@@ -246,6 +251,7 @@ export type ResetVotesEvent = Record<PropertyKey, never>;
 export interface VoteSnapshot {
   /** Display name at snapshot time — cosmetic; the profile below is identity. */
   voter: string;
+
   /**
    * Live identity link, so a badge stays right even after a rename. Optional
    * only for snapshots stored by the name-keyed predecessor.
@@ -265,16 +271,19 @@ export interface VoteSnapshot {
 export interface HistoryEntry {
   id: string;
   title: string;
+
   /**
    * Display name at log time — cosmetic. Defaulted so entries stored by the
    * name-keyed predecessor (which had no such field) read back as `""`.
    */
   loggedByName: string | Default<"">;
+
   /**
    * Live identity link to whoever logged it. Optional only for entries
    * stored by the name-keyed predecessor, which recorded no identity link.
    */
   loggedBy?: LunchProfileCell;
+
   /**
    * Both defaulted so entries stored by the SQL-era predecessor (separate
    * tables, text timestamps) read back — a zero `wentAt` sorts a legacy row
@@ -291,6 +300,7 @@ export interface HistoryEntry {
  */
 export interface PlaceStat {
   title: string;
+
   /**
    * Counts are defaulted so rows stored by the SQL-era predecessor (whose
    * derived stat rows carried different fields) read back as zeros instead
@@ -323,6 +333,7 @@ type QuestionCell = Writable<string | Default<"Where should we eat?">>;
 type OptionsCell = Writable<Option[] | Default<[]>>;
 type VotesCell = Writable<Vote[] | Default<[]>>;
 type UsersCell = Writable<User[] | Default<[]>>;
+
 /** Free-text drafts (option title, visit date) — never identity. */
 type DraftCell = Writable<string | Default<"">>;
 type HistoryCell = Writable<HistoryEntry[] | Default<[]>>;
@@ -946,6 +957,7 @@ interface OptionTally {
     voteType: VoteColor;
     color: string;
     initials: string;
+
     /**
      * Whether this vote is the viewer's own, decided by profile cell.
      * Resolved here rather than in the view, which has only a display name
@@ -1033,8 +1045,10 @@ export interface CozyPollInput {
   options?: PerSpace<Option[] | Default<[]>>;
   votes?: PerSpace<Vote[] | Default<[]>>;
   users?: PerSpace<User[] | Default<[]>>;
+
   /** Which participant hosts the poll — the first to join, transferable. */
   host?: PerSpace<HostValue>;
+
   /**
    * Allocation site for the viewer-identity override slot — per-user, so ONE
    * shared piece holds a separate override per viewer (a multi-user test
@@ -1061,8 +1075,10 @@ export interface CozyPollOutput {
   // only `todaysVotes` — see the current-day filter note in the file header.
   votes: readonly Vote[];
   users: readonly User[];
+
   /** The host's display name, resolved from the roster ("" when unhosted). */
   hostName: string;
+
   /** This viewer's display name from their profile ("" before it resolves). */
   myName: string;
   userCount: number;
@@ -1089,6 +1105,7 @@ export interface CozyPollOutput {
   placeStats: readonly PlaceStat[];
   isJoined: boolean;
   isAdmin: boolean;
+
   /**
    * Why this viewer's last join attempt was rejected, or "" — the join
    * gate's loud counterpart. The deploy doc's CLI smoke test reads this.
@@ -1096,6 +1113,7 @@ export interface CozyPollOutput {
   joinMessage: string;
   joinAs: Stream<JoinEvent>;
   claimHost: Stream<ClaimHostEvent>;
+
   /** Test seam: claim this viewer's identity (see the handler's doc). */
   overrideViewer: Stream<ViewerOverride>;
   addOption: Stream<AddOptionEvent>;

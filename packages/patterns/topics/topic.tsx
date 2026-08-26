@@ -52,10 +52,12 @@ export interface AddLinkEvent extends AgentAuthoredEvent {
    * result direction, where required-to-optional is refused, so relaxing
    * this rides the next acknowledged break rather than an ordinary deploy. */
   kind: TopicLinkKind;
+
   /** The link target. Must be http(s): anything else rejects, because a
    * user-supplied scheme on a shared surface is script execution in every
    * viewer's session. */
   url: string;
+
   /** Display label. A blank label falls back to the URL; required to be
    * present for the same gate reason as `kind`. */
   label: string;
@@ -71,6 +73,7 @@ export interface SetBodyEvent extends AgentAuthoredEvent {
 export interface SetTitleEvent {
   /** The new title, trimmed before it is stored. Must be non-empty. */
   title: string;
+
   /** The agent making this mutation, stored as structured attribution beside
    * the write time. Required: this verb postdates the unsigned-caller era,
    * so it carries no legacy fallback. */
@@ -144,6 +147,7 @@ export interface SetBodyResult {
   /** The body as persisted — verbatim, so a caller can confirm that
    * whitespace-sensitive Markdown survived the round trip. */
   body: string;
+
   /** Attribution written for this save. Both are absent when the caller sent
    * no `agentName`: an unattributed save leaves the previous attribution
    * standing rather than overwriting it. */
@@ -154,6 +158,7 @@ export interface SetBodyResult {
 export interface SetTitleResult {
   /** The title as persisted, after trimming. */
   title: string;
+
   /** Attribution written for this rename — always present, because the verb
    * requires `agentName`. */
   titleUpdatedBy: TopicAuthor;
@@ -166,6 +171,7 @@ export interface TopicComment {
    * array elements have stable entity identity; future editing addresses
    * elements by reference (`equals()`), not by a synthetic key. */
   author?: TopicAuthor;
+
   /** @deprecated Compatibility shadow for consumers of the previous result
    * schema. New callers must use `author`; the pattern mirrors this field. */
   authorName: string | Default<"">;
@@ -183,6 +189,7 @@ export interface TopicLink {
 
 export interface TopicInput {
   title?: Writable<string | Default<"">>;
+
   /** The topic's living document: durable conclusions get folded up into the
    * body; the comment thread below holds the deliberation. */
   body?: Writable<string | Default<"">>;
@@ -190,8 +197,10 @@ export interface TopicInput {
   links?: Writable<TopicLink[] | Default<[]>>;
   createdAt?: number | Default<0>;
   createdBy?: TopicAuthor;
+
   /** @deprecated Compatibility shadow for the previous result contract. */
   createdByName?: string | Default<"">;
+
   /** @deprecated Retained only for callers of the previous unsigned mutation
    * streams. New callers use Profile authorship or an atomic `agentName`. */
   myName?: PerUser<Writable<string | Default<"">>>;
@@ -199,17 +208,20 @@ export interface TopicInput {
     TopicAuthor | Default<{ kind: "person"; name: "" }>
   >;
   bodyUpdatedAt?: Writable<number | Default<0>>;
+
   /** Attribution of the last rename, stamped by `setTitle` — the same pair
    * the body keeps, because a title is the other editable scalar. */
   titleUpdatedBy?: Writable<
     TopicAuthor | Default<{ kind: "person"; name: "" }>
   >;
   titleUpdatedAt?: Writable<number | Default<0>>;
+
   /** The board's own topics list — the mention universe the body editor
    * autocompletes over. A reference to the tracker's array, wired at creation
    * like `myName` (and backfillable as a one-time link-bind on pieces created
    * before it existed). Absent, the editor simply offers no completions. */
   mentionable?: Writable<TopicPiece[] | Default<[]>>;
+
   /** Where this topic's `[Label][key]` mentions point, keyed by the token that
    * appears in the body. The editor owns the contents; this pattern owns the
    * cell, which is what makes a mention durable and — because each entry holds
@@ -220,6 +232,7 @@ export interface TopicInput {
    * under a different default than its input carries cannot be materialized. */
   // deno-lint-ignore ban-types
   references?: Writable<TopicMentionRefMap | Default<{}>>;
+
   /** Pieces this topic references outside its prose — what `mention` records.
    *
    * Its own list rather than an entry in `references`, because that map belongs
@@ -229,6 +242,7 @@ export interface TopicInput {
    * key by, because there is nothing to point back at from the prose — a
    * reference outside a sentence is just a link in a list. */
   mentioned?: Writable<unknown[] | Default<[]>>;
+
   /** The board's mention pivot, one row per topic. A topic reads its own row
    * out of it and nothing else; see `backlinksOf`. Absent, a topic simply shows
    * no inbound references.
@@ -325,6 +339,7 @@ export interface TopicSummary {
    * `deno task pattern-vintage` is what catches it, by replaying a real
    * deployed board. */
   title: string | Default<"">;
+
   /** When the topic was filed (epoch milliseconds), stamped at create. */
   createdAt: number;
   createdBy?:
@@ -353,17 +368,22 @@ export interface TopicPiece extends TopicSummary {
    * retained topic may not have produced this path yet; its persisted title
    * remains authoritative until it does. */
   [NAME]: string | Default<""> | undefined;
+
   /** @deprecated Compatibility shadow for consumers of the previous result
    * schema. New callers must use `createdBy`; the pattern mirrors this field. */
   createdByName: string | Default<"">;
+
   /** The living document, verbatim Markdown. `setBody` replaces it whole. */
   body: string | Default<"">;
+
   /** The thread, in arrival order: append-only point-in-time records, each
    * carrying its author snapshot and `sentAt`. */
   comments: TopicComment[];
+
   /** Typed outbound links, in arrival order, each carrying its author
    * snapshot and `addedAt`. */
   links: TopicLink[];
+
   /** Every piece this topic's prose and links point at, as references.
    *
    * The board's pivot is declared over this and nothing else, so what one topic
@@ -381,13 +401,16 @@ export interface TopicPiece extends TopicSummary {
    * and the default is what a topic deployed before this path existed
    * materializes against. */
   mentions: unknown[] | Default<[]>;
+
   /** Where this topic's `[Label][key]` mentions point. Durable content, like
    * `links`. The body editor works on a session copy of this map, which a save
    * publishes here whole, beside the prose whose tokens name its entries. */
   // deno-lint-ignore ban-types
   references: TopicMentionRefMap | Default<{}>;
+
   /** Pieces referenced outside the prose, recorded by `mention`. */
   mentioned: unknown[] | Default<[]>;
+
   /** The topics that mention this one, read out of the board's pivot.
    *
    * Declared through `TopicSummary` rather than `TopicPiece`, and that is
@@ -398,19 +421,23 @@ export interface TopicPiece extends TopicSummary {
   referencedBy: TopicSummary[] | Default<[]>;
   bodyUpdatedBy?: TopicAuthor | undefined;
   bodyUpdatedAt?: number | undefined;
+
   /** Append to the thread — a point-in-time record of progress or
    * deliberation; durable conclusions belong in the body. Returns the
    * comment as recorded, resolved author and `sentAt` included. */
   addComment: Stream<AddCommentEvent, AddCommentResult>;
+
   /** Attach a typed outbound link — a PR, an agent session, a web page.
    * Returns the link as recorded, resolved `addedBy` and `addedAt`
    * included. Appends merge and nothing dedupes: a repeated URL is two
    * entries. */
   addLink: Stream<AddLinkEvent, AddLinkResult>;
+
   /** Replace the living document whole — read it, revise it, write it back
    * complete; the body is one value with whole-value conflict semantics.
    * Returns the persisted body and any attribution written. */
   setBody: Stream<SetBodyEvent, SetBodyResult>;
+
   /** Reference another piece from this topic — the payload is the piece
    * itself, stored as a reference. The browser equivalent is picking a
    * completion in the body editor, which writes the same map.
@@ -421,6 +448,7 @@ export interface TopicPiece extends TopicSummary {
    * outright. The older verbs predate every deployed generation, so they can
    * stay required; these cannot. */
   mention?: Stream<MentionEvent>;
+
   /** Stop referencing a piece: removes every `mention`-made entry naming it.
    * References made in the prose are retracted by editing the prose, not by
    * this. Optional on the projection for the same reason as `mention`. */
@@ -443,6 +471,7 @@ export interface TopicPiece extends TopicSummary {
  */
 export interface TopicOutput extends TopicPiece {
   [UI]: VNode;
+
   /**
    * Session-local composer/edit state. These controls belong to a direct Topic
    * instance, not the shared TopicPiece projection used by the tracker's list.
@@ -455,6 +484,7 @@ export interface TopicOutput extends TopicPiece {
   linkUrlDraft: PerSession<Writable<string>>;
   linkLabelDraft: PerSession<Writable<string>>;
   linkKindDraft: PerSession<Writable<TopicLinkKind>>;
+
   /**
    * The body draft's mention map, staged so Cancel can discard it.
    *
@@ -468,6 +498,7 @@ export interface TopicOutput extends TopicPiece {
    * this gives them one.
    */
   referencesDraft: PerSession<Writable<TopicMentionRefMap>>;
+
   /** Rename the topic. Lives on the direct interface rather than the shared
    * `TopicPiece` projection, and the placement is the contract: a holder's
    * required demands are write-once, so a required verb added to the
@@ -477,32 +508,41 @@ export interface TopicOutput extends TopicPiece {
    * all.) Requires `agentName` and returns the persisted title with the
    * attribution written. */
   setTitle: Stream<SetTitleEvent, SetTitleResult>;
+
   /** Attribution of the last rename; unset until the first `setTitle`.
    * Beside `setTitle` rather than on the projection, for the same reason. */
   titleUpdatedBy?: TopicAuthor | undefined;
   titleUpdatedAt?: number | undefined;
+
   /** UI wrapper: open the rename editor, seeding the session draft from the
    * durable title. */
   startEditTitle: Stream<void>;
+
   /** UI wrapper: save the session title draft under the viewer's Profile —
    * the contract verb is `setTitle`, and both land through the same core, so
    * a browser rename stamps the same attribution and moves the same activity
    * clock. */
   saveTitle: Stream<void>;
+
   /** UI wrapper: close the rename editor; the session draft is the discard. */
   cancelEditTitle: Stream<void>;
+
   /** UI wrapper: append the session comment draft under the viewer's
    * Profile. Reads session-local state, so it is a silent no-op headless —
    * the contract verb is `addComment`. */
   submitComment: Stream<void>;
+
   /** UI wrapper: open the body editor, seeding the session drafts from the
    * durable body and mention map. */
   startEditBody: Stream<void>;
+
   /** UI wrapper: publish the session body and mention-map drafts whole,
    * attributed to the viewer's Profile — the contract verb is `setBody`. */
   saveBody: Stream<void>;
+
   /** UI wrapper: close the body editor; the session drafts are the discard. */
   cancelEditBody: Stream<void>;
+
   /** UI wrapper: append the session link drafts under the viewer's Profile —
    * the contract verb is `addLink`. */
   submitLink: Stream<void>;

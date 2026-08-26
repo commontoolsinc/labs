@@ -26,6 +26,7 @@ import { type MentionablePiece } from "./backlinks-index.tsx";
 type CalculatorRequest = {
   /** The mathematical expression to evaluate. */
   expression: string;
+
   /** The base to use for the calculation. */
   base?: number;
 };
@@ -279,12 +280,16 @@ export const readWebpage = pattern<
 type BashRequest = {
   /** The bash command to execute. */
   command: string;
+
   /** Working directory for the command. */
   workingDirectory?: string;
+
   /** Timeout in milliseconds. Defaults to 60000. */
   timeout?: number;
+
   /** Additional environment variables as key-value pairs. */
   environment?: Record<string, string>;
+
   /** Sandbox identifier. Automatically provided — do not set. */
   sandboxId: FrameworkProvided<string>;
 };
