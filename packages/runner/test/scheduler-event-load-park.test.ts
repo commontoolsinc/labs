@@ -265,6 +265,98 @@ describe("event dispatch parks on in-flight closure loads", () => {
     expect(callbackRuns).toBe(1);
   });
 
+  // The SERVED counterpart of the test above, and the reason the two
+  // arms differ (verification-coverage.md's OW45 residue member): a
+  // client event has no durable entry, so its load-park failure has
+  // nowhere to be re-delivered from and keeps the terminal drop. A
+  // SERVED event's entry IS durable, so the same failure must reach the
+  // drain as a DEFERRAL — no consequence sealed, the entry left pending
+  // for a later drain. events.md §5's T3 predicate is "no runnable
+  // handler", never "the run raced", and a transient read failure over
+  // a doc that exists durably is the second. This pins the contract the
+  // SpaceServer's `onFailure` branches on; the end-to-end consequence,
+  // ordering, and exactly-once behaviour live in
+  // executor-events-down.test.ts.
+  it("a SERVED event's load-park failure reaches the drain as a load-park DEFERRAL, not a drop", async () => {
+    const { runtime, tx } = env;
+    const coldDoc = runtime.getCell<string>(
+      space,
+      "load-park-served-cold",
+      undefined,
+    );
+    const eventCell = runtime.getCell<number>(
+      space,
+      "load-park-served-event",
+      undefined,
+    );
+    await tx.commit();
+    env.tx = runtime.edit();
+
+    let handlerRuns = 0;
+    const handler: EventHandler = () => {
+      handlerRuns++;
+    };
+    runtime.scheduler.addEventHandler(
+      handler,
+      eventCell.getAsNormalizedFullLink(),
+      (depTx) => coldDoc.withTx(depTx).get(),
+    );
+
+    const link = coldDoc.getAsNormalizedFullLink();
+    const key = `${link.space}/${link.scope}/${link.id}`;
+    const load = Promise.withResolvers<void>();
+    const parkObserved = Promise.withResolvers<void>();
+    const manager = runtime.storageManager as unknown as {
+      pendingLoadAddresses(): readonly {
+        space: string;
+        scope: string;
+        id: string;
+      }[];
+      pendingLoadGeneration(key: string): number | undefined;
+      loadsSettled(keys: readonly string[]): Promise<void>;
+    };
+    manager.pendingLoadAddresses = () => [{
+      space: link.space,
+      scope: link.scope,
+      id: link.id,
+    }];
+    manager.pendingLoadGeneration = (candidate) =>
+      candidate === key ? 1 : undefined;
+    manager.loadsSettled = () => {
+      parkObserved.resolve();
+      return load.promise;
+    };
+
+    const outcomes: { kind: string; cause?: string }[] = [];
+    runtime.scheduler.queueEvent(
+      eventCell.getAsNormalizedFullLink(),
+      1,
+      true,
+      undefined,
+      false,
+      {
+        served: {
+          streamEntry: { sidecarId: "of:stream-events:pin", index: 0, seq: 1 },
+          onFailure: (outcome) =>
+            outcomes.push({ kind: outcome.kind, cause: outcome.cause }),
+        },
+      },
+    );
+    await parkObserved.promise;
+    expect(handlerRuns).toBe(0);
+
+    load.reject(new Error("memory session revoked: unauthorized"));
+    await runtime.idle();
+    expect(handlerRuns).toBe(0);
+    // The pin: `deferred` (the entry stays pending for a later drain),
+    // carrying the cause that keeps it off the queued class's bounded
+    // creation-race budget. Pre-fix this read [{ kind: "dropped" }] and
+    // the drain sealed the entry.
+    expect(outcomes).toEqual([{ kind: "deferred", cause: "load-park" }]);
+    await runtime.idle();
+    expect(outcomes.length, "settled exactly once").toBe(1);
+  });
+
   it("re-parks the same event for a fresh load generation", async () => {
     const { runtime, tx } = env;
     const coldDoc = runtime.getCell<string>(

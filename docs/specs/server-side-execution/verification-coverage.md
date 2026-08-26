@@ -6303,6 +6303,70 @@ supply; OW29/OW32/OW34 closed):
     shared-profile's, profile-embed's, and staged-publish's steps
     with an owed row) is the owner's call, deliberately not taken by
     the diagnosis seat.
+    **FIXED 2026-08-26 (its own deliberate seal-adjacent pass, no
+    riders — the OW58 caution above is why): the load-park failure arm
+    DEFERS a served event instead of dropping it.**
+    `failHeadEventLoadPark` (scheduler/facade.ts) now settles a served
+    event through the `deferred` arm — no consequence sealed, the
+    durable entry left pending and UNCONSEQUENCED, the standard
+    re-drain re-delivering it — and carries the drain's arrival-order
+    BARRIER with it (events.md §2, mirroring the sidecar-sync-failure
+    arm): every later-arrived durable served entry behind it IN THE
+    SAME SPACE defers too. Two exclusions, deliberate: cross-space
+    queue neighbours (§2's order is per-space) and LT1 in-process
+    copies (`served` with no `streamEntry` — no durable entry to
+    re-drain, and a running event's same-wave cascade children rather
+    than later arrivals; their entry re-drains WITH a `streamEntry`,
+    the `lt1LeftoversPurged` semantics). CLIENT-side (no `served`) the
+    drop keeps today's shape — there is no durable entry to re-drain,
+    so deferring would lose the event outright; the same split
+    events.ts already makes for a piece-load failure, and client-side
+    the two arms are behaviourally indistinguishable anyway (both
+    remove the event and abort its onCommit). T3's genuine
+    no-runnable-handler drop is UNTOUCHED — only the load-FAILURE
+    routing changed.
+    **Persistent-failure posture, stated:** a load that never heals
+    defers INDEFINITELY — durable, visible, re-tried each drain. The
+    deferral is deliberately kept OFF the queued class's bounded
+    creation-race budget (`EVENT_DEFERRAL_DROP_THRESHOLD`, which
+    hardens into §5's drop after 8 deferrals) by a typed
+    `cause: "load-park"` on the served failure outcome: that budget
+    exists because a piece which never materializes has no runnable
+    handler, whereas here the input doc EXISTS durably and only the
+    read path failed, so hardening would restore exactly the
+    at-least-once discharge this fix removes. Indefinite deferral is
+    strictly better than silent loss and is the accepted posture; its
+    cost is that the backstop rescan keeps ticking, so a never-healing
+    load holds the space out of its idle park. A give-up arm for that
+    case is OW54's separately tracked territory and was deliberately
+    NOT built here.
+    Observability gap CLOSED with the fix: `events.loadParkDeferrals`
+    counts each deferral (head and barrier alike) and `events.dropped`
+    counts terminal drop notices sealed onto a durable entry — the
+    previously invisible half; a loud WARN per deferral names the
+    failing doc keys and the error. serving-loop.md §7 carries both.
+    Pins, red-first: `executor-events-down.test.ts`'s "a served event
+    whose HEAD-EVENT LOAD PARK fails DEFERS instead of terminally
+    dropping" (a new `GatedStorageManager.loadParkFailAddress` seam
+    reports one doc as an in-flight load and REJECTS its park settle
+    with the production error text; observed pre-fix red: BOTH entries
+    sealed `{consequenced: true, status: "dropped", reason: "Event
+    dropped: required replica load failed before dispatch"}` — the
+    exact CI store shape) and
+    `scheduler-event-load-park.test.ts`'s "a SERVED event's load-park
+    failure reaches the drain as a load-park DEFERRAL, not a drop"
+    (the contract the SpaceServer's `onFailure` branches on; the
+    pre-existing client-side drop pin beside it is unchanged).
+    Mutations, both red: restore the drop routing → both entries seal
+    dropped and the log never grows past the warm-up; skip the barrier
+    loop → the log reads `["A","B","A"]`, the OW45 arm-B b01 overtake
+    shape. Battery green at the fix: executor-events-down (23 steps),
+    executor-fan-out, executor-serving-loop, scheduler-event-load-park.
+    STILL OPEN, untouched by this fix: shard 9
+    (`cfc-staged-publish`) stays UNHARVESTED — symptom-compatible,
+    no store evidence, classification open — and the #6248 lane
+    disposition remains the owner's call, now with the fix-before-flip
+    option actually available.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
