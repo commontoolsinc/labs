@@ -246,6 +246,14 @@ describe("connection", () => {
 
       expect(connection.getPendingRequestDiagnostics()).toHaveLength(0);
 
+      // And the timeline says so too: a missing `doneAtMs` reads as still in
+      // flight, which is the one thing this request is not.
+      const entry = connection.getRequestTimelineDiagnostics().find((e) =>
+        e.type === RequestType.CellSet
+      );
+      expect(entry?.doneAtMs).toEqual(expect.any(Number));
+      expect(entry?.error).toBe(true);
+
       // Would reject the orphan, if the bookkeeping still held one.
       await connection.dispose();
     });

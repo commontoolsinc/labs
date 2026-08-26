@@ -443,6 +443,43 @@ describe("web-worker-console-bridge", () => {
       }
     });
 
+    it("reports a message that does not decode at all", async () => {
+      // Dispatched raw rather than through `dispatch()`, which encodes: what
+      // this needs is a message that is no encoding at all, which is what a
+      // non-conforming or damaged sender would deliver. The companion below
+      // goes the other way -- a well-formed encoding of a value that is no
+      // message -- and the two reach different reports for the same reason,
+      // that there is no `msgId` to answer under.
+      const posted: Posted[] = [];
+      const originalPostMessage =
+        (globalThis as { postMessage?: unknown }).postMessage;
+      (globalThis as { postMessage: (m: unknown) => void }).postMessage = (
+        m: unknown,
+      ) => {
+        posted.push(fabricFromRealmValue(m as never) as Posted);
+      };
+      const realConsoleError = console.error;
+      console.error = () => {};
+
+      try {
+        await import("@/backends/web-worker/index.ts");
+        posted.length = 0;
+
+        globalThis.dispatchEvent(
+          new MessageEvent("message", { data: { not: "an encoding" } }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(posted).toHaveLength(1);
+        expect(posted[0].type).toBe(NotificationType.ErrorReport);
+        expect(posted[0].message).toContain("Undecodable message");
+      } finally {
+        console.error = realConsoleError;
+        (globalThis as { postMessage?: unknown }).postMessage =
+          originalPostMessage;
+      }
+    });
+
     it("reports a message that carries no `msgId` to reply under", async () => {
       // A reply is addressed by `msgId`, and `null` carries none. It reaches
       // the guard rather than the decode's `catch`: `null` is a `FabricValue`,

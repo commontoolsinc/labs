@@ -318,6 +318,18 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       this.#transport.send(message);
     } catch (error) {
       this.#settle(msgId);
+      // The timeline reads a missing `doneAtMs` as still in flight, which is
+      // what a reader mid-diagnosis would take from it -- and this request is
+      // as finished as one gets. It never left, so it is marked done at the
+      // moment it failed, and as an error.
+      const timelineEntry = this.#timelineByMsgId.get(msgId);
+      if (timelineEntry) {
+        timelineEntry.doneAtMs = Math.round(
+          performance.now() - this.#constructedAt,
+        );
+        timelineEntry.error = true;
+        this.#timelineByMsgId.delete(msgId);
+      }
       throw error;
     }
 
