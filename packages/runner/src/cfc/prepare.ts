@@ -1372,12 +1372,14 @@ const schemaEnvelopeForTargetPath = (
 // and it is not a user value write for schema write policy, flow labels, or
 // writer-fit to measure.
 //
-// A recorded write holds its document out of the exemption, so a forged write
-// is measured like any other value write and carries the join. The recording
-// arms differ: the manifest arm throws, while a forged grant write reaches
-// storage under the non-rejecting modes, and the label it carries is what ties
-// a later read of it back to what the forging transaction observed. Reads of
-// these documents are measured for the same reason.
+// A write the chokepoint recorded as unprivileged holds its document out of
+// the exemption, so a forged write is measured like any other value write and
+// carries the join. Which namespace that matters for follows from the two
+// arms. A forged manifest write throws, so no such document reaches the
+// boundary. A forged grant write is recorded and still reaches storage under
+// the modes that do not reject, and the label it carries there is what ties a
+// later read of the document back to what the forging transaction observed.
+// Reads of these documents stay measured for the same reason.
 const isReservedCfcDocumentId = (id: string): boolean =>
   id.startsWith(CFC_POLICY_MANIFEST_ID_PREFIX) ||
   id.startsWith(CFC_GRANT_ID_PREFIX);
