@@ -6,10 +6,21 @@
  * One shared Topics board across two worker-isolated runtimes. Covers the
  * board's core multi-user promises:
  * - every headless mutation carries its agent signature atomically,
- * - concurrent comment appends from different users both land (mergeable
- *   `push` — no clobbering),
  * - topics created by either user propagate to the other, with structured
  *   authorship snapshots taken at write time.
+ *
+ * Concurrent comment appends — both landing, mergeable `push`, no clobbering —
+ * are exercised on a topic the setup holds DIRECTLY, not on one reached
+ * through the board. That is not a convenience: the board's demand carries
+ * neither the thread nor the verbs that write it, so a comment cannot be
+ * appended through the board's projection at all. What this file asserts of
+ * the board is therefore topic propagation and authorship, never a thread.
+ *
+ * That leaves one thing no assertion here can make: that a real append raises
+ * the `commentCount` the board's index publishes. Proving it needs a topic
+ * resolved to its own piece from a board that created it, which is
+ * `packages/patterns/integration/topic-board-child-contract.test.ts` — it
+ * reads `index[0].commentCount`, appends, and reads it again.
  *
  * Cross-runtime reads use INLINE literal accesses (topics[0].comments[0]) —
  * `.map()`, loop-variable indexing, and helper calls over another runtime's

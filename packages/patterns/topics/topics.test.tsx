@@ -3,11 +3,11 @@
  *
  * Complements multi-user.test.tsx (cross-runtime isolation and merge
  * behavior) and topics-rejections.test.tsx (thrown rejections on the mutating
- * verbs — those runs expect runtime errors): this file drives the happy and
- * paths in one runtime — atomic agent signatures, body-at-create,
- * label defaulting, body updates,
- * activity-based sorting, the board's bounded discovery index, and the exported
- * pure helpers. UI composer wrappers keep silent guards, exercised here.
+ * verbs — those runs expect runtime errors): this file drives the happy paths
+ * in one runtime — atomic agent signatures, body-at-create, label defaulting,
+ * body updates, activity-based sorting, the board's bounded discovery index,
+ * and the exported pure helpers. UI composer wrappers keep silent guards,
+ * exercised here.
  */
 import {
   action,
@@ -322,9 +322,6 @@ export default pattern(() => {
     );
   });
 
-  // The previous deployed event shapes remain operational while callers
-  // migrate. They use the hidden legacy name cell; new callers always send an
-  // atomic `agentName` instead.
   // The unsigned caller is gone. `agentName` is required on every verb, so
   // there is no legacy board, no hidden name cell, and no unsigned mutation to
   // exercise — a call without a signature now rejects, which

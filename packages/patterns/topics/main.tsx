@@ -161,8 +161,10 @@ export interface TopicIndexRow {
 
   /** Who filed the topic. A topic written without structured authorship
    * materializes the declared default — the inert legacy sentinel
-   * `{ kind: "person", name: "" }` — so a blank name here means "unsigned";
-   * the display string then comes from the topic's own `createdByName`. */
+   * `{ kind: "person", name: "" }` — so a blank name here means "unsigned",
+   * and there is nothing further to consult: the display-name mirror this
+   * once pointed at is retired, and `topicAuthorLabel` renders the sentinel
+   * as `someone`. */
   createdBy?: TopicAuthor | Default<{ kind: "person"; name: "" }> | undefined;
 
   /** Coalesced to 0 for a cold or older topic whose derived path is absent,

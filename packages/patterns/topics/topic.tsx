@@ -483,7 +483,9 @@ export interface TopicPiece extends TopicSummary {
 
   /** Stop referencing a piece: removes every `mention`-made entry naming it.
    * References made in the prose are retracted by editing the prose, not by
-   * this. Optional on the projection for the same reason as `mention`. */
+   * this. Required on the projection for the same reason as `mention`, and
+   * the pair has to move together: a caller that can make a reference and
+   * only maybe retract it is the worse half of both contracts. */
   unmention: Stream<UnmentionEvent>;
 }
 
@@ -534,11 +536,12 @@ export interface TopicOutput extends TopicPiece {
   /** Rename the topic. Lives on the direct interface rather than the shared
    * `TopicPiece` projection, and the placement is the contract: a holder's
    * required demands are write-once, so a required verb added to the
-   * projection every board embeds would refuse those boards' updates.
-   * (`mention` above takes the other safe road, an optional member; a rename
-   * is a direct-address mutation and needs no place on the projection at
-   * all.) Requires `agentName` and returns the persisted title with the
-   * attribution written. */
+   * projection every board embeds refuses those boards' updates unless an
+   * acknowledged break rewrites them. That is what `mention` above costs, and
+   * it is worth paying only for a verb the projection has to carry. A rename
+   * is a direct-address mutation with no place on the projection at all, so
+   * it never faces the question. Requires `agentName` and returns the
+   * persisted title with the attribution written. */
   setTitle: Stream<SetTitleEvent, SetTitleResult>;
 
   /** Attribution of the last rename; unset until the first `setTitle`.
@@ -664,8 +667,9 @@ export const rejectMutation = (verb: string, reason: string): never => {
   throw new Error(`${verb} rejected: ${reason}`);
 };
 
-/** Structured author first, legacy string second. Agent snapshots are labelled
- * explicitly because they share the authenticated principal's identity key. */
+/** The display string for an author, falling back to `someone` when there is
+ * none or the name is blank. Agent snapshots are labeled explicitly because
+ * they share the authenticated principal's identity key. */
 export const topicAuthorLabel = (
   author: TopicAuthor | undefined,
 ): string => {

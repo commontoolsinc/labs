@@ -30,7 +30,8 @@ export default pattern(() => {
   const seedTopic = Topic({ title: "Seed", body: "" });
 
   // addTopic: empty title; blank (provided) agentName. An *omitted* agentName
-  // is the legacy caller path and stays accepted — covered in topics.test.tsx.
+  // rejects too, and `action_add_topic_unsigned` below is where that is
+  // proven — there is no longer a legacy caller path that accepts it.
   const action_add_blank_title = action(() => {
     board.addTopic.send({ title: "   ", agentName: "Sol" });
   });
@@ -169,8 +170,9 @@ export default pattern(() => {
   const assert_legacy_board_empty = assert(() => legacyBoard.topicCount === 0);
 
   return {
-    // Every rejection below MUST surface as a thrown handler error — thirteen
-    // throwing actions, thirteen runtime errors. The exact count means a
+    // Every rejection below MUST surface as a thrown handler error —
+    // seventeen throwing actions, seventeen runtime errors. The exact count
+    // means a
     // single verb quietly reverting to a silent early-return fails this suite;
     // the no-write assertions then prove the throw also blocked the write.
     expectRuntimeErrors: 17,

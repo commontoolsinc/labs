@@ -23,8 +23,14 @@ open decisions named rather than assumed.
 | --- | --- |
 | Space | `topics-dev-476ea34f` = `did:key:z6MkjcdxtxTiUWkPkPffhs8ENkCcJjuRCQPpJFb2xyzwHqEk` |
 | Board piece | `fid1:jtdD-DSmuGrLGSt_6sJ3DS_7jmerrkKTEnW3fZV9e34` |
-| Children | 73 topic pieces, each its own piece, across **two** deployed generations |
+| Children | one topic piece per topic, across **two** deployed generations |
 | Store size | ~1.0 GB, ~200k commits |
+
+The board is in use, so its topic count rises between any snapshot and any
+run. Every count below is what the 2026-07-22 snapshot held — 73 topics then,
+113 on the live board as of 2026-08-26 — and none of them is a figure to
+assert against. The pre-flight reads the counts, and the verification compares
+them to what that same run recorded, never to a number written here.
 
 The space DID is not recoverable from the store — it has no ACL doc — so it
 must be supplied explicitly. Passing the wrong one produces a clone that serves
@@ -32,8 +38,9 @@ an empty space rather than an error.
 
 ## What is being upgraded from
 
-Read out of the 2026-07-22 snapshot rather than assumed. The 73 topics are
-**not** on one version:
+Read out of the 2026-07-22 snapshot rather than assumed. What matters here is
+the split, not the totals: the topics are **not** on one version, and a run
+re-reads its own generation counts before moving anything.
 
 | | pieces | pattern identity |
 | --- | ---: | --- |
@@ -46,8 +53,8 @@ Both topic generations are legacy — `createdByName` present, no
 authored lines of `topic.tsx`). The board's `main.tsx` mentions
 `AddTopicEvent.body` but not `rejectMutation`, so it predates #4991 as well.
 
-(The space holds 319 pieces across 150 pattern identities in total; only these
-74 are in scope.)
+(The space holds 319 pieces across 150 pattern identities in total; only the
+board and its topics are in scope.)
 
 **This is the condition that makes the rehearsal mandatory**, not incidental:
 "more than one pattern generation is live in the space" is a trigger in the
@@ -71,9 +78,9 @@ pieces=$(deno task cf inspect entities $DB --kind piece --require-complete --jso
         | jq -r '[.id, (.pattern.identity // "unresolved"), (.pattern.filename // "-")] | @tsv'
     done | sort -k2 > topics-manifest.tsv
 
-# the 74 in scope: the board plus everything on either topic generation
+# everything in scope: the board plus everything on either topic generation
 grep -E 'PB0GumS5vkDPyKAWciwh-4UtypoJwKFUXcDj3SsspHY|-85Wmyd9iwUjbpwnTYR2YolxkMUHup9WHY6YsRUDA1E|WpIRvAWL_WW45Q89ekZAlHWLObhQ16NDmQzvv_q2aI8' \
-  topics-manifest.tsv | cut -f2 | sort | uniq -c   # expect 39 / 34 / 1
+  topics-manifest.tsv | cut -f2 | sort | uniq -c   # two generations + 1 board
 ```
 
 `--require-complete` is load-bearing, not decoration: the piece listing is
@@ -85,7 +92,7 @@ never reaches the redirect, so it leaves the previous manifest untouched rather
 than replacing it with an empty one.
 
 The count check is the point: the space holds 319 pieces across 150 identities,
-so "did I migrate the right 74?" is a question the manifest answers and a
+so "did I migrate the right set?" is a question the manifest answers and a
 hand-copied list does not. It is also the rollback record — the second column is
 the identity each piece has to be returned to, and the Going-live section says
 what can take a piece back there and what else must be captured before
@@ -120,7 +127,7 @@ a sustained plateau rather than a burst.
 
 1. ~~**Starting state.**~~ **Resolved: (a), migrate a clone of the current
    production snapshot as-is.** The Risks section says rehearse
-   **old→populate→new**, but a clone of today's board is already mid-state: 73
+   **old→populate→new**, but a clone of today's board is already mid-state:
    legacy-schema topics under a pre-rework board. Migrating it rehearses the
    *actual* transition that will happen live, which is what a rehearsal is for;
    it is what #4997's rehearsal did and what the tooling is built for. A
@@ -162,7 +169,7 @@ resolve to whichever same-DID store discovery finds — usually this checkout's
 `cache/memory`, silently. `--until` is what makes a quiet window observable
 rather than assumed (generic runbook, "Reading the verdict").
 
-Record: topic count (expect 73), comment and link totals, the content
+Record: the topic count this run reads, comment and link totals, the content
 fingerprint, and `max(seq)`. The first two come from the baseline fingerprint
 dump the generic runbook's authored-content check already produces:
 
@@ -222,7 +229,7 @@ new-shape topics landing under a board that still demands `createdByName`, the
 array reading empty while the count still looks right. That is the same silent
 failure the 2026-07-10 outage taught, arriving from the other direction.
 
-Move the board, then generation A's 39, then generation B's 34. Keeping the two
+Move the board, then all of generation A, then all of generation B. Keeping the two
 child transitions separable means that if one storms you know which;
 interleaving them blurs that signal for no benefit. The board's recomputation
 still storms, so it is watched as closely as before — it is the ordering that
@@ -248,7 +255,7 @@ The quoted `"${TOPICS_TEST_ARGS[@]}"` expansion repeats every `--test` entry.
 Deployment packages and type-checks attached tests but does not run them.
 
 ```bash
-# each of the 73 topics, one at a time, against the CLONE's api-url
+# each topic, one at a time, against the CLONE's api-url
 deno task cf piece setsrc packages/patterns/topics/topic.tsx \
   "${TOPICS_TEST_ARGS[@]}" \
   --piece <topic-fid> --api-url http://localhost:8010 --space <did> …
@@ -282,8 +289,9 @@ so this run's own gate cannot see the failure mode that matters most.
 Then the acceptance items from the implementation plan's live checklist, which
 `cf space verify` cannot cover because they are semantic:
 
-- all 73 topics present; comment and link totals unchanged;
-- a **cold** board read returns all 73 (wait ≥20 s; a cold load is slow and a
+- every topic the pre-flight counted is present; comment and link totals
+  unchanged;
+- a **cold** board read returns all of them (wait ≥20 s; a cold load is slow and a
   premature check caused a production rollback);
 - a cold index read resolves a linked topic;
 - `createdBy` / `bodyUpdatedBy` attribution survived;
@@ -294,7 +302,7 @@ Then the acceptance items from the implementation plan's live checklist, which
 - the deployed verb schema matches the skill driving it (`cf piece verbs`);
 - churn returns to baseline **and stays there** — a storm is a steady state,
   not a spike;
-- **the 73 topics report exactly ONE pattern identity afterwards**, not two.
+- **the topics report exactly ONE pattern identity afterwards**, not two.
   This is the cheapest proof the migration converged rather than half-landing,
   and neither `cf space verify` nor the content fingerprint would catch a
   half-migration on its own: leaving generation B behind changes no authored
@@ -398,7 +406,7 @@ piece — a pass whose midpoint is unknown is not one of the two clean passes.
 Only after two clean passes, and with a rollback manifest written down first:
 the pristine snapshot path, the exact reset command, the prior pattern
 identity of every piece (`cf inspect piece <space> <fid>` records it — capture
-all 74 before starting) together with the source checkout that produced each
+every one before starting) together with the source checkout that produced each
 of those identities, pinned by git rev, and a **fresh content export**
 taken from a snapshot of production at the start of the quiet window, so the
 per-topic restore has current data rather than rehearsal-age data.

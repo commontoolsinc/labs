@@ -59,15 +59,23 @@ array on as the mention universe, so the name has to survive the demand to
 reach the editor. Counting only what the board reads is what drops it, and
 dropping it costs no type error and empties every `@`-mention completion.
 
-Every member carries a default. A demanded path a stored topic cannot produce
-makes the whole array unreadable, while a default materializes in its place.
+Seven of the eight carry a default. `createdAt` is the exception, and it is
+safe for a different reason rather than by oversight: the topic pattern
+defaults its own `createdAt` input to `0` and publishes it unconditionally, so
+every topic produces the path whether or not it was ever stamped.
+
+That is the property the demand rests on, and defaults are how it is usually
+bought. A demanded path a stored topic cannot produce makes the whole array
+unreadable — not the one row, the array — while a value the topic always
+produces is simply read. A ninth member is safe when one of the two holds, and
+a default is the only one of them a board can grant itself.
 
 ## Stages
 
 | stage | carries | state |
 | --- | --- | --- |
 | A | compatible updates: verb and event prose, the describe layer, `setTitle`, a compact `addTopic` result | landed in source |
-| B | one rehearsed break, four items batched | in progress |
+| B | one rehearsed break, four items batched | batched in PR #6143, in review |
 | C | items gated on platform work | designed for, not started |
 
 ### Stage A
@@ -84,8 +92,12 @@ Stage A is not yet deployed to the team board: no deployed topic carries a
 Four items, batched into a single rehearsed migration rather than paying the
 rehearsal four times:
 
+All four are written and batched into PR #6143, which is in review. None of
+them has landed until that merges, and they merge together or not at all —
+that is what batching a single rehearsed migration means.
+
 1. **Narrow the board's `topics` demand and the topic's `mentionable`
-   demand** to the fields above. In review as PR #6143.
+   demand** to the fields above.
 2. **Require `agentName` on every verb**, retiring the unsigned legacy path and
    with it the misattribution where an unsigned body edit leaves the previous
    author's name on content they did not write.
@@ -94,18 +106,18 @@ rehearsal four times:
 4. **Open the `kind` value domains** on links and authors, which are closed
    enums in provided data and so cannot widen — and with them relax
    `addLink`'s `kind` and `label`, which the handler already defaults and
-   which the gate refuses to relax on their own. **Landed.**
+   which the gate refuses to relax on their own.
 
 Baselines are recorded ONCE, when the batch is complete — not after each item.
 A baseline recorded mid-batch describes a contract that never ships, and the
 next item in the batch breaks it, so it has to be forgiven by an accepted-break
-entry that exists only to excuse an artefact. Baselines cannot be deleted
+entry that exists only to excuse an artifact. Baselines cannot be deleted
 either, so that churn is permanent. The cost of waiting is that the
 compatibility gate reports unrecorded contracts, and stays red, until the last
 item lands; that is the honest state of a break that has not finished being
 taken.
 
-Item 1 additionally needs, before it can land:
+Item 1 additionally needed, before it could land, and each is in the PR:
 
 - an accepted-break entry for `topics/main.tsx` and `topics/topic.tsx` naming
   the baselines the narrowing cannot apply over and only the paths it blames,

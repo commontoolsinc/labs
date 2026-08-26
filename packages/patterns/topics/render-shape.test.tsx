@@ -42,13 +42,22 @@ function findAllByTag(
   tag: string,
   found: TestVNode[] = [],
 ): TestVNode[] {
-  if (Array.isArray(node)) {
-    node.forEach((child) => findAllByTag(child, tag, found));
+  // Resolved BEFORE either test, and before the array check so that a
+  // cell-backed list of children is stepped through rather than skipped. A
+  // compiled reactive child arrives cell-backed, and asking `isVNode` of the
+  // cell rather than its value stops the walk one level above whatever it was
+  // looking for. That failure is not silent here — the assertions below treat
+  // "no editor found" as false — but a guard that reports a real render as a
+  // regression is no more use than one that misses it. `propValue` returns a
+  // non-cell unchanged, so this costs nothing on the plain path.
+  const resolved = propValue(node);
+  if (Array.isArray(resolved)) {
+    resolved.forEach((child) => findAllByTag(child, tag, found));
     return found;
   }
-  if (!isVNode(node)) return found;
-  if (node.name === tag) found.push(node);
-  for (const child of node.children ?? []) findAllByTag(child, tag, found);
+  if (!isVNode(resolved)) return found;
+  if (resolved.name === tag) found.push(resolved);
+  for (const child of resolved.children ?? []) findAllByTag(child, tag, found);
   return found;
 }
 
