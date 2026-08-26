@@ -186,52 +186,47 @@ becoming unusable. Keep the snapshot's filename `<did>.sqlite`: the export
 records the space DID from it, and `topics-restore.ts` defaults its `--space`
 to that record.
 
-### Migrate — children first, board last, serially
+### Migrate — board first for this break, then children, serially
 
-The order is not stylistic. The board's result recomputation is what storms,
-and a board pointing at half-migrated children is the "Topics (0)" failure from
-the 2026-07-10 outage: old-generation results lacking new fields make the whole
-array read empty, silently.
+**The ordering follows from which side can read the other, and it inverts when
+the board's own demand changes.**
 
-Do generation A's 39 first, then generation B's 34, then the board. Keeping
-the two transitions separable means that if one storms you know which;
-interleaving them blurs that signal for no benefit.
+The rule that produced "children first" is about keeping the whole setup
+functional at every step: a board pointing at half-migrated children is the
+"Topics (0)" failure from the 2026-07-10 outage, where old-generation results
+lacking new fields make the whole array read empty, silently. That reasoning is
+correct whenever the board's demand stays put — the children have to catch up
+to what the board already requires.
 
-**This ordering is contested for the Stage B break, and the pre-flight decides
-it.** Children-first is right about write storms and wrong about demand: a
-topic carrying the new shape lands under a board that still demands the old
-one, and if the old board requires a member the new topic retires, the WHOLE
-array reads empty rather than one row failing — the same silent shape the
-paragraph above is guarding against, arriving from the other direction.
-
-Measured on 2026-08-26, and no longer an inference. The board's demand was
-read out of a snapshot of the topics space, from the board piece's latest
-stored revision — what the deployed board actually demands, rather than what a
+This break moves the board's demand, which reverses it. Measured on
+2026-08-26, from the board piece's latest stored revision in a snapshot of the
+live topics space — what the deployed board actually demands, not what a
 recompile of its source would produce:
 
-- **The board demands `createdByName` required, with no default.** So does
-  `title`, and so do nine other members: only five of the sixteen carry
-  defaults. A topic shape retiring any of those eleven breaks this board, and
-  it breaks the WHOLE array rather than one row.
-- The narrowed board reads OLD topics cleanly. `createdAt` is the only member
-  of its eight-member demand without a default, and all 113 topics provide it;
-  `mentions` is absent on every one of them and carries `Default<[]>`. So the
-  new board is itself the both-shapes board, and no intermediate vintage is
-  needed.
+- **The deployed board demands `createdByName` required, with no default**, and
+  this break retires that field. It is not alone: eleven of the board's sixteen
+  demanded members carry no default, `title`, `body`, `comments`, `links` and
+  `createdAt` among them. Only five are defaulted.
+- **The narrowed board reads OLD topics cleanly.** `createdAt` is the only
+  member of its eight-member demand without a default, and all 113 topics
+  provide it; `mentions` is absent on every one and carries `Default<[]>`.
 
-An absent default is evidence here rather than silence: 76 `default` keys
+An absent default is evidence rather than silence here: 76 `default` keys
 survive that serialization, five of them inside the board's own demand, so the
 format plainly preserves them.
 
-**The board therefore moves FIRST for this break, and the children follow** —
-the reverse of the paragraph above. Children-first would land new-shape topics
-under a board still demanding `createdByName`, and the array would read empty
-while the count looked right.
+So the new board is **itself** the both-shapes board — it reads the old topics
+and the new ones — and moving it first keeps the setup functional at every
+step, with no intermediate artifact. Children-first would do the opposite:
+new-shape topics landing under a board that still demands `createdByName`, the
+array reading empty while the count still looks right. That is the same silent
+failure the 2026-07-10 outage taught, arriving from the other direction.
 
-Two things to confirm before executing, neither of which changes the ordering:
-the snapshot is named for a dev space though it carries the same board and
-space identifiers as the live board, and its topic footprint is larger than the
-113 the live board lists.
+Move the board, then generation A's 39, then generation B's 34. Keeping the two
+child transitions separable means that if one storms you know which;
+interleaving them blurs that signal for no benefit. The board's recomputation
+still storms, so it is watched as closely as before — it is the ordering that
+changed, not the risk.
 
 Run every authored test against the migration source before changing the clone.
 Stop if any test fails. Keep the complete flag set on every topic and board
@@ -425,7 +420,8 @@ after it, so whether and when that tier may be used is agreed with whoever
 operates the deployment before the attempt, not negotiated during an incident.
 
 Repeat the migrate and verify steps against production, in the same order,
-serially, board last.
+serially, board first — the ordering the rehearsal established, for the reason
+it established it.
 
 ## What this rehearsal cannot tell you
 

@@ -162,7 +162,8 @@ before writing a case:
 
 Stage B rewrites the shape of live team data, so it goes through the rehearsal
 in [Topics migration rehearsal](topics-migration-rehearsal.md): a snapshot
-first, two consecutive clean passes against a clone, children before the board,
+first, two consecutive clean passes against a clone, the board before its
+children,
 and a content export that the restore drill exercises rather than assumes.
 
 Two preconditions belong to the board rather than to the code:
