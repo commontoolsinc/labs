@@ -148,11 +148,6 @@ interface DebugRegistrationState {
   value: DebugRegistration | undefined;
 }
 
-/** Default-pattern list names mutated during debug view deployment. */
-type DebugRegistrationListName =
-  | "pieceRegistry"
-  | "recentPieces";
-
 const debugDeploymentTails = new Map<string, Promise<void>>();
 
 async function serializeDebugDeployment<T>(
@@ -470,29 +465,19 @@ async function debugRegistration(
   };
 }
 
-async function debugRegistrationLists(
+async function debugPieceRegistry(
   defaultPattern: Cell<unknown>,
-): Promise<Map<DebugRegistrationListName, Cell<FabricValue[]>>> {
-  const lists = new Map<DebugRegistrationListName, Cell<FabricValue[]>>();
+): Promise<Cell<FabricValue[]>> {
   const root = defaultPattern.asSchema(undefined);
-  for (const name of ["pieceRegistry", "recentPieces"] as const) {
-    const slot = root.key(name);
-    if (slot.getRaw() === undefined) {
-      if (name === "pieceRegistry") {
-        throw new Error("default pattern does not expose pieceRegistry");
-      }
-      continue;
-    }
-    const list = slot.resolveAsCell().asSchema(
-      SHALLOW_PIECE_LINK_LIST_SCHEMA,
-    ) as Cell<FabricValue[]>;
-    await list.sync();
-    lists.set(name, list);
+  const slot = root.key("pieceRegistry");
+  if (slot.getRaw() === undefined) {
+    throw new Error("default pattern does not expose pieceRegistry");
   }
-  if (!lists.has("pieceRegistry")) {
-    throw new Error("default pattern does not expose a piece registry");
-  }
-  return lists;
+  const registry = slot.resolveAsCell().asSchema(
+    SHALLOW_PIECE_LINK_LIST_SCHEMA,
+  ) as Cell<FabricValue[]>;
+  await registry.sync();
+  return registry;
 }
 
 async function registerDebugPiece(
@@ -506,8 +491,8 @@ async function registerDebugPiece(
   signal?: AbortSignal,
 ): Promise<void> {
   signal?.throwIfAborted();
-  const [lists, registration] = await Promise.all([
-    debugRegistrationLists(defaultPattern),
+  const [registry, registration] = await Promise.all([
+    debugPieceRegistry(defaultPattern),
     debugRegistration(manager, ownerDid),
   ]);
   const precedingPiece = registration.value?.cause !== undefined &&
@@ -575,7 +560,7 @@ async function registerDebugPiece(
         activeRegistry.getRawUntyped() === undefined ||
         !areLinksSame(
           activeRegistry.resolveAsCell(),
-          lists.get("pieceRegistry")!,
+          registry,
           activeRegistry,
         )
       ) {
@@ -583,24 +568,19 @@ async function registerDebugPiece(
           "default pattern registry changed during debug view deployment",
         );
       }
-      let changed = false;
-      for (const [name, list] of lists) {
-        const listWithTx = list.withTx(tx);
-        const current = listWithTx.getRawUntyped({ frozen: false });
-        if (!Array.isArray(current)) {
-          throw new Error(`default pattern ${name} is not an array`);
-        }
-        const retained = current.filter((value) =>
-          !piecesToRemove.some((target) =>
-            areLinksSame(value, target, listWithTx)
-          )
-        );
-        if (retained.length !== current.length) {
-          listWithTx.setRawUntyped(retained);
-          changed = true;
-        }
+      const registryWithTx = registry.withTx(tx);
+      const current = registryWithTx.getRawUntyped({ frozen: false });
+      if (!Array.isArray(current)) {
+        throw new Error("default pattern pieceRegistry is not an array");
       }
-      return changed;
+      const retained = current.filter((value) =>
+        !piecesToRemove.some((target) =>
+          areLinksSame(value, target, registryWithTx)
+        )
+      );
+      if (retained.length === current.length) return false;
+      registryWithTx.setRawUntyped(retained);
+      return true;
     });
   };
   signal?.throwIfAborted();

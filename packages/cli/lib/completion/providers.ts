@@ -818,7 +818,6 @@ export function wishTargetCandidates(): ProviderResult {
     { value: "#journal", description: "space-relative" },
     { value: "#learned", description: "space-relative" },
     { value: "#mentionable", description: "space-relative" },
-    { value: "#recent", description: "space-relative" },
     { value: "#pieceRegistry", description: "space-relative" },
     { value: "/", description: "the space's root" },
   ]);
@@ -973,6 +972,9 @@ const OPTION_VALUE_PROVIDERS: Readonly<Record<string, OptionProvider>> = {
   // is the transform; `--plan` reads the rows a survey wrote.
   fixer: () => Promise.resolve(directive({ kind: "files", glob: "*.ts" })),
   plan: () => Promise.resolve(directive({ kind: "files" })),
+  // `cf piece survey --diff` reads the plan the survey is checked against,
+  // which is the file `--out` wrote.
+  diff: () => Promise.resolve(directive({ kind: "files" })),
   // `cf inspect --dir` is an extra directory to search for space DBs.
   dir: () => Promise.resolve(directive({ kind: "dirs" })),
   // `cf inspect html --out` and `cf check --output` write a file.

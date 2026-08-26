@@ -225,7 +225,7 @@ const CPUPROFILE_DIR = (() => {
 })();
 type NoteCreateTimingEntry = {
   noteIndex: number;
-  noteTitle: string;
+  noteId: string;
   noteCountBefore: number;
   noteCountAfter: number;
   createToViewMs: number;
@@ -278,7 +278,7 @@ describe("default-app flow test", () => {
   let identity: Identity;
   const spaceName = SPACE_NAME;
 
-  it("should create a note via default app and see it in the space list", async () => {
+  it("should create and navigate to a note", async () => {
     identity = await Identity.generate({ implementation: "noble" });
 
     const page = shell.page();
@@ -436,6 +436,14 @@ describe("default-app flow test", () => {
           typeof state.view.pieceId === "string" &&
           state.view.pieceId.length > 0;
       });
+      const noteId = await page.evaluate(() => {
+        const view = globalThis.app?.serialize?.()?.view;
+        return view && typeof view === "object" && "pieceId" in view &&
+            typeof view.pieceId === "string"
+          ? view.pieceId
+          : undefined;
+      });
+      assert(noteId, `Expected a piece id for note ${noteIndex}`);
 
       await waitForRuntimeIdle(page);
       const noteViewReadyAt = performance.now();
@@ -525,25 +533,14 @@ describe("default-app flow test", () => {
         );
       }
       await waitForRuntimeIdle(page);
-
-      console.log(`Wait for note count to increase (note ${noteIndex})...`);
-      await waitForCondition(page, noteTitlesExceed, {
-        args: [noteCountBefore],
-      });
+      await awaitViewSettled(page);
 
       const noteTitlesAfter = await collectNoteTitlesInList(page);
-      const newNoteTitles = noteTitlesAfter.filter((title) =>
-        !noteTitlesBefore.includes(title)
-      );
-      assert(
-        newNoteTitles.length > 0,
-        `Expected a new note title in the list for note ${noteIndex}`,
-      );
 
       const noteCreateFinishedAt = performance.now();
       const noteCreateTiming: NoteCreateTimingEntry = {
         noteIndex,
-        noteTitle: newNoteTitles[0]!,
+        noteId,
         noteCountBefore,
         noteCountAfter: noteTitlesAfter.length,
         createToViewMs: Number(
@@ -609,7 +606,7 @@ describe("default-app flow test", () => {
           {
             frontendUrl: FRONTEND_URL,
             spaceName,
-            expectNoteInList: true,
+            expectNoteInList: false,
           },
         );
         assert(
@@ -617,7 +614,7 @@ describe("default-app flow test", () => {
           `Expected home load summary for ${noteIndex} notes`,
         );
         homeLoadSeries.push({
-          noteCount: noteIndex,
+          noteCount: noteTitlesAfter.length,
           ...(homeLoadSummary as Record<string, unknown>),
         });
         console.log(
@@ -628,12 +625,6 @@ describe("default-app flow test", () => {
     }
 
     cpuProfiler?.close();
-
-    const noteFound = await findNoteInList(page);
-    assert(
-      noteFound,
-      "List should contain '📝 New Note #<hash>' after creating a note",
-    );
 
     if (actionRunSeries.length > 0) {
       console.log(
@@ -3476,11 +3467,6 @@ async function clickPieceLinkWithText(
   }
 }
 
-// Helper to find note in list using regex pattern
-async function findNoteInList(page: Page): Promise<boolean> {
-  return (await collectNoteTitlesInList(page)).length > 0;
-}
-
 // Serialized into the page by waitForCondition: count the unique rendered
 // "📝 New Note #<hash>" titles across the document and every shadow root and
 // report whether more than `minCount` are present. Inlines the collection that
@@ -3499,30 +3485,26 @@ const noteTitlesExceed = (probe: ProbeApi, minCount: number): boolean => {
 };
 
 async function collectNoteTitlesInList(page: Page): Promise<string[]> {
-  try {
-    return await page.evaluate(() => {
-      const titles = new Set<string>();
+  return await page.evaluate(() => {
+    const titles = new Set<string>();
 
-      function search(root: Document | ShadowRoot): void {
-        const allElements = root.querySelectorAll("*");
-        for (const el of allElements) {
-          const text = el.textContent;
-          if (text) {
-            for (
-              const match of text.matchAll(/📝 New Note #[A-Za-z0-9_-]+/g)
-            ) {
-              titles.add(match[0]);
-            }
-          }
-          if (el.shadowRoot) {
-            search(el.shadowRoot);
+    function search(root: Document | ShadowRoot): void {
+      const allElements = root.querySelectorAll("*");
+      for (const el of allElements) {
+        const text = el.textContent;
+        if (text) {
+          for (
+            const match of text.matchAll(/📝 New Note #[A-Za-z0-9_-]+/g)
+          ) {
+            titles.add(match[0]);
           }
         }
+        if (el.shadowRoot) {
+          search(el.shadowRoot);
+        }
       }
-      search(document);
-      return [...titles].sort();
-    });
-  } catch (_) {
-    return [];
-  }
+    }
+    search(document);
+    return [...titles].sort();
+  });
 }

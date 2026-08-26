@@ -1,7 +1,10 @@
 import { assertEquals, assertExists } from "@std/assert";
 import ts from "typescript";
 
-import { getCellWrapperInfo } from "../../src/typescript/cell-brand.ts";
+import {
+  getCellBrand,
+  getCellWrapperInfo,
+} from "../../src/typescript/cell-brand.ts";
 
 function createProgram(source: string): {
   checker: ts.TypeChecker;
@@ -96,4 +99,24 @@ Deno.test("getCellWrapperInfo handles unions containing branded cells", () => {
   const nullableArg = nullableInfo.typeRef.typeArguments?.[0];
   assertExists(nullableArg);
   assertEquals(checker.typeToString(nullableArg), "string");
+});
+
+Deno.test("getCellBrand ignores synthetic brand properties", () => {
+  const source = `
+    type SyntheticBrand = { [Key in "CELL_BRAND"]: "cell" };
+
+    interface Schema {
+      value: SyntheticBrand;
+    }
+  `;
+
+  const { checker, sourceFile } = createProgram(source);
+  const type = getPropertyType(checker, sourceFile, "Schema", "value");
+  const brand = checker.getPropertiesOfType(type).find((property) =>
+    property.getName() === "CELL_BRAND"
+  );
+
+  assertExists(brand);
+  assertEquals(brand.getDeclarations(), undefined);
+  assertEquals(getCellBrand(type, checker), undefined);
 });

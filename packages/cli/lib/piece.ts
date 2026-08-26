@@ -514,8 +514,6 @@ export async function loadPieces(
   // deferred half of the embedded-space check `normalizeLLMFriendlyRef`
   // performs at parse time for a DID-configured space.
   validateEmbeddedSpaces(config.embeddedSpaces, session.space);
-  // Use a const ref object so we can assign later while keeping const binding
-  const piecesRef: { current?: PiecesController } = {};
   const runtimeErrors: CliRuntimeErrorRecord[] = [];
   const runtime = await timeCliPhase(
     "loadPieces.runtime",
@@ -555,25 +553,6 @@ export async function loadPieces(
               (config.jsonOutput ? console.error : console.log)(
                 `navigateTo new piece id ${id}`,
               );
-              // Best-effort: ensure piece is present in list
-              runtime.storageManager
-                .synced()
-                .then(async () => {
-                  try {
-                    const mgr = piecesRef.current!;
-                    const piecesCell = await mgr.getPieceRegistry();
-                    const list = piecesCell.get();
-                    const exists = list.some((c) => pieceId(c) === id);
-                    if (!exists) {
-                      await mgr.add([target]);
-                    }
-                  } catch (e) {
-                    console.error("navigateTo add error:", e);
-                  }
-                })
-                .catch((_err: unknown) => {
-                  // ignore; we already emitted the id
-                });
             } catch (e) {
               console.error("navigateTo callback error:", e);
             }
@@ -608,7 +587,6 @@ export async function loadPieces(
           deferSpaceCellSync: config.deferSpaceCellSync,
         }),
     );
-    piecesRef.current = pieces;
     if (config.deferSpaceCellSync) {
       await timeCliPhase(
         "loadPieces.ensureSpaceSession",

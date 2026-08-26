@@ -99,6 +99,7 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
   ["stats-threshold", "a threshold"],
   ["storage-stats-limit", "a count"],
   ["wait", "a patience in seconds"],
+  ["group-size", "how many pieces one session serves; a count"],
   // Identifiers the caller brings from outside, or coins.
   ["did", "a DID, pasted from elsewhere"],
   ["as", "a DID whose view to approximate, pasted from elsewhere"],

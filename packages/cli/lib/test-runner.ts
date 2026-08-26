@@ -1227,7 +1227,7 @@ export async function runTestPattern(
     // 3. Set up defaultPattern so wish({ query: "#default" }) resolves.
     // In production, default-app.tsx provides this. The test harness must
     // create a minimal equivalent so patterns that use wish("#default") to
-    // access pieceRegistry, recentPieces, etc. work correctly.
+    // access the piece registry and related space services work correctly.
     await withPhase(["runTestPattern", "defaultPatternSetup"], async () => {
       const setupTx = runtime.edit();
       const spaceCell = runtime.getCell(space, space, undefined, setupTx);
@@ -1260,7 +1260,6 @@ export async function runTestPattern(
         },
         parseLink(addPiece),
       );
-      (defaultPatternCell as any).key("recentPieces").set([]);
       (defaultPatternCell as any).key("backlinksIndex").set({
         mentionable: [],
       });
