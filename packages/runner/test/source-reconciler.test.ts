@@ -343,6 +343,59 @@ describe("piece source reconciliation", () => {
       expect((await piece.pull())?.marker).toBe("v2");
     });
 
+    it("treats a pattern index that errors as an artifact that will not load", async () => {
+      // Asking whether the running pattern still loads is a question that can
+      // fail rather than answer. A failure is read as "it will not load",
+      // which sends the pass on to compile the source again.
+      const v1Identity = await identityFor(source("v1"));
+      const fetched: string[] = [];
+      const piece = await preparePiece(
+        servingFetch(
+          () => v1Identity,
+          () => source("v1"),
+          (url) => fetched.push(url.pathname),
+        ),
+      );
+      const originalRef = getPatternIdentityRef(piece);
+      await stampSource(piece, PARENT_SOURCE);
+
+      const manager = runtime.patternManager;
+      const load = manager.loadPatternByIdentity.bind(manager);
+      manager.loadPatternByIdentity = (...args: Parameters<typeof load>) =>
+        args[0] === originalRef!.identity
+          ? Promise.reject(new Error("the pattern index is unreadable"))
+          : load(...args);
+      try {
+        expect(await reconcile(piece)).toBe("current");
+      } finally {
+        manager.loadPatternByIdentity = load;
+      }
+      expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+      expect(fetched).toContain(PARENT_PATH);
+    });
+
+    it("keeps the running source when the candidate compiles to no identity", async () => {
+      // Nothing can point a piece at source that has no identity to point at,
+      // so a candidate the compiler produces without one is refused rather
+      // than adopted under whatever the piece already records.
+      const v2Identity = await identityFor(source("v2"));
+      const piece = await preparePiece(
+        servingFetch(() => v2Identity, () => source("v2")),
+      );
+      const originalRef = getPatternIdentityRef(piece);
+      await stampSource(piece, PARENT_SOURCE);
+
+      const manager = runtime.patternManager;
+      const entryRef = manager.getArtifactEntryRef.bind(manager);
+      manager.getArtifactEntryRef = () => undefined;
+      try {
+        expect(await reconcile(piece)).toBe("unavailable");
+      } finally {
+        manager.getArtifactEntryRef = entryRef;
+      }
+      expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+    });
+
     it("records the pattern it displaced when its source is gone", async () => {
       // A piece whose own source this space no longer holds has nothing left
       // to protect: it cannot be set up again at all, so the origin's source
@@ -694,6 +747,35 @@ describe("piece source reconciliation", () => {
 
       expect(await reconcile(piece)).toBe("incompatible");
       expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+    });
+
+    it("adopts a contract-moving candidate when the running pattern is gone", async () => {
+      // The comparison an ungated origin has to satisfy is made against the
+      // pattern the piece runs. A piece whose own pattern can no longer be
+      // loaded has nothing left to protect — it cannot run at all — so the
+      // origin's source is a rescue and is taken without a comparison there
+      // is no way to make.
+      const piece = await preparePiece(refuseEveryFetch);
+      const originalRef = getPatternIdentityRef(piece)!;
+      const changed = await runtime.patternManager.compilePattern(
+        parentProgram(sourceWithChangedContract("v2")),
+        { space: piece.space },
+      );
+      const changedRef = runtime.patternManager.getArtifactEntryRef(changed)!;
+      await stampSource(piece, `cf:pattern:${changedRef.identity}`);
+
+      const manager = runtime.patternManager;
+      const load = manager.loadPatternByIdentity.bind(manager);
+      manager.loadPatternByIdentity = (...args: Parameters<typeof load>) =>
+        args[0] === originalRef.identity
+          ? Promise.reject(new Error("the running pattern is gone"))
+          : load(...args);
+      try {
+        expect(await reconcile(piece)).toBe("updated");
+      } finally {
+        manager.loadPatternByIdentity = load;
+      }
+      expect(getPatternIdentityRef(piece)).toEqual(changedRef);
     });
 
     it("keeps the running source when a pinned target is unavailable", async () => {
