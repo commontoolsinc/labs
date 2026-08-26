@@ -204,26 +204,34 @@ one, and if the old board requires a member the new topic retires, the WHOLE
 array reads empty rather than one row failing — the same silent shape the
 paragraph above is guarding against, arriving from the other direction.
 
-Measured on 2026-08-26, against the recorded board contracts and the live
-board's 113 topics:
+Measured on 2026-08-26, and no longer an inference. The board's demand was
+read out of a snapshot of the topics space, from the board piece's latest
+stored revision — what the deployed board actually demands, rather than what a
+recompile of its source would produce:
 
+- **The board demands `createdByName` required, with no default.** So does
+  `title`, and so do nine other members: only five of the sixteen carry
+  defaults. A topic shape retiring any of those eleven breaks this board, and
+  it breaks the WHOLE array rather than one row.
 - The narrowed board reads OLD topics cleanly. `createdAt` is the only member
-  of its eight-member demand without a default, and every one of the 113
-  provides it; `mentions` is absent on all of them and carries `Default<[]>`.
-  So the new board is itself the both-shapes board, and no intermediate
-  vintage is needed.
-- The OLD board is dirty on `createdByName`. It is `required` with no default
-  across the eleven contracts recorded from 2026-07-29 to 2026-08-17, gaining
-  `"default": ""` only from 08-18. The deployed board sits on the older side of
-  that line: no deployed topic carries a `setTitle` stream, so it predates
-  Stage A.
+  of its eight-member demand without a default, and all 113 topics provide it;
+  `mentions` is absent on every one of them and carries `Default<[]>`. So the
+  new board is itself the both-shapes board, and no intermediate vintage is
+  needed.
 
-If that holds of the deployed contract, the board moves FIRST for this break
-and the children follow — the reverse of the paragraph above. Confirm it
-rather than inherit it: read the deployed board's argument schema and check
-whether its `createdByName` carries a default. Both orderings are safe once
-the board is on a contract that defaults it; only the old-board window is
-dangerous, and only in the children-first direction.
+An absent default is evidence here rather than silence: 76 `default` keys
+survive that serialization, five of them inside the board's own demand, so the
+format plainly preserves them.
+
+**The board therefore moves FIRST for this break, and the children follow** —
+the reverse of the paragraph above. Children-first would land new-shape topics
+under a board still demanding `createdByName`, and the array would read empty
+while the count looked right.
+
+Two things to confirm before executing, neither of which changes the ordering:
+the snapshot is named for a dev space though it carries the same board and
+space identifiers as the live board, and its topic footprint is larger than the
+113 the live board lists.
 
 Run every authored test against the migration source before changing the clone.
 Stop if any test fails. Keep the complete flag set on every topic and board
