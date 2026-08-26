@@ -24,6 +24,7 @@ export const PATTERN_AUTHOR_SUBAGENT_PROFILE = "pattern-author" as const;
 export const WEB_SEARCH_SUBAGENT_MODEL = "gemini-3.5-flash" as const;
 export const DEFAULT_SUBAGENT_MAX_MODEL_TURNS = 8;
 export const MAX_SUBAGENT_MAX_MODEL_TURNS = 64;
+
 /**
  * Turn budget of the `pattern-author` profile. Authoring is a write,
  * compile-error, fix loop, and each iteration costs a turn; at the default
@@ -34,6 +35,7 @@ export const MAX_SUBAGENT_MAX_MODEL_TURNS = 64;
 export const PATTERN_AUTHOR_SUBAGENT_MAX_MODEL_TURNS = 24;
 export const DEFAULT_SUBAGENT_RETURN_CHANNEL =
   "summary-and-sanitized-state" as const;
+
 /**
  * Tool surface of the `default` profile. `run_pattern` is gated the same way
  * the parent surface gates it: the prompt loop drops it from a child whose
@@ -60,6 +62,7 @@ export const WEB_FETCH_SUBAGENT_ALLOWED_TOOL_IDS = [
 ] as const satisfies readonly BuiltinToolId[];
 export const WEB_SEARCH_SUBAGENT_ALLOWED_TOOL_IDS =
   [] as const satisfies readonly BuiltinToolId[];
+
 /**
  * Tool surface of the `pattern-author` profile. The child writes pattern source
  * into `run_pattern` arguments rather than into the workspace, so it receives
@@ -88,6 +91,7 @@ export const BROWSER_SUBAGENT_ALLOWED_SKILL_SCRIPTS = [
   { skill: "agent-browser", path: "scripts/form-automation.sh" },
   { skill: "agent-browser", path: "scripts/capture-workflow.sh" },
 ] as const satisfies readonly HarnessAllowedSkillScript[];
+
 /**
  * Skills preloaded into a `pattern-author` child when the run has a skill
  * registry. These are the documents a pattern author would otherwise spend its
@@ -99,6 +103,7 @@ export const PATTERN_AUTHOR_SUBAGENT_SKILL_NAMES = [
   "pattern-dev",
   "pattern-schema",
 ] as const satisfies readonly string[];
+
 /**
  * The vocabulary a child reports a failure in. A code is inert by
  * construction — it is one of a fixed set, carries nothing read out of a
@@ -279,6 +284,7 @@ export interface HarnessSubagentProfileConfig {
   allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   skillScriptExecutionTarget?: HarnessSkillScriptExecutionTarget;
   maxModelTurns: number;
+
   /**
    * Return contract applied to a delegation to this profile that declares no
    * `returnSchema` of its own. A profile that owns one leaves no delegation
@@ -450,6 +456,7 @@ export interface HarnessSubagentRunStateSummary {
 
 export interface HarnessSubagentStructuredReturn {
   type: "cf-harness.subagent-structured-return";
+
   /**
    * `child-reported-failure` is its own status because a child saying it
    * failed is an answer, not a broken return: the parent gets a failure it can
@@ -457,6 +464,7 @@ export interface HarnessSubagentStructuredReturn {
    * that something went wrong somewhere.
    */
   status: "valid" | "invalid" | "child-reported-failure";
+
   /**
    * Present whenever the child's return says `ok: false`, on either status.
    */
@@ -516,6 +524,7 @@ export interface DelegateTaskToolInput {
   context?: string;
   maxModelTurns?: number;
   returnSchema?: JSONSchema;
+
   /**
    * A handle the PARENT holds, naming a cell whose string value is skill
    * text for the child. Materialized trusted-side at child spawn — the

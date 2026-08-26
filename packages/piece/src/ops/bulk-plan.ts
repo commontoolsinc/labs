@@ -56,6 +56,7 @@ export interface RegisteredOutside {
 export interface PieceExpect {
   /** The pattern identity the piece is currently on. */
   patternIdentity: string;
+
   /**
    * The export the identity runs. The runtime's executable pointer is the
    * `{identity, symbol}` pair — two patterns exported by one module share an
@@ -63,6 +64,7 @@ export interface PieceExpect {
    * both halves.
    */
   symbol: string;
+
   /**
    * Whether the source behind `patternIdentity` is verifiably retained in
    * the space — the canonical loader can produce its closure — and so is a
@@ -71,12 +73,14 @@ export interface PieceExpect {
    * incident.
    */
   retained: boolean;
+
   /**
    * The revision the piece is at, when it already keeps a source-revision log.
    * A piece with no log yet — a legacy piece — has none until its first
    * transition appends a baseline revision, so a survey cannot read one for it.
    */
   revisionId?: string;
+
   /**
    * The hash of the piece's stored input document, recorded by a repair's
    * dry run. It is the repair row's precondition the way the reference pair
@@ -90,8 +94,10 @@ export interface PieceExpect {
 /** Replace a piece's source with the program a local source closure produces. */
 export interface RetargetOp {
   kind: "retarget";
+
   /** The source closure to apply, as the local-program inputs that name it. */
   source: RetargetSource;
+
   /**
    * A human-facing label for the source's provenance — a git rev, say. Recorded
    * for readers and for diffing two plans; never enforced. The identity is the
@@ -99,10 +105,13 @@ export interface RetargetOp {
    * row if it differs from `patternIdentity`.
    */
   rev?: string;
+
   /** The identity the source produces, computed from the source, not compiled. */
   patternIdentity: string;
+
   /** The export the retarget runs: the source's `mainExport`, or the default. */
   symbol: string;
+
   /**
    * Whether this row may apply with the pattern and retained-link compatibility
    * checks disabled. A field on the row so a reviewer sees which rows ran with
@@ -115,12 +124,16 @@ export interface RetargetOp {
 export interface RetargetSource {
   /** The entry module path. */
   main: string;
+
   /** The source root, when it is not the entry's own directory. */
   root?: string;
+
   /** Test entry paths to include in the closure. */
   testPaths?: readonly string[];
+
   /** Data file paths to attach and classify as data. */
   dataFilePaths?: readonly string[];
+
   /** The entry export to run, when it is not the default. */
   mainExport?: string;
 }
@@ -133,6 +146,7 @@ export interface RetargetSource {
  */
 export interface RestoreOp {
   kind: "restore";
+
   /**
    * The identity the retained revision carries. For a legacy piece whose
    * baseline the retarget itself appended, this is the identity the survey
@@ -140,8 +154,10 @@ export interface RestoreOp {
    * revision retaining that identity's source.
    */
   patternIdentity: string;
+
   /** The export the restored revision runs — the pair's other half. */
   symbol: string;
+
   /**
    * The revision to restore, when the survey read one — a piece that already
    * kept a log at survey time. Absent for a baseline the retarget appends,
@@ -159,8 +175,10 @@ export interface RestoreOp {
  */
 export interface RepairOp {
   kind: "repair";
+
   /** The fixer's name as supplied — a module path or label; never resolved. */
   fixer: string;
+
   /**
    * The content identity of the fixer module's authored closure — the same
    * no-compile identity a retarget's source carries — which is the pin the
@@ -182,6 +200,7 @@ export interface PiecePlanRow {
    * same piece and folds to this form at decode.
    */
   piece: string;
+
   /** A grouping label for reports and for stopping between groups; not a sort key. */
   phase?: string;
   expect: PieceExpect;
@@ -192,8 +211,10 @@ export interface PiecePlanRow {
 export interface PlanEnumeration {
   /** Pieces the selection names: a collection's members, or a list's entries. */
   collection: number;
+
   /** Pieces the space's piece registry lists. */
   registry: number;
+
   /**
    * Registered pieces on an in-scope identity that the collection does not
    * hold. Any above zero is a selection error: the collection read dropped a
@@ -206,13 +227,17 @@ export interface PlanEnumeration {
 export interface PiecePlanHeader {
   kind: "piece-plan";
   v: 1;
+
   /** The space every row's piece lives in. */
   space: string;
+
   /** When the survey behind the plan was taken, as an ISO-8601 string. */
   takenAt: string;
+
   /** Which selector produced the rows: a holder's collection, or a list. */
   selector: "collection" | "list";
   enumerated: PlanEnumeration;
+
   /**
    * Selected pieces the survey could not read into rows. Their absence from
    * `rows` would otherwise be invisible in the artifact, so an incomplete
@@ -220,6 +245,7 @@ export interface PiecePlanHeader {
    * a plan carrying any.
    */
   problems?: readonly SurveyProblem[];
+
   /** Registered in-scope pieces the selection lacks — the same standing. */
   outside?: readonly RegisteredOutside[];
 }

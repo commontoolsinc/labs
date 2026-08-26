@@ -69,8 +69,10 @@ export interface BrowserToolInput {
 export interface BrowserToolSuccessOutput {
   outputId: string;
   status: "ok";
+
   /** What the action printed, truncated to a bounded length. */
   output: string;
+
   /** Diagnostic text the action printed alongside a success, when any. */
   detail?: string;
 }

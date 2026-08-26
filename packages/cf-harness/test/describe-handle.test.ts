@@ -505,6 +505,7 @@ describe("describe_handle", () => {
     let storageManager: ReturnType<typeof StorageManager.emulate>;
     let runtime: Runtime;
     let session: HarnessFabricSession;
+
     /** A second space on the same runtime, so a cross-space address in these
      * tests names a document the runtime really could read. */
     let neighbour: PiecesController;

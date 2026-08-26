@@ -211,6 +211,7 @@ export interface CreateHarnessEngineOptions
   sandboxRuntime?: SandboxRuntime;
   artifactStore?: HarnessArtifactStore;
   processRunner?: ProcessRunner;
+
   /**
    * Injection seam for the `run_pattern` fabric session, mirroring how
    * `sandboxRuntime` replaces the engine-built sandbox. When absent, a
@@ -219,6 +220,7 @@ export interface CreateHarnessEngineOptions
    * tool surface.
    */
   fabricSessionFactory?: HarnessFabricSessionFactory;
+
   /**
    * Operator input cells to mint handles for at run start; see
    * `establishInputCells`. Requires a fabric session — the cells live in

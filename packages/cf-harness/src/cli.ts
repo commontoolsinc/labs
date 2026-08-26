@@ -352,10 +352,12 @@ export type CfHarnessCliSignalHandler = (
 export interface RunCfHarnessCliDependencies {
   cwd?: string;
   env?: Record<string, string | undefined>;
+
   /** Trusted, fixed binding supplied only by the dedicated local Loom host. */
   loomLocalHostBinding?: LoomLocalHostBinding;
   fetchFn?: HarnessFetch;
   structuredHostFailures?: boolean;
+
   /**
    * What caused this run, reported on every gateway request it makes.
    * Resolved from the process when absent.
@@ -391,6 +393,7 @@ export interface RunCfHarnessCliDependencies {
     handler: CfHarnessCliSignalHandler,
   ) => () => void;
   exit?: (code: number) => never | void;
+
   /**
    * Replaces the Fabric session the engine would build from `--fabric-*`
    * configuration. Tests grant well-known handles without a deployed API.

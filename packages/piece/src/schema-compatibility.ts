@@ -27,6 +27,7 @@ interface CompatibilityContext {
   targetRoot: JSONSchema;
   role: SchemaRole;
   activePairs: ActivePairsByRoot;
+
   /**
    * Piece evolution deliberately permits a small set of non-subset changes
    * (for example, naming a previously-uncontracted field on an open argument
@@ -34,12 +35,16 @@ interface CompatibilityContext {
    * they must never be used as proof that one conjunct implies another.
    */
   allowEvolutionPolicy: boolean;
+
   /** Whether default-backed evolution remains safe through every ancestor. */
   allowEvolutionDefaults: boolean;
+
   /** Link materialization fills valid target defaults before validation. */
   allowTargetDefaults: boolean;
+
   /** Whether defaults describe a pattern migration or link materialization. */
   defaultComparison: "evolution" | "target";
+
   /**
    * True below a node both contracts mark `asCell: ["stream"]` — a verb, so
    * everything beneath is the verb's EVENT schema. There, a boolean
