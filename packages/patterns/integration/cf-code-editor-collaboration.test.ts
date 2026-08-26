@@ -26,7 +26,10 @@ const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 type EditorHost = Element & {
   collaborative?: boolean;
   value?: { runtime?: () => unknown };
-  _collaboration?: { active?: boolean };
+  _collaboration?: {
+    active?: boolean;
+    prepareExternalChange?: () => Promise<boolean>;
+  };
   _editorView?: {
     state: {
       doc: { length: number; toString(): string };
@@ -360,6 +363,26 @@ async function releaseCollaboration(page: Page): Promise<void> {
       throw new Error("editor collaboration release is not available");
     }
     await editor.releaseCollaboration();
+  });
+}
+
+async function confirmPendingCollaborationEdits(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const collect = (root: Document | ShadowRoot): Element[] => {
+      const result: Element[] = [];
+      for (const element of root.querySelectorAll("*")) {
+        result.push(element);
+        if (element.shadowRoot) result.push(...collect(element.shadowRoot));
+      }
+      return result;
+    };
+    const editor = collect(document).find((element) =>
+      element.localName === "cf-code-editor"
+    ) as EditorHost | undefined;
+    const confirmed = await editor?._collaboration?.prepareExternalChange?.();
+    if (!confirmed) {
+      throw new Error("collaborative editor did not confirm pending edits");
+    }
   });
 }
 
@@ -710,6 +733,7 @@ describe("cf-code-editor collaboration", () => {
       waitForCondition(bobPage, editorContainsTokens, { args: [["!"]] }),
       awaitMaterialized("reconcile", (value) => value === "reset!"),
     ]);
+    await confirmPendingCollaborationEdits(alicePage);
 
     await listenForReconciliation(alicePage);
     await installNextApplyGate(alicePage);
