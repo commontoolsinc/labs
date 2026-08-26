@@ -98,6 +98,30 @@ describe("guest", () => {
       }
     });
 
+    it("lets an available port perform the request snapshot", async () => {
+      const fabric = connectFabric();
+      const originalStructuredClone = globalThis.structuredClone;
+      let cloneCalls = 0;
+      globalThis.structuredClone = ((...args) => {
+        cloneCalls++;
+        return originalStructuredClone(...args);
+      }) as typeof structuredClone;
+      try {
+        const host = handOffPort();
+        const received = receive(host);
+        const writing = fabric.cell<{ n: number }>("record").write({ n: 1 });
+
+        expect(cloneCalls).toBe(0);
+        const request = await received;
+        expect(request.value).toEqual({ n: 1 });
+        send(host, response(request.id));
+        await writing;
+      } finally {
+        globalThis.structuredClone = originalStructuredClone;
+        fabric.disconnect();
+      }
+    });
+
     it("exposes subscription events as stable cell snapshots", async () => {
       const fabric = connectFabric();
       try {

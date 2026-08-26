@@ -351,10 +351,11 @@ export class FabricClient {
     };
     let encoded: EncodedBridgeRequest;
     try {
+      encoded = realmFromFabricValue(request);
       // `postMessage()` snapshots at send time. Queued calls have no port yet,
-      // so clone the encoded form now to preserve the same invocation-time
-      // boundary instead of retaining caller-owned objects by reference.
-      encoded = structuredClone(realmFromFabricValue(request));
+      // so they snapshot the encoded form at invocation time instead of
+      // retaining caller-owned objects by reference until capability handoff.
+      if (!this.#port) encoded = structuredClone(encoded);
     } catch (cause) {
       return Promise.reject(cause);
     }

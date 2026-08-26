@@ -54,7 +54,9 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 import { type Cell, createCell, encodeSqliteParams } from "../cell.ts";
 import type { CfcConfClause } from "../cfc/clause.ts";
+import { createRef } from "../create-ref.ts";
 import { stripEntityUriScheme } from "../entity-kind.ts";
+import { toURI } from "../uri-utils.ts";
 // The wire shape (`id`, `tables`, `scope`, `owner`) is the memory protocol's
 // own `SqliteDbRef`; only `rev` is added here.
 type SqliteDbRef = WireSqliteDbRef & {
@@ -503,7 +505,12 @@ export function labelResultSchema(
       // No single source → conservative join/meet of the db's labeled columns.
       const derived = deriveNullOriginIfc(tables);
       if (derived) {
-        itemProps[c.output] = { ifc: derived };
+        Object.defineProperty(itemProps, c.output, {
+          value: { ifc: derived },
+          enumerable: true,
+          configurable: true,
+          writable: true,
+        });
         anyLabeled = true;
       }
       continue;
@@ -515,11 +522,17 @@ export function labelResultSchema(
       // by reference makes the schema-policy walk proxy a non-extensible object
       // ("ownKeys … non-extensible"). `cloneIfNecessary(_, { frozen: false })`
       // reads through the proxy and returns plain, mutable data.
-      itemProps[c.output] = {
-        ifc: cloneIfNecessary(ifc as Parameters<typeof cloneIfNecessary>[0], {
-          frozen: false,
-        }),
-      };
+      Object.defineProperty(itemProps, c.output, {
+        value: {
+          ifc: cloneIfNecessary(
+            ifc as Parameters<typeof cloneIfNecessary>[0],
+            { frozen: false },
+          ),
+        },
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
       anyLabeled = true;
     }
   }
@@ -544,6 +557,36 @@ export function labelResultSchema(
         },
       },
     },
+  };
+}
+
+/** Schema for one SQLite row after unsafe column names have selected the
+ * entry-list wire representation. Column labels move from object properties to
+ * each entry tuple's value slot; ordinary rows keep their object schema. */
+function sqliteWireRowSchema(
+  row: unknown,
+  objectSchema: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  if (!Array.isArray(row)) {
+    return objectSchema ?? {
+      type: "object",
+      additionalProperties: true,
+    };
+  }
+  const properties = objectSchema?.properties as
+    | Record<string, unknown>
+    | undefined;
+  return {
+    type: "array",
+    prefixItems: (row as Array<[string, unknown]>).map(([name]) => ({
+      type: "array",
+      prefixItems: [
+        { type: "string" },
+        Object.getOwnPropertyDescriptor(properties ?? {}, name)?.value ?? true,
+      ],
+      items: false,
+    })),
+    items: false,
   };
 }
 
@@ -1043,6 +1086,27 @@ export function sqliteQuery(
                 )
                 : wireRow;
             }) as unknown[];
+            const objectRowSchema = (labelSchema?.properties as {
+              result?: { items?: Record<string, unknown> };
+            } | undefined)?.result?.items;
+            const rowSchemas = resultRows.map((row) =>
+              sqliteWireRowSchema(row, objectRowSchema)
+            );
+            const needsEntryRowSchema = resultRows.some(Array.isArray) &&
+              (labelSchema !== undefined || anyPerRow);
+            const writeSchema = needsEntryRowSchema
+              ? {
+                type: "object",
+                additionalProperties: true,
+                properties: {
+                  result: {
+                    type: "array",
+                    prefixItems: rowSchemas,
+                    items: false,
+                  },
+                },
+              }
+              : labelSchema;
             const wrote = await runtime.editWithRetry((wtx) => {
               markEffectCompletion(wtx, effectKey);
               applyRunIdentity(wtx);
@@ -1052,30 +1116,55 @@ export function sqliteQuery(
               if (result.withTx(wtx).get()?.requestHash !== hash) {
                 return;
               }
-              const target = labelSchema
-                ? result.asSchema(labelSchema).withTx(wtx)
+              const base = result.getAsNormalizedFullLink();
+              const storedRows = resultRows.map((row, i) => {
+                if (
+                  !Array.isArray(row) ||
+                  (labelSchema === undefined && perRow[i] === undefined)
+                ) {
+                  return row;
+                }
+                const rowLink = {
+                  ...base,
+                  id: toURI(createRef({ id: i }, {
+                    parent: { id: base.id, space: base.space },
+                    path: [...base.path, "result"],
+                    context: "sqlite-entry-row",
+                  })),
+                  path: [],
+                  schema: {
+                    ...rowSchemas[i],
+                    ...(perRow[i] !== undefined && { ifc: perRow[i] }),
+                  },
+                };
+                const rowCell = createCell(runtime, rowLink, wtx).asSchema(
+                  rowLink.schema as Parameters<Cell<unknown>["asSchema"]>[0],
+                ).withTx(wtx);
+                rowCell.set(row);
+                return rowCell;
+              });
+              const target = writeSchema
+                ? result.asSchema(writeSchema).withTx(wtx)
                 : result.withTx(wtx);
               target.set({
                 pending: false,
-                result: resultRows,
+                result: storedRows,
                 requestHash: hash,
                 ...(withheld !== undefined ? { withheld } : {}),
               });
-              // Per-row label attachment (CFC Phase 3): each row split into its
-              // own entity doc above; write each labeled row doc DIRECTLY (its
-              // own id, root path) under a root-`ifc` schema. Keyed by the row
-              // doc's id, so there is no collision with the array write's items
-              // schema, and the per-row root label coexists with the per-column
-              // field labels on the same doc (06-cfc.md "Read — re-derive per
-              // row, attach, ceiling").
+              // Per-row label attachment (CFC Phase 3): object rows split into
+              // entity docs. Labeled entry-list rows are anchored explicitly
+              // because arrays otherwise remain inline. Both forms attach the
+              // row label at the entity root and retain the per-column labels
+              // in `rowSchemas`.
               if (anyPerRow) {
-                const base = result.getAsNormalizedFullLink();
                 for (let i = 0; i < resultRows.length; i++) {
                   const ifc = perRow[i];
                   if (!ifc) {
                     continue;
                   }
-                  const raw = result.key("result").key(i).withTx(wtx).getRaw();
+                  const rowCell = result.key("result").key(i).withTx(wtx);
+                  const raw = rowCell.getRaw();
                   const link = parseLink(raw);
                   if (!link?.id) {
                     // Fail closed: a labeled row MUST carry its label; aborting
@@ -1096,11 +1185,11 @@ export function sqliteQuery(
                     wtx,
                   ).asSchema(
                     {
-                      type: "object",
-                      additionalProperties: true,
+                      ...rowSchemas[i],
                       ifc,
                     } as Parameters<Cell<unknown>["asSchema"]>[0],
-                  ).withTx(wtx).set(resultRows[i]);
+                  ).withTx(wtx)
+                    .set(resultRows[i]);
                 }
               }
             });
