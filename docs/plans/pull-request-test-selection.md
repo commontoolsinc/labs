@@ -52,11 +52,13 @@ has landed, archive it under
   spec](../specs/test-records.md). Everything here is built on the complete
   identity.
 - An **item** is the smallest thing a runner can be asked to run on its
-  own. For a pattern test the item is one file; the file supplies the name
-  while the suite supplies the kind, scope, and optional variant. For a
-  unit test the item is usually the file, which contains many identities.
-  For the command-line integration script the item is a named section,
-  which contains many identities.
+  own. It holds one identity or many, depending on the suite. For a
+  pattern test the item is one file and the file supplies the name, so the
+  two coincide. For a unit test the item is usually the file, and every
+  `Deno.test` in it is a separate identity, which is where almost all of
+  the repository's identities live. For the command-line integration
+  script the item is a single-step dispatch arm, which records the one
+  identity named for its step.
 - A **suite** is a named group of tests that share one runner and one
   environment: the workspace unit tests, the pattern integration tests,
   the pattern integration tests under the server-execution flag, and so
