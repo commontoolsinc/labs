@@ -22,6 +22,12 @@ import {
   type HarnessTranscriptMessage,
   inspectHarnessTranscriptPairing,
 } from "../src/contracts/transcript.ts";
+import {
+  type ChatFault,
+  FAULT_POINTS,
+  faultingToolLoop,
+  toolCall,
+} from "./support/chat-fault-fixture.ts";
 
 const nextIsoNow = () => {
   let counter = 0;
@@ -859,54 +865,20 @@ Deno.test("sqlite session restore keeps closed sessions closed while terminalizi
   }
 });
 
-const toolCall = (id: string) => ({
-  id,
-  type: "function" as const,
-  function: { name: "read_file", arguments: "{}" },
-});
+const RESUMED_AFTER_FIRST_TURN: readonly HarnessTranscriptMessage[] = [
+  { role: "user", content: "Read the first file" },
+  { role: "assistant", content: "Read the first." },
+  { role: "user", content: "Try again" },
+];
 
 /**
- * A loop that reports an assistant message declaring two tool calls and then as
- * many of their results as `resultsBeforeFault` names, before handing control
- * to `fault`. Every fault point CT-2069 names is one value of that pair.
- */
-const partialToolTurnLoop = (
-  resultsBeforeFault: number,
-  fault: () => Promise<HarnessPromptLoopResult>,
-): HarnessInteractivePromptLoopFactory =>
-() => ({
-  runTranscript: async (options) => {
-    const assistant = {
-      role: "assistant" as const,
-      content: "Reading both files.",
-      toolCalls: [toolCall("call-a"), toolCall("call-b")],
-    };
-    const transcript: HarnessTranscriptMessage[] = [
-      ...options.transcript,
-      assistant,
-    ];
-    await options.onTranscriptEvent?.({ message: assistant, transcript });
-    for (const id of ["call-a", "call-b"].slice(0, resultsBeforeFault)) {
-      const message = {
-        role: "tool" as const,
-        toolCallId: id,
-        toolName: "read_file",
-        content: `contents for ${id}`,
-      };
-      transcript.push(message);
-      await options.onTranscriptEvent?.({ message, transcript });
-    }
-    return await fault();
-  },
-});
-
-/**
- * Complete one turn, fail a second after partial tool progress, rebuild the
- * service from the same store, and report the transcript the next turn's prompt
- * loop is handed.
+ * Complete one turn, lose a second to `fault` after `resultsBeforeFault` of its
+ * two tool results, rebuild the service from the same store, and report the
+ * transcript the next turn's prompt loop is handed.
  */
 const transcriptAfterFaultedTurn = async (
   resultsBeforeFault: number,
+  fault: ChatFault,
 ): Promise<readonly HarnessTranscriptMessage[]> => {
   const path = await Deno.makeTempFile({ suffix: ".sqlite" });
   const store = await openSqliteHarnessChatSessionStore({
@@ -917,16 +889,12 @@ const transcriptAfterFaultedTurn = async (
     const service = new HarnessInteractiveChatService({
       createPromptLoop: (options) => {
         turn += 1;
-        if (turn === 1) {
-          return {
+        return turn === 1
+          ? {
             runTranscript: (runOptions) =>
               Promise.resolve(makeResult(runOptions, "Read the first.")),
-          };
-        }
-        return partialToolTurnLoop(
-          resultsBeforeFault,
-          () => Promise.reject(new Error("read_file exhausted its budget")),
-        )(options);
+          }
+          : faultingToolLoop(resultsBeforeFault, fault)(options);
       },
       now: nextIsoNow(),
       sessionStore: store,
@@ -974,23 +942,15 @@ const transcriptAfterFaultedTurn = async (
   }
 };
 
-const RESUMED_AFTER_FIRST_TURN: readonly HarnessTranscriptMessage[] = [
-  { role: "user", content: "Read the first file" },
-  { role: "assistant", content: "Read the first." },
-  { role: "user", content: "Try again" },
-];
-
-Deno.test("sqlite session restore is provider-valid after a turn dies having declared two tool calls", async () => {
-  const next = await transcriptAfterFaultedTurn(0);
-  assertEquals(next, RESUMED_AFTER_FIRST_TURN);
-  assertEquals(inspectHarnessTranscriptPairing(next).valid, true);
-});
-
-Deno.test("sqlite session restore is provider-valid after a turn dies between two tool results", async () => {
-  const next = await transcriptAfterFaultedTurn(1);
-  assertEquals(next, RESUMED_AFTER_FIRST_TURN);
-  assertEquals(inspectHarnessTranscriptPairing(next).valid, true);
-});
+// Whichever fault point a turn dies at, a service rebuilt from the same store
+// resumes from the last completed turn and nothing else.
+for (const resultsBeforeFault of FAULT_POINTS) {
+  Deno.test(`sqlite session restore resumes from the last completed turn after a fault with ${resultsBeforeFault} of two tool results`, async () => {
+    const next = await transcriptAfterFaultedTurn(resultsBeforeFault, "error");
+    assertEquals(next, RESUMED_AFTER_FIRST_TURN);
+    assertEquals(inspectHarnessTranscriptPairing(next).valid, true);
+  });
+}
 
 Deno.test("sqlite session restore keeps a reusable checkpoint when a turn is interrupted mid-tool", async () => {
   const path = await Deno.makeTempFile({ suffix: ".sqlite" });
@@ -1015,14 +975,9 @@ Deno.test("sqlite session restore keeps a reusable checkpoint when a turn is int
               Promise.resolve(makeResult(runOptions, "Read the first.")),
           };
         }
-        return partialToolTurnLoop(
-          1,
-          () => {
-            reachFault?.();
-            // Simulates the process dying between two tool results.
-            return new Promise<HarnessPromptLoopResult>(() => {});
-          },
-        )(options);
+        return faultingToolLoop(1, "interrupt", { onFault: reachFault })(
+          options,
+        );
       },
       now: nextIsoNow(),
       sessionStore: store,

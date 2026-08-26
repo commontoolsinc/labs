@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   type HarnessToolCall,
+  type HarnessTranscriptDefect,
   type HarnessTranscriptMessage,
   inspectHarnessTranscriptPairing,
   isResumableHarnessTranscript,
@@ -23,7 +24,7 @@ const assistant = (
   ...(toolCalls.length > 0 ? { toolCalls } : {}),
 });
 
-const toolResult = (id: string): HarnessTranscriptMessage => ({
+const result = (id: string): HarnessTranscriptMessage => ({
   role: "tool",
   toolCallId: id,
   toolName: "read_file",
@@ -35,146 +36,155 @@ const user = (content: string): HarnessTranscriptMessage => ({
   content,
 });
 
-describe("harness transcript pairing", () => {
-  it("accepts an empty transcript with a boundary of zero", () => {
-    const pairing = inspectHarnessTranscriptPairing([]);
-    expect(pairing.valid).toBe(true);
-    expect(pairing.defects).toEqual([]);
-    expect(pairing.safeBoundary).toBe(0);
-  });
-
-  it("accepts a fully paired transcript and puts the boundary at its end", () => {
-    const transcript = [
+/**
+ * Each case names the transcript, the defects it should report, and where its
+ * resumable prefix ends. `safeBoundary` is stated for every case on purpose: a
+ * boundary that runs past a defect is the failure mode that hides here, and it
+ * is invisible to a test that only checks the defect list.
+ */
+const CASES: readonly {
+  name: string;
+  transcript: readonly HarnessTranscriptMessage[];
+  defects: readonly HarnessTranscriptDefect[];
+  safeBoundary: number;
+}[] = [
+  { name: "an empty transcript", transcript: [], defects: [], safeBoundary: 0 },
+  {
+    name: "a fully paired transcript",
+    transcript: [
       user("read both"),
       assistant("reading", call("a"), call("b")),
-      toolResult("a"),
-      toolResult("b"),
+      result("a"),
+      result("b"),
       assistant("done"),
-    ];
-    const pairing = inspectHarnessTranscriptPairing(transcript);
-    expect(pairing.valid).toBe(true);
-    expect(pairing.safeBoundary).toBe(transcript.length);
-  });
-
-  it("reports both ids when an assistant declares two calls and neither is answered", () => {
-    const transcript = [
+    ],
+    defects: [],
+    safeBoundary: 5,
+  },
+  {
+    name: "an assistant message whose two calls are both unanswered",
+    transcript: [user("read both"), assistant("reading", call("a"), call("b"))],
+    defects: [{
+      kind: "unresolved_tool_calls",
+      messageIndex: 1,
+      toolCallIds: ["a", "b"],
+    }],
+    safeBoundary: 1,
+  },
+  {
+    name: "one of two results having landed",
+    transcript: [
       user("read both"),
       assistant("reading", call("a"), call("b")),
-    ];
-    const pairing = inspectHarnessTranscriptPairing(transcript);
-    expect(pairing.valid).toBe(false);
-    expect(pairing.defects).toEqual([
-      {
-        kind: "unresolved_tool_calls",
-        messageIndex: 1,
-        toolCallIds: ["a", "b"],
-      },
-    ]);
-    expect(pairing.safeBoundary).toBe(1);
-  });
-
-  it("names only the unanswered id when one of two results has landed", () => {
-    const transcript = [
-      user("read both"),
-      assistant("reading", call("a"), call("b")),
-      toolResult("a"),
-    ];
-    const pairing = inspectHarnessTranscriptPairing(transcript);
-    expect(pairing.valid).toBe(false);
-    expect(pairing.defects).toEqual([
-      { kind: "unresolved_tool_calls", messageIndex: 1, toolCallIds: ["b"] },
-    ]);
-    expect(pairing.safeBoundary).toBe(1);
-  });
-
-  it("reports a tool result that no call preceded", () => {
-    const pairing = inspectHarnessTranscriptPairing([
-      user("hi"),
-      toolResult("ghost"),
-    ]);
-    expect(pairing.defects).toEqual([
-      { kind: "orphan_tool_result", messageIndex: 1, toolCallId: "ghost" },
-    ]);
-    // No truncation repairs an orphan, so the boundary stops before it.
-    expect(pairing.safeBoundary).toBe(1);
-  });
-
-  it("reports a second result for a call that was already answered", () => {
-    const pairing = inspectHarnessTranscriptPairing([
+      result("a"),
+    ],
+    defects: [{
+      kind: "unresolved_tool_calls",
+      messageIndex: 1,
+      toolCallIds: ["b"],
+    }],
+    safeBoundary: 1,
+  },
+  {
+    name: "a result no call preceded",
+    transcript: [user("hi"), result("ghost")],
+    defects: [{
+      kind: "orphan_tool_result",
+      messageIndex: 1,
+      toolCallId: "ghost",
+    }],
+    safeBoundary: 1,
+  },
+  {
+    name: "a second result for an answered call",
+    transcript: [assistant("reading", call("a")), result("a"), result("a")],
+    defects: [{
+      kind: "duplicate_tool_result",
+      messageIndex: 2,
+      toolCallId: "a",
+    }],
+    safeBoundary: 2,
+  },
+  {
+    name: "a call id declared twice",
+    transcript: [
       assistant("reading", call("a")),
-      toolResult("a"),
-      toolResult("a"),
-    ]);
-    expect(pairing.defects).toEqual([
-      { kind: "duplicate_tool_result", messageIndex: 2, toolCallId: "a" },
-    ]);
-    expect(pairing.safeBoundary).toBe(2);
-  });
-
-  it("reports a call id declared twice", () => {
-    const pairing = inspectHarnessTranscriptPairing([
-      assistant("reading", call("a")),
-      toolResult("a"),
+      result("a"),
       assistant("again", call("a")),
-    ]);
-    expect(pairing.defects).toEqual([
-      { kind: "duplicate_tool_call", messageIndex: 2, toolCallId: "a" },
-    ]);
-    // The prefix keeps the answered call and stops before the redeclaration.
-    expect(pairing.safeBoundary).toBe(2);
-  });
-
-  it("accepts an assistant message carrying only native model tool results", () => {
-    // These are provider-side results already embedded in the assistant
-    // message. The Responses projection never turns them into a function_call,
-    // so they need no matching tool message.
-    const transcript: HarnessTranscriptMessage[] = [
-      user("search"),
-      {
-        role: "assistant",
-        content: "here is what I found",
-        nativeModelToolResults: [
-          {
-            type: "cf-harness.native-model-tool-result",
-            toolId: "google_search",
-          },
-        ],
-      },
-    ];
-    const pairing = inspectHarnessTranscriptPairing(transcript);
-    expect(pairing.valid).toBe(true);
-    expect(pairing.safeBoundary).toBe(transcript.length);
-  });
-
-  it("keeps the boundary behind a user message that interleaves pending calls", () => {
-    const transcript = [
+    ],
+    defects: [{
+      kind: "duplicate_tool_call",
+      messageIndex: 2,
+      toolCallId: "a",
+    }],
+    safeBoundary: 2,
+  },
+  {
+    name: "a user message interleaved while calls are pending",
+    transcript: [
       user("read both"),
       assistant("reading", call("a"), call("b")),
       user("actually, never mind"),
-    ];
-    const pairing = inspectHarnessTranscriptPairing(transcript);
-    expect(pairing.valid).toBe(false);
-    expect(pairing.safeBoundary).toBe(1);
+    ],
+    defects: [{
+      kind: "unresolved_tool_calls",
+      messageIndex: 1,
+      toolCallIds: ["a", "b"],
+    }],
+    safeBoundary: 1,
+  },
+  {
+    name: "an assistant message carrying only native model tool results",
+    // Provider-side results already embedded in the assistant message. The
+    // Responses projection never turns them into a call needing a partner.
+    transcript: [user("search"), {
+      role: "assistant",
+      content: "here is what I found",
+      nativeModelToolResults: [{
+        type: "cf-harness.native-model-tool-result",
+        toolId: "google_search",
+      }],
+    }],
+    defects: [],
+    safeBoundary: 2,
+  },
+];
+
+describe("harness transcript pairing", () => {
+  for (const testCase of CASES) {
+    it(`reports ${testCase.name}`, () => {
+      const pairing = inspectHarnessTranscriptPairing(testCase.transcript);
+      expect(pairing.defects).toEqual(testCase.defects);
+      expect(pairing.valid).toBe(testCase.defects.length === 0);
+      expect(pairing.safeBoundary).toBe(testCase.safeBoundary);
+    });
+  }
+
+  it("truncates every case to a prefix that is itself resumable", () => {
+    // The property the recovery path depends on, asserted over the same table
+    // rather than restated per case.
+    for (const { name, transcript, safeBoundary } of CASES) {
+      const prefix = transcript.slice(0, safeBoundary);
+      expect(isResumableHarnessTranscript(prefix), name).toBe(true);
+    }
   });
 
-  it("projects a transcript truncated at its boundary into paired provider input", async () => {
+  it("projects a truncated transcript into paired provider input", async () => {
     // The boundary has to fall after a complete call/result pair, or the
     // projection below proves nothing about pairing.
     const transcript = [
       { role: "system", content: "Be careful." } as HarnessTranscriptMessage,
       user("read the first"),
       assistant("reading", call("a")),
-      toolResult("a"),
+      result("a"),
       assistant("reading both", call("b"), call("c")),
-      toolResult("b"),
+      result("b"),
     ];
     const { safeBoundary } = inspectHarnessTranscriptPairing(transcript);
     expect(safeBoundary).toBe(4);
-    const rolledBack = transcript.slice(0, safeBoundary);
-    expect(isResumableHarnessTranscript(rolledBack)).toBe(true);
 
     const { input } = await toResponsesInput(
-      rolledBack,
+      transcript.slice(0, safeBoundary),
       "gpt-5",
       "openai",
       "gateway Responses",
