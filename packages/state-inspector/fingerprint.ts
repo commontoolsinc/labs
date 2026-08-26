@@ -109,6 +109,16 @@ export interface FingerprintReport {
   excludedGenerated: number;
 
   /**
+   * The ids behind {@link excludedGenerated}. A diff against a fingerprint
+   * taken from another store must subtract these before calling anything
+   * removed: the two stores compute their exclusions independently, so a cell
+   * no manifest listed THERE and this manifest calls generated HERE is present
+   * in both and absent from one list. Reporting that as removed content is the
+   * loudest verdict this module has, spent on a filter disagreement.
+   */
+  excludedGeneratedIds: string[];
+
+  /**
    * Ids some manifest calls generated and another calls named. Counted as
    * generated (rotation-prone wins, so the fingerprint stays stable) but
    * reported, because that choice can hide a real content change and must never
@@ -221,10 +231,12 @@ export function contentFingerprint(
   const perEntity: EntityFingerprint[] = [];
   const unhashable: { id: string; reason: string }[] = [];
   let excludedGenerated = 0;
+  const excludedGeneratedIds: string[] = [];
 
   for (const model of allEntities(space, branch, options.enumerationCap)) {
     if (generated.has(model.id)) {
       excludedGenerated++;
+      excludedGeneratedIds.push(model.id);
       continue;
     }
     // The models come from this branch, so the values must too — reading the
@@ -264,6 +276,7 @@ export function contentFingerprint(
     ).toString(),
     entities: perEntity.length,
     excludedGenerated,
+    excludedGeneratedIds,
     ambiguous,
     unhashable,
     perEntity,

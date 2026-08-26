@@ -220,6 +220,46 @@ Deno.test("a migration-shaped change is a PASS, not a failure", async () => {
   });
 });
 
+Deno.test("a cell a migration adopts as generated is not a removal", async () => {
+  // Measured on a 5 GB clone of the real Topics store: `verify` reported 114
+  // owned cells REMOVED — "durable content was destroyed", the loudest verdict
+  // it has — while every one of them was present at head in BOTH stores. The
+  // two sides derive their exclusions from their own pieces: the baseline
+  // hashed cells no pristine manifest listed, and after the migration the
+  // pieces call those same cells generated, so they drop out of the second
+  // list. An operator following the runbook aborts a healthy migration on it.
+  await withDirs(async ({ source, clone }) => {
+    // A cell no piece's manifest lists: the baseline hashes it.
+    mutate(source, [["of:orphan", {
+      value: "orphan-v1",
+      result: link("of:piece"),
+    }]]);
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const paths = clonePaths(clone, SPACE);
+    // What the migration does: the new pattern adopts it into a generated slot.
+    mutate(paths.workingPath, [["of:piece", {
+      value: { $NAME: "Board" },
+      argument: link("of:input"),
+      internal: [
+        { partialCause: "entries", link: link("of:named") },
+        { partialCause: { $generated: 0 }, link: link("of:generated") },
+        { partialCause: { $generated: 1 }, link: link("of:orphan") },
+      ],
+      patternIdentity: { identity: MODULE_IDENTITY, symbol: "default" },
+      schema: { type: "object", properties: {}, $defs: {} },
+    }]]);
+
+    const v = await verifyClone(clone);
+    assertEquals(v.diff.removed, 0, "it is in both stores; nothing was lost");
+    assertEquals(
+      v.diff.reclassifiedGenerated,
+      1,
+      "and the reclassification is reported rather than dropped",
+    );
+    assert(v.okAfterMigration, "so the migration verdict passes");
+  });
+});
+
 Deno.test("verify catches a real content change", async () => {
   await withDirs(async ({ source, clone }) => {
     await createClone({ source, space: SPACE, targetDir: clone, now: NOW });

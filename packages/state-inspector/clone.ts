@@ -412,6 +412,16 @@ export interface VerifyResult {
     changed: number;
     added: number;
 
+    /**
+     * Entities the baseline hashed and this store's manifests call generated.
+     * They are present in both stores, so they are not removed; the two sides
+     * derive their exclusions from their own pieces, and a migration that
+     * adopts an unlisted cell into a generated slot moves it from one list to
+     * the other. Reported rather than dropped: a number that silently
+     * disappears is one nobody can check.
+     */
+    reclassifiedGenerated: number;
+
     /** Counts per entity kind, so "74 pieces" reads differently from "74 cells". */
     changedByKind: Record<string, number>;
     removedByKind: Record<string, number>;
@@ -504,6 +514,11 @@ export async function verifyClone(dir: string): Promise<VerifyResult> {
       hash: manifest.fingerprint.hash,
       entities: rows.length,
       excludedGenerated: manifest.fingerprint.excludedGenerated,
+      // The sidecar records how many the baseline excluded, not which. Empty
+      // is honest here and costs nothing: the reclassification below reads
+      // the WORKING store's exclusions, which is the side that can turn a
+      // present entity into an absent row.
+      excludedGeneratedIds: [],
       ambiguous: [],
       unhashable: [],
       perEntity: rows,
@@ -519,6 +534,18 @@ export async function verifyClone(dir: string): Promise<VerifyResult> {
   }
 
   const d = diffFingerprints(before, fingerprint);
+  // A removal is an entity gone from the store, never one this store's own
+  // manifests reclassified. The two sides compute their exclusions
+  // independently — the baseline from the pristine pieces, this from the
+  // working ones — so a cell no pristine manifest listed and a migrated piece
+  // now calls generated is present in both stores and absent from one list.
+  // Subtracting them here is what keeps `removed` meaning destroyed content,
+  // which is the verdict the runbook tells an operator to stop on.
+  const excludedNow = new Set(fingerprint.excludedGeneratedIds);
+  const reclassifiedGenerated = d.removed.filter((at) =>
+    excludedNow.has(at.id)
+  );
+  const removed = d.removed.filter((at) => !excludedNow.has(at.id));
   // Keyed by id AND scope throughout: one id can hold a shared space value plus
   // per-user/per-session overrides that are genuinely different entities, and a
   // by-id lookup would let the last scope win and misclassify the tally —
@@ -544,11 +571,12 @@ export async function verifyClone(dir: string): Promise<VerifyResult> {
     return out;
   };
   const delta = {
-    removed: d.removed.length,
+    removed: removed.length,
     changed: d.changed.length,
     added: d.added.length,
+    reclassifiedGenerated: reclassifiedGenerated.length,
     changedByKind: tally(d.changed, kindOf),
-    removedByKind: tally(d.removed, kindWas),
+    removedByKind: tally(removed, kindWas),
   };
 
   const match = fingerprint.hash === manifest.fingerprint.hash;
