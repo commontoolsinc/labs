@@ -34,6 +34,7 @@ import {
   type CfcLabelView,
   JSONValue,
   RequestType,
+  type SqliteParams,
   type WireCellValue,
 } from "./protocol/mod.ts";
 import { $conn, type RuntimeClient } from "./runtime-client.ts";
@@ -154,12 +155,19 @@ export class CellHandle<T = unknown> {
     await this.#applyLocalAndSend(value, RequestType.CellSet);
   }
 
+  /** Set the cell's value and reject when the runtime refuses the write. */
+  async setStrict(value: T): Promise<void> {
+    this.#requireSchema("setStrict");
+    await this.#applyLocalAndSend(value, RequestType.CellSet, true);
+  }
+
   // Optimistic local update (mirrors the old set()) plus the remote write. The
   // request _type_ encodes the intent: CellSet is a blind overwrite, CellPush
   // is a read-modify-write append that the runtime keeps as compare-and-set.
   #applyLocalAndSend(
     value: T,
     type: RequestType.CellSet | RequestType.CellPush,
+    propagateFailure = false,
   ): Promise<void> {
     // Serialized _first_, because it can refuse. The local update below is
     // optimistic about the _write_ -- it assumes a value the connection
@@ -202,6 +210,7 @@ export class CellHandle<T = unknown> {
         cell,
         value: serialized,
       });
+    if (propagateFailure) return request;
     return request.catch((error) => {
       if (!this.#conn.signal.aborted) {
         console.error("[CellHandle] Write failed:", error);
@@ -210,11 +219,22 @@ export class CellHandle<T = unknown> {
   }
 
   async send(event: T): Promise<void> {
-    await this.#conn.request<RequestType.CellSend>({
+    await this.#send(event);
+  }
+
+  /** Send a stream event and reject when the runtime refuses it. */
+  async sendStrict(event: T): Promise<void> {
+    await this.#send(event, true);
+  }
+
+  #send(event: T, propagateFailure = false): Promise<void> {
+    const request = this.#conn.request<RequestType.CellSend>({
       type: RequestType.CellSend,
       cell: this.ref(),
       event: CellHandle.serialize(event as ClientCellValue),
-    }).catch((error) => {
+    });
+    if (propagateFailure) return request;
+    return request.catch((error) => {
       if (!this.#conn.signal.aborted) {
         console.error("[CellHandle] Send failed:", error);
       }
@@ -385,6 +405,37 @@ export class CellHandle<T = unknown> {
       cell: this.ref(),
     });
     return response.cfcLabel;
+  }
+
+  /** Run a read-only query when this handle refers to a SQLite database. */
+  async querySqlite<Row = Record<string, unknown>>(
+    sql: string,
+    params?: ReadonlyArray<ClientCellValue> | Record<string, ClientCellValue>,
+  ): Promise<Row[]> {
+    const response = await this.#conn.request<RequestType.SqliteQuery>({
+      type: RequestType.SqliteQuery,
+      cell: this.ref(),
+      sql,
+      ...(params !== undefined && {
+        params: CellHandle.serialize(params) as SqliteParams,
+      }),
+    });
+    return response.rows.map((row) => CellHandle.deserialize(this, row) as Row);
+  }
+
+  /** Commit a SQL write when this handle refers to a SQLite database. */
+  async execSqlite(
+    sql: string,
+    params?: ReadonlyArray<ClientCellValue> | Record<string, ClientCellValue>,
+  ): Promise<void> {
+    await this.#conn.request<RequestType.SqliteExec>({
+      type: RequestType.SqliteExec,
+      cell: this.ref(),
+      sql,
+      ...(params !== undefined && {
+        params: CellHandle.serialize(params) as SqliteParams,
+      }),
+    });
   }
 
   equals(other: unknown): boolean {

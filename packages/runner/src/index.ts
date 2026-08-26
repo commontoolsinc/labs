@@ -91,6 +91,7 @@ export {
 export {
   type CellLinkInput,
   convertCellsToLinks,
+  encodeSqliteParams,
   isCell,
   isReadableCell,
   isStream,
@@ -276,6 +277,7 @@ export {
   CFC_RUNTIME_SUBJECT,
   cfcAtom,
   ContextualFlowControl,
+  resolveExternalRootRefForStructure,
 } from "./cfc.ts";
 export type { Mutable } from "@commonfabric/utils/types";
 export {

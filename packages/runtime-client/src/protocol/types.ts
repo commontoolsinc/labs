@@ -155,6 +155,12 @@ export enum RequestType {
   /** Forgets a client's pinned operation target. */
   OperationSessionClose = "operation:session-close",
 
+  /** Runs a read-only SQL query against a SQLite database cell. */
+  SqliteQuery = "sqlite:query",
+
+  /** Commits a SQL write through a SQLite database cell. */
+  SqliteExec = "sqlite:exec",
+
   // Runtime operations
 
   /**
@@ -998,6 +1004,27 @@ export type WireOperationFieldSnapshot =
     materialized: RealmEncodedValue;
     operations: WireIntegratedOperation[];
   };
+
+/** SQLite bind values as the main-thread connection carries them. */
+export type SqliteParams =
+  | readonly WireCellValue[]
+  | { readonly [key: string]: WireCellValue };
+
+/** The {@link RequestType.SqliteQuery} request. */
+export type SqliteQueryRequest = BaseRequest & {
+  type: RequestType.SqliteQuery;
+  cell: CellRef;
+  sql: string;
+  params?: SqliteParams;
+};
+
+/** The {@link RequestType.SqliteExec} request. */
+export type SqliteExecRequest = BaseRequest & {
+  type: RequestType.SqliteExec;
+  cell: CellRef;
+  sql: string;
+  params?: SqliteParams;
+};
 
 /**
  * The {@link RequestType.GetCell} request. `cause` is what derives the
@@ -2414,6 +2441,8 @@ export type IPCClientRequest =
   | OperationSubscribeRequest
   | OperationUnsubscribeRequest
   | OperationSessionCloseRequest
+  | SqliteQueryRequest
+  | SqliteExecRequest
   | GetCellRequest
   | GetHomeSpaceCellRequest
   | EnsureHomePatternRunningRequest
@@ -2522,6 +2551,11 @@ export type CellGetResponse = CellValueResponse & {
    * none to reference.
    */
   cell?: CellRef;
+};
+
+/** Rows returned by {@link RequestType.SqliteQuery}. */
+export type SqliteQueryResponse = {
+  rows: readonly WireCellValue[];
 };
 
 /** A reference to one cell, for a request whose answer is which cell. */
@@ -2854,6 +2888,7 @@ export type RemoteResponse =
   | CellGetResponse
   | CellResponse
   | CfcLabelViewResponse
+  | SqliteQueryResponse
   | GraphSnapshotResponse
   | LoggerCountsResponse
   | PatternCoverageResponse
@@ -3054,6 +3089,14 @@ export type Commands = {
   [RequestType.OperationSessionClose]: {
     request: OperationSessionCloseRequest;
     response: BooleanResponse;
+  };
+  [RequestType.SqliteQuery]: {
+    request: SqliteQueryRequest;
+    response: SqliteQueryResponse;
+  };
+  [RequestType.SqliteExec]: {
+    request: SqliteExecRequest;
+    response: EmptyResponse;
   };
   // Page requests
   [RequestType.PageCreate]: {

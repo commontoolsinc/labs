@@ -2540,6 +2540,55 @@ describe("runtime-processor", () => {
       });
     });
 
+    it("describes a resolved SQLite cell as a SQLite capability", () => {
+      const sourceRef: CellRef = {
+        id: "of:sqlite-source" as CellRef["id"],
+        space: "did:key:test" as CellRef["space"],
+        scope: "space",
+        path: [],
+      };
+      const resolvedRef: CellRef = {
+        id: "of:sqlite-database" as CellRef["id"],
+        space: "did:key:test" as CellRef["space"],
+        scope: "space",
+        path: [],
+        schema: { type: "object", properties: {} },
+      };
+      const resolvedCell = {
+        getAsLink: () => ({ "/": { "link@1": resolvedRef } }),
+        getAsNormalizedFullLink: () => resolvedRef,
+        getRaw: () => ({
+          id: "fid1:sqlite-database",
+          tables: { notes: { type: "object" } },
+          scope: "space",
+        }),
+        runtime: {
+          readTx: () => ({
+            readOrThrow: () => ({ value: { id: "fid1:sqlite-database" } }),
+          }),
+        },
+      };
+      const processor = {
+        runtime: {
+          getCellFromLink: () => ({ resolveAsCell: () => resolvedCell }),
+        },
+      } as unknown as RuntimeProcessor;
+
+      const response = RuntimeProcessor.prototype.handleCellResolveAsCell.call(
+        processor,
+        { type: RequestType.CellResolveAsCell, cell: sourceRef },
+      );
+
+      expect(response.cell).toEqual({
+        ...resolvedRef,
+        schema: {
+          type: "object",
+          properties: {},
+          asCell: ["sqlite"],
+        },
+      });
+    });
+
     it("does not look up CFC labels from a result meta cell", () => {
       const resultRef: CellRef = {
         id: "of:cfc-label-result" as CellRef["id"],
@@ -4149,6 +4198,124 @@ describe("runtime-processor", () => {
         processorOver({ "cf:module/abc": undefined }),
       );
       expect(patterns).toEqual([]);
+    });
+  });
+
+  describe("RuntimeProcessor SQLite IPC", () => {
+    const ref: CellRef = {
+      id: "of:database" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+
+    const processorWith = (
+      db: Record<string, unknown>,
+      sqliteQuery: (...args: unknown[]) => Promise<unknown>,
+    ) => {
+      let pulled = false;
+      const cell = {
+        pull: () => {
+          pulled = true;
+          return Promise.resolve(db);
+        },
+        getRaw: () => pulled ? db : undefined,
+        asSchema: () => ({ get: () => db }),
+      };
+      const runtime = {
+        getCellFromLink: () => cell,
+        storageManager: { open: () => ({ sqliteQuery }) },
+      };
+      return Object.assign(Object.create(RuntimeProcessor.prototype), {
+        runtime,
+      }) as RuntimeProcessor;
+    };
+
+    it("queries an unlabeled database through its storage provider", async () => {
+      const calls: unknown[][] = [];
+      const processor = processorWith(
+        { id: "db-1", tables: { notes: {} }, scope: "user" },
+        (...args) => {
+          calls.push(args);
+          return Promise.resolve({ rows: [{ title: "One" }] });
+        },
+      );
+
+      await expect(processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT title FROM notes WHERE id = ?",
+        params: [1],
+      })).resolves.toEqual({ rows: [{ title: "One" }] });
+      expect(calls).toEqual([[
+        { id: "db-1", tables: { notes: {} }, scope: "user" },
+        "SELECT title FROM notes WHERE id = ?",
+        [1],
+      ]]);
+    });
+
+    it("refuses a direct query whose result needs CFC provenance", async () => {
+      let queried = false;
+      const processor = processorWith({
+        id: "db-1",
+        tables: {
+          notes: {
+            properties: {
+              secret: { ifc: { confidentiality: ["private"] } },
+            },
+          },
+        },
+      }, () => {
+        queried = true;
+        return Promise.resolve({ rows: [] });
+      });
+
+      await expect(processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT secret FROM notes",
+      })).rejects.toThrow("query them inside a pattern");
+      expect(queried).toBe(false);
+    });
+
+    it("commits writes through the database cell's transactional exec", async () => {
+      const calls: unknown[][] = [];
+      const cell = {
+        pull: () => {
+          calls.push(["pull"]);
+          return Promise.resolve({ id: "db-1" });
+        },
+        withTx: (tx: unknown) => ({
+          exec: (sql: string, params: unknown) => calls.push([tx, sql, params]),
+        }),
+      };
+      const tx = { id: "transaction" };
+      const runtime = {
+        getCellFromLink: () => cell,
+        editWithRetry: (edit: (tx: unknown) => void) => {
+          edit(tx);
+          return Promise.resolve({ ok: undefined });
+        },
+      };
+      const processor = Object.assign(
+        Object.create(RuntimeProcessor.prototype),
+        { runtime },
+      ) as RuntimeProcessor;
+
+      await processor.handleSqliteExec({
+        type: RequestType.SqliteExec,
+        cell: ref,
+        sql: "INSERT INTO notes (title) VALUES (:title)",
+        params: { title: "New" },
+      });
+
+      expect(calls).toEqual([[
+        "pull",
+      ], [
+        tx,
+        "INSERT INTO notes (title) VALUES (:title)",
+        { title: "New" },
+      ]]);
     });
   });
 });

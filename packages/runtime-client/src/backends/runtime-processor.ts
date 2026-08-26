@@ -5,7 +5,10 @@ import {
 } from "@commonfabric/data-model/codecs";
 import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import {
+  cloneIfNecessary,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import { toStructuredDebugValue } from "@commonfabric/data-model/value-debug";
 import {
   type SiteTable,
@@ -31,8 +34,10 @@ import { setLLMUrl } from "@commonfabric/llm";
 import { type ACL, isACLUser, isCapability } from "@commonfabric/memory/acl";
 import {
   type ApplyOpResolution,
+  dbNeedsColumnProvenance,
   type OperationFieldAddress,
   type OperationFieldSnapshot,
+  type SqliteDbRef,
   toValuePath,
 } from "@commonfabric/memory/v2";
 import {
@@ -49,6 +54,7 @@ import {
   type Cancel,
   type Cell,
   convertCellsToLinks,
+  encodeSqliteParams,
   entityIdFrom,
   getCellOrThrow,
   getPatternIdentityRef,
@@ -60,6 +66,7 @@ import {
   markUiInputBlindWriteTx,
   normalizeSpaceHost,
   PatternCoverageCollector,
+  resolveExternalRootRefForStructure,
   Runtime,
   runtimePresets,
   RuntimeTelemetry,
@@ -134,6 +141,7 @@ import {
   type InitializationData,
   type IPCClientNotification,
   IPCClientRequest,
+  isCellRef,
   type LoggerCountsResponse,
   type LoggerMetadata,
   type LogLevel,
@@ -187,6 +195,9 @@ import {
   type SpaceRemoveAclEntryRequest,
   type SpaceResponse,
   type SpaceSetAclEntryRequest,
+  type SqliteExecRequest,
+  type SqliteQueryRequest,
+  type SqliteQueryResponse,
   type TriggerTraceResponse,
   type UploadBlobRequest,
   type UploadBlobResponse,
@@ -288,6 +299,38 @@ const cfcLabelLogger = getLogger("runtime-client.cfc-label", {
   enabled: true,
   level: "error",
 });
+
+function isSqliteDbRefValue(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.id === "string" &&
+    !!candidate.tables && typeof candidate.tables === "object" &&
+    !Array.isArray(candidate.tables) &&
+    (candidate.scope === undefined || candidate.scope === "space" ||
+      candidate.scope === "user" || candidate.scope === "session") &&
+    (candidate.owner === undefined || typeof candidate.owner === "string");
+}
+
+function sqliteParamsForRuntime(
+  runtime: Runtime,
+  value: FabricValue,
+): unknown {
+  if (isCellRef(value)) return getCell(runtime, value);
+  if (Array.isArray(value)) {
+    return value.map((member) => sqliteParamsForRuntime(runtime, member));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, member]) => [
+        key,
+        sqliteParamsForRuntime(runtime, member),
+      ]),
+    );
+  }
+  return value;
+}
 
 function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
   const spaceBaseUrl = new URL(`/${space}/`, apiUrl);
@@ -1403,8 +1446,25 @@ export class RuntimeProcessor {
   handleCellResolveAsCell(request: CellResolveAsCellRequest): CellResponse {
     const cell = getCell(this.runtime, request.cell);
     const resolved = cell.resolveAsCell();
+    const ref = createCellRef(resolved);
+    if (
+      ref.schema && typeof ref.schema === "object" &&
+      !Array.isArray(ref.schema)
+    ) {
+      ref.schema = resolveExternalRootRefForStructure(ref.schema);
+    }
+    const raw = (resolved as Cell<unknown> & {
+      getRaw?: (options: { lastNode: "value" }) => unknown;
+    }).getRaw?.({ lastNode: "value" });
+    if (isSqliteDbRefValue(raw)) {
+      const schema = ref.schema && typeof ref.schema === "object" &&
+          !Array.isArray(ref.schema)
+        ? ref.schema
+        : { type: "object" as const };
+      ref.schema = { ...schema, asCell: ["sqlite"] as const };
+    }
     return {
-      cell: createCellRef(resolved),
+      cell: ref,
     };
   }
 
@@ -1435,6 +1495,92 @@ export class RuntimeProcessor {
     };
     cfcLabelLogger.time(totalStart, "total");
     return response;
+  }
+
+  async handleSqliteQuery(
+    request: SqliteQueryRequest,
+  ): Promise<SqliteQueryResponse> {
+    const cell = getCell(this.runtime, request.cell);
+    await cell.pull();
+    const db = this.readSqliteDbRef(cell);
+    // A direct IPC query has no runner result cell on which to persist the
+    // label derived from result-column provenance. Refuse that database shape
+    // instead of returning rows with their CFC labels silently stripped.
+    if (dbNeedsColumnProvenance(db.tables)) {
+      throw new Error(
+        "Direct SQLite bridge queries are unavailable for CFC-labeled " +
+          "tables; query them inside a pattern so result labels propagate.",
+      );
+    }
+    const provider = this.runtime.storageManager.open(request.cell.space);
+    if (!provider.sqliteQuery) {
+      throw new Error(
+        "sqlite: storage provider does not support queries " +
+          "(sqliteQuery unavailable)",
+      );
+    }
+    const params = request.params === undefined
+      ? undefined
+      : encodeSqliteParams(
+        request.sql,
+        sqliteParamsForRuntime(this.runtime, request.params) as
+          | ReadonlyArray<unknown>
+          | Record<string, unknown>,
+      );
+    const result = await provider.sqliteQuery(db, request.sql, params);
+    return { rows: result.rows as SqliteQueryResponse["rows"] };
+  }
+
+  async handleSqliteExec(request: SqliteExecRequest): Promise<void> {
+    await getCell(this.runtime, request.cell).pull();
+    const params = request.params === undefined
+      ? undefined
+      : sqliteParamsForRuntime(this.runtime, request.params) as
+        | ReadonlyArray<unknown>
+        | Record<string, unknown>;
+    const result = await this.runtime.editWithRetry((tx) => {
+      const cell = getCell(this.runtime, request.cell).withTx(
+        tx,
+      ) as unknown as {
+        exec(
+          sql: string,
+          params?: ReadonlyArray<unknown> | Record<string, unknown>,
+        ): void;
+      };
+      cell.exec(request.sql, params);
+    });
+    if (result.error) throw new Error(result.error.message);
+  }
+
+  private readSqliteDbRef(cell: Cell<unknown>): SqliteDbRef {
+    const raw = cell.getRaw({ lastNode: "value" }) as
+      | {
+        id?: unknown;
+        tables?: unknown;
+        scope?: unknown;
+        owner?: unknown;
+      }
+      | undefined;
+    if (!raw || typeof raw.id !== "string") {
+      throw new TypeError(
+        "SQLite operations require a valid SqliteDb cell handle.",
+      );
+    }
+    const materialized = cell.asSchema<{
+      tables?: FabricValue;
+    }>({ type: "object", additionalProperties: true }).get();
+    const tables = materialized?.tables !== undefined
+      ? cloneIfNecessary(materialized.tables, {
+        frozen: false,
+      }) as SqliteDbRef["tables"]
+      : raw.tables as SqliteDbRef["tables"];
+    return {
+      id: raw.id,
+      ...(tables !== undefined && { tables }),
+      ...((raw.scope === "space" || raw.scope === "user" ||
+        raw.scope === "session") && { scope: raw.scope }),
+      ...(typeof raw.owner === "string" && { owner: raw.owner }),
+    };
   }
 
   handleGetCell(request: GetCellRequest): CellResponse {
@@ -2118,6 +2264,10 @@ export class RuntimeProcessor {
         return this.handleOperationUnsubscribe(request);
       case RequestType.OperationSessionClose:
         return this.handleOperationSessionClose(request);
+      case RequestType.SqliteQuery:
+        return await this.handleSqliteQuery(request);
+      case RequestType.SqliteExec:
+        return await this.handleSqliteExec(request);
       case RequestType.GetCell:
         return this.handleGetCell(request);
       case RequestType.GetHomeSpaceCell:

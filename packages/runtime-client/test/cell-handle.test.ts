@@ -6,7 +6,10 @@ import {
   FabricBytes,
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-primitives";
-import { linkRefPayloadFromString } from "@commonfabric/runner/shared";
+import {
+  linkRefFrom,
+  linkRefPayloadFromString,
+} from "@commonfabric/runner/shared";
 
 import {
   $conn,
@@ -20,6 +23,71 @@ import {
 import { cellRefToKey } from "@/shared/utils.ts";
 
 describe("cell-handle", () => {
+  describe("SQLite IPC", () => {
+    const ref: CellRef = {
+      id: "of:database" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+
+    it("queries through the database cell and hydrates returned cell refs", async () => {
+      const requests: unknown[] = [];
+      const linked = { ...ref, id: "of:linked" as CellRef["id"] };
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: unknown) => {
+            requests.push(request);
+            return Promise.resolve({
+              rows: [{ title: "One", source: linkRefFrom(linked) }],
+            });
+          },
+        }),
+      } as unknown as RuntimeClient;
+      const database = new CellHandle(runtime, ref);
+
+      const rows = await database.querySqlite<{
+        title: string;
+        source: CellHandle<unknown>;
+      }>("SELECT title, source FROM notes WHERE id = ?", [1]);
+
+      expect(requests).toEqual([{
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT title, source FROM notes WHERE id = ?",
+        params: [1],
+      }]);
+      expect(rows[0]?.title).toBe("One");
+      expect(rows[0]?.source).toBeInstanceOf(CellHandle);
+      expect(rows[0]?.source.ref()).toEqual(linked);
+    });
+
+    it("commits writes through the database cell", async () => {
+      const requests: unknown[] = [];
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: unknown) => {
+            requests.push(request);
+            return Promise.resolve({});
+          },
+        }),
+      } as unknown as RuntimeClient;
+      const database = new CellHandle(runtime, ref);
+
+      await database.execSqlite(
+        "INSERT INTO notes (title) VALUES (:title)",
+        { title: "New" },
+      );
+
+      expect(requests).toEqual([{
+        type: RequestType.SqliteExec,
+        cell: ref,
+        sql: "INSERT INTO notes (title) VALUES (:title)",
+        params: { title: "New" },
+      }]);
+    });
+  });
+
   describe("CellHandle CFC label IPC", () => {
     it("queries the runtime for the label view behind a cell", async () => {
       const cfcLabel = {
@@ -756,6 +824,12 @@ describe("cell-handle", () => {
       expect(spy.calls.length).toBe(0);
     });
 
+    it("rejects a strict send when the runtime refuses the event", async () => {
+      const cell = new CellHandle(runtimeWith(false), ref);
+
+      await expect(cell.sendStrict({ n: 1 })).rejects.toThrow("aborted");
+    });
+
     it("logs a set() failure while the connection is alive", async () => {
       const cell = new CellHandle(runtimeWith(false), ref);
       const spy = captureError();
@@ -776,6 +850,12 @@ describe("cell-handle", () => {
         spy.restore();
       }
       expect(spy.calls.length).toBe(0);
+    });
+
+    it("rejects a strict set when the runtime refuses the write", async () => {
+      const cell = new CellHandle(runtimeWith(false), ref);
+
+      await expect(cell.setStrict({ n: 1 })).rejects.toThrow("aborted");
     });
   });
 
