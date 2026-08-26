@@ -10,6 +10,8 @@
 
 import { env, type Page, waitForCondition } from "@commonfabric/integration";
 import { Identity } from "@commonfabric/identity";
+import { ANYONE_USER } from "@commonfabric/memory/acl";
+import { ACLManager } from "@commonfabric/runner";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { expect } from "@std/expect";
@@ -283,6 +285,7 @@ describe("cf-iframe bridge with multiple users", () => {
       apiUrl: new URL(API_URL),
       identity: aliceIdentity,
     });
+    await new ACLManager(cc.runtime, cc.getSpace()).set(ANYONE_USER, "WRITE");
     await cc.ensureDefaultPattern();
 
     const sourcePath = join(
@@ -307,7 +310,10 @@ describe("cf-iframe bridge with multiple users", () => {
   });
 
   it("preserves `PerSpace`, `PerUser`, `PerSession`, and SQLite data at their declared boundaries", async () => {
-    const view = { spaceName: SPACE_NAME, pieceId };
+    const view = {
+      spaceDid: cc.getSpace() as `did:${string}:${string}`,
+      pieceId,
+    };
     const identities = [aliceIdentity, aliceIdentity, bobIdentity];
     const pages = shells.map((shell) => shell.page());
 
