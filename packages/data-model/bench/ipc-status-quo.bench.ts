@@ -17,11 +17,16 @@
  * **The encode is inside the timed region**, unlike the other file's, because
  * it is part of what the change costs a sender. So is the decode.
  *
- * Where the two arms are not equivalent, the status quo is the lossy one and
- * the subject says so: structured cloning strips a fabric class to `{}`, so
- * `bytes` and `omnibus` under `status quo` are measuring a crossing that
- * arrives damaged. They are kept because the timing is still the timing the
- * connection had.
+ * Every subject is like-for-like: both arms carry the same data, so the ratio
+ * between them is a cost rather than an artifact. Where the two arms need
+ * different values to manage that they get them -- bytes cross as a
+ * `Uint8Array` under the status quo, which structured cloning carries
+ * natively, and as a `FabricBytes` under the envelope.
+ *
+ * A payload the status quo cannot carry at all has no place here. Timing a
+ * crossing that arrives damaged against one that arrives whole produces a
+ * ratio that reads as a regression and means nothing, so the instance-bearing
+ * shapes are measured by the in-realm benchmarks instead.
  *
  * Run with:
  *
@@ -29,12 +34,11 @@
  */
 
 import { realmFromFabricValue } from "@/codecs.ts";
+import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import type { FabricValue } from "@/interface.ts";
 import {
-  BYTES,
   makeJsonPassThroughOmnibus,
   makeObject,
-  makeOmnibus,
   OBJECTS,
 } from "./fixtures/codec-fixtures.ts";
 import type { IpcAck, IpcRequest } from "./fixtures/realm-ipc-worker.ts";
@@ -91,30 +95,47 @@ const farSide = new FarSide();
  * `lossy` marks a subject the status quo does not actually carry, so a reader
  * does not take its timing for a like-for-like comparison.
  */
-const SUBJECTS: readonly (readonly [string, FabricValue, boolean])[] = [
+const MEGABYTE = 1024 * 1024;
+
+/**
+ * What each arm sends. `statusQuo` defaults to the same value the envelope
+ * arm carries, and differs only where carrying the same data takes a different
+ * shape on the old path.
+ */
+type Subject = {
+  readonly name: string;
+  readonly value: FabricValue;
+  readonly statusQuo?: unknown;
+};
+
+const SUBJECTS: readonly Subject[] = [
   // A small cell value: one container, a handful of members.
-  ["small record", makeObject(10), false],
+  { name: "small record", value: makeObject(10) },
   // A flat object of 100 numbers: one container, many members.
-  ["flat 100 members", OBJECTS[3]![1], false],
+  { name: "flat 100 members", value: OBJECTS[3]![1] },
   // ~400 containers of plain data. The shape a VDOM batch or a cell update has.
-  ["nested 100 records", makeJsonPassThroughOmnibus(100), false],
+  { name: "nested 100 records", value: makeJsonPassThroughOmnibus(100) },
   // Ten times that, for the scaling.
-  ["nested 1000 records", makeJsonPassThroughOmnibus(1000), false],
-  // 1 MB of bytes: one value, no containers, and the status quo loses it.
-  ["1MB FabricBytes", BYTES[BYTES.length - 1]![1], true],
-  // Every codec, instances included; the status quo loses those too.
-  ["omnibus 100 leaves", makeOmnibus(100), true],
+  { name: "nested 1000 records", value: makeJsonPassThroughOmnibus(1000) },
+  // A megabyte of bytes, carried both ways: a bare `Uint8Array` is how the
+  // status quo moves bytes at all, structured cloning carrying one natively,
+  // and a `FabricBytes` is how they cross now. Same bytes, both arriving.
+  {
+    name: "1MB of bytes",
+    value: new FabricBytes(new Uint8Array(MEGABYTE)),
+    statusQuo: new Uint8Array(MEGABYTE),
+  },
 ];
 
-for (const [name, value, lossy] of SUBJECTS) {
-  const label = lossy ? `${name} (lossy)` : name;
+for (const { name, value, statusQuo } of SUBJECTS) {
+  const before = statusQuo ?? value;
 
   Deno.bench({
-    name: `status quo — ${label}`,
+    name: `status quo — ${name}`,
     group: name,
     baseline: true,
   }, async () => {
-    await farSide.send({ kind: "status-quo", payload: value });
+    await farSide.send({ kind: "status-quo", payload: before });
   });
 
   Deno.bench({ name: `envelope — ${name}`, group: name }, async () => {
