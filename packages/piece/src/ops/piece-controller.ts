@@ -1,5 +1,6 @@
 import type { CellKind, LinkScope } from "@commonfabric/api";
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
+import { getLogger } from "@commonfabric/utils/logger";
 import {
   applyPieceSourceTransition,
   Cell,
@@ -69,6 +70,11 @@ import {
 } from "./piece-origin.ts";
 import type { PiecesController } from "./pieces-controller.ts";
 import { compileProgram } from "./utils.ts";
+
+const pieceUpdateLogger = getLogger("piece.update", {
+  enabled: true,
+  level: "warn",
+});
 
 interface PieceCellIo {
   get(path?: CellPath): Promise<unknown>;
@@ -4011,6 +4017,12 @@ export class PieceController<T = unknown> {
           await this.#cell.sync();
           const storedRef = getPatternIdentityRef(this.#cell);
           if (!storedRef) throw error;
+          pieceUpdateLogger.warn("set-pattern-current-unloadable", () => [
+            "the current pattern failed to load; replacing source from the",
+            `stored identity ref ${storedRef.identity}#${storedRef.symbol}`,
+            `under dangerouslyAllowIncompatibleSchema (${this.#cell.space})`,
+            error,
+          ]);
           previousRef = storedRef;
         }
         const expected = getPieceSourceSnapshot(this.#cell);
