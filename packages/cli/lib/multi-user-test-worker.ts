@@ -399,7 +399,6 @@ const handlers: Record<
       );
       const pieceRegistry = (defaultPatternCell as any).key("pieceRegistry");
       pieceRegistry.set([]);
-      (defaultPatternCell as any).key("recentPieces").set([]);
       (defaultPatternCell as any).key("backlinksIndex").set({
         mentionable: [],
       });

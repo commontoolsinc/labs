@@ -11,6 +11,30 @@ The dependency guide owns the TypeScript checkout prerequisite, compiler-roll
 checks, and regeneration command for the vendored type libraries. See
 [the vendored type libraries](../../docs/development/DEPENDENCIES.md#the-vendored-type-libraries).
 
+## Generated type modules
+
+Two of the files under `assets/types/` are built from workspace sources rather
+than authored in place. Generating them puts a "do not edit by hand" line at the
+top of what a reader opens, and lets a module reach declarations that live in
+other packages: the pattern compiler serves each module as a single
+self-contained text, so anything a module takes from elsewhere has to arrive as
+text in the generated file.
+
+- `commonfabric.d.ts` is generated from `packages/api/index.ts` by
+  `scripts/generate-commonfabric-types.ts`. Regenerate it with
+  `deno task gen-commonfabric-types`, and `deno task check-commonfabric-types`
+  fails when the checked-in copy is stale.
+- `cfc.ts` is generated from `packages/api/cfc-authoring.ts` by
+  `scripts/generate-cfc-types.ts`, flattened to a declaration-only module.
+  Regenerate it with `deno task gen-cfc-types`, and `deno task check-cfc-types`
+  fails when the checked-in copy is stale.
+
+Both checks run in CI, and `scripts/generated-asset.ts` holds the command line
+the two scripts share. The remaining sources under `assets/types/` are the
+vendored type libraries, `turndown.d.ts`, and two symlinks:
+`commonfabric-schema.d.ts` into `packages/api` and `jsx.d.ts` into
+`packages/html`.
+
 ## Withheld globals
 
 `assets/types/es2023.d.ts` and `assets/types/dom.d.ts` describe the sandbox
@@ -48,5 +72,5 @@ in CI:
   transformer goldens with `UPDATE_GOLDENS=1` (see
   `packages/ts-transformers/AGENTS.md`).
 - The Performance Check job ratchets `packages/static` uncovered lines. New code
-  in `scripts/strip-withheld-globals.ts` needs matching tests, or it trips the
-  ratchet. Neither `cfcheck` nor `deno task check` measures coverage.
+  under `scripts/` needs matching tests, or it trips the ratchet. Neither
+  `cfcheck` nor `deno task check` measures coverage.

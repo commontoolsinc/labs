@@ -247,6 +247,91 @@ Deno.test("CfHarnessEngine seeds the piece-registry grant once and replays the r
   assertEquals(registryReads, 1);
 });
 
+Deno.test("CfHarnessEngine mints operator input cells once and replays the record", async () => {
+  const cellSpace = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+  const cellRef = `/of:fid1:${"D".repeat(43)}/travellerName`;
+  let spaceReads = 0;
+  const engine = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    inputCells: [{
+      name: "travellerName",
+      ref: cellRef,
+    }],
+    fabricSessionFactory: () =>
+      Promise.resolve(
+        {
+          pieces: {
+            getSpace: () => {
+              spaceReads += 1;
+              return cellSpace;
+            },
+          },
+          // deno-lint-ignore no-explicit-any
+        } as any,
+      ),
+  });
+
+  const inputCells = await engine.establishInputCells();
+  assertEquals(inputCells.length, 1);
+  assertEquals(inputCells[0]!.name, "travellerName");
+  assertEquals(inputCells[0]!.ref, cellRef);
+  assertEquals(engine.getRunState().inputCells, inputCells);
+  const entry = engine.handleTable?.entries.find(
+    (candidate) => candidate.token === inputCells[0]!.token,
+  );
+  assertEquals(entry?.schema, undefined);
+  assertEquals(entry?.schemaSource, undefined);
+
+  // A second establishment answers from the record without another session.
+  assertEquals(await engine.establishInputCells(), inputCells);
+  assertEquals(spaceReads, 1);
+});
+
+Deno.test("CfHarnessEngine refuses operator input cells without a fabric session", async () => {
+  const engine = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    inputCells: [{
+      name: "travellerName",
+      ref: `/of:fid1:${"D".repeat(43)}/travellerName`,
+    }],
+  });
+  await assertRejects(
+    () => engine.establishInputCells(),
+    Error,
+    "requires a fabric session",
+  );
+  assertEquals(engine.getRunState().inputCells, undefined);
+});
+
+Deno.test("CfHarnessEngine refuses an operator input cell into another space, recording nothing", async () => {
+  const engine = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    inputCells: [{
+      name: "foreign",
+      ref: `/@did:key:z6MkforeignSpaceForEngineSeedTest/of:fid1:${
+        "E".repeat(43)
+      }/x`,
+    }],
+    fabricSessionFactory: () =>
+      Promise.resolve(
+        {
+          pieces: {
+            getSpace: () =>
+              "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
+          },
+          // deno-lint-ignore no-explicit-any
+        } as any,
+      ),
+  });
+  await assertRejects(
+    () => engine.establishInputCells(),
+    Error,
+    "targets another space",
+  );
+  assertEquals(engine.getRunState().inputCells, undefined);
+  assertEquals(engine.handleTable, undefined);
+});
+
 Deno.test("CfHarnessEngine rejects only cross-model Codex resume", () => {
   const resumedState = (
     modelProvider: "openai-codex" | "openai-compatible-gateway",

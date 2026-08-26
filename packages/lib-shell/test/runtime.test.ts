@@ -78,8 +78,6 @@ class MockRuntimeClient {
 
   getSpaceRootPattern(space: DID): Promise<never> {
     this.spaceRootCalls.push(space);
-    // Reject so registerNavigatedPiece's try/catch absorbs it — the
-    // tests only assert WHERE the registration was addressed.
     return Promise.reject(new Error("no root pattern in mock"));
   }
 
@@ -123,6 +121,49 @@ type NavigationDetail = {
 };
 
 describe("RuntimeInternals", () => {
+  describe("getSpaceRootPattern", () => {
+    it("caches a successful root-pattern lookup", async () => {
+      const client = new MockRuntimeClient();
+      const rootPattern = { id: "root-pattern" };
+      client.getSpaceRootPattern = (space: DID) => {
+        client.spaceRootCalls.push(space);
+        return Promise.resolve(rootPattern as never);
+      };
+      const runtime = new RuntimeInternals(client as any);
+      const space = "did:key:z6Mk-root-cache" as DID;
+
+      try {
+        await expect(runtime.getSpaceRootPattern(space)).resolves.toBe(
+          rootPattern,
+        );
+        await expect(runtime.getSpaceRootPattern(space)).resolves.toBe(
+          rootPattern,
+        );
+        expect(client.spaceRootCalls).toEqual([space]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("retries a root-pattern lookup after rejection", async () => {
+      const client = new MockRuntimeClient();
+      const runtime = new RuntimeInternals(client as any);
+      const space = "did:key:z6Mk-root-retry" as DID;
+
+      try {
+        await expect(runtime.getSpaceRootPattern(space)).rejects.toThrow(
+          "no root pattern in mock",
+        );
+        await expect(runtime.getSpaceRootPattern(space)).rejects.toThrow(
+          "no root pattern in mock",
+        );
+        expect(client.spaceRootCalls).toEqual([space, space]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+  });
+
   it("reads a piece's source state through the client", async () => {
     const client = new MockRuntimeClient();
     const runtime = new RuntimeInternals(client as any);
@@ -185,9 +226,22 @@ describe("RuntimeInternals", () => {
   it("uses the default navigation event when no navigation callback is injected", async () => {
     const spaceDid = "did:key:z6Mk-lib-shell-runtime-did-nav-current" as DID;
     const client = new MockRuntimeClient();
+    let registryWrites = 0;
+    client.getSpaceRootPattern = (space: DID) => {
+      client.spaceRootCalls.push(space);
+      return Promise.resolve({
+        cell: () => ({
+          key: () => ({
+            send: () => {
+              registryWrites += 1;
+              return Promise.resolve();
+            },
+          }),
+          sync: () => Promise.resolve(),
+        }),
+      } as never);
+    };
     const runtime = new RuntimeInternals(client as any);
-
-    runtime.registerNavigatedPiece = async () => {};
 
     let navigation: NavigationDetail | undefined;
     const navigationReceived = deferred<NavigationDetail>();
@@ -212,6 +266,8 @@ describe("RuntimeInternals", () => {
         spaceDid,
         pieceId: "piece-123",
       });
+      expect(client.spaceRootCalls).toEqual([]);
+      expect(registryWrites).toBe(0);
     } finally {
       globalThis.removeEventListener("cf-navigate", onNavigate);
       await runtime.dispose();
@@ -261,9 +317,6 @@ describe("RuntimeInternals", () => {
         navigated = true;
       },
     });
-    // Isolate #handleNavigateRequest from the mock's rejecting root pattern.
-    runtime.registerNavigatedPiece = async () => {};
-
     const errors: unknown[][] = [];
     const originalError = console.error;
     console.error = (...args: unknown[]) => errors.push(args);
@@ -298,8 +351,6 @@ describe("RuntimeInternals", () => {
         navigated = true;
       },
     });
-    runtime.registerNavigatedPiece = async () => {};
-
     const errors: unknown[][] = [];
     const originalError = console.error;
     console.error = (...args: unknown[]) => errors.push(args);
@@ -735,27 +786,6 @@ describe("RuntimeInternals", () => {
     });
   });
 
-  // A navigated piece registers in ITS OWN space's root pattern — the
-  // cell's space, not any notion of a current space.
-  describe("registerNavigatedPiece", () => {
-    it("targets the navigated cell's space", async () => {
-      const client = new MockRuntimeClient();
-      const runtime = new RuntimeInternals(client as any);
-      const cellSpace = "did:key:z6Mk-lib-shell-runtime-foreign" as DID;
-      try {
-        await runtime.registerNavigatedPiece(
-          {
-            id: () => "piece-9",
-            space: () => cellSpace,
-          } as any,
-        );
-        expect(client.spaceRootCalls).toEqual([cellSpace]);
-      } finally {
-        await runtime.dispose();
-      }
-    });
-  });
-
   describe("lifetime signal", () => {
     it("exposes the client's lifetime signal", async () => {
       const client = new MockRuntimeClient();
@@ -764,56 +794,6 @@ describe("RuntimeInternals", () => {
         expect(runtime.signal).toBe(client.signal);
       } finally {
         await runtime.dispose();
-      }
-    });
-  });
-
-  describe("trackRecentPiece", () => {
-    it("absorbs a failed root-pattern lookup and logs once while alive", async () => {
-      const client = new MockRuntimeClient();
-      const runtime = new RuntimeInternals(client as any);
-      const space = "did:key:z6Mk-lib-shell-runtime-recent" as DID;
-
-      const errors: unknown[][] = [];
-      const originalError = console.error;
-      console.error = (...args: unknown[]) => errors.push(args);
-      try {
-        // getSpaceRootPattern rejects in the mock; the catch absorbs it and
-        // logs once because the runtime is still alive.
-        await runtime.trackRecentPiece(space, "piece-recent");
-        expect(client.spaceRootCalls).toEqual([space]);
-        expect(errors.length).toBe(1);
-      } finally {
-        console.error = originalError;
-        await runtime.dispose();
-      }
-    });
-
-    it("stays silent when the lookup fails after disposal", async () => {
-      const client = new MockRuntimeClient();
-      const runtime = new RuntimeInternals(client as any);
-      const space = "did:key:z6Mk-lib-shell-runtime-recent-disposed" as DID;
-      // Reject only after the runtime has been disposed, so the catch takes
-      // the silent branch.
-      let rejectRoot!: (error: unknown) => void;
-      client.getSpaceRootPattern = (s: DID) => {
-        client.spaceRootCalls.push(s);
-        return new Promise<never>((_, reject) => {
-          rejectRoot = reject;
-        });
-      };
-
-      const errors: unknown[][] = [];
-      const originalError = console.error;
-      console.error = (...args: unknown[]) => errors.push(args);
-      try {
-        const tracking = runtime.trackRecentPiece(space, "piece-recent");
-        await runtime.dispose();
-        rejectRoot(new Error("no root pattern in mock"));
-        await tracking;
-        expect(errors.length).toBe(0);
-      } finally {
-        console.error = originalError;
       }
     });
   });

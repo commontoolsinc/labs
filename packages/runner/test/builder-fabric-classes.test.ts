@@ -1,12 +1,13 @@
 /**
  * The `FabricSpecialObject` classes reach pattern code as `export declare
- * const`s in `api/index.ts`, but the runtime values behind those declarations
- * are bound separately, in `builder/factory.ts`. The two sides are maintained
- * by hand, so a class can be declared without being bound -- which type-checks
- * when the pattern is compiled and then fails once it actually runs. These
- * tests pin the runtime half against the declared half.
+ * const`s in `data-model/src/api.ts`, which `api/index.ts` re-exports, but the
+ * runtime values behind those declarations are bound separately, in
+ * `builder/factory.ts`. The two sides are maintained by hand, so a class can be
+ * declared without being bound -- which type-checks when the pattern is
+ * compiled and then fails once it actually runs. These tests pin the runtime
+ * half against the declared half.
  *
- * `types/commonfabric.d.ts` is a symlink to `api/index.ts`, and is the exact
+ * `types/commonfabric.d.ts` is generated from `api/index.ts`, and is the exact
  * artifact the sandbox hands a pattern as its view of `commonfabric`. Deriving
  * the expected names from it means this test tracks the real declarations
  * rather than a hand-copied list that someone has to remember to extend.

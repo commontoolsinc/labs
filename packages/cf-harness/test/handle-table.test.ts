@@ -544,6 +544,23 @@ describe("handle-table", () => {
         .toThrow("salt must be a non-empty string");
     });
 
+    it("throws for an entry claiming schema provenance with no schema", async () => {
+      const { table } = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+      );
+      const broken = {
+        ...table,
+        entries: table.entries.map((entry) => ({
+          ...entry,
+          schemaSource: "harness",
+        })),
+      } as unknown as HarnessHandleTable;
+      expect(() => assertValidHarnessHandleTable(broken)).toThrow(
+        "claims schema provenance",
+      );
+    });
+
     it("throws for entries that are not an array", () => {
       const table = {
         ...createHarnessHandleTable("run-1"),

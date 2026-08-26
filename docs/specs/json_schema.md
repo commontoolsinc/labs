@@ -219,7 +219,7 @@ Deliberate extensions beyond the 2020-12 vocabulary:
   `required: ["length"]` but not `required: ["x"]`) — mirroring the
   TypeScript structural rule that a `FabricBytes` is assignable to
   `{length: number}`. The nominal brand key
-  (`FABRIC_SPECIAL_OBJECT_BRAND` in `packages/api/index.ts`), which
+  (`FABRIC_SPECIAL_OBJECT_BRAND` in `packages/data-model/src/api.ts`), which
   schemas from pre-vocabulary compilations name in `required` (current
   generator emissions omit it everywhere), has no runtime existence and
   counts as present on any `FabricSpecialObject`. Property sub-schemas are

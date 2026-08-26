@@ -542,10 +542,10 @@ in-app remove button can address the same entity without introspecting the piece
 cell. A space's key is the space name, which the handler already has from the
 event.
 
-The MRU lists — the profile most-recently-used list and the recent-pieces list —
-stay a read-modify-write `set`. Their write is not a set-membership change: it
-moves an entry to the front of the list and caps the length, so its correctness
-depends on reading the current order and count. That is a condition other than
+The profile most-recently-used list stays a read-modify-write `set`. Its write
+is not a set-membership change: it moves an entry to the front of the list and
+caps the length, so its correctness depends on reading the current order and
+count. That is a condition other than
 uniqueness, which the mergeable ops do not preserve: `addUnique` appends at the
 tail and never reorders, and there is no mergeable "keep only the first N". A
 concurrent pair of most-recently-used stamps conflicts and one retries, which

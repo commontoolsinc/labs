@@ -9,6 +9,7 @@ import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { entityIdFrom } from "../src/create-ref.ts";
 import { NAME, UI } from "../src/builder/types.ts";
+import { acquireSchemaRegistryLease } from "../src/schema-registry.ts";
 import {
   createSidecarPatternCache,
   parseWishTarget,
@@ -256,52 +257,6 @@ describe("wish built-in", () => {
       { name: "Beta" },
     ]);
     expect(result.key("firstMentionable").get()?.result).toEqual("Alpha");
-  });
-
-  it("resolves recent pieces via #recent", async () => {
-    const spaceCell = runtime.getCell(space, space).withTx(tx);
-    const recentPiecesCell = runtime.getCell(space, "recent-pieces", {
-      type: "array",
-      items: { type: "object" },
-    }).withTx(tx);
-    const recentData = [{ name: "Piece A" }, { name: "Piece B" }];
-    recentPiecesCell.set(recentData);
-
-    // Set up defaultPattern to own recentPieces
-    const defaultPatternCell = runtime.getCell(space, "default-pattern").withTx(
-      tx,
-    );
-    (defaultPatternCell as any).key("recentPieces").set(recentPiecesCell);
-    (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
-
-    await tx.commit();
-    await runtime.idle();
-    tx = runtime.edit();
-
-    const wishPattern = pattern(() => {
-      return {
-        recent: wish({ query: "#recent" }),
-        recentFirst: wish({ query: "#recent/0/name" }),
-      };
-    });
-
-    const resultCell = runtime.getCell<{
-      recent?: { result?: unknown[] };
-      recentFirst?: { result?: string };
-    }>(
-      space,
-      "wish recent pieces result",
-      undefined,
-      tx,
-    );
-    const result = runtime.run(tx, wishPattern, {}, resultCell);
-    await tx.commit();
-    tx = runtime.edit();
-
-    await result.pull();
-
-    expect(result.key("recent").get()?.result).toEqual(recentData);
-    expect(result.key("recentFirst").get()?.result).toEqual("Piece A");
   });
 
   it("returns current timestamp via #now", async () => {
@@ -4884,6 +4839,40 @@ describe("createSidecarPatternCache", () => {
     expect(await cache.fetch(fakeRuntime)).toBeUndefined();
     expect(cache.cached()).toBeUndefined();
     // The cleared memoization lets a later launch re-fetch the same URL.
+    expect(await cache.fetch(fakeRuntime)).toEqual({
+      source: "source from env-a.test",
+    });
+    expect(calls).toEqual(["env-a.test", "env-a.test"]);
+  });
+
+  it("drops its compiled pattern when the schema registry epoch clears", async () => {
+    // A compiled pattern's serialized graph embeds `cid:` schema references
+    // minted in the registry epoch that compiled it, and both backings die
+    // with the epoch — the registry clears on last-lease-out, and the
+    // compile context's space belongs to that session. A pattern handed
+    // across the clear would stage links whose references nothing can
+    // resolve (the emission gate throws on exactly that), so the cache
+    // drops with the epoch and the next launch refetches, minting into the
+    // epoch that will use it.
+    const { calls } = installFetchMock();
+    const fakeRuntime = makeFakeRuntime();
+    setPatternEnvironment({ apiUrl: new URL("https://env-a.test/") });
+    const cache = createSidecarPatternCache({ name: "profile-picker.tsx" });
+
+    const release = acquireSchemaRegistryLease();
+    expect(await cache.fetch(fakeRuntime)).toEqual({
+      source: "source from env-a.test",
+    });
+    expect(cache.cached()).toEqual({ source: "source from env-a.test" });
+
+    release();
+    expect(
+      cache.cached(),
+      "a compiled pattern outlived the registry epoch that minted its " +
+        "schema references",
+    ).toBeUndefined();
+
+    // The next launch re-fetches and recompiles into the new epoch.
     expect(await cache.fetch(fakeRuntime)).toEqual({
       source: "source from env-a.test",
     });

@@ -46,6 +46,7 @@ import {
   isConflictRejection,
   isStorageTransactionInconsistent,
 } from "../storage/rejection.ts";
+import { onSchemaRegistryClear } from "../schema-registry.ts";
 import { scopedCell } from "./scope-policy.ts";
 
 const wishFlowLogger = getLogger("runner.wish-flow", {
@@ -188,7 +189,6 @@ function getResolutionKind(parsed: ParsedWishTarget): string {
     case "#summaryIndex":
     case "#knowledgeGraph":
     case "#pieceRegistry":
-    case "#recent":
     case "#now":
       return "space-target";
     case "#favorites":
@@ -1268,7 +1268,6 @@ function resolveSpaceTarget(
     "#summaryIndex": ["defaultPattern", "summaryIndex"],
     "#knowledgeGraph": ["defaultPattern", "knowledgeGraph"],
 
-    "#recent": ["defaultPattern", "recentPieces"],
     "#suggestions": ["defaultPattern", "suggestionHistory"],
   };
 
@@ -1323,7 +1322,7 @@ function resolveSpaceTarget(
  *
  * Resolution paths:
  * 1. Well-known space targets (/, #default, #mentionable, #pieceRegistry,
- *    #recent, #now)
+ *    #now)
  * 2. Well-known home space targets (#favorites, #journal, #learned, #profile)
  * 3. Hashtag search (arbitrary #tags in favorites/mentionables)
  */
@@ -1590,6 +1589,22 @@ export function createSidecarPatternCache(options: {
       return undefined;
     }
   }
+
+  // A compiled pattern's serialized graph embeds `cid:` schema references
+  // minted in the registry epoch that compiled it (`externalizeSchema` at
+  // binding serialization), and both backings of those references die with
+  // that epoch: the registry clears on last-lease-out, and the compile
+  // context's space is not the next session's. A cached pattern handed
+  // across the clear would stage links whose references nothing anywhere
+  // can resolve — the emission gate throws on exactly that shape — so the
+  // cache drops with the epoch and the next wish refetches and recompiles,
+  // minting into the epoch that will use it. (The listener registration is
+  // permanent; a cache abandoned by tests resets as a no-op.)
+  onSchemaRegistryClear(() => {
+    pattern = undefined;
+    fetchPromise = undefined;
+    fetchUrl = undefined;
+  });
 
   return {
     // Pattern from a completed fetch for the current environment's URL.

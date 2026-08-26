@@ -1621,10 +1621,21 @@ export class Runner {
               : new Error(error.message);
           }
           if (
-            error.name === "StorageTransactionAborted" &&
+            (error.name === "CfcCommitRefusalError" ||
+              error.name === "StorageTransactionAborted") &&
             error.message.startsWith("CFC enforcement rejected commit")
           ) {
-            throw new Error(error.message, { cause: error.reason });
+            // The two rejections carry their diagnostic differently: the
+            // boundary refusal carries every prepare reason as `reasons`,
+            // while the prepared-digest drift carries a marker `reason`.
+            // Reading only one drops the cause for the other.
+            const { reason, reasons } = error as {
+              reason?: unknown;
+              reasons?: readonly string[];
+            };
+            throw new Error(error.message, {
+              cause: reasons !== undefined ? [...reasons] : reason,
+            });
           }
         }
 

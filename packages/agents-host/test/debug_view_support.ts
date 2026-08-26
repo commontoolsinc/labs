@@ -365,17 +365,15 @@ export async function installDefaultPattern(
   );
   const defaultPattern = pattern<{
     pieceRegistry: Cell<unknown>[];
-    recentPieces: Cell<unknown>[];
   }>(
-    ({ pieceRegistry, recentPieces }) => ({
+    ({ pieceRegistry }) => ({
       pieceRegistry,
-      recentPieces,
       addPiece: addPiece({ pieceRegistry }),
     }),
   );
   const piece = await manager.runPersistent(
     defaultPattern,
-    { pieceRegistry: [], recentPieces: [] },
+    { pieceRegistry: [] },
     "agents-host-debug-test-default-pattern",
   );
   await manager.linkDefaultPattern(piece);
@@ -386,9 +384,8 @@ export async function installDefaultPattern(
 
 export async function registeredPieceIds(
   defaultPattern: Cell<unknown>,
-  name: "pieceRegistry" | "recentPieces",
 ): Promise<string[]> {
-  const slot = defaultPattern.asSchema(undefined).key(name);
+  const slot = defaultPattern.asSchema(undefined).key("pieceRegistry");
   if (slot.getRaw() === undefined) return [];
   const list = slot.resolveAsCell().asSchema(
     SHALLOW_PIECE_LIST_SCHEMA,
