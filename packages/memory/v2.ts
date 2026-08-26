@@ -915,6 +915,16 @@ export type MemoryProtocolFlags = {
    * version always advertises it.
    */
   verdictCatchUpMarkers: boolean;
+  /**
+   * The peer accepts a message delivered as a sequence of `fvc1:` chunk
+   * frames (`v2/wire-chunking.ts`) instead of one text frame, which keeps an
+   * oversized payload under the 64 MiB per-frame ceiling a WebSocket peer
+   * enforces. Advertised by both ends and consulted per direction: a sender
+   * chunks only toward a peer that advertised it, and the handshake itself
+   * is never chunked. Inherent to the build (not configuration), so a build
+   * of this version always advertises it.
+   */
+  wireChunking: boolean;
   /** The server can list live space-scoped entity identifiers without values. */
   entityIdListing: boolean;
   /** The server can page one stable entity-identifier snapshot. */
@@ -933,6 +943,7 @@ export type WireMemoryProtocolFlags = {
   sqliteCommitRowLabelEval?: boolean;
   pendingReadStacks?: boolean;
   verdictCatchUpMarkers?: boolean;
+  wireChunking?: boolean;
   entityIdListing?: boolean;
   entityIdPagination?: boolean;
   entityIdLookup?: boolean;
@@ -1548,6 +1559,10 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // obligation for every verdict (accepts included), so it always
   // advertises it. Clients that see it absent apply verdicts immediately.
   verdictCatchUpMarkers: true,
+  // Likewise build-inherent: this build reassembles `fvc1:` chunk frames
+  // (v2/wire-chunking.ts), so it always advertises it. Peers that see it
+  // absent send every message as a single frame, as they always have.
+  wireChunking: true,
   // The engine answers this request from its identifier index without
   // selecting stored entity values.
   entityIdListing: true,
@@ -1626,6 +1641,14 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const wireChunking = value.wireChunking;
+  if (
+    wireChunking !== undefined &&
+    typeof wireChunking !== "boolean"
+  ) {
+    return null;
+  }
+
   const entityIdListing = value.entityIdListing;
   if (
     entityIdListing !== undefined &&
@@ -1664,6 +1687,9 @@ export const parseMemoryProtocolFlags = (
     // parses to false: clients apply verdicts immediately instead of
     // parking them on marker coverage.
     verdictCatchUpMarkers: verdictCatchUpMarkers === true,
+    // Absent (an older peer) parses to false: a sender chunks only toward a
+    // peer that POSITIVELY advertised that it reassembles chunk frames.
+    wireChunking: wireChunking === true,
     entityIdListing: entityIdListing === true,
     entityIdPagination: entityIdPagination === true,
     entityIdLookup: entityIdLookup === true,
@@ -1682,6 +1708,7 @@ export const wireMemoryProtocolFlags = (
   sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,
   pendingReadStacks: flags.pendingReadStacks,
   verdictCatchUpMarkers: flags.verdictCatchUpMarkers,
+  wireChunking: flags.wireChunking,
   entityIdListing: flags.entityIdListing,
   entityIdPagination: flags.entityIdPagination,
   entityIdLookup: flags.entityIdLookup,

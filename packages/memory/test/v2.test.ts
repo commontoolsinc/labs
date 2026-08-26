@@ -139,6 +139,7 @@ describe("memory v2 flags", () => {
       sqliteCommitRowLabelEval: true,
       pendingReadStacks: true,
       verdictCatchUpMarkers: true,
+      wireChunking: true,
       entityIdListing: true,
       entityIdPagination: true,
       entityIdLookup: true,
@@ -155,6 +156,7 @@ describe("memory v2 flags", () => {
       sqliteCommitRowLabelEval: true,
       pendingReadStacks: true,
       verdictCatchUpMarkers: true,
+      wireChunking: true,
       entityIdListing: true,
       entityIdPagination: true,
       entityIdLookup: true,
@@ -175,6 +177,7 @@ describe("memory v2 flags", () => {
         sqliteCommitRowLabelEval: true,
         pendingReadStacks: true,
         verdictCatchUpMarkers: false,
+        wireChunking: true,
         entityIdListing: true,
         entityIdPagination: true,
         entityIdLookup: true,
@@ -189,6 +192,7 @@ describe("memory v2 flags", () => {
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         verdictCatchUpMarkers: false,
+        wireChunking: false,
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
@@ -206,6 +210,7 @@ describe("parseMemoryProtocolFlags", () => {
       sqliteCommitRowLabelEval: false,
       pendingReadStacks: false,
       verdictCatchUpMarkers: false,
+      wireChunking: false,
       entityIdListing: false,
       entityIdPagination: false,
       entityIdLookup: false,
@@ -217,6 +222,7 @@ describe("parseMemoryProtocolFlags", () => {
       sqliteCommitRowLabelEval: false,
       pendingReadStacks: false,
       verdictCatchUpMarkers: false,
+      wireChunking: false,
       entityIdListing: false,
       entityIdPagination: false,
       entityIdLookup: false,
@@ -235,6 +241,7 @@ describe("parseMemoryProtocolFlags", () => {
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         verdictCatchUpMarkers: false,
+        wireChunking: false,
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
@@ -254,6 +261,7 @@ describe("parseMemoryProtocolFlags", () => {
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         verdictCatchUpMarkers: false,
+        wireChunking: false,
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
@@ -273,6 +281,7 @@ describe("parseMemoryProtocolFlags", () => {
         sqliteCommitRowLabelEval: true,
         pendingReadStacks: false,
         verdictCatchUpMarkers: false,
+        wireChunking: false,
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
@@ -300,6 +309,7 @@ describe("parseMemoryProtocolFlags", () => {
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         verdictCatchUpMarkers: true,
+        wireChunking: false,
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
@@ -320,6 +330,7 @@ describe("parseMemoryProtocolFlags", () => {
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: true,
         verdictCatchUpMarkers: false,
+        wireChunking: false,
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
@@ -337,6 +348,7 @@ describe("parseMemoryProtocolFlags", () => {
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         verdictCatchUpMarkers: false,
+        wireChunking: false,
         entityIdListing: true,
         entityIdPagination: false,
         entityIdLookup: false,
@@ -357,11 +369,36 @@ describe("parseMemoryProtocolFlags", () => {
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         verdictCatchUpMarkers: false,
+        wireChunking: false,
         entityIdListing: false,
         entityIdPagination: true,
         entityIdLookup: true,
       },
     );
+  });
+
+  it("accepts the wireChunking capability key", () => {
+    assertEquals(
+      parseMemoryProtocolFlags({
+        wireChunking: true,
+      }),
+      {
+        modernCellRep: false,
+        commitPreconditions: false,
+        syncSchemaTableV2: false,
+        sqliteCommitRowLabelEval: false,
+        pendingReadStacks: false,
+        verdictCatchUpMarkers: false,
+        wireChunking: true,
+        entityIdListing: false,
+        entityIdPagination: false,
+        entityIdLookup: false,
+      },
+    );
+  });
+
+  it("returns `wireChunking: false` for flags that omit the key", () => {
+    assertEquals(parseMemoryProtocolFlags({})?.wireChunking, false);
   });
 
   it("rejects values that are not a recognizable flags shape", () => {
@@ -389,6 +426,7 @@ describe("parseMemoryProtocolFlags", () => {
       null,
     );
     assertEquals(parseMemoryProtocolFlags({ entityIdLookup: "true" }), null);
+    assertEquals(parseMemoryProtocolFlags({ wireChunking: "true" }), null);
     assertEquals(
       parseMemoryProtocolFlags({
         modernCellRep: true,

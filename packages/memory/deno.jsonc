@@ -38,6 +38,7 @@
     "./v2/session-open-auth": "./v2/session-open-auth.ts",
     "./v2/storage-path": "./v2/storage-path.ts",
     "./v2/schema-table-links": "./v2/schema-table-links.ts",
+    "./v2/wire-chunking": "./v2/wire-chunking.ts",
     "./v2/dump": "./v2/dump.ts",
     "./sqlite": "./v2/sqlite/mod.ts",
     "./sqlite/columns": "./v2/sqlite/columns.ts",
