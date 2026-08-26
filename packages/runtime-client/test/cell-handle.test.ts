@@ -1051,7 +1051,9 @@ describe("cell-handle", () => {
         [$conn]: () => ({
           request: (request: unknown) => {
             requests.push(
-              fabricFromRealmValue(realmFromFabricValue(request as never)),
+              fabricFromRealmValue(
+                structuredClone(realmFromFabricValue(request as never)),
+              ),
             );
             return Promise.resolve({});
           },

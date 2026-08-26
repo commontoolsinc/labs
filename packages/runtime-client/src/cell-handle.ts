@@ -492,7 +492,10 @@ export class CellHandle<T = unknown> {
    * Recursively hydrate any object, converting any sigil links into
    * CellHandle instances. Legacy `$alias` records are plain data — they are
    * only meaningful as bindings inside Pattern objects, which the client
-   * never interprets.
+   * never interprets. A `FabricPrimitive` comes back as itself.
+   *
+   * @throws If the value holds a `FabricInstance`, which is a container this
+   *   walk cannot descend and so cannot hydrate a link inside.
    */
   static deserialize<T>(
     base: CellHandle<T>,
@@ -553,11 +556,13 @@ export class CellHandle<T = unknown> {
    * Converts a value the client holds into the one the connection carries,
    * which is the same data with a `CellRef` wherever a `CellHandle` sat.
    *
-   * Every other arm crosses as itself, the envelope's encoding carrying the
-   * whole `FabricValue` domain -- a `FabricSpecialObject` with its class, a
-   * `bigint` and a `symbol` as themselves.
+   * A `FabricPrimitive` crosses as itself, the envelope's encoding carrying it
+   * with its class, as it carries a `bigint` and a `symbol`.
    *
    * `CellHandle.deserialize()` is the inverse.
+   *
+   * @throws If the value holds a `FabricInstance`, which is a container this
+   *   walk cannot descend and so cannot convert a handle inside.
    */
   static serialize(value: ClientCellValue): WireCellValue {
     if (isCellHandle(value)) return value.ref();
