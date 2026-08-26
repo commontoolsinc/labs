@@ -32,6 +32,7 @@ const DIRS = [
   "packages/content-hash",
   "packages/dashboard",
   "packages/data-model",
+  "packages/data-model-schema",
   "packages/deno-web-test",
   "packages/felt",
   "packages/fuse",

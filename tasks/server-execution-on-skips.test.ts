@@ -128,9 +128,8 @@ Deno.test("main: no arguments behaves like an unknown suite", async () => {
 });
 
 Deno.test("main: empty lists print the report on stderr and nothing on stdout", async () => {
-  // The shell suite's list is empty (patterns carries the default-app
-  // STEP entry and the lunch-poll-vote FILE entry; runner and
-  // runtime-client are empty since their lifts).
+  // The shell suite's list is empty (patterns carries one FILE entry and two
+  // STEP entries; runner and runtime-client are empty since their lifts).
   const { out, err, io } = captureIo();
   assertEquals(await main(["shell"], io), 0);
   assertEquals(out, []);
@@ -140,10 +139,10 @@ Deno.test("main: empty lists print the report on stderr and nothing on stdout", 
 Deno.test("main: the patterns list carries the three current phase-7 entries and keeps the flip bar explicit", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
-  // The step entry never drops its file; the lunch-poll-vote FILE entry
-  // is the one --ignore flag on stdout.
+  // The topic step entry never drops its file; the lunch-poll-vote FILE
+  // entry is the one --ignore flag on stdout.
   assertEquals(out, ["--ignore=integration/lunch-poll-vote.test.ts"]);
-  // …the report carries both skips loudly…
+  // …the report carries all three remaining skips loudly…
   assertMatch(
     err[0],
     /patterns: SKIP-STEP integration\/default-app\.test\.ts :: should persist and reload every rapidly created notebook note \(until phase-7; the rest of the file runs\)/,
@@ -156,8 +155,8 @@ Deno.test("main: the patterns list carries the three current phase-7 entries and
     err[0],
     /patterns: SKIP-STEP integration\/topic-board-child-contract\.test\.ts :: builds one pivot row per topic/,
   );
-  // …and the list holds EXACTLY these three entries — a fourth entry or
-  // a silent lift both redden this pin.
+  // …and the list holds EXACTLY these three entries — an addition or a silent
+  // lift both redden this pin.
   assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 3);
   assertEquals(
     SERVER_EXECUTION_ON_SKIPS.patterns[0].file,
@@ -169,7 +168,7 @@ Deno.test("main: the patterns list carries the three current phase-7 entries and
   );
   // The lunch-poll-vote entry is FILE-level (no step guard: every step
   // depends on the profile-first join the class kills), same class and
-  // fork memo as the step entry above.
+  // fork memo as the closed default-app residue.
   assertEquals(
     SERVER_EXECUTION_ON_SKIPS.patterns[1].file,
     "integration/lunch-poll-vote.test.ts",
@@ -177,8 +176,8 @@ Deno.test("main: the patterns list carries the three current phase-7 entries and
   assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[1].step, undefined);
   assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[1].phase, "phase-7");
   // Its reason names the NARROWED charge the entry's own gate found
-  // (2026-08-24) — the guest profile piece's program materialization
-  // never landing — not the b04 client-start class that gate closed,
+  // (2026-08-24), the pinned never-issued mechanism, and the completed
+  // post-fix gate — not the b04 client-start class that gate closed,
   // whose fork memo the reason keeps as history.
   assertMatch(
     SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
@@ -188,6 +187,11 @@ Deno.test("main: the patterns list carries the three current phase-7 entries and
     SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
     /ow45-armb-client-start-fork\.md/,
   );
+  assertMatch(
+    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
+    /never issued/i,
+  );
+  assertMatch(SERVER_EXECUTION_ON_SKIPS.patterns[1].reason, /0\/8/);
   // The topic-board entry is STEP-level under issue #6304: the pivot
   // baseline case's row-count assertion fails on the ON arm's served-view
   // divergence (four rows for three topics; the durable store holds
@@ -216,23 +220,25 @@ Deno.test("main: the patterns list carries the three current phase-7 entries and
     pivotEntry !== undefined,
     "the pivot baseline step's guard entry must resolve",
   );
-  // The guard lookup resolves for the guarded step, and the reason
-  // names the current measured charge and the unchanged lift bar.
+  // The guard resolves the current direct-CI charge and pins its decisive
+  // discriminators so a stale launcher-era reason cannot return silently.
   const entry = serverExecutionOnStepSkip(
     "patterns",
     "integration/default-app.test.ts",
     "should persist and reload every rapidly created notebook note",
   );
-  assert(entry !== undefined, "the reload step's guard entry must resolve");
+  assert(entry !== undefined, "the rapid-note step's guard entry must resolve");
   assertEquals(entry.phase, "phase-7");
-  assertMatch(entry.reason, /9\/10/);
-  assertMatch(entry.reason, /likely closed/);
-  assertMatch(entry.reason, /absence-of-observation only/);
-  assertMatch(entry.reason, /six durable note appends/);
-  assertMatch(entry.reason, /pattern-swap-setup-error/);
-  assertMatch(entry.reason, /zero pattern-load-error/);
-  assertMatch(entry.reason, /catch-up-and-start/);
-  assertMatch(entry.reason, /10\/10/);
+  assertMatch(entry.reason, /66a969ca0/);
+  assertMatch(entry.reason, /33008274232/);
+  assertMatch(entry.reason, /5m22s/);
+  assertMatch(entry.reason, /300000ms/);
+  assertMatch(entry.reason, /eventInvocationCount=7/);
+  assertMatch(entry.reason, /notebookActionCount=0/);
+  assertMatch(entry.reason, /84 stored UI note chips/);
+  assertMatch(entry.reason, /zero pattern-swap-setup-error/);
+  assertMatch(entry.reason, /distinct from the split-source/);
+  assertMatch(entry.reason, /10\/10 quiet-and-loaded/);
   // The shard filter drops exactly the FILE entry's file (the shard
   // lanes feed explicit file lists) and passes every other candidate
   // through untouched — remove the lunch-poll-vote entry and this
@@ -353,7 +359,7 @@ Deno.test("main: the runner list is EMPTY — pattern-and-data-persistence LIFTE
   // since — patterns' lunch-poll-vote entry (2026-08-24, the OW45 arm-B
   // client-start class its profile-first join newly exposes) — is named
   // here so the NEXT file-level entry still reddens this pin. The flip
-  // PR's list-EMPTY bar hangs on the default-app step and this file.
+  // PR's list-EMPTY bar hangs on this file and the topic-board step.
   for (const suite of ["patterns", "runner", "runtime-client", "shell"]) {
     if (!isServerExecutionSuite(suite)) throw new Error("unreachable");
     assertEquals(

@@ -11,11 +11,11 @@ import {
   type FabricValue,
   shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
+  internSchema,
   isNontrivialSchema,
   schemaWithProperties,
-} from "@commonfabric/data-model/schema-utils";
+} from "@commonfabric/data-model-schema";
 import {
   readMaybeLink,
   resolveLink,

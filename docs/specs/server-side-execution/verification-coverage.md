@@ -6003,6 +6003,85 @@ supply; OW29/OW32/OW34 closed):
     The lift bar remains 10/10 quiet-and-loaded ON. Full ledger and
     per-run evidence paths:
     [`ow45-default-app-reload-post-6292-remeasure-2026-08-26.md`](../../history/plans/server-execution-v2/optimize/ow45-default-app-reload-post-6292-remeasure-2026-08-26.md).
+    **ROOT-CAUSED 2026-08-26: the campaign launcher split browser and
+    serving pattern-source authority; the seventh event was durable but
+    STRANDED before served admission, and the recursive setup error was a
+    finite witness of that divergence rather than the event's refusal.** The
+    off-repository launcher gave the browser the run's independent 97xx
+    `API_URL` but did not set `API_URL` on the toolshed process. Toolshed's
+    supported remote-source posture therefore used the default
+    `http://localhost:8000` while storage and the browser used the run
+    toolshed. Only red r01 had an unrelated old toolshed answering on 8000:
+    the browser compiled current note identity `30y74xQLD…#default`; the
+    serving updater fetched `c-jbvEpTaj…#default`, whose source maps exactly
+    to repository commit `8ca18b71e`. Green r02/r03 got connection refused
+    from the implicit source host, so no conflicting candidate was installed;
+    a self-source live control likewise avoided the path.
+
+    Store classification, now definitive: the seventh `Create` WAS emitted
+    and durably appended at seq 87, with a registered handler, but its sidecar
+    has no consequence, terminal status, error, or reason; the durable served
+    watermark covers only through seq 81. The client speculative path
+    materialized an orphan seventh note, but the served handler did not run
+    and no seventh notebook append exists. Precisely: the event is stranded
+    BEFORE served queue admission/terminal classification — not refused,
+    dropped, or never issued. The six completed actions/consequences are
+    seqs 36/37, 43/45, 53/55, 60/63, 69/71, and 81/83. Loaded green r02 has
+    all seven authored actions and consequences, ending at seqs 84/86.
+
+    The exact captured candidate was `c-jbvEpTaj…#default`, validated against
+    a note argument whose `parentNotebook` points at the notebook root. The
+    embedded NotePiece/NotebookPiece schema follows
+    `note.parentNotebook.notes[0].parentNotebook` back to the same value under
+    the same schema pair, so the schema progress guard returns “recursive
+    schema validation made no progress.” Offline replay terminates; the
+    validator is not the endless loop. An exact-old-source live probe
+    reproduced the error after all seven appends had landed, and a
+    comment-only identity split reproduced the family, ruling out the old
+    note semantics and a fixed note index. A narrow idle trace saw the same
+    client setup error but drained all observed idle branches and failed
+    normally in 22 s, so the setup error neither automatically refuses an
+    event nor intrinsically leaks the idle barrier.
+
+    Established causal chain: omitted server `API_URL` → conflicting source
+    identity → live-piece swap requests → finite recursive-argument setup
+    error; under r01's ordering, served progress then failed to reach the
+    final durable event, so `waitForRuntimeIdle`'s event/durability fixpoint
+    could not resolve before the unchanged 600 s harness bound. OPEN LIMIT:
+    the durable store names the pending event but cannot reconstruct which
+    original client scheduler collection or promise held it after the error;
+    diagnostic timing did not recreate that state. Load is not necessary
+    (r01 and the identity-only red were quiet), and `event-view-lag` alone is
+    insufficient (quiet r03 had it and greened).
+
+    No production fix: distinct source and storage hosts are supported, and
+    forcing self-source would change that contract without a mechanism pin.
+    The exact measurement fix seat is the off-repository launcher: pass the
+    run port as the server's `API_URL` and preflight that browser and serving
+    source authorities report the expected identity. No repository-owned
+    deterministic regression can directly pin that launcher, and the live
+    timing probe did not isolate a local behavior change suitable for a
+    mutation check. The STEP skip and bound guard therefore STAY. The lift bar
+    remains a separate 10/10 quiet-and-loaded campaign under the corrected
+    source-authority posture. Full RCA and evidence map:
+    [`ow45-default-app-store-incomplete-root-cause-2026-08-26.md`](../../history/plans/server-execution-v2/optimize/ow45-default-app-store-incomplete-root-cause-2026-08-26.md).
+    **DIRECT CI UNSKIP PROBE, 2026-08-26: RED — NO LIFT.** Head
+    `66a969ca02e8962ae44eeb4da264a575da421893`, Actions run
+    [33008274232, ON shard 5](https://github.com/commontoolsinc/labs/actions/runs/33008274232/job/98307864923).
+    The registry had no default-app entry, the job printed that no listed
+    skip was in its file list, and the exact rapid-note step ran. The other
+    nine ON pattern shards passed. Shard 5 failed only this target after
+    5m22s, when `waitForCondition` reached its unchanged 300000 ms bound.
+    The final client trace reported `eventInvocationCount: 7` and
+    `notebookInvocationCount: 7`, but `isNotebook: false`, `notesLength: 0`,
+    `notebookActionCount: 0`, 84 stored UI note chips, and zero rendered note
+    chips. The log had zero `pattern-swap-setup-error`, recursive-schema
+    errors, and `pattern-load-error`. This is therefore a current true-CI ON
+    failure distinct from the split-source off-repository launcher failure;
+    the direct CI artifact does not establish the durable disposition of any
+    note action or assign the new failure's root cause. The STEP entry is
+    restored with this current charge. Its bound guard and separate lift bar
+    remain.
     Sibling entry, landed mid-review: #5744 (lunch-poll profile-first
     join) re-skipped `integration/lunch-poll-vote.test.ts` as a FILE
     entry on this row's b04 signature — its recorded reds PREDATE the
@@ -6081,7 +6160,8 @@ supply; OW29/OW32/OW34 closed):
     complains when it succeeds), which is what makes the store the
     only usable witness; the worker console bridge was verified live
     at all three levels first, so the silence is a finding rather
-    than a blind instrument. **NOT DETERMINED, deliberately:**
+    than a blind instrument. **CAMPAIGN FORK, DELIBERATELY LEFT
+    UNDETERMINED AT THAT HEAD:**
     whether that commit was REFUSED, DROPPED in flight, or NEVER
     ISSUED. The guest's space appears in NO server-side line at all —
     including none of the 50-73 per-run
@@ -6145,12 +6225,34 @@ supply; OW29/OW32/OW34 closed):
     here is WRITE-direction and occurs at ensure-OFF, so OW61's
     separate client-side ABSORB investigation is not expected to
     close this shape.
-    **DISPOSITION: NO LIFT. The entry STAYS, its reason reworded to
-    the narrowed charge — the b04 class it was minted for is closed
-    at this head, and it now stands on the guest-profile
-    program-materialization loss. The lift bar is UNCHANGED: this
-    entry's own gate evidence at the merged head, 10/10, never by
-    inference from the default-app gate.**
+    **SUPERSEDED CAMPAIGN DISPOSITION: NO LIFT.** The 2026-08-24
+    campaign kept the entry on the narrowed guest-profile
+    program-materialization charge and left the mechanism fork open.
+    **CURRENT DISPOSITION: RESOLVED — the server never issued the
+    materialization commit on its first served attempt.** Under ON the
+    client may run the handler speculatively, but intentionally discards
+    that seal and waits for the authoritative server transaction.
+    **OWNER RULING 2026-08-26:** “with ON, the transaction should go
+    through the server. it's in this case fine for the client to just
+    wait for that to complete vs speculatively running things.” The
+    server reached `ProfileHome.inSpace()` before the anonymous target
+    name was cached; name resolution warmed the cache and threw
+    `RetryImmediately`, but `retries: false` caused the served event to
+    be dropped instead of rerun. The scheduler now preserves the served
+    carriage across that name-resolution requeue and reruns it in the
+    same settle. Ordinary transient commit retries remain disabled. The
+    red-first scheduler regression failed at one attempt before the fix
+    and passes at two; production-shaped ensure-OFF ON evidence moved
+    from 2/8 target-member reds on current main to 0/8, with all eight
+    guest stores carrying the 98-operation `patternIdentity`
+    materialization. Baseline head: `37b45336a`; diagnostic fix head:
+    `8524f4ec1`; rebased smokes: f10 at `622ef2bda` and f11 at
+    `e158eb0c3`. The run stores and logs remain on the measuring box at
+    `/Users/berni/labs-worktrees/lunch-member-evidence/`; the running
+    report is `/Users/berni/labs-worktrees/lunch-member-report.md`.
+    This was neither a server refusal nor loss of a required client wire
+    send; it was the server name-resolution retry gate preventing
+    issuance.
     **THE ENSURE-ON PROFILE-SURFACE MEMBER ROOT-CAUSED AND FIXED
     2026-08-25 (PR #6312) — the n=3 side probe's "create surface never renders"
     shape and the #6248 board's profile-shard family, reproduced
@@ -6236,8 +6338,13 @@ supply; OW29/OW32/OW34 closed):
     re-runs; its own defect, untouched. (iii) The lunch FILE entry's
     third member (ensure-OFF: the guest's ~98-101-op
     program-materialization commit never landing) is a DIFFERENT,
-    post-click stage and is untouched — the entry and its lift bar
-    stand exactly as written. (iv) Whether the #6248 board's
+    post-click stage; it is now resolved by the served-event
+    name-resolution requeue described in that entry's current
+    disposition. The 2026-08-26 owner ruling and evidence recorded there
+    supersede the earlier 10/10 lift bar with the requested approximately
+    eight-run re-baseline, a red-first mechanism regression, and eight
+    post-fix runs. (iv)
+    Whether the #6248 board's
     POST-fill shape (shards 2/6: fill succeeded, click landed,
     `#profile` never resolved) is this same clobber on a later
     surface or another member is undetermined — re-measure on that

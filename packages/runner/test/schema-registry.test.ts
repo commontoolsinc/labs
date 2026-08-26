@@ -5,7 +5,7 @@ import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import {
   internSchema,
   internSchemaAsTaggedHashString,
-} from "@commonfabric/data-model/schema-hash";
+} from "@commonfabric/data-model-schema";
 import {
   acquireSchemaRegistryLease,
   isSchemaDocumentClosureComplete,

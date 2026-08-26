@@ -30,7 +30,7 @@ import {
 } from "../src/link-utils.ts";
 import { externalRefTo, resolvedSchema } from "./schema-ref-helpers.ts";
 import { registerSchemaDocument } from "../src/schema-registry.ts";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import { Runtime } from "../src/runtime.ts";
 import {
   resetContentAddressedSchemasConfig,

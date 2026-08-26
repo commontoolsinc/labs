@@ -10,8 +10,8 @@ import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   internSchema,
   isInternedSchema,
-} from "@commonfabric/data-model/schema-hash";
-import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
+  isNontrivialSchema,
+} from "@commonfabric/data-model-schema";
 
 import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
 import { mergeDefaults } from "../src/schema.ts";

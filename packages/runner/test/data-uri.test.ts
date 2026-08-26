@@ -269,7 +269,7 @@ describe("data-uri", () => {
 
     // The standard encoding canonicalizes key order, so the minted id is a
     // function of content alone. This is the property whose absence #4360
-    // worked around in `schema-hash.ts`.
+    // worked around in `schema-intern.ts`.
     it("mints the same URI regardless of key insertion order", () => {
       const inOrder = { alpha: 1, beta: [2, 3], gamma: { delta: 4 } };
       const scrambled = { gamma: { delta: 4 }, beta: [2, 3], alpha: 1 };

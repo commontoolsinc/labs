@@ -1,4 +1,4 @@
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { stripUndefinedProps } from "@commonfabric/utils/strip-undefined-props";
 

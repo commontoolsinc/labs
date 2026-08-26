@@ -1130,4 +1130,67 @@ describe("event handling", () => {
       expect(onCommitStatus).toBeDefined();
     },
   );
+
+  it(
+    "reruns a served event after inSpace-name resolution even when commit retries are disabled",
+    async () => {
+      const eventCell = runtime.getCell<number>(
+        space,
+        "served-inspace-resolution-event",
+        undefined,
+        tx,
+      );
+      eventCell.set(0);
+      await tx.commit();
+
+      let attempts = 0;
+      let commits = 0;
+      const presyncIdentities: unknown[] = [];
+      const handler: EventHandler = () => {
+        attempts++;
+        if (attempts === 1) {
+          throw new RetryImmediately();
+        }
+      };
+      handler.presyncInputs = (_event, identity) => {
+        presyncIdentities.push(identity);
+        return Promise.resolve();
+      };
+
+      runtime.scheduler.addEventHandler(
+        handler,
+        eventCell.getAsNormalizedFullLink(),
+      );
+      runtime.scheduler.queueEvent(
+        eventCell.getAsNormalizedFullLink(),
+        1,
+        false,
+        () => {
+          commits++;
+        },
+        false,
+        {
+          eventId: "served-inspace-resolution",
+          served: {
+            firedAt: { user: "did:key:served-user", session: "served-session" },
+          },
+        },
+      );
+
+      await runtime.idle();
+
+      expect(attempts).toBe(2);
+      expect(commits).toBe(1);
+      expect(presyncIdentities).toEqual([
+        {
+          principal: "did:key:served-user",
+          sessionId: "served-session",
+        },
+        {
+          principal: "did:key:served-user",
+          sessionId: "served-session",
+        },
+      ]);
+    },
+  );
 });

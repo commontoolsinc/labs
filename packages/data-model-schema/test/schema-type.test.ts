@@ -18,8 +18,7 @@ import {
   isFabricPrimitiveSchemaType,
 } from "@commonfabric/api";
 
-import type { FabricPrimitive } from "@/interface.ts";
-import { BaseFabricPrimitive } from "@/fabric-bases/BaseFabricPrimitive.ts";
+import { BaseFabricPrimitive } from "@commonfabric/data-model/fabric-bases";
 import {
   codecClasses,
   FabricBytes,
@@ -28,8 +27,10 @@ import {
   FabricHash,
   FabricKeyPair,
   FabricRegExp,
-  schemaTypeOfFabricPrimitive,
-} from "@/fabric-primitives/index.ts";
+} from "@commonfabric/data-model/fabric-primitives";
+import type { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
+
+import { schemaTypeOfFabricPrimitive } from "@/schemaTypeOfFabricPrimitive.ts";
 
 /**
  * One row per concrete primitive class: the constructor, an instance factory,

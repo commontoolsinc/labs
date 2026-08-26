@@ -192,37 +192,34 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
   // verification-coverage.md OW60, not as a flaky test.
   patterns: [
     {
-      // The post-client-absorb-fix ON gate is 9/10 at the CI lane's
-      // ensure-off
-      // posture. The earlier read-side residues are likely closed by
-      // intervening fixes: r01 has the matching read-side delivery
-      // mechanism story, while r06/r09 have absence-of-observation only
-      // because their keyless-identity mechanism was never root-caused.
-      // The sole red is a new shape: the target stops after six durable
-      // note appends, with one `pattern-swap-setup-error` reporting that
-      // recursive schema validation made no progress. Its root keeps a
-      // real pattern identity, and `pattern-load-error` stays at zero.
-      // The store-incomplete setup-error shape is the current charge;
-      // verification-coverage.md OW45 and its linked historical report
-      // carry the full ledger and discriminators. The entry lifts when
-      // this step greens ON 10/10 quiet-and-loaded; the flip PR needs
-      // this list empty.
+      // The current charge is a direct CI ON failure, not the invalid
+      // split-source launcher topology root-caused in the OW45 RCA. The
+      // unskip probe at 66a969ca0 ran this exact step in ON shard 5 and
+      // failed at its unchanged 300 s condition bound. Its final client
+      // diagnostics reported all seven invocation traces but no bound
+      // notebook action state, with stored note chips present and none
+      // rendered. The run had no pattern-swap-setup-error, recursive-schema
+      // error, or pattern-load-error, so that older signature is not the
+      // reason for this skip. verification-coverage.md OW45 carries the
+      // full run and job evidence. The entry lifts on the established 10/10
+      // quiet-and-loaded gate under the current source-authority posture;
+      // the flip PR needs this list empty.
       file: "integration/default-app.test.ts",
       step: "should persist and reload every rapidly created notebook note",
       phase: "phase-7",
-      reason: "Real ON-regime defect, RE-MEASURED 2026-08-26 " +
-        "(verification-coverage.md OW45 arm B): the " +
-        "post-client-absorb-fix gate " +
-        "is 9/10. The earlier read-side r01/r06/r09 residues are " +
-        "likely closed by intervening fixes — r01 has the matching " +
-        "read-side delivery mechanism story; r06/r09 have " +
-        "absence-of-observation only. The sole red is a new " +
-        "store-incomplete setup-error shape: the step stops after six " +
-        "durable note appends with one pattern-swap-setup-error " +
-        "(recursive schema validation made no progress), a real root " +
-        "pattern identity, and zero pattern-load-error. Root cause " +
-        "unknown. Lifts when the fixed step greens ON 10/10 " +
-        "quiet-and-loaded; catch-up-and-start remains closed.",
+      reason: "Direct CI ON unskip probe at head 66a969ca0, run " +
+        "33008274232, shard 5: the log proved this exact step ran with " +
+        "no listed skip, then it failed after 5m22s at waitForCondition's " +
+        "unchanged 300000ms bound. Final client diagnostics reported " +
+        "eventInvocationCount=7 and notebookInvocationCount=7, but " +
+        "isNotebook=false, notesLength=0, notebookActionCount=0, 84 " +
+        "stored UI note chips, and zero rendered note chips. The run had " +
+        "zero pattern-swap-setup-error, recursive-schema errors, and " +
+        "pattern-load-error, so this is distinct from the split-source " +
+        "off-repository launcher failure root-caused by the OW45 RCA. " +
+        "The current CI failure's cause is not yet assigned. Lifts on " +
+        "10/10 quiet-and-loaded ON under the current source-authority " +
+        "posture.",
     },
     {
       // Re-listed by the lunch-poll identity PR (#5744). This file was
@@ -262,10 +259,11 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
       // exactly 4 commits (byte-identical across all three reds), no
       // patternIdentity anywhere, and appears in ZERO toolshed log
       // lines — greens reach 14-21 commits with patternIdentity named
-      // 57-216 times. Refused vs dropped vs never issued is NOT
-      // determined: the space is absent even from the 50-73 per-run
-      // foreign-write refusals, which name other spaces and fire as
-      // often in greens. Flagged there, not here: S-B's barrier
+      // 57-216 times. That campaign deliberately left refused vs
+      // dropped vs never issued undetermined. PR #6378 later pinned the
+      // mechanism: the authoritative server attempt was dropped on its
+      // `RetryImmediately` name-resolution signal before it could issue
+      // the transaction. Flagged there, not here: S-B's barrier
       // cannot cover a write that is never in flight, and the S-C
       // skip ruling's premise (waitForRuntimeIdle before any reload)
       // does not reach a surface with no reload. Recorded so nobody
@@ -285,18 +283,21 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "optimize/ow45-armb-client-start-fork.md) is CLOSED at that " +
         "head: catch-up activations in 10/10 runs, zero terminal " +
         "deferred-start deaths, zero recovery failures, zero " +
-        "pattern-load-error. The entry now stands on a THIRD, " +
-        "WRITE-SIDE residue member: the GUEST browser's mid-session " +
-        "profile piece never lands its program-materialization " +
-        "commit (~98-101 ops), so its space holds 4 commits with NO " +
-        "patternIdentity and is named zero times in the server log " +
-        "while greens reach 14-21 — the serving loop never engages, " +
-        "the wish #profile never resolves, and #lp-join-button never " +
-        "renders. Whether that commit was refused, dropped, or never " +
-        "issued is NOT determined. Every later step depends on that " +
-        "join, so the whole file waits. Lift bar UNCHANGED: this " +
-        "entry's own gate evidence at the merged head, 10/10, never " +
-        "by inference from the default-app gate.",
+        "pattern-load-error. The entry's THIRD, WRITE-SIDE residue " +
+        "member is RESOLVED by PR #6378: the authoritative server " +
+        "attempt reached ProfileHome.inSpace() before the anonymous " +
+        "target name was cached, then retries: false dropped its " +
+        "RetryImmediately signal. The ~98-101-op " +
+        "program-materialization transaction was therefore never " +
+        "issued; this was neither a refusal nor loss of a required " +
+        "client wire send. The 2026-08-26 owner ruling makes the " +
+        "server transaction authoritative under ON. Current-main " +
+        "evidence moved from 2/8 target-member reds to 0/8 after the " +
+        "scheduler retained the served carriage across the " +
+        "name-resolution requeue. The prior 10/10 lift bar is " +
+        "superseded by that owner-directed approximately eight-run " +
+        "pin. This FILE entry remains explicit until the phase-7 " +
+        "coordinator lifts it.",
     },
     {
       // Filed 2026-08-25 from PR #6267's ON-lane investigation (issue

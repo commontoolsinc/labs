@@ -6,26 +6,24 @@ import {
 } from "@commonfabric/api";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
+import {
+  DEFAULT_SELECTOR,
+  hashSchema,
+  internPathSelector,
+  internSchema,
+  internSchemaAsTaggedHashString,
+  internSchemaPairAsKey,
+  isInternedSchema,
+  REJECTING_SELECTOR,
+  schemaTypeOfFabricPrimitive,
+  schemaWithProperties,
+} from "@commonfabric/data-model-schema";
 import {
   FabricInstance,
   FabricPrimitive,
   FabricSpecialObject,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import {
-  hashSchema,
-  internSchema,
-  internSchemaAsTaggedHashString,
-  isInternedSchema,
-} from "@commonfabric/data-model/schema-hash";
-import {
-  DEFAULT_SELECTOR,
-  internPathSelector,
-  internSchemaPairAsKey,
-  REJECTING_SELECTOR,
-  schemaWithProperties,
-} from "@commonfabric/data-model/schema-utils";
 import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MemorySpace, Result, Unit } from "@commonfabric/memory/interface";
@@ -993,7 +991,7 @@ export class MapSet<K, V> {
  * code. When `hashValues` is `true`, uses `hashStringOf()`.
  *
  * **Contract:** Callers must hand in selectors that have already been
- * interned via `internPathSelector` (from `@commonfabric/data-model/schema-utils`).
+ * interned via `internPathSelector` (from `@commonfabric/data-model-schema`).
  * That helper deep-freezes `v.path` and `v`, and interns `v.schema`, so the
  * `isDeepFrozen` guard in `hashOfModernInternal` is satisfied and repeat
  * hashes of the same selector reference hit the WeakMap cache. Selectors

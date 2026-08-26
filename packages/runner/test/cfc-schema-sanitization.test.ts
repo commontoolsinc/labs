@@ -3,7 +3,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 
 import type { JSONSchema } from "../src/builder/types.ts";
 import {

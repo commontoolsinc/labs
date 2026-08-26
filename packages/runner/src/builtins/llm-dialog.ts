@@ -11,11 +11,11 @@ import {
   FabricPrimitive,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
+  internSchema,
   isNontrivialSchema,
   toDeepFrozenSchema,
-} from "@commonfabric/data-model/schema-utils";
+} from "@commonfabric/data-model-schema";
 import {
   DEFAULT_MODEL_NAME,
   LLMClient,

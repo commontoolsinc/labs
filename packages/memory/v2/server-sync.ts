@@ -1,4 +1,4 @@
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import {
   type CellScope,
   type EntitySnapshot,

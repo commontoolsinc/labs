@@ -91,6 +91,10 @@ Add a line for each new document to the index below.
 - [`host-embedding.md`](host-embedding.md) — the seams a host that is not the
   labs shell may bind to when it mounts our components and patterns, each one
   pinned by a test that goes red if the contract changes
+- [`piece-bulk-operations.md`](piece-bulk-operations.md) — retargeting,
+  repairing, and reversing many pieces in one space as one reviewable,
+  resumable operation: what a plan row means, what each write proves first,
+  what a stop leaves behind, and what a resume may claim
 
 ## Observability and testing
 
