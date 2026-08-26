@@ -236,7 +236,7 @@ A field authored against a `FabricPrimitive` class ITSELF (`blob: FabricBytes`)
 emits that class's schema-vocabulary name, a leaf with no `properties`, no
 `required`, and no `$defs` hoisting. Validation is by prototype
 (`schemaTypeOfFabricPrimitive`,
-`packages/data-model/src/fabric-primitives/index.ts`); the dialect side is
+`packages/data-model-schema/src/schemaTypeOfFabricPrimitive.ts`); the dialect side is
 specified in `docs/specs/json_schema.md`.
 
 The remaining typed arrays and the buffer types map to `true` (accept

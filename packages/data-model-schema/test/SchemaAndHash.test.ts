@@ -14,7 +14,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { SchemaAndHash } from "@/SchemaAndHash.ts";
 import { toDeepFrozenSchema } from "@/schema-utils.ts";
 
