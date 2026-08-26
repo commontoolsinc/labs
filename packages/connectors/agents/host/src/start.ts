@@ -41,6 +41,34 @@ export interface StartAgentsHostOptions {
   createDriver?: (config: AgentSourceConfig) => AgentDriver;
 }
 
+interface HostProcessLock {
+  release(): Promise<void>;
+}
+
+export interface StartAgentsHostDependencies {
+  openFabric: typeof openAgentFabricRuntime;
+  targetLockPath: typeof defaultTargetProcessLockPath;
+  acquireProcessLock: (path: string) => Promise<HostProcessLock>;
+  ledgerPath: typeof defaultTargetLedgerPath;
+  deployDebugView: typeof deployAgentSessionsDebugView;
+  openLedger: typeof CommandLedger.open;
+  describeTarget: typeof describeAgentFabricTarget;
+  createHost: (
+    options: ConstructorParameters<typeof AgentsHost>[0],
+  ) => AgentsHost;
+}
+
+const defaultDependencies: StartAgentsHostDependencies = {
+  openFabric: openAgentFabricRuntime,
+  targetLockPath: defaultTargetProcessLockPath,
+  acquireProcessLock: AgentsHostProcessLock.acquire,
+  ledgerPath: defaultTargetLedgerPath,
+  deployDebugView: deployAgentSessionsDebugView,
+  openLedger: CommandLedger.open,
+  describeTarget: describeAgentFabricTarget,
+  createHost: (options) => new AgentsHost(options),
+};
+
 export class RunningAgentsHost {
   readonly host: AgentsHost;
   readonly runtime: Runtime;
@@ -48,7 +76,7 @@ export class RunningAgentsHost {
   readonly debugPieceId?: string;
   readonly initialSessionCount: number;
   readonly ledgerPath: string;
-  readonly #processLocks: AgentsHostProcessLock[];
+  readonly #processLocks: HostProcessLock[];
   #stopTask?: Promise<void>;
 
   constructor(options: {
@@ -57,7 +85,7 @@ export class RunningAgentsHost {
     debugPieceId?: string;
     initialSessionCount: number;
     ledgerPath: string;
-    processLocks: AgentsHostProcessLock[];
+    processLocks: HostProcessLock[];
   }) {
     this.host = options.host;
     this.runtime = options.fabric.runtime;
@@ -97,8 +125,9 @@ export class RunningAgentsHost {
 
 export async function startAgentsHost(
   options: StartAgentsHostOptions,
+  dependencies: StartAgentsHostDependencies = defaultDependencies,
 ): Promise<RunningAgentsHost> {
-  const processLocks: AgentsHostProcessLock[] = [];
+  const processLocks: HostProcessLock[] = [];
   const startupTasks = new Set<Promise<unknown>>();
   let fabric: AgentFabricRuntime | undefined;
   let host: AgentsHost | undefined;
@@ -116,36 +145,36 @@ export async function startAgentsHost(
     abortable(trackStartup(task), options.signal);
   try {
     options.signal?.throwIfAborted();
-    fabric = await openAgentFabricRuntime({
+    fabric = await dependencies.openFabric({
       ...options,
       deferStorageClaim: true,
     });
     options.signal?.throwIfAborted();
     const targetLockPath = options.targetLockPath ??
-      await defaultTargetProcessLockPath(
+      await dependencies.targetLockPath(
         options.apiUrl,
         fabric.spaceDid,
         fabric.ownerDid,
       );
     options.signal?.throwIfAborted();
-    processLocks.push(await AgentsHostProcessLock.acquire(targetLockPath));
+    processLocks.push(await dependencies.acquireProcessLock(targetLockPath));
     options.signal?.throwIfAborted();
     await waitForStartup(fabric.target.claimStorage());
     options.signal?.throwIfAborted();
-    const ledgerPath = await defaultTargetLedgerPath(
+    const ledgerPath = await dependencies.ledgerPath(
       options.apiUrl,
       fabric.spaceDid,
       fabric.ownerDid,
     );
     options.signal?.throwIfAborted();
     processLocks.push(
-      await AgentsHostProcessLock.acquire(`${ledgerPath}.lock`),
+      await dependencies.acquireProcessLock(`${ledgerPath}.lock`),
     );
     options.signal?.throwIfAborted();
     const debugPieceId = options.debugView === false
       ? undefined
       : await waitForStartup(
-        deployAgentSessionsDebugView(
+        dependencies.deployDebugView(
           fabric.manager,
           fabric.target,
           undefined,
@@ -154,14 +183,14 @@ export async function startAgentsHost(
       );
     options.signal?.throwIfAborted();
     const ledger = await waitForStartup(
-      CommandLedger.open(ledgerPath),
+      dependencies.openLedger(ledgerPath),
     );
     options.signal?.throwIfAborted();
-    host = new AgentsHost({
+    host = dependencies.createHost({
       sources: options.sources,
       checkoutRoots: options.checkoutRoots,
       target: fabric.target,
-      targetDescription: describeAgentFabricTarget(
+      targetDescription: dependencies.describeTarget(
         fabric.target,
         fabric.spaceDid,
         debugPieceId,

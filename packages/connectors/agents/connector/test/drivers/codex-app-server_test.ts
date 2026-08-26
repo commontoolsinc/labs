@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import {
   CodexAppServerDriver,
   codexServerRequestPolicy,
@@ -145,6 +145,55 @@ for line in sys.stdin:
         print(json.dumps({"method": "turn/completed", "params": {"threadId": message["params"]["threadId"], "turn": {"id": "turn-1", "status": "completed"}}}), flush=True)
 `;
 
+const EDGE_CASE_SERVER = String.raw`#!/usr/bin/env python3
+import json, sys
+
+pending_prompt = None
+for line in sys.stdin:
+    message = json.loads(line)
+    method = message.get("method")
+    params = message.get("params", {})
+    if "id" not in message:
+        continue
+    result = {}
+    completion = None
+    if method == "initialize":
+        result = {}
+    elif method == "thread/list":
+        if params.get("archived"):
+            result = {"threads": [{"id": "archived", "title": "Archived", "status": {"type": "notLoaded"}}]}
+        elif params.get("cursor"):
+            result = {"threads": [{"id": "second", "title": "Second", "created_at": 1, "updated_at": 10000000000, "status": {"type": "systemError"}}]}
+        else:
+            result = {"threads": [{"id": "first", "status": {"type": "idle"}}], "nextCursor": "next"}
+    elif method == "thread/read":
+        if params["threadId"] == "missing":
+            result = {}
+        else:
+            result = {"thread": {"id": params["threadId"], "createdAt": "2026-08-26T00:00:00.000Z", "status": {"type": "future"}, "turns": [{"items": [{"type": "commandExecution", "text": "tool output", "created_at": 1}, {"type": "futureItem", "content": {"content": ["nested", {"text": "text"}]}}]}]}}
+    elif method == "thread/resume":
+        result = {}
+    elif method == "turn/start":
+        text = params["input"][0]["text"]
+        if text == "missing turn":
+            result = {"turn": {}}
+        else:
+            turn_id = "turn-" + text.replace(" ", "-")
+            result = {"turn": {"id": turn_id}}
+            if text == "cancel me":
+                pending_prompt = (params["threadId"], turn_id)
+            else:
+                completion = {"method": "turn/completed", "params": {"threadId": params["threadId"], "turn": {"id": turn_id, "status": "failed" if text == "fail" else "completed"}}}
+    elif method == "turn/interrupt":
+        result = {}
+        if pending_prompt is not None:
+            completion = {"method": "turn/completed", "params": {"threadId": pending_prompt[0], "turn": {"id": pending_prompt[1], "status": "interrupted"}}}
+            pending_prompt = None
+    print(json.dumps({"id": message["id"], "result": result}), flush=True)
+    if completion is not None:
+        print(json.dumps(completion), flush=True)
+`;
+
 Deno.test("Codex launch modes distinguish private stdio and shared proxies", () => {
   const source = {
     id: "codex:default",
@@ -198,6 +247,18 @@ Deno.test("Codex launch modes distinguish private stdio and shared proxies", () 
     {
       command: ["ssh", "devbox", "codex app-server proxy"],
     },
+  );
+  assertEquals(
+    resolveCodexAppServerLaunch({
+      ...source,
+      codexTransport: "proxy",
+    }, { CODEX_BIN: "/opt/codex" }),
+    { command: ["/opt/codex", "app-server", "proxy"] },
+  );
+  assertThrows(
+    () => codexServerRequestPolicy("unknown/request"),
+    Error,
+    "Unsupported Codex server request",
   );
 });
 
@@ -539,6 +600,115 @@ Deno.test("Codex reserves a session while a turn is starting", async () => {
     const release = await Deno.open(releasePath, { write: true });
     release.close();
     assertEquals((await first).status, "succeeded");
+  } finally {
+    await driver.stop();
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("Codex driver handles provider edge cases and cancellation", async () => {
+  const directory = await Deno.makeTempDir();
+  const server = `${directory}/edge-server`;
+  await Deno.writeTextFile(server, EDGE_CASE_SERVER);
+  await Deno.chmod(server, 0o755);
+  const driver = new CodexAppServerDriver({
+    id: "codex:edge",
+    driver: "codex-app-server",
+    enabled: true,
+    command: [server],
+  });
+  try {
+    await driver.start();
+    await assertRejects(
+      () => driver.listSessions("invalid"),
+      Error,
+      "invalid Codex cursor",
+    );
+    const first = await driver.listSessions();
+    assertEquals(first.sessions[0].active, false);
+    assertEquals(first.nextCursor, "active:next");
+    const second = await driver.listSessions(first.nextCursor);
+    assertEquals(second.sessions[0].title, "Second");
+    assertEquals(second.sessions[0].createdAt, "1970-01-01T00:00:01.000Z");
+    assertEquals(second.sessions[0].updatedAt, "1970-04-26T17:46:40.000Z");
+    assertEquals(second.nextCursor, "archived:");
+    const archived = await driver.listSessions(second.nextCursor);
+    assertEquals(archived.sessions[0].archived, true);
+    assertEquals(archived.nextCursor, undefined);
+
+    await assertRejects(
+      () => driver.readSession("missing"),
+      Error,
+      "Codex thread not found",
+    );
+    const snapshot = await driver.readSession("edge");
+    assertEquals(snapshot.summary.active, null);
+    assertEquals(
+      snapshot.normalizedMessages.map((message) => message.role),
+      ["tool", "unknown"],
+    );
+    assertEquals(snapshot.normalizedMessages[1].textPreview, "nested\ntext");
+
+    assertEquals((await driver.cancel("edge")).status, "unsupported");
+    assertEquals((await driver.setMode("edge", "plan")).status, "unsupported");
+    assertEquals(
+      (await driver.setConfigOption("edge", "thinking", true)).status,
+      "unsupported",
+    );
+    assertEquals(
+      (await driver.prompt("edge", { text: "missing turn" })).error?.code,
+      "missing-turn-id",
+    );
+    assertEquals(
+      (await driver.prompt("edge", { text: "fail" })).error?.code,
+      "turn-failed",
+    );
+    assertEquals(
+      (await driver.prompt("edge", { text: "callback fails" }, {
+        onSessionActive: () => Promise.reject(new Error("callback failed")),
+      })).error?.code,
+      "turn-outcome-unknown",
+    );
+
+    const active = Promise.withResolvers<void>();
+    const prompt = driver.prompt("edge", { text: "cancel me" }, {
+      onSessionActive: () => {
+        active.resolve();
+        return Promise.resolve();
+      },
+    });
+    await active.promise;
+    const cancelled = await driver.cancel("edge");
+    assertEquals(cancelled.status, "succeeded");
+    assertEquals(cancelled.providerOperationId, "turn-cancel-me");
+    assertEquals((await prompt).error?.code, "turn-failed");
+  } finally {
+    await driver.stop();
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("managed Codex mode reports bootstrap stderr", async () => {
+  const directory = await Deno.makeTempDir();
+  const server = `${directory}/failed-server`;
+  await Deno.writeTextFile(
+    server,
+    "#!/usr/bin/env python3\nimport sys\nprint('daemon unavailable', file=sys.stderr)\nsys.exit(7)\n",
+  );
+  await Deno.chmod(server, 0o755);
+  const driver = new CodexAppServerDriver({
+    id: "codex:failed-managed",
+    driver: "codex-app-server",
+    enabled: true,
+    codexTransport: "managed",
+    codexBin: server,
+  });
+  try {
+    await assertRejects(
+      () => driver.start(),
+      Error,
+      "Codex managed app-server failed to start: daemon unavailable",
+    );
   } finally {
     await driver.stop();
     await Deno.remove(directory, { recursive: true });

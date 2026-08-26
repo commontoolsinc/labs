@@ -243,3 +243,45 @@ Deno.test("postCoverageComment skips an invalid payload without posting", async 
   const requests = await runWithPayload({ prNumber: "not-a-number" }, []);
   assertEquals(requests.length, 0);
 });
+
+Deno.test("postCoverageComment reports an absent payload file", async () => {
+  const directory = await Deno.makeTempDir({
+    prefix: "coverage-comment-absent-test-",
+  });
+  const file = path.join(directory, "missing.json");
+  const messages: string[] = [];
+  const originalLog = console.log;
+  Deno.env.set("COVERAGE_COMMENT_FILE", file);
+  console.log = (...args) => messages.push(args.map(String).join(" "));
+  try {
+    await postCoverageComment();
+  } finally {
+    console.log = originalLog;
+    Deno.env.delete("COVERAGE_COMMENT_FILE");
+    await Deno.remove(directory, { recursive: true });
+  }
+
+  assertEquals(messages, [`No ${file} present; nothing to post.`]);
+});
+
+Deno.test("postCoverageComment reports malformed JSON", async () => {
+  const directory = await Deno.makeTempDir({
+    prefix: "coverage-comment-malformed-test-",
+  });
+  const file = path.join(directory, "coverage-comment.json");
+  await Deno.writeTextFile(file, "{not json");
+  const messages: string[] = [];
+  const originalError = console.error;
+  Deno.env.set("COVERAGE_COMMENT_FILE", file);
+  console.error = (...args) => messages.push(args.map(String).join(" "));
+  try {
+    await postCoverageComment();
+  } finally {
+    console.error = originalError;
+    Deno.env.delete("COVERAGE_COMMENT_FILE");
+    await Deno.remove(directory, { recursive: true });
+  }
+
+  assertEquals(messages.length, 1);
+  assertStringIncludes(messages[0], `Could not parse ${file}:`);
+});

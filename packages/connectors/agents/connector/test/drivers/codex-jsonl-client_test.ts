@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import { CodexJsonlClient } from "../../src/drivers/codex-jsonl-client.ts";
 
@@ -102,12 +102,131 @@ for line in sys.stdin:
         print(json.dumps({"id": message["id"], "result": {"attempt": attempt}}), flush=True)
 `;
 
+const PROTOCOL_SERVER = String.raw`#!/usr/bin/env python3
+import json, sys
+
+for line in sys.stdin:
+    message = json.loads(line)
+    if "id" not in message:
+        continue
+    method = message.get("method")
+    if method == "initialize":
+        print(json.dumps({"id": message["id"], "result": {}}), flush=True)
+    elif method == "server-request":
+        print(json.dumps({
+            "jsonrpc": "2.0",
+            "id": "server-request-id",
+            "method": message.get("params", {}).get("method", "server/method"),
+            "params": {"value": 42},
+        }), flush=True)
+        reply = json.loads(sys.stdin.readline())
+        print(json.dumps({"id": message["id"], "result": reply}), flush=True)
+    elif method == "unknown-response":
+        print(json.dumps({"id": 999999, "result": {"ignored": True}}), flush=True)
+        print(json.dumps({"id": message["id"], "result": {"complete": True}}), flush=True)
+    elif method == "flood":
+        print(json.dumps({"id": message["id"], "result": {}}), flush=True)
+        for index in range(501):
+            print(json.dumps({
+                "method": "event/item",
+                "params": {"index": index},
+            }), flush=True)
+`;
+
 function outcome<T>(promise: Promise<T>) {
   return promise.then(
     (value) => ({ ok: true as const, value }),
     (error) => ({ ok: false as const, error: String(error) }),
   );
 }
+
+Deno.test("Codex client rejects invalid lifecycle operations", async () => {
+  assertThrows(
+    () => new CodexJsonlClient([]),
+    Error,
+    "Codex command must not be empty",
+  );
+
+  const client = new CodexJsonlClient(["unused"]);
+  await assertRejects(
+    () => client.call("before-start"),
+    Error,
+    "Codex App Server is not running",
+  );
+  await assertRejects(
+    () => client.notify("before-start"),
+    Error,
+    "Codex App Server is not running",
+  );
+});
+
+Deno.test("Codex client handles server requests and notification pressure", async () => {
+  const directory = await Deno.makeTempDir();
+  const server = `${directory}/protocol-server`;
+  await Deno.writeTextFile(server, PROTOCOL_SERVER);
+  await Deno.chmod(server, 0o755);
+  try {
+    const unsupported = new CodexJsonlClient([server]);
+    await unsupported.start();
+    await assertRejects(
+      () => unsupported.start(),
+      Error,
+      "Codex App Server already started",
+    );
+    assertEquals(await unsupported.call("server-request"), {
+      jsonrpc: "2.0",
+      id: "server-request-id",
+      error: {
+        code: -32601,
+        message: "Unsupported server request: server/method",
+      },
+    });
+    assertEquals(await unsupported.call("unknown-response"), {
+      complete: true,
+    });
+    const last = unsupported.waitForNotification((message) =>
+      (message.params as { index?: number } | undefined)?.index === 500
+    );
+    await unsupported.call("flood");
+    assertEquals(await last, {
+      method: "event/item",
+      params: { index: 500 },
+    });
+    await unsupported.stop();
+
+    const handled = new CodexJsonlClient([server], undefined, {
+      handleServerRequest: (method, params) => ({ method, params }),
+    });
+    await handled.start();
+    assertEquals(await handled.call("server-request", { method: "handled" }), {
+      jsonrpc: "2.0",
+      id: "server-request-id",
+      result: {
+        method: "handled",
+        params: { value: 42 },
+      },
+    });
+    await handled.stop();
+
+    const failed = new CodexJsonlClient([server], undefined, {
+      handleServerRequest: () => {
+        throw new Error("handler failed");
+      },
+    });
+    await failed.start();
+    assertEquals(await failed.call("server-request"), {
+      jsonrpc: "2.0",
+      id: "server-request-id",
+      error: {
+        code: -32603,
+        message: "Error: handler failed",
+      },
+    });
+    await failed.stop();
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
 
 Deno.test("Codex requests remain pending until the server responds", async () => {
   const dir = await Deno.makeTempDir();
@@ -423,7 +542,15 @@ Deno.test("Codex terminates a server that emits malformed JSON", async () => {
   await Deno.writeTextFile(server, MALFORMED_SERVER);
   await Deno.chmod(server, 0o755);
   try {
-    for (const frame of ["{not-json", "{}"]) {
+    const cases = [
+      ["{not-json", "emitted invalid JSON"],
+      ["[]", "emitted invalid JSON"],
+      ["{}", "invalid JSON-RPC message"],
+      ['{"id":2}', "invalid JSON-RPC response"],
+      ['{"id":2,"result":{},"error":{}}', "invalid JSON-RPC response"],
+      ['{"id":2,"error":"bad"}', "invalid JSON-RPC error"],
+    ] as const;
+    for (const [frame, expected] of cases) {
       const client = new CodexJsonlClient([server, frame]);
       try {
         await client.start();
@@ -431,7 +558,7 @@ Deno.test("Codex terminates a server that emits malformed JSON", async () => {
         await assertRejects(
           () => client.call("emit-malformed"),
           Error,
-          frame === "{}" ? "invalid JSON-RPC message" : "emitted invalid JSON",
+          expected,
         );
         await assertRejects(() => notification, Error);
       } finally {

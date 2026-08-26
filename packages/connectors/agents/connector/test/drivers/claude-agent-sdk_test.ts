@@ -779,6 +779,102 @@ Deno.test("Claude prompts use explicit source env and run concurrently", async (
   }
 });
 
+Deno.test("Claude driver handles message, cursor, and live control edges", async () => {
+  const active = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const calls: string[] = [];
+  const query = Object.assign(
+    (async function* () {
+      active.resolve();
+      await release.promise;
+      yield { type: "result", subtype: "success", result: "done" };
+    })(),
+    {
+      interrupt: () => {
+        calls.push("interrupt");
+        return Promise.resolve();
+      },
+      setPermissionMode: (mode: string) => {
+        calls.push(`mode:${mode}`);
+        return Promise.resolve();
+      },
+      setModel: (model: string) => {
+        calls.push(`model:${model}`);
+        return Promise.resolve();
+      },
+      close: () => calls.push("close"),
+    },
+  );
+  const sdk = {
+    listSessions: () =>
+      Promise.resolve([{
+        sessionId: "session",
+        firstPrompt: "First prompt",
+        cwd: "/tmp/project",
+        createdAt: Number.NaN,
+      }]),
+    getSessionInfo: (id: string) =>
+      Promise.resolve(
+        id === "missing" ? undefined : { sessionId: id, cwd: "/tmp/project" },
+      ),
+    getSessionMessages: () =>
+      Promise.resolve([{
+        type: "future",
+        uuid: "nested",
+        message: { content: ["one", { text: "two" }, null] },
+      }]),
+    renameSession: () => Promise.resolve(),
+    query: () => query,
+  } as unknown as ClaudeSdkAdapter;
+  const driver = new ClaudeAgentSdkDriver(
+    { id: "claude:edges", driver: "claude-agent-sdk", enabled: true },
+    sdk,
+  );
+
+  await assertRejects(
+    () => driver.listSessions("invalid"),
+    Error,
+    "invalid Claude cursor",
+  );
+  const page = await driver.listSessions();
+  assertEquals(page.sessions[0].title, "First prompt");
+  assertEquals(page.sessions[0].createdAt, null);
+  await assertRejects(
+    () => driver.readSession("missing"),
+    Error,
+    "Claude session not found",
+  );
+  const snapshot = await driver.readSession("session");
+  assertEquals(snapshot.normalizedMessages[0].role, "unknown");
+  assertEquals(snapshot.normalizedMessages[0].textPreview, "one\ntwo");
+  assertEquals((await driver.cancel("session")).status, "unsupported");
+  assertEquals(
+    (await driver.setMode("session", "missing")).status,
+    "unsupported",
+  );
+  assertEquals(
+    (await driver.setConfigOption("session", "unknown", true)).status,
+    "unsupported",
+  );
+
+  const prompt = driver.prompt("session", { text: "continue" });
+  await active.promise;
+  assertEquals((await driver.setMode("session", "plan")).status, "succeeded");
+  assertEquals(
+    (await driver.setConfigOption("session", "model", "claude-test")).status,
+    "succeeded",
+  );
+  assertEquals((await driver.cancel("session")).status, "succeeded");
+  release.resolve();
+  assertEquals((await prompt).status, "succeeded");
+  assertEquals(calls, [
+    "mode:plan",
+    "model:claude-test",
+    "interrupt",
+    "close",
+  ]);
+});
+
 Deno.test("Claude prompt env excludes another source's temporary globals", async () => {
   const key = "CLAUDE_TEST_FIRST_SOURCE_ONLY";
   const previous = Deno.env.get(key);

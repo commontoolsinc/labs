@@ -167,6 +167,36 @@ describe("GithubHost", () => {
           lastComplete: target.priorLastComplete,
         });
       });
+
+      it("reports collection and degraded-health failures together", async () => {
+        const target = new FakeTarget();
+        let healthPublications = 0;
+        target.publishHealth = (value: object) => {
+          target.healthValues.push(structuredClone(value));
+          healthPublications++;
+          return healthPublications === 3
+            ? Promise.reject(new Error("health cell unavailable"))
+            : Promise.resolve();
+        };
+        const client = {
+          collectOpenPullRequests: () => Promise.reject(new Error("offline")),
+        } as unknown as GithubClient;
+        const host = new GithubHost({
+          client,
+          target: target as unknown as GithubFabricTarget,
+          spaceDid: "did:key:test",
+          clock: () => new Date("2026-08-21T00:00:00.000Z"),
+        });
+
+        await host.start();
+        await expect(host.synchronize("initial")).rejects.toThrow(
+          "GitHub collection and health publication failed",
+        );
+        expect(target.healthValues.at(-1)).toMatchObject({
+          status: "degraded",
+          sync: { status: "failed", error: "offline" },
+        });
+      });
     });
   });
 });

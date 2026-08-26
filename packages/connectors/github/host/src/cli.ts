@@ -20,6 +20,10 @@ export interface GithubHostCliDependencies {
   readEnv: (key: string) => string | undefined;
   resolveToken: typeof resolveGithubToken;
   openFabric: typeof openGithubFabricRuntime;
+  acquireProcessLock: (
+    path: string,
+  ) => Promise<{ release(): Promise<void> }>;
+  createClient: (token: string, endpoint: string) => GithubClient;
   addSignalListener: typeof Deno.addSignalListener;
   removeSignalListener: typeof Deno.removeSignalListener;
   scheduleEvery: (intervalMs: number, callback: () => void) => () => void;
@@ -31,6 +35,9 @@ const defaultDependencies: GithubHostCliDependencies = {
   readEnv: (key) => Deno.env.get(key),
   resolveToken: resolveGithubToken,
   openFabric: openGithubFabricRuntime,
+  acquireProcessLock: GithubHostProcessLock.acquire,
+  createClient: (token, endpoint) =>
+    new GithubClient(createGithubGraphqlTransport({ token, endpoint })),
   addSignalListener: Deno.addSignalListener,
   removeSignalListener: Deno.removeSignalListener,
   scheduleEvery: (intervalMs, callback) => {
@@ -51,7 +58,7 @@ export async function runGithubHostCli(
   let queue: CollectionRequestQueue | undefined;
   let stopPeriodic: (() => void) | undefined;
   let activeCollection: AbortController | undefined;
-  let processLock: GithubHostProcessLock | undefined;
+  let processLock: { release(): Promise<void> } | undefined;
   const shutdown = Promise.withResolvers<"SIGINT" | "SIGTERM">();
   const installedSignals: Array<[Deno.Signal, () => void]> = [];
   const addSignal = (signal: Deno.Signal, listener: () => void) => {
@@ -72,17 +79,14 @@ export async function runGithubHostCli(
       githubHost: new URL(config.graphqlEndpoint).host,
       githubAccount: config.account,
     });
-    processLock = await GithubHostProcessLock.acquire(
+    processLock = await dependencies.acquireProcessLock(
       await githubTargetProcessLockPath(
         options.apiUrl,
         fabric.spaceDid,
         `${new URL(config.graphqlEndpoint).host}/${config.account}`,
       ),
     );
-    const client = new GithubClient(createGithubGraphqlTransport({
-      token,
-      endpoint: config.graphqlEndpoint,
-    }));
+    const client = dependencies.createClient(token, config.graphqlEndpoint);
     host = new GithubHost({
       client,
       target: fabric.target,

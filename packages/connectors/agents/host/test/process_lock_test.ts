@@ -1,9 +1,36 @@
 import { assertEquals, assertNotEquals, assertRejects } from "@std/assert";
-import { join } from "@std/path";
+import { join, resolve } from "@std/path";
 import {
   AgentsHostProcessLock,
+  defaultAgentsHostLockDirectory,
   defaultTargetProcessLockPath,
 } from "../src/process-lock.ts";
+
+Deno.test("agent host process-lock directories honor runtime settings", () => {
+  assertEquals(
+    defaultAgentsHostLockDirectory((key) =>
+      key === "CF_AGENTS_HOST_LOCK_DIR" ? " ./locks " : undefined
+    ),
+    resolve("./locks"),
+  );
+  assertEquals(
+    defaultAgentsHostLockDirectory((key) =>
+      key === "XDG_RUNTIME_DIR" ? "/runtime" : undefined
+    ),
+    join(resolve("/runtime"), "commonfabric", "agents-host"),
+  );
+  if (Deno.build.os !== "windows") {
+    assertEquals(
+      defaultAgentsHostLockDirectory((key) =>
+        key === "TMPDIR" ? "/private/runtime" : undefined
+      ),
+      join(
+        resolve("/private/runtime"),
+        `commonfabric-agents-host-${Deno.uid()}`,
+      ),
+    );
+  }
+});
 
 Deno.test("target process locks use the canonical API and resolved space", async () => {
   const directory = await Deno.makeTempDir();
@@ -122,5 +149,30 @@ Deno.test("AgentsHostProcessLock rejects shared lock directories", async () => {
     );
   } finally {
     await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("AgentsHostProcessLock rejects invalid existing lock files", async () => {
+  if (Deno.build.os === "windows") return;
+  const directory = await Deno.makeTempDir();
+  const path = join(directory, "agents.lock");
+  try {
+    await Deno.writeTextFile(path, "shared\n", { mode: 0o600 });
+    await Deno.chmod(path, 0o644);
+    await assertRejects(
+      () => AgentsHostProcessLock.acquire(path),
+      Error,
+      "process lock file permits access by other users",
+    );
+
+    await Deno.remove(path);
+    await Deno.mkdir(path, { mode: 0o700 });
+    await assertRejects(
+      () => AgentsHostProcessLock.acquire(path),
+      Error,
+      "process lock file is not a file",
+    );
+  } finally {
+    await Deno.remove(directory, { recursive: true });
   }
 });

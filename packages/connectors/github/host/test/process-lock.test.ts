@@ -1,8 +1,10 @@
 import { basename, join, resolve } from "@std/path";
+import { assertEquals, assertRejects } from "@std/assert";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import {
   defaultGithubHostLockDirectory,
+  GithubHostProcessLock,
   githubTargetProcessLockPath,
 } from "../src/process-lock.ts";
 
@@ -112,4 +114,88 @@ describe("GitHub host process-lock paths", () => {
       )
     ).toThrow("must not contain line breaks");
   });
+});
+
+Deno.test("GitHub process locks exclude peers and release cleanly", async () => {
+  const directory = await Deno.makeTempDir();
+  const path = join(directory, "github.lock");
+  const child = new Deno.Command(Deno.execPath(), {
+    args: [
+      "run",
+      "--allow-read",
+      "--allow-write",
+      "--allow-sys=uid",
+      join(import.meta.dirname!, "process-lock-holder.ts"),
+      path,
+    ],
+    stdin: "piped",
+    stdout: "piped",
+    stderr: "inherit",
+  }).spawn();
+  try {
+    const reader = child.stdout.getReader();
+    const ready = await reader.read();
+    reader.releaseLock();
+    assertEquals(new TextDecoder().decode(ready.value).trim(), "locked");
+
+    await assertRejects(
+      () => GithubHostProcessLock.acquire(path),
+      Error,
+      "another GitHub host holds the process lock",
+    );
+
+    const writer = child.stdin.getWriter();
+    await writer.write(new Uint8Array([10]));
+    await writer.close();
+    assertEquals((await child.status).success, true);
+
+    const acquired = await GithubHostProcessLock.acquire(path);
+    await assertRejects(
+      () => GithubHostProcessLock.acquire(path),
+      Error,
+      "another GitHub host holds the process lock",
+    );
+    await acquired.release();
+    await acquired.release();
+  } finally {
+    await child.stdin.close().catch(() => undefined);
+    await child.status;
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("GitHub process locks reject symbolic links", async () => {
+  if (Deno.build.os === "windows") return;
+  const directory = await Deno.makeTempDir();
+  const target = join(directory, "target");
+  const path = join(directory, "github.lock");
+  try {
+    await Deno.writeTextFile(target, "do not replace\n", { mode: 0o600 });
+    await Deno.symlink(target, path);
+    await assertRejects(
+      () => GithubHostProcessLock.acquire(path),
+      Error,
+      "process lock is not a regular file",
+    );
+    assertEquals(await Deno.readTextFile(target), "do not replace\n");
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("GitHub process locks reject shared lock files", async () => {
+  if (Deno.build.os === "windows") return;
+  const directory = await Deno.makeTempDir();
+  const path = join(directory, "github.lock");
+  try {
+    await Deno.writeTextFile(path, "", { mode: 0o666 });
+    await Deno.chmod(path, 0o666);
+    await assertRejects(
+      () => GithubHostProcessLock.acquire(path),
+      Error,
+      "process lock is accessible by other users",
+    );
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
 });

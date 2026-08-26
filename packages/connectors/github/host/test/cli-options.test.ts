@@ -24,4 +24,13 @@ describe("GitHub host CLI options", () => {
     expect(failure?.cause).toBeUndefined();
     expect(String(failure).includes("secret")).toBe(false);
   });
+
+  it("rejects unknown options and positional arguments", () => {
+    expect(() => parseGithubHostCliOptions(["--unknown"])).toThrow(
+      "unknown option: --unknown",
+    );
+    expect(() => parseGithubHostCliOptions(["unexpected"])).toThrow(
+      "unexpected positional argument: unexpected",
+    );
+  });
 });

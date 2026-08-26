@@ -4,6 +4,7 @@ import type {
   ListSessionsRequest,
   ListSessionsResponse,
   LoadSessionRequest,
+  LoadSessionResponse,
   PromptRequest,
   PromptResponse,
   SessionNotification,
@@ -11,6 +12,83 @@ import type {
   SetSessionModeRequest,
 } from "@agentclientprotocol/sdk";
 import { AcpDriver, type AcpTransport } from "../../src/drivers/acp.ts";
+
+function fakeTransport(
+  overrides: Partial<AcpTransport> = {},
+): AcpTransport {
+  return {
+    setSessionUpdateSink() {},
+    initialize: () =>
+      Promise.resolve({
+        protocolVersion: 1,
+        agentCapabilities: {
+          loadSession: true,
+          sessionCapabilities: { list: {} },
+        },
+      }),
+    listSessions: () => Promise.resolve({ sessions: [] }),
+    loadSession: () => Promise.resolve({}),
+    resumeSession: () => Promise.resolve({}),
+    prompt: () => Promise.resolve({ stopReason: "end_turn" }),
+    cancel: () => Promise.resolve(),
+    setSessionMode: () => Promise.resolve({}),
+    setSessionConfigOption: () => Promise.resolve({ configOptions: [] }),
+    stop: () => Promise.resolve(),
+    ...overrides,
+  };
+}
+
+const PROCESS_ACP_SERVER = String.raw`#!/usr/bin/env python3
+import json, sys
+
+print("fake ACP adapter started", file=sys.stderr, flush=True)
+pending_prompt = None
+for line in sys.stdin:
+    message = json.loads(line)
+    method = message.get("method")
+    params = message.get("params", {})
+    if method == "session/cancel":
+        if pending_prompt is not None:
+            print(json.dumps({"jsonrpc": "2.0", "id": pending_prompt, "result": {"stopReason": "cancelled"}}), flush=True)
+            pending_prompt = None
+        continue
+    if "id" not in message:
+        continue
+    if method == "initialize":
+        result = {
+            "protocolVersion": 1,
+            "agentCapabilities": {
+                "loadSession": True,
+                "sessionCapabilities": {"list": {}, "resume": {}},
+            },
+            "agentInfo": {"name": "process-acp", "version": "2"},
+        }
+    elif method == "session/list":
+        result = {"sessions": [{"sessionId": "process-session", "cwd": "/tmp/process"}]}
+    elif method in ("session/load", "session/resume"):
+        print(json.dumps({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": params["sessionId"],
+                "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "from process"}},
+            },
+        }), flush=True)
+        result = {
+            "modes": {"currentModeId": "plan", "availableModes": [{"id": "plan", "name": "Plan"}]},
+            "configOptions": [{"id": "thinking", "name": "Thinking", "type": "boolean", "currentValue": False}],
+        }
+    elif method == "session/prompt":
+        pending_prompt = message["id"]
+        continue
+    elif method == "session/set_mode":
+        result = {}
+    elif method == "session/set_config_option":
+        result = {"configOptions": []}
+    else:
+        result = {}
+    print(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}), flush=True)
+`;
 
 Deno.test("ACP driver enumerates and loads persisted sessions", async () => {
   const calls: string[] = [];
@@ -396,4 +474,316 @@ Deno.test("ACP driver serializes overlapping loads of the same session", async (
   );
   assertEquals(maximumActiveLoads, 1);
   await driver.stop();
+});
+
+Deno.test("ACP driver normalizes updates and prunes stale controls", async () => {
+  let notify: ((notification: SessionNotification) => void) | undefined;
+  let inventory: ListSessionsResponse["sessions"] = [{
+    sessionId: "stale",
+    cwd: "/tmp/stale",
+    additionalDirectories: ["/tmp/shared"],
+  }];
+  const loadRequests: LoadSessionRequest[] = [];
+  const transport = fakeTransport({
+    setSessionUpdateSink(sink) {
+      notify = sink;
+    },
+    listSessions: (params) => {
+      assertEquals(params, {});
+      return Promise.resolve({ sessions: inventory });
+    },
+    loadSession: (params) => {
+      loadRequests.push(params);
+      for (
+        const update of [
+          {
+            id: "thought",
+            sessionUpdate: "agent_thought_chunk",
+            content: ["thinking", { text: "carefully" }],
+          },
+          {
+            sessionUpdate: "tool_call",
+            content: { content: { text: "running a tool" } },
+          },
+          { sessionUpdate: "unrecognized", content: 42 },
+        ]
+      ) {
+        notify?.(
+          { sessionId: params.sessionId, update } as SessionNotification,
+        );
+      }
+      return Promise.resolve({
+        modes: {
+          currentModeId: "plan",
+          availableModes: [{ id: "plan", name: "Plan" }],
+        },
+      });
+    },
+  });
+  const driver = new AcpDriver(
+    { id: "acp:updates", driver: "acp", enabled: true, command: ["fake"] },
+    transport,
+  );
+
+  await driver.start();
+  await driver.listSessions();
+  const snapshot = await driver.readSession("stale");
+  assertEquals(loadRequests[0].additionalDirectories, ["/tmp/shared"]);
+  assertEquals(
+    snapshot.normalizedMessages.map(({ id, role, textPreview }) => ({
+      id,
+      role,
+      textPreview,
+    })),
+    [
+      {
+        id: "thought",
+        role: "assistant",
+        textPreview: "thinking\ncarefully",
+      },
+      {
+        id: "update-1",
+        role: "tool",
+        textPreview: "running a tool",
+      },
+      { id: "update-2", role: "unknown", textPreview: null },
+    ],
+  );
+  assertEquals(driver.source.capabilities.modes, ["plan"]);
+
+  inventory = [{ sessionId: "current", cwd: "/tmp/current" }];
+  await driver.listSessions();
+  assertEquals(driver.source.capabilities.modes, []);
+  await assertRejects(
+    () => driver.readSession("stale"),
+    Error,
+    "not listed or missing cwd",
+  );
+});
+
+Deno.test("ACP prompt admission covers resumed and uncertain outcomes", async () => {
+  const promptStarted = Promise.withResolvers<void>();
+  const promptResult = Promise.withResolvers<PromptResponse>();
+  let promptCalls = 0;
+  let resumeCalls = 0;
+  let cancelCalls = 0;
+  const transport = fakeTransport({
+    initialize: () =>
+      Promise.resolve({
+        protocolVersion: 1,
+        agentCapabilities: {
+          loadSession: true,
+          sessionCapabilities: { list: {}, resume: {} },
+        },
+      }),
+    listSessions: () =>
+      Promise.resolve({
+        sessions: [{ sessionId: "session", cwd: "/tmp/project" }],
+      }),
+    resumeSession: () => {
+      resumeCalls++;
+      return Promise.resolve({});
+    },
+    prompt: () => {
+      promptCalls++;
+      if (promptCalls === 1) {
+        promptStarted.resolve();
+        return promptResult.promise;
+      }
+      return Promise.reject(new Error("adapter disconnected"));
+    },
+    cancel: () => {
+      cancelCalls++;
+      return Promise.resolve();
+    },
+  });
+  const driver = new AcpDriver(
+    { id: "acp:prompt", driver: "acp", enabled: true, command: ["fake"] },
+    transport,
+  );
+
+  await driver.start();
+  assertEquals(
+    (await driver.prompt("missing", { text: "hello" })).status,
+    "unsupported",
+  );
+  assertEquals((await driver.cancel("session")).status, "unsupported");
+  assertEquals(
+    (await driver.renameSession("session", "New title")).status,
+    "unsupported",
+  );
+  await driver.listSessions();
+
+  const first = driver.prompt("session", { text: "continue" });
+  await promptStarted.promise;
+  assertEquals(
+    (await driver.prompt("session", { text: "again" })).status,
+    "needs-confirmation",
+  );
+  assertEquals((await driver.cancel("session")).status, "succeeded");
+  assertEquals(cancelCalls, 1);
+  promptResult.resolve({ stopReason: "cancelled" });
+  const cancelled = await first;
+  assertEquals(cancelled.status, "failed");
+  assertEquals(cancelled.error?.code, "cancelled");
+
+  const uncertain = await driver.prompt("session", { text: "retry" });
+  assertEquals(uncertain.status, "unknown");
+  assertEquals(uncertain.error?.code, "prompt-outcome-unknown");
+  assertEquals(resumeCalls, 2);
+});
+
+Deno.test("ACP select controls accept only advertised values", async () => {
+  const configCalls: SetSessionConfigOptionRequest[] = [];
+  const transport = fakeTransport({
+    listSessions: () =>
+      Promise.resolve({
+        sessions: [{ sessionId: "session", cwd: "/tmp/project" }],
+      }),
+    loadSession: () =>
+      Promise.resolve({
+        configOptions: [
+          {
+            id: "model",
+            name: "Model",
+            type: "select" as const,
+            currentValue: "fast",
+            options: [{
+              name: "Models",
+              options: [
+                { name: "Fast", value: "fast" },
+                { name: "Careful", value: "careful" },
+              ],
+            }],
+          },
+          {
+            id: "mystery",
+            name: "Mystery",
+            type: "future-type",
+            currentValue: null,
+          },
+        ],
+      } as unknown as LoadSessionResponse),
+    setSessionConfigOption: (params) => {
+      configCalls.push(params);
+      return Promise.resolve({
+        configOptions: [{
+          id: "model",
+          name: "Model",
+          type: "select" as const,
+          currentValue: "careful",
+          options: [{ name: "Careful", value: "careful" }],
+        }],
+      });
+    },
+  });
+  const driver = new AcpDriver(
+    { id: "acp:config", driver: "acp", enabled: true, command: ["fake"] },
+    transport,
+  );
+
+  await driver.start();
+  await driver.listSessions();
+  await driver.readSession("session");
+  assertEquals(
+    (await driver.setConfigOption("session", "missing", "value")).status,
+    "unsupported",
+  );
+  assertEquals(
+    (await driver.setConfigOption("session", "mystery", "value")).status,
+    "unsupported",
+  );
+  assertEquals(
+    (await driver.setConfigOption("session", "model", true)).status,
+    "unsupported",
+  );
+  assertEquals(
+    (await driver.setConfigOption("session", "model", "unknown")).status,
+    "unsupported",
+  );
+  assertEquals(
+    (await driver.setConfigOption("session", "model", "careful")).status,
+    "succeeded",
+  );
+  assertEquals(configCalls, [{
+    sessionId: "session",
+    configId: "model",
+    value: "careful",
+  }]);
+});
+
+Deno.test("default ACP transport rejects invalid startup order", async () => {
+  const driver = new AcpDriver({
+    id: "acp:default",
+    driver: "acp",
+    enabled: true,
+  });
+
+  await assertRejects(
+    () => driver.listSessions(),
+    Error,
+    "transport is not initialized",
+  );
+  await assertRejects(
+    () => driver.start(),
+    Error,
+    "requires a command",
+  );
+
+  const controller = new AbortController();
+  controller.abort(new Error("cancelled before start"));
+  await assertRejects(
+    () => driver.start(controller.signal),
+    Error,
+    "cancelled before start",
+  );
+});
+
+Deno.test("default ACP transport serves a complete process session", async () => {
+  const directory = await Deno.makeTempDir();
+  const server = `${directory}/fake-acp`;
+  await Deno.writeTextFile(server, PROCESS_ACP_SERVER);
+  await Deno.chmod(server, 0o755);
+  const driver = new AcpDriver({
+    id: "acp:process",
+    driver: "acp",
+    enabled: true,
+    command: [server],
+  });
+  try {
+    await driver.start();
+    assertEquals(driver.source.version, "2");
+    assertEquals((await driver.listSessions()).sessions.length, 1);
+    const snapshot = await driver.readSession("process-session");
+    assertEquals(snapshot.normalizedMessages[0].textPreview, "from process");
+    assertEquals(
+      (await driver.setMode("process-session", "plan")).status,
+      "succeeded",
+    );
+    assertEquals(
+      (await driver.setConfigOption("process-session", "thinking", true))
+        .status,
+      "succeeded",
+    );
+
+    const active = Promise.withResolvers<void>();
+    const prompt = driver.prompt("process-session", { text: "continue" }, {
+      onSessionActive: () => {
+        active.resolve();
+        return Promise.resolve();
+      },
+    });
+    await active.promise;
+    assertEquals((await driver.cancel("process-session")).status, "succeeded");
+    assertEquals((await prompt).error?.code, "cancelled");
+
+    await assertRejects(
+      () => driver.start(),
+      Error,
+      "already initialized",
+    );
+  } finally {
+    await driver.stop();
+    await Deno.remove(directory, { recursive: true });
+  }
 });

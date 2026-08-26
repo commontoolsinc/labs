@@ -410,6 +410,25 @@ describe("check-package-cycles", () => {
       expect(workspace.members).toEqual(["alpha"]);
       expect(workspace.names).toEqual(new Map());
     });
+
+    it("ignores malformed and non-package workspace entries", async () => {
+      const root = await tree({
+        alpha: { "deno.json": JSON.stringify({ name: "alpha-from-json" }) },
+      });
+      await Deno.writeTextFile(
+        join(root, "deno.jsonc"),
+        JSON.stringify({
+          workspace: [null, 42, "./tools", "./packages/alpha"],
+        }),
+      );
+      await Deno.remove(join(root, "packages", "alpha", "deno.jsonc"));
+
+      const workspace = await readWorkspace(root);
+      expect(workspace.members).toEqual(["alpha"]);
+      expect(workspace.names).toEqual(
+        new Map([["alpha-from-json", "alpha"]]),
+      );
+    });
   });
 
   describe("packageOfPath()", () => {

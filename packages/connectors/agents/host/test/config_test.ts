@@ -317,6 +317,19 @@ Deno.test("parseAgentsHostCliOptions rejects unknown flags", () => {
   );
 });
 
+Deno.test("parseAgentsHostCliOptions rejects missing and positional values", () => {
+  assertThrows(
+    () => parseAgentsHostCliOptions([], () => undefined),
+    Error,
+    "missing required option: --config",
+  );
+  assertThrows(
+    () => parseAgentsHostCliOptions(["unexpected"], () => undefined),
+    Error,
+    "unexpected positional argument: unexpected",
+  );
+});
+
 Deno.test("parseAgentsHostCliOptions does not accept per-invocation ledgers", () => {
   assertThrows(
     () =>

@@ -76,5 +76,17 @@ describe("fabric-runtime", () => {
       })).rejects.toThrow(Deno.errors.NotFound);
       expect(requested).toBe(false);
     });
+
+    it("disposes the runtime when its health check fails", async () => {
+      globalThis.fetch = () =>
+        Promise.resolve(new Response(null, { status: 503 }));
+
+      await expect(openAgentFabricRuntime({
+        apiUrl: "https://deployment.example",
+        identityPath,
+        ownerDid,
+        space: "a-space-of-its-own",
+      })).rejects.toThrow("could not connect to https://deployment.example");
+    });
   });
 });

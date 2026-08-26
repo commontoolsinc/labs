@@ -10,7 +10,12 @@ import {
   type PromptInput,
   type SessionPage,
 } from "@commonfabric/agents-connector";
-import { assertEquals, assertExists, assertRejects } from "@std/assert";
+import {
+  assertEquals,
+  assertExists,
+  assertRejects,
+  assertThrows,
+} from "@std/assert";
 import {
   AgentsHost,
   type AgentsHostTarget,
@@ -313,6 +318,84 @@ function clock(): () => Date {
   let tick = 0;
   return () => new Date(Date.UTC(2026, 6, 20, 0, 0, tick++));
 }
+
+Deno.test("AgentsHost validates and closes its lifecycle boundaries", async () => {
+  const directory = await Deno.makeTempDir();
+  try {
+    const target = new FakeTarget();
+    const ledger = await openLedger(directory);
+    assertThrows(
+      () =>
+        new AgentsHost({
+          sources: [],
+          target,
+          targetDescription: TARGET_DESCRIPTION,
+          ledger,
+          createDriver: () => new FakeDriver("unused"),
+          activityLimit: 0,
+        }),
+      Error,
+      "activityLimit must be a positive safe integer",
+    );
+
+    const driver = new FakeDriver("codex");
+    const host = new AgentsHost({
+      sources: [sourceConfig("codex")],
+      target,
+      targetDescription: TARGET_DESCRIPTION,
+      ledger,
+      createDriver: () => driver,
+      clock: clock(),
+      activityLimit: 1,
+    });
+    await assertRejects(
+      () => host.start({ onHealthOwnership: () => undefined }),
+      Error,
+      "onHealthOwnership requires deferHealthUntilReady",
+    );
+    assertEquals(await host.start({ acceptCommands: false }), 1);
+    assertEquals(host.health().activity.length, 1);
+    await assertRejects(
+      () => host.start(),
+      Error,
+      "agent host has already been started",
+    );
+    await host.stop();
+    await assertRejects(
+      () => host.synchronize(),
+      Error,
+      "agent host is not accepting sync work",
+    );
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("AgentsHost rejects a configuration with no enabled source", async () => {
+  const directory = await Deno.makeTempDir();
+  try {
+    const host = new AgentsHost({
+      sources: [sourceConfig("disabled", false)],
+      target: new FakeTarget(),
+      targetDescription: TARGET_DESCRIPTION,
+      ledger: await openLedger(directory),
+      createDriver: () => {
+        throw new Error("disabled source must not create a driver");
+      },
+      clock: clock(),
+    });
+
+    await assertRejects(
+      () => host.start({ acceptCommands: false }),
+      Error,
+      "no configured agent source started successfully",
+    );
+    assertEquals(host.health().status, "failed");
+    await host.stop();
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
 
 Deno.test("AgentsHost publishes sessions, health, and lifecycle activity", async () => {
   const directory = await Deno.makeTempDir();

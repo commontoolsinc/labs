@@ -1012,6 +1012,138 @@ Deno.test("commands reject non-record payloads before claiming", async () => {
   }
 });
 
+Deno.test("commands reject malformed envelopes before claiming", async () => {
+  const directory = await Deno.makeTempDir();
+  try {
+    const ledger = await CommandLedger.open(`${directory}/ledger.json`);
+    const worker = new CommandWorker(
+      new Map(),
+      [],
+      ledger,
+      "did:key:test-owner",
+    );
+    const base = {
+      schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
+      id: "valid-command",
+      createdAt: "2026-08-26T00:00:00.000Z",
+      sourceId: "fake:default",
+      nativeSessionId: "session-1",
+      type: "cancel",
+      payload: {},
+    };
+    await worker.handle([
+      "{ invalid JSON",
+      null,
+      { ...base, schema: "unsupported", id: "wrong-schema" },
+      { ...base, type: "unsupported", id: "wrong-type" },
+      { ...base, id: " " },
+      { ...base, id: "x".repeat(257) },
+    ]);
+    await worker.drain();
+
+    assertEquals(ledger.pendingPublicationCount(), 0);
+    assertEquals(ledger.get("wrong-schema"), undefined);
+    assertEquals(ledger.get("wrong-type"), undefined);
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("shared in-flight receipts become unknown", async () => {
+  const directory = await Deno.makeTempDir();
+  try {
+    const ledger = await CommandLedger.open(`${directory}/ledger.json`);
+    const published: AgentSessionCommandReceipt[] = [];
+    const existing: AgentSessionCommandReceipt = {
+      schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+      ownerDid: "did:key:test-owner",
+      commandId: "shared-in-flight",
+      sourceId: "fake:default",
+      nativeSessionId: "session-1",
+      status: "in-flight",
+      claimedAt: "2026-08-26T00:00:00.000Z",
+    };
+    const target: CommandTarget = {
+      readReceipt: () => Promise.resolve(existing),
+      publishReceipt: (receipt) => {
+        published.push(receipt);
+        return Promise.resolve();
+      },
+      refreshSession: () => Promise.resolve(),
+    };
+    const worker = new CommandWorker(
+      new Map(),
+      [target],
+      ledger,
+      "did:key:test-owner",
+    );
+    await worker.handle([{
+      schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
+      id: existing.commandId,
+      createdAt: "2026-08-26T00:00:00.000Z",
+      sourceId: existing.sourceId,
+      nativeSessionId: existing.nativeSessionId,
+      type: "cancel",
+      payload: {},
+    }]);
+    await worker.drain();
+
+    assertEquals(ledger.get(existing.commandId)?.status, "unknown");
+    assertEquals(
+      ledger.get(existing.commandId)?.error?.code,
+      "orphaned-shared-claim",
+    );
+    assertEquals(published.at(-1)?.status, "unknown");
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("shared receipt identities must match the submitted command", async () => {
+  const directory = await Deno.makeTempDir();
+  try {
+    const ledger = await CommandLedger.open(`${directory}/ledger.json`);
+    const worker = new CommandWorker(
+      new Map(),
+      [{
+        readReceipt: (commandId) =>
+          Promise.resolve({
+            schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+            ownerDid: "did:key:test-owner",
+            commandId,
+            sourceId: "another:source",
+            nativeSessionId: "session-1",
+            status: "succeeded",
+          }),
+        publishReceipt: () => Promise.resolve(),
+        refreshSession: () => Promise.resolve(),
+      }],
+      ledger,
+      "did:key:test-owner",
+    );
+    await worker.handle([{
+      schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
+      id: "reused-command",
+      createdAt: "2026-08-26T00:00:00.000Z",
+      sourceId: "fake:default",
+      nativeSessionId: "session-1",
+      type: "cancel",
+      payload: {},
+    }]);
+    await assertRejects(
+      () => worker.drain(),
+      AggregateError,
+      "command worker operations failed",
+    );
+    assertEquals(ledger.get("reused-command"), undefined);
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
 Deno.test("synchronous driver failures publish a terminal receipt", async () => {
   const directory = await Deno.makeTempDir();
   try {
@@ -1134,6 +1266,224 @@ Deno.test("command ledger preserves Fabric receipt results across reopen", async
       (await CommandLedger.open(path)).get(receipt.commandId),
       receipt,
     );
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("command receipt parsing rejects every malformed boundary field", () => {
+  const receipt: AgentSessionCommandReceipt = {
+    schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+    ownerDid: "did:key:test-owner",
+    commandId: "command",
+    sourceId: "fake:default",
+    nativeSessionId: "session-1",
+    status: "succeeded",
+  };
+  const cases: Array<[string, unknown, string]> = [
+    ["command", null, "must be an object"],
+    ["command", { ...receipt, schema: "wrong" }, "schema must be"],
+    [" Command ", { ...receipt, commandId: " Command " }, "not normalized"],
+    ["command", { ...receipt, sourceId: "" }, "sourceId must be a string"],
+    [
+      "command",
+      { ...receipt, nativeSessionId: "" },
+      "nativeSessionId must be a string",
+    ],
+    [
+      "command",
+      { ...receipt, sourceId: " Fake:Default " },
+      "sourceId is not normalized",
+    ],
+    [
+      "command",
+      { ...receipt, providerOperationId: "" },
+      "providerOperationId must be a string",
+    ],
+    ["command", { ...receipt, result: [] }, "result must be an object"],
+  ];
+  for (const [commandId, value, message] of cases) {
+    assertThrows(() => parseCommandReceipt(commandId, value), Error, message);
+  }
+});
+
+Deno.test("command worker covers unavailable sources and control commands", async () => {
+  const directory = await Deno.makeTempDir();
+  try {
+    const ledger = await CommandLedger.open(`${directory}/ledger.json`);
+    const statuses: string[] = [];
+    const modes: string[] = [];
+    const configs: Array<[string, unknown]> = [];
+    const target: CommandTarget = {
+      publishReceipt: (receipt) => {
+        statuses.push(receipt.status);
+        return Promise.resolve();
+      },
+      refreshSession: () => Promise.resolve(),
+    };
+    const driver = {
+      source: {
+        id: "fake:default",
+        driver: "acp",
+        capabilities: {
+          inventory: true,
+          read: true,
+          prompt: true,
+          cancel: true,
+          rename: true,
+          setMode: true,
+          setConfigOption: true,
+        },
+      },
+      setMode: (_sessionId: string, mode: string) => {
+        modes.push(mode);
+        return Promise.resolve({ status: "succeeded" as const });
+      },
+      setConfigOption: (_sessionId: string, key: string, value: unknown) => {
+        configs.push([key, value]);
+        return Promise.resolve({ status: "succeeded" as const });
+      },
+    } as unknown as AgentDriver;
+    const worker = new CommandWorker(
+      new Map([[driver.source.id, driver]]),
+      [target],
+      ledger,
+      "did:key:test-owner",
+      () => {
+        throw new Error("observer failed");
+      },
+    );
+    const base = {
+      schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
+      createdAt: "2026-08-26T00:00:00.000Z",
+      nativeSessionId: "session-1",
+    };
+    await worker.handle([{
+      ...base,
+      id: "missing-source",
+      sourceId: "missing:default",
+      type: "cancel",
+      payload: {},
+    }, {
+      ...base,
+      id: "set-mode",
+      sourceId: driver.source.id,
+      type: "set-mode",
+      payload: { mode: "plan" },
+    }, {
+      ...base,
+      id: "set-config",
+      sourceId: driver.source.id,
+      type: "set-config-option",
+      payload: { key: "thinking", value: true },
+    }]);
+    await worker.drain();
+
+    assertEquals(
+      ledger.get("missing-source")?.error?.code,
+      "source-unavailable",
+    );
+    assertEquals(modes, ["plan"]);
+    assertEquals(configs, [["thinking", true]]);
+    assertEquals(
+      statuses.sort(),
+      [
+        "in-flight",
+        "unsupported",
+        "in-flight",
+        "succeeded",
+        "in-flight",
+        "succeeded",
+      ].sort(),
+    );
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("command worker persists and reports publication failures", async () => {
+  const directory = await Deno.makeTempDir();
+  try {
+    const claimLedger = await CommandLedger.open(`${directory}/claim.json`);
+    const claimWorker = new CommandWorker(
+      new Map(),
+      [{
+        publishReceipt: (receipt) =>
+          receipt.status === "in-flight"
+            ? Promise.reject(new Error("claim rejected"))
+            : Promise.resolve(),
+        refreshSession: () => Promise.resolve(),
+      }],
+      claimLedger,
+      "did:key:test-owner",
+    );
+    const command = {
+      schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
+      id: "claim-failure",
+      createdAt: "2026-08-26T00:00:00.000Z",
+      sourceId: "missing:default",
+      nativeSessionId: "session-1",
+      type: "cancel",
+      payload: {},
+    };
+    await claimWorker.handle([command]);
+    await claimWorker.drain();
+    assertEquals(
+      claimLedger.get(command.id)?.error?.code,
+      "claim-publish-failed",
+    );
+
+    await claimLedger.put({
+      schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+      ownerDid: "did:key:test-owner",
+      commandId: "recovery",
+      sourceId: "missing:default",
+      nativeSessionId: "session-1",
+      status: "failed",
+    });
+    const recoveryWorker = new CommandWorker(
+      new Map(),
+      [{
+        publishReceipt: () => Promise.reject(new Error("still unavailable")),
+        refreshSession: () => Promise.resolve(),
+      }],
+      claimLedger,
+      "did:key:test-owner",
+    );
+    await assertRejects(
+      () => recoveryWorker.recoverUnpublishedReceipts(),
+      AggregateError,
+      "could not publish recovered command receipts",
+    );
+
+    const failedLedger = await CommandLedger.open(`${directory}/failed.json`);
+    const failures: string[] = [];
+    const failedWorker = new CommandWorker(
+      new Map(),
+      [{
+        publishReceipt: () => Promise.reject(new Error("target unavailable")),
+        refreshSession: () => Promise.resolve(),
+      }],
+      failedLedger,
+      "did:key:test-owner",
+      undefined,
+      (failure) => {
+        failures.push(failure.commandId);
+        throw new Error("failure observer failed");
+      },
+    );
+    await failedWorker.handle([{
+      ...command,
+      id: "double-publication-failure",
+    }]);
+    await assertRejects(
+      () => failedWorker.drain(),
+      AggregateError,
+      "command worker operations failed",
+    );
+    assertEquals(failures, ["double-publication-failure"]);
   } finally {
     await Deno.remove(directory, { recursive: true });
   }
