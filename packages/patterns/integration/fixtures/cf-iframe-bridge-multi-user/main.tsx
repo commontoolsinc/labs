@@ -227,13 +227,14 @@ export default pattern<BridgeFixtureInput, BridgeFixtureOutput>((state) => {
   const sessionDatabase: PerSession<SqliteDb> = sqliteDatabase(
     { tables },
   );
+  // One-shot reads materialize the scoped handle cells before the iframe gets
+  // its capabilities. They stay independent of later database invalidations,
+  // so an in-flight guest operation cannot unload its own bridge.
   const userDatabaseProbe = userDatabase.query<{ value: string }>(
     "SELECT value FROM bridge_items",
-    { reactOn: userDatabase },
   );
   const sessionDatabaseProbe = sessionDatabase.query<{ value: string }>(
     "SELECT value FROM bridge_items",
-    { reactOn: sessionDatabase },
   );
   const context = IframeContext({
     shared: state.shared,
