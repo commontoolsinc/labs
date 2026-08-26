@@ -15,13 +15,17 @@ import {
   scrubHandleSkillTextDeep,
 } from "../src/prompt-loop.ts";
 
-const PAYLOAD = "CANARY-SKILL-9f4e2: the whole skill body";
+const PAYLOAD = 'CANARY-SKILL-9f4e2: the "whole"\nskill body';
 const MARKER = "[handle-delivered skill text withheld]";
 
 describe("skill-text scrub", () => {
   describe("scrubHandleSkillText", () => {
     it("replaces the payload and its JSON-escaped spelling with the marker", () => {
       const escaped = JSON.stringify(PAYLOAD).slice(1, -1);
+      // The payload carries a quote and a newline, so its JSON-escaped
+      // spelling genuinely differs from the raw form — the escaped branch is
+      // exercised rather than run against a byte-identical string.
+      expect(escaped).not.toBe(PAYLOAD);
       expect(scrubHandleSkillText(`before ${PAYLOAD} after`, PAYLOAD))
         .toBe(`before ${MARKER} after`);
       expect(scrubHandleSkillText(`before ${escaped} after`, PAYLOAD))
