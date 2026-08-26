@@ -1195,6 +1195,7 @@ export function invocationJson(
  * only the receipt readback. */
 export interface PieceCallWaitControl {
   mode: "settle" | "commit";
+
   /** Caller-chosen patience bound in seconds (`--wait`). Never set for
    * `commit` — the readback the bound would cover is already skipped. */
   boundSeconds?: number;
@@ -3258,6 +3259,7 @@ export function parseRetargetFlag(spec: string): PhaseRetarget {
 export interface SurveyCLIOptions extends BulkSelectionOptions {
   retarget?: string[];
   validator?: string;
+
   /** A plan this survey is reported against rather than emitted beside. */
   diff?: string;
   out?: string;
@@ -3867,6 +3869,7 @@ export interface SetPieceSourceCommandDependencies {
 /** Injectable dependencies for testing `piece setsrc --check`. */
 export interface CheckPieceSourceCommandDependencies {
   checkPiecePattern?: typeof checkPiecePattern;
+
   /** `exitWithDataError`'s seam, so a test can observe the refusal. */
   exit?: Parameters<typeof exitWithDataError>[1];
 }

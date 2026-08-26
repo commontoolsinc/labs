@@ -47,8 +47,10 @@ interface BoardInput {
 interface BoardOutput {
   [NAME]: string;
   items: MemberOutput[];
+
   /** File a new member on the board. */
   addMember: Stream<AddMemberEvent, AddMemberResult>;
+
   /** Seed many members in one call. */
   seedMembers: Stream<SeedMembersEvent, SeedMembersResult>;
 }

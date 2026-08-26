@@ -46,6 +46,7 @@ interface RecordResult {
 interface ItemInput {
   label?: Writable<string | Default<"">>;
   recorded?: Writable<number | Default<0>>;
+
   /**
    * A callable handed in by the board, so this piece's ARGUMENTS cell carries
    * a name its result cell also carries. The two are different streams, and
@@ -58,6 +59,7 @@ interface ItemOutput {
   [NAME]: string;
   label: string;
   recorded: number;
+
   /** Record one line against this item, and report the running count. */
   record: Stream<RecordEvent, RecordResult>;
 }
@@ -85,6 +87,7 @@ export const Item = pattern<ItemInput, ItemOutput>(
 interface AddItemEvent {
   /** The item's display label. */
   title: string;
+
   /** Whether the item starts pinned. */
   pinned?: boolean;
 }
@@ -92,6 +95,7 @@ interface AddItemEvent {
 interface AddItemResult {
   /** The item this call created. */
   item: ItemOutput;
+
   /** How many items the board holds afterwards. */
   total: number;
 }
@@ -99,8 +103,10 @@ interface AddItemResult {
 interface RenameItemEvent {
   /** Which item to rename, by position. */
   index: number;
+
   /** The label to write. */
   newTitle: string;
+
   /** Leave the old label in place when it is already set. */
   keepExisting?: boolean;
 }
@@ -136,18 +142,23 @@ interface BoardOutput {
   itemCount: number;
   settings: BoardSettings;
   revision: number;
+
   /** Add one item to the board, and report the new total. */
   addItem: Stream<AddItemEvent, AddItemResult>;
+
   /** Rename the item at a position. */
   renameItem: Stream<RenameItemEvent, RenameItemResult>;
+
   /** Bump the revision and return nothing. */
   sweep: Stream<void>;
+
   /**
    * Record against the board rather than one item. Handed to every child as
    * its `record` argument, which is what puts a callable of that name on the
    * child's arguments cell beside the one on its result cell.
    */
   noteAll: Stream<RecordEvent, RecordResult>;
+
   /** @deprecated Use addItem, which reports the new total. */
   legacyAdd: Stream<AddItemEvent>;
 }
