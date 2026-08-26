@@ -88,23 +88,6 @@ export function verifySinkRequestRelease(
 }
 
 /**
- * The keys each transaction has already registered an abandon callback under.
- *
- * Keyed by the INNER transaction, the one the outbox and the callback
- * registries live on, because a caller may hand this function a wrapper around
- * it. Two stagings that reach the same inner transaction share one outbox
- * entry, so they share one abandonment; keyed by the wrapper they would each
- * register, and one refusal would be reported twice.
- */
-const abandonCallbackKeys = new WeakMap<object, Set<string>>();
-
-/** The inner transaction a wrapper forwards to, or the transaction itself. */
-function transactionIdentity(tx: object): object {
-  const inner = (tx as { tx?: object }).tx;
-  return inner ?? tx;
-}
-
-/**
  * Stage a sink request on `tx` and run `flush` once that transaction commits.
  *
  * The work happens after the commit because the request's own state — the

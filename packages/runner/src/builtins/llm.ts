@@ -507,23 +507,27 @@ async function handleLLMError<T, P>(
    * make it again. */
   announce?: (tx: IExtendedStorageTransaction) => void,
 ): Promise<void> {
-  const superseded = thisRun !== getCurrentRun();
-  if (superseded && announce === undefined) return;
+  if (thisRun !== getCurrentRun() && announce === undefined) return;
 
   const message = error instanceof Error ? error.message : String(error);
-  if (!superseded) {
+  if (thisRun === getCurrentRun()) {
     console.warn(`[LLM Error] ${message}`);
     logger.warn("llm", "Error in LLM request", { error });
   }
 
   await runtime.idle();
 
+  let wrote = false;
   const { error: writeError } = await runtime.editWithRetry((tx) => {
     if (effectKey !== undefined) markEffectCompletion(tx, effectKey);
     announce?.(tx);
-    // A newer request owns the answer, so only the announcement above is
-    // this run's to make.
-    if (superseded) return;
+    // Read at write time rather than from a decision taken before the wait
+    // above: a newer request can start while this one waits for the
+    // scheduler, and from then on the answer is that request's to give. The
+    // announcement still stands, because it says where the answer appears and
+    // is the same either way.
+    if (thisRun !== getCurrentRun()) return;
+    wrote = true;
     pendingCell.withTx(tx).set(false);
     errorCell.withTx(tx).set(message);
     resultCell.withTx(tx).set(undefined as T);
@@ -540,7 +544,7 @@ async function handleLLMError<T, P>(
     );
   }
 
-  if (superseded) return;
+  if (!wrote) return;
   resetPreviousHash();
 }
 
@@ -888,6 +892,11 @@ export function llm(
         effectKey,
       );
 
+    // This request's own result cell. A later run that finds a different output
+    // scope builds a new one and leaves this variable pointing at that, so the
+    // ending below has to write the cell this request announced.
+    const requestResultCell = resultCell;
+
     // The abandoned request's ending. It carries the announcement because the
     // one this run made rode the transaction that was abandoned, and the
     // `cellsInitialized` latch means no later run makes it again.
@@ -895,11 +904,11 @@ export function llm(
       handleLLMError(
         error,
         runtime,
-        resultCell.key("pending"),
-        resultCell.key("result"),
-        resultCell.key("error"),
-        resultCell.key("partial"),
-        resultCell.key("requestHash"),
+        requestResultCell.key("pending"),
+        requestResultCell.key("result"),
+        requestResultCell.key("error"),
+        requestResultCell.key("partial"),
+        requestResultCell.key("requestHash"),
         hash,
         () => currentRun,
         thisRun,
@@ -907,7 +916,7 @@ export function llm(
           if (hash === previousCallHash) previousCallHash = undefined;
         },
         effectKey,
-        (announceTx) => sendResult(announceTx, resultCell),
+        (announceTx) => sendResult(announceTx, requestResultCell),
       );
 
     // Build tool catalog if tools are present, then start execution after the
@@ -1295,6 +1304,11 @@ export function generateText(
         effectKey,
       );
 
+    // This request's own result cell. A later run that finds a different output
+    // scope builds a new one and leaves this variable pointing at that, so the
+    // ending below has to write the cell this request announced.
+    const requestResultCell = resultCell;
+
     // The abandoned request's ending. It carries the announcement because the
     // one this run made rode the transaction that was abandoned, and the
     // `cellsInitialized` latch means no later run makes it again.
@@ -1302,11 +1316,11 @@ export function generateText(
       handleLLMError(
         error,
         runtime,
-        resultCell.key("pending"),
-        resultCell.key("result"),
-        resultCell.key("error"),
-        resultCell.key("partial"),
-        resultCell.key("requestHash"),
+        requestResultCell.key("pending"),
+        requestResultCell.key("result"),
+        requestResultCell.key("error"),
+        requestResultCell.key("partial"),
+        requestResultCell.key("requestHash"),
         hash,
         () => currentRun,
         thisRun,
@@ -1314,7 +1328,7 @@ export function generateText(
           if (hash === previousCallHash) previousCallHash = undefined;
         },
         effectKey,
-        (announceTx) => sendResult(announceTx, resultCell),
+        (announceTx) => sendResult(announceTx, requestResultCell),
       );
 
     enqueuePostCommitLLMWork(
@@ -1763,6 +1777,12 @@ export function generateObject<T extends Record<string, unknown>>(
         );
       };
 
+      // This request's own result cell. A later run that finds a different
+      // output scope builds a new one and leaves this variable pointing at
+      // that, so the ending below has to write the cell this request
+      // announced.
+      const requestResultCell = resultCell;
+
       // The abandoned request's ending. It carries the announcement because
       // the one this run made rode the transaction that was abandoned, and the
       // `cellsInitialized` latch means no later run makes it again.
@@ -1770,11 +1790,11 @@ export function generateObject<T extends Record<string, unknown>>(
         handleLLMError(
           error,
           runtime,
-          resultCell.key("pending"),
-          resultCell.key("result"),
-          resultCell.key("error"),
-          resultCell.key("partial"),
-          resultCell.key("requestHash"),
+          requestResultCell.key("pending"),
+          requestResultCell.key("result"),
+          requestResultCell.key("error"),
+          requestResultCell.key("partial"),
+          requestResultCell.key("requestHash"),
           hash,
           () => currentRun,
           thisRun,
@@ -1782,7 +1802,7 @@ export function generateObject<T extends Record<string, unknown>>(
             previousCallHash = undefined;
           },
           effectKey,
-          (announceTx) => sendResult(announceTx, resultCell),
+          (announceTx) => sendResult(announceTx, requestResultCell),
         );
 
       logGenerateObject("enqueue", toolsRequestSummary);
@@ -2159,6 +2179,12 @@ export function generateObject<T extends Record<string, unknown>>(
         );
       };
 
+      // This request's own result cell. A later run that finds a different
+      // output scope builds a new one and leaves this variable pointing at
+      // that, so the ending below has to write the cell this request
+      // announced.
+      const requestResultCell = resultCell;
+
       // The abandoned request's ending. It carries the announcement because
       // the one this run made rode the transaction that was abandoned, and the
       // `cellsInitialized` latch means no later run makes it again.
@@ -2166,11 +2192,11 @@ export function generateObject<T extends Record<string, unknown>>(
         handleLLMError(
           error,
           runtime,
-          resultCell.key("pending"),
-          resultCell.key("result"),
-          resultCell.key("error"),
-          resultCell.key("partial"),
-          resultCell.key("requestHash"),
+          requestResultCell.key("pending"),
+          requestResultCell.key("result"),
+          requestResultCell.key("error"),
+          requestResultCell.key("partial"),
+          requestResultCell.key("requestHash"),
           hash,
           () => currentRun,
           thisRun,
@@ -2178,7 +2204,7 @@ export function generateObject<T extends Record<string, unknown>>(
             previousCallHash = undefined;
           },
           effectKey,
-          (announceTx) => sendResult(announceTx, resultCell),
+          (announceTx) => sendResult(announceTx, requestResultCell),
         );
 
       logGenerateObject("enqueue", directRequestSummary);

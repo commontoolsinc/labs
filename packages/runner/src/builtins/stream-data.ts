@@ -262,14 +262,19 @@ export function streamData(
       {
         idempotencyKey: effectKey,
         onRejected: (rejection) => {
-          if (thisRun !== status.run) return;
           runtime.trackAsyncWork(
             settleAbandonedRequest(
               runtime,
               "streamData",
               effectKey,
               (settleTx) => {
+                // The announcement rode the abandoned transaction, so it is
+                // made again whoever owns the answer now.
                 sendResult(settleTx, { pending, result, error });
+                // Decided here rather than when this callback ran: a newer
+                // request can start in between, and the stream it opens owns
+                // these cells from then on.
+                if (thisRun !== status.run) return;
                 pending.withTx(settleTx).set(false);
                 result.withTx(settleTx).set(undefined);
                 error.withTx(settleTx).set(rejection.message);

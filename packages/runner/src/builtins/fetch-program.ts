@@ -384,13 +384,27 @@ export function fetchProgram(
                 (settleTx) => {
                   // The claim this run staged rode the abandoned transaction,
                   // so the entry reads `idle` and a reader waits on a fetch
-                  // nobody is running. Record the refusal in its place.
+                  // nobody is running. Record the refusal in its place — but
+                  // read the entry at write time first: a later request for
+                  // the same inputs claims it or answers it, and that state is
+                  // the newer request's, not this one's to overwrite.
+                  const entry = cache.withTx(settleTx).get()?.[inputHash];
+                  if (entry !== undefined && entry.state.type !== "idle") {
+                    return;
+                  }
                   cache.withTx(settleTx).update({
                     [inputHash]: {
                       inputHash,
                       state: { type: "error", message: rejection.message },
                     },
                   });
+                  // A run derives these from the entry above and announces
+                  // them at its end. No run follows this one, so the ending
+                  // does both itself.
+                  sendResult(settleTx, { pending, result, error });
+                  pending.withTx(settleTx).set(false);
+                  result.withTx(settleTx).set(undefined);
+                  error.withTx(settleTx).set(rejection.message);
                 },
               ),
               parentCell,

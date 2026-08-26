@@ -899,6 +899,15 @@ export function sqliteQuery(
             effectKey,
             (settleTx) => {
               sendResult(settleTx, result);
+              // Read the stored claim at write time: a newer request commits
+              // its own hash, and from then on the result is that request's
+              // to write, exactly as `failQuery` decides it.
+              const stored = result.withTx(settleTx).get();
+              if (
+                stored?.requestHash !== undefined && stored.requestHash !== hash
+              ) {
+                return;
+              }
               result.withTx(settleTx).set({
                 pending: false,
                 error: (rejection as { message?: string })?.message,

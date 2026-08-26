@@ -216,8 +216,10 @@ every attempt re-subscribes so the action recovers when its inputs next change.
 Whichever way a run ends, the moment the scheduler stops attempting a commit is
 the moment it calls `abandonStagedWork` on that transaction. Every stop does
 so, on both paths: a permanent or terminal rejection, an exhausted retry
-budget, an exhausted name resolution, a handler that threw, a caller that opted
-out of retrying, and a seal that was refused. Work staged there
+budget, an exhausted name resolution, a handler that threw, and a caller that
+opted out of retrying. A refused late seal is the one refusal that is not a
+stop: the durable entry is still the truth and the drain delivers it, so a
+further attempt is coming and the staged work is waiting for something. Work staged there
 and waiting for the commit hears it as its effect's `abandon`.
 That decision is the scheduler's, because the number of attempts is not a
 property of the rejection. A CFC refusal whose every reason is a verdict on the
