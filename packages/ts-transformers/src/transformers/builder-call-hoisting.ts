@@ -120,6 +120,7 @@ interface HoistableBuilderSpec {
     call: ts.CallExpression,
     context: TransformationContext,
   ) => ts.CallExpression | undefined;
+
   /**
    * Optional: produce the replacement for the visited site once the inner call
    * has been hoisted to `hoistedName`. Omit for applied builders, which take

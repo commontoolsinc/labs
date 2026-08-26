@@ -8,16 +8,22 @@ import "../components/cf-cell-link/index.ts";
 export interface DragState {
   /** The CellHandle being dragged */
   cell: CellHandle;
+
   /** Optional type identifier for filtering drop zones */
   type?: string;
+
   /** The source element that initiated the drag */
   sourceElement: HTMLElement;
+
   /** The preview element being shown during drag */
   preview: HTMLElement;
+
   /** Optional cleanup function to call when drag ends */
   previewCleanup?: () => void;
+
   /** Current pointer X position (updated during drag) */
   pointerX: number;
+
   /** Current pointer Y position (updated during drag) */
   pointerY: number;
 }
@@ -173,6 +179,7 @@ export function subscribeToDrag(listener: DragListener): () => void {
 export interface DragPreview {
   /** The preview element (not yet added to the DOM). */
   preview: HTMLElement;
+
   /** Stops the preview's render; pass as {@link DragState.previewCleanup}. */
   cleanup?: () => void;
 }

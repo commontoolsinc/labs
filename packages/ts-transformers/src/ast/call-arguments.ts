@@ -7,10 +7,12 @@ import ts from "typescript";
 export interface CallArgumentPosition {
   /** The call whose argument list carries the node. */
   readonly call: ts.CallExpression;
+
   /** The node `call.arguments` lists — the queried node itself, or the
    *  outermost parenthesized wrapper around it. Identity comparisons against
    *  entries of `call.arguments` must use this node, never the queried one. */
   readonly argument: ts.Expression;
+
   /** Index of `argument` within `call.arguments`. */
   readonly index: number;
 }

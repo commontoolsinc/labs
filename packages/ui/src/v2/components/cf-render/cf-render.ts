@@ -54,11 +54,14 @@ export const PIECE_CONTEXT_MENU_EVENT = "cf-piece-context-menu";
 export interface PieceContextMenuDetail {
   /** The space holding the piece. */
   space: DID;
+
   /** The piece's full schemed id. */
   pieceId: string;
+
   /** Client coordinates of the click, for placing the menu. */
   x: number;
   y: number;
+
   /** The variant the piece was rendered at. */
   variant: UIVariant;
 }

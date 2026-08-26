@@ -43,6 +43,7 @@ export type CapabilityParamSummary = {
   readonly opaquePaths?: readonly (readonly string[])[];
   readonly passthrough: boolean;
   readonly wildcard: boolean;
+
   /**
    * Write-exhaustiveness is unverifiable for this parameter — `writePaths`
    * may be incomplete. Set by unrecognized or dynamic method calls on
@@ -75,8 +76,10 @@ export type UnreadableCellArgument = {
 
 export type FunctionCapabilitySummary = {
   readonly params: readonly CapabilityParamSummary[];
+
   /** True when analysis was short-circuited due to recursion. */
   readonly recursive?: boolean;
+
   /** Cell arguments passed to parameters the contract could not classify. */
   readonly unreadableCellArguments?: readonly UnreadableCellArgument[];
 };
@@ -137,6 +140,7 @@ export type TransformationOptions = {
    * its own and stores it back here, so `context.state` is always present.
    */
   readonly state?: CrossStageState;
+
   /**
    * Shared diagnostics collector that accumulates diagnostics across all transformers.
    * If provided, diagnostics are pushed to this array in addition to the local context.
@@ -144,6 +148,7 @@ export type TransformationOptions = {
   readonly diagnosticsCollector?: TransformationDiagnostic[];
   readonly patternCoverage?: PatternCoverageOptions;
   readonly builderSourceSites?: BuilderSourceSiteOptions;
+
   /**
    * Whether an `assert(...)` body records its operands, so that a failing
    * pattern-test assertion can report them. Defaults to true.
@@ -154,8 +159,10 @@ export type TransformationOptions = {
    * debug rendering in its assertion bodies.
    */
   readonly assertDiagnostics?: boolean;
+
   /** Content identity assigned by the compiler for every authored source. */
   readonly moduleIdentities?: ReadonlyMap<string, string>;
+
   /**
    * Compile-name → authored-name mapping for CFC writer-identity file
    * spellings (claim minting, provenance stamping, `PolicyOf` source
@@ -166,6 +173,7 @@ export type TransformationOptions = {
    * verbatim (modulo path-separator normalization).
    */
   readonly canonicalWriterIdentityFile?: (fileName: string) => string;
+
   /**
    * The program is DURABLE STORED pattern source being reloaded — bytes
    * nobody can re-author, recompiled by a toolchain newer than the one that

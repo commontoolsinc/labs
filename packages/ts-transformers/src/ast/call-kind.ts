@@ -88,6 +88,7 @@ const CELL_SCOPED_CONSTRUCTOR_NAMES = new Set([
 const COMMONFABRIC_CALL_NAMES = COMMONFABRIC_CALL_EXPORT_NAMES;
 const WILDCARD_OBJECT_METHOD_NAMES = new Set(["keys", "values", "entries"]);
 export const FUNCTION_HARDENING_HELPER_PREFIX = "__cfHardenFn";
+
 /**
  * Prefix for the module-scope const a hoisted `lift(...)` call is bound to
  * (CT-1644, Phase 2 of derive→lift→selfcontained). The whole lift call —
@@ -161,6 +162,7 @@ export interface ReactiveCollectionProvenanceOptions {
   readonly sameScope?: ts.FunctionLikeDeclaration;
   readonly typeRegistry?: WeakMap<ts.Node, ts.Type>;
   readonly syntheticReactiveCollectionRegistry?: WeakSet<ts.Symbol>;
+
   /**
    * True once the walk has descended into a variable declaration's initializer
    * (CT-1778). The derived-reactive-collection-call recognition is gated on this
