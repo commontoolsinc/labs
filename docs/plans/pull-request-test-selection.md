@@ -619,12 +619,12 @@ build's 17,999 executions.
 
 | Invocation unit | Suites | Identities inside it | Reaching one of them |
 | --- | --- | --- | --- |
-| A `deno test` file | `workspace-unit`, `runner-unit`, `pattern-integration` and its ON arm, `package-integration` and its ON arm, `generated-patterns`, `cli-deno` | One per bare `Deno.test`, and one per `it`, named as its describe chain joined with `" > "`. The container testcase Deno also reports is dropped at ingestion, so a `describe` is not an identity | The skip list, through the preload for a bare `Deno.test` and through the remapped `describe`/`it` for the rest. This is the row the whole section is about. |
+| A `deno test` file | `workspace-unit`, `runner-unit`, `pattern-integration` and its ON arm, `package-integration` and its ON arm, `generated-patterns`, `cli-deno` | Every bare `Deno.test` in the file, and every `it`, named as its describe chain joined with `" > "`. The container testcase Deno also reports is dropped at ingestion, so a `describe` is not an identity | The skip list, through the preload for a bare `Deno.test` and through the remapped `describe`/`it` for the rest. This is the row the whole section is about. |
 | A pattern file run by `cf test` | `pattern-unit` | One. The runner writes one record per pattern file | Nothing to reach: the file is the identity. |
 | A pattern file checked by the compatibility gate | `pattern-compat` | One, named `pattern-compat <key>`, which the task appends itself as each file's verdict is known | Nothing to reach. The task already takes `--only` to restrict which files it reads. |
 | A single-step arm of `integration.sh` | `cli-core` | One, named for its step | Nothing to reach. The script's own whole-invocation record is suite-level and belongs to no invocation unit at all. |
-| One gate command | `repo-gates` | One per gate | Nothing to reach. |
-| One `deno check` invocation | `typecheck` | One per checked path group, which the task records itself | Nothing to reach. |
+| One gate command | `repo-gates` | One, named for the gate that ran | Nothing to reach. |
+| One `deno check` invocation | `typecheck` | One, named for the path group it checked, which the task records itself | Nothing to reach. |
 | A whole task carrying one record | `cfcheck`, `pattern-vintage` | One, for everything the task did | Nothing to reach, and nothing finer exists: the suite is its own identity. |
 | A script with no section argument | `cli-fuse`, `pattern-reload` | One | Not reachable, for two different reasons. `fuse-exec.sh` takes no section argument, and the fix is to give it the dispatch its sibling has. `pattern-reload` holds a single `it`, so the finest subset and the whole suite are already the same thing. |
 
@@ -652,6 +652,54 @@ and hold 148.6 minutes between them, and they are scattered through files
 whose other tests are cheap. Being able to leave the slow ones out of a
 file the lane is running anyway is the lever the item granularity was
 hiding.
+
+### Skipping assumes tests do not lean on each other
+
+Not every identity can run on its own, and the mechanism does not make it
+so. It stops the other tests running; it does nothing about what this one
+needed them for.
+
+Setup and teardown are not the problem. `beforeAll` and `afterAll` belong
+to the `describe`, which still registers and still runs when some of its
+`it`s are ignored, and `beforeEach` and `afterEach` run around each `it`
+that survives. A test that gets everything it needs from those is
+unaffected.
+
+The problem is a test that reads what a sibling wrote. That pattern is
+here: a scan finds over a hundred files in which one `it` assigns a
+binding another `it` reads. The scan cannot tell a real dependence from a
+`beforeEach` that resets the binding first, and that is the argument for
+measuring the property rather than reading the source for it.
+
+So independence is established per identity, never assumed. Until it is
+established, an identity's siblings are not skipped and its file stays the
+unit — which is today's behaviour, so the starting point is no worse than
+what the repository has now, and it improves from there.
+
+#### Establishing it
+
+A test that passes as the only test running in its file depends on no
+sibling: its `beforeAll` and `beforeEach` still ran and nothing else did.
+So the check is one invocation per identity with every sibling skipped,
+and the answer is a flag carried in the manifest beside the score.
+
+It cannot be a sweep. One invocation per identity is around 18,000 of
+them, against the roughly 2,000 the weekly coverage attribution job
+already costs three and a half hours for. So `main` checks the identities
+in the files its own run touched, plus a rotating slice of everything else.
+The map fills in over weeks and stays current where the code is moving,
+and an identity whose file changed loses its flag until it is checked
+again.
+
+#### When the flag is wrong
+
+A flag is only ever granted by an identity passing alone, so the failure
+that matters is the rarer one: a test that passed alone and fails when its
+siblings are skipped, because it depended on a sibling in a way one solo
+run did not expose. That fails a lane and passes on `main`, which is the
+case [the reporter](#telling-a-pull-request-what-main-found) already
+exists to explain. The failure is also evidence, and the identity loses
+its flag.
 
 ### What replaces the item
 
@@ -724,6 +772,11 @@ being imposed.
       density pass sorting by marginal cost.
 - [ ] `command()` returns one invocation per file with its skip list, and
       omits a file whose every identity is skipped.
+- [ ] The independence flag: a `main`-side check that runs an identity as
+      the only test in its file, a rotating slice per run plus every
+      identity whose file changed, the flag carried in the manifest, and
+      the packer refusing to skip the siblings of an identity that has
+      none.
 - [ ] A fixture proving the four properties that make this safe: an
       unlisted new test runs, a renamed test runs, a listed test is
       reported as skipped rather than missing, and two files holding the
