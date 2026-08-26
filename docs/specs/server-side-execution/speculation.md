@@ -392,10 +392,14 @@ merely a server-side write (`!== "derived"`, conservative, converging
 on the next cover). The elision posture above is unchanged: no rewrite
 means the doc's seq stays BELOW the floor, and the predicate is never
 consulted. **A content-addressed doc the store holds witnesses at ANY cover seq
-(#6304, 2026-08-25): its stored value is immutable — admission
-refuses a `cid:` set that is not the first installation or
-content-identical, and identical rewrites are elided — so its cover
-never advances and the floor comparison can never pass for it.
+(#6304, 2026-08-25): its stored envelope is immutable — admission
+refuses a `cid:` delete or patch outright, and a `cid:` set unless
+the whole stored envelope, metadata included, is value-equal;
+identical rewrites are elided — so its cover never advances and the
+floor comparison can never pass for it. The witness rests on that
+commit-boundary immutability: a metadata-write carve-out for `cid:`
+docs (a label merge for two sources of one hash, say) would have to
+revisit it.
 Nothing newer can be pending at the id, and retiring the layer
 renders the STORED value whatever the layer holds: the store wins,
 the disposition every divergence gets (a divergent speculative cid

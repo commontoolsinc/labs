@@ -1926,12 +1926,15 @@ export class SpeculationOverlayDestination
         for (const doc of entry.writtenDocs) {
           const state = view(doc.id, doc.scope);
           // A content-addressed doc the store holds witnesses at ANY
-          // cover seq (#6304). Its stored value is immutable —
-          // admission refuses a `cid:` set that is not the first
-          // installation or content-identical (memory/v2 engine.ts's
-          // content-addressed immutability pass) — and identical
-          // rewrites are elided, so its cover never advances and the
-          // floor comparison below can never pass for it. Nothing
+          // cover seq (#6304). Its stored envelope is immutable —
+          // admission refuses a `cid:` delete or patch outright, and a
+          // `cid:` set unless the WHOLE stored envelope, metadata
+          // included, is value-equal (memory/v2 engine.ts's
+          // content-addressed immutability pass; this witness rests on
+          // that boundary, so a metadata-write carve-out for cid docs
+          // would have to revisit it) — and identical rewrites are
+          // elided, so its cover never advances and the floor
+          // comparison below can never pass for it. Nothing
           // newer can be pending at the id, and retirement renders
           // the stored value whatever this layer holds: the store
           // wins, the disposition every divergence gets — a divergent
