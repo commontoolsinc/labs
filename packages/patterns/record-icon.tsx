@@ -35,6 +35,7 @@ export interface RecordIconModuleInput {
 export interface RecordIconModuleOutput {
   /** The palette emoji, then the chosen icon, or `(auto)` when none is set. */
   [NAME]: string;
+
   /** Custom emoji/icon */
   icon: string;
 }

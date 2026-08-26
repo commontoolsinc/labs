@@ -104,6 +104,7 @@ type MembershipRecord = InferItem<typeof MembershipSchema> & {
 /** One hotel brand the scan found more than one membership number for. */
 interface MultiAccountBrand {
   brand: string;
+
   /** One entry per distinct membership number, with the tier it was found at. */
   accounts: { membershipNumber: string; tier?: string }[];
 }

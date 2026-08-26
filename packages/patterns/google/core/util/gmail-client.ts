@@ -28,8 +28,10 @@ import type { Auth } from "../gmail-importer.tsx";
 export interface GmailClientConfig {
   /** How many times the client will retry after an HTTP failure */
   retries?: number;
+
   /** Enable verbose console logging */
   debugMode?: boolean;
+
   /**
    * External refresh callback for cross-piece token refresh.
    * Use this when the auth cell belongs to a different piece - direct cell updates

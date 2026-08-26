@@ -53,8 +53,10 @@ export interface User {
    */
   name: string;
   joinedAt: number;
+
   /** Avatar URL or glyph, snapshotted from the joiner's shared profile. */
   avatar?: string;
+
   /**
    * Link to the joiner's profile cell — the stable identity key (optional so
    * rosters written before the profile migration still load).

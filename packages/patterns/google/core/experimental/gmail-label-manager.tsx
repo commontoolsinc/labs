@@ -51,10 +51,13 @@ import {
 type LabelOperation = {
   /** Message IDs to modify */
   messageIds: string[];
+
   /** Label IDs to add */
   addLabelIds: string[];
+
   /** Label IDs to remove */
   removeLabelIds: string[];
+
   /** Human-readable label names (for display) */
   addLabelNames: string[];
   removeLabelNames: string[];
@@ -70,8 +73,10 @@ type OperationResult = {
 interface Input {
   /** Message ID(s) to manage labels for - can be single string or array */
   messageIds: string[] | Default<[]>;
+
   /** Labels to add (by ID) */
   labelsToAdd: string[] | Default<[]>;
+
   /** Labels to remove (by ID) */
   labelsToRemove: string[] | Default<[]>;
 }
@@ -83,6 +88,7 @@ export interface Output {
   labelsToAdd: string[];
   labelsToRemove: string[];
   result: OperationResult | null;
+
   /** Available labels (fetched from Gmail) */
   availableLabels: GmailLabel[];
 }
