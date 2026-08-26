@@ -545,6 +545,17 @@ describe("codemirror-presence", () => {
   });
 
   describe("remote decorations", () => {
+    it("keeps an unfocused participant's last selection decorated", () => {
+      const state = createState().update({
+        effects: upsert(participant({
+          focused: false,
+          selection: presenceSelectionToJSON(EditorSelection.single(1, 3)),
+        })),
+      }).state;
+
+      expect(decorationValues(state)).toHaveLength(2);
+    });
+
     it("renders every selection range and caret from a bounded palette", () => {
       const selection = EditorSelection.create([
         EditorSelection.range(0, 1),

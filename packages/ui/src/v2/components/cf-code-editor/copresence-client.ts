@@ -40,7 +40,7 @@ export type PresencePublication = {
   focused: boolean;
   /** Confirmed Memory coordinate used by the selection. */
   cursor: PresenceCursor;
-  /** Selection in confirmed document coordinates, or `null` while unfocused. */
+  /** Selection in confirmed coordinates, or `null` until one is established. */
   selection: PresenceSelection;
   /** Whether local pending changes were involved in deriving the selection. */
   basis: ParticipantPresence["basis"];
@@ -225,7 +225,7 @@ function decodeParticipant(value: unknown): ParticipantPresence {
     ]) ||
     !isNonnegativeSafeInteger(value.revision) || value.revision < 1 ||
     typeof value.focused !== "boolean" ||
-    value.focused !== (value.selection !== null) ||
+    (value.focused && value.selection === null) ||
     (value.basis !== "provisional" && value.basis !== "confirmed")
   ) {
     throw new Error("Presence participant record is invalid");
@@ -383,7 +383,7 @@ export class CopresenceSession {
     decodeCursor(publication.cursor);
     decodeSelection(publication.selection);
     if (
-      publication.focused !== (publication.selection !== null) ||
+      (publication.focused && publication.selection === null) ||
       (publication.basis !== "provisional" &&
         publication.basis !== "confirmed")
     ) {

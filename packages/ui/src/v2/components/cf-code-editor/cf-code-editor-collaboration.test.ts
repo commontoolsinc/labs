@@ -479,7 +479,7 @@ describe("CFCodeEditor collaboration", () => {
     }
   });
 
-  it("publishes focused selections and unfocused replacement state", () => {
+  it("publishes no selection before focus and retains it after blur", () => {
     const originalWebSocket = globalThis.WebSocket;
     const originalRequestFrame = globalThis.requestAnimationFrame;
     const originalCancelFrame = globalThis.cancelAnimationFrame;
@@ -504,7 +504,7 @@ describe("CFCodeEditor collaboration", () => {
       const element = new CFCodeEditor();
       const presence = (element as any)._presenceComp as Compartment;
       const view = statefulView([presence.of([])]);
-      view.hasFocus = true;
+      view.hasFocus = false;
       view.dispatch({ selection: { anchor: 1, head: 2 } } as never);
       (element as any)._editorView = view;
       (element as any)._collaboration = {
@@ -528,22 +528,34 @@ describe("CFCodeEditor collaboration", () => {
       frames.shift()?.(0);
       expect(JSON.parse(socket.sent[0])).toMatchObject({
         name: "Ada",
-        focused: true,
+        focused: false,
         cursor: { epoch: 2, version: 4 },
+        selection: null,
+        basis: "confirmed",
+      });
+
+      view.hasFocus = true;
+      (element as any)._publishPresence();
+      frames.shift()?.(0);
+      expect(JSON.parse(socket.sent[1])).toMatchObject({
+        revision: 2,
+        focused: true,
         selection: {
           ranges: [{ anchor: 1, head: 2, assoc: -1 }],
           main: 0,
         },
-        basis: "confirmed",
       });
 
       view.hasFocus = false;
       (element as any)._publishPresence();
       frames.shift()?.(0);
-      expect(JSON.parse(socket.sent[1])).toMatchObject({
-        revision: 2,
+      expect(JSON.parse(socket.sent[2])).toMatchObject({
+        revision: 3,
         focused: false,
-        selection: null,
+        selection: {
+          ranges: [{ anchor: 1, head: 2, assoc: -1 }],
+          main: 0,
+        },
       });
     } finally {
       Object.defineProperty(globalThis, "WebSocket", {

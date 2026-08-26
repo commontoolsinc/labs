@@ -67,7 +67,7 @@ export interface ParticipantPresence {
   /** Memory cursor whose document coordinates contain `.selection`. */
   readonly cursor: PresenceCursor;
 
-  /** Remote selection, or `null` when none should be shown. */
+  /** Remote selection, or `null` before this participant establishes one. */
   readonly selection: PresenceSelectionJSON | null;
 
   /** Whether `.selection` is exact or mapped back over pending local edits. */
@@ -273,12 +273,12 @@ class RemoteCaretWidget extends WidgetType {
   }
 }
 
-/** Decodes a focused selection when every range fits the current document. */
+/** Decodes a selection when every range fits the current document. */
 const decodeSelection = (
   record: ParticipantPresence,
   documentLength: number,
 ): EditorSelection | undefined => {
-  if (!record.focused || record.selection === null) return undefined;
+  if (record.selection === null) return undefined;
   if (
     record.selection.ranges.length === 0 ||
     !Number.isInteger(record.selection.main) ||
@@ -322,7 +322,7 @@ const displayRecord = (
   if (composed !== undefined && composed.newLength !== documentLength) {
     return undefined;
   }
-  if (!record.focused || record.selection === null) {
+  if (record.selection === null) {
     return { record, selection: null };
   }
   const selection = decodeSelection(

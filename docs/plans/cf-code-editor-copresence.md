@@ -153,7 +153,7 @@ A participant's latest record contains:
 | `name` | Bounded plain-text display name. |
 | `focused` | Whether this editor currently owns focus. |
 | `cursor` | Confirmed Memory `{ epoch, version }` used as the selection's coordinate space. |
-| `selection` | CodeMirror selection JSON with `{ anchor, head, assoc }` per range, or null when unfocused. |
+| `selection` | CodeMirror selection JSON with `{ anchor, head, assoc }` per range, or null until the participant establishes one. |
 | `basis` | `provisional` when mapped back over pending edits, otherwise `confirmed`. |
 
 The wire messages are deliberately small:
@@ -203,6 +203,8 @@ approximated before the inserted text existed, such as a selection wholly
 inside a new insertion.
 
 Focus, blur, name, and selection-only changes also publish replacement records.
+Blur retains the last established selection so collaborators keep its caret and
+range highlight while `focused` continues to report the editor's actual state.
 Coalesce bursts at the browser animation-frame boundary; do not use a sleep,
 poll, debounce timer, or retry loop as a synchronization primitive.
 
@@ -246,8 +248,9 @@ shown. At no point does presence hold back the Memory transaction.
 - Clear presence on editor disposal, Cell rebinding, collaborative-mode change,
   explicit release, reconciliation failure, operation-session failure, and
   Memory epoch change.
-- Send an unfocused replacement on ordinary blur. Socket close remains the
-  authoritative removal if the page disappears before the message is sent.
+- Send an unfocused replacement with the last established selection on ordinary
+  blur. Socket close remains the authoritative removal if the page disappears
+  before the message is sent.
 - On a transient socket close, remove remote state and reconnect using the
   browser's next explicit online/visibility lifecycle signal. The first slice
   does not add a retry timer or reconnect on each editor interaction.

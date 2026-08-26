@@ -323,6 +323,22 @@ describe("copresence-client", () => {
           basis: "provisional",
         },
       });
+      expect(decodePresenceServerMessage({ ...message, focused: false }))
+        .toEqual({
+          type: "participant.upsert",
+          participant: {
+            participantId: "22222222-2222-4222-8222-222222222222",
+            revision: 2,
+            name: "Ada",
+            focused: false,
+            cursor: { epoch: 1, version: 3 },
+            selection: {
+              ranges: [{ anchor: 0, head: 2, assoc: -1 }],
+              main: 0,
+            },
+            basis: "provisional",
+          },
+        });
       expect(() => decodePresenceServerMessage({ ...message, document: "no" }))
         .toThrow("upsert");
     });

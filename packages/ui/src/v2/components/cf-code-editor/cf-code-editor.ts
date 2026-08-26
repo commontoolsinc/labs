@@ -358,6 +358,7 @@ export class CFCodeEditor extends BaseElement {
   private _collaborationSyncUnsub: (() => void) | undefined;
   private _presence: CopresenceSession | undefined;
   private _presenceParticipantId: string | undefined;
+  private _presenceHasSelection = false;
   private _presenceEpoch: number | undefined;
   private _presenceServiceUrl: string | undefined;
   private _presenceRoom: string | undefined;
@@ -1613,6 +1614,7 @@ export class CFCodeEditor extends BaseElement {
     this._presence = undefined;
     presence?.dispose();
     this._presenceParticipantId = undefined;
+    this._presenceHasSelection = false;
     this._presenceEpoch = undefined;
     this._presenceRoom = undefined;
     this._presenceServiceUrl = undefined;
@@ -1736,13 +1738,14 @@ export class CFCodeEditor extends BaseElement {
       return;
     }
     const focused = view.hasFocus;
+    if (focused) this._presenceHasSelection = true;
     const provisional = synchronization.pendingChanges.length !== 0;
     try {
       presence.publish({
         name: this.participantName,
         focused,
         cursor: synchronization.confirmedCursor,
-        selection: focused
+        selection: this._presenceHasSelection
           ? presenceSelectionToJSON(mapSelectionToConfirmed(
             view.state.selection,
             synchronization.pendingChanges,
