@@ -257,14 +257,19 @@ export declare const FabricKeyPair: FabricKeyPairConstructor;
 export type FabricErrorState = {
   /** Constructor name of the originating native `Error` (e.g. `"TypeError"`). */
   readonly type: string;
+
   /** The `.name` property. Omit to mean "same as `type`". */
   readonly name?: string | null | undefined;
+
   /** The `.message` property. */
   readonly message: string;
+
   /** The `.stack` property, or `undefined`. */
   readonly stack: string | undefined;
+
   /** The `.cause` value, in `FabricValue` form, or `undefined`. */
   readonly cause: FabricValue | undefined;
+
   /** Custom enumerable own properties, in `FabricValue` form. */
   readonly extras?:
     | Iterable<readonly [string, FabricValue]>

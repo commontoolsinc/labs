@@ -62,6 +62,7 @@ const FABRIC_ERROR_RESERVED_KEYS: FrozenSet<string> = new FrozenSet([
 export type FabricErrorState = {
   /** Constructor name of the originating native `Error`, e.g. `TypeError`. */
   readonly type: string;
+
   /**
    * The `.name` property. Pass `null` (or omit) to mean "same as `type`"; the
    * resulting instance's `.name` is always a concrete string (`null` is a
@@ -69,12 +70,16 @@ export type FabricErrorState = {
    * public API).
    */
   readonly name?: string | null | undefined;
+
   /** The `.message` property. */
   readonly message: string;
+
   /** The `.stack` property, or `undefined`. */
   readonly stack: string | undefined;
+
   /** The `.cause` value, in `FabricValue` form, or `undefined`. */
   readonly cause: FabricValue | undefined;
+
   /**
    * Optional iterable of custom enumerable own properties, in `FabricValue`
    * form. Keys must not collide with the fixed-schema slot names or with
