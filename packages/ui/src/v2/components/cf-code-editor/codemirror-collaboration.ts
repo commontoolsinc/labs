@@ -38,10 +38,20 @@ export type CodeMirrorSubmission = {
   payload: CodeMirrorOperationPayload;
 };
 
+/** Canonical identity of the resolved Memory field synchronized by CodeMirror. */
+export type CodeMirrorCollaborationFieldIdentity = {
+  space: string;
+  branch: string;
+  id: string;
+  scopeKey: string;
+  path: readonly string[];
+};
+
 /** Read-only document synchronization state exposed to ephemeral consumers. */
 export type CodeMirrorSynchronizationSnapshot = {
   confirmedCursor: OpCursor;
   pendingChanges: readonly ChangeDesc[];
+  field: CodeMirrorCollaborationFieldIdentity;
 };
 
 /** Preserves both values when a new epoch cannot absorb unconfirmed edits. */
@@ -249,6 +259,7 @@ export class CodeMirrorCollaborationController {
     (snapshot: CodeMirrorSynchronizationSnapshot | null) => void
   >();
   #cursor: OpCursor | null = null;
+  #field: CodeMirrorCollaborationFieldIdentity | null = null;
   #baselineHash = "";
   #unsubscribe: (() => void) | undefined;
   #flushPromise: Promise<void> | undefined;
@@ -273,12 +284,15 @@ export class CodeMirrorCollaborationController {
   }
 
   get synchronizationSnapshot(): CodeMirrorSynchronizationSnapshot | null {
-    if (!this.active || this.#cursor === null) return null;
+    if (!this.active || this.#cursor === null || this.#field === null) {
+      return null;
+    }
     return {
       confirmedCursor: { ...this.#cursor },
       pendingChanges: sendableUpdates(this.#view.state).map((update) =>
         update.changes
       ),
+      field: { ...this.#field, path: [...this.#field.path] },
     };
   }
 
@@ -440,6 +454,7 @@ export class CodeMirrorCollaborationController {
         `CodeMirror cannot open operation codec ${snapshot.codec}`,
       );
     }
+    this.#assertFieldIdentity(snapshot);
     const version = snapshot.cursor?.version ?? 0;
     this.#ready = false;
     // Invalidate observer state before any transaction can map ephemeral
@@ -473,6 +488,7 @@ export class CodeMirrorCollaborationController {
   #receive(snapshot: OperationFieldSnapshot): void {
     if (!this.#canProcess() || this.#failed) return;
     try {
+      this.#assertFieldIdentity(snapshot);
       if (typeof snapshot.materialized !== "string") {
         throw new Error("CodeMirror collaboration requires a string field");
       }
@@ -675,6 +691,7 @@ export class CodeMirrorCollaborationController {
           CODEMIRROR_CHANGESET_CODEC,
       );
     }
+    this.#assertFieldIdentity(resolution.address);
     const syncedVersion = getSyncedVersion(this.#view.state);
     const current = this.#cursor ?? {
       epoch: resolution.from.epoch,
@@ -737,6 +754,34 @@ export class CodeMirrorCollaborationController {
     const snapshot = this.synchronizationSnapshot;
     for (const observer of this.#synchronizationObservers) {
       this.#notifySynchronizationObserver(observer, snapshot);
+    }
+  }
+
+  #assertFieldIdentity(
+    address: Pick<
+      OperationFieldSnapshot,
+      "branch" | "id" | "scopeKey" | "path"
+    >,
+  ): void {
+    const next: CodeMirrorCollaborationFieldIdentity = {
+      space: String(this.#cell.space()),
+      branch: address.branch,
+      id: address.id,
+      scopeKey: address.scopeKey,
+      path: [...address.path],
+    };
+    const current = this.#field;
+    if (current === null) {
+      this.#field = next;
+      return;
+    }
+    if (
+      current.space !== next.space || current.branch !== next.branch ||
+      current.id !== next.id || current.scopeKey !== next.scopeKey ||
+      current.path.length !== next.path.length ||
+      current.path.some((part, index) => part !== next.path[index])
+    ) {
+      throw new Error("CodeMirror operation field identity changed");
     }
   }
 

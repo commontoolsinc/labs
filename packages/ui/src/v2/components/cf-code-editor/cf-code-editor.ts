@@ -86,7 +86,11 @@ import {
   MentionableArraySchema,
   MentionableSchema,
 } from "../../core/mentionable.ts";
-import { runtimeContext, spaceContext } from "../../runtime-context.ts";
+import {
+  presenceUrlContext,
+  runtimeContext,
+  spaceContext,
+} from "../../runtime-context.ts";
 import { type StoredFile, uploadFile } from "../../utils/file-cell-storage.ts";
 import { mentionIdFromCellId } from "../../utils/mention-id.ts";
 import {
@@ -124,11 +128,11 @@ import {
   presenceSelectionToJSON,
 } from "./codemirror-presence.ts";
 import {
+  copresenceRoomForField,
   CopresenceSession,
   type PresenceFailureCategory,
   type PresenceServerMessage,
 } from "./copresence-client.ts";
-import { copresenceUrlContext } from "./copresence-context.ts";
 
 /** A unique noteId, so notes created from a mention do not collide. */
 function generateNoteId(): string {
@@ -216,10 +220,11 @@ const getLangExtFromMimeType = (mime: MimeType) => {
  * @attr {"code"|"prose"} mode - Editor mode; "prose" enables markdown prose editing.
  * @attr {CellHandle<string>} pattern - Optional pattern piece used for backlink context.
  * @attr {boolean} collaborative - Use Memory's operation protocol for concurrent editing.
- * @attr {string} presenceRoom - Opaque room identifier for ephemeral co-presence.
+ * @attr {string} presenceRoom - Optional opaque room override for ephemeral
+ *   co-presence. The bound text Cell address supplies the default.
  * @attr {string} participantName - Plain-text co-presence display name.
  * @attr {string} presenceUrl - Optional WebSocket co-presence service
- *   override. Hosts can instead provide `copresenceUrlContext`.
+ *   override. Hosts can instead provide `presenceUrlContext`.
  *
  * @fires cf-change - Fired when content changes with detail: { value, oldValue, language }
  * @fires cf-focus - Fired on focus
@@ -322,9 +327,9 @@ export class CFCodeEditor extends BaseElement {
   declare participantName: string;
   declare presenceUrl: string;
 
-  @consume({ context: copresenceUrlContext, subscribe: true })
+  @consume({ context: presenceUrlContext, subscribe: true })
   @property({ attribute: false })
-  accessor copresenceUrl: string | undefined = undefined;
+  accessor contextPresenceUrl: string | undefined = undefined;
 
   @consume({ context: runtimeContext, subscribe: true })
   @property({ attribute: false })
@@ -1431,13 +1436,24 @@ export class CFCodeEditor extends BaseElement {
       this.emit("cf-error", { error, message: error.message });
       return;
     }
-    const cell = this.value as CellHandle<string>;
+    const sourceCell = this.value as CellHandle<string>;
 
     // Do not accept edits between the initial Memory query and installation of
     // CodeMirror's versioned collaboration state.
     view.dispatch({
       effects: this._readonly.reconfigure(EditorState.readOnly.of(true)),
     });
+    let cell: CellHandle<string>;
+    try {
+      cell = await sourceCell.resolveAsCell();
+    } catch (cause) {
+      if (generation !== this._collaborationGeneration) return;
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      this._collaborationFailed = true;
+      this.emit("cf-error", { error, message: error.message });
+      return;
+    }
+    if (generation !== this._collaborationGeneration) return;
     const controller = new CodeMirrorCollaborationController({
       runtime: cell.runtime(),
       cell,
@@ -1528,10 +1544,14 @@ export class CFCodeEditor extends BaseElement {
     retryFailedConnection = false,
   ): void {
     const view = this._editorView;
-    const serviceUrl = this.presenceUrl || this.copresenceUrl || "";
+    const serviceUrl = this.presenceUrl || this.contextPresenceUrl || "";
+    const room = this.presenceRoom ||
+      (synchronization === null || synchronization === undefined
+        ? ""
+        : copresenceRoomForField(synchronization.field));
     const configurationKey = JSON.stringify([
       serviceUrl,
-      this.presenceRoom,
+      room,
       this.participantName,
     ]);
     if (
@@ -1543,7 +1563,7 @@ export class CFCodeEditor extends BaseElement {
     if (
       !view || !this.collaborative || !this._collaboration?.active ||
       synchronization === null || synchronization === undefined ||
-      !this.presenceRoom || !this.participantName || !serviceUrl
+      !room || !this.participantName || !serviceUrl
     ) {
       this._cleanupPresence();
       return;
@@ -1558,7 +1578,7 @@ export class CFCodeEditor extends BaseElement {
     if (
       this._presence !== undefined &&
       this._presenceEpoch === synchronization.confirmedCursor.epoch &&
-      this._presenceRoom === this.presenceRoom &&
+      this._presenceRoom === room &&
       this._presenceServiceUrl === serviceUrl
     ) {
       this._publishPresence();
@@ -1573,12 +1593,12 @@ export class CFCodeEditor extends BaseElement {
       ),
     });
     this._presenceEpoch = synchronization.confirmedCursor.epoch;
-    this._presenceRoom = this.presenceRoom;
+    this._presenceRoom = room;
     this._presenceServiceUrl = serviceUrl;
     try {
       this._presence = new CopresenceSession({
         serviceUrl,
-        room: this.presenceRoom,
+        room,
         onMessage: (message) => this._handlePresenceMessage(message),
         onFailure: (category) => this._failPresence(category),
       });
@@ -1605,9 +1625,14 @@ export class CFCodeEditor extends BaseElement {
   }
 
   private _failPresence(category: PresenceFailureCategory): void {
+    const synchronization = this._collaboration?.synchronizationSnapshot;
+    const room = this.presenceRoom ||
+      (synchronization === null || synchronization === undefined
+        ? ""
+        : copresenceRoomForField(synchronization.field));
     const configurationKey = JSON.stringify([
-      this.presenceUrl || this.copresenceUrl || "",
-      this.presenceRoom,
+      this.presenceUrl || this.contextPresenceUrl || "",
+      room,
       this.participantName,
     ]);
     if (
@@ -1915,7 +1940,7 @@ export class CFCodeEditor extends BaseElement {
     if (
       changedProperties.has("presenceRoom") ||
       changedProperties.has("presenceUrl") ||
-      changedProperties.has("copresenceUrl") ||
+      changedProperties.has("contextPresenceUrl") ||
       changedProperties.has("participantName")
     ) {
       this._setupPresence();

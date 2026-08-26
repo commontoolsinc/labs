@@ -584,6 +584,13 @@ describe("CodeMirror operation collaboration", () => {
       {
         confirmedCursor: { epoch: 1, version: 0 },
         pendingChanges: [],
+        field: {
+          space: "did:key:test-space",
+          branch: "",
+          id: "of:editor",
+          scopeKey: "space",
+          path: [],
+        },
       },
     ]);
   });
@@ -618,6 +625,27 @@ describe("CodeMirror operation collaboration", () => {
     expect(errors).toEqual([]);
     expect(view.state.doc.toString()).toBe("random string!");
     expect(sendableUpdates(view.state)).toEqual([]);
+  });
+
+  it("rejects operation-field identity drift within a pinned session", async () => {
+    let subscriber: ((snapshot: OperationFieldSnapshot) => void) | undefined;
+    const initial = activeSnapshot(
+      "abc",
+      acceptedResolution("abc", 1, ""),
+    );
+    const { controller, errors } = controllerHarness({
+      initial,
+      followup: initial,
+      apply: () => acceptedResolution("abc", 1, "X"),
+      subscribe: (callback) => subscriber = callback,
+    });
+    await controller.start();
+
+    subscriber?.({ ...initial, scopeKey: "user:another-participant" });
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain("field identity changed");
+    expect(controller.active).toBe(false);
   });
 
   it("reinstalls reset and epoch snapshots only without pending edits", async () => {
@@ -1053,9 +1081,12 @@ function controllerHarness(options: {
     },
   } as unknown as RuntimeClient;
   const errors: Error[] = [];
+  const cell = {
+    space: () => "did:key:test-space",
+  } as unknown as CellHandle<string>;
   const controller = new CodeMirrorCollaborationController({
     runtime,
-    cell: {} as CellHandle<string>,
+    cell,
     view,
     compartment,
     clientId: "alice",

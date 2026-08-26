@@ -2,6 +2,7 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import {
+  copresenceRoomForField,
   copresenceRoomUrl,
   CopresenceSession,
   decodePresenceServerMessage,
@@ -60,6 +61,40 @@ function participant(index: number) {
 }
 
 describe("copresence-client", () => {
+  describe("copresenceRoomForField()", () => {
+    it("keys the room on the complete resolved operation-field identity", () => {
+      const field = {
+        space: "did:key:space-a",
+        branch: "main",
+        id: "of:document-a",
+        scopeKey: "user:alice",
+        path: ["value", "note", "body"],
+      } as const;
+      const room = copresenceRoomForField(field);
+
+      expect(room).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      expect(copresenceRoomForField({ ...field })).toBe(room);
+      expect(room).not.toContain("space-a");
+      expect(room).not.toContain("document-a");
+      for (
+        const changed of [
+          { ...field, space: "did:key:space-b" },
+          { ...field, branch: "draft" },
+          { ...field, id: "computed:document-a" },
+          { ...field, scopeKey: "user:bob" },
+          { ...field, path: ["value", "note", "title"] },
+          { ...field, path: ["value", "note", "body", "nested"] },
+        ]
+      ) {
+        expect(copresenceRoomForField(changed)).not.toBe(room);
+      }
+      expect(copresenceRoomForField({ ...field, path: ["value", "."] }))
+        .not.toBe(
+          copresenceRoomForField({ ...field, path: ["value", "", ""] }),
+        );
+    });
+  });
+
   describe("CopresenceSession", () => {
     describe("constructor()", () => {
       it("opens the versioned endpoint for a validated opaque room", () => {

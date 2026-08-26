@@ -1,7 +1,5 @@
 import { CFCodeEditor, MimeType } from "./cf-code-editor.ts";
 
-export { copresenceUrlContext } from "./copresence-context.ts";
-
 if (!customElements.get("cf-code-editor")) {
   customElements.define("cf-code-editor", CFCodeEditor);
 }

@@ -11,12 +11,14 @@ participant.
 
 The first deployment is one Cloudflare Worker with one hibernating Durable
 Object per room. It has no authentication, durable storage, replay, or document
-data. A room identifier and participant name opt an editor into the feature;
-the service endpoint is deployment configuration with an explicit component
-override for local development and integration tests. Hosts supply that
-deployment configuration through the exported `copresenceUrlContext`; Labs
-Shell supplies none until an endpoint is deployed. The Worker and Durable
-Object live in the independent private
+data. A participant name opts a collaborative Cell-backed editor into the
+feature when a service endpoint is configured. The room defaults to an opaque
+hash of the resolved Memory field, with an explicit component override for
+specialized rendezvous. The service endpoint is deployment configuration with
+an explicit component override for local development and integration tests.
+Hosts supply that configuration through the exported `presenceUrlContext`;
+Labs Shell maps the optional build-time `PRESENCE_URL` into that context. The
+Worker and Durable Object live in the independent private
 [`commontoolsinc/cloudflare-copresence`](https://github.com/commontoolsinc/cloudflare-copresence)
 repository so their deployment and operational access do not become part of a
 Labs or Memory deployment.
@@ -108,17 +110,20 @@ Add these optional properties to `cf-code-editor`:
 
 | Property | Meaning |
 | --- | --- |
-| `presenceRoom` | Opaque, high-entropy room identifier. Its absence disables presence. |
+| `presenceRoom` | Optional opaque room override. Without one, the editor hashes its resolved, pinned Memory field identity. |
 | `participantName` | Plain-text display name. Its absence disables presence. |
-| `presenceUrl` | Optional WebSocket service override. A host-provided `copresenceUrlContext` is the default; tests and local development may set the override directly. |
+| `presenceUrl` | Optional WebSocket service override. A host-provided `presenceUrlContext` is the default; tests and local development may set the override directly. |
 
-Setting both `presenceRoom` and `participantName` while `collaborative` is
-active opens the socket when either the context or override supplies an
-endpoint. Changing the room, endpoint, bound Cell, or
-collaborative mode closes the old socket, removes all remote decorations, and
-starts a new session only after the new Memory operation session is ready.
-Changing the participant name in the same room publishes a replacement record
-without reconnecting.
+Setting `participantName` while `collaborative` is active opens the socket when
+either the context or override supplies an endpoint. The default room hashes a
+domain-separated, versioned tuple containing the resolved space DID, branch,
+full schemed document id, resolved scope key, and complete operation field
+path. This keeps aliases and direct handles to the same field together while
+separating different user and session instances. The hash is not
+authentication. Changing the room, endpoint, bound Cell, or collaborative mode
+closes the old socket, removes all remote decorations, and starts a new session
+only after the new Memory operation session is ready. Changing the participant
+name in the same room publishes a replacement record without reconnecting.
 
 The room creates and owns an unpredictable participant id for each socket
 session and ignores any client attempt to update another participant. Names

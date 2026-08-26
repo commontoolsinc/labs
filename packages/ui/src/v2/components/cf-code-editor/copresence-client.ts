@@ -10,6 +10,7 @@ import {
   type ParticipantPresence,
   type PresenceCursor,
 } from "./codemirror-presence.ts";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 
 const protocolVersion = 1;
 const roomPattern = /^[A-Za-z0-9_-]{22,128}$/;
@@ -97,6 +98,30 @@ export type CopresenceSessionOptions = {
   /** Receives the first terminal failure category for this session. */
   onFailure: (category: PresenceFailureCategory) => void;
 };
+
+/** Canonical resolved operation-field identity used for room rendezvous. */
+export type CopresenceFieldIdentity = {
+  space: string;
+  branch: string;
+  id: string;
+  scopeKey: string;
+  path: readonly string[];
+};
+
+/** Derives an opaque room from one resolved, pinned Memory field. */
+export function copresenceRoomForField(
+  field: CopresenceFieldIdentity,
+): string {
+  return hashStringOf({
+    namespace: "cf-code-editor-copresence-room",
+    version: 1,
+    space: field.space,
+    branch: field.branch,
+    id: field.id,
+    scopeKey: field.scopeKey,
+    path: [...field.path],
+  });
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);

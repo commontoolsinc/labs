@@ -26,12 +26,20 @@ it receives no document contents or changes and retains no state after a socket
 disconnects. Presence is optional and cannot delay, alter, or disable a Memory
 operation.
 
-`cf-code-editor` joins only while collaborative editing is active and both an
-opaque `presenceRoom` and a `participantName` are set. A host supplies the
-service endpoint through the exported `copresenceUrlContext`; an explicit
-`presenceUrl` on an editor overrides that default for tests, local development,
-or a specialized host. With no effective endpoint, co-presence stays disabled.
-Labs does not configure an endpoint in Shell until a service is deployed.
+`cf-code-editor` joins only while collaborative editing is active, a
+`participantName` is set, and a service endpoint is available. By default it
+derives an opaque room from the resolved, pinned Memory field: the space DID,
+branch, full schemed document id, resolved scope instance, and complete field
+path are domain-separated and hashed. An explicit `presenceRoom` overrides
+that derived room. The address hash is a pseudonymous rendezvous key, not
+authentication; a human space name is display state and does not participate
+in Cell identity.
+
+A host supplies the service endpoint through the exported
+`presenceUrlContext`; Labs Shell provides it from the optional build-time
+`PRESENCE_URL`. An explicit `presenceUrl` on an editor overrides that default
+for tests, local development, or a specialized host. With no effective
+endpoint, co-presence stays disabled.
 
 Each selection names the Memory `{ epoch, version }` whose document coordinates
 it uses and retains CodeMirror's side association for every range endpoint.

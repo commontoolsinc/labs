@@ -9,6 +9,7 @@ import {
 import type { EditorView } from "@codemirror/view";
 import {
   CellHandle,
+  type CellRef,
   CODEMIRROR_CHANGESET_CODEC,
   type OperationFieldSnapshot,
 } from "@commonfabric/runtime-client";
@@ -86,11 +87,44 @@ const presenceSnapshot = JSON.stringify({
   participants: [],
 });
 
-function operationCell(runtime: Record<string, unknown>): CellHandle<string> {
-  const cell = Object.create(CellHandle.prototype);
-  Object.defineProperty(cell, "runtime", { value: () => runtime });
-  return cell;
+function operationCell(
+  runtime: Record<string, unknown>,
+  ref: CellRef = {
+    space: "did:key:editor-space" as CellRef["space"],
+    id: "of:editor-document" as CellRef["id"],
+    scope: "space",
+    path: ["body"],
+  },
+  resolvedRef: CellRef = ref,
+): CellHandle<string> {
+  const makeCell = (cellRef: CellRef): CellHandle<string> => {
+    const cell = Object.create(CellHandle.prototype);
+    Object.defineProperty(cell, "runtime", { value: () => runtime });
+    Object.defineProperty(cell, "ref", { value: () => cellRef });
+    Object.defineProperty(cell, "space", { value: () => cellRef.space });
+    Object.defineProperty(cell, "resolveAsCell", {
+      configurable: true,
+      value: () => Promise.resolve(cell),
+    });
+    return cell;
+  };
+  const resolved = makeCell(resolvedRef);
+  if (resolvedRef === ref) return resolved;
+  const source = makeCell(ref);
+  Object.defineProperty(source, "resolveAsCell", {
+    configurable: true,
+    value: () => Promise.resolve(resolved),
+  });
+  return source;
 }
+
+const synchronizedField = {
+  space: "did:key:editor-space",
+  branch: "main",
+  id: "of:editor-document",
+  scopeKey: "space",
+  path: ["value", "body"],
+} as const;
 
 describe("CFCodeEditor collaboration", () => {
   it("routes local, remote, and cell-originated editor updates correctly", () => {
@@ -264,6 +298,66 @@ describe("CFCodeEditor collaboration", () => {
     expect(errors.at(-1)?.[0]).toBe("cf-error");
   });
 
+  it("resolves the bound handle before pinning collaboration identity", async () => {
+    const sourceRef: CellRef = {
+      space: "did:key:source-space" as CellRef["space"],
+      id: "of:alias" as CellRef["id"],
+      scope: "space",
+      path: ["body"],
+    };
+    const resolvedRef: CellRef = {
+      space: "did:key:target-space" as CellRef["space"],
+      id: "computed:document" as CellRef["id"],
+      scope: "user",
+      path: ["content", "markdown"],
+    };
+    const snapshot = {
+      ...inactiveSnapshot("abc"),
+      branch: "main",
+      id: resolvedRef.id,
+      scopeKey: "user:ada",
+      path: [
+        "value",
+        ...resolvedRef.path,
+      ] as unknown as OperationFieldSnapshot["path"],
+      active: true,
+      codec: CODEMIRROR_CHANGESET_CODEC,
+      cursor: { epoch: 1, version: 0 },
+    } as const;
+    let openedCell: CellHandle<string> | undefined;
+    const runtime = {
+      operationCodecs: (cell: CellHandle<string>) => {
+        openedCell = cell;
+        return Promise.resolve([CODEMIRROR_CHANGESET_CODEC]);
+      },
+      queryOperationField: () => Promise.resolve(snapshot),
+      subscribeOperationField: () => Promise.resolve(() => {}),
+      closeOperationSession: () => Promise.resolve(),
+    };
+    const element = new CFCodeEditor();
+    const readonly = (element as any)._readonly as Compartment;
+    const collaboration = (element as any)
+      ._collaborationComp as Compartment;
+    (element as any)._editorView = statefulView([
+      readonly.of(EditorState.readOnly.of(false)),
+      collaboration.of([]),
+    ]);
+    element.value = operationCell(runtime, sourceRef, resolvedRef);
+    element.collaborative = true;
+
+    await (element as any)._setupCollaboration();
+
+    expect(openedCell?.ref()).toEqual(resolvedRef);
+    expect((element as any)._collaboration.synchronizationSnapshot.field)
+      .toEqual({
+        space: "did:key:target-space",
+        branch: "main",
+        id: "computed:document",
+        scopeKey: "user:ada",
+        path: ["value", "content", "markdown"],
+      });
+  });
+
   it("uses the host endpoint context until an explicit override is set", () => {
     const originalWebSocket = globalThis.WebSocket;
     MockPresenceWebSocket.instances = [];
@@ -280,13 +374,14 @@ describe("CFCodeEditor collaboration", () => {
         synchronizationSnapshot: {
           confirmedCursor: { epoch: 2, version: 4 },
           pendingChanges: [],
+          field: synchronizedField,
         },
       };
       (element as any)._collaboration = collaboration;
       element.collaborative = true;
       element.presenceRoom = "abcdefghijklmnopqrstuv";
       element.participantName = "Ada";
-      element.copresenceUrl = "wss://default-presence.example";
+      element.contextPresenceUrl = "wss://default-presence.example";
 
       (element as any)._setupPresence();
       expect(MockPresenceWebSocket.instances[0].url).toBe(
@@ -300,6 +395,7 @@ describe("CFCodeEditor collaboration", () => {
       collaboration.synchronizationSnapshot = {
         confirmedCursor: { epoch: 3, version: 0 },
         pendingChanges: [],
+        field: synchronizedField,
       };
       (element as any)._handleCollaborationSynchronization(
         collaboration.synchronizationSnapshot,
@@ -321,8 +417,60 @@ describe("CFCodeEditor collaboration", () => {
 
       element.presenceRoom = "";
       (element as any)._setupPresence();
-      expect((element as any)._presence).toBeUndefined();
+      expect(MockPresenceWebSocket.instances).toHaveLength(5);
+      expect(MockPresenceWebSocket.instances[4].url).toMatch(
+        /^wss:\/\/override-presence\.example\/v1\/rooms\/[A-Za-z0-9_-]{43}$/,
+      );
       expect(MockPresenceWebSocket.instances[3].closes).toEqual([1000]);
+    } finally {
+      Object.defineProperty(globalThis, "WebSocket", {
+        configurable: true,
+        value: originalWebSocket,
+      });
+    }
+  });
+
+  it("derives a room from the bound text cell when no override is set", () => {
+    const originalWebSocket = globalThis.WebSocket;
+    MockPresenceWebSocket.instances = [];
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: MockPresenceWebSocket,
+    });
+    try {
+      const element = new CFCodeEditor();
+      const presence = (element as any)._presenceComp as Compartment;
+      (element as any)._editorView = statefulView([presence.of([])]);
+      (element as any)._collaboration = {
+        active: true,
+        synchronizationSnapshot: {
+          confirmedCursor: { epoch: 2, version: 4 },
+          pendingChanges: [],
+          field: {
+            space: "did:key:resolved-space",
+            branch: "main",
+            id: "of:note-document",
+            scopeKey: "user:ada",
+            path: ["value", "content", "markdown"],
+          },
+        },
+      };
+      element.value = operationCell({}, {
+        space: "did:key:shared-space" as CellRef["space"],
+        id: "of:note-document" as CellRef["id"],
+        scope: "space",
+        path: ["content", "markdown"],
+      });
+      element.collaborative = true;
+      element.participantName = "Ada";
+      element.contextPresenceUrl = "wss://default-presence.example";
+
+      (element as any)._setupPresence();
+
+      expect(MockPresenceWebSocket.instances).toHaveLength(1);
+      expect(MockPresenceWebSocket.instances[0].url).toMatch(
+        /^wss:\/\/default-presence\.example\/v1\/rooms\/[A-Za-z0-9_-]{43}$/,
+      );
     } finally {
       Object.defineProperty(globalThis, "WebSocket", {
         configurable: true,
@@ -364,6 +512,7 @@ describe("CFCodeEditor collaboration", () => {
         synchronizationSnapshot: {
           confirmedCursor: { epoch: 2, version: 4 },
           pendingChanges: [],
+          field: synchronizedField,
         },
       };
       element.collaborative = true;
@@ -452,6 +601,7 @@ describe("CFCodeEditor collaboration", () => {
         synchronizationSnapshot: {
           confirmedCursor: { epoch: 1, version: 0 },
           pendingChanges: [],
+          field: synchronizedField,
         },
       };
       (element as any).emit = (name: string, detail: unknown) =>
@@ -459,7 +609,7 @@ describe("CFCodeEditor collaboration", () => {
       element.collaborative = true;
       element.presenceRoom = "abcdefghijklmnopqrstuv";
       element.participantName = "Ada";
-      element.copresenceUrl = "https://presence.example";
+      element.contextPresenceUrl = "https://presence.example";
 
       (element as any)._setupPresence();
       (element as any)._setupPresence();
@@ -471,7 +621,7 @@ describe("CFCodeEditor collaboration", () => {
       ]);
       expect(MockPresenceWebSocket.instances).toHaveLength(0);
 
-      element.copresenceUrl = "wss://presence.example";
+      element.contextPresenceUrl = "wss://presence.example";
       (element as any)._setupPresence();
       expect(MockPresenceWebSocket.instances).toHaveLength(1);
     } finally {
@@ -496,6 +646,7 @@ describe("CFCodeEditor collaboration", () => {
       const synchronizationSnapshot = {
         confirmedCursor: { epoch: 1, version: 0 },
         pendingChanges: [],
+        field: synchronizedField,
       };
       (element as any)._collaboration = {
         active: true,
@@ -795,6 +946,7 @@ describe("CFCodeEditor collaboration", () => {
       const snapshot = {
         confirmedCursor: { epoch: 1, version: 3 },
         pendingChanges: [],
+        field: synchronizedField,
       };
       let observerRegistrations = 0;
       const collaboration = {
