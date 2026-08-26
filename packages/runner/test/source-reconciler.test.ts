@@ -343,6 +343,39 @@ describe("piece source reconciliation", () => {
       expect((await piece.pull())?.marker).toBe("v2");
     });
 
+    it("records the pattern it displaced when its source is gone", async () => {
+      // A piece whose own source this space no longer holds has nothing left
+      // to protect: it cannot be set up again at all, so the origin's source
+      // is a rescue. What the rescue replaced is recorded, because after the
+      // pointer moves nothing else names it.
+      const v2Identity = await identityFor(source("v2"));
+      const piece = await preparePiece(
+        servingFetch(() => v2Identity, () => source("v2")),
+      );
+      const originalRef = getPatternIdentityRef(piece)!;
+      await stampSource(piece, PARENT_SOURCE);
+
+      const manager = runtime.patternManager;
+      const program = manager.getPatternSourceProgramByIdentity.bind(manager);
+      manager.getPatternSourceProgramByIdentity = (
+        ...args: Parameters<typeof program>
+      ) =>
+        args[0] === originalRef.identity
+          ? Promise.resolve(undefined)
+          : program(...args);
+      try {
+        expect(await reconcile(piece)).toBe("updated");
+      } finally {
+        manager.getPatternSourceProgramByIdentity = program;
+      }
+
+      expect(getPatternIdentityRef(piece)?.identity).toBe(v2Identity);
+      expect(piece.getMetaRaw("displacedPattern")).toMatchObject({
+        identity: originalRef.identity,
+        symbol: originalRef.symbol,
+      });
+    });
+
     it("keeps the running source when the route cannot be reached", async () => {
       const piece = await preparePiece(() =>
         Promise.resolve(new Response("nope", { status: 503 }))

@@ -555,13 +555,6 @@ export class SourceReconciler {
         candidateRef,
         transition,
       );
-      if (baseline.kind === "unavailable") {
-        resultCell.withTx(tx).setMetaRaw("displacedPattern", {
-          identity: state.running.identity,
-          symbol: state.running.symbol,
-          displacedAt: transition.timestamp,
-        });
-      }
       // Staging the candidate belongs to this transaction whether or not the
       // piece is running, so a refusal costs nothing either way: setup that
       // cannot take the piece's data fails the transaction and the piece keeps
