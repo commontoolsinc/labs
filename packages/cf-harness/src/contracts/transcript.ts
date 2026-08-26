@@ -133,9 +133,11 @@ export const inspectHarnessTranscriptPairing = (
         break;
       case "system":
       case "user":
-        // A user or system message does not answer an outstanding tool call.
-        // History that interleaves one while calls are pending is exactly the
-        // crash-then-next-turn shape, and stays invalid.
+        // A user or system message neither answers an outstanding call nor
+        // cancels it. Pairing is by id over the whole transcript, not by
+        // adjacency, so a result still settles its call from further down;
+        // what a message here does is hold the boundary back, which is what
+        // leaves a turn abandoned mid-tool looking unresumable.
         break;
     }
     // Only a prefix free of defects is resumable. An unanswered call is

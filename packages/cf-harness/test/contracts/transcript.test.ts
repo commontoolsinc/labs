@@ -134,6 +134,21 @@ const CASES: readonly {
     safeBoundary: 1,
   },
   {
+    name: "a result that lands after an intervening user message",
+    // Pairing is by id, not adjacency. The harness cannot build this shape —
+    // the prompt loop collects follow-up user messages during the tool loop and
+    // appends them only once every result has landed (`prompt-loop.ts`) — and
+    // nothing here establishes that a provider rejects it. Pinned so the
+    // accepted reading is deliberate rather than incidental.
+    transcript: [
+      assistant("reading", call("a")),
+      user("actually, also check the other one"),
+      result("a"),
+    ],
+    defects: [],
+    safeBoundary: 3,
+  },
+  {
     name: "an assistant message carrying only native model tool results",
     // Provider-side results already embedded in the assistant message. The
     // Responses projection never turns them into a call needing a partner.
