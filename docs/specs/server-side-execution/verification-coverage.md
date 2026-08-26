@@ -6155,7 +6155,8 @@ supply; OW29/OW32/OW34 closed):
     complains when it succeeds), which is what makes the store the
     only usable witness; the worker console bridge was verified live
     at all three levels first, so the silence is a finding rather
-    than a blind instrument. **NOT DETERMINED, deliberately:**
+    than a blind instrument. **CAMPAIGN FORK, DELIBERATELY LEFT
+    UNDETERMINED AT THAT HEAD:**
     whether that commit was REFUSED, DROPPED in flight, or NEVER
     ISSUED. The guest's space appears in NO server-side line at all —
     including none of the 50-73 per-run
@@ -6191,42 +6192,6 @@ supply; OW29/OW32/OW34 closed):
     all, does run the create through the barrier, and still loses the
     program in every red. Whether that reopens S-C is the owner's
     call, not a measurement call.
-    **PINNED AND FIXED 2026-08-26 — the commit was NEVER ISSUED by
-    the server on its first served attempt.** Current-main re-baseline
-    reproduced the same four-commit guest store in 2/8 runs overall,
-    2/5 runs that reached the guest opportunity. Instrumentation
-    closed the wire fork: the client DID construct a speculative
-    157-write / three-space profile-create transaction, but under ON
-    `SpeculationOverlayDestination` intentionally dropped its seal
-    before handoff after the terminal served consequence arrived; it
-    was never a wire-bound commit. The authoritative server attempt
-    reached `ProfileHome.inSpace()` before the anonymous target name
-    was cached; `resolvePendingSpaceNamesAndRetry()` resolved it and
-    threw `RetryImmediately`. Served events had `retries: false`, so
-    the scheduler logged `Event handler needed inSpace-name resolution
-    but opted out of retry ... dropping` and discarded that first run
-    instead of rerunning it against the warmed cache. A later
-    home-space wave could rediscover the still-unconsequenced durable
-    event, explaining the intermittent greens; reds received no later
-    wake. The owner ruled the ownership seam: under ON the transaction
-    goes through the server and the client may wait instead of
-    publishing its speculative result. The bounded fix therefore
-    carries the served carriage across the name-resolution requeue and
-    reruns it inside the same scheduler settle, so the installed
-    destination seals it into the SAME wave. `retries: false` remains
-    intact for transient commit failures; this does not add served
-    commit backoff. Red-first pin:
-    `scheduler-events.test.ts` ("reruns a served event after inSpace-name
-    resolution even when commit retries are disabled") failed at one
-    attempt before the fix and passes at two with the served actor and
-    session preserved. Production-shaped lift evidence: 8/8 fresh-store
-    ensure-OFF ON runs green (13-16 s); every guest child contains one
-    98-op authored commit with `patternIdentity` and 16-53 total
-    commits, and no fixed server log carries the old drop warning.
-    Target-member red rate moved from 2/8 overall (2/5 opportunities)
-    to 0/8. This resolves the fork as neither server refusal nor
-    client-side loss before a required wire send: it was the server's
-    name-resolution retry gate preventing issuance.
     **Anti-red-herrings, recorded so the next seat does not
     re-derive them.** `piece-start-commit-failed` is NOT this file's
     discriminator: 13 occurrences across the campaign, 1-2 per run,
@@ -6255,12 +6220,26 @@ supply; OW29/OW32/OW34 closed):
     here is WRITE-direction and occurs at ensure-OFF, so OW61's
     separate client-side ABSORB investigation is not expected to
     close this shape.
-    **DISPOSITION: NO LIFT. The entry STAYS, its reason reworded to
-    the narrowed charge — the b04 class it was minted for is closed
-    at this head, and it now stands on the guest-profile
-    program-materialization loss. The lift bar is UNCHANGED: this
-    entry's own gate evidence at the merged head, 10/10, never by
-    inference from the default-app gate.**
+    **SUPERSEDED CAMPAIGN DISPOSITION: NO LIFT.** The 2026-08-24
+    campaign kept the entry on the narrowed guest-profile
+    program-materialization charge and left the mechanism fork open.
+    **CURRENT DISPOSITION: RESOLVED — the server never issued the
+    materialization commit on its first served attempt.** Under ON the
+    client may run the handler speculatively, but intentionally discards
+    that seal and waits for the authoritative server transaction. The
+    server reached `ProfileHome.inSpace()` before the anonymous target
+    name was cached; name resolution warmed the cache and threw
+    `RetryImmediately`, but `retries: false` caused the served event to
+    be dropped instead of rerun. The scheduler now preserves the served
+    carriage across that name-resolution requeue and reruns it in the
+    same settle. Ordinary transient commit retries remain disabled. The
+    red-first scheduler regression failed at one attempt before the fix
+    and passes at two; production-shaped ensure-OFF ON evidence moved
+    from 2/8 target-member reds on current main to 0/8, with all eight
+    guest stores carrying the 98-operation `patternIdentity`
+    materialization. This was neither a server refusal nor loss of a
+    required client wire send; it was the server name-resolution retry
+    gate preventing issuance.
     **THE ENSURE-ON PROFILE-SURFACE MEMBER ROOT-CAUSED AND FIXED
     2026-08-25 (PR #6312) — the n=3 side probe's "create surface never renders"
     shape and the #6248 board's profile-shard family, reproduced
