@@ -29,7 +29,11 @@
 // - DR1/§2: a lease lost mid-wave aborts the wave commit — work sealed
 //   under a lapsed tenure never commits;
 // - protocol.md §2b: multi-space seals commit foreign-first, and a
-//   foreign failure withholds the home commit.
+//   foreign failure withholds the home commit;
+// - protocol.md §2b, the F1b fix: a foreign space whose engine cannot be
+//   resolved withdraws exactly the contributions that sealed into it —
+//   the handler requeues, the derivation drops, everything else commits,
+//   and no batch is ever built for the failed space.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -1058,70 +1062,153 @@ describe("stage D seal-into-wave", () => {
     }
   });
 
-  it("commits contributions that do not target a failed foreign space", async () => {
+  it("an unresolvable foreign space withdraws exactly its own crossings: the handler requeues, the derivation drops, a home-only contribution commits, and no batch reaches the failed space (protocol.md §2b; the F1b fix)", async () => {
+    // What a wave is carrying when a foreign space fails decides which
+    // arms of the withdrawal run: the requeue arm needs a handler that
+    // crossed into that space, the drop arm needs a derivation that
+    // crossed, and the skip arm needs a contribution that stayed home.
+    // A test driving the serving loop gets whichever of the three
+    // happen to seal into one wave, so this one builds the wave itself
+    // and puts all three in it.
     const foreignSigner = await Identity.fromPassphrase(
-      "wave unresolved foreign space",
+      "wave foreign unresolvable",
     );
     const foreign = foreignSigner.did() as MemorySpace;
-    const wave = newWave({ lease: liveLease() });
+    const foreignEngine = await server.engineForSpace(foreign);
+    seedGenesisAcl(foreignEngine, foreign);
+    const lease = liveLease();
+
+    const wave = newWave({ lease });
     runtime.installSealDestination(wave);
 
-    const failedHome = runtime.getCell<{ value: number }>(
-      space,
-      "failed-foreign-home",
-      undefined,
-    );
-    const failedForeign = runtime.getCell<{ value: number }>(
+    // The crossing handler: a §2b provisioning run with a home write of
+    // its own, so its withdrawal is visible in both spaces.
+    const handlerForeign = runtime.getCell<{ value: number }>(
       foreign,
-      "failed-foreign-target",
+      "f1b-handler-foreign",
       undefined,
     );
-    const failedTx = runtime.edit();
-    stampWaveRunContext(failedTx, {
-      actionId: "failed-foreign-event",
+    const handlerHome = runtime.getCell<{ value: number }>(
+      space,
+      "f1b-handler-home",
+      undefined,
+    );
+    const handlerTx = runtime.edit();
+    stampWaveRunContext(handlerTx, {
+      actionId: "provision/handler",
       kind: "event-handler",
-      eventId: "e-failed-foreign",
+      eventId: "e-crossing",
       acting: { user: "did:key:alice", session: "sess-1" },
       capabilityRef: "cap:test-grant",
     });
-    failedTx.enableMultiSpaceWrites?.([space, foreign]);
-    failedHome.withTx(failedTx).set({ value: 1 });
-    failedForeign.withTx(failedTx).set({ value: 2 });
-    expect((await failedTx.commit()).error).toBeUndefined();
+    handlerTx.enableMultiSpaceWrites?.([foreign, space]);
+    handlerForeign.withTx(handlerTx).set({ value: 1 });
+    handlerHome.withTx(handlerTx).set({ value: 2 });
+    expect((await handlerTx.commit()).error).toBeUndefined();
 
-    const survivingHome = runtime.getCell<{ value: number }>(
-      space,
-      "failed-foreign-survivor",
+    // The crossing derivation: same target space, and no event behind
+    // it, so it takes the drop arm rather than the requeue arm.
+    const derivationForeign = runtime.getCell<{ value: number }>(
+      foreign,
+      "f1b-derivation-foreign",
       undefined,
     );
-    const survivingTx = runtime.edit();
-    stampWaveRunContext(survivingTx, {
-      actionId: "unrelated-home-derivation",
+    const derivationHome = runtime.getCell<{ value: number }>(
+      space,
+      "f1b-derivation-home",
+      undefined,
+    );
+    const derivationTx = runtime.edit();
+    stampWaveRunContext(derivationTx, {
+      actionId: "derive/crossing",
+      kind: "derivation",
+      acting: { user: "did:key:alice", session: "sess-1" },
+      scopeKeyIdentity: { principal: "did:key:alice", sessionId: "sess-1" },
+      capabilityRef: "cap:test-grant",
+    });
+    derivationTx.enableMultiSpaceWrites?.([foreign, space]);
+    derivationForeign.withTx(derivationTx).set({ value: 3 });
+    derivationHome.withTx(derivationTx).set({ value: 4 });
+    expect((await derivationTx.commit()).error).toBeUndefined();
+
+    // The bystander: everything else the wave is carrying. It never
+    // touched the failed space and reads nothing the withdrawals take
+    // away, so it commits.
+    const bystander = runtime.getCell<{ value: number }>(
+      space,
+      "f1b-bystander",
+      undefined,
+    );
+    const bystanderTx = runtime.edit();
+    stampWaveRunContext(bystanderTx, {
+      actionId: "derive/bystander",
       kind: "derivation",
     });
-    survivingHome.withTx(survivingTx).set({ value: 3 });
-    expect((await survivingTx.commit()).error).toBeUndefined();
-
-    wave.failForeignSpace(foreign, "injected engine lookup failure");
+    bystander.withTx(bystanderTx).set({ value: 5 });
+    expect((await bystanderTx.commit()).error).toBeUndefined();
     runtime.clearSealDestination();
-    const outcome = await wave.commitWave(newSink());
+
+    wave.failForeignSpace(foreign, "engine open failed (test)");
+
+    // The sink stands in for the serving loop's own, which reaches the
+    // failed space through an engine lookup that has nothing to return:
+    // a batch built for it can only be refused, and the refusal aborts
+    // the wave. The recorded spaces say whether one was built at all.
+    const foreignSeqBefore = Engine.serverSeq(foreignEngine);
+    const inner = newSink();
+    const committedSpaces: MemorySpace[] = [];
+    const recordingSink: WaveCommitSink = {
+      currentHeads: (s, docs) => inner.currentHeads(s, docs),
+      concurrentWritePaths: (s, doc, since) =>
+        inner.concurrentWritePaths(s, doc, since),
+      commitWave: (
+        batch,
+      ): Promise<Result<{ seq: number }, WaveCommitRejection>> => {
+        committedSpaces.push(batch.space);
+        if (batch.space !== space) {
+          return Promise.resolve({
+            error: {
+              name: "WaveCommitRejected",
+              message: `no resolved co-hosted engine for ${batch.space}`,
+            },
+          });
+        }
+        return inner.commitWave(batch);
+      },
+    };
+    const outcome = await wave.commitWave(recordingSink);
     await wave.settled();
 
     expect(outcome.aborted).toBeUndefined();
-    expect(outcome.requeuedEventIds).toEqual(["e-failed-foreign"]);
     expect(outcome.dispositions).toEqual([
       { kind: "requeued" },
+      { kind: "dropped" },
       { kind: "committed" },
     ]);
+    // The handler's event stays pending and replays; the derivation is
+    // recomputed on demand, and its one withdrawn home write is counted.
+    expect(outcome.requeuedEventIds).toEqual(["e-crossing"]);
+    expect(outcome.dependencyDroppedWrites).toBe(1);
+
+    // Nothing reached the failed space, and at home only the bystander's
+    // write landed.
+    expect(committedSpaces).toEqual([space]);
+    expect(Engine.serverSeq(foreignEngine)).toBe(foreignSeqBefore);
     expect(
       Engine.selectDocHead(engine, {
-        id: failedHome.getAsNormalizedFullLink().id,
+        id: handlerHome.getAsNormalizedFullLink().id,
         scopeKey: "space",
       }),
     ).toBe(0);
     expect(
       Engine.selectDocHead(engine, {
-        id: survivingHome.getAsNormalizedFullLink().id,
+        id: derivationHome.getAsNormalizedFullLink().id,
+        scopeKey: "space",
+      }),
+    ).toBe(0);
+    expect(
+      Engine.selectDocHead(engine, {
+        id: bystander.getAsNormalizedFullLink().id,
         scopeKey: "space",
       }),
     ).toBeGreaterThan(0);
