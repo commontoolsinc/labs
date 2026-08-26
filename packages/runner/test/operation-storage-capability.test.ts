@@ -24,6 +24,127 @@ import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 const signer = await Identity.fromPassphrase("operation storage capability");
 
 describe("operation storage capability", () => {
+  it("fails closed when Memory lacks operation support or a resolution", async () => {
+    const unsupportedClient = {
+      serverFlags: { applyOp: false },
+      close: () => Promise.resolve(),
+    } as unknown as MemoryV2Client.Client;
+    const unsupportedStorage = new (class extends V2StorageManager {
+      constructor() {
+        super(
+          { as: signer, memoryHost: new URL("memory://") },
+          {
+            create: () =>
+              Promise.resolve({
+                client: unsupportedClient,
+                session: {} as MemoryV2Client.SpaceSession,
+              }),
+          },
+        );
+      }
+    })();
+    const unsupported = unsupportedStorage.open(signer.did()).replica;
+    if (!hasOperationStorageCapability(unsupported)) return;
+    expect(await unsupported.operationCodecs()).toEqual([]);
+    await expect(unsupported.applyOperation({ op: "apply-op" } as never))
+      .rejects.toThrow("does not support apply-op");
+    await expect(unsupported.releaseOperationField({
+      op: "release-op-field",
+    } as never)).rejects.toThrow("does not support release-op-field");
+    await unsupportedStorage.closeNow();
+
+    const client = {
+      serverFlags: { applyOp: true, operationCodecs: ["test@1"] },
+      close: () => Promise.resolve(),
+    } as unknown as MemoryV2Client.Client;
+    const session = {
+      transact: () => Promise.resolve({}),
+    } as unknown as MemoryV2Client.SpaceSession;
+    const storage = new (class extends V2StorageManager {
+      constructor() {
+        super(
+          { as: signer, memoryHost: new URL("memory://") },
+          { create: () => Promise.resolve({ client, session }) },
+        );
+      }
+    })();
+    const replica = storage.open(signer.did()).replica;
+    if (!hasOperationStorageCapability(replica)) return;
+    expect(await replica.operationCodecs()).toEqual(["test@1"]);
+    await expect(replica.applyOperation({ op: "apply-op" } as never))
+      .rejects.toThrow("no operation resolution");
+    await replica.releaseOperationField({ op: "release-op-field" } as never);
+    await storage.closeNow();
+  });
+
+  it("removes a failed subscription and isolates callback failures", async () => {
+    const query = { id: "of:failed-watch", path: toValuePath([]) };
+    const watchId = `operation:${hashStringOf(query)}`;
+    const sync: SessionSync = {
+      type: "sync",
+      fromSeq: 0,
+      toSeq: 0,
+      upserts: [],
+      removes: [],
+      operationFields: [{
+        watchId,
+        field: {
+          branch: "",
+          id: query.id,
+          scopeKey: "space",
+          path: query.path,
+          active: false,
+          codec: null,
+          cursor: null,
+          baselineHash: "baseline",
+          materialized: "value",
+          operations: [],
+        },
+      }],
+    };
+    const view = MemoryV2Client.WatchView.fromSync(sync);
+    let attempts = 0;
+    const session = {
+      watchAddSync: () => {
+        attempts++;
+        if (attempts === 1) return Promise.reject(new Error("watch failed"));
+        return Promise.resolve({ view, sync, precedingSyncs: [] });
+      },
+      watchRemoveSync: () =>
+        Promise.resolve({ view, sync, precedingSyncs: [] }),
+    } as unknown as MemoryV2Client.SpaceSession;
+    const client = {
+      serverFlags: { applyOp: true, operationCodecs: ["test@1"] },
+      close: () => Promise.resolve(),
+    } as unknown as MemoryV2Client.Client;
+    const storage = new (class extends V2StorageManager {
+      constructor() {
+        super(
+          { as: signer, memoryHost: new URL("memory://") },
+          { create: () => Promise.resolve({ client, session }) },
+        );
+      }
+    })();
+    const replica = storage.open(signer.did()).replica;
+    if (!hasOperationStorageCapability(replica)) return;
+    await expect(replica.subscribeOperationField(query, () => {})).rejects
+      .toThrow("watch failed");
+
+    const errors: unknown[][] = [];
+    const original = console.error;
+    console.error = (...values: unknown[]) => errors.push(values);
+    try {
+      const cancel = await replica.subscribeOperationField(query, () => {
+        throw new Error("subscriber failed");
+      });
+      expect(errors).toHaveLength(1);
+      cancel();
+    } finally {
+      console.error = original;
+      await storage.closeNow();
+    }
+  });
+
   it("exposes codec-neutral collaboration through a space replica", async () => {
     const storage = EmulatedStorageManager.emulate({ as: signer });
     const space = signer.did();

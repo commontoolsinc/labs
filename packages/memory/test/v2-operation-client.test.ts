@@ -119,6 +119,51 @@ class ReconnectableOperationTransport implements Transport {
 }
 
 describe("v2-operation-client", () => {
+  it("rejects operation requests when the server lacks the capability", async () => {
+    const client = {
+      serverFlags: { applyOp: false },
+      isConnected: () => true,
+      request: () => Promise.reject(new Error("request should not be sent")),
+    };
+    const session = new SpaceSession(
+      client as never,
+      "did:key:z6Mk-operation-unsupported",
+      "session:unsupported",
+      "token",
+      0,
+    );
+
+    await expect(session.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "apply-op",
+        id: "of:unsupported",
+        path: toValuePath([]),
+        codec: CODEMIRROR_CHANGESET_CODEC,
+        submissionId: "unsupported:1",
+        base: null,
+        baselineHash: operationBaselineHash(null),
+        payload: { updates: [] },
+      }],
+    })).rejects.toThrow("does not support apply-op");
+    await expect(session.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "release-op-field",
+        id: "of:unsupported",
+        path: toValuePath([]),
+        codec: CODEMIRROR_CHANGESET_CODEC,
+        cursor: { epoch: 1, version: 0 },
+      }],
+    })).rejects.toThrow("does not support apply-op");
+    await expect(session.queryOperationField({
+      id: "of:unsupported",
+      path: toValuePath([]),
+    })).rejects.toThrow("does not support apply-op");
+  });
+
   it("replays preceding operation cursors onto a newly installed watch", async () => {
     const requests: Array<Record<string, unknown>> = [];
     const client = {

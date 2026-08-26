@@ -774,6 +774,116 @@ describe("v2-operation-engine", () => {
         },
       });
 
+      const rejectApply = (
+        sessionId: string,
+        overrides: Partial<ApplyOpOperation>,
+        error: new (message: string) => Error,
+      ) => {
+        expect(() =>
+          applyCommit(engine, {
+            sessionId,
+            commit: {
+              localSeq: 1,
+              reads: { confirmed: [], pending: [] },
+              operations: [{
+                op: "apply-op",
+                id: "of:collaborative",
+                path: toValuePath(["body"]),
+                codec: CODEMIRROR_CHANGESET_CODEC,
+                submissionId: sessionId,
+                base: { epoch: 1, version: 1 },
+                payload: {
+                  updates: [{
+                    clientId: sessionId,
+                    changes: changes(3, 3, "!"),
+                  }],
+                },
+                ...overrides,
+              }],
+            },
+          })
+        ).toThrow(error);
+      };
+      rejectApply(
+        "session:apply-codec-change",
+        { codec: "other@1" },
+        OpCodecError,
+      );
+      rejectApply(
+        "session:apply-baseline-mismatch",
+        { base: null, baselineHash: operationBaselineHash("stale") },
+        OpFieldBaselineMismatchError,
+      );
+      rejectApply(
+        "session:apply-epoch-mismatch",
+        { base: { epoch: 2, version: 1 } },
+        OpCursorMismatchError,
+      );
+      rejectApply(
+        "session:apply-future",
+        { base: { epoch: 1, version: 2 } },
+        OpCursorMismatchError,
+      );
+
+      const rejectRelease = (
+        sessionId: string,
+        overrides: Record<string, unknown>,
+        error: new (message: string) => Error,
+      ) => {
+        expect(() =>
+          applyCommit(engine, {
+            sessionId,
+            commit: {
+              localSeq: 1,
+              reads: { confirmed: [], pending: [] },
+              operations: [{
+                op: "release-op-field",
+                id: "of:collaborative",
+                path: toValuePath(["body"]),
+                codec: CODEMIRROR_CHANGESET_CODEC,
+                cursor: { epoch: 1, version: 1 },
+                ...overrides,
+              } as never],
+            },
+          })
+        ).toThrow(error);
+      };
+      rejectRelease(
+        "session:release-malformed-cursor",
+        { cursor: { epoch: 0, version: -1 } },
+        OpCursorMismatchError,
+      );
+      rejectRelease(
+        "session:release-malformed-codec",
+        { codec: 1 },
+        OpCodecError,
+      );
+      rejectRelease(
+        "session:release-stale",
+        { cursor: { epoch: 1, version: 0 } },
+        OpCursorMismatchError,
+      );
+      rejectRelease(
+        "session:release-codec",
+        { codec: "other@1" },
+        OpCodecError,
+      );
+
+      expect(() =>
+        applyCommit(engine, {
+          sessionId: "session:ordinary-remove",
+          commit: {
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "patch",
+              id: "of:collaborative",
+              patches: [{ op: "remove", path: "/value/body" }],
+            }],
+          },
+        })
+      ).toThrow(OpFieldWriteConflictError);
+
       expect(() =>
         applyCommit(engine, {
           sessionId: "session:ordinary",
@@ -1072,6 +1182,23 @@ describe("v2-operation-engine", () => {
       };
 
       fail({ ...operation, codec: "unknown@1" }, UnsupportedOpCodecError);
+      fail({ ...operation, id: "" }, ProtocolError);
+      fail({ ...operation, codec: "codemirror" }, ProtocolError);
+      fail({ ...operation, submissionId: "" }, ProtocolError);
+      fail({
+        ...operation,
+        path: toValuePath(Array.from({ length: 257 }, () => "body")),
+      }, ProtocolError);
+      fail({
+        ...operation,
+        base: { epoch: 0, version: 0 },
+        baselineHash: undefined,
+      }, OpCursorMismatchError);
+      fail({ ...operation, baselineHash: "" }, OpFieldBaselineMismatchError);
+      fail({
+        ...operation,
+        base: { epoch: 1, version: 0 },
+      }, OpFieldBaselineMismatchError);
       fail(
         { ...operation, baselineHash: operationBaselineHash("stale") },
         OpFieldBaselineMismatchError,
@@ -1112,13 +1239,48 @@ describe("v2-operation-engine", () => {
     }
   });
 
-  it("rejects a codec that changes materialized state without an operation", async () => {
+  it("rejects invalid codec results without mutating materialized state", async () => {
     const path = await Deno.makeTempFile({ suffix: ".sqlite" });
     const engine = await open({
       url: toFileUrl(path),
       operationCodecs: new OperationCodecRegistry([{
         id: "empty-change@1",
         integrate: () => ({ materialized: "changed", operations: [] }),
+      }, {
+        id: "too-many@1",
+        integrate: ({ materialized }) => ({
+          materialized,
+          operations: Array.from({ length: 257 }, () => "operation"),
+        }),
+      }, {
+        id: "invalid-materialized@1",
+        integrate: () => ({
+          materialized: (() => {}) as never,
+          operations: ["operation"],
+        }),
+      }, {
+        id: "invalid-operation@1",
+        integrate: ({ materialized }) => ({
+          materialized,
+          operations: [(() => {}) as never],
+        }),
+      }, {
+        id: "large-materialized@1",
+        integrate: () => ({
+          materialized: "x".repeat(1_000_001),
+          operations: ["operation"],
+        }),
+      }, {
+        id: "large-operation@1",
+        integrate: ({ materialized }) => ({
+          materialized,
+          operations: ["x".repeat(1_000_001)],
+        }),
+      }, {
+        id: "throw-value@1",
+        integrate: () => {
+          throw "codec rejection";
+        },
       }]),
     });
 
@@ -1136,25 +1298,37 @@ describe("v2-operation-engine", () => {
         },
       });
 
-      expect(() =>
-        applyCommit(engine, {
-          sessionId: "session:codec",
-          commit: {
-            localSeq: 1,
-            reads: { confirmed: [], pending: [] },
-            operations: [{
-              op: "apply-op",
-              id: "of:empty-change",
-              path: toValuePath(["body"]),
-              codec: "empty-change@1",
-              submissionId: "codec:1",
-              base: null,
-              baselineHash: operationBaselineHash("original"),
-              payload: {},
-            }],
-          },
-        })
-      ).toThrow(OpCodecError);
+      for (
+        const codec of [
+          "empty-change@1",
+          "too-many@1",
+          "invalid-materialized@1",
+          "invalid-operation@1",
+          "large-materialized@1",
+          "large-operation@1",
+          "throw-value@1",
+        ]
+      ) {
+        expect(() =>
+          applyCommit(engine, {
+            sessionId: `session:${codec}`,
+            commit: {
+              localSeq: 1,
+              reads: { confirmed: [], pending: [] },
+              operations: [{
+                op: "apply-op",
+                id: "of:empty-change",
+                path: toValuePath(["body"]),
+                codec,
+                submissionId: `submission:${codec}`,
+                base: null,
+                baselineHash: operationBaselineHash("original"),
+                payload: {},
+              }],
+            },
+          })
+        ).toThrow(OpCodecError);
+      }
       expect(read(engine, { id: "of:empty-change" })).toEqual({
         value: { body: "original" },
       });

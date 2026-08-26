@@ -200,6 +200,59 @@ describe("RuntimeClient operation collaboration", () => {
     expect(requests[1].subscriptionId).toBe(requests[0].subscriptionId);
   });
 
+  it("fails closed on refused subscriptions and releases", async () => {
+    const requests: Array<{ type: RequestType }> = [];
+    let subscribeAccepted = false;
+    let releaseAccepted = false;
+    const conn = {
+      signal: new AbortController().signal,
+      on: () => {},
+      dispose: () => Promise.resolve(),
+      request: (request: { type: RequestType }) => {
+        requests.push(request);
+        if (request.type === RequestType.OperationSubscribe) {
+          return Promise.resolve({ value: subscribeAccepted });
+        }
+        if (request.type === RequestType.OperationUnsubscribe) {
+          return Promise.reject(new Error("connection closed"));
+        }
+        if (request.type === RequestType.OperationRelease) {
+          return Promise.resolve({ value: releaseAccepted });
+        }
+        throw new Error(`unexpected request: ${request.type}`);
+      },
+    } as unknown as never;
+    const client = new (RuntimeClient as unknown as {
+      new (conn: never, options: unknown): RuntimeClient;
+    })(conn, {});
+    const cell = {
+      ref: () => ({ id: "of:x", path: [] }),
+    } as unknown as CellHandle<unknown>;
+
+    await expect(client.subscribeOperationField(cell, () => {})).rejects
+      .toThrow("not installed");
+    await expect(client.releaseOperationField(
+      cell,
+      "test@1",
+      { epoch: 1, version: 0 },
+    )).rejects.toThrow("not released");
+
+    subscribeAccepted = true;
+    releaseAccepted = true;
+    const unsubscribe = await client.subscribeOperationField(cell, () => {});
+    unsubscribe();
+    unsubscribe();
+    await Promise.resolve();
+    await client.releaseOperationField(cell, "test@1", {
+      epoch: 1,
+      version: 0,
+    });
+    await client.dispose();
+    expect(
+      requests.filter(({ type }) => type === RequestType.OperationUnsubscribe),
+    ).toHaveLength(2);
+  });
+
   it("encodes Fabric values across the worker operation boundary", async () => {
     const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
     const address = {
@@ -280,5 +333,144 @@ describe("RuntimeClient operation collaboration", () => {
         applied.resolution.operations[0].payload,
       ) as FabricBytes).slice(),
     ).toEqual(new Uint8Array([1, 2, 3]));
+  });
+
+  it("dispatches the worker operation capability lifecycle", async () => {
+    let subscribed: ((field: OperationFieldSnapshot) => void) | undefined;
+    let cancellations = 0;
+    const field: OperationFieldSnapshot = {
+      branch: "",
+      id: "of:lifecycle",
+      scopeKey: "space",
+      path: [] as unknown as OperationFieldSnapshot["path"],
+      active: false,
+      codec: null,
+      cursor: null,
+      baselineHash: "baseline",
+      materialized: "value",
+      operations: [],
+    };
+    const replica = {
+      operationCodecs: () => Promise.resolve(["test@1"]),
+      queryOperationField: () => Promise.resolve(field),
+      applyOperation: () => Promise.resolve({ operations: [] }),
+      releaseOperationField: () => Promise.resolve(),
+      subscribeOperationField: (
+        _query: unknown,
+        callback: typeof subscribed,
+      ) => {
+        subscribed = callback;
+        return Promise.resolve(() => cancellations++);
+      },
+    };
+    const processor = Object.assign(Object.create(RuntimeProcessor.prototype), {
+      runtime: { storageManager: { open: () => ({ replica }) } },
+      operationSubscriptions: new Map(),
+      _isDisposed: false,
+    }) as RuntimeProcessor;
+    const cell = {
+      space: "did:key:z6Mk-runtime",
+      id: "of:lifecycle",
+      path: [],
+    };
+
+    expect(await processor.handleOperationCapabilities({ cell } as never))
+      .toEqual({ codecs: ["test@1"] });
+    await processor.handleOperationRelease({
+      cell,
+      codec: "test@1",
+      cursor: { epoch: 1, version: 0 },
+    } as never);
+    expect(
+      await processor.handleOperationSubscribe({
+        cell,
+        subscriptionId: "subscription:1",
+      } as never),
+    ).toEqual({ value: true });
+    const notifications: unknown[] = [];
+    const postMessage = (globalThis as { postMessage?: unknown }).postMessage;
+    (globalThis as { postMessage?: (message: unknown) => void }).postMessage = (
+      message,
+    ) => notifications.push(message);
+    try {
+      subscribed!(field);
+      await Promise.resolve();
+      expect(notifications).toEqual([{
+        type: NotificationType.OperationUpdate,
+        subscriptionId: "subscription:1",
+        field: {
+          ...field,
+          materialized: realmFromFabricValue(field.materialized),
+        },
+      }]);
+    } finally {
+      (globalThis as { postMessage?: unknown }).postMessage = postMessage;
+    }
+    expect(
+      await processor.handleOperationSubscribe({
+        cell,
+        subscriptionId: "subscription:1",
+      } as never),
+    ).toEqual({ value: false });
+    expect(processor.handleOperationUnsubscribe({
+      subscriptionId: "missing",
+    } as never)).toEqual({ value: false });
+    expect(processor.handleOperationUnsubscribe({
+      subscriptionId: "subscription:1",
+    } as never)).toEqual({ value: true });
+    expect(cancellations).toBe(1);
+
+    await processor.handleRequest({
+      type: RequestType.OperationCapabilities,
+      cell,
+    } as never);
+    await processor.handleRequest({
+      type: RequestType.OperationQuery,
+      cell,
+    } as never);
+    await processor.handleRequest({
+      type: RequestType.OperationApply,
+      cell,
+      codec: "test@1",
+      submissionId: "switch:1",
+      base: null,
+      baselineHash: "baseline",
+      payload: realmFromFabricValue("value"),
+    } as never);
+    await processor.handleRequest({
+      type: RequestType.OperationRelease,
+      cell,
+      codec: "test@1",
+      cursor: { epoch: 1, version: 0 },
+    } as never);
+    await processor.handleRequest({
+      type: RequestType.OperationSubscribe,
+      cell,
+      subscriptionId: "subscription:switch",
+    } as never);
+    await processor.handleRequest({
+      type: RequestType.OperationUnsubscribe,
+      subscriptionId: "subscription:switch",
+    } as never);
+    expect(cancellations).toBe(2);
+
+    (processor as any)._isDisposed = true;
+    expect(
+      await processor.handleOperationSubscribe({
+        cell,
+        subscriptionId: "subscription:disposed",
+      } as never),
+    ).toEqual({ value: false });
+    expect(cancellations).toBe(3);
+
+    const unsupported = Object.assign(
+      Object.create(RuntimeProcessor.prototype),
+      {
+        runtime: { storageManager: { open: () => ({ replica: {} }) } },
+      },
+    ) as RuntimeProcessor;
+    await expect(unsupported.handleOperationCapabilities({ cell } as never))
+      .rejects.toThrow("does not support");
+    expect(subscribed).toBeDefined();
   });
 });
