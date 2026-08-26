@@ -354,6 +354,7 @@ Deno.test("provider keys report which commands each option provider answers on",
   assertEquals(options.get("to"), ["space clone"]);
   assertEquals(options.get("scope"), ["wish"]);
   assertEquals(options.get("list"), ["piece survey", "piece repair"]);
+  assertEquals(options.get("diff"), ["piece survey"]);
   assertEquals(options.get("select"), ["piece get", "get"]);
   assertEquals(options.get("root"), [
     "check",
