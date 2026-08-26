@@ -54,6 +54,7 @@ export class CooperativeYield {
   readonly #sliceMs: number;
   #sliceStart = performance.now();
   #yields = 0;
+
   /** The mid-wave hook (the SpaceServer's lease renew): called
    * synchronously at every yield, BEFORE the macrotask turn. */
   onYield: (() => void) | undefined;

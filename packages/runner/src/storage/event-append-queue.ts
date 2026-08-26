@@ -64,15 +64,19 @@ const logger = getLogger("event-append-queue", {
 export type QueuedEventAppend = {
   /** The stream's sidecar doc ({@link streamEntriesDocId}). */
   sidecarId: string;
+
   /** The stream link the entry self-describes (events.md §1). */
   stream: StreamLinkRef;
+
   /** The durable client-minted event id (event-identity). */
   eventId: string;
   payload?: FabricValue;
+
   /** The one client-minted firedAt component (events.md §1): orders
    * this session's own appends and steers nothing. */
   clientSeq: number;
   runtimeInjectedEventKeys?: string[];
+
   /** See StreamEventEntry.rendererTrusted (fan-out stage B). */
   rendererTrusted?: true;
 };
@@ -134,8 +138,10 @@ const RETRY_CAP_MS = 10_000;
 export type EventAppendPacing = {
   /** Sustained sends per second, per stream. */
   ratePerSecond: number;
+
   /** Bucket capacity: sends that pass immediately after a quiet spell. */
   burst: number;
+
   /** Clock seam (tests). Defaults to `Date.now`. */
   now?: () => number;
 };
@@ -173,6 +179,7 @@ export class EventAppendQueue {
   readonly #nextLocalSeq: () => number;
   readonly #onRefused?: (append: QueuedEventAppend, reason: string) => void;
   readonly #queue: QueuedEventAppend[] = [];
+
   /** Keyed PER ENTRY OBJECT, not per eventId: duplicate-eventId fires
    * are a DESIGNED flow (events.md §5's duplicate submission), and a
    * per-id map would leak the first fire's outcome forever — wedging
@@ -186,26 +193,32 @@ export class EventAppendQueue {
   #draining = false;
   #closed = false;
   #retryTimer: ReturnType<typeof setTimeout> | undefined;
+
   /** Resolves the drain loop's in-flight backoff wait — close() must
    * settle it (clearing the timer alone would leave the loop's await
    * pending forever, wedging dispose-time sanitizers). */
   #retryRelease: (() => void) | undefined;
+
   /** OW27 pacing: the per-stream token buckets (keyed by sidecar doc id
    * — one per stream), or undefined when pacing is disabled. */
   readonly #pacing: EventAppendPacing | undefined;
   readonly #buckets = new Map<string, { tokens: number; refilledAt: number }>();
+
   /** DIAGNOSTIC (tests): sends held by pacing so far. */
   #pacedHolds = 0;
   #loaded: Promise<void>;
+
   /** The tail of the save chain — `persisted` awaits it (tests, and
    * any caller that must observe durability before proceeding). */
   #lastPersist: Promise<void> = Promise.resolve();
 
   constructor(options: {
     space: string;
+
     /** Sends one ClientCommit; resolves on accept, rejects with the
      * (name-carrying) wire error otherwise. */
     transact: (commit: ClientCommit) => Promise<unknown>;
+
     /** Allocated at SEND time, per attempt — the increasing-localSeq
      * send-order discipline (04-protocol §3.9) forbids holding one
      * across other commits, and a session-replacement resubmit needs a
@@ -213,6 +226,7 @@ export class EventAppendQueue {
     nextLocalSeq: () => number;
     store?: EventAppendQueueStore;
     onRefused?: (append: QueuedEventAppend, reason: string) => void;
+
     /** OW27 per-stream send pacing; absent = the default posture,
      * `false` = unpaced. */
     pacing?: EventAppendPacing | false;

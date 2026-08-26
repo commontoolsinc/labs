@@ -35,6 +35,7 @@ type ScopedWatchAddress = {
   id: URI;
   type: MIME;
   scope?: CellScope;
+
   /** The explicit scope INSTANCE an instance-named load targets
    * (server-execution v2 stage A); absent = the session's own. */
   scopeKey?: ScopeKey;

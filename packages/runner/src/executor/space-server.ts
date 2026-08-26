@@ -180,13 +180,16 @@ export type SpaceServerPolicy = {
    * 50–100 ms; a policy knob tuned in Phase 6 — the toolshed bootstrap
    * reads SERVER_EXECUTION_FLUSH_DEADLINE_MS). */
   flushDeadlineMs?: number;
+
   /** Phase 6 (serving-loop.md §5's per-space budgets; README §3.8):
    * cap on dispatched-but-unsettled NETWORK effects per space —
    * "outstanding LLM calls". Undefined = unbounded. */
   maxOutstandingEffects?: number;
+
   /** Phase 6: per-space network-effect egress pacing (dispatches per
    * second, token bucket). Undefined = unpaced. */
   egressRatePerSecond?: number;
+
   /** OW45 arm-B stage 1 (review F2): the bound on the tenure's
    * awaited space-root ensure. The ensure's resolve path fetches with
    * no timeout of its own and can point at a remote host, and the
@@ -200,21 +203,25 @@ export type SpaceServerPolicy = {
    * UPDATE arm by OCC refusal (the transition's stillMatches baseline
    * refuses a moved root, so stale-over-new is impossible). */
   rootEnsureDeadlineMs?: number;
+
   /** serving-loop.md §1's IDLE_PARK_MS. */
   idleParkMs?: number;
   renewIntervalMs?: number;
+
   /** The execution lease's TTL (serving-loop.md §2; production takes the
    * wire default EXECUTION_LEASE_TTL_MS). A knob so tests can pin the
    * mid-wave renew (stage C tuning T3) with a short tenure instead of
    * waiting out the 15-s default; the mid-wave renew fires once a wave
    * has run longer than TTL/3 without a renewal. */
   leaseTtlMs?: number;
+
   /** Deadline on the park's runtime dispose (park LIVENESS): a serving
    * runtime killed mid-wave can hang `runtime.dispose()` forever, and a
    * park gated on it never resolves `whenParked` — wedging every
    * chained recovery. On overrun the dispose is abandoned (loudly,
    * counted) and the park completes anyway. */
   parkDisposeTimeoutMs?: number;
+
   /** The host's failure-park re-activation backoff (read by the
    * ExecutorHost, not the SpaceServer): after N consecutive
    * `loop-failed` parks of one space, its next re-activation is delayed
@@ -229,10 +236,12 @@ export type SpaceServerOptions = {
   space: MemorySpace;
   server: MemoryServer;
   engine: Engine.Engine;
+
   /** The service identity (DID) the DR1 holder is minted from — also the
    * loopback session's principal, which is what the read-row admission
    * matches (protocol.md §2). */
   serviceIdentity: string;
+
   /** Build the serving runtime over the LOOPBACK storage plane
    * (serving-loop.md §1 plane (a)). The factory owns auth and options;
    * the SpaceServer asserts the posture (flag ON) and flips the
@@ -242,11 +251,14 @@ export type SpaceServerOptions = {
     runtime: Runtime;
     dispose: () => Promise<void>;
   }>;
+
   /** The process-lifetime localSeq counter for this space's wave sink
    * (engine-wave-sink.ts's replay keying — the host owns it). */
   localSeqRef: { value: number };
+
   /** The host's shared counters (serving-loop.md §7). */
   stats: ServingLoopStats;
+
   /** OW45 arm-B stage 1, RULED 2026-08-24 (the owner, verbatim in the
    * stage-1 report): production spaces always get a default pattern —
    * "in production there is no reason for a space to not have a
@@ -260,6 +272,7 @@ export type SpaceServerOptions = {
   ensureSpaceRoots?: boolean;
   policy?: SpaceServerPolicy;
   onParked?: (reason: string) => void;
+
   /** Fired on each successfully committed wave — the host's
    * failure-streak reset signal (real served progress, as opposed to an
    * activation that merely got as far as building a runtime). */
@@ -321,6 +334,7 @@ export async function selectForeignStaleInstances(
  * structurally futile. Remaining `of:` ids are NOT distinguishable by
  * id class (a not-yet-created piece and a never-a-piece value doc look
  * alike) — the complete terminal-state design is the owed follow-up. */
+
 /** The dedupe key of a demanding (principal, session) pair in the
  * registry (stage B): both components, so two sessions of one user are
  * two demanders (a node beneath the root may narrow to session for that
@@ -361,11 +375,13 @@ export class SpaceServer implements TransactionSealDestination {
   #disposeRuntime: (() => Promise<void>) | undefined;
   #sink: EngineWaveCommitSink | undefined;
   #renewTimer: ReturnType<typeof setInterval> | undefined;
+
   /** Wall-clock of the last successful acquire/renew (stage C tuning T3):
    * the mid-wave renew fires from the scheduler's cooperative yield once
    * `now − lastRenewAt ≥ TTL/3`, i.e. exactly when the interval timer
    * would have fired had the wave's settle let it. */
   #lastRenewAt = 0;
+
   /** The drain's IN-FLIGHT copies (stage C tuning, T3's companion guard
    * — see `events.drainInFlightSkips`): eventId → phase. A re-drain must
    * not queue a SECOND copy of an entry whose first copy is still queued,
@@ -399,6 +415,7 @@ export class SpaceServer implements TransactionSealDestination {
   // never dropped between cycles.
   #pendingShadowFlipWake = false;
   #inputHead = 0;
+
   /** Highest NON-self-echo seq drained — the watermark's advance
    * target. The loop's own derived commits return on the feed above W
    * and must not count as coverage-owed input, or every wave commit
@@ -411,6 +428,7 @@ export class SpaceServer implements TransactionSealDestination {
    * commits, never by its own bookkeeping-only commit. */
   #coverageHead = 0;
   #watermark = 0;
+
   /** S1 (RULED 2026-08-19): this loop's own committed wave seqs still
    * ABOVE the watermark — the drain-settle quiescence advance's
    * contiguity domain. The advance walks upward from its coverage base
@@ -429,6 +447,7 @@ export class SpaceServer implements TransactionSealDestination {
    * the bound is never reached. */
   readonly #ownWaveSeqs = new Set<number>();
   static readonly #MAX_OWN_WAVE_SEQS = 4096;
+
   /** S1's once-per-quiescence-transition latch: armed when a wave with
    * CONTENT contributions (derivation/event-handler kinds — commits
    * whose seq can enter a client read basis) lands; consumed when the
@@ -443,6 +462,7 @@ export class SpaceServer implements TransactionSealDestination {
   readonly #parked = Promise.withResolvers<void>();
   #idleSince: number | undefined;
   #demandedRoots = new Set<string>();
+
   /** Demanded roots whose `ensurePieceRunning` has not yet SUCCEEDED —
    * it returned false (typically the creation race: the demand cycle
    * ran before the piece's `patternIdentity` meta applied to the
@@ -455,6 +475,7 @@ export class SpaceServer implements TransactionSealDestination {
    * never started server-side (waves committed watermark-only while
    * `waitForSettled` claimed the derivation current). */
   readonly #pendingStructureLoads = new Set<string>();
+
   /** The TERMINAL not-loadable roots (stage P2-F, the OW19 demand-cycle
    * design — RULED direction 2026-08-07): a demanded root whose doc is
    * confirmed SYNCED from the durable store and still carries no
@@ -468,6 +489,7 @@ export class SpaceServer implements TransactionSealDestination {
    * classes out of piece demand entirely; this covers the remaining
    * `of:` ids, which id classes cannot split. */
   readonly #terminalStructureLoads = new Map<string, ReadonlySet<string>>();
+
   /** Consecutive deferral streak per demanded root (keyed by demand
    * key), feeding `stats.structureLoadStuck` and the
    * `structure-load-stuck` WARN once a streak crosses
@@ -480,10 +502,12 @@ export class SpaceServer implements TransactionSealDestination {
    * again); left untouched by the THROW arm, whose failures are
    * already loud (`structureLoadFailures` + warn per attempt). */
   readonly #structureLoadDeferralStreaks = new Map<string, number>();
+
   /** The single-flighted demand-structure load pass (stage P2-F): the
    * wave cycle races it against the flush deadline; a pass outliving
    * its wave keeps running and later cycles join it. */
   #structureLoadPass: Promise<void> | undefined;
+
   /** Re-armed roots whose retry waits for the CURRENT cycle's settle
    * (frame application) before re-entering `#pendingStructureLoads` —
    * retrying inside the re-arming cycle reads the replica's stale
@@ -491,10 +515,12 @@ export class SpaceServer implements TransactionSealDestination {
    * settle boundary; the promotion latches a wake so a then-quiet
    * space retries promptly instead of sitting out the idle window. */
   readonly #rearmedAwaitingSettle = new Set<string>();
+
   /** Level-converted wake for the promotion above (the same latch
    * shape as the shadow-flip wake): set when re-armed roots became
    * retryable mid-cycle, consumed by the next #waitForInput. */
   #pendingStructureRetryWake = false;
+
   /** Level-converted demand wake (stage B): a session's watch set
    * changed (or a session opened) and the grace elapsed; consumed by the
    * next #waitForInput. */
@@ -509,8 +535,10 @@ export class SpaceServer implements TransactionSealDestination {
   // costs one extra pass; steady state (no notes) never re-latches.
   #demandNoteGeneration = 0;
   #passDemandNoteGen = 0;
+
   /** The demand wake's grace timer (see noteDemandChanged). */
   #demandWakeTimer: ReturnType<typeof setTimeout> | undefined;
+
   /** WARM DEMAND (the explicit warm request's demand half —
    * serving-loop.md §1's third activation trigger, RULED 2026-08-21):
    * the staged doc instances of warm-marked feed notices, captured at
@@ -566,6 +594,7 @@ export class SpaceServer implements TransactionSealDestination {
     }
     | undefined;
   #growthAwaitingLanding = false;
+
   /** Wave-bound seals CHAINED but not yet applied (the F4 fix, as a
    * LEVEL): seal() returns after arming the seal chain, so a seal
    * landing in a cycle's last microtasks — after the closing wave
@@ -579,10 +608,12 @@ export class SpaceServer implements TransactionSealDestination {
    * deterministic wake the removed host fan-out had provided
    * incidentally. */
   #pendingWaveSeals = 0;
+
   /** The activation scan's head: records at or below it are covered
    * by the basis re-mark and never drained (activation filters the
    * queued feed the same way). Late-arrival accounting keys off it. */
   #activationScanHead = 0;
+
   /** Exact-once guard for LATE records (seq ≤ inputHead at drain —
    * the two-producer notice race documented in #drainFeed): recently
    * drained seqs, insertion-ordered, pruned at a bound that far
@@ -591,6 +622,7 @@ export class SpaceServer implements TransactionSealDestination {
   // (d′): `#demandSinks` (the per-key demand WALK effects,
   // `demand-walk:<space>/<root>`) is DELETED — demand is the tracked-ids
   // closure and its writers are standing demand roots (design §2.7).
+
   /** The DEMANDERS per demand key (server-execution v2 Phase 2, M1's
    * demand carriage — scopes.md §5: the demand supplies the run
    * identity; fan-out stage B: identity on SPACE-scoped demand rows too
@@ -610,6 +642,7 @@ export class SpaceServer implements TransactionSealDestination {
    * the key — structure and walk — but own no instance and are not
    * demanders. */
   readonly #demandersByKey = new Map<string, Map<string, ScopeKeyIdentity>>();
+
   /** Demand key → the piece root doc id its structure load RESOLVED to
    * (stage P2-F): a demanded root may be an argument/derived doc whose
    * owning piece `ensurePieceRunning` discovers by following the result
@@ -617,16 +650,20 @@ export class SpaceServer implements TransactionSealDestination {
    * PIECE's actions too, not only when the demand names the piece root
    * itself. Entries retire with their demand key. */
   readonly #pieceRootByDemandKey = new Map<string, string>();
+
   /** The stage-G effect channel (serving-loop.md §4–§5). */
   #outbox: SpaceOutbox | undefined;
+
   /** A drain left undelivered rows behind (transport-class failure):
    * the next wave cycle re-drains even without fresh appends. */
   #outboxDrainOwed = false;
+
   /** Phase 3 (events-down): an event-append admission (or a wave's
    * requeue) owes the next wave a stream-sidecar scan — the drain
    * input (serving-loop.md §3's event-append classification; §6
    * step 4's reprocess scan is the same move at activation). */
   #eventScanOwed = false;
+
   /** OW45 arm-B server-ensure stage 1 (design PR #6209 §1, seat A2):
    * activation owes the tenure ONE space-root ensure — existence +
    * freshness, no start — run as the first serialized step of the wave
@@ -643,6 +680,7 @@ export class SpaceServer implements TransactionSealDestination {
    * creation transaction's OCC re-read plus the cause-derived root
    * address converge every race on one root. */
   #rootEnsureOwed = false;
+
   /** The fail-closed skip's SAME-TENURE retry arm (stage-1 measurement
    * r01's boot-order finding): the host activates on SESSION-OPEN,
    * which precedes the client bootstrap's genesis ACL commit (the
@@ -657,11 +695,13 @@ export class SpaceServer implements TransactionSealDestination {
    * admission, and the ensure re-sets it only from another no-owner
    * skip. */
   #rootEnsureAwaitingOwner = false;
+
   /** F6 (log hygiene): the no-owner WARN fires once per tenure — a
    * permanently-ownerless space whose ACL doc keeps getting written
    * would otherwise warn 1:1 with the re-arm; the counter carries the
    * per-event record either way. */
   #rootEnsureNoOwnerWarned = false;
+
   /** Phase 4 (protocol.md §5): an effects-doc-touching authored commit
    * (an ack) — or activation (a crash between ack and retirement must
    * still retire) — owes the next wave the acked-entry retirement scan.
@@ -669,9 +709,11 @@ export class SpaceServer implements TransactionSealDestination {
    * retirement write (the bookkeeping conflict class's drop-whole arm,
    * serving-loop.md §3d) self-heals on the following cycle. */
   #effectsRetirementOwed = false;
+
   /** Consequence-notice seals in flight (the error/drop/skip arms):
    * awaited before the wave closes so their marks ride THIS wave. */
   readonly #eventNoticeWork = new Set<Promise<unknown>>();
+
   /** Consecutive DEFERRALS per eventId (cold-view piece loads). The
    * deferral arm exists for the creation race (OW19's conflation
    * caution: a not-yet-created piece and a never-startable one are
@@ -682,11 +724,13 @@ export class SpaceServer implements TransactionSealDestination {
    * park). Cleared on activation (a fresh runtime re-tries from
    * scratch) and on any non-deferred outcome. */
   readonly #eventDeferrals = new Map<string, number>();
+
   /** The deferral backstop timer (see EVENT_DEFERRAL_REARM_MS): armed
    * when a drain pass left deferred/transient work behind, so the scan
    * re-arms after a REAL wait even when no input ever arrives. Input
    * arriving first promotes the owed scan immediately (#drainFeed). */
   #deferredRescanTimer: ReturnType<typeof setTimeout> | undefined;
+
   /** Consecutive pre-queue barrier deferrals per blocking key (the
    * view-lagged entry's eventId; the failing sidecar's doc id; a
    * queue-time thrower's `queue\0`-prefixed eventId — its own namespace,
@@ -694,6 +738,7 @@ export class SpaceServer implements TransactionSealDestination {
    * attempt). Cleared when the key passes ITS arm's check; see
    * EVENT_PREQUEUE_STUCK_AFTER. */
   #preQueueDeferralStreaks = new Map<string, number>();
+
   /** Post-commit effects of sealed transactions, deferred per wave
    * (serving-loop.md §3: effects hand to the outbox POST-commit, never
    * at seal). Admitted to the outbox after the wave's commit step;
@@ -703,10 +748,12 @@ export class SpaceServer implements TransactionSealDestination {
     WaveAccumulator,
     SealedEffectBatch[]
   >();
+
   /** Which wave each sealed tx closed into — set at seal, consumed by
    * deferSealedEffects (which runs after the seal resolved, when the
    * wave may already have rotated). */
   readonly #waveByTx = new WeakMap<object, WaveAccumulator>();
+
   /** The APPENDING wave of each LT1 same-space in-process copy's run
    * (stage C build W3, (α); events.md §4's RULED one-entry-one-
    * completed-run sentence): tx of the copy's handler run → the wave
@@ -2901,6 +2948,7 @@ export class SpaceServer implements TransactionSealDestination {
    * `#pendingStructureLoads` for the next input-driven cycle — the
    * missing meta arrives as a commit, and that commit fires the cycle
    * that retries. */
+
   /** Fold the demand-root enter/leave delta SINCE THE LAST FOLD into the
    * space-lived `stats.demand` accumulators (MINOR-2). Called at the end
    * of every demand pass AND before park disposes the runtime, so a
@@ -3433,6 +3481,7 @@ export class SpaceServer implements TransactionSealDestination {
    * commit ONE derived transaction carrying the wave's writes, the
    * watermark doc write, and `derivedThrough`.
    */
+
   /**
    * The LT1 leftover PURGE (stage C build W3, (α1); events.md §4's RULED
    * sentence: "the serving loop purges unrun in-process leftovers at the

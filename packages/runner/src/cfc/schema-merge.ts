@@ -695,6 +695,7 @@ export const mergeCfcSchemaEnvelopes = (
 export interface CfcSchemaMergeIssue {
   /** The merge's own human-readable reason, verbatim. */
   message: string;
+
   /**
    * True when the rejection is the additive-required migration class — an old
    * document predating a now-required field that declares no default. This is

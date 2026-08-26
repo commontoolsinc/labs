@@ -84,11 +84,14 @@ export const DEFAULT_EXCHANGE_FUEL = 64;
 export type RuleFiring = {
   readonly recordId: string;
   readonly ruleId: string;
+
   /** Index of the rewritten clause in the label AT FIRING TIME. */
   readonly clauseIndex: number;
   readonly kind: "add" | "drop";
+
   /** Alternatives added by an `add` firing. */
   readonly added?: readonly unknown[];
+
   /** The alternative removed by a `drop` firing. */
   readonly dropped?: unknown;
 };
@@ -118,6 +121,7 @@ export type CfcGrantConsumptionContext = "consuming" | "observing";
 export type CfcGrantResolverQuery = {
   readonly kind: string;
   readonly fields: Readonly<Record<string, unknown>>;
+
   /**
    * The evaluation site's consumption context, stamped from
    * {@link ExchangeEvalContext.grantConsumption}. ABSENT means observing
@@ -157,16 +161,20 @@ export type ExchangeEvalContext = {
    * pool is `label.integrity ∪ ctx.integrity`.
    */
   readonly integrity?: readonly CfcAtom[];
+
   /** Boundary-context atoms minted for this evaluation site (B5). */
   readonly boundary?: readonly CfcAtom[];
+
   /** Trust closure for concept-valued integrity guards (B3). */
   readonly trustResolver?: TrustResolver;
   readonly actingPrincipal?: string;
+
   /**
    * Grant lookup for `policyState` guards (route 2a). Absent → every
    * policyState guard is unsatisfied and its rule never fires (fail closed).
    */
   readonly grantResolver?: CfcGrantResolver;
+
   /**
    * Consuming vs observing evaluation site (single-use releases, design
    * §2.2) — stamped onto every resolver query. Absent = observing (fail
@@ -175,6 +183,7 @@ export type ExchangeEvalContext = {
    * the same prepare pass. See {@link CfcGrantConsumptionContext}.
    */
   readonly grantConsumption?: CfcGrantConsumptionContext;
+
   /**
    * Exact module-manifest lookup. Absent or unsuccessful lookup fails the
    * whole evaluation closed when the label selects a module policy.

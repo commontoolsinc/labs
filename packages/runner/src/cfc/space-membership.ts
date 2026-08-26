@@ -89,6 +89,7 @@ export interface SpaceMembershipProvider {
    * over-block to an admit.
    */
   readerRole(space: string): SpaceRole | null;
+
   /**
    * Subscribe to a space's ACL doc; `onChange` fires when it later syncs or
    * changes — NOT synchronously at subscribe time (the initial snapshot is

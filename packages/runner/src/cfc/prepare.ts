@@ -267,6 +267,7 @@ const effectiveReadLabel = (
   read: {
     nonRecursive: boolean | undefined;
     consumes: ReadClassSelection;
+
     /**
      * Entries excluded from this read's consumption on top of class
      * selection. Sole current user is `deriveFlowJoin`'s pair of template
@@ -3196,6 +3197,7 @@ type WritePrefixBounds = {
     },
     path: readonly string[],
   ): number;
+
   /**
    * Stage-0 instrumentation only (docs/specs/cfc-value-level-provenance.md
    * §6): whether the transaction logged ANY value-surface write attempt.
@@ -3282,6 +3284,7 @@ const buildWritePrefixBounds = (
 
 /** How a protected write's activity-clock bound was obtained. */
 export type CfcPrefixBoundSource =
+
   /** A logged overlapping write attempt — the prefix engaged. */
   | "real"
   /**
@@ -3302,6 +3305,7 @@ export type CfcPrefixBoundSource =
 export type CfcPrefixProvenanceWrite = {
   /** Document id of the protected write's target. */
   id: string;
+
   /**
    * Protected schema-entry path as an RFC 6901 JSON pointer (e.g. "/out";
    * "" is the root; "~"/"/" in property names escape as "~0"/"~1"), so
@@ -3309,10 +3313,13 @@ export type CfcPrefixProvenanceWrite = {
    */
   path: string;
   boundSource: CfcPrefixBoundSource;
+
   /** Gated reads within this write's D4 prefix (post-S7-exemption). */
   prefixGatedReads: number;
+
   /** What the pre-D4 transaction-global gate would have counted. */
   txGlobalGatedReads: number;
+
   /** Provenance-only reads within the prefix the S7 exemption excluded. */
   s7ExemptionFires: number;
 };
@@ -3326,18 +3333,23 @@ export type CfcPrefixProvenanceWrite = {
 export type CfcPrefixProvenanceSummary = {
   /** Protected writes measured (may exceed writes.length — see the cap). */
   protectedWrites: number;
+
   /** Sum of per-write prefix-gated read counts. */
   prefixGatedReads: number;
+
   /** Sum of per-write pre-D4 transaction-global gated-read counts. */
   txGlobalGatedReads: number;
+
   /** Bound-source classification counts across protected writes. */
   boundSources: {
     real: number;
     infinityFallback: number;
     clockLess: number;
   };
+
   /** Total S7 provenance-only exemption fires within prefixes. */
   s7ExemptionFires: number;
+
   /**
    * Non-internal read activities without an activity-clock position,
    * treated at -Infinity (joining every prefix). Deliberate -Infinity
@@ -3345,6 +3357,7 @@ export type CfcPrefixProvenanceSummary = {
    * write, so this is per-prepare, not per-write.
    */
   clockLessReads: number;
+
   /** Per-write detail, capped at CFC_PREFIX_PROVENANCE_MAX_WRITES. */
   writes: CfcPrefixProvenanceWrite[];
 };
@@ -4947,6 +4960,7 @@ const evaluateGatedConfidentiality = (
     readonly reference: unknown;
     readonly reason: string;
   }[];
+
   /** A grant lookup could not be read; see `createTxCfcGrantResolver`. */
   grantResolutionUnavailable: boolean;
 } => {
