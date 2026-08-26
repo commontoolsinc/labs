@@ -271,9 +271,9 @@ Naming pieces directly skips the containment check — and says so. The header
 records the selector, so a reader of the plan knows no containment claim was
 made. The orphan is still out there; this survey simply never claimed otherwise.
 
-### Past act 11 · Undoing it
+### Acts 12–14 · Undoing it, where this tour stops
 
-The demo does not stop there. Acts 12 through 14 walk the reversal — a retarget
+The demo does not stop at act 11. These three walk the reversal — a retarget
 undone from the plan that made it, one piece returned to a revision of its own
 source log, and a piece that cannot be brought back at all. They are the same
 spine as the acts above, applied in the other direction, and what each one

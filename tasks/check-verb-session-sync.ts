@@ -39,8 +39,6 @@ export const DEMO_PATH = "packages/cli/integration/verb-session-demo.sh";
 export const WALKTHROUGH_PATH = "docs/common/verbs/session-walkthrough.md";
 export const TOUR_PATH = "docs/common/verbs/the-verb-session.md";
 
-/** Every document held to the demo. Both quote commands and name acts, and a
- * command invented in either is wrong the same way. */
 export const BULK_DEMO_PATH = "packages/cli/integration/bulk-ops-demo.sh";
 export const BULK_TOUR_PATH = "docs/common/workflows/bulk-operations.md";
 
@@ -58,7 +56,27 @@ export const DOC_DEMOS: ReadonlyArray<{ doc: string; demo: string }> = [
   { doc: BULK_TOUR_PATH, demo: BULK_DEMO_PATH },
 ];
 
+/** Every document held to a demo. Each quotes commands and names acts, and a
+ * command invented in any of them is wrong the same way. */
 export const DOC_PATHS = DOC_DEMOS.map((pair) => pair.doc);
+
+/**
+ * The demo a document is held to, by the table rather than by a default.
+ *
+ * A document the table does not name has no demo to pick — every demo runs a
+ * different session, so choosing one for it would check it against a story it
+ * never described — and saying so is the whole of what this does.
+ */
+export function demoFor(doc: string): string {
+  const pair = DOC_DEMOS.find((entry) => entry.doc === doc);
+  if (pair === undefined) {
+    throw new Error(
+      `No demo is paired with ${doc}; name one as shPath, or add the ` +
+        `pairing to DOC_DEMOS.`,
+    );
+  }
+  return pair.demo;
+}
 
 /** The comment that exempts the next `cf` line in a walkthrough bash block.
  * The marker alone is not enough: an exemption without a reason is one
@@ -345,11 +363,12 @@ export function findViolations(
  * Runs the check and returns the process exit code.
  *
  * The printers are injectable so a test can drive both verdicts, and so is
- * the pairing: `mdPath` names the document to check and `shPath` the demo to
- * hold it to, defaulting to the verb demo. A demo alone names no document, so
- * it is refused rather than quietly dropped — the caller that passes one means
- * to check something against it. The default is every pairing in
- * {@link DOC_DEMOS} and the console.
+ * the pairing. With neither path, every pairing in {@link DOC_DEMOS} runs.
+ * With both, they are the pairing. With `mdPath` alone, the document supplies
+ * its own demo from {@link DOC_DEMOS} — a document declared there is never
+ * held to another story's demo. Half a pairing that names nothing is refused
+ * rather than defaulted: a demo with no document to check, and a document the
+ * table does not know, each say what to pass.
  */
 export async function main(deps: {
   shPath?: string;
@@ -365,10 +384,13 @@ export async function main(deps: {
     );
   }
   // An override names one pairing; otherwise every document is read against
-  // the demo it was written from.
-  const pairs = deps.mdPath === undefined
-    ? DOC_DEMOS
-    : [{ doc: deps.mdPath, demo: deps.shPath ?? DEMO_PATH }];
+  // the demo it was written from. A named document that the table knows
+  // brings its own demo, so an override of the document alone cannot hold
+  // one story's document to another story's demo.
+  const pairs = deps.mdPath === undefined ? DOC_DEMOS : [{
+    doc: deps.mdPath,
+    demo: deps.shPath ?? demoFor(deps.mdPath),
+  }];
   const demoText = new Map<string, string>();
   const violations: string[] = [];
   for (const { doc, demo } of pairs) {

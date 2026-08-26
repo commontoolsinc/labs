@@ -1,6 +1,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Command } from "@cliffy/command";
+import { dirname, fromFileUrl, join } from "@std/path";
+import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import {
   commandPattern,
   declaredCommands,
@@ -12,6 +14,79 @@ import {
   readPackageDocs,
   reportCommandDocs,
 } from "./check-command-docs.ts";
+
+const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
+
+/** Run the gate the way its task does, and return what the process reported. */
+async function runAsProgram(
+  ...args: string[]
+): Promise<{ code: number; out: string }> {
+  const output = await runDenoCommandWithTemporaryLock({
+    root: REPO_ROOT,
+    args: (lockPath) => [
+      "run",
+      "--config",
+      join(REPO_ROOT, "deno.jsonc"),
+      "--lock",
+      lockPath,
+      // The permissions deno.jsonc grants the task, so a run that needs more
+      // than the task allows fails here rather than in CI.
+      "--allow-read",
+      "--allow-env",
+      "--allow-sys",
+      "--allow-ffi",
+      join(REPO_ROOT, "tasks/check-command-docs.ts"),
+      ...args,
+    ],
+  });
+  return { code: output.code, out: new TextDecoder().decode(output.stdout) };
+}
+
+/** What a run printed, either side of the exit code it returned. */
+async function captureConsole(
+  body: () => Promise<number>,
+): Promise<{ code: number; out: string; err: string }> {
+  const out: string[] = [];
+  const err: string[] = [];
+  const origLog = console.log;
+  const origError = console.error;
+  console.log = (...args) => out.push(args.map(String).join(" "));
+  console.error = (...args) => err.push(args.map(String).join(" "));
+  try {
+    return { code: await body(), out: out.join("\n"), err: err.join("\n") };
+  } finally {
+    console.log = origLog;
+    console.error = origError;
+  }
+}
+
+/**
+ * A repository root holding a config and no documents at all, so every
+ * command the CLI declares is undocumented and the failure directions are
+ * reachable without inventing a command tree.
+ */
+async function withEmptyRoot(
+  body: (root: string) => Promise<void>,
+): Promise<void> {
+  const root = await Deno.makeTempDir();
+  try {
+    await Deno.writeTextFile(`${root}/deno.jsonc`, `{ "workspace": [] }`);
+    await body(root);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+}
+
+/** The gate's own failure verdict, run against a root with no documents. */
+async function withFailure(): Promise<
+  { code: number; out: string; err: string }
+> {
+  let captured = { code: -1, out: "", err: "" };
+  await withEmptyRoot(async (root) => {
+    captured = await captureConsole(() => main([], root));
+  });
+  return captured;
+}
 
 /** A small tree in the shape the CLI's own is: nested commands under a root. */
 function fixtureTree() {
@@ -65,6 +140,19 @@ describe("check-command-docs", () => {
       expect(isLiveDoc("packages\\oven\\README.md", packageDocs)).toBe(true);
     });
 
+    it("takes nothing vendored under node_modules as documentation", () => {
+      // A dependency's own README travels with the dependency. Without this
+      // rule a vendored copy under `docs/` would read as live documentation,
+      // and a command named in it would satisfy the gate.
+      expect(isLiveDoc("docs/node_modules/dep/README.md", packageDocs))
+        .toBe(false);
+      expect(isLiveDoc("skills/cf/node_modules/dep/guide.md", packageDocs))
+        .toBe(false);
+      // The rule is the path segment, not the word: a document about the
+      // directory is still a document.
+      expect(isLiveDoc("docs/node_modules-and-you.md", packageDocs)).toBe(true);
+    });
+
     it("takes a README under a package to be the package's own or nothing", () => {
       // A fixture corpus and a test directory keep READMEs of their own, and
       // neither is somewhere a caller is sent to read.
@@ -99,6 +187,37 @@ describe("check-command-docs", () => {
         );
         expect([...await readPackageDocs(root)].sort()).toEqual([
           "packages/mixers/whisk/README.md",
+          "packages/oven/README.md",
+        ]);
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
+    });
+
+    it("takes no README from a config that lists no workspace", async () => {
+      // A config without the key is not a config with an empty one by
+      // accident: no member means no package README counts, and the walk
+      // simply finds nothing under `packages/`.
+      const root = await Deno.makeTempDir();
+      try {
+        await Deno.writeTextFile(`${root}/deno.jsonc`, `{ "tasks": {} }`);
+        expect([...await readPackageDocs(root)]).toEqual([]);
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
+    });
+
+    it("skips a member that is not a path", async () => {
+      // The member list is data from a file, so a malformed entry is a
+      // possibility rather than a type error. It contributes no README
+      // instead of a `[object Object]/README.md` that matches nothing.
+      const root = await Deno.makeTempDir();
+      try {
+        await Deno.writeTextFile(
+          `${root}/deno.jsonc`,
+          `{ "workspace": ["./packages/oven", 7, { "path": "./packages/x" }] }`,
+        );
+        expect([...await readPackageDocs(root)]).toEqual([
           "packages/oven/README.md",
         ]);
       } finally {
@@ -223,6 +342,23 @@ describe("check-command-docs", () => {
       });
     });
 
+    it("raises a doc root that cannot be walked rather than reading past it", async () => {
+      // A missing root contributes no documents, which is how a partial
+      // checkout behaves. A root that exists and cannot be walked is a
+      // different fact: reading past it would silently drop every document
+      // it holds and report the commands they name as undocumented.
+      const root = await Deno.makeTempDir();
+      try {
+        await Deno.writeTextFile(`${root}/deno.jsonc`, `{ "workspace": [] }`);
+        await Deno.writeTextFile(`${root}/docs`, "a file where a tree goes");
+        await expect(documentedCommands(root, ["brew"])).rejects.toThrow(
+          /Not a directory/,
+        );
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
+    });
+
     it("reads the package's own README and not an internal one", async () => {
       // A fixture corpus documents the fixtures, for whoever maintains them.
       await withDocs({
@@ -297,6 +433,65 @@ describe("check-command-docs", () => {
         expect(reason.trim().length, `${command} has no reason`)
           .toBeGreaterThan(0);
       }
+    });
+
+    it("fails a command no document names, printing the finding and the remedy", async () => {
+      // Against a root holding no documents at all, every command the CLI
+      // declares is undocumented — which is the shape of the failure a real
+      // one takes, one command at a time.
+      const { code, err } = await withFailure();
+      expect(code).toBe(1);
+      expect(err).toContain("Command documentation check failed.");
+      expect(err).toContain("are named in no live document");
+      expect(err).toContain("NO_PROSE");
+      // The offending commands by name, not a count an operator cannot act
+      // on, and the remedy beside them.
+      expect(err).toContain("cf get");
+      expect(err).toContain("cf piece survey");
+      expect(err).toContain("Either describe the command in a live document");
+      expect(err).toContain("tasks/check-command-docs.ts");
+    });
+
+    it("lists the undocumented commands and succeeds when asked for the list", async () => {
+      // `--list` is the working view: it answers what is undocumented
+      // without failing, so the list can be read while it is worked through.
+      let captured = { code: -1, out: "", err: "" };
+      await withEmptyRoot(async (root) => {
+        captured = await captureConsole(() => main(["--list"], root));
+      });
+      expect(captured.code).toBe(0);
+      expect(captured.out).toContain("cf get");
+      expect(captured.out).toContain("cf piece survey");
+      // The list is the whole of what it prints: no verdict line, because
+      // the run passed and the list is not a failure report.
+      expect(captured.out).not.toContain("Command documentation OK");
+      expect(captured.err).toBe("");
+      // A command the allowance covers is decided, so it is not undecided.
+      for (const command of NO_PROSE.keys()) {
+        expect(captured.out).not.toContain(`cf ${command}`);
+      }
+    });
+  });
+
+  describe("as the task runs it", () => {
+    // Calling main() above would still pass if the entry point never ran it,
+    // or if the permissions the task declares were too narrow to walk the
+    // tree. This is the promise the CI job makes: the command exits 0, having
+    // done the work.
+    it("exits 0 reporting the commands it walked", async () => {
+      const { code, out } = await runAsProgram();
+      expect(code).toBe(0);
+      expect(out).toContain("Command documentation OK");
+      expect(out).toMatch(/\d+ command\(s\)/);
+      expect(out).toMatch(/\d+ deliberately without prose/);
+    });
+
+    it("exits 0 printing nothing to list when every command is documented", async () => {
+      // The gate is green on this repository, so the working view is empty —
+      // and an empty list is a result, not a silence to be read as an error.
+      const { code, out } = await runAsProgram("--list");
+      expect(code).toBe(0);
+      expect(out.trim()).toBe("");
     });
   });
 });
