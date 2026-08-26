@@ -28,6 +28,7 @@ function inactiveSnapshot(materialized = "abc") {
 
 function statefulView(extensions: unknown[] = []) {
   return {
+    hasFocus: false,
     state: EditorState.create({
       doc: "abc",
       extensions: extensions as never[],
@@ -37,6 +38,44 @@ function statefulView(extensions: unknown[] = []) {
     },
   };
 }
+
+class MockPresenceWebSocket {
+  static instances: MockPresenceWebSocket[] = [];
+
+  readyState = 0;
+  readonly sent: string[] = [];
+  readonly closes: number[] = [];
+  readonly listeners = new Map<string, Array<(event: unknown) => void>>();
+
+  constructor(readonly url: string) {
+    MockPresenceWebSocket.instances.push(this);
+  }
+
+  send(data: string): void {
+    this.sent.push(data);
+  }
+
+  close(code?: number): void {
+    if (code !== undefined) this.closes.push(code);
+  }
+
+  addEventListener(type: string, listener: (event: unknown) => void): void {
+    const listeners = this.listeners.get(type) ?? [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  emit(type: string, event: unknown = {}): void {
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
+}
+
+const presenceSnapshot = JSON.stringify({
+  v: 1,
+  type: "room.snapshot",
+  selfParticipantId: "11111111-1111-4111-8111-111111111111",
+  participants: [],
+});
 
 function operationCell(runtime: Record<string, unknown>): CellHandle<string> {
   const cell = Object.create(CellHandle.prototype);
@@ -55,6 +94,8 @@ describe("CFCodeEditor collaboration", () => {
       readonly: false,
       language: "text/markdown",
       _collaboration: collaboration,
+      _retryPresenceFromSignal: () => calls.push("presence retry"),
+      _publishPresence: () => calls.push("presence"),
       emit: () => calls.push("change"),
       setValue: () => calls.push("value"),
       _updateMentionedFromContent: () => calls.push("mentioned"),
@@ -62,9 +103,14 @@ describe("CFCodeEditor collaboration", () => {
       _detectAndSyncNameChanges: () => calls.push("names"),
       _syncMentionRefs: () => calls.push("refs"),
     };
-    const invoke = (annotation: unknown, docChanged = true) =>
+    const invoke = (
+      annotation: unknown,
+      docChanged = true,
+      selectionSet = false,
+    ) =>
       (CFCodeEditor.prototype as any)._handleEditorUpdate.call(self, {
         docChanged,
+        selectionSet,
         state: { doc: { toString: () => "new" } },
         startState: { doc: { toString: () => "old" } },
         transactions: [{
@@ -75,6 +121,8 @@ describe("CFCodeEditor collaboration", () => {
     invoke(undefined);
     expect(calls).toEqual([
       "operation",
+      "presence retry",
+      "presence",
       "change",
       "mentioned",
       "subscriptions",
@@ -91,6 +139,9 @@ describe("CFCodeEditor collaboration", () => {
     invoke(cellSync);
     invoke(undefined, false);
     expect(calls).toEqual([]);
+
+    invoke(undefined, false, true);
+    expect(calls).toEqual(["presence retry", "presence"]);
 
     calls.length = 0;
     self._collaboration = undefined as never;
@@ -204,6 +255,311 @@ describe("CFCodeEditor collaboration", () => {
     await (invalid as any)._setupCollaboration();
     expect((invalid as any)._collaborationFailed).toBe(true);
     expect(errors.at(-1)?.[0]).toBe("cf-error");
+  });
+
+  it("uses the host endpoint context until an explicit override is set", () => {
+    const originalWebSocket = globalThis.WebSocket;
+    MockPresenceWebSocket.instances = [];
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: MockPresenceWebSocket,
+    });
+    try {
+      const element = new CFCodeEditor();
+      const presence = (element as any)._presenceComp as Compartment;
+      (element as any)._editorView = statefulView([presence.of([])]);
+      const collaboration = {
+        active: true,
+        synchronizationSnapshot: {
+          confirmedCursor: { epoch: 2, version: 4 },
+          pendingChanges: [],
+        },
+      };
+      (element as any)._collaboration = collaboration;
+      element.collaborative = true;
+      element.presenceRoom = "abcdefghijklmnopqrstuv";
+      element.participantName = "Ada";
+      element.copresenceUrl = "wss://default-presence.example";
+
+      (element as any)._setupPresence();
+      expect(MockPresenceWebSocket.instances[0].url).toBe(
+        "wss://default-presence.example/v1/rooms/abcdefghijklmnopqrstuv",
+      );
+
+      element.participantName = "Grace";
+      (element as any)._setupPresence();
+      expect(MockPresenceWebSocket.instances).toHaveLength(1);
+
+      collaboration.synchronizationSnapshot = {
+        confirmedCursor: { epoch: 3, version: 0 },
+        pendingChanges: [],
+      };
+      (element as any)._handleCollaborationSynchronization(
+        collaboration.synchronizationSnapshot,
+      );
+      expect(MockPresenceWebSocket.instances).toHaveLength(2);
+      expect(MockPresenceWebSocket.instances[0].closes).toEqual([1000]);
+
+      element.presenceUrl = "wss://override-presence.example";
+      (element as any)._setupPresence();
+      expect(MockPresenceWebSocket.instances[2].url).toBe(
+        "wss://override-presence.example/v1/rooms/abcdefghijklmnopqrstuv",
+      );
+      expect(MockPresenceWebSocket.instances[1].closes).toEqual([1000]);
+
+      element.presenceRoom = "zyxwvutsrqponmlkjihgfe";
+      (element as any)._setupPresence();
+      expect(MockPresenceWebSocket.instances).toHaveLength(4);
+      expect(MockPresenceWebSocket.instances[2].closes).toEqual([1000]);
+
+      element.presenceRoom = "";
+      (element as any)._setupPresence();
+      expect((element as any)._presence).toBeUndefined();
+      expect(MockPresenceWebSocket.instances[3].closes).toEqual([1000]);
+    } finally {
+      Object.defineProperty(globalThis, "WebSocket", {
+        configurable: true,
+        value: originalWebSocket,
+      });
+    }
+  });
+
+  it("publishes focused selections and unfocused replacement state", () => {
+    const originalWebSocket = globalThis.WebSocket;
+    const originalRequestFrame = globalThis.requestAnimationFrame;
+    const originalCancelFrame = globalThis.cancelAnimationFrame;
+    const frames: FrameRequestCallback[] = [];
+    MockPresenceWebSocket.instances = [];
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: MockPresenceWebSocket,
+    });
+    Object.defineProperty(globalThis, "requestAnimationFrame", {
+      configurable: true,
+      value: (callback: FrameRequestCallback) => {
+        frames.push(callback);
+        return frames.length;
+      },
+    });
+    Object.defineProperty(globalThis, "cancelAnimationFrame", {
+      configurable: true,
+      value: () => {},
+    });
+    try {
+      const element = new CFCodeEditor();
+      const presence = (element as any)._presenceComp as Compartment;
+      const view = statefulView([presence.of([])]);
+      view.hasFocus = true;
+      view.dispatch({ selection: { anchor: 1, head: 2 } } as never);
+      (element as any)._editorView = view;
+      (element as any)._collaboration = {
+        active: true,
+        synchronizationSnapshot: {
+          confirmedCursor: { epoch: 2, version: 4 },
+          pendingChanges: [],
+        },
+      };
+      element.collaborative = true;
+      element.presenceRoom = "abcdefghijklmnopqrstuv";
+      element.participantName = "Ada";
+      element.presenceUrl = "wss://presence.example";
+
+      (element as any)._setupPresence();
+      const socket = MockPresenceWebSocket.instances[0];
+      socket.readyState = 1;
+      socket.emit("open");
+      socket.emit("message", { data: presenceSnapshot });
+      frames.shift()?.(0);
+      expect(JSON.parse(socket.sent[0])).toMatchObject({
+        name: "Ada",
+        focused: true,
+        cursor: { epoch: 2, version: 4 },
+        selection: {
+          ranges: [{ anchor: 1, head: 2, assoc: -1 }],
+          main: 0,
+        },
+        basis: "confirmed",
+      });
+
+      view.hasFocus = false;
+      (element as any)._publishPresence();
+      frames.shift()?.(0);
+      expect(JSON.parse(socket.sent[1])).toMatchObject({
+        revision: 2,
+        focused: false,
+        selection: null,
+      });
+    } finally {
+      Object.defineProperty(globalThis, "WebSocket", {
+        configurable: true,
+        value: originalWebSocket,
+      });
+      Object.defineProperty(globalThis, "requestAnimationFrame", {
+        configurable: true,
+        value: originalRequestFrame,
+      });
+      Object.defineProperty(globalThis, "cancelAnimationFrame", {
+        configurable: true,
+        value: originalCancelFrame,
+      });
+    }
+  });
+
+  it("reports presence failure without making Memory collaboration read-only", () => {
+    const events: Array<[string, unknown]> = [];
+    const element = new CFCodeEditor();
+    const readonly = (element as any)._readonly as Compartment;
+    const presence = (element as any)._presenceComp as Compartment;
+    const view = statefulView([
+      readonly.of(EditorState.readOnly.of(false)),
+      presence.of([]),
+    ]);
+    const collaboration = { active: true };
+    (element as any)._editorView = view;
+    (element as any)._collaboration = collaboration;
+    (element as any)._presence = { dispose: () => {} };
+    (element as any).emit = (name: string, detail: unknown) =>
+      events.push([name, detail]);
+
+    (element as any)._failPresence("protocol");
+
+    expect((element as any)._collaboration).toBe(collaboration);
+    expect(view.state.readOnly).toBe(false);
+    expect(events).toEqual([["cf-presence-error", { category: "protocol" }]]);
+  });
+
+  it("reports invalid host configuration once until the endpoint changes", () => {
+    const originalWebSocket = globalThis.WebSocket;
+    MockPresenceWebSocket.instances = [];
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: MockPresenceWebSocket,
+    });
+    const events: Array<[string, unknown]> = [];
+    try {
+      const element = new CFCodeEditor();
+      const presence = (element as any)._presenceComp as Compartment;
+      (element as any)._editorView = statefulView([presence.of([])]);
+      (element as any)._collaboration = {
+        active: true,
+        synchronizationSnapshot: {
+          confirmedCursor: { epoch: 1, version: 0 },
+          pendingChanges: [],
+        },
+      };
+      (element as any).emit = (name: string, detail: unknown) =>
+        events.push([name, detail]);
+      element.collaborative = true;
+      element.presenceRoom = "abcdefghijklmnopqrstuv";
+      element.participantName = "Ada";
+      element.copresenceUrl = "https://presence.example";
+
+      (element as any)._setupPresence();
+      (element as any)._setupPresence();
+      (element as any)._retryPresenceFromSignal();
+
+      expect((element as any)._collaboration.active).toBe(true);
+      expect(events).toEqual([
+        ["cf-presence-error", { category: "configuration" }],
+      ]);
+      expect(MockPresenceWebSocket.instances).toHaveLength(0);
+
+      element.copresenceUrl = "wss://presence.example";
+      (element as any)._setupPresence();
+      expect(MockPresenceWebSocket.instances).toHaveLength(1);
+    } finally {
+      Object.defineProperty(globalThis, "WebSocket", {
+        configurable: true,
+        value: originalWebSocket,
+      });
+    }
+  });
+
+  it("reconnects a failed presence session only after an explicit signal", () => {
+    const originalWebSocket = globalThis.WebSocket;
+    MockPresenceWebSocket.instances = [];
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: MockPresenceWebSocket,
+    });
+    try {
+      const element = new CFCodeEditor();
+      const presence = (element as any)._presenceComp as Compartment;
+      (element as any)._editorView = statefulView([presence.of([])]);
+      const synchronizationSnapshot = {
+        confirmedCursor: { epoch: 1, version: 0 },
+        pendingChanges: [],
+      };
+      (element as any)._collaboration = {
+        active: true,
+        synchronizationSnapshot,
+      };
+      element.collaborative = true;
+      element.presenceRoom = "abcdefghijklmnopqrstuv";
+      element.participantName = "Ada";
+      element.presenceUrl = "wss://presence.example";
+
+      (element as any)._setupPresence();
+      const failedSocket = MockPresenceWebSocket.instances[0];
+      failedSocket.emit("error");
+      expect(failedSocket.closes).toEqual([1002]);
+
+      (element as any)._handleCollaborationSynchronization(
+        synchronizationSnapshot,
+      );
+      expect(MockPresenceWebSocket.instances).toHaveLength(1);
+
+      (element as any)._retryPresenceFromSignal();
+      expect(MockPresenceWebSocket.instances).toHaveLength(2);
+      const reconnectedSocket = MockPresenceWebSocket.instances[1];
+      reconnectedSocket.readyState = 1;
+      reconnectedSocket.emit("open");
+      reconnectedSocket.emit("message", { data: presenceSnapshot });
+      expect((element as any)._presenceParticipantId).toBe(
+        "11111111-1111-4111-8111-111111111111",
+      );
+    } finally {
+      Object.defineProperty(globalThis, "WebSocket", {
+        configurable: true,
+        value: originalWebSocket,
+      });
+    }
+  });
+
+  it("listens for online and visible signals only while connected", () => {
+    const originalDocument = Object.getOwnPropertyDescriptor(
+      globalThis,
+      "document",
+    );
+    const fakeDocument = new EventTarget() as EventTarget & {
+      visibilityState: string;
+    };
+    fakeDocument.visibilityState = "visible";
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      value: fakeDocument,
+    });
+    const element = new CFCodeEditor();
+    let retries = 0;
+    (element as any)._retryPresenceFromSignal = () => retries++;
+    try {
+      (element as any)._setupPresenceReconnectListeners();
+      globalThis.dispatchEvent(new Event("online"));
+      fakeDocument.dispatchEvent(new Event("visibilitychange"));
+      expect(retries).toBe(2);
+
+      (element as any)._cleanupPresenceReconnectListeners();
+      globalThis.dispatchEvent(new Event("online"));
+      fakeDocument.dispatchEvent(new Event("visibilitychange"));
+      expect(retries).toBe(2);
+    } finally {
+      (element as any)._cleanupPresenceReconnectListeners();
+      if (originalDocument) {
+        Object.defineProperty(globalThis, "document", originalDocument);
+      } else {
+        Reflect.deleteProperty(globalThis, "document");
+      }
+    }
   });
 
   it("submits external backlink title rewrites through collaboration", async () => {
@@ -409,6 +765,73 @@ describe("CFCodeEditor collaboration", () => {
     expect(view.state.facet(EditorState.readOnly)).toBe(true);
     release.resolve();
     await releasing;
+  });
+
+  it("restores synchronization and presence when release fails", async () => {
+    const originalWebSocket = globalThis.WebSocket;
+    MockPresenceWebSocket.instances = [];
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: MockPresenceWebSocket,
+    });
+    try {
+      const element = new CFCodeEditor();
+      const readonly = (element as any)._readonly as Compartment;
+      const collaborationComp = (element as any)
+        ._collaborationComp as Compartment;
+      const presence = (element as any)._presenceComp as Compartment;
+      const view = statefulView([
+        readonly.of(EditorState.readOnly.of(false)),
+        collaborationComp.of([]),
+        presence.of([]),
+      ]);
+      const snapshot = {
+        confirmedCursor: { epoch: 1, version: 3 },
+        pendingChanges: [],
+      };
+      let observerRegistrations = 0;
+      const collaboration = {
+        active: true,
+        synchronizationSnapshot: snapshot,
+        release: () => Promise.reject(new Error("release failed")),
+        observeSynchronization: (
+          observer: (value: typeof snapshot) => void,
+        ) => {
+          observerRegistrations++;
+          observer(snapshot);
+          return () => {};
+        },
+      };
+      (element as any)._editorView = view;
+      (element as any)._collaboration = collaboration;
+      (element as any)._collaborationSyncUnsub = () => {};
+      element.collaborative = true;
+      element.presenceRoom = "abcdefghijklmnopqrstuv";
+      element.participantName = "Ada";
+      element.presenceUrl = "wss://presence.example";
+      (element as any)._setupPresence();
+
+      let failure: unknown;
+      try {
+        await element.releaseCollaboration();
+      } catch (error) {
+        failure = error;
+      }
+
+      expect((failure as Error).message).toBe("release failed");
+      expect(observerRegistrations).toBe(1);
+      expect(MockPresenceWebSocket.instances).toHaveLength(2);
+      expect(MockPresenceWebSocket.instances[0].closes).toEqual([1000]);
+      expect((element as any)._presence).toBeDefined();
+      expect(view.state.facet(EditorState.readOnly)).toBe(false);
+      expect((element as any)._collaboration).toBe(collaboration);
+      (element as any)._cleanupPresence();
+    } finally {
+      Object.defineProperty(globalThis, "WebSocket", {
+        configurable: true,
+        value: originalWebSocket,
+      });
+    }
   });
 
   it("defers a programmatic title rewrite until release settles", async () => {
