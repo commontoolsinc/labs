@@ -34,6 +34,52 @@ Deno.test("legacy run reports remain readable without provider metadata", async 
   }
 });
 
+Deno.test("run reports carry the fabric session's resolved CFC posture", () => {
+  const fabricSessionCfc = {
+    enforcementMode: "enforce-strict",
+    enforcementModeSource: "configured",
+    flowLabels: "persist",
+    flowLabelsSource: "posture",
+    posture: "max-enforcement",
+  } as const;
+  const report = createHarnessRunReport({
+    runState: {
+      runId: "postured-state",
+      status: "completed",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      cfcEnforcementMode: "enforce-explicit",
+      fabricSessionCfc,
+      policyEvents: [],
+      policyDecisions: [],
+      toolOutputs: [],
+    },
+    model: "postured-model",
+    modelTurns: 1,
+    toolActivity: [],
+  });
+
+  assertEquals(report.fabricSessionCfc, fabricSessionCfc);
+});
+
+Deno.test("run reports omit the fabric-session posture when the run had no session", () => {
+  const report = createHarnessRunReport({
+    runState: {
+      runId: "sessionless-state",
+      status: "completed",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      cfcEnforcementMode: "disabled",
+      policyEvents: [],
+      policyDecisions: [],
+      toolOutputs: [],
+    },
+    model: "sessionless-model",
+    modelTurns: 1,
+    toolActivity: [],
+  });
+
+  assertEquals("fabricSessionCfc" in report, false);
+});
+
 Deno.test("run reports do not invent API-key auth for legacy run state", () => {
   const report = createHarnessRunReport({
     runState: {

@@ -1204,7 +1204,8 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
         recordCfcConsultedGrant: (entry: unknown) => consulted.push(entry),
         noteCfcDiagnostic: () => {},
       } as unknown as IExtendedStorageTransaction;
-      const resolver = createTxCfcGrantResolver(throwingTx);
+      const availability = { unavailable: false };
+      const resolver = createTxCfcGrantResolver(throwingTx, { availability });
       expect(
         resolver({
           kind: "ShareGrant",
@@ -1212,6 +1213,29 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
         }),
       ).toEqual([]);
       expect(consulted).toEqual([]);
+      // Reported as UNAVAILABLE, not as an absent grant: a boundary refusal
+      // that consulted this lookup must stay retryable rather than terminal
+      // (the sink-ceiling verdict tag withholds itself on this signal).
+      expect(availability.unavailable).toBe(true);
+    });
+
+    it("does not report unavailability for a grant that reads as absent", () => {
+      const absentTx = {
+        readOrThrow: () => undefined,
+        recordCfcConsultedGrant: () => {},
+        noteCfcDiagnostic: () => {},
+      } as unknown as IExtendedStorageTransaction;
+      const availability = { unavailable: false };
+      const resolver = createTxCfcGrantResolver(absentTx, { availability });
+      expect(
+        resolver({
+          kind: "ShareGrant",
+          fields: { owner: ALICE, resource: PHOTO_REF },
+        }),
+      ).toEqual([]);
+      // An absent grant is a real answer — no facts — and a refusal decided
+      // on it is deterministic, so the tag-withholding signal must not fire.
+      expect(availability.unavailable).toBe(false);
     });
 
     it("notes a diagnostic for a malformed stored document", async () => {

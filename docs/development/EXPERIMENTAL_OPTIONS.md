@@ -582,6 +582,26 @@ latter's for its fabric session from `--fabric-cfc-enforcement-mode`
 (raise-only: `enforce-explicit` or `enforce-strict`) and
 `--fabric-cfc-flow-labels`, with `CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE` and
 `CF_HARNESS_FABRIC_CFC_FLOW_LABELS` as their environment defaults.
+
+One named bundle sits beside the per-dial rollout: every preset's `CoreParams`
+accepts `cfcPosture: "max-enforcement"`, which spreads
+`MAX_ENFORCEMENT_CFC_OPTIONS` (same file) over the core — flow labels
+`persist`, write floor / policy evaluation / declared monotonicity /
+label-metadata protection at `enforce`, trigger-read gating on, the §10.1
+standard prompt-caveat policy as the deployment's `cfcPolicyRecords`, and
+public-only confidentiality ceilings on the network-fetch sinks
+(`MAX_ENFORCEMENT_SINK_CEILINGS`). The llm sinks carry no ceiling, and a sink
+with no ceiling gets no gate: llm-sink release is ungoverned under this
+posture — pending a boundary-scoped admission mechanism, since an exact-match
+ceiling cannot admit the source-varying material-risk caveats an llm sink
+exists to process. The bundle deliberately leaves the
+enforcement-mode pin at `enforce-explicit` (strict stays a per-session host
+raise), and leaves `cfcDecomposedEnvelopes`, `cfcTrustConfig`, and
+`cfcPrefixProvenanceStats` alone. It is opt-in per runtime, never a fleet
+flip: cf-harness exposes it for its fabric session as `--fabric-cfc-posture`
+(`CF_HARNESS_FABRIC_CFC_POSTURE`); toolshed publishes whatever CFC posture its
+Runtime resolved on `/api/meta` (`lib/cfc-posture.ts`), so a deployment's
+enforcement is readable rather than indistinguishable from the default.
 The interactive `cf-harness` and the `fuse` mount expose the enforcement mode
 through `CF_CFC_MODE` for testing. Because these dials are keys of
 `RuntimeOptions`, the exhaustive `RUNTIME_OPTION_KEYS` registry in the same file

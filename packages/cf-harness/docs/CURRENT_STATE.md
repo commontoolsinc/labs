@@ -146,11 +146,15 @@ The current package provides:
   `--fabric-cfc-enforcement-mode` (raise-only: `enforce-explicit` or
   `enforce-strict`) and `--fabric-cfc-flow-labels` (`off`/`observe`/`persist`)
   set the session runtime's CFC dials, so with labels persisted a
-  confidentiality-tainted pattern write is refused at commit under strict —
-  these are the fabric session's dials, independent of the harness's own
-  `--cfc-enforcement-mode`, and the resolved posture (each dial's value and
-  source) is recorded as `fabricSessionCfc` in run state and printed in the
-  operator summary;
+  confidentiality-tainted pattern write is refused at commit under strict, and
+  `--fabric-cfc-posture max-enforcement` opts the session runtime into the
+  runner's named posture bundle (every staged enforcement dial on, the standard
+  prompt-caveat policy loaded, public-only ceilings on the network-fetch sinks),
+  with the two per-dial flags applying over it — these are the fabric session's
+  dials, independent of the harness's own `--cfc-enforcement-mode`, and the
+  resolved posture (each dial's value and whether the operator, the named
+  bundle, or the default supplied it) is recorded as `fabricSessionCfc` in run
+  state and the run report, and printed in the operator summary;
 - a `pattern-author` child profile that authors and runs Common Fabric pattern
   source: `run_pattern` under the same fabric-session gate, plus `read_file`,
   `bash`, and `read_skill_resource`, and no workspace writes, so its deliverable

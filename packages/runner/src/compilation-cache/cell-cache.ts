@@ -1684,10 +1684,44 @@ export async function loadCompiledClosure(
     } catch {
       return undefined;
     }
-    return doc.policyManifests === undefined ? doc : (() => {
+    // `cell.get()` hands back a live query-result view, and `sourceMap` is the
+    // one stored field consumers carry VERBATIM into module artifacts (the
+    // process byte cache, storage-served compile bodies, repair and
+    // replication write-backs). Written back into another space, a live view
+    // serializes as a link to the place it was read from — a cross-space
+    // `/sourceMap` link instead of the map, which either lands silently
+    // corrupt (fresh target doc) or aborts the write-back when the target doc
+    // already carries its stored CFC envelope ("missing link source metadata
+    // … at /sourceMap" — the ensure-ON sx2-scale red). Materialize it to a
+    // plain value here, at the one read boundary every consumer funnels
+    // through, exactly as `policyManifests` are snapshotted above. The other
+    // verbatim-reused fields are immune: strings and string arrays either
+    // re-derive on write (`deriveModuleRecordFields`) or serialize through
+    // `JSON.stringify`.
+    let sourceMap: unknown;
+    try {
+      sourceMap = doc.sourceMap === undefined
+        ? undefined
+        : snapshotQueryResult(doc.sourceMap);
+    } catch {
+      // Mirror the policyManifests degradation above: a synchronously
+      // throwing resolution — e.g. an authorization error against an
+      // unreachable space behind a legacy cross-space `/sourceMap` link —
+      // drops THIS doc (a cache miss, so the caller recompiles) instead of
+      // failing the whole closure load.
+      return undefined;
+    }
+    if (doc.policyManifests === undefined && sourceMap === undefined) {
+      return doc;
+    }
+    if (doc.policyManifests !== undefined) {
       runtime.registerCfcPolicyManifests(undefined, policyManifests);
-      return { ...doc, policyManifests };
-    })();
+    }
+    return {
+      ...doc,
+      ...(sourceMap === undefined ? {} : { sourceMap }),
+      ...(doc.policyManifests === undefined ? {} : { policyManifests }),
+    };
   };
 
   const entryCell = runtime.getCell(
