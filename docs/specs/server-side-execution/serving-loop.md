@@ -1432,12 +1432,14 @@ OW45 residue member, 2026-08-26): `loadParkDeferrals` — served events
 deferred because the dispatch preflight's head-event LOAD PARK failed,
 counted per deferral (the head's and each later-arrived same-space
 entry the arrival-order barrier holds behind it), each with a WARN
-naming the failing doc keys and the error. §5's T3 predicate is "no
+naming the failing doc keys and the error. events.md §5's T3 predicate
+is "no
 runnable handler", never "the run raced", so a transient read failure
 over a durably-existing doc defers rather than dropping: the entry
 stays pending and UNCONSEQUENCED and a later drain re-delivers it.
 The deferral is deliberately NOT on the queued class's bounded
-creation-race budget — that budget hardens into §5's drop, which for
+creation-race budget — that budget hardens into events.md §5's drop,
+which for
 this cause would be the at-least-once discharge the arm exists to
 prevent — so a load that never heals defers indefinitely and its
 backstop rescan keeps the space out of the idle park; a give-up arm

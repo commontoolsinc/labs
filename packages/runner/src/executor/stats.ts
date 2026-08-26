@@ -421,7 +421,11 @@ export type ServingLoopStats = {
     loadParkDeferrals: number;
     /** Terminal drop/error notices SEALED onto a durable entry
      * (events.md §5: the notice IS the consequence and the frontier
-     * advances past it). Recorded observability gap, closed with the
+     * advances past it). DROPS ONLY — a handler that THREW seals an
+     * error consequence and is deliberately not counted here, matching
+     * serving-loop.md §7's wording (independent review F8: this comment
+     * used to say "drop/error", which the increment never did).
+     * Recorded observability gap, closed with the
      * load-park fix: a terminally discharged served event used to be
      * invisible in serving stats — `appended == processed` reads clean
      * while a user's action is permanently gone — so only the WARN line

@@ -155,9 +155,19 @@ class GatedStorageManager extends EmulatedStorageManager {
     return super.pendingLoadGeneration(key);
   }
 
+  /** When set, the armed doc's park settle returns THIS promise instead of
+   * rejecting at once — so a pin can hold a park OPEN until it has arranged
+   * the state under test (e.g. a later-arrived entry actually QUEUED behind
+   * the parked head), then fail it on command. Without it the rejection is
+   * immediate and the state a pin wants to construct may never exist. The
+   * scheduler-level pins use the same `Promise.withResolvers` idiom. */
+  static loadParkSettle: Promise<void> | undefined;
+
   override loadsSettled(keys: readonly string[]): Promise<void> {
     if (keys.some((key) => GatedStorageManager.#matchesArmedDoc(key))) {
       GatedStorageManager.loadParkFailHits += 1;
+      const held = GatedStorageManager.loadParkSettle;
+      if (held !== undefined) return held;
       return Promise.reject(
         new Error("memory session revoked: unauthorized (pin seam)"),
       );
@@ -276,6 +286,33 @@ const ORDERED_LOG_PATTERN = [
   "  { log: Writable<string[]> },",
   "  { log: string[]; a: Stream<unknown>; b: Stream<unknown> }",
   ">(({ log }) => ({ log, a: pushA({ log }), b: pushB({ log }) }));",
+].join("\n");
+
+/** The ORDERED_LOG_PATTERN's sibling with DISJOINT handler closures: `pushA`
+ * additionally reads `gate`, which the test links to a SEPARATE doc, while
+ * `pushB` reads only the shared log. Arming the load-park failure on the gate
+ * doc therefore parks stream `a`'s head event and leaves stream `b`'s handler
+ * perfectly runnable — the construction the in-queue arrival-order barrier
+ * actually needs. (In the shared-closure pattern a later-arrived B parks on
+ * the same failing doc and self-defers through the HEAD arm, so removing the
+ * barrier changes nothing and the pin cannot discriminate it — independent
+ * review F3.) */
+const DISJOINT_CLOSURE_LOG_PATTERN = [
+  "import { handler, pattern, Stream, Writable } from 'commonfabric';",
+  "const pushA = handler<",
+  "  unknown,",
+  "  { log: Writable<string[]>; gate: Writable<number> }",
+  ">((_ev, { log, gate }) => {",
+  "  gate.get();",
+  "  log.set([...(log.get() ?? []), 'A']);",
+  "});",
+  "const pushB = handler<unknown, { log: Writable<string[]> }>(",
+  "  (_ev, { log }) => { log.set([...(log.get() ?? []), 'B']); },",
+  ");",
+  "export default pattern<",
+  "  { log: Writable<string[]>; gate: Writable<number> },",
+  "  { log: string[]; a: Stream<unknown>; b: Stream<unknown> }",
+  ">(({ log, gate }) => ({ log, a: pushA({ log, gate }), b: pushB({ log }) }));",
 ].join("\n");
 
 // OW54's refused-commit class (verification-coverage.md §3): a stored
@@ -3511,6 +3548,241 @@ describe("Phase 3 events-down (serving side)", () => {
         servingManager.syncGate = undefined;
       }
       gate.resolve();
+      cancelDemand();
+    }
+  });
+
+  it('the IN-QUEUE arrival-order barrier, discriminated: a later-arrived event whose closure does NOT touch the failing doc — so it is perfectly runnable and already QUEUED behind the parked head — defers with the head instead of overtaking it (events.md §2; independent review F3: the previous construction had both handlers reading the armed doc, so a barrier-less B parked on the same failure and self-deferred through the HEAD arm, making the in-queue half undiscriminable. Here the park rejection is DEFERRED until both entries are provably queued, so the mid-pass half cannot be what saves the order. Mutation: empty the barrier loop in failHeadEventLoadPark → B1 consequences while A2 is deferred and the log reads ["A","B","A"])', async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+
+    const compiled = await clientRuntime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: DISJOINT_CLOSURE_LOG_PATTERN }],
+    }, { space });
+    // `gate` is its OWN doc, linked into the argument: that is what makes
+    // pushA's closure a strict superset of pushB's.
+    const gateCell = clientRuntime.getCell<number>(
+      space,
+      "in-queue-barrier-gate",
+      undefined,
+    );
+    const argument = clientRuntime.getCell<
+      { log: string[]; gate: unknown }
+    >(space, "in-queue-barrier-arg", undefined);
+    const result = clientRuntime.getCell<Record<string, unknown>>(
+      space,
+      "in-queue-barrier-result",
+      compiled.resultSchema,
+    );
+    await gateCell.sync();
+    await argument.sync();
+    await result.sync();
+    {
+      const seed = clientRuntime.edit();
+      gateCell.withTx(seed).set(0);
+      argument.withTx(seed).set({ log: [], gate: gateCell });
+      expect((await seed.commit()).error).toBeUndefined();
+    }
+    {
+      const tx = clientRuntime.edit();
+      clientRuntime.run(tx, compiled, argument, result);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    const argumentId = argument.getAsNormalizedFullLink().id;
+    const gateId = gateCell.getAsNormalizedFullLink().id;
+    // The construction only means anything if the gate really is a separate
+    // doc — otherwise arming it would arm both closures again (the F3 trap).
+    expect(gateId, "the gate must be its own doc, not a path in the argument")
+      .not.toBe(argumentId);
+    const storedLog =
+      (): string[] => ((Engine.read(engine, { id: argumentId })?.value as
+        | { log?: string[] }
+        | undefined)?.log ?? []);
+    const send = (stream: "a" | "b") =>
+      (result.key(stream) as unknown as { send(value: unknown): unknown })
+        .send({});
+
+    GatedStorageManager.loadParkFailHits = 0;
+    const park = Promise.withResolvers<void>();
+    park.promise.catch(() => {});
+    try {
+      // Warm the piece and stream `a`'s sidecar, unarmed.
+      send("a");
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(
+        () => storedLog().length === 1,
+        "the warm-up consequence to land",
+      );
+      expect(storedLog()).toEqual(["A"]);
+
+      // Arm the failure on the GATE doc — pushA's closure only — and HOLD
+      // the park open rather than failing it now.
+      GatedStorageManager.loadParkSettle = park.promise;
+      GatedStorageManager.loadParkFailDocId = gateId;
+      GatedStorageManager.loadParkFailAddress = {
+        space,
+        scope: "space",
+        id: gateId,
+      };
+
+      const processedBefore = host!.stats().events.processed;
+      send("a"); // A2 arrives first
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      send("b"); // B1 second
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+
+      // THE CONSTRUCTION: wait until BOTH entries have been queued into the
+      // scheduler (processed counts queueEvent calls per drain pass) and A2
+      // is provably PARKED on the held settle. At this instant the queue is
+      // [A2 parked at head, B1 behind it] — B1 is exactly what the in-queue
+      // sweep must reach, and the mid-pass half is irrelevant because no
+      // deferral has happened yet.
+      await waitUntil(
+        () =>
+          host!.stats().events.processed >= processedBefore + 2 &&
+          GatedStorageManager.loadParkFailHits > 0,
+        "both entries queued with A2 parked on the held load",
+      );
+      expect(storedLog(), "neither may have run while A2 holds the head")
+        .toEqual(["A"]);
+
+      // Now fail the park. A2 defers; the in-queue barrier must take B1 with
+      // it even though B1's own closure is perfectly loadable.
+      park.reject(new Error("memory session revoked: unauthorized (pin seam)"));
+      await waitUntil(
+        () => host!.stats().events.loadParkDeferrals >= 2,
+        "the head deferral and its barrier victim",
+      );
+      expect(
+        storedLog(),
+        "B1 must not consequence while the earlier-arrived A2 is deferred",
+      ).toEqual(["A"]);
+
+      // Heal: both re-drain in arrival order.
+      GatedStorageManager.loadParkFailDocId = undefined;
+      GatedStorageManager.loadParkFailAddress = undefined;
+      GatedStorageManager.loadParkSettle = undefined;
+
+      await waitUntil(
+        () => storedLog().length === 3,
+        "all three consequences to land after the load failure clears",
+        30_000,
+      );
+      // THE PIN: arrival order. Without the in-queue sweep B1 runs at the
+      // moment A2 defers and the log reads ["A","B","A"].
+      expect(storedLog()).toEqual(["A", "A", "B"]);
+      expect(host!.stats().events.dropped).toBe(0);
+    } finally {
+      GatedStorageManager.loadParkFailDocId = undefined;
+      GatedStorageManager.loadParkFailAddress = undefined;
+      GatedStorageManager.loadParkSettle = undefined;
+      park.reject(new Error("pin teardown"));
+      cancelDemand();
+    }
+  });
+
+  it("the typed-cause budget bypass, discriminated: a PERSISTENTLY failing load defers past the cold-view give-up threshold without ever hardening into §5's drop (the fix's central posture — `cause: \"load-park\"` keeps these deferrals off `EVENT_DEFERRAL_DROP_THRESHOLD`, because that budget exists for a piece that never materializes, not for an input that exists and only failed to READ. Independent review F4. Mutation: delete the arm's trailing delete/delete/rescan/return so it falls through into the threshold accounting → the entry hardens into a sealed dropped notice after ~8 backstop ticks, restoring the at-least-once discharge this PR removes)", async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const { argument, result } = await standUp(clientRuntime, BUMP_PATTERN, {
+      arg: "budget-bypass-arg",
+      result: "budget-bypass-result",
+    });
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    const argumentId = argument.getAsNormalizedFullLink().id;
+    const storedValue = () =>
+      (Engine.read(engine, { id: argumentId })?.value as
+        | { value?: number }
+        | undefined)?.value ?? 0;
+    const entriesOf = (sidecarId: string) =>
+      ((Engine.read(engine, { id: sidecarId })?.value ??
+        {}) as StreamEventsDocValue).entries ?? [];
+    const allEntries = () =>
+      sidecarIdsIn(engine).flatMap((id) => entriesOf(id));
+    const bump = () =>
+      (result.key("bump") as unknown as { send(value: unknown): unknown })
+        .send({});
+
+    GatedStorageManager.loadParkFailHits = 0;
+    try {
+      // Warm the piece and its sidecar, unarmed.
+      bump();
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(() => storedValue() === 1, "the warm-up bump to land");
+
+      // A PERSISTENT failure — never healed inside this pin.
+      GatedStorageManager.loadParkFailDocId = argumentId;
+      GatedStorageManager.loadParkFailAddress = {
+        space,
+        scope: "space",
+        id: argumentId,
+      };
+      bump();
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+
+      // Causally closed on the COUNTER, not a sleep: one pending event means
+      // one deferral per backstop tick, so crossing the cold-view budget is
+      // what we wait for. EVENT_DEFERRAL_DROP_THRESHOLD is 8; going past it
+      // is the whole point. The seal arm is in the predicate too, so that a
+      // regression reds on the ASSERTION below rather than on a timeout:
+      // under the fall-through mutation the counter stops at the threshold
+      // (the entry is consequenced and stops deferring) and would otherwise
+      // just hang here.
+      await waitUntil(
+        () =>
+          host!.stats().events.loadParkDeferrals > 8 ||
+          allEntries().some((entry) =>
+            (entry as { status?: string }).status !== undefined
+          ),
+        "the deferral count to pass the cold-view give-up threshold " +
+          "(or an entry to harden, which is the regression)",
+        30_000,
+      );
+
+      // THE PIN: past the threshold, still no consequence. Under the
+      // fall-through mutation the entry is sealed
+      // {status: "dropped", consequenced: true} by now.
+      expect(
+        allEntries().filter((entry) =>
+          (entry as { status?: string }).status !== undefined
+        ),
+        "a persistent load failure must never harden into §5's drop",
+      ).toEqual([]);
+      expect(host!.stats().events.dropped, "nothing terminal was sealed")
+        .toBe(0);
+      expect(
+        allEntries().filter((entry) => entry.consequenced === true).length,
+        "only the warm-up entry is consequenced",
+      ).toBe(1);
+      expect(storedValue(), "the handler never ran").toBe(1);
+
+      // And it is a DEFERRAL, not a wedge: healing still delivers it once.
+      GatedStorageManager.loadParkFailDocId = undefined;
+      GatedStorageManager.loadParkFailAddress = undefined;
+      await waitUntil(
+        () => storedValue() === 2,
+        "the long-deferred event to deliver after the failure clears",
+        30_000,
+      );
+      expect(host!.stats().events.dropped).toBe(0);
+    } finally {
+      GatedStorageManager.loadParkFailDocId = undefined;
+      GatedStorageManager.loadParkFailAddress = undefined;
       cancelDemand();
     }
   });

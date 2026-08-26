@@ -6332,10 +6332,19 @@ supply; OW29/OW32/OW34 closed):
     it → red) but NOT its POSITION — measured, not assumed: with the
     check moved back to the pre-review position the pin still passes.
     Discriminating the position needs the park rejection to land inside
-    the stream-doc-sync window specifically, which takes a two-stage
-    drain gate plus a controllable park rejection interleaved in a
-    fixed order; a flaky pin in this arm would be worse than none, so
-    the position rests on the code comment and this record. Two
+    the stream-doc-sync window specifically. **PIN OWED, CONSTRUCTION
+    SKETCHED** (review F7 corrected this seat's earlier "a flaky pin
+    would be worse than none" — the construction is fully CAUSAL, not
+    timing-raced, so that framing overstated): hold B at its sidecar
+    sync (the shipped gate), wait for A2's park to be CREATED (a
+    parkObserved hook in the seam, as the scheduler pin already does),
+    arm a second gate on B's stream-doc sync (`cell.sync()` always
+    reaches `syncCell` — verified, no warm-cache short-circuit),
+    release the sidecar gate, hold at the stream gate, reject the park,
+    disarm, release. Every step causally ordered, no timers. Recorded
+    rather than built here only to keep this round scoped to the two P1
+    pins; see review-6365-report.md F7. Until it exists the position
+    rests on the code comment and this record. Two
     exclusions, deliberate: cross-space
     queue neighbours (§2's order is per-space) and LT1 in-process
     copies (`served` with no `streamEntry` — no durable entry to
@@ -6364,6 +6373,36 @@ supply; OW29/OW32/OW34 closed):
     load holds the space out of its idle park. A give-up arm for that
     case is OW54's separately tracked territory and was deliberately
     NOT built here.
+    **The price, quantified (review §2 — it was asserted but not
+    costed).** Per poisoned space, per 250 ms backstop tick: one drain
+    pass, one queueEvent, one preflight, one park, one real load attempt
+    against the failing backend, and 1+N WARN lines (head plus barrier
+    victims). So ~4 load attempts/s and, for a 10-event backlog, ~44 log
+    lines/s sustained — a WARN-flood cost the fix frames as
+    observability. Same-space later served events are head-of-line
+    blocked indefinitely BY DESIGN (order over liveness). Cross-space
+    events are not deferred, but the scheduler is head-serial, so the
+    poisoned head occupies the head slot for one park-to-rejection
+    latency every tick — negligible for the production error (a revoked
+    session rejects immediately) but a TIMEOUT-class slow failure would
+    stall co-scheduled dispatch at 4 Hz. That slow-failure case is what
+    makes OW54 worth scheduling rather than itself deferring
+    indefinitely.
+    **Weakening recorded (review F5), and it is DELIBERATE but was
+    unstated.** The arm's `#eventDeferrals.delete(entry.eventId)` on
+    every load-park deferral — head and barrier victims alike — means
+    the cold-view give-up guarantee is no longer "8 deferrals" but "8
+    CONSECUTIVE cold-view deferrals uninterrupted by a load-park
+    failure". Under a FLAPPING serving session (revoke/remount cycling
+    — the production mechanism here) a genuinely unrunnable event whose
+    cold-view deferrals interleave with load-park failures at least once
+    per ~7 ticks never hardens, wedging the park criterion active for an
+    event T3 licenses dropping. The intent was only to keep the budgets
+    unmixed; the sharper alternative — leave the cold-view count ALONE
+    rather than resetting it, since not-mixing is not the same as
+    resetting — preserves the hardening bound and belongs in OW54's
+    design space. Not changed here: it is a behaviour change to the
+    cold-view arm, which this deliberately scoped pass does not touch.
     Observability gap CLOSED with the fix: `events.loadParkDeferrals`
     counts each deferral (head and barrier alike) and `events.dropped`
     counts terminal drop notices sealed onto a durable entry — the
@@ -6384,17 +6423,70 @@ supply; OW29/OW32/OW34 closed):
     A third pin covers the mid-pass half: the drain's sync gate holds a
     pass at B's sidecar with A2's park already failed inside it, and
     after healing and release the log still reads `["A","A","B"]`.
-    Mutations, all red: restore the drop routing → both entries seal
-    dropped and the log never grows past the warm-up (and the
-    scheduler-level pin reads `kind: "dropped"`); skip the in-queue
-    barrier loop → `["A","B","A"]`, the OW45 arm-B b01 overtake shape;
-    drop the `#loadParkDeferredInPass` check → the same overtake through
-    the mid-pass gap. Battery green at the fix: executor-events-down
-    (24 steps, the α3 retry machinery untouched), executor-fan-out,
+    **CORRECTED 2026-08-26 (independent review F3 — this record briefly
+    claimed a mutation red that does not reproduce, the one thing it
+    must never do).** The original in-queue row was measured BEFORE the
+    mid-pass half existed and never re-run after; with both halves
+    present, emptying the in-queue loop leaves the suite GREEN, because
+    that pin's two handlers both read the ARMED doc — so a barrier-less
+    B parks on the same failure and self-defers through the HEAD arm.
+    The in-queue half is now discriminated by its own pin: the
+    `DISJOINT_CLOSURE_LOG_PATTERN` gives `pushA` an extra `gate` input
+    linked to a SEPARATE doc, the seam arms only that doc (so B stays
+    perfectly runnable), and the park rejection is HELD
+    (`loadParkSettle`) until both entries are provably queued —
+    `events.processed` up by two with the head parked — so the mid-pass
+    half cannot be what preserves the order. A fifth pin discriminates
+    the typed-cause budget bypass (review F4, the posture's load-bearing
+    half, previously unpinned): a PERSISTENT failure, waited past
+    `EVENT_DEFERRAL_DROP_THRESHOLD` on the `loadParkDeferrals` counter
+    rather than a sleep, must still seal nothing — then heals and
+    delivers once.
+    Mutations, all red, all re-run at this head: restore the drop
+    routing → both entries seal dropped and the log never grows past the
+    warm-up (and the scheduler-level pin reads `kind: "dropped"`); empty
+    the in-queue barrier loop → "B1 must not consequence while the
+    earlier-arrived A2 is deferred", `["A","B","A"]`, the OW45 arm-B b01
+    overtake shape; drop the `#loadParkDeferredInPass` check → the same
+    overtake through the mid-pass gap; fall the load-park arm through
+    into the threshold accounting → "a persistent load failure must
+    never harden into events.md §5's drop". Battery green at the fix:
+    executor-events-down
+    (26 steps, the α3 retry machinery untouched), executor-fan-out,
     executor-serving-loop, scheduler-event-load-park,
     executor-space-server, executor-watermark, executor-stats,
     executor-wave, executor-cross-space, and the full
     `packages/runner` package (1301 passed / 7549 steps / 0 failed).
+    **THE BARRIER INVARIANT AS STATED IS NOT CLOSED — a THIRD path gets
+    past both halves (review F1, structural from the code; not built as
+    a repro, and NOT a landing blocker because both the re-mark and the
+    shaper routing pre-date this PR and the pre-fix behaviour — terminal
+    drop — was strictly worse).** The drain re-marks durable entries
+    renderer-trusted before queueing (space-server.ts), and
+    `Scheduler.queueEvent` routes any renderer-trusted payload with
+    `doNotLoadPieceIfNotRunning=false` — what the drain passes — through
+    `holdShapedEvent`. The wake shaper's first `BURST_CAPACITY` (10)
+    deliveries per piece-group are synchronous, so the barrier sees
+    those; overflow sits in `group.pending` and releases as a batch on
+    the next window tick (≤1000 ms) straight into `queueSchedulerEvent`,
+    knowing nothing of a barrier sweep that ran while it was held.
+    Scenario, and the fresh-space backlog drain IS the OW45 window:
+    >10 renderer-trusted served entries for one piece drain in one pass;
+    1–10 queue, 11+ are shaper-held with their `#drainInFlight` guards
+    set (so re-drains skip them). Head 1's park fails → the in-queue
+    sweep defers 2–10 and the mid-pass break stops further queueing, but
+    11+ are in NEITHER place. The window tick releases 11 into the
+    now-empty queue; the load heals (this failure heals on next mount,
+    seconds); the rescan re-drains 1–10 BEHIND 11 → 11's consequence
+    lands ahead of 1–10, the §2 inversion the barrier exists to prevent.
+    (If the load still fails when 11 heads, 11 self-parks and order
+    self-heals; the overtake needs the heal inside the
+    release-to-rescan window — a real race for a transient failure.)
+    Named follow-up shape: exempt DRAIN RE-DISPATCHES from shaping —
+    they are re-deliveries of already-shaped input, so re-shaping
+    double-charges the timing budget anyway — or have the shaper's
+    release re-check barrier state. Sibling PRE-EXISTING hazard minted
+    separately as **OW63** below.
     STILL OPEN, untouched by this fix: shard 9
     (`cfc-staged-publish`) stays UNHARVESTED — symptom-compatible,
     no store evidence, classification open — and the #6248 lane
@@ -7786,6 +7878,34 @@ supply; OW29/OW32/OW34 closed):
     never landed at all (`deferred-start-conflict-exhausted` never
     became a live log key; the recovery's keys are
     `deferred-start-catchup` / `deferred-start-catchup-failed`).**
+  - **OW63 — the wake shaper can invert same-space arrival order
+    across PIECES, with no load-park involved (PRE-EXISTING; minted
+    2026-08-26 from the independent review of PR #6365, finding F1's
+    sibling). NOT OWED BY THAT PR** — it neither introduced nor
+    worsened this; it is recorded because reading the barrier's
+    reachability exposed it. events.md §2 orders served entries
+    "across streams in one space, arrival order", but the wake shaper
+    buckets held events per PIECE-GROUP, and two pieces in one space
+    have SEPARATE buckets with independent burst budgets and window
+    ticks. So a later-arrived entry for piece Y whose bucket is cold
+    (synchronous, inside `BURST_CAPACITY`) can consequence ahead of an
+    earlier-arrived entry for piece X whose bucket is saturated and
+    therefore held to the next window tick (≤1000 ms). No failure of
+    any kind is required — only a burst on one piece and normal
+    traffic on another, which is ordinary multi-piece load. What is
+    NOT yet established: whether any §2-visible consequence ordering
+    actually depends on cross-piece order in practice (same-piece and
+    same-stream order are preserved by the shaper's own FIFO), so the
+    first move is to decide whether §2's "across streams in one space"
+    is meant to bind across pieces at all — a SPEC question for the
+    owner before it is a code question. If it does bind, the candidate
+    shapes are the same two F1 names for the load-park case: exempt
+    drain re-dispatches from shaping (re-deliveries of already-shaped
+    input — re-shaping double-charges the timing budget), or give the
+    shaper a space-level ordering constraint rather than a per-group
+    one. Unpinned and unmeasured; structural from the code only
+    (`wake-shaping.ts`'s per-group `pending` + window tick, and the
+    drain's per-entry `queueEvent`).
 
 ## 4. Standing rule
 
