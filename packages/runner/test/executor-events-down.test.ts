@@ -3387,7 +3387,7 @@ describe("Phase 3 events-down (serving side)", () => {
     }
   });
 
-  it("the load-park barrier reaches entries the drain has NOT queued yet: a park failure landing MID-PASS stops the pass, instead of letting the next-arrived entry queue behind the barrier's back and overtake (the scheduler-side barrier can only hold what is already IN the event queue, and each new sidecar's sync() is an await — so the gap is real; held open here with the drain's sync gate on B's sidecar. Mutation: drop the #loadParkDeferredInPass check in #drainStreamEvents → B1 queues into the healed load and the log reads [\"A\",\"B\",\"A\"], the OW45 arm-B b01 overtake shape)", async () => {
+  it('the load-park barrier reaches entries the drain has NOT queued yet: a park failure landing MID-PASS stops the pass, instead of letting the next-arrived entry queue behind the barrier\'s back and overtake (the scheduler-side barrier can only hold what is already IN the event queue, and each new sidecar\'s sync() is an await — so the gap is real; held open here with the drain\'s sync gate on B\'s sidecar. Mutation: drop the #loadParkDeferredInPass check in #drainStreamEvents → B1 queues into the healed load and the log reads ["A","B","A"], the OW45 arm-B b01 overtake shape)', async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
 
