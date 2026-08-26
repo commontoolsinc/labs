@@ -1,5 +1,13 @@
 # Memory wire chunking
 
+**Status: shelved (2026-08-25).** The outage that motivated this plan was
+resolved by restoring sync-schema-table negotiation under
+`contentAddressedSchemas` (#6337) — the payload dropped ~9× and the 64 MiB
+cliff receded to roughly 6–7× the current board. The chunk layer remains a
+design option for the memory delivery owner, recorded in labs#6319. On this
+branch, stage 1 (the codec and flag plumbing) is complete and reviewed; the
+stage 2 wiring exists only as an unfinished WIP commit.
+
 The memory v2 protocol delivers each server or client message as a single
 WebSocket text frame. A sync response's size is proportional to the watched
 document's graph closure, and nothing bounds it: the deployed topics board's
