@@ -357,4 +357,124 @@ describe("operation storage capability", () => {
     cancelSecond();
     await storage.closeNow();
   });
+
+  it("closes operation watches that resolve during replica teardown", async () => {
+    const sync: SessionSync = {
+      type: "sync",
+      fromSeq: 0,
+      toSeq: 0,
+      upserts: [],
+      removes: [],
+    };
+    const client = {
+      serverFlags: { applyOp: true, operationCodecs: ["test@1"] },
+      close: () => Promise.resolve(),
+    } as unknown as MemoryV2Client.Client;
+    const createStorage = (session: MemoryV2Client.SpaceSession) =>
+      new (class extends V2StorageManager {
+        constructor() {
+          super(
+            { as: signer, memoryHost: new URL("memory://") },
+            { create: () => Promise.resolve({ client, session }) },
+          );
+        }
+      })();
+
+    const addition = defer<{
+      view: MemoryV2Client.WatchView;
+      sync: SessionSync;
+      precedingSyncs: SessionSync[];
+    }>();
+    const lateAdditionView = MemoryV2Client.WatchView.fromSync(sync);
+    const addingStorage = createStorage({
+      watchAddSync: () => addition.promise,
+    } as unknown as MemoryV2Client.SpaceSession);
+    const addingReplica = addingStorage.open(signer.did()).replica;
+    if (!hasOperationStorageCapability(addingReplica)) return;
+    const subscribing = addingReplica.subscribeOperationField({
+      id: "of:late-addition",
+      path: toValuePath([]),
+    }, () => {});
+    await Promise.resolve();
+    await addingStorage.closeNow();
+    addition.resolve({
+      view: lateAdditionView,
+      sync,
+      precedingSyncs: [],
+    });
+    await expect(subscribing).rejects.toThrow("memory replica closed");
+
+    const removal = defer<{
+      view: MemoryV2Client.WatchView;
+      sync: SessionSync;
+      precedingSyncs: SessionSync[];
+    }>();
+    const activeView = MemoryV2Client.WatchView.fromSync(sync);
+    const lateRemovalView = MemoryV2Client.WatchView.fromSync(sync);
+    const removingStorage = createStorage({
+      watchAddSync: () =>
+        Promise.resolve({ view: activeView, sync, precedingSyncs: [] }),
+      watchRemoveSync: () => removal.promise,
+    } as unknown as MemoryV2Client.SpaceSession);
+    const removingReplica = removingStorage.open(signer.did()).replica;
+    if (!hasOperationStorageCapability(removingReplica)) return;
+    const cancel = await removingReplica.subscribeOperationField({
+      id: "of:late-removal",
+      path: toValuePath([]),
+    }, () => {});
+    cancel();
+    await Promise.resolve();
+    await removingStorage.closeNow();
+    removal.resolve({
+      view: lateRemovalView,
+      sync,
+      precedingSyncs: [],
+    });
+    await Promise.resolve();
+  });
+
+  it("warns when removing an operation watch fails", async () => {
+    const sync: SessionSync = {
+      type: "sync",
+      fromSeq: 0,
+      toSeq: 0,
+      upserts: [],
+      removes: [],
+    };
+    const view = MemoryV2Client.WatchView.fromSync(sync);
+    const session = {
+      watchAddSync: () => Promise.resolve({ view, sync, precedingSyncs: [] }),
+      watchRemoveSync: () => Promise.reject(new Error("remove failed")),
+    } as unknown as MemoryV2Client.SpaceSession;
+    const client = {
+      serverFlags: { applyOp: true, operationCodecs: ["test@1"] },
+      close: () => Promise.resolve(),
+    } as unknown as MemoryV2Client.Client;
+    const storage = new (class extends V2StorageManager {
+      constructor() {
+        super(
+          { as: signer, memoryHost: new URL("memory://") },
+          { create: () => Promise.resolve({ client, session }) },
+        );
+      }
+    })();
+    const replica = storage.open(signer.did()).replica;
+    if (!hasOperationStorageCapability(replica)) return;
+    const warnings: unknown[][] = [];
+    const original = console.warn;
+    console.warn = (...values: unknown[]) => warnings.push(values);
+    try {
+      const cancel = await replica.subscribeOperationField({
+        id: "of:failed-removal",
+        path: toValuePath([]),
+      }, () => {});
+      cancel();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(warnings).toHaveLength(1);
+    } finally {
+      console.warn = original;
+      await storage.closeNow();
+    }
+  });
 });

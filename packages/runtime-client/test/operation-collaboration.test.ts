@@ -473,4 +473,33 @@ describe("RuntimeClient operation collaboration", () => {
       .rejects.toThrow("does not support");
     expect(subscribed).toBeDefined();
   });
+
+  it("cancels operation subscriptions during worker disposal", async () => {
+    let cancellations = 0;
+    const telemetry = {
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    };
+    const runtime = {
+      storageManager: { synced: () => Promise.resolve() },
+      dispose: () => Promise.resolve(),
+    };
+    const processor = new (RuntimeProcessor as unknown as {
+      new (
+        runtime: unknown,
+        controller: unknown,
+        space: unknown,
+        identity: unknown,
+        telemetry: unknown,
+      ): RuntimeProcessor;
+    })(runtime, {}, "did:key:z6Mk-dispose", {}, telemetry);
+    (processor as any).operationSubscriptions.set(
+      "subscription:dispose",
+      () => cancellations++,
+    );
+
+    await processor.dispose();
+
+    expect(cancellations).toBe(1);
+  });
 });

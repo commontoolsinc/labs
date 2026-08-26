@@ -27,6 +27,7 @@ import {
 } from "../v2/operation-codec.ts";
 import {
   type ApplyOpOperation,
+  encodeMemoryBoundary,
   streamEntriesDocId,
   toValuePath,
 } from "../v2.ts";
@@ -573,6 +574,55 @@ describe("v2-operation-engine", () => {
         retainedFrom: { epoch: 1, version: 2 },
         operations: [{ cursor: { epoch: 1, version: 3 } }],
       });
+
+      expect(pruneOperationFieldHistory(engine, {
+        id: "of:retained",
+        path: toValuePath(["body"]),
+      })).toEqual({
+        cursor: { epoch: 1, version: 2 },
+        prunedOperations: 0,
+      });
+      const replay = engine.database.prepare(`
+        SELECT payload FROM op_integrated WHERE id = ? AND version = 3
+      `).get("of:retained") as { payload: string };
+      engine.database.prepare(`
+        UPDATE op_integrated SET payload = ? WHERE id = ? AND version = 3
+      `).run(
+        encodeMemoryBoundary({ updates: [] }),
+        "of:retained",
+      );
+      expect(() =>
+        pruneOperationFieldHistory(engine, {
+          id: "of:retained",
+          path: toValuePath(["body"]),
+        })
+      ).toThrow("did not reproduce integrated history");
+      engine.database.prepare(`
+        UPDATE op_integrated SET payload = ? WHERE id = ? AND version = 3
+      `).run(replay.payload, "of:retained");
+
+      engine.database.prepare(`
+        UPDATE op_field_epoch SET materialized = ? WHERE id = ?
+      `).run(encodeMemoryBoundary("wrong"), "of:retained");
+      expect(() =>
+        pruneOperationFieldHistory(engine, {
+          id: "of:retained",
+          path: toValuePath(["body"]),
+        })
+      ).toThrow("checkpoint diverged");
+      engine.database.prepare(`
+        UPDATE op_field_epoch SET materialized = ? WHERE id = ?
+      `).run(encodeMemoryBoundary("abcd"), "of:retained");
+
+      engine.database.prepare(`
+        DELETE FROM op_integrated WHERE id = ? AND version = 3
+      `).run("of:retained");
+      expect(() =>
+        pruneOperationFieldHistory(engine, {
+          id: "of:retained",
+          path: toValuePath(["body"]),
+        })
+      ).toThrow("not contiguous");
     } finally {
       close(engine);
       await Deno.remove(path);
@@ -1119,7 +1169,7 @@ describe("v2-operation-engine", () => {
           operations: [{
             op: "set",
             id: "of:malformed",
-            value: { value: { body: "abc" } },
+            value: { value: { body: "abc", items: ["x"] } },
           }],
         },
       });
@@ -1173,7 +1223,7 @@ describe("v2-operation-engine", () => {
         ).toThrow(error);
         expect(counts()).toEqual(before);
         expect(read(engine, { id: "of:malformed" })).toEqual({
-          value: { body: "abc" },
+          value: { body: "abc", items: ["x"] },
         });
         expect(queryOperationField(engine, {
           id: "of:malformed",
@@ -1188,6 +1238,10 @@ describe("v2-operation-engine", () => {
       fail({
         ...operation,
         path: toValuePath(Array.from({ length: 257 }, () => "body")),
+      }, ProtocolError);
+      fail({
+        ...operation,
+        path: toValuePath(["items", "not-an-index"]),
       }, ProtocolError);
       fail({
         ...operation,
@@ -1336,6 +1390,85 @@ describe("v2-operation-engine", () => {
         id: "of:empty-change",
         path: toValuePath(["body"]),
       })).toMatchObject({ active: false, cursor: null });
+    } finally {
+      close(engine);
+      await Deno.remove(path);
+    }
+  });
+
+  it("detects durable entity divergence beneath an active field", async () => {
+    const { engine, path } = await openTestEngine();
+    try {
+      applyCommit(engine, {
+        sessionId: "session:setup",
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:diverged",
+            value: { value: { body: "a" } },
+          }],
+        },
+      });
+      applyCommit(engine, {
+        sessionId: "session:writer",
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "apply-op",
+            id: "of:diverged",
+            path: toValuePath(["body"]),
+            codec: CODEMIRROR_CHANGESET_CODEC,
+            submissionId: "writer:1",
+            base: null,
+            baselineHash: operationBaselineHash("a"),
+            payload: {
+              updates: [{ clientId: "writer", changes: changes(1, 1, "b") }],
+            },
+          }],
+        },
+      });
+      engine.database.prepare(`
+        UPDATE revision SET data = ?
+        WHERE id = ? AND op = 'patch'
+      `).run(
+        encodeMemoryBoundary([{
+          op: "replace",
+          path: "/value/body",
+          value: "corrupt",
+        }]),
+        "of:diverged",
+      );
+      expect(() =>
+        applyCommit(engine, {
+          sessionId: "session:writer",
+          commit: {
+            localSeq: 2,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "apply-op",
+              id: "of:diverged",
+              path: toValuePath(["body"]),
+              codec: CODEMIRROR_CHANGESET_CODEC,
+              submissionId: "writer:2",
+              base: { epoch: 1, version: 1 },
+              payload: { updates: [] },
+            }],
+          },
+        })
+      ).toThrow("materialization diverged");
+
+      engine.database.prepare("DELETE FROM revision WHERE id = ?").run(
+        "of:diverged",
+      );
+      expect(() =>
+        queryOperationField(engine, {
+          id: "of:diverged",
+          path: toValuePath(["body"]),
+        })
+      ).toThrow("field path is missing");
     } finally {
       close(engine);
       await Deno.remove(path);

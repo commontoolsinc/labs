@@ -66,8 +66,44 @@ describe("cf inspect operations", () => {
             })),
           },
         });
+        applyCommit(engine, {
+          sessionId: "session:writer",
+          commit: {
+            localSeq: 2,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "apply-op",
+              id: "of:b",
+              path: toValuePath(["body"]),
+              codec: CODEMIRROR_CHANGESET_CODEC,
+              submissionId: "b:2",
+              base: { epoch: 1, version: 1 },
+              payload: {
+                updates: [{
+                  clientId: "b",
+                  changes: [2, [0, "z"]],
+                }],
+              },
+            }, {
+              op: "release-op-field",
+              id: "of:b",
+              path: toValuePath(["body"]),
+              codec: CODEMIRROR_CHANGESET_CODEC,
+              cursor: { epoch: 1, version: 2 },
+            }],
+          },
+        });
       } finally {
         close(engine);
+      }
+
+      const corrupt = new Database(path);
+      try {
+        corrupt.prepare(
+          "DELETE FROM op_checkpoint WHERE id = ? AND version = 0",
+        ).run("of:b");
+      } finally {
+        corrupt.close();
       }
 
       expect(await output(["operations", path, "of:missing"])).toContain(
@@ -77,6 +113,17 @@ describe("cf inspect operations", () => {
       expect(human).toContain("active\tof:a");
       expect(human).toContain("submissions=1 integrated=1 checkpoints=1");
       expect(human).toContain("field list truncated at 1");
+
+      const unhealthy = await output([
+        "operations",
+        path,
+        "of:b",
+        "--history-limit",
+        "1",
+      ]);
+      expect(unhealthy).toContain("inactive\tof:b");
+      expect(unhealthy).toContain("INCONSISTENT");
+      expect(unhealthy).toContain("submissions=1+ integrated=1+");
 
       const json = JSON.parse(
         await output([

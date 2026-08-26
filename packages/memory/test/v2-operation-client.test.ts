@@ -9,6 +9,7 @@ import {
   type Transport,
 } from "../v2/client.ts";
 import { Server, SessionRegistry } from "../v2/server.ts";
+import { sameWatchSpec } from "../v2/server-sync.ts";
 import {
   CODEMIRROR_CHANGESET_CODEC,
   operationBaselineHash,
@@ -119,6 +120,31 @@ class ReconnectableOperationTransport implements Transport {
 }
 
 describe("v2-operation-client", () => {
+  it("compares every operation-watch cursor and address dimension", () => {
+    const watch = {
+      id: "operation:body",
+      kind: "operation" as const,
+      query: {
+        id: "of:watch",
+        path: toValuePath(["body"]),
+      },
+    };
+
+    expect(sameWatchSpec(watch, structuredClone(watch))).toBe(true);
+    expect(sameWatchSpec(watch, {
+      ...watch,
+      query: { ...watch.query, branch: "feature" },
+    })).toBe(false);
+    expect(sameWatchSpec(watch, {
+      ...watch,
+      query: { ...watch.query, scope: "user" },
+    })).toBe(false);
+    expect(sameWatchSpec(watch, {
+      ...watch,
+      query: { ...watch.query, after: { epoch: 1, version: 2 } },
+    })).toBe(false);
+  });
+
   it("rejects operation requests when the server lacks the capability", async () => {
     const client = {
       serverFlags: { applyOp: false },
@@ -162,6 +188,137 @@ describe("v2-operation-client", () => {
       id: "of:unsupported",
       path: toValuePath([]),
     })).rejects.toThrow("does not support apply-op");
+  });
+
+  it("reports operation query, reset, and codec failures through the server", async () => {
+    const server = new Server({
+      ...testSessionOpenServerOptions,
+      store: new URL("memory://memory-v2-operation-server-errors"),
+      operationCheckpointInterval: 1,
+    });
+    const client = await connect({ transport: loopback(server) });
+    const spaceId = "did:key:z6Mk-memory-v2-operation-server-errors";
+    const session = await client.mount(
+      spaceId,
+      {},
+      testSessionOpenAuthFactory,
+    );
+
+    try {
+      const missing = new SpaceSession(
+        client,
+        spaceId,
+        "session:missing",
+        "token",
+        0,
+      );
+      await expect(missing.queryOperationField({
+        id: "of:missing",
+        path: toValuePath([]),
+      })).rejects.toThrow("Session is not open");
+      expect(
+        (await server.operationFieldQuery({
+          type: "op.query",
+          requestId: "query:unknown-session",
+          space: spaceId,
+          sessionId: "session:missing",
+          query: { id: "of:missing", path: toValuePath([]) },
+        })).error?.name,
+      ).toBe("SessionError");
+
+      expect(
+        (await server.operationFieldQuery({
+          type: "op.query",
+          requestId: "query:malformed",
+          space: spaceId,
+          sessionId: session.sessionId,
+          query: { id: "", path: toValuePath([]) },
+        })).error?.name,
+      ).toBe("ProtocolError");
+
+      await session.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:reset-query",
+          value: { value: { body: "a" } },
+        }],
+      });
+      await session.transact({
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "apply-op",
+          id: "of:reset-query",
+          path: toValuePath(["body"]),
+          codec: CODEMIRROR_CHANGESET_CODEC,
+          submissionId: "reset:1",
+          base: null,
+          baselineHash: operationBaselineHash("a"),
+          payload: {
+            updates: [{
+              clientId: "writer",
+              changes: ChangeSet.of({ from: 1, insert: "b" }, 1).toJSON(),
+            }],
+          },
+        }],
+      });
+      await session.transact({
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "apply-op",
+          id: "of:reset-query",
+          path: toValuePath(["body"]),
+          codec: CODEMIRROR_CHANGESET_CODEC,
+          submissionId: "reset:2",
+          base: { epoch: 1, version: 1 },
+          payload: {
+            updates: [{
+              clientId: "writer",
+              changes: ChangeSet.of({ from: 2, insert: "c" }, 2).toJSON(),
+            }],
+          },
+        }],
+      });
+      const reset = await server.operationFieldQuery({
+        type: "op.query",
+        requestId: "query:reset",
+        space: spaceId,
+        sessionId: session.sessionId,
+        query: {
+          id: "of:reset-query",
+          path: toValuePath(["body"]),
+          after: { epoch: 1, version: 0 },
+        },
+      });
+      expect(reset.ok?.field.reset).toBe(true);
+
+      const codecFailure = await server.transact({
+        type: "transact",
+        requestId: "transact:codec-failure",
+        space: spaceId,
+        sessionId: session.sessionId,
+        commit: {
+          localSeq: 4,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "apply-op",
+            id: "of:reset-query",
+            path: toValuePath(["body"]),
+            codec: "other@1",
+            submissionId: "reset:bad-codec",
+            base: { epoch: 1, version: 2 },
+            payload: { updates: [] },
+          }],
+        },
+      });
+      expect(codecFailure.error?.name).toBe("OpCodecError");
+    } finally {
+      await client.close();
+      await server.close();
+    }
   });
 
   it("replays preceding operation cursors onto a newly installed watch", async () => {
@@ -678,6 +835,7 @@ describe("v2-operation-client", () => {
           path: toValuePath(["body"]),
         },
       }]);
+      expect(server.watchedRootsForSpace(spaceId)).toEqual([]);
       expect(server.demandedInstancesForSpace(spaceId)).toEqual([]);
 
       await session.watchAddSync([{

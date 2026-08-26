@@ -429,6 +429,58 @@ describe("CodeMirror operation collaboration", () => {
     expect(errors).toHaveLength(1);
   });
 
+  it("reconciles active-to-inactive and epoch changes with pending edits", async () => {
+    let subscriber: ((snapshot: OperationFieldSnapshot) => void) | undefined;
+    const accepted = acceptedResolution("abc", 1, "X");
+    const initial = activeSnapshot("aXbc", accepted);
+    const first = controllerHarness({
+      initial,
+      followup: initial,
+      apply: () => accepted,
+      subscribe: (callback) => subscriber = callback,
+    });
+    await first.controller.start();
+    first.view.dispatch({ changes: { from: 0, insert: "local:" } });
+    subscriber?.(inactiveSnapshot("canonical"));
+    expect(first.errors[0]).toBeInstanceOf(CodeMirrorReconciliationError);
+
+    const second = controllerHarness({
+      initial,
+      followup: initial,
+      apply: () => accepted,
+      subscribe: (callback) => subscriber = callback,
+    });
+    await second.controller.start();
+    second.view.dispatch({ changes: { from: 0, insert: "local:" } });
+    subscriber?.({
+      ...initial,
+      cursor: { epoch: 2, version: 0 },
+      materialized: "canonical",
+      operations: [],
+    });
+    expect(second.errors[0]).toBeInstanceOf(CodeMirrorReconciliationError);
+  });
+
+  it("adopts the first active cursor delivered to an inactive controller", async () => {
+    let subscriber: ((snapshot: OperationFieldSnapshot) => void) | undefined;
+    const { controller, errors } = controllerHarness({
+      initial: inactiveSnapshot("abc"),
+      followup: inactiveSnapshot("abc"),
+      apply: () => acceptedResolution("abc", 1, "X"),
+      subscribe: (callback) => subscriber = callback,
+    });
+    await controller.start();
+    subscriber?.({
+      ...inactiveSnapshot("abc"),
+      active: true,
+      codec: "codemirror-changeset@1",
+      cursor: { epoch: 1, version: 0 },
+    });
+
+    expect(errors).toEqual([]);
+    expect(controller.active).toBe(true);
+  });
+
   it("reinstalls reset and epoch snapshots only without pending edits", async () => {
     let subscriber: ((snapshot: OperationFieldSnapshot) => void) | undefined;
     const initialResolution = acceptedResolution("abc", 1, "X");
@@ -512,6 +564,48 @@ describe("CodeMirror operation collaboration", () => {
     expect(errors[0]?.message).toBe("apply failed");
     expect(cancellations).toBe(1);
     await expect(controller.stop()).rejects.toThrow("local edits pending");
+  });
+
+  it("fails closed when an apply response advertises another codec", async () => {
+    let cancellations = 0;
+    const resolution = {
+      ...acceptedResolution("abc", 1, "X"),
+      codec: "other@1",
+    };
+    const { controller, view, errors } = controllerHarness({
+      initial: inactiveSnapshot("abc"),
+      followup: inactiveSnapshot("abc"),
+      apply: () => resolution,
+      cancel: () => cancellations++,
+    });
+
+    await controller.start();
+    view.dispatch({ changes: { from: 1, insert: "X" } });
+    await controller.localDocChanged();
+
+    expect(errors[0]?.message).toContain("received operation codec other@1");
+    expect(cancellations).toBe(1);
+  });
+
+  it("releases an active controller whose field has no cursor", async () => {
+    let releases = 0;
+    let cancellations = 0;
+    const { controller } = controllerHarness({
+      initial: inactiveSnapshot("abc"),
+      followup: inactiveSnapshot("abc"),
+      apply: () => acceptedResolution("abc", 1, "X"),
+      cancel: () => cancellations++,
+      release: () => {
+        releases++;
+      },
+    });
+
+    await controller.start();
+    await controller.release();
+
+    expect(releases).toBe(0);
+    expect(cancellations).toBe(1);
+    expect(controller.active).toBe(false);
   });
 
   it("releases an active field and accepts its inactive notification", async () => {

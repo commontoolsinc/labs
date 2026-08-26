@@ -6,6 +6,7 @@ import {
   CODEMIRROR_CHANGESET_CODEC,
 } from "@commonfabric/runtime-client";
 import { CFCodeEditor } from "./cf-code-editor.ts";
+import { backlinkField } from "./features/backlinks.ts";
 
 const operationPath = [] as never[];
 
@@ -89,6 +90,11 @@ describe("CFCodeEditor collaboration", () => {
     invoke(cellSync);
     invoke(undefined, false);
     expect(calls).toEqual([]);
+
+    calls.length = 0;
+    self._collaboration = undefined as never;
+    invoke(undefined);
+    expect(calls).toContain("value");
   });
 
   it("leaves operation authority in charge of ordinary Cell echoes", () => {
@@ -171,9 +177,76 @@ describe("CFCodeEditor collaboration", () => {
 
     await (element as any)._setupCollaboration();
     expect((element as any)._collaboration.active).toBe(true);
-    subscriber?.({ ...inactiveSnapshot(), materialized: 42 });
+    (element as any)._editorView.dispatch({
+      changes: { from: 0, insert: "local:" },
+    });
+    subscriber?.(inactiveSnapshot("canonical"));
+    expect(errors.at(-2)?.[0]).toBe("cf-collaboration-reconcile");
     expect(errors.at(-1)?.[0]).toBe("cf-error");
     expect((element as any)._collaborationFailed).toBe(true);
+
+    const invalid = new CFCodeEditor();
+    (invalid as any)._editorView = statefulView([
+      (invalid as any)._readonly.of(EditorState.readOnly.of(false)),
+      (invalid as any)._collaborationComp.of([]),
+    ]);
+    (invalid as any).emit = (name: string, detail: unknown) =>
+      errors.push([name, detail]);
+    invalid.value = operationCell({
+      operationCodecs: () => Promise.resolve([CODEMIRROR_CHANGESET_CODEC]),
+      queryOperationField: () =>
+        Promise.resolve({ ...inactiveSnapshot(), materialized: 42 }),
+    });
+    invalid.collaborative = true;
+    await (invalid as any)._setupCollaboration();
+    expect((invalid as any)._collaborationFailed).toBe(true);
+    expect(errors.at(-1)?.[0]).toBe("cf-error");
+  });
+
+  it("submits external backlink title rewrites through collaboration", () => {
+    let state = EditorState.create({
+      doc: "[[Old (piece:1)]]",
+      extensions: [backlinkField],
+    });
+    const events: Array<[string, unknown]> = [];
+    let localChanges = 0;
+    let reads = 0;
+    const self = {
+      language: "text/markdown",
+      _editorView: {
+        get state() {
+          return state;
+        },
+        dispatch(spec: never) {
+          state = state.update(spec).state;
+        },
+      },
+      _collaboration: {
+        active: true,
+        localDocChanged: () => localChanges++,
+      },
+      _previousBacklinkNames: new Map(),
+      emit: (name: string, detail: unknown) => events.push([name, detail]),
+      _updateMentionedFromContent: () => {},
+      setValue: () => {
+        throw new Error("ordinary value path used");
+      },
+    };
+    const piece = {
+      key: () => ({
+        get: () => reads++ === 0 ? "New" : "📝 New",
+      }),
+    };
+
+    (CFCodeEditor.prototype as any)._handleExternalTitleChange.call(
+      self,
+      "piece:1",
+      piece,
+    );
+
+    expect(state.doc.toString()).toBe("[[📝 New (piece:1)]]");
+    expect(localChanges).toBe(1);
+    expect(events[0][0]).toBe("cf-change");
   });
 
   it("detaches without releasing and explicitly releases active collaboration", async () => {
@@ -206,5 +279,49 @@ describe("CFCodeEditor collaboration", () => {
     expect(element.collaborative).toBe(false);
     expect(events).toContain("release");
     expect(events).toContain("update");
+
+    (element as any)._collaboration = undefined;
+    await element.releaseCollaboration();
+    (element as any)._cleanupCollaboration();
+  });
+
+  it("handles superseded setup and reactive collaboration lifecycle hooks", async () => {
+    const element = new CFCodeEditor();
+    await (element as any)._setupCollaboration();
+
+    const dispatches: unknown[] = [];
+    (element as any)._editorView = {
+      dispatch: (value: unknown) => dispatches.push(value),
+    };
+    const previous = {
+      stop: () => Promise.resolve(),
+      dispose: () => {},
+    };
+    (element as any)._collaboration = previous;
+    element.collaborative = false;
+    (element as any)._updateEditorFromCellValue = () => {};
+    await (element as any)._setupCollaboration();
+    expect((element as any)._collaboration).toBeUndefined();
+
+    let setup = 0;
+    (element as any)._setupCollaboration = () => {
+      setup++;
+      return Promise.resolve();
+    };
+    Object.defineProperty(element, "hasUpdated", { value: true });
+    element.updated(new Map([["collaborative", false]]));
+    expect(setup).toBe(1);
+
+    (element as any)._collaborationFailed = true;
+    element.updated(new Map([["readonly", false]]));
+    expect(dispatches.length).toBeGreaterThan(0);
+
+    const noMentions = {
+      mentioned: null,
+      getValue: () => "value",
+    };
+    (CFCodeEditor.prototype as any)._updateMentionedFromContent.call(
+      noMentions,
+    );
   });
 });
