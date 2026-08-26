@@ -6450,7 +6450,21 @@ supply; OW29/OW32/OW34 closed):
     overtake shape; drop the `#loadParkDeferredInPass` check → the same
     overtake through the mid-pass gap; fall the load-park arm through
     into the threshold accounting → "a persistent load failure must
-    never harden into events.md §5's drop". Battery green at the fix:
+    never harden into events.md §5's drop". The barrier's TWO
+    EXCLUSIONS are pinned too — they were the coverage ratchet's two
+    uncovered lines, and were COVERED rather than accepted: a
+    scheduler-level pin queues, behind a parked served head, a
+    same-space durable sibling, another SPACE's durable entry, and a
+    `streamEntry`-less LT1 copy, and asserts the sweep takes only the
+    first. Independently red: drop the cross-space guard → "another
+    space's entry must not be swept"; drop the LT1 guard → "a
+    streamEntry-less LT1 copy must not be swept". Construction note for
+    whoever edits it — both traps cost this seat a red: `addEventHandler`
+    stamps `populateDependencies` onto the HANDLER FUNCTION OBJECT, so
+    each stream needs its own function (sharing one makes all four park
+    on the armed doc), and same-stream sends COALESCE by doc id, so the
+    cross-space neighbour needs its own id rather than the sibling's
+    with the space swapped. Battery green at the fix:
     executor-events-down
     (26 steps, the α3 retry machinery untouched), executor-fan-out,
     executor-serving-loop, scheduler-event-load-park,
