@@ -2,9 +2,11 @@ import { MetaLinkField } from "@commonfabric/api";
 import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import { isNontrivialSchema } from "@commonfabric/data-model-schema/schema-utils";
+import {
+  internSchema,
+  isNontrivialSchema,
+} from "@commonfabric/data-model-schema";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
 import type { JSONSchemaObj } from "@commonfabric/api";
 import {
   decomposeSchema,

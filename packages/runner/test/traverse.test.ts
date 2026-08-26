@@ -6,8 +6,10 @@ import type { SchemaPathSelector } from "@commonfabric/api";
 import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { isInternedSchema } from "@commonfabric/data-model-schema/schema-hash";
-import { internPathSelector } from "@commonfabric/data-model-schema/schema-utils";
+import {
+  internPathSelector,
+  isInternedSchema,
+} from "@commonfabric/data-model-schema";
 import type {
   Entity,
   Revision,

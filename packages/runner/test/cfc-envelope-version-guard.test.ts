@@ -1,4 +1,4 @@
-import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
   writeSeedEnvelopeDoc,

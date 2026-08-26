@@ -10,11 +10,9 @@ import { describe, it } from "@std/testing/bdd";
 import {
   internSchema,
   isInternedSchema,
-} from "@commonfabric/data-model-schema/schema-hash";
-import {
   isNontrivialSchema,
   toDeepFrozenSchema,
-} from "@commonfabric/data-model-schema/schema-utils";
+} from "@commonfabric/data-model-schema";
 
 import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
 import { resolveSchema, resolveSchemaForValue } from "../src/schema.ts";

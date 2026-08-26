@@ -6,7 +6,12 @@ import {
   type CfcAtom,
   cfcAtom,
 } from "@commonfabric/api/cfc";
-import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model-schema/schema-type";
+import {
+  emptySchemaObject,
+  internSchema,
+  internSchemaAsTaggedHashString,
+  schemaTypeOfFabricPrimitive,
+} from "@commonfabric/data-model-schema";
 import {
   cloneForMutation,
   type CloneForMutationResult,
@@ -15,11 +20,6 @@ import {
   isFabricObjectOrArray,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import {
-  internSchema,
-  internSchemaAsTaggedHashString,
-} from "@commonfabric/data-model-schema/schema-hash";
-import { emptySchemaObject } from "@commonfabric/data-model-schema/schema-utils";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";

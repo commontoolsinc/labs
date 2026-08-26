@@ -5,7 +5,7 @@ import {
   entityRefToString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
-import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { homeSchema } from "@commonfabric/home-schemas";
 import {
   createSession,

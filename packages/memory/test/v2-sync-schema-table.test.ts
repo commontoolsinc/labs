@@ -17,7 +17,7 @@ import type {
   FabricValue,
   MutableFabricPlainObjectLayer,
 } from "@commonfabric/data-model/fabric-value";
-import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 import type { JSONSchema } from "@commonfabric/api";
 import {
   encodeMemoryBoundary,

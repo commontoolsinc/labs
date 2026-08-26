@@ -1,7 +1,7 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
 
 import type { JSONSchema } from "../src/builder/types.ts";

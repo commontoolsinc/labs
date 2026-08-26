@@ -6,7 +6,10 @@ import {
   type JSONValue,
 } from "@commonfabric/api";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
-import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model-schema/schema-type";
+import {
+  deepFrozenCloneAndInternSchema,
+  schemaTypeOfFabricPrimitive,
+} from "@commonfabric/data-model-schema";
 import {
   cloneIfNecessary,
   type FabricPlainObject,
@@ -15,7 +18,6 @@ import {
   isFabricPlainObject,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { deepFrozenCloneAndInternSchema } from "@commonfabric/data-model-schema/schema-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   isObjectNotArray,

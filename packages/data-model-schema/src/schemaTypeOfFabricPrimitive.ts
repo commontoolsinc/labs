@@ -1,5 +1,3 @@
-/** The schema `type` name for a `FabricPrimitive`, resolved by prototype. */
-
 import type { FabricPrimitiveSchemaType } from "@commonfabric/api";
 import {
   FabricBytes,

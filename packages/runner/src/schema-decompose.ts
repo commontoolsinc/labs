@@ -33,7 +33,7 @@ import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 import {
   anySchema,
   forEachSubschema,

@@ -27,9 +27,6 @@
     ]
   },
   "exports": {
-    "./SchemaAndHash": "./src/SchemaAndHash.ts",
-    "./schema-hash": "./src/schema-hash.ts",
-    "./schema-type": "./src/schema-type.ts",
-    "./schema-utils": "./src/schema-utils.ts"
+    ".": "./src/index.ts"
   }
 }

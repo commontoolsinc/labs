@@ -4,7 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import type { FabricValue, JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema/schema-hash";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import {
   EmulatedStorageManager,
   newLoopbackServer,

@@ -8,7 +8,7 @@ import type {
   NativeSessionSnapshot,
   SourceDescriptor,
 } from "@commonfabric/agents-connector/types";
-import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { pieceId } from "@commonfabric/piece";

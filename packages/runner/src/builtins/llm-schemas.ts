@@ -1,6 +1,6 @@
 import type { JSONSchema } from "@commonfabric/api";
 import { cfcAtom } from "@commonfabric/api/cfc";
-import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 
 // Epic D1b (docs/history/plans/cfc-future-work-implementation.md): model output written
 // by the `llm`, `generateText`, and `generateObject` builtins carries an

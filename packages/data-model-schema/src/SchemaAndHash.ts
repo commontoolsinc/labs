@@ -8,7 +8,7 @@ import type { FabricHash } from "@commonfabric/data-model/fabric-primitives";
  * that schemas are always stored in their canonical deep-frozen form and that
  * the hash is computed once.
  *
- * To create instances, use `internSchema()` from `schema-hash.ts` — it handles
+ * To create instances, use `internSchema()` from `schema-intern.ts` — it handles
  * freezing, hashing, and caching. The constructor is public for direct use when
  * both the frozen schema and hash are already in hand.
  *
@@ -26,7 +26,7 @@ export class SchemaAndHash {
   /**
    * Constructs an instance, from an already-deep-frozen schema and its
    * pre-computed hash. Throws if the schema is not deep-frozen. Prefer
-   * `internSchema()` from `schema-hash.ts` for the friendly entry point that
+   * `internSchema()` from `schema-intern.ts` for the friendly entry point that
    * handles freezing, hashing, and interning.
    */
   constructor(schema: JSONSchema | undefined, hash: FabricHash) {

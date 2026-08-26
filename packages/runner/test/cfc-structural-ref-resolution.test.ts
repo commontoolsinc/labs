@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema/schema-hash";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 
 import type { JSONSchemaObj } from "@commonfabric/api";
 import { resolveExternalRootRefForStructure } from "../src/cfc.ts";

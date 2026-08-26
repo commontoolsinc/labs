@@ -1,9 +1,9 @@
 import type { SchemaPathSelector } from "@commonfabric/api";
-import { hashSchema } from "@commonfabric/data-model-schema/schema-hash";
 import {
+  hashSchema,
   internPathSelector,
   REJECTING_SELECTOR,
-} from "@commonfabric/data-model-schema/schema-utils";
+} from "@commonfabric/data-model-schema";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MIME } from "@commonfabric/memory/interface";
 import type {

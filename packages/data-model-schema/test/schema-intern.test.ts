@@ -1,6 +1,6 @@
 /**
- * Hashing a schema and interning it, so that an equal schema becomes the same
- * object and can be named by its hash.
+ * Interning a schema, so that an equal schema becomes the same object and can
+ * be named by its hash.
  *
  * Interning is what makes a schema comparable by identity afterward, so the
  * cases cover the several ways one can be asked for -- with and without the
@@ -21,65 +21,18 @@ import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import {
   deepFrozenCloneAndInternSchema,
   findInternedSchema,
-  hashSchema,
   internSchema,
   internSchemaAsTaggedHashString,
   isInternedSchema,
-} from "@/schema-hash.ts";
+} from "@/schema-intern.ts";
 import { SchemaAndHash } from "@/SchemaAndHash.ts";
 import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import {
-  hashStringOf,
-  taggedHashStringOf,
-} from "@commonfabric/data-model/value-hash";
+import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import { toDeepFrozenSchema } from "@/schema-utils.ts";
 
-describe("schema-hash", () => {
-  describe("hashSchema()", () => {
-    it("returns a string", () => {
-      const result = hashSchema({ type: "number" });
-      expect(typeof result).toBe("string");
-    });
-
-    it("agrees with `hashStringOf()` on primitives", () => {
-      for (const v of [false, true, undefined]) {
-        const result1 = hashSchema(v);
-        const result2 = hashStringOf(v);
-        expect(result1).toBe(result2);
-      }
-    });
-
-    it("agrees with `hashStringOf()` on plain objects", () => {
-      const result1 = hashSchema({ type: "number", title: "Yes!" });
-      const result2 = hashStringOf({ type: "number", title: "Yes!" });
-      expect(result1).toBe(result2);
-    });
-
-    it("is deterministic (same input produces same result)", () => {
-      const schema: JSONSchema = {
-        type: "object",
-        properties: { name: { type: "string" } },
-      };
-      const a = hashSchema(schema);
-      const b = hashSchema(schema);
-      expect(a).toBe(b);
-    });
-
-    it("produces different results for different schemas", () => {
-      const a = hashSchema({ type: "number" });
-      const b = hashSchema({ type: "string" });
-      expect(a).not.toEqual(b);
-    });
-
-    it("is key-order independent", () => {
-      const a = hashSchema({ type: "object", title: "A" } as JSONSchema);
-      const b = hashSchema({ title: "A", type: "object" } as JSONSchema);
-      expect(a).toBe(b);
-    });
-  });
-
+describe("schema-intern", () => {
   describe("internSchema()", () => {
     it("defaults to `wantSchemaAndHash = false`", () => {
       const result = internSchema({});
@@ -448,10 +401,5 @@ describe("schema-hash", () => {
       const second = internSchemaAsTaggedHashString(schema);
       expect(first).toBe(second);
     });
-  });
-
-  it("returns base64url strings from `hashSchema()` (no algorithm prefix)", () => {
-    const result = hashSchema({ type: "number" });
-    expect(result).toMatch(/^[A-Za-z0-9_-]+$/);
   });
 });

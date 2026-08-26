@@ -3,8 +3,8 @@ import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   hashSchema,
   internSchema,
-} from "@commonfabric/data-model-schema/schema-hash";
-import { schemaWithProperties } from "@commonfabric/data-model-schema/schema-utils";
+  schemaWithProperties,
+} from "@commonfabric/data-model-schema";
 import type { Result, Unit } from "@commonfabric/memory/interface";
 import {
   resolveScopeKey,

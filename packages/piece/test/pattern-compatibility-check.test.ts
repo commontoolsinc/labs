@@ -14,7 +14,7 @@ import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,
 } from "@commonfabric/memory/v2";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema/schema-hash";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { readStoredCfcMetadata } from "@commonfabric/runner/cfc";
 import { PiecesController } from "../src/ops/pieces-controller.ts";

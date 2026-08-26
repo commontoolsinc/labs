@@ -4,7 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, Signer, URI } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
-import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 import {
   type Options,
   type SessionFactory,

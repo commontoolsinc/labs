@@ -30,7 +30,7 @@ import {
 } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
 
-import { schemaTypeOfFabricPrimitive } from "@/schema-type.ts";
+import { schemaTypeOfFabricPrimitive } from "@/schemaTypeOfFabricPrimitive.ts";
 
 /**
  * One row per concrete primitive class: the constructor, an instance factory,
