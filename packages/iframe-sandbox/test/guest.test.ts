@@ -242,6 +242,23 @@ describe("guest", () => {
       expect(cell.getSnapshot()).toEqual({ status: "ready", value: 2 });
     });
 
+    it("starts the first write before a later bridge operation", async () => {
+      const operations: string[] = [];
+      const client = {
+        request: (operation: string) => {
+          operations.push(operation);
+          return Promise.resolve(operation === "read" ? 0 : undefined);
+        },
+      } as unknown as FabricClient;
+      const cell = new RemoteCell<number>(client, "count");
+
+      const writing = cell.write(1);
+      const reading = cell.read();
+      expect(operations).toEqual(["write", "read"]);
+
+      await Promise.all([writing, reading]);
+    });
+
     it("rejects pending work when disconnected", async () => {
       const fabric = connectFabric();
       const pending = fabric.describe();

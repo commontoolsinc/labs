@@ -1097,16 +1097,12 @@ export class RuntimeProcessor {
   handleCellSet(request: CellSetRequest): void | Promise<void> {
     const commit = this.applyCellWrite(request, /* blind */ true);
     if (request.awaitCommit) return this.requireCellCommit(commit);
-    void commit.catch((error) => {
-      console.error("[RuntimeProcessor] Cell set commit failed:", error);
-    });
+    this.observeCellCommit(commit, "set");
   }
 
   handleCellPush(request: CellPushRequest): void {
     const commit = this.applyCellWrite(request, /* blind */ false);
-    void commit.catch((error) => {
-      console.error("[RuntimeProcessor] Cell push commit failed:", error);
-    });
+    this.observeCellCommit(commit, "push");
   }
 
   private operationSessionKey(cell: CellGetRequest["cell"]): string {
@@ -1378,9 +1374,29 @@ export class RuntimeProcessor {
     this.runtime.prepareTxForCommit(tx);
     const commit = tx.commit();
     if (request.awaitCommit) return this.requireCellCommit(commit);
-    void commit.catch((error) => {
-      console.error("[RuntimeProcessor] Cell send commit failed:", error);
-    });
+    this.observeCellCommit(commit, "send");
+  }
+
+  private observeCellCommit(
+    commit: ReturnType<ReturnType<Runtime["edit"]>["commit"]>,
+    operation: "set" | "push" | "send",
+  ): void {
+    void commit.then(
+      (result) => {
+        if (result.error) {
+          console.error(
+            `[RuntimeProcessor] Cell ${operation} commit failed:`,
+            result.error,
+          );
+        }
+      },
+      (error) => {
+        console.error(
+          `[RuntimeProcessor] Cell ${operation} commit failed:`,
+          error,
+        );
+      },
+    );
   }
 
   private async requireCellCommit(

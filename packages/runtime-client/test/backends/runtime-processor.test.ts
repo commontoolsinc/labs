@@ -3141,6 +3141,42 @@ describe("runtime-processor", () => {
       }
     });
 
+    it("observes resolved fire-and-forget cell commit refusals", async () => {
+      const calls: unknown[][] = [];
+      const original = console.error;
+      console.error = (...args: unknown[]) => calls.push(args);
+      try {
+        const set = createProcessor({ error: { message: "set refused" } });
+        const push = createProcessor({ error: { message: "push refused" } });
+        const send = createProcessor({ error: { message: "send refused" } });
+
+        RuntimeProcessor.prototype.handleCellSet.call(set.processor, {
+          type: RequestType.CellSet,
+          cell: ref,
+          value: "new value",
+        });
+        RuntimeProcessor.prototype.handleCellPush.call(push.processor, {
+          type: RequestType.CellPush,
+          cell: ref,
+          value: "new value",
+        });
+        RuntimeProcessor.prototype.handleCellSend.call(send.processor, {
+          type: RequestType.CellSend,
+          cell: ref,
+          event: "new value",
+        });
+        await Promise.resolve();
+
+        expect(calls.map(([message]) => message)).toEqual([
+          "[RuntimeProcessor] Cell set commit failed:",
+          "[RuntimeProcessor] Cell push commit failed:",
+          "[RuntimeProcessor] Cell send commit failed:",
+        ]);
+      } finally {
+        console.error = original;
+      }
+    });
+
     it("returns a strict set commit refusal to the caller", async () => {
       const { processor } = createProcessor({
         error: { message: "set refused" },
