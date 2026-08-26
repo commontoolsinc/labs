@@ -5,6 +5,8 @@
 
 import { type BindValue, Database } from "@db/sqlite";
 import type { FabricPlainObject } from "@commonfabric/api";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { assertReadOnly, assertWriteSafe } from "./guard.ts";
 import { columnOrigins } from "./column-origin.ts";
 import { createTableSQL, type TableSchema } from "./schema.ts";
@@ -71,13 +73,28 @@ export type WriteResult = {
 };
 
 // @db/sqlite binds positional values as a rest list and named values as a single
-// record argument. Our values are already SQLite scalars (cf_link params are
-// pre-encoded to strings by the client), so the cast to BindValue is safe.
+// record argument. Binary values stay as FabricBytes over the memory protocol
+// and become Uint8Array only at this native database edge.
 // (Exported for the commit-time row-label evaluator, which prepares the same
 // wire params against its RETURNING-instrumented statement.)
 export function bindArgs(params?: SqliteParams): BindValue[] {
   if (params === undefined) return [];
-  return (Array.isArray(params) ? [...params] : [params]) as BindValue[];
+  const bindValue = (value: unknown): unknown =>
+    value instanceof FabricBytes ? value.slice() : value;
+  return (Array.isArray(params) ? params.map(bindValue) : [Object.fromEntries(
+    Object.entries(params).map(([key, value]) => [key, bindValue(value)]),
+  )]) as BindValue[];
+}
+
+function rowFromNative<Row extends FabricPlainObject>(
+  row: Record<string, unknown>,
+): Row {
+  return Object.fromEntries(
+    Object.entries(row).map(([key, value]) => [
+      key,
+      fabricFromNativeValue(value),
+    ]),
+  ) as Row;
 }
 
 /** Run a single guarded read-only SELECT and return all rows. */
@@ -87,7 +104,8 @@ export function runQuery<Row extends FabricPlainObject = FabricPlainObject>(
   params?: SqliteParams,
 ): Row[] {
   assertReadOnly(sql);
-  return db.prepare(sql).all(...bindArgs(params)) as Row[];
+  return (db.prepare(sql).all(...bindArgs(params)) as Record<string, unknown>[])
+    .map(rowFromNative<Row>);
 }
 
 /** A result column's output name plus its TRUE source `(table, column)` origin
@@ -117,7 +135,8 @@ export function runQueryWithOrigins<
   try {
     const names = stmt.columnNames();
     const origins = columnOrigins(stmt.unsafeHandle, names.length);
-    const rows = stmt.all(...bindArgs(params)) as Row[];
+    const rows = (stmt.all(...bindArgs(params)) as Record<string, unknown>[])
+      .map(rowFromNative<Row>);
     return {
       rows,
       columns: names.map((output, i) => ({

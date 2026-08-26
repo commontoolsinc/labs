@@ -322,7 +322,7 @@ function sqliteParamForRuntime(
   runtime: Runtime,
   value: FabricValue,
 ): unknown {
-  if (value instanceof FabricBytes) return value.slice();
+  if (value instanceof FabricBytes) return value;
   if (isCellRef(value)) return getCell(runtime, value);
   if (Array.isArray(value)) {
     return value.map((member) => sqliteParamForRuntime(runtime, member));

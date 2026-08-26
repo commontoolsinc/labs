@@ -4440,14 +4440,16 @@ describe("runtime-processor", () => {
       expect(calls).toEqual(["pull", "query"]);
     });
 
-    it("converts native SQLite BLOB rows and parameters at the IPC boundary", async () => {
+    it("keeps SQLite BLOB parameters encoded across the storage boundary", async () => {
       const calls: unknown[][] = [];
       const processor = processorWith(
         { id: "db-1", tables: { blobs: {} } },
         (...args) => {
           calls.push(args);
           return Promise.resolve({
-            rows: [{ payload: new Uint8Array([1, 2, 3]) }],
+            rows: [{
+              payload: new FabricBytes(new Uint8Array([1, 2, 3])),
+            }],
           });
         },
       );
@@ -4465,7 +4467,11 @@ describe("runtime-processor", () => {
       expect((output as FabricBytes).slice()).toEqual(
         new Uint8Array([1, 2, 3]),
       );
-      expect(calls[0]?.[2]).toEqual([new Uint8Array([4, 5, 6])]);
+      const parameter = (calls[0]?.[2] as unknown[])[0];
+      expect(parameter).toBeInstanceOf(FabricBytes);
+      expect((parameter as FabricBytes).slice()).toEqual(
+        new Uint8Array([4, 5, 6]),
+      );
     });
 
     it("hydrates linked and nested SQLite bind values", async () => {
@@ -4495,11 +4501,12 @@ describe("runtime-processor", () => {
 
       const params = calls[0]?.[2] as Record<string, unknown>;
       const nested = params.nested as {
-        bytes: Uint8Array;
+        bytes: FabricBytes;
         links: unknown[];
       };
       expect(params.linked).toBe(nested.links[0]);
-      expect(nested.bytes).toEqual(new Uint8Array([7, 8, 9]));
+      expect(nested.bytes).toBeInstanceOf(FabricBytes);
+      expect(nested.bytes.slice()).toEqual(new Uint8Array([7, 8, 9]));
     });
 
     it("preserves reserved SQLite column names in query rows", async () => {

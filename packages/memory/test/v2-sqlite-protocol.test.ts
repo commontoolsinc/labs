@@ -5,6 +5,7 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Server } from "../v2/server.ts";
 import { connect, loopback } from "../v2/client.ts";
 import { cfLink, table } from "../v2/sqlite/schema.ts";
@@ -27,6 +28,7 @@ const dbRef = (): SqliteDbRef => ({
       id: "integer primary key",
       author_cf_link: cfLink(),
       body: "text",
+      payload: "blob",
     }),
   },
 });
@@ -79,6 +81,28 @@ describe("sqlite protocol verbs (loopback)", () => {
       "SELECT body FROM messages ORDER BY id",
     );
     expect(r.rows).toEqual([{ body: "hello" }]);
+  });
+
+  it("round-trips BLOB binds and rows over the memory protocol", async () => {
+    const db = dbRef();
+    const payload = new FabricBytes(new Uint8Array([0, 1, 2, 255]));
+    await seedRows(
+      db,
+      "INSERT INTO messages (body, payload) VALUES (?, ?)",
+      ["binary", payload],
+    );
+
+    const result = await session.sqliteQuery(
+      db,
+      "SELECT payload FROM messages WHERE payload = ?",
+      [payload],
+    );
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]!.payload).toBeInstanceOf(FabricBytes);
+    expect((result.rows[0]!.payload as FabricBytes).slice()).toEqual(
+      new Uint8Array([0, 1, 2, 255]),
+    );
   });
 
   it("returns an empty result for an auto-created (empty) table", async () => {
