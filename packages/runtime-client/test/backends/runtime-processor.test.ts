@@ -4278,6 +4278,35 @@ describe("runtime-processor", () => {
       expect(queried).toBe(false);
     });
 
+    it("rejects queries when the storage provider has no SQLite support", async () => {
+      const processor = processorWith(
+        { id: "db-1", tables: { notes: {} } },
+        () => Promise.resolve({ rows: [] }),
+      );
+      (processor as unknown as {
+        runtime: { storageManager: { open(): object } };
+      }).runtime.storageManager.open = () => ({});
+
+      await expect(processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT 1",
+      })).rejects.toThrow("sqliteQuery unavailable");
+    });
+
+    it("rejects queries through a cell without a database reference", async () => {
+      const processor = processorWith(
+        { tables: { notes: {} } },
+        () => Promise.resolve({ rows: [] }),
+      );
+
+      await expect(processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT 1",
+      })).rejects.toThrow("valid SqliteDb cell handle");
+    });
+
     it("commits writes through the database cell's transactional exec", async () => {
       const calls: unknown[][] = [];
       const cell = {
@@ -4316,6 +4345,50 @@ describe("runtime-processor", () => {
         "INSERT INTO notes (title) VALUES (:title)",
         { title: "New" },
       ]]);
+    });
+
+    it("reports a transactional SQLite write failure", async () => {
+      const cell = {
+        pull: () => Promise.resolve({ id: "db-1" }),
+        withTx: () => ({ exec: () => {} }),
+      };
+      const processor = Object.assign(
+        Object.create(RuntimeProcessor.prototype),
+        {
+          runtime: {
+            getCellFromLink: () => cell,
+            editWithRetry: () =>
+              Promise.resolve({ error: { message: "write refused" } }),
+          },
+        },
+      ) as RuntimeProcessor;
+
+      await expect(processor.handleSqliteExec({
+        type: RequestType.SqliteExec,
+        cell: ref,
+        sql: "DELETE FROM notes",
+      })).rejects.toThrow("write refused");
+    });
+
+    it("routes SQLite requests through the processor dispatch", async () => {
+      const processor = Object.assign(
+        Object.create(RuntimeProcessor.prototype),
+        {
+          handleSqliteQuery: () => Promise.resolve({ rows: [{ value: 1 }] }),
+          handleSqliteExec: () => Promise.resolve(),
+        },
+      ) as RuntimeProcessor;
+
+      await expect(processor.handleRequest({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT 1 AS value",
+      })).resolves.toEqual({ rows: [{ value: 1 }] });
+      await expect(processor.handleRequest({
+        type: RequestType.SqliteExec,
+        cell: ref,
+        sql: "DELETE FROM notes",
+      })).resolves.toBeUndefined();
     });
   });
 });

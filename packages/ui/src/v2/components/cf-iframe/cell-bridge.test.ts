@@ -86,6 +86,38 @@ describe("cf-iframe cell bridge", () => {
     }]);
   });
 
+  it("adapts plain object properties without a runtime connection", async () => {
+    const runtime = {
+      [$conn]: () => ({
+        request: () => Promise.reject(new Error("request should not be used")),
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+        signal: { aborted: false },
+      }),
+    } as unknown as RuntimeClient;
+    const linked = new CellHandle(runtime, ref);
+    const marker = new Date(0);
+    const context = {
+      count: 1,
+      nested: { linked },
+      marker,
+    };
+
+    const bridge = createCellContextBridge(context);
+
+    expect(Object.keys(bridge.resources)).toEqual([
+      "count",
+      "nested",
+      "marker",
+    ]);
+    expect(bridge.resources.nested.read!()).toEqual({
+      linked: linked.toJSON(),
+    });
+    expect(bridge.resources.marker.read!()).toBe(marker);
+    await bridge.resources.count.write!(2);
+    expect(context.count).toBe(2);
+  });
+
   it("discovers context properties that materialize after bridge creation", async () => {
     const requests: unknown[] = [];
     const runtime = {
@@ -114,6 +146,13 @@ describe("cf-iframe cell bridge", () => {
     await context.setStrict({ command: "" });
 
     expect(Object.keys(bridge.resources)).toEqual(["command"]);
+    expect(bridge.resources.missing).toBeUndefined();
+    expect(
+      Object.getOwnPropertyDescriptor(
+        bridge.resources,
+        Symbol.iterator,
+      ),
+    ).toBeUndefined();
     const command = bridge.resources.command;
     expect(command.kind).toBe("cell");
     await command.write!("next");
@@ -239,6 +278,33 @@ describe("cf-iframe cell bridge", () => {
     await expect(count.write!(3)).rejects.toThrow("write refused");
   });
 
+  it("publishes cell changes after suppressing the initial value", () => {
+    let subscribed: CellHandle<number> | undefined;
+    const runtime = {
+      [$conn]: () => ({
+        request: () => Promise.resolve({}),
+        subscribe: (cell: CellHandle<number>) => {
+          subscribed = cell;
+          return Promise.resolve();
+        },
+        unsubscribe: () => Promise.resolve(),
+        signal: { aborted: false },
+      }),
+    } as unknown as RuntimeClient;
+    const context = new CellHandle(runtime, ref, {
+      count: 1,
+      database: { id: "db-1" },
+    });
+    const count = createCellContextBridge(context).resources.count;
+    const changes: unknown[] = [];
+
+    const unsubscribe = count.subscribe!((value) => changes.push(value));
+    subscribed?.[$onCellUpdate](2);
+
+    expect(changes).toEqual([2]);
+    unsubscribe();
+  });
+
   it("reports a stream event the runtime refuses", async () => {
     const runtime = {
       [$conn]: () => ({
@@ -325,5 +391,29 @@ describe("cf-iframe cell bridge", () => {
       sql: "INSERT INTO notes (title) VALUES (:title)",
       params: { title: "New" },
     }]);
+  });
+
+  it("rejects malformed SQLite operation inputs before sending a request", async () => {
+    const runtime = {
+      [$conn]: () => ({
+        request: () => {
+          throw new Error("request should not be sent");
+        },
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+        signal: { aborted: false },
+      }),
+    } as unknown as RuntimeClient;
+    const context = new CellHandle(runtime, ref, {
+      database: { id: "db-1" },
+    });
+    const query = createCellContextBridge(context).resources.database.methods!
+      .query;
+
+    await expect(query(undefined)).rejects.toThrow("object input");
+    await expect(query({ params: [] })).rejects.toThrow("string `sql`");
+    await expect(query({ sql: "SELECT 1", params: 1 })).rejects.toThrow(
+      "array or object",
+    );
   });
 });
