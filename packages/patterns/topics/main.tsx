@@ -111,9 +111,6 @@ export interface TopicsInput {
    * are legitimate but unattributed, and a whole-array write forfeits the
    * mergeability the verb's append keeps. */
   topics?: Writable<TopicDemand[] | Default<[]>>;
-  /** @deprecated Retained while pre-Profile callers still use the old
-   * `setMyName` + unsigned-event contract. New callers use `agentName`. */
-  myName?: PerUser<Writable<string | Default<"">>>;
 }
 
 export interface AddTopicEvent {
@@ -128,10 +125,12 @@ export interface AddTopicEvent {
 
   /** The agent making this mutation. The authenticated principal remains the
    * human whose identity key invoked the stream; this is the agent's explicit
-   * content-level signature under that shared principal. Optional only so
-   * callers of the previous deployed schema remain valid; new callers must
-   * provide a non-blank name. */
-  agentName?: string;
+   * content-level signature under that shared principal.
+   *
+   * Required, for the reason given on `AgentAuthoredEvent`: acceptance widens
+   * compatibly and narrows only through a break, so tolerating an unsigned
+   * create is a tolerance that could never be withdrawn. */
+  agentName: string;
 }
 
 export interface AddTopicResult {
@@ -394,13 +393,6 @@ export interface TopicsOutput {
    * finishes a create. Returns the created topic as its survey row — the
    * reference plus the write-time facts the pattern resolved. */
   addTopic: Stream<AddTopicEvent, AddTopicResult>;
-
-  /** @deprecated Compatibility view for callers of the previous board. */
-  myName: string;
-
-  /** @deprecated Compatibility mutation for callers of the previous board. */
-  setMyName: Stream<{ name: string }>;
-
   /** Submit the footer composer as the current viewer's canonical Profile. */
   submitTopic: Stream<void>;
 }
@@ -418,7 +410,6 @@ export const submitProfileTopic = handler<void, {
    * here writes a row. */
   boardCrossrefs: Writable<TopicCrossrefRow[] | Default<[]>>;
   newTitle: Writable<string>;
-  myName: Writable<string | Default<"">>;
   profileName: string;
   profileAvatar: string;
 }>((_, {
@@ -426,7 +417,6 @@ export const submitProfileTopic = handler<void, {
   mentionable,
   boardCrossrefs,
   newTitle,
-  myName,
   profileName,
   profileAvatar,
 }) => {
@@ -437,8 +427,6 @@ export const submitProfileTopic = handler<void, {
     title: trimmed,
     createdAt: Date.now(),
     createdBy: author,
-    createdByName: topicAuthorLabel(author),
-    myName,
     // Same wiring `addTopic` gives its children: the board's own list is the
     // mention universe the new topic's editor autocompletes over, and the
     // board's pivot is where it reads its inbound references.
@@ -449,7 +437,7 @@ export const submitProfileTopic = handler<void, {
   newTitle.set("");
 });
 
-export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
+export default pattern<TopicsInput, TopicsOutput>(({ topics }) => {
   const newTitle = new Writable.perSession("");
 
   // `.length` alone is what makes this cheap: the shrunk schema declares
@@ -484,14 +472,9 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     { title, body, agentName },
   ) => {
     const trimmed = (title ?? "").trim();
-    const author = topicAuthorFromAgent(agentName ?? "");
-    if (agentName !== undefined && !author) {
-      rejectMutation("addTopic", "agentName must be non-blank when given");
-    }
+    const author = topicAuthorFromAgent(agentName) ??
+      rejectMutation("addTopic", "agentName must be non-blank");
     if (!trimmed) rejectMutation("addTopic", "title must be non-empty");
-    const legacyName = author
-      ? topicAuthorLabel(author)
-      : myName.get().trim() || "someone";
     const piece = Topic({
       title: trimmed,
       // Body at create is part of the create's atomic unit; created-with is
@@ -501,8 +484,6 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
       body: body ?? "",
       createdAt: Date.now(),
       createdBy: author,
-      createdByName: legacyName,
-      myName,
       // The board's own list, so the editor has a mention universe (backfilled
       // as a one-time link-bind on pieces created before this input existed).
       mentionable: topics,
@@ -517,16 +498,11 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     return { topic: piece };
   });
 
-  const setMyName = action(({ name }: { name: string }) => {
-    myName.set((name ?? "").trim());
-  });
-
   const submitTopic = submitProfileTopic({
     topics,
     mentionable: topics,
     boardCrossrefs: crossrefs,
     newTitle,
-    myName,
     profileName,
     profileAvatar,
   });
@@ -624,8 +600,6 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     index: topics,
     newTitle,
     addTopic,
-    myName,
-    setMyName,
     submitTopic,
   };
 });

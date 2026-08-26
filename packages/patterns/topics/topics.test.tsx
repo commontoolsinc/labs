@@ -4,8 +4,8 @@
  * Complements multi-user.test.tsx (cross-runtime isolation and merge
  * behavior) and topics-rejections.test.tsx (thrown rejections on the mutating
  * verbs — those runs expect runtime errors): this file drives the happy and
- * legacy paths in one runtime — atomic agent signatures, body-at-create,
- * legacy authorship fallback/shadow fields, label defaulting, body updates,
+ * paths in one runtime — atomic agent signatures, body-at-create,
+ * label defaulting, body updates,
  * activity-based sorting, the board's bounded discovery index, and the exported
  * pure helpers. UI composer wrappers keep silent guards, exercised here.
  */
@@ -117,7 +117,6 @@ interface LegacyUnsignedTopicOutput {
   links: TopicLink[];
   createdAt: number;
   createdBy: TopicAuthor | undefined;
-  createdByName: string;
   mentions: unknown[] | undefined;
   references: TopicMentionRefMap | undefined;
   mentioned: unknown[] | undefined;
@@ -139,7 +138,11 @@ const LegacyUnsignedTopic = pattern<
   LegacyUnsignedTopicOutput
 >(() => {
   const addComment = action<{ body: string }, AddCommentResult>((event) => ({
-    comment: { authorName: "", body: event.body, sentAt: 0 },
+    comment: {
+      author: { kind: "person", name: "" },
+      body: event.body,
+      sentAt: 0,
+    },
   }));
   const addLink = action<
     { kind: TopicLinkKind; url: string; label: string },
@@ -162,7 +165,6 @@ const LegacyUnsignedTopic = pattern<
     // The retained mixed-version link materializes the legacy missing path as
     // a present undefined value, which must survive current list validation.
     createdBy: undefined,
-    createdByName: "Legacy Person",
     // Absent for the same reason `createdBy` is: this sibling predates these
     // paths, and the current projection has to accept that.
     //
@@ -205,14 +207,6 @@ export default pattern(() => {
     mentionable: mixedMentionable,
   });
 
-  // Pre-migration fields remain accepted and readable.
-  const legacy = Topic({
-    title: "Legacy",
-    createdAt: 1,
-    createdByName: "Legacy Person",
-    comments: [{ authorName: "Old Agent", body: "old", sentAt: 2 }],
-  });
-
   // Deterministic bindings for the exact handlers used by Profile-backed UI
   // controls. Pattern tests do not provide a #profile wish result, so bind the
   // resolved snapshot values directly here rather than inventing a production
@@ -225,7 +219,6 @@ export default pattern(() => {
     [],
   );
   const profileTitleDraft = new Writable("Profile topic");
-  const profileLegacyName = new Writable<string | Default<"">>("");
   const profileComments = new Writable<TopicComment[] | Default<[]>>([]);
   const profileCommentDraft = new Writable("via the profile composer");
   const profileBody = new Writable<string | Default<"">>("old body");
@@ -266,7 +259,6 @@ export default pattern(() => {
     mentionable: profileTopics,
     boardCrossrefs: profileBoardCrossrefs,
     newTitle: profileTitleDraft,
-    myName: profileLegacyName,
     profileName: " Ada ",
     profileAvatar: " 🦊 ",
   });
@@ -333,35 +325,13 @@ export default pattern(() => {
   // The previous deployed event shapes remain operational while callers
   // migrate. They use the hidden legacy name cell; new callers always send an
   // atomic `agentName` instead.
-  const legacyName = new Writable.perUser("");
-  const legacyBoard = Topics({ myName: legacyName });
-  // Same reason as `boardVerbTopic`, plus one of its own: the unsigned verbs
-  // take their author from the board's hidden name cell, so this instance is
-  // handed the very cell `setMyName` writes.
-  const legacyVerbTopic = Topic({
-    title: "Legacy verb target",
-    myName: legacyName,
-  });
-  const action_set_legacy_name = action(() => {
-    legacyBoard.setMyName.send({ name: " Legacy User " });
-  });
-  const action_add_legacy_topic = action(() => {
-    legacyBoard.addTopic.send({ title: "Legacy-shaped topic" });
-  });
-  const action_comment_legacy_topic = action(() => {
-    legacyVerbTopic.addComment.send({ body: "legacy comment" });
-  });
-  const action_link_legacy_topic = action(() => {
-    legacyVerbTopic.addLink.send({
-      kind: "web",
-      url: "https://example.com/legacy",
-      label: "legacy link",
-    });
-  });
-  const action_update_legacy_topic_body = action(() => {
-    legacyVerbTopic.setBody.send({ body: "legacy body" });
-  });
-
+  // The unsigned caller is gone. `agentName` is required on every verb, so
+  // there is no legacy board, no hidden name cell, and no unsigned mutation to
+  // exercise — a call without a signature now rejects, which
+  // `topics-rejections.test.tsx` is where it is proven. What that retires with
+  // it: the `myName` fallback, the `createdByName` and `authorName` mirrors it
+  // filled, and the `setBody` path that wrote a body while leaving the
+  // PREVIOUS author's stamps on it.
   const action_comment_signed = action(() => {
     boardVerbTopic.addComment.send({
       body: "hello thread",
@@ -461,7 +431,6 @@ export default pattern(() => {
     boardVerbTopic.commentCount === 1 &&
     boardVerbTopic.comments?.[0]?.author?.kind === "agent" &&
     boardVerbTopic.comments?.[0]?.author?.name === "Sol" &&
-    boardVerbTopic.comments?.[0]?.authorName === "Sol (agent)" &&
     boardVerbTopic.comments?.[0]?.body === "hello thread" &&
     (boardVerbTopic.comments?.[0]?.sentAt ?? 0) > 0 &&
     (boardVerbTopic.lastActivityAt ?? 0) >= (boardVerbTopic.createdAt ?? 0)
@@ -521,49 +490,6 @@ export default pattern(() => {
     directTopic.body === "line one\nline two"
   );
 
-  const assert_legacy_fields_load = assert(() =>
-    legacy.createdByName === "Legacy Person" &&
-    legacy.createdBy?.kind === "person" &&
-    legacy.createdBy?.name === "Legacy Person" &&
-    legacy.comments?.[0]?.authorName === "Old Agent" &&
-    legacy.comments?.[0]?.author === undefined &&
-    topicAuthorLabel(legacy.createdBy, legacy.createdByName) ===
-      "Legacy Person" &&
-    topicAuthorLabel(
-        legacy.comments?.[0]?.author,
-        legacy.comments?.[0]?.authorName,
-      ) === "Old Agent"
-  );
-
-  const assert_legacy_name_set = assert(() =>
-    legacyBoard.myName === "Legacy User"
-  );
-
-  const assert_legacy_topic_created = assert(() =>
-    legacyBoard.topicCount === 1 &&
-    legacyBoard.topics?.[0]?.title === "Legacy-shaped topic" &&
-    legacyBoard.topics?.[0]?.createdBy?.kind === "person" &&
-    legacyBoard.topics?.[0]?.createdBy?.name === "Legacy User"
-  );
-
-  const assert_legacy_comment_landed = assert(() =>
-    legacyVerbTopic.comments?.[0]?.author === undefined &&
-    legacyVerbTopic.comments?.[0]?.authorName === "Legacy User" &&
-    legacyVerbTopic.comments?.[0]?.body === "legacy comment"
-  );
-
-  const assert_legacy_link_landed = assert(() =>
-    legacyVerbTopic.links?.[0]?.addedBy === undefined &&
-    legacyVerbTopic.links?.[0]?.label === "legacy link"
-  );
-
-  const assert_legacy_body_landed = assert(() =>
-    legacyBoard.topicCount === 1 &&
-    legacyVerbTopic.body === "legacy body" &&
-    (legacyVerbTopic.bodyUpdatedBy?.name ?? "") === "" &&
-    (legacyVerbTopic.bodyUpdatedAt ?? 0) === 0
-  );
-
   const assert_profile_topic_submitted = assert(() => {
     const list = profileTopics.get() ?? [];
     return list.length === 1 &&
@@ -571,7 +497,6 @@ export default pattern(() => {
       list[0]?.createdBy?.kind === "person" &&
       list[0]?.createdBy?.name === "Ada" &&
       list[0]?.createdBy?.avatar === "🦊" &&
-      list[0]?.createdByName === "Ada" &&
       profileTitleDraft.get() === "";
   });
 
@@ -582,7 +507,6 @@ export default pattern(() => {
       list[0]?.author?.kind === "person" &&
       list[0]?.author?.name === "Ada" &&
       list[0]?.author?.avatar === "🦊" &&
-      list[0]?.authorName === "Ada" &&
       (list[0]?.sentAt ?? 0) > 0 &&
       profileCommentDraft.get() === "";
   });
@@ -919,16 +843,6 @@ export default pattern(() => {
       { assertion: assert_profile_references_published },
       { action: action_submit_profile_link },
       { assertion: assert_profile_link_submitted },
-      { action: action_set_legacy_name },
-      { assertion: assert_legacy_name_set },
-      { action: action_add_legacy_topic },
-      { assertion: assert_legacy_topic_created },
-      { action: action_comment_legacy_topic },
-      { assertion: assert_legacy_comment_landed },
-      { action: action_link_legacy_topic },
-      { assertion: assert_legacy_link_landed },
-      { action: action_update_legacy_topic_body },
-      { assertion: assert_legacy_body_landed },
       // Render the Profile-authored rows after their mutations land, then the
       // edit state whose Save control is disabled until #profile resolves.
       { render: profileTopic[UI] },
@@ -964,8 +878,6 @@ export default pattern(() => {
       // Materialize the direct and legacy Topics without putting UI into the
       // board's shared TopicPiece projection.
       { render: directTopic[UI] },
-      { render: legacy[UI] },
-      { assertion: assert_legacy_fields_load },
       { assertion: assert_pure_helpers },
       { assertion: assert_self_mention_inert_through_a_twin },
       { assertion: assert_mention_lists_tolerate_a_mid_sync_source },

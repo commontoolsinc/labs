@@ -92,6 +92,7 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20260818T020120Z-AfZn709Q7YVH7WlZ",
       "20260819T172917Z-ocrU646RD4YKITBc",
       "20260825T233242Z-lYi7sjXp_--Dkqrb",
+      "20260826T034942Z-i36ehwPr3rl95EA5",
     ],
     paths: [
       "argument.topics[]",
@@ -103,6 +104,8 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "argument.topics[].createdBy",
       "result.index[].createdBy",
       "result.mentionable[].addComment",
+      // The unsigned caller retires: `agentName` is required on every verb, and the display-name mirrors that path filled go with it.
+      "result.myName",
     ],
     reason:
       "Two accepted breaks on one pattern: the reference-graph rebuild on cell " +
@@ -139,6 +142,7 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20260818T020121Z-Y5Q-u4fiTKGUrP5Y",
       "20260819T172917Z-K_8fL8hZtM4xYV7V",
       "20260825T233242Z-zbW80d8lAFpf3tlJ",
+      "20260826T034942Z--sgcqyrT6j-lQ-JT",
     ],
     paths: [
       "argument.boardCrossrefs",
@@ -148,6 +152,9 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "result.crossrefs",
       "argument.bodyUpdatedBy.kind",
       "result.addLink.kind",
+      // The unsigned caller retires: a comment always carries a structured author now, so the mirror beside it goes.
+      "argument.comments[]",
+      "result.createdByName",
     ],
     reason:
       "Two accepted breaks on one pattern: the reference-graph rebuild on cell " +

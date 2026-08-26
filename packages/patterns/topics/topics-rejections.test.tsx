@@ -2,7 +2,7 @@
  * Rejection-path tests for the Topics mutating verbs (verb contract rule 4,
  * docs/plans/pattern-verb-contract.md: rejection is a value, never a silent
  * no-op). Every action here makes a verb throw, so the runtime errors are
- * required (`expectRuntimeErrors: 13` — exact count, so a rejection quietly
+ * required (`expectRuntimeErrors: 17` — exact count, so a rejection quietly
  * reverting to a silent return fails the suite); each assertion then verifies
  * the write did NOT land. Happy and legacy paths live in topics.test.tsx — including the UI
  * composer wrappers, whose silent guards are correct behavior (an empty draft
@@ -105,6 +105,27 @@ export default pattern(() => {
     });
   });
 
+  // An OMITTED `agentName`, on each verb that once tolerated one. This is the
+  // half that changed: a blank signature always rejected, while an absent one
+  // was the legacy caller's path and was accepted. Casts, because the point is
+  // a caller written against the previous contract, which no longer type-checks.
+  const action_add_topic_unsigned = action(() => {
+    // deno-lint-ignore no-explicit-any
+    (board.addTopic as any).send({ title: "unsigned create" });
+  });
+  const action_comment_unsigned_omitted = action(() => {
+    // deno-lint-ignore no-explicit-any
+    (seedTopic.addComment as any).send({ body: "unsigned comment" });
+  });
+  const action_link_unsigned_omitted = action(() => {
+    // deno-lint-ignore no-explicit-any
+    (seedTopic.addLink as any).send({ url: "https://example.com/unsigned" });
+  });
+  const action_set_body_unsigned_omitted = action(() => {
+    // deno-lint-ignore no-explicit-any
+    (seedTopic.setBody as any).send({ body: "unsigned body" });
+  });
+
   // setTitle: blank title; blank agentName. On a direct instance, because the
   // verb lives on the direct interface rather than the shared projection —
   // and unlike its elders, a MISSING agentName is as rejected as a blank one:
@@ -152,7 +173,7 @@ export default pattern(() => {
     // throwing actions, thirteen runtime errors. The exact count means a
     // single verb quietly reverting to a silent early-return fails this suite;
     // the no-write assertions then prove the throw also blocked the write.
-    expectRuntimeErrors: 13,
+    expectRuntimeErrors: 17,
     [TESTS]: [
       { action: action_seed_topic },
       { assertion: assert_seeded },
@@ -173,6 +194,14 @@ export default pattern(() => {
       { action: action_link_unsigned },
       { assertion: assert_seed_topic_untouched },
       { action: action_set_body_unsigned },
+      { assertion: assert_seed_topic_untouched },
+      { action: action_add_topic_unsigned },
+      { assertion: assert_board_unchanged },
+      { action: action_comment_unsigned_omitted },
+      { assertion: assert_seed_topic_untouched },
+      { action: action_link_unsigned_omitted },
+      { assertion: assert_seed_topic_untouched },
+      { action: action_set_body_unsigned_omitted },
       { assertion: assert_seed_topic_untouched },
       { action: action_mention_text_address },
       { assertion: assert_no_mentions },

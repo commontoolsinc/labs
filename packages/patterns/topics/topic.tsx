@@ -51,9 +51,15 @@ export interface TopicAuthor {
 
 export interface AgentAuthoredEvent {
   /** Explicit content-level signature for an agent using its human user's
-   * identity key. Optional only so callers of the previous deployed schema
-   * remain valid; new callers must provide a non-blank name. */
-  agentName?: string;
+   * identity key. Fabric authenticates the write with that key; this says
+   * which agent acted under it.
+   *
+   * Required, and required from the start of a caller's life rather than
+   * eventually: acceptance can widen later but not narrow, so a verb that
+   * tolerates an unsigned call can never stop tolerating one without a break.
+   * Taking it here means the arrival of execution provenance can relax this
+   * to optional compatibly, which is the direction that costs nothing. */
+  agentName: string;
 }
 
 export interface AddCommentEvent extends AgentAuthoredEvent {
@@ -184,11 +190,9 @@ export interface TopicComment {
    * authorship on a profile wish — CT-1879). Comments carry no minted id:
    * array elements have stable entity identity; future editing addresses
    * elements by reference (`equals()`), not by a synthetic key. */
-  author?: TopicAuthor;
-
-  /** @deprecated Compatibility shadow for consumers of the previous result
-   * schema. New callers must use `author`; the pattern mirrors this field. */
-  authorName: string | Default<"">;
+  /** Every comment carries one: `addComment` requires a signature, so there
+   * is no unsigned thread entry to describe. */
+  author: TopicAuthor;
   body: string | Default<"">;
   sentAt: number | Default<0>;
 }
@@ -211,13 +215,6 @@ export interface TopicInput {
   links?: Writable<TopicLink[] | Default<[]>>;
   createdAt?: number | Default<0>;
   createdBy?: TopicAuthor;
-
-  /** @deprecated Compatibility shadow for the previous result contract. */
-  createdByName?: string | Default<"">;
-
-  /** @deprecated Retained only for callers of the previous unsigned mutation
-   * streams. New callers use Profile authorship or an atomic `agentName`. */
-  myName?: PerUser<Writable<string | Default<"">>>;
   bodyUpdatedBy?: Writable<
     TopicAuthor | Default<{ kind: "person"; name: "" }>
   >;
@@ -396,11 +393,6 @@ export interface TopicPiece extends TopicSummary {
    * retained topic may not have produced this path yet; its persisted title
    * remains authoritative until it does. */
   [NAME]: string | Default<""> | undefined;
-
-  /** @deprecated Compatibility shadow for consumers of the previous result
-   * schema. New callers must use `createdBy`; the pattern mirrors this field. */
-  createdByName: string | Default<"">;
-
   /** The living document, verbatim Markdown. `setBody` replaces it whole. */
   body: string | Default<"">;
 
@@ -694,12 +686,10 @@ const LINK_KIND_ITEMS = [
 export const appendComment = (
   comments: Writable<TopicComment[] | Default<[]>>,
   body: string,
-  author: TopicAuthor | undefined,
-  legacyName: string,
+  author: TopicAuthor,
 ): TopicComment => {
   const comment = {
     author,
-    authorName: legacyName,
     body: body.trim(),
     sentAt: Date.now(),
   };
@@ -742,7 +732,7 @@ export const submitProfileComment = handler<void, {
   const text = commentDraft.get();
   const author = topicAuthorFromPerson(profileName, profileAvatar);
   if (!text.trim() || !author) return;
-  appendComment(comments, text, author, topicAuthorLabel(author));
+  appendComment(comments, text, author);
   commentDraft.set("");
 });
 
@@ -988,18 +978,15 @@ const lastActivityOf = lift((
   return newest;
 });
 
-/** A legacy Topic has only `createdByName`. Project that snapshot into the
- * structured result instead of returning a dangling link to an absent optional
- * input path; sibling Topic schemas can then validate the piece. */
+/** The structured author, projected rather than returned as a dangling link to
+ * an absent optional input path, so a sibling Topic's schema can validate the
+ * piece. A topic with no author reads as the inert sentinel rather than as
+ * nothing. */
 const createdByOf = lift((
-  { createdBy, createdByName }: {
-    createdBy?: TopicAuthor;
-    createdByName: string;
-  },
-): TopicAuthor => {
-  if (createdBy && createdBy.name.trim()) return createdBy;
-  return { kind: "person", name: createdByName.trim() };
-});
+  { createdBy }: { createdBy?: TopicAuthor },
+): TopicAuthor =>
+  createdBy && createdBy.name.trim() ? createdBy : { kind: "person", name: "" }
+);
 
 // ===== The pattern =====
 
@@ -1012,8 +999,6 @@ export default pattern<TopicInput, TopicOutput>(
       links,
       createdAt,
       createdBy,
-      createdByName,
-      myName,
       bodyUpdatedBy,
       bodyUpdatedAt,
       titleUpdatedBy,
@@ -1051,37 +1036,25 @@ export default pattern<TopicInput, TopicOutput>(
     const profileName = profileWish.result?.name ?? "";
     const profileAvatar = profileWish.result?.avatar ?? "";
     const hasProfile = profileName.trim().length > 0;
-    const createdByView = createdByOf({ createdBy, createdByName });
+    const createdByView = createdByOf({ createdBy });
 
     // --- Streams (external API; also usable headlessly via CLI) ---
 
     const addComment = action<AddCommentEvent, AddCommentResult>(
       ({ body: text, agentName }) => {
         const trimmed = (text ?? "").trim();
-        const author = topicAuthorFromAgent(agentName ?? "");
-        if (agentName !== undefined && !author) {
-          rejectMutation(
-            "addComment",
-            "agentName must be non-blank when given",
-          );
-        }
+        const author = topicAuthorFromAgent(agentName) ??
+          rejectMutation("addComment", "agentName must be non-blank");
         if (!trimmed) rejectMutation("addComment", "body must be non-empty");
-        const legacyName = author
-          ? topicAuthorLabel(author)
-          : (myName.get() ?? "").trim() || "someone";
-        return {
-          comment: appendComment(comments, trimmed, author, legacyName),
-        };
+        return { comment: appendComment(comments, trimmed, author) };
       },
     );
 
     const addLink = action<AddLinkEvent, AddLinkResult>(
       ({ kind, url, label, agentName }) => {
         const trimmedUrl = (url ?? "").trim();
-        const author = topicAuthorFromAgent(agentName ?? "");
-        if (agentName !== undefined && !author) {
-          rejectMutation("addLink", "agentName must be non-blank when given");
-        }
+        const author = topicAuthorFromAgent(agentName) ??
+          rejectMutation("addLink", "agentName must be non-blank");
         if (!trimmedUrl) rejectMutation("addLink", "url must be non-empty");
         if (!isSafeLinkUrl(trimmedUrl)) {
           rejectMutation("addLink", "url must be http(s)");
@@ -1092,13 +1065,14 @@ export default pattern<TopicInput, TopicOutput>(
 
     const setBody = action<SetBodyEvent, SetBodyResult>(
       ({ body: text, agentName }) => {
-        const author = topicAuthorFromAgent(agentName ?? "");
-        if (agentName !== undefined && !author) {
-          rejectMutation("setBody", "agentName must be non-blank when given");
-        }
+        const author = topicAuthorFromAgent(agentName) ??
+          rejectMutation("setBody", "agentName must be non-blank");
         const persisted = text ?? "";
         body.set(persisted);
-        if (!author) return { body: persisted };
+        // Every edit stamps. The unsigned path used to write the body and
+        // leave these alone, which left the PREVIOUS author's name sitting on
+        // content they did not write — a misattribution the verb reported as
+        // success.
         const bodyUpdatedAtValue = Date.now();
         bodyUpdatedBy.set(author);
         bodyUpdatedAt.set(bodyUpdatedAtValue);
@@ -1327,7 +1301,7 @@ export default pattern<TopicInput, TopicOutput>(
               )}
             <cf-hstack justify="between" align="center">
               <cf-text variant="caption" tone="muted">
-                started by {topicAuthorLabel(createdByView, createdByName)}
+                started by {topicAuthorLabel(createdByView)}
                 {createdAt ? ` · ${whenLabel(createdAt)}` : ""}
               </cf-text>
               <cf-hstack gap="2" align="center">
@@ -1503,17 +1477,11 @@ export default pattern<TopicInput, TopicOutput>(
                           <cf-hstack gap="2" align="center">
                             <cf-avatar
                               src={comment.author?.avatar || ""}
-                              name={topicAuthorLabel(
-                                comment.author,
-                                comment.authorName,
-                              )}
+                              name={topicAuthorLabel(comment.author)}
                               size="xs"
                             />
                             <cf-text style="font-weight: 600;">
-                              {topicAuthorLabel(
-                                comment.author,
-                                comment.authorName,
-                              )}
+                              {topicAuthorLabel(comment.author)}
                             </cf-text>
                             <cf-text variant="caption" tone="muted">
                               {whenLabel(comment.sentAt)}
@@ -1617,7 +1585,6 @@ export default pattern<TopicInput, TopicOutput>(
       links,
       createdAt,
       createdBy: createdByView,
-      createdByName,
       bodyUpdatedBy,
       bodyUpdatedAt,
       commentCount,
