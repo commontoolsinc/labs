@@ -344,6 +344,94 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     }
   });
 
+  /**
+   * A root pinned to V2 whose stored setup was staged by V1, started as it is.
+   * Returns the V2 entry ref the root now points at.
+   */
+  async function stageMetadataOnlyRollForward() {
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+    await piece.setInput({ profile: { name: "warm" } });
+    await runtime.idle();
+    await controller.stopPiece(root);
+
+    stub.setSource(ROOT_V2);
+    const currentPattern = await runtime.patternManager.compilePattern(
+      {
+        main: DEFAULT_APP_PATTERN_PATH,
+        files: [{ name: DEFAULT_APP_PATTERN_PATH, contents: ROOT_V2 }],
+      },
+      { space: controller.getSpace() },
+    );
+    const currentRef = runtime.patternManager.getArtifactEntryRef(
+      currentPattern,
+    )!;
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", currentRef);
+    });
+    expect(error).toBeUndefined();
+    const metadataOnlyRoot = (await controller.getDefaultPattern(false))!;
+    await controller.startPiece(metadataOnlyRoot);
+    return currentRef;
+  }
+
+  /**
+   * Run `body` with pattern loads for `identity` answered by `answer` instead
+   * of by the pattern manager.
+   */
+  async function withLoadFor(
+    identity: string,
+    answer: () => Promise<undefined>,
+    body: () => Promise<void>,
+  ) {
+    const manager = runtime.patternManager;
+    const load = manager.loadPatternByIdentity.bind(manager);
+    manager.loadPatternByIdentity = (...args: Parameters<typeof load>) =>
+      args[0] === identity ? answer() : load(...args);
+    try {
+      await body();
+    } finally {
+      manager.loadPatternByIdentity = load;
+    }
+  }
+
+  it("leaves the root alone when its pinned pattern will not load", async () => {
+    // The re-stage repairs a document whose stored setup an older version
+    // staged. With no pattern to stage from there is nothing to repair with,
+    // so the root is left exactly as it is rather than half-written.
+    const currentRef = await stageMetadataOnlyRollForward();
+
+    await withLoadFor(
+      currentRef.identity,
+      () => Promise.resolve(undefined),
+      async () => {
+        await controller.ensureDefaultPattern();
+      },
+    );
+    await runtime.idle();
+
+    const after = (await controller.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)).toEqual(currentRef);
+    expect(getPatternSetupIdentityRef(after)).not.toEqual(currentRef);
+  });
+
+  it("leaves the root alone when loading its pinned pattern throws", async () => {
+    const currentRef = await stageMetadataOnlyRollForward();
+
+    await withLoadFor(
+      currentRef.identity,
+      () => Promise.reject(new Error("the pattern index is unreadable")),
+      async () => {
+        await controller.ensureDefaultPattern();
+      },
+    );
+    await runtime.idle();
+
+    const after = (await controller.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)).toEqual(currentRef);
+    expect(getPatternSetupIdentityRef(after)).not.toEqual(currentRef);
+  });
+
   it("repairs a metadata-only roll-forward to the current pattern", async () => {
     const piece = await controller.ensureDefaultPattern();
     const root = piece.getCell();

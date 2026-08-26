@@ -9,6 +9,7 @@ import {
   resolveEntryIdentity,
   resolveSystemPatternSource,
   Runtime,
+  setPatternSource,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/cfc/migration-reason";
@@ -793,6 +794,97 @@ describe("opening a space root", () => {
       await identityForSource(SOURCE_V2),
     );
     expect(getPatternIdentityRef(healed)?.symbol).toBe("default");
+  });
+
+  it("returns the started replacement when the rescue's retry succeeds", async () => {
+    await setup();
+    // The rescue's whole point is that the caller gets a root it can use. A
+    // root that follows nothing and whose stored pattern this runtime cannot
+    // load is rolled forward to the space's official system root, and the
+    // start is retried against that.
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-root.tsx",
+        files: [{ name: "/custom-root.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await controller.getDefaultPattern(false))!;
+    const staleIdentity = await identityForSource(
+      patternSource("unloadable-root-whose-rescue-succeeds"),
+    );
+    await controller.stopPiece(root);
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: staleIdentity,
+        symbol: "default",
+      });
+    });
+    expect(error).toBeUndefined();
+    stub.setSource(SOURCE_V2);
+
+    const started = (await controller.getDefaultPattern(true))!;
+    await runtime.idle();
+
+    expect(getPatternIdentityRef(started)?.identity).toBe(
+      await identityForSource(SOURCE_V2),
+    );
+    expect(getPatternIdentityRef(started)?.symbol).toBe("default");
+  });
+
+  it("rethrows a start failure for a root that follows an origin", async () => {
+    await setup();
+    // Opening a root already reconciled it against its origin, so a start that
+    // still failed is not a root left behind — rolling it forward would
+    // replace source the space deliberately follows.
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+    await controller.stopPiece(root);
+    const { error } = await runtime.editWithRetry((tx) => {
+      setPatternSource(root, tx, "https://elsewhere.example/root.tsx");
+    });
+    expect(error).toBeUndefined();
+    const staleRef = getPatternIdentityRef(root)!;
+
+    const restore = shadowLoadProbe(staleRef.identity, "undefined");
+    try {
+      await expect(controller.getDefaultPattern(true)).rejects.toThrow(
+        "Could not load pattern",
+      );
+    } finally {
+      restore();
+    }
+    expect(getPatternIdentityRef(root)).toEqual(staleRef);
+  });
+
+  it("rethrows a start failure whose pinned pattern still loads", async () => {
+    await setup();
+    // The rescue is for a root whose stored pattern is gone. One that loads
+    // fine failed to start for some other reason, and replacing its source
+    // would destroy state over a fault the replacement does not address.
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-root.tsx",
+        files: [{ name: "/custom-root.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await controller.getDefaultPattern(false))!;
+    const pinnedRef = getPatternIdentityRef(root)!;
+    await controller.stopPiece(root);
+
+    const originalStart = runtime.start.bind(runtime);
+    runtime.start = ((cell: Parameters<typeof originalStart>[0]) => {
+      throw new Error("start refused for a reason of its own");
+      // deno-lint-ignore no-unreachable
+      return originalStart(cell);
+    }) as typeof runtime.start;
+    try {
+      await expect(controller.getDefaultPattern(true)).rejects.toThrow(
+        "start refused for a reason of its own",
+      );
+    } finally {
+      runtime.start = originalStart;
+    }
+    expect(getPatternIdentityRef(root)).toEqual(pinnedRef);
   });
 
   it("surfaces the ORIGINAL start failure when the post-heal retry fails", async () => {
