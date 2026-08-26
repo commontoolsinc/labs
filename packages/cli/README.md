@@ -842,6 +842,12 @@ schema-derived piece-call flags after `--`, for example
 piece-call JSON file. These rules keep the options before the callable name for
 `cf call` itself and the arguments after the name for the invoked callable.
 
+`--` belongs to the commands that have a callable section to close. `cf get`,
+`cf set` and `cf wish` have none, so a `--` written on one of those is refused
+rather than read: the parser sets every word after it aside, and the command
+would otherwise return a value the caller did not ask for and exit zero. The
+refusal names the words that were set aside and the line that works.
+
 ## Command visibility
 
 Every registered top-level command appears in `cf --help`. The direct
