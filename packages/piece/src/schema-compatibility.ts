@@ -13,7 +13,7 @@ import {
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
 import { isFabricPrimitiveSchemaType } from "@commonfabric/api";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 import {
   type FabricValue,
   valueEqual,

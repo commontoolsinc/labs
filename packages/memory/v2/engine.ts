@@ -1,7 +1,7 @@
 import { Database } from "@db/sqlite";
 import type { FabricValue } from "@commonfabric/api";
 import { valueEqual } from "@commonfabric/data-model/fabric-value";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { collectExternalSchemaRefHashes } from "../../runner/src/schema-decompose.ts";
 import { isSubschema } from "../../runner/src/schema-walk.ts";

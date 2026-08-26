@@ -23,7 +23,7 @@ import {
   deepFrozenCloneAndInternSchema,
   internSchema,
   isInternedSchema,
-} from "@commonfabric/data-model/schema-hash";
+} from "@commonfabric/data-model-schema";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
