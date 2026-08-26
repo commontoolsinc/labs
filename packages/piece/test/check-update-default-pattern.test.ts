@@ -2485,9 +2485,11 @@ describe("opening a space root", () => {
   });
 
   it("keeps the home root pinned when by-identity recovery is disabled", async () => {
-    // Under cfcEnforcementMode "disabled" the probe returns undefined
-    // unconditionally — "probe unsupported" must not read as "artifact
-    // dead". No shadow here: the real probe short-circuits.
+    // Under cfcEnforcementMode "disabled" a by-identity load returns
+    // undefined for anything outside the in-memory index, so it says "probe
+    // unsupported" rather than "artifact dead" and authorizes nothing. The
+    // root that cannot start therefore surfaces its failure rather than being
+    // replaced.
     await setupHome({ cfcEnforcementMode: "disabled" });
     await controller.recreateDefaultPattern({
       customProgram: {
@@ -2499,9 +2501,71 @@ describe("opening a space root", () => {
     const staleRef = getPatternIdentityRef(root)!;
 
     stub.setSource(SOURCE_V2);
-    await controller.ensureDefaultPattern();
+    await controller.stopPiece(root);
+    const restore = shadowLoadProbe(staleRef.identity, "undefined");
+    try {
+      await expect(controller.ensureDefaultPattern()).rejects.toThrow(
+        "Could not load pattern",
+      );
+    } finally {
+      restore();
+    }
     expect(getPatternIdentityRef(root)).toEqual(staleRef);
     expect(getPatternSource(root)).toBeUndefined();
+    expect(
+      (root as unknown as { getMetaRaw: (key: string) => unknown })
+        .getMetaRaw("displacedPattern"),
+    ).toBeUndefined();
+  });
+
+  /** Point the home space's root config at `defaultAppUrl`. */
+  async function configureDefaultAppUrl(defaultAppUrl: unknown): Promise<void> {
+    const homeSpaceCell = runtime.getHomeSpaceCell();
+    await homeSpaceCell.sync();
+    const homeRoot = runtime.getCell(
+      runtime.userIdentityDID,
+      "home-root-config",
+    );
+    const { error } = await runtime.editWithRetry((tx) => {
+      homeRoot.withTx(tx).set({ defaultAppUrl });
+      // deno-lint-ignore no-explicit-any
+      (homeSpaceCell.withTx(tx) as any).key("defaultPattern").set(homeRoot);
+    });
+    expect(error).toBeUndefined();
+    await runtime.idle();
+  }
+
+  it("refuses a configured defaultAppUrl that names no pattern route", async () => {
+    await setup();
+    // A rooted path outside the patterns route resolves against the host to
+    // whatever the site serves for an unrouted address, so a root born with
+    // it would record an origin nothing can follow. The system default-app
+    // source stands in.
+    await configureDefaultAppUrl("/participant-card.tsx");
+
+    await controller.recreateDefaultPattern();
+    const root = (await controller.getDefaultPattern(false))!;
+    expect(getPatternSource(root)).toBe(DEFAULT_APP_PATTERN_SOURCE);
+    expect(getPatternIdentityRef(root)?.identity).toBe(
+      await identityForSource(SOURCE_V1),
+    );
+    expect(
+      stub.requestedHrefs().some((href) =>
+        href.endsWith("/participant-card.tsx")
+      ),
+    ).toBe(false);
+  });
+
+  it("ignores a configured defaultAppUrl that is not a string", async () => {
+    await setup();
+    await configureDefaultAppUrl(42);
+
+    await controller.recreateDefaultPattern();
+    const root = (await controller.getDefaultPattern(false))!;
+    expect(getPatternSource(root)).toBe(DEFAULT_APP_PATTERN_SOURCE);
+    expect(getPatternIdentityRef(root)?.identity).toBe(
+      await identityForSource(SOURCE_V1),
+    );
   });
 
   describe("recreateDefaultPattern provenance (CT-1890)", () => {

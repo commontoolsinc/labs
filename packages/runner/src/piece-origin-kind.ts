@@ -87,7 +87,10 @@ export function classifyPieceOriginString(
   const route = resolveSystemPatternSource(source);
   if (route !== undefined) return { kind: "system", ref: source, route };
 
-  if (source.startsWith("/")) {
+  // A leading `//` opens an authority, not a path, so such a string is a
+  // protocol-relative URL and falls through to the absolute-URL test below,
+  // where it reports as unusable for naming no scheme.
+  if (source.startsWith("/") && !source.startsWith("//")) {
     const rewritten = normalizePatternSource(source);
     return {
       kind: "legacy-path",

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   getPatternIdentityRef,
+  getPatternSetupIdentityRef,
   isLink,
   resolveEntryIdentity,
   resolveSystemPatternSource,
@@ -384,15 +385,20 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     expect(metadataOnlyRoot.key("profileName").getRaw()).toBeUndefined();
 
     // Opening the root re-stages a document its pinned pattern did not set
-    // up, which is what repairs the projection.
-    await controller.ensureDefaultPattern();
+    // up, which is what repairs the projection. The repair writes through a
+    // transaction of its own, so read the root it hands back rather than the
+    // one captured before it: the older cell still describes the metadata the
+    // re-stage replaced.
+    const repaired = await controller.ensureDefaultPattern();
     await runtime.idle();
+    expect(getPatternSetupIdentityRef(repaired.getCell())).toEqual(currentRef);
 
-    const repairedRoot = metadataOnlyRoot.asSchema(
+    const repairedRoot = repaired.getCell().asSchema(
       {
         type: "object",
         properties: {
           pieceRegistry: { type: "array", items: { type: "string" } },
+          profileName: { type: "string" },
         },
       } as const,
     );
@@ -405,6 +411,10 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     await repairedRoot.pull();
     await runtime.idle();
 
+    // `profileName` is V2's alone, and the projection carrying it is what the
+    // re-stage writes. `pieceRegistry` was seeded under V1 and survives a root
+    // that was never repaired, so it says nothing on its own.
+    expect(repairedRoot.key("profileName").get()).toBe("warm");
     expect(pieceRegistry).toEqual(SEEDED_PIECES);
     cancelPieceRegistrySink();
   });

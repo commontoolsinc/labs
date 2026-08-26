@@ -446,12 +446,15 @@ export class SourceReconciler {
       target.symbol === state.running.symbol
     ) return "current";
 
-    const program = await runtime.patternManager
-      .getPatternSourceProgramByIdentity(
-        target.identity,
-        sourceSpace,
-        destinationSpace,
-      );
+    const program = await abortable(
+      () =>
+        runtime.patternManager.getPatternSourceProgramByIdentity(
+          target.identity,
+          sourceSpace,
+          destinationSpace,
+        ),
+      signal,
+    );
     if (program === undefined) return "unavailable";
     return await this.#adopt(
       resultCell,

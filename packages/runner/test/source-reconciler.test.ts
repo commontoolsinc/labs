@@ -47,6 +47,15 @@ function sourceWithRequiredInput(marker: string): string {
   ].join("\n");
 }
 
+/** The same argument contract with a result the previous one does not carry. */
+function sourceWithExtraResult(marker: string): string {
+  return [
+    "import { computed, pattern } from 'commonfabric';",
+    `export const ${SYMBOL} = pattern<Record<string, never>, { marker: string; extra: string }>(() => ({ marker: computed(() => "${marker}"), extra: computed(() => "extra") }));`,
+    "",
+  ].join("\n");
+}
+
 /** A different contract the piece's empty stored argument still satisfies. */
 function sourceWithChangedContract(marker: string): string {
   return [
@@ -351,6 +360,50 @@ describe("piece source reconciliation", () => {
       expect(getPatternIdentityRef(piece)).toEqual(originalRef);
     });
 
+    it("keeps the running source when the identity route names no identity", async () => {
+      const piece = await preparePiece(
+        servingFetch(() => "", () => source("v2")),
+      );
+      const originalRef = getPatternIdentityRef(piece);
+      await stampSource(piece, PARENT_SOURCE);
+
+      expect(await reconcile(piece)).toBe("unavailable");
+      expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+    });
+
+    it("compiles the advertised source again when the artifact is gone", async () => {
+      // The identity route settles only whether the SOURCE moved. A space that
+      // no longer holds the compiled artifact for an unchanged identity cannot
+      // start the piece, so reconciliation downloads and compiles that source
+      // rather than stopping at the identity comparison — which puts the
+      // artifact back under the identity the piece already points at.
+      const v1Identity = await identityFor(source("v1"));
+      const fetched: string[] = [];
+      const piece = await preparePiece(
+        servingFetch(
+          () => v1Identity,
+          () => source("v1"),
+          (url) => fetched.push(url.pathname),
+        ),
+      );
+      const originalRef = getPatternIdentityRef(piece);
+      await stampSource(piece, PARENT_SOURCE);
+
+      const manager = runtime.patternManager;
+      const load = manager.loadPatternByIdentity.bind(manager);
+      manager.loadPatternByIdentity = (...args: Parameters<typeof load>) =>
+        args[0] === originalRef!.identity
+          ? Promise.resolve(undefined)
+          : load(...args);
+      try {
+        expect(await reconcile(piece)).toBe("current");
+      } finally {
+        manager.loadPatternByIdentity = load;
+      }
+      expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+      expect(fetched).toContain(PARENT_PATH);
+    });
+
     it("adopts a candidate that changes the piece contract", async () => {
       // This deployment gates its own patterns where they are released, so a
       // candidate from its own route is taken as it stands.
@@ -537,6 +590,23 @@ describe("piece source reconciliation", () => {
       expect(await reconcile(piece)).toBe("incompatible");
       expect(getPatternIdentityRef(piece)).toEqual(originalRef);
       expect(getPieceSourceRevisions(piece)).toEqual([]);
+    });
+
+    it("refuses a candidate whose result grows past the accepted one", async () => {
+      // The argument the piece already stores still fits, so only the reads
+      // its result promises have moved — which is a contract change like any
+      // other where nobody gated the release.
+      const piece = await preparePiece(refuseEveryFetch);
+      const originalRef = getPatternIdentityRef(piece);
+      const grown = await runtime.patternManager.compilePattern(
+        parentProgram(sourceWithExtraResult("v2")),
+        { space: piece.space },
+      );
+      const grownRef = runtime.patternManager.getArtifactEntryRef(grown)!;
+      await stampSource(piece, `cf:pattern:${grownRef.identity}`);
+
+      expect(await reconcile(piece)).toBe("incompatible");
+      expect(getPatternIdentityRef(piece)).toEqual(originalRef);
     });
 
     it("keeps the running source when a pinned target is unavailable", async () => {
