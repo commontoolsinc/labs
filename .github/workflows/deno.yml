@@ -1516,6 +1516,62 @@ jobs:
             --junit-path=../../test-results/patterns-server-execution-on-${{ matrix.shard }}.xml \
             "${TEST_FILES[@]}"
 
+      # ------------------------------------------------------------------
+      # SCRATCH DIAGNOSIS STEPS — branch claude/server-exec-v2-postfill-
+      # diagnosis only; NEVER MERGE. On shard failure, capture the run's
+      # store (the toolshed's fresh MEMORY_DIR at <workspace>/cache/memory)
+      # plus the toolshed log and live serving stats, for the post-fill
+      # starvation forensics (the OW45 row's residual iv: fill worked,
+      # click landed, resolution never completed — CI-only shape).
+      # ------------------------------------------------------------------
+      - name: 🔬 Capture store + toolshed log on failure (scratch diagnosis)
+        if: failure()
+        run: |
+          mkdir -p "$RUNNER_TEMP/postfill-capture"
+          # Serving stats while the server is still alive.
+          curl -s --max-time 20 "http://localhost:8000/api/health/stats" \
+            > "$RUNNER_TEMP/postfill-capture/stats-at-failure.json" || true
+          # Quiesce the toolshed (PID via the port it holds — no name kills)
+          # so the sqlite stores checkpoint before tarring.
+          TS_PID=$(lsof -ti tcp:8000 || true)
+          if [ -n "$TS_PID" ]; then
+            kill "$TS_PID" 2>/dev/null || true
+            for _ in $(seq 1 20); do
+              kill -0 "$TS_PID" 2>/dev/null || break
+              sleep 0.5
+            done
+            kill -0 "$TS_PID" 2>/dev/null && kill -9 "$TS_PID" 2>/dev/null || true
+          fi
+          if [ -f "$RUNNER_TEMP/toolshed.log" ]; then
+            cp "$RUNNER_TEMP/toolshed.log" "$RUNNER_TEMP/postfill-capture/"
+          fi
+          if [ -d "cache/memory" ]; then
+            tar -czf "$RUNNER_TEMP/postfill-capture/store.tar.gz" -C . cache/memory
+          fi
+          # Inline digest so the job log alone carries a first read.
+          if [ -f "$RUNNER_TEMP/toolshed.log" ]; then
+            echo "--- toolshed.log marker census ---"
+            for m in sidecar-run-raced sidecar-run-withdrawn contribution-dropped \
+                     "dropping" event-view-lag sidecar-sync structure-load-stuck \
+                     schema-doc-quarantine seal-space-commit-failed \
+                     foreign-write-refused pattern-swap-setup-withdrawn \
+                     preQueueDeferralStuck warm-request retries \
+                     sync-load-failure; do
+              printf '%s=%s\n' "$m" "$(grep -c -- "$m" "$RUNNER_TEMP/toolshed.log" || true)"
+            done
+            echo "--- toolshed.log last 250 WARN/ERROR lines ---"
+            grep -n "WARN\|ERROR" "$RUNNER_TEMP/toolshed.log" | tail -250 || true
+          fi
+
+      - name: 📤 Upload failure capture (scratch diagnosis)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: postfill-capture-${{ matrix.shard }}
+          path: ${{ runner.temp }}/postfill-capture/
+          retention-days: 3
+          if-no-files-found: ignore
+
       - name: 📤 Upload test timing data
         if: always()
         uses: actions/upload-artifact@v7
