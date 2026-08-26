@@ -634,6 +634,27 @@ describe("cell-handle", () => {
       expect(calls.length).toBe(after);
     });
 
+    it("notifies when a handle is replaced by a record", () => {
+      // A handle holds its state privately, so a walk over enumerable own
+      // properties reads `{}` off it -- equal to any other key-less object,
+      // `{}` included, which would drop the update and tell no subscriber.
+      const cell = new CellHandle<{ a: unknown }>(makeRuntime(), ref);
+      const calls: Array<unknown> = [];
+      cell.subscribe((value) => {
+        calls.push(value);
+      });
+      const inner = new CellHandle(makeRuntime(), {
+        ...ref,
+        id: "of:other-cell" as CellRef["id"],
+      });
+
+      cell[$onCellUpdate]({ a: inner });
+      const after = calls.length;
+      cell[$onCellUpdate]({ a: {} });
+
+      expect(calls.length).toBe(after + 1);
+    });
+
     it("notifies on a 0 -> -0 change", () => {
       // `0` and `-0` are distinct stored values (the content hash
       // distinguishes them); the update must not be dropped.

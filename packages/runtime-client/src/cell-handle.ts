@@ -664,8 +664,13 @@ function valuesEqual(a: unknown, b: unknown): boolean {
   if (a == null || b == null) return a === b;
   if (typeof a !== typeof b) return false;
   if (typeof a !== "object") return false;
-  if (isCellHandle(a) && isCellHandle(b)) {
-    return a.equals(b);
+  // Either side being a handle is enough to ask, as with the instances below.
+  // A handle holds its state privately, so the record branch would read `{}`
+  // off it and call it equal to anything else without enumerable own keys --
+  // `{}` itself among them. A handle is a reference to a cell and equals only
+  // another reference to the same cell.
+  if (isCellHandle(a) || isCellHandle(b)) {
+    return isCellHandle(a) && isCellHandle(b) && a.equals(b);
   }
 
   // Compared by the data model rather than by this walk, and _before_ the
