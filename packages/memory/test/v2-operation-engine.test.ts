@@ -28,6 +28,8 @@ import {
 import {
   type ApplyOpOperation,
   encodeMemoryBoundary,
+  resetServerExecutionConfig,
+  setServerExecutionConfig,
   streamEntriesDocId,
   toValuePath,
 } from "../v2.ts";
@@ -154,6 +156,61 @@ describe("v2-operation-engine", () => {
       expect(applied.operationResolutions?.[0].operations[0].opId).toBe(
         field.operations[0].opId,
       );
+    } finally {
+      close(engine);
+      await Deno.remove(path);
+    }
+  });
+
+  it("projects collaborative fields through array indexes", async () => {
+    const { engine, path } = await openTestEngine();
+    try {
+      applyCommit(engine, {
+        sessionId: "session:array-setup",
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:array-field",
+            value: { value: { items: ["a", "b"] } },
+          }],
+        },
+      });
+      const applied = applyCommit(engine, {
+        sessionId: "session:array-writer",
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "apply-op",
+            id: "of:array-field",
+            path: toValuePath(["items", "1"]),
+            codec: CODEMIRROR_CHANGESET_CODEC,
+            submissionId: "array:1",
+            base: null,
+            baselineHash: operationBaselineHash("b"),
+            payload: {
+              updates: [{
+                clientId: "array-writer",
+                changes: changes(1, 1, "!"),
+              }],
+            },
+          }],
+        },
+      });
+
+      expect(applied.operationResolutions?.[0].to).toEqual({
+        epoch: 1,
+        version: 1,
+      });
+      expect(read(engine, { id: "of:array-field" })).toEqual({
+        value: { items: ["a", "b!"] },
+      });
+      expect(queryOperationField(engine, {
+        id: "of:array-field",
+        path: toValuePath(["items", "1"]),
+      })).toMatchObject({ active: true, materialized: "b!" });
     } finally {
       close(engine);
       await Deno.remove(path);
@@ -1214,6 +1271,7 @@ describe("v2-operation-engine", () => {
         expect(() =>
           applyCommit(engine, {
             sessionId: "session:malformed",
+            commitClass: "authored",
             commit: {
               localSeq: 1,
               reads: { confirmed: [], pending: [] },
@@ -1281,12 +1339,29 @@ describe("v2-operation-engine", () => {
         ...operation,
         payload: { oversized: "x".repeat(1_000_001) },
       }, OpCodecError);
-      fail({
+      const streamOperation: ApplyOpOperation = {
         ...operation,
         id: streamEntriesDocId({ id: "of:stream", path: ["events"] }),
         path: toValuePath([]),
         baselineHash: operationBaselineHash(null),
-      }, ProtocolError);
+      };
+      setServerExecutionConfig(true);
+      try {
+        expect(() =>
+          applyCommit(engine, {
+            sessionId: "session:malformed",
+            commitClass: "authored",
+            commit: {
+              localSeq: 1,
+              reads: { confirmed: [], pending: [] },
+              operations: [streamOperation],
+            },
+          })
+        ).toThrow("apply-op cannot mutate a stream sidecar document");
+      } finally {
+        resetServerExecutionConfig();
+      }
+      expect(counts()).toEqual(before);
     } finally {
       close(engine);
       await Deno.remove(path);

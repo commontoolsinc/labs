@@ -3100,16 +3100,17 @@ export class Server {
           for (const resolution of commit.operationResolutions ?? []) {
             const operation =
               message.commit.operations[resolution.operationIndex];
-            if (operation?.op !== "apply-op") continue;
-            const attributes = {
-              codec: resolution.codec,
-              duplicate: resolution.duplicate,
-            };
-            operationApplyCount.add(1, attributes);
-            operationTransformSuffix.record(
-              resolution.from.version - (operation.base?.version ?? 0),
-              attributes,
-            );
+            if (operation?.op === "apply-op") {
+              const attributes = {
+                codec: resolution.codec,
+                duplicate: resolution.duplicate,
+              };
+              operationApplyCount.add(1, attributes);
+              operationTransformSuffix.record(
+                resolution.from.version - (operation.base?.version ?? 0),
+                attributes,
+              );
+            }
           }
           // Mark dirty immediately after the durable apply so the next batch
           // reflects this write and can carry its catch-up marker. Keys are

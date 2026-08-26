@@ -221,11 +221,13 @@ describe("operation storage capability", () => {
     };
     const view = MemoryV2Client.WatchView.fromSync(sync);
     const removed = defer<readonly string[]>();
+    let removalCount = 0;
     const session = {
       watchAddSync: (_watches: WatchSpec[]) =>
         Promise.resolve({ view, sync, precedingSyncs: [] }),
       watchRemoveSync: (watchIds: readonly string[]) => {
-        removed.resolve(watchIds);
+        removalCount++;
+        if (removalCount === 1) removed.resolve(watchIds);
         return Promise.resolve({ view, sync, precedingSyncs: [] });
       },
     } as unknown as MemoryV2Client.SpaceSession;
@@ -250,13 +252,35 @@ describe("operation storage capability", () => {
       throw new Error("operation capability unavailable");
     }
 
-    const cancel = await replica.subscribeOperationField({
+    const query = {
       id: "of:operation-watch",
       path: toValuePath(["body"]),
-    }, (_snapshot: OperationFieldSnapshot) => {});
-    cancel();
+    };
+    const cancelFirst = await replica.subscribeOperationField(
+      query,
+      (_snapshot: OperationFieldSnapshot) => {},
+    );
+    const cancelSecond = await replica.subscribeOperationField(
+      query,
+      (_snapshot: OperationFieldSnapshot) => {},
+    );
+    cancelFirst();
+    expect(removalCount).toBe(0);
+    cancelSecond();
 
     expect(await removed.promise).toHaveLength(1);
+    const cancelAfterRemoval = await replica.subscribeOperationField(
+      query,
+      () => {},
+    );
+    expect(removalCount).toBe(1);
+    cancelAfterRemoval();
+    const cancelAfterSecondRemoval = await replica.subscribeOperationField(
+      query,
+      () => {},
+    );
+    expect(removalCount).toBe(2);
+    cancelAfterSecondRemoval();
     await storage.closeNow();
   });
 
@@ -396,13 +420,14 @@ describe("operation storage capability", () => {
       path: toValuePath([]),
     }, () => {});
     await Promise.resolve();
-    await addingStorage.closeNow();
+    (addingReplica as unknown as { closeNow(): void }).closeNow();
     addition.resolve({
       view: lateAdditionView,
       sync,
       precedingSyncs: [],
     });
     await expect(subscribing).rejects.toThrow("memory replica closed");
+    await addingStorage.closeNow();
 
     const removal = defer<{
       view: MemoryV2Client.WatchView;
@@ -424,13 +449,14 @@ describe("operation storage capability", () => {
     }, () => {});
     cancel();
     await Promise.resolve();
-    await removingStorage.closeNow();
+    (removingReplica as unknown as { closeNow(): void }).closeNow();
     removal.resolve({
       view: lateRemovalView,
       sync,
       precedingSyncs: [],
     });
     await Promise.resolve();
+    await removingStorage.closeNow();
   });
 
   it("warns when removing an operation watch fails", async () => {

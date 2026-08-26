@@ -3815,16 +3815,7 @@ const validateApplyOperation = (operation: ApplyOpOperation): void => {
       "baselineHash is required exactly when apply-op base is null",
     );
   }
-  let encoded: string;
-  try {
-    encoded = encodeMemoryBoundary(operation.payload);
-  } catch (cause) {
-    throw new OpCodecError(
-      `operation payload is not a Fabric value: ${
-        cause instanceof Error ? cause.message : String(cause)
-      }`,
-    );
-  }
+  const encoded = encodeMemoryBoundary(operation.payload);
   if (encoded.length > MAX_OPERATION_PAYLOAD_BYTES) {
     throw new OpCodecError("operation payload exceeds the byte limit");
   }

@@ -37,14 +37,29 @@ describe("cf inspect operations", () => {
       try {
         applyCommit(engine, {
           sessionId: "session:setup",
+          principal: "did:key:z6MkInspectOperations",
           commit: {
             localSeq: 1,
             reads: { confirmed: [], pending: [] },
-            operations: ["a", "b"].map((name) => ({
+            operations: [{
               op: "set" as const,
-              id: `of:${name}`,
+              id: "of:a",
               value: { value: { body: "x" } },
-            })),
+            }, {
+              op: "set" as const,
+              id: "of:b",
+              value: { value: { body: "x" } },
+            }, {
+              op: "set" as const,
+              id: "of:user-scoped",
+              scope: "user" as const,
+              value: { value: { body: "user" } },
+            }, {
+              op: "set" as const,
+              id: "of:session-scoped",
+              scope: "session" as const,
+              value: { value: { body: "session" } },
+            }],
           },
         });
         applyCommit(engine, {
@@ -134,6 +149,12 @@ describe("cf inspect operations", () => {
         ]),
       );
       expect(json.fields[0].address.id).toBe("of:a");
+
+      const scopes = await output(["scopes", path]);
+      expect(scopes).toContain("3 scope(s)");
+      expect(scopes).toContain("user z6MkInsp…ions");
+      expect(scopes).toContain("session z6MkInsp…ions/session:");
+      expect(scopes).toContain("inspect overlay");
     } finally {
       await Deno.remove(directory, { recursive: true });
     }

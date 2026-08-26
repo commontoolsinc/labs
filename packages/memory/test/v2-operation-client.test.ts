@@ -315,6 +315,91 @@ describe("v2-operation-client", () => {
         },
       });
       expect(codecFailure.error?.name).toBe("OpCodecError");
+
+      const releaseCodecFailure = await server.transact({
+        type: "transact",
+        requestId: "transact:release-codec-failure",
+        space: spaceId,
+        sessionId: session.sessionId,
+        commit: {
+          localSeq: 5,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "release-op-field",
+            id: "of:reset-query",
+            path: toValuePath(["body"]),
+            codec: "malformed",
+            cursor: { epoch: 1, version: 2 },
+          }],
+        },
+      });
+      expect(releaseCodecFailure.error?.name).toBe("OpCodecError");
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("rejects an operation query whose session closes during authorization", async () => {
+    const sessions = new SessionRegistry();
+    const server = new Server({
+      ...testSessionOpenServerOptions,
+      store: new URL("memory://memory-v2-operation-query-close-race"),
+      sessions,
+    });
+    const client = await connect({ transport: loopback(server) });
+    const spaceId = "did:key:z6Mk-memory-v2-operation-query-close-race";
+    const session = await client.mount(
+      spaceId,
+      {},
+      testSessionOpenAuthFactory,
+    );
+
+    try {
+      const response = server.operationFieldQuery({
+        type: "op.query",
+        requestId: "query:closing-session",
+        space: spaceId,
+        sessionId: session.sessionId,
+        query: { id: "of:closing-session", path: toValuePath([]) },
+      });
+      sessions.remove(spaceId, session.sessionId);
+      expect((await response).error?.name).toBe("SessionError");
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("omits operation snapshots when a watch session closes mid-request", async () => {
+    const sessions = new SessionRegistry();
+    const server = new Server({
+      ...testSessionOpenServerOptions,
+      store: new URL("memory://memory-v2-operation-watch-close-race"),
+      sessions,
+    });
+    const client = await connect({ transport: loopback(server) });
+    const spaceId = "did:key:z6Mk-memory-v2-operation-watch-close-race";
+    const session = await client.mount(
+      spaceId,
+      {},
+      testSessionOpenAuthFactory,
+    );
+
+    try {
+      const response = server.watchSet({
+        type: "session.watch.set",
+        requestId: "watch:closing-session",
+        space: spaceId,
+        sessionId: session.sessionId,
+        watches: [{
+          id: "closing-operation",
+          kind: "operation",
+          query: { id: "of:closing-operation", path: toValuePath([]) },
+        }],
+      });
+      sessions.remove(spaceId, session.sessionId);
+      expect((await response).ok?.sync.operationFields).toBeUndefined();
     } finally {
       await client.close();
       await server.close();
