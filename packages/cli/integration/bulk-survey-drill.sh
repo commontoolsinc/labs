@@ -6,8 +6,12 @@
 # fixer refused by name — and retarget it: the stamped plan applied to
 # completion, a run killed midway and finished by re-invocation, an edited
 # source refused with every unattempted piece named, a piece moved elsewhere
-# stopping the run, and the after-survey diffed against the plan it verifies.
-# Stages 1 through 3 of docs/plans/piece-bulk-operations.md, which finishes
+# stopping the run, and the after-survey diffed against the plan it verifies
+# — and reverse it: the completed retarget rolled back from its own plan with
+# every row restored, a reversal killed midway and finished by re-invocation,
+# a row whose prior source is not retained refused by name and accepted by
+# name, and one piece returned on its own through `cf piece restore`.
+# Stages 1 through 4 of docs/plans/piece-bulk-operations.md, which finishes
 # each stage with a CI drill so "does the migration tooling still work?"
 # stays a CI result.
 #
@@ -627,22 +631,42 @@ else
 fi
 
 step "22. A rollback killed midway is completed by re-invoking the same command"
-# Put the moved member back on the target, so the retarget is complete again
-# and the reversal has a board to reverse. The plan's own source again, for
-# the reason step 17 gives. That it landed is asserted rather than assumed:
-# a re-stage that silently did not happen would leave the reversal blocked
-# and every assertion below about the cut vacuous.
-$CF piece setsrc -q --piece "$FIRST_MEMBER" --main-export Member \
-  "$NEXT_SOURCE" $ARGS >/dev/null 2>"$WORK/rollback-restage.err" ||
-  bad "moving the aliased member back to the target failed"
-RESTAGED=$($CF piece inspect --pattern-identity --json \
-  --piece "$FIRST_MEMBER" $ARGS 2>/dev/null |
-  jq -r '[.patternIdentity, .symbol] | @tsv')
-TARGET_REF=$(tail -n +2 "$RETARGET_PLAN" | jq -rs --arg p "$FIRST_MEMBER" \
-  'map(select(.piece == $p)) | first | [.op.patternIdentity, .op.symbol]
-   | @tsv')
-check "$TARGET_REF" "$RESTAGED" \
-  "the aliased member is back on its row's target reference, both halves"
+# Put BOTH moved members back on the target, so the board is a completed
+# retarget again and the reversal below has every row to restore: step 17 left
+# one on the target identity under another symbol, and step 18 left the other
+# on the prior generation. A row that is already back before the reversal
+# starts is a row the reversal never has to restore, and step 23's "a
+# completed retarget is fully reversed" would then be a claim about the rest
+# of the board rather than about all of it. The plan's own source again, for
+# the reason step 17 gives.
+#
+# Each re-stage is proved rather than assumed: one that silently did not
+# happen would leave the reversal blocked and every assertion below about the
+# cut vacuous.
+restage_to_target() {
+  $CF piece setsrc -q --piece "$1" --main-export Member \
+    "$NEXT_SOURCE" $ARGS >/dev/null 2>"$WORK/rollback-restage.err" ||
+    bad "moving $2 back to the target failed"
+  local now target
+  now=$($CF piece inspect --pattern-identity --json --piece "$1" $ARGS \
+    2>/dev/null | jq -r '[.patternIdentity, .symbol] | @tsv')
+  target=$(tail -n +2 "$RETARGET_PLAN" | jq -rs --arg p "$1" \
+    'map(select(.piece == $p)) | first | [.op.patternIdentity, .op.symbol]
+     | @tsv')
+  check "$target" "$now" \
+    "$2 is back on its row's target reference, both halves"
+}
+restage_to_target "$FIRST_MEMBER" "the aliased member"
+restage_to_target "$SECOND_MEMBER" "the member left on the prior generation"
+# Every row outstanding, none landed: the reversal below therefore restores
+# the whole board and not the part of it that happened to be forward. This
+# reds if any row was already back before the rollback started.
+STAGED=$($CF piece rollback -q $ARGS --plan "$RETARGET_PLAN" --json \
+  2>"$WORK/rollback-staged.err" | sed 's/^fvj1://' |
+  jq -r '[(.rows | length | tostring), (.complete|tostring),
+    (.rows | map(.verdict) | unique | join(","))] | @tsv')
+check "$(printf '%s\ttrue\toutstanding' "$MEMBERS_NOW")" "$STAGED" \
+  "the retarget is complete again: every row has a restore ahead of it"
 # The same idiom step 15 uses, and for the same reason: an interrupted run is
 # what rots silently, and a run that finished on its own would satisfy every
 # assertion about the second invocation while exercising none of what this
@@ -717,7 +741,8 @@ check "$MEMBERS_NOW" "$((${RESUME_LANDED:-0} + ${RESUME_APPLIED:-0}))" \
 step "23. The reversal put the board back where the plan found it"
 # The retarget plan's own precondition, checked against the space: every row
 # reads outstanding again, which is the same reading the plan got before the
-# retarget ran. A completed retarget is fully reversed.
+# retarget ran. A completed retarget is fully reversed — every row of it,
+# step 22 having proved that none was already back before the reversal began.
 REVERSED=$($CF piece retarget -q $ARGS --plan "$RETARGET_PLAN" --json \
   2>/dev/null | sed 's/^fvj1://' | jq -r '[(.applied|tostring),
     (.complete|tostring), (.rows | map(.verdict) | unique | join(","))]

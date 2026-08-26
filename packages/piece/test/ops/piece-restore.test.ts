@@ -240,6 +240,48 @@ describe("piece-restore", () => {
       );
     });
 
+    it("severs the origin a piece follows when it already runs the named revision's reference", async () => {
+      // A restore is a detach as much as it is a reload: it runs the
+      // retained bytes AND clears the active origin. So a piece that runs
+      // the named revision's reference while still following an origin is
+      // not where the restore would leave it, and skipping the write would
+      // leave it taking that origin's next update — the operation the
+      // operator named having silently not happened.
+      const v1 = await resolveLocalSourceProgram(runtime, {
+        main: `${dir}/member-v1.tsx`,
+      });
+      const upstream = "https://example.test/member-v1.tsx";
+      const piece = await pieces.create(v1, {
+        input: { seed: "s" },
+        origin: upstream,
+      });
+      const controller = await pieces.get(piece.id, false);
+      await pieces.synced();
+      const before = await readRestorableSource(pieces, controller);
+      expect(before.origin).toBe(upstream);
+      const head = before.revisions.at(-1)!;
+      expect(head.current).toBe(true);
+
+      // The dry run reports the origin, so a caller reading `current` sees
+      // the write this run would still make.
+      const dry = await restorePiece(pieces, piece.id, {
+        revisionId: head.revisionId,
+      });
+      expect(dry.origin).toBe(upstream);
+      expect(dry.restored).toBe(false);
+
+      const outcome = await restorePiece(pieces, piece.id, {
+        revisionId: head.revisionId,
+        apply: true,
+      });
+      expect(outcome.restored).toBe(true);
+      expect(outcome.problem).toBeUndefined();
+      const after = await readRestorableSource(pieces, controller);
+      expect(after.origin).toBeNull();
+      expect(after.revisions.length).toBe(before.revisions.length + 1);
+      expect(after.revisions.at(-1)?.operation).toBe("revert");
+    });
+
     it("reports a restore the runtime judges incompatible rather than forcing it", async () => {
       // The piece is forced onto a source whose result shape the first one
       // cannot produce. Returning to the first is what a rollback row asks

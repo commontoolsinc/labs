@@ -522,6 +522,35 @@ describe("piece-rollback", () => {
       expect(hints).toEqual(["fid1:aaa already runs rev-b"]);
     });
 
+    it("names the origin a restore would sever for a piece on the revision's reference", async () => {
+      const hints: string[] = [];
+      await captureStdout(() =>
+        restoreFromCommand({
+          ...TARGET,
+          piece: "fid1:aaa",
+          revision: "rev-b",
+        }, {
+          runRestore: () =>
+            Promise.resolve({
+              ...LISTING,
+              origin: "https://example.test/member.tsx",
+              selected: { ...LISTING.revisions[1] },
+            }),
+          printHint: (message) => {
+            hints.push(message);
+          },
+        })
+      );
+      // Running the reference is not standing where the restore would leave
+      // the piece: the origin is still ahead of it, so reporting this as
+      // needing nothing would hide the write the operator asked for.
+      expect(hints).toEqual([
+        "fid1:aaa runs the reference of rev-b but follows " +
+        "https://example.test/member.tsx; --apply restores it and severs " +
+        "that origin",
+      ]);
+    });
+
     it("exits nonzero naming what refused a named revision", async () => {
       const errors: string[] = [];
       await expect(

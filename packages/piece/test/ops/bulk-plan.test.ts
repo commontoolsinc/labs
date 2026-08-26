@@ -542,6 +542,39 @@ describe("bulk-plan", () => {
       );
     });
 
+    it("names the unretained rows in the spelling the acceptance takes", () => {
+      // The refusal is the only place these addresses can be read: they are
+      // rows of the plan in hand rather than pieces of a registry, so nothing
+      // enumerates them at the prompt and the slot is deliberately left
+      // without completion candidates (tasks/check-completion-slots.ts).
+      // Pasting what the refusal prints therefore has to be accepted
+      // unedited — including when the plan file spelled the address the other
+      // legal way, since the message must name the canonical form and not the
+      // input's.
+      const aliased = encodePlan(unretainedPlan()).replace(
+        '"fid1:bbY"',
+        '"of:fid1:bbY"',
+      );
+      const plan = decodePlan(aliased);
+      expect(plan.rows[1].piece).toBe("fid1:bbY");
+      let message = "";
+      try {
+        deriveRollbackPlan(plan, "later");
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+      // Whole words as the message prints them, never a substring mined out
+      // of one: what an operator pastes is a token of this text, so a
+      // truncated or decorated address has to red here rather than be
+      // repaired by the reader.
+      const pasted = message.split(/[\s,]+/).filter((word) =>
+        word.includes("fid1:")
+      );
+      expect(pasted).toEqual(["fid1:bbY"]);
+      const rollback = deriveRollbackPlan(plan, "later", { accepted: pasted });
+      expect(rollback.rows.map((row) => row.piece)).toEqual(["fid1:aaY"]);
+    });
+
     it("leaves out an unretained row the caller accepted by name", () => {
       const rollback = deriveRollbackPlan(unretainedPlan(), "later", {
         accepted: ["fid1:bbY"],

@@ -17,7 +17,7 @@
  */
 
 import type { CellScope } from "@commonfabric/api";
-import type { Cell } from "@commonfabric/runner";
+import { type Cell, getPatternSource } from "@commonfabric/runner";
 
 import { isSourceRetained } from "./bulk-survey.ts";
 import {
@@ -48,7 +48,13 @@ export interface RestorableRevision {
    * incident.
    */
   retained: boolean;
-  /** Whether the piece runs this revision's reference right now. */
+  /**
+   * Whether the piece runs this revision's reference right now. A fact
+   * about the reference alone: a piece that runs it while still following
+   * an origin is not where a restore of this revision would leave it, the
+   * restore severing that origin. {@link RestorableSource.origin} carries
+   * the other half.
+   */
   current: boolean;
 }
 
@@ -66,14 +72,21 @@ export interface RestoreOutcome {
    * instead of the revision, in exactly the mode a script reads.
    */
   selected?: RestorableRevision;
+  /**
+   * The origin the piece follows, when it follows one; absent when it is
+   * detached. A restore severs it, so this is what tells a piece that is
+   * where the restore would leave it from one that merely runs the same
+   * reference and would still take the origin's next update.
+   */
+  origin?: string;
   /** Whether this run wrote the restore. False on every dry run. */
   restored: boolean;
   /**
    * Why the named revision was not restored: no such revision in this
    * piece's log, a source no longer retained, or a compatibility verdict
    * against the piece as it now stands. Absent when nothing is wrong —
-   * including on a dry run, and on a piece already running the named
-   * revision's reference.
+   * including on a dry run, and on a piece already standing where the
+   * restore would leave it.
    *
    * Not every refusal arrives here. An argument the restored source cannot
    * use at all is the runtime's hard refusal and throws out of this call
@@ -117,25 +130,32 @@ export interface RestorableSource {
    * pattern identity at all.
    */
   pattern?: { identity: string; symbol: string };
+  /**
+   * The origin the piece follows as THIS read observed it, and null when it
+   * follows none — the same fact the runtime's own source snapshot carries,
+   * read raw rather than classified, because an origin nothing can classify
+   * is still one a restore severs. A restore detaches the piece and runs
+   * the retained bytes, so this is the half of "already restored" that the
+   * reference cannot answer.
+   */
+  origin: string | null;
   /** Every revision the log holds, oldest first. */
   revisions: RestorableRevision[];
 }
 
 /**
- * Read a piece's source state: the reference it runs, and every revision it
- * could be returned to, oldest first, each carrying whether its source is
- * still retained and whether the piece runs it now. One synced read of the
- * piece plus one retained-source load per distinct identity in its log — the
- * piece is never run.
+ * Read a piece's source state: the reference it runs, the origin it
+ * follows, and every revision it could be returned to, oldest first, each
+ * carrying whether its source is still retained and whether the piece runs
+ * it now. One synced read of the piece plus one retained-source load per
+ * distinct identity in its log — the piece is never run.
  */
 export async function readRestorableSource(
   pieces: PiecesController,
   controller: PieceController<unknown>,
 ): Promise<RestorableSource> {
-  const state = readPieceSourceMetadata(
-    pieces.runtime,
-    controller.getCell() as Cell<unknown>,
-  );
+  const cell = controller.getCell() as Cell<unknown>;
+  const state = readPieceSourceMetadata(pieces.runtime, cell);
   const retainedByIdentity = new Map<string, boolean>();
   const revisions: RestorableRevision[] = [];
   for (const revision of state.history) {
@@ -157,6 +177,7 @@ export async function readRestorableSource(
   }
   return {
     ...(state.pattern === undefined ? {} : { pattern: state.pattern }),
+    origin: getPatternSource(cell) ?? null,
     revisions,
   };
 }
@@ -244,7 +265,8 @@ function retainedOrProblem(
 /**
  * Restore one piece to a retained revision, or — without `apply` — report
  * what a restore would do. Dry by default, like every other operation in
- * this group. A piece already running the named revision's reference is
+ * this group. A piece already standing where the restore would leave it —
+ * running the named revision's reference AND following no origin — is
  * reported as such and not rewritten, which is what makes restoring
  * resumable one piece at a time as much as in bulk.
  */
@@ -254,10 +276,14 @@ export async function restorePiece(
   options: RestoreOptions = {},
 ): Promise<RestoreOutcome> {
   const controller = await pieces.get(piece, false, undefined, options.scope);
-  const { pattern, revisions } = await readRestorableSource(pieces, controller);
+  const { pattern, origin, revisions } = await readRestorableSource(
+    pieces,
+    controller,
+  );
   const outcome: RestoreOutcome = {
     piece: controller.id,
     revisions,
+    ...(origin === null ? {} : { origin }),
     restored: false,
   };
   if (options.revisionId === undefined) return outcome;
@@ -282,10 +308,15 @@ export async function restorePiece(
   if ("problem" in restorable) {
     return { ...outcome, selected: { ...named }, problem: restorable.problem };
   }
-  // Already on it: nothing to write, and nothing wrong. The same reading a
-  // bulk rollback gives a row it finds already back on its recorded
-  // reference.
-  if (named.current || options.apply !== true) {
+  // Already where this restore would leave the piece: nothing to write, and
+  // nothing wrong. Both halves are required, because a restore is a detach
+  // as much as it is a reload — the runtime severs the active origin and
+  // runs the retained bytes — so a piece that runs the reference while
+  // still following an origin has not had this operation performed on it,
+  // and skipping the write would leave it taking that origin's next update.
+  // The reference alone is what the bulk rollback classifies on, its rows
+  // recording a reference and nothing else.
+  if ((named.current && origin === null) || options.apply !== true) {
     return { ...outcome, selected: { ...named } };
   }
   let result;

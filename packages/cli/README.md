@@ -180,8 +180,11 @@ log, in front of the runtime's restore of a retained revision. Without
 `--revision` the run lists what the piece could be returned to — the id, when it
 was accepted, the reference it carries, whether its source is still retained,
 and whether the piece runs it now; with one but without `--apply` it is the
-preflight for that revision alone. A piece already running the named revision's
-reference is reported as such and not rewritten.
+preflight for that revision alone. A piece already standing where the restore
+would leave it — running the named revision's reference and following no origin
+— is reported as such and not rewritten. A piece that runs that reference while
+still following an origin is not there: restoring severs the origin, so the run
+writes and names the origin it would cut.
 
 `cf piece slugs` lists the space's slug index: every name assigned through
 `--slug` or `set-slug`, each resolved to the piece it names. The index records

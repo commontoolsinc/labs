@@ -973,15 +973,6 @@ const OPTION_VALUE_PROVIDERS: Readonly<Record<string, OptionProvider>> = {
   // takes what `--piece` takes. Scoped, because a `--list` elsewhere would
   // mean something else entirely.
   list: onlyOn(["piece survey", "piece repair"], pieceCandidates),
-  // `--accept-unretained` names one piece of the plan in hand whose prior
-  // source is not retained, so it takes what `--piece` takes — the same
-  // reading `--list` gets, and scoped for the same reason. Both write
-  // commands that ask for the acceptance answer it identically: the rule is
-  // one rule, so the slot is one entry.
-  "accept-unretained": onlyOn(
-    ["piece retarget", "piece rollback"],
-    pieceCandidates,
-  ),
   // `cf piece survey --validator` reads a JSON-schema file.
   validator: () => Promise.resolve(directive({ kind: "files" })),
   // `cf piece repair --fixer` names a TypeScript module whose default export

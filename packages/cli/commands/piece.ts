@@ -2477,7 +2477,7 @@ export const piece = targetOptions(
   )
   .option(
     "--accept-unretained <piece:string>",
-    "Accept, by name, that this piece could not be rolled back once moved — its prior source is not retained — and move it anyway. Required by --apply for every such row; a dry run needs none. Repeatable, one piece at a time: there is no flag that accepts all of them. The other way past is to supply the legacy source, so a reversal has something to restore.",
+    "Accept, by name, that this piece could not be rolled back once moved — its prior source is not retained — and move it anyway. Required by --apply for every such row; a dry run needs none. The refusal that asks for the acceptance names each such piece in exactly the form this flag takes. Repeatable, one piece at a time: there is no flag that accepts all of them. The other way past is to supply the legacy source, so a reversal has something to restore.",
     { collect: true },
   )
   .option(
@@ -2515,7 +2515,7 @@ export const piece = targetOptions(
   )
   .option(
     "--accept-unretained <piece:string>",
-    "Accept, by name, that this piece cannot be rolled back — its prior source is not retained — and leave it out of the reversal. Repeatable, one piece at a time: there is no flag that accepts all of them. The other way past an unretained row is to supply its legacy source and retarget onto it.",
+    "Accept, by name, that this piece cannot be rolled back — its prior source is not retained — and leave it out of the reversal. The refusal that asks for the acceptance names each such piece in exactly the form this flag takes. Repeatable, one piece at a time: there is no flag that accepts all of them. The other way past an unretained row is to supply its legacy source and retarget onto it.",
     { collect: true },
   )
   .option(
@@ -4079,9 +4079,12 @@ export function formatRestorableRevision(
  * what this piece could be returned to, and with one but without `--apply`
  * it is the preflight for that revision alone.
  *
- * A piece already running the named revision's reference is reported as
- * such and not rewritten, which is what makes restoring resumable one piece
- * at a time as much as in bulk.
+ * A piece already standing where the restore would leave it — running the
+ * named revision's reference and following no origin — is reported as such
+ * and not rewritten, which is what makes restoring resumable one piece at a
+ * time as much as in bulk. A piece that runs the reference while still
+ * following an origin is not there: the restore severs the origin, so the
+ * run has work to do and says which origin it would cut.
  */
 export async function restoreFromCommand(
   options: RestoreCLIOptions,
@@ -4123,7 +4126,17 @@ export async function restoreFromCommand(
   } else if (outcome.restored) {
     printHint(`restored ${outcome.piece} to ${options.revision}`);
   } else if (outcome.selected?.current === true) {
-    printHint(`${outcome.piece} already runs ${options.revision}`);
+    // Running the reference is not the same as standing where the restore
+    // would leave the piece: one that still follows an origin has the
+    // detach ahead of it, so reporting it as needing nothing would hide the
+    // write the operator asked for.
+    printHint(
+      outcome.origin === undefined
+        ? `${outcome.piece} already runs ${options.revision}`
+        : `${outcome.piece} runs the reference of ${options.revision} but ` +
+          `follows ${outcome.origin}; --apply restores it and severs that ` +
+          `origin`,
+    );
   } else {
     printHint(
       `${outcome.piece} would be restored to ${options.revision}; ` +

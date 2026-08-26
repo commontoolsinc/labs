@@ -1,8 +1,9 @@
 # Bulk piece operations
 
-**Status:** proposed; stages 1 through 3 — the survey, repair, and retarget
-libraries, their `cf` entry points, and their coverage in the CI drill and
-the demo — are built. Every later stage is unbuilt. This is the design and build sequence for changing
+**Status:** proposed; stages 1 through 4 — the survey, repair, retarget, and
+rollback libraries, their `cf` entry points, and their coverage in the CI
+drill and the demo — are built. Stage 5 is unbuilt, and gated on the
+measurement it names. This is the design and build sequence for changing
 many pieces in one space as one reviewable, resumable operation. Driven by
 recurring Topics board upgrades.
 
