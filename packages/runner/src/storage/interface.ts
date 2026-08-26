@@ -801,7 +801,7 @@ export type IMemoryChange = {
    * Value memory address has after change.
    */
   after: FabricValue;
-}
+};
 
 export type StorageTransactionStatus =
   | { status: "ready"; journal: ITransactionJournal }
