@@ -5,7 +5,7 @@ import { type IPCRemotePost, NotificationType } from "@/protocol/mod.ts";
 import { describeFailure } from "@/shared/utils.ts";
 
 /**
- * How much of an undeliverable message to render. Enough to recognise which
+ * How much of an undeliverable message to render. Enough to recognize which
  * message it was, short enough that a hostile payload cannot flood the
  * channel it is being reported on.
  */
