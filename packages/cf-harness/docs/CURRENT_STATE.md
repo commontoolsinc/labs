@@ -67,7 +67,13 @@ The current package provides:
   opt-in GPT-5.6 gateway cache controls; the ChatGPT/Codex subscription backend
   uses implicit caching because it rejects the API `prompt_cache_options` field;
 - interactive NDJSON stdio sessions with optional SQLite session, turn, event,
-  replay, cancellation, and restore state;
+  replay, cancellation, and restore state; a session's durable transcript
+  advances only at a completed turn, so a failed, canceled, or interrupted turn
+  retains the transcript from before it while its tool and event history stays
+  on the audit trail, and a restored session whose recorded history does not
+  pair its tool calls with tool results is rolled back to its resumable prefix
+  or refused with an `incomplete_transcript` error rather than sent to a
+  provider;
 - CFC modes `disabled`, `observe`, `enforce-explicit`, and `enforce-strict`,
   plus prompt-slot, invocation-context, policy-event, and model-influence
   evidence;
@@ -234,7 +240,10 @@ mode.
 - Model-driven dynamic skill activation is not implemented. Skills are
   explicitly preloaded by the caller; child skills are profile-controlled.
 - Resume is transcript-oriented and does not recover an arbitrary partially
-  executed tool or orchestration state machine.
+  executed tool or orchestration state machine. An interrupted turn is never
+  replayed automatically: its tools may already have taken effect, so the
+  session resumes from the checkpoint before it and the operator decides what to
+  send next.
 - Raw operator artifacts use filesystem paths. Parent-visible child returns are
   sanitized, and the prompt loop swaps model-bound tool output and
   model-authored tool arguments through the address handle table; denial-path

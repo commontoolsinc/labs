@@ -56,3 +56,106 @@ export interface HarnessTranscriptEvent {
   message: HarnessTranscriptMessage;
   transcript: readonly HarnessTranscriptMessage[];
 }
+
+/** A way a transcript fails to be valid resumable model history. */
+export type HarnessTranscriptDefect =
+  | {
+    kind: "unresolved_tool_calls";
+    messageIndex: number;
+    toolCallIds: readonly string[];
+  }
+  | { kind: "orphan_tool_result"; messageIndex: number; toolCallId: string }
+  | { kind: "duplicate_tool_result"; messageIndex: number; toolCallId: string }
+  | { kind: "duplicate_tool_call"; messageIndex: number; toolCallId: string };
+
+export interface HarnessTranscriptPairing {
+  valid: boolean;
+  defects: readonly HarnessTranscriptDefect[];
+  /**
+   * Length of the longest prefix that is itself resumable: the prefix ends
+   * where no tool call is left outstanding.
+   *
+   * Truncating to this boundary can drop an assistant message carrying
+   * `providerContinuation` compaction. That is safe — the Responses projection
+   * selects the newest surviving compaction boundary, so the cost is a longer
+   * prompt, never invalid history.
+   */
+  safeBoundary: number;
+}
+
+/**
+ * Report whether every tool call in `transcript` has exactly one matching tool
+ * result, and where the longest resumable prefix ends.
+ *
+ * A provider rejects history whose tool calls and tool results do not pair, so
+ * this is the invariant a durable session transcript must hold before it is
+ * advertised as reusable or sent to a model.
+ *
+ * `nativeModelToolResults` are excluded: they are provider-side results already
+ * embedded in the assistant message, and the Responses projection does not turn
+ * them into a call that needs a partner.
+ */
+export const inspectHarnessTranscriptPairing = (
+  transcript: readonly HarnessTranscriptMessage[],
+): HarnessTranscriptPairing => {
+  const defects: HarnessTranscriptDefect[] = [];
+  const pending = new Map<string, number>();
+  const seen = new Set<string>();
+  let safeBoundary = 0;
+
+  for (const [messageIndex, message] of transcript.entries()) {
+    switch (message.role) {
+      case "assistant":
+        for (const call of message.toolCalls ?? []) {
+          if (seen.has(call.id)) {
+            defects.push({
+              kind: "duplicate_tool_call",
+              messageIndex,
+              toolCallId: call.id,
+            });
+            continue;
+          }
+          seen.add(call.id);
+          pending.set(call.id, messageIndex);
+        }
+        break;
+      case "tool":
+        if (!pending.delete(message.toolCallId)) {
+          defects.push({
+            kind: seen.has(message.toolCallId)
+              ? "duplicate_tool_result"
+              : "orphan_tool_result",
+            messageIndex,
+            toolCallId: message.toolCallId,
+          });
+        }
+        break;
+      case "system":
+      case "user":
+        // A user or system message does not answer an outstanding tool call.
+        // History that interleaves one while calls are pending is exactly the
+        // crash-then-next-turn shape, and stays invalid.
+        break;
+    }
+    if (pending.size === 0) {
+      safeBoundary = messageIndex + 1;
+    }
+  }
+
+  const unresolvedByAssistant = new Map<number, string[]>();
+  for (const [toolCallId, messageIndex] of pending) {
+    const ids = unresolvedByAssistant.get(messageIndex) ?? [];
+    ids.push(toolCallId);
+    unresolvedByAssistant.set(messageIndex, ids);
+  }
+  for (const [messageIndex, toolCallIds] of unresolvedByAssistant) {
+    defects.push({ kind: "unresolved_tool_calls", messageIndex, toolCallIds });
+  }
+
+  return { valid: defects.length === 0, defects, safeBoundary };
+};
+
+/** Whether `transcript` can be sent to a provider as model history. */
+export const isResumableHarnessTranscript = (
+  transcript: readonly HarnessTranscriptMessage[],
+): boolean => inspectHarnessTranscriptPairing(transcript).valid;

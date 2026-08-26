@@ -21,6 +21,10 @@ import type {
   RunHarnessTranscriptOptions,
 } from "../src/prompt-loop.ts";
 import type { HarnessChatSessionStore } from "../src/session-store.ts";
+import {
+  type HarnessTranscriptMessage,
+  inspectHarnessTranscriptPairing,
+} from "../src/contracts/transcript.ts";
 
 const nextIsoNow = () => {
   let counter = 0;
@@ -1479,4 +1483,272 @@ Deno.test("interactive service preserves every typed provider blocker", async ()
       { code, message: `provider blocker: ${code}` },
     );
   }
+});
+
+const toolCall = (id: string) => ({
+  id,
+  type: "function" as const,
+  function: { name: "read_file", arguments: "{}" },
+});
+
+const toolMessage = (id: string) => ({
+  role: "tool" as const,
+  toolCallId: id,
+  toolName: "read_file",
+  content: `contents for ${id}`,
+});
+
+/**
+ * A store that keeps every transcript it was asked to persist, so a test can
+ * assert the invariant over the whole history of durable writes rather than
+ * over the final one alone.
+ */
+const recordingStore = (): {
+  store: HarnessChatSessionStore;
+  snapshots: readonly HarnessTranscriptMessage[][];
+} => {
+  const snapshots: HarnessTranscriptMessage[][] = [];
+  const store: HarnessChatSessionStore = {
+    saveSession: (snapshot) => {
+      snapshots.push([...snapshot.transcript]);
+    },
+    getSession: () => undefined,
+    listSessions: () => [],
+    saveSessionAndAppendEvent: (snapshot) => {
+      snapshots.push([...snapshot.transcript]);
+    },
+    saveSessionTurnAndAppendEvent: (mutation) => {
+      snapshots.push([...mutation.session.transcript]);
+      return true;
+    },
+    saveTurn: () => {},
+    getTurn: () => undefined,
+    listTurns: () => [],
+    appendEvent: () => {},
+    listEvents: () => [],
+    latestSequence: () => 0,
+  };
+  return { store, snapshots };
+};
+
+/**
+ * A loop that reports an assistant message declaring two tool calls, then as
+ * many of their results as `resultsBeforeFault` names, then fails the way
+ * `fault` asks. This is the fault surface the durable checkpoint must survive.
+ */
+const partialToolTurnLoop = (
+  resultsBeforeFault: number,
+  fault: (options: RunHarnessTranscriptOptions) => Promise<never>,
+): HarnessInteractivePromptLoopFactory =>
+() => ({
+  runTranscript: async (options) => {
+    const assistant = {
+      role: "assistant" as const,
+      content: "Reading both files.",
+      toolCalls: [toolCall("call-a"), toolCall("call-b")],
+    };
+    const transcript: HarnessTranscriptMessage[] = [
+      ...options.transcript,
+      assistant,
+    ];
+    await options.onTranscriptEvent?.({ message: assistant, transcript });
+    for (const id of ["call-a", "call-b"].slice(0, resultsBeforeFault)) {
+      const message = toolMessage(id);
+      transcript.push(message);
+      await options.onTranscriptEvent?.({ message, transcript });
+    }
+    return await fault(options);
+  },
+});
+
+const throwingFault = () =>
+  Promise.reject(new Error("read_file exhausted its budget"));
+
+const runPartialToolTurn = async (
+  resultsBeforeFault: number,
+): Promise<{
+  service: HarnessInteractiveChatService;
+  snapshots: readonly HarnessTranscriptMessage[][];
+}> => {
+  const { store, snapshots } = recordingStore();
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: partialToolTurnLoop(resultsBeforeFault, throwingFault),
+    now: nextIsoNow(),
+    sessionStore: store,
+  });
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Read both files" },
+  });
+  await service.waitForTurn("session-1", "turn-1");
+  return { service, snapshots };
+};
+
+Deno.test("a turn that fails after declaring tool calls persists no partial transcript", async () => {
+  const { service, snapshots } = await runPartialToolTurn(0);
+
+  for (const snapshot of snapshots) {
+    assertEquals(
+      inspectHarnessTranscriptPairing(snapshot).valid,
+      true,
+      `persisted a transcript a provider would reject: ${
+        JSON.stringify(snapshot)
+      }`,
+    );
+  }
+  // The turn is rolled back whole, user message included: the tools already ran
+  // and the turn is never replayed.
+  assertEquals(snapshots[snapshots.length - 1], []);
+  const session = service.status("session-1").sessions[0];
+  assertEquals(session.status, "idle");
+  assertEquals(session.reusable, true);
+});
+
+Deno.test("a turn that fails after the first of two tool results persists no partial transcript", async () => {
+  const { service, snapshots } = await runPartialToolTurn(1);
+
+  for (const snapshot of snapshots) {
+    assertEquals(
+      inspectHarnessTranscriptPairing(snapshot).valid,
+      true,
+      `persisted a transcript a provider would reject: ${
+        JSON.stringify(snapshot)
+      }`,
+    );
+  }
+  assertEquals(snapshots[snapshots.length - 1], []);
+  assertEquals(service.status("session-1").sessions[0].reusable, true);
+});
+
+Deno.test("tool history survives a failed turn whose model history is rolled back", async () => {
+  const { service } = await runPartialToolTurn(1);
+
+  const kinds = service.events("session-1").map((event) => event.event.kind);
+  assertEquals(kinds.filter((kind) => kind === "tool_started").length, 2);
+  assertEquals(kinds.filter((kind) => kind === "tool_completed").length, 1);
+  assertEquals(kinds[kinds.length - 1], "turn_failed");
+  assertEquals(
+    service.listTurns({ sessionId: "session-1" }).turns[0].turn.status,
+    "failed",
+  );
+});
+
+Deno.test("cancellation after partial tool progress does not poison the next turn", async () => {
+  let releaseTurn: (() => void) | undefined;
+  const held = new Promise<void>((resolve) => {
+    releaseTurn = () => resolve();
+  });
+  const nextTurnTranscripts: (readonly HarnessTranscriptMessage[])[] = [];
+  let firstTurn = true;
+  const createPromptLoop: HarnessInteractivePromptLoopFactory = (options) => {
+    if (firstTurn) {
+      firstTurn = false;
+      return partialToolTurnLoop(1, async (runOptions) => {
+        await held;
+        throw new DOMException(
+          `cf-harness chat turn canceled: ${runOptions.model}`,
+          "AbortError",
+        );
+      })(options);
+    }
+    return {
+      runTranscript: (runOptions) => {
+        nextTurnTranscripts.push([...runOptions.transcript]);
+        return Promise.resolve(makeResult(runOptions, "Done."));
+      },
+    };
+  };
+  const { store, snapshots } = recordingStore();
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop,
+    now: nextIsoNow(),
+    sessionStore: store,
+  });
+
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Read both files" },
+  });
+  await service.cancelTurn("req-3", "session-1", "turn-1", "user_requested");
+  releaseTurn?.();
+  await service.waitForTurn("session-1", "turn-1");
+
+  for (const snapshot of snapshots) {
+    assertEquals(inspectHarnessTranscriptPairing(snapshot).valid, true);
+  }
+  await service.startTurn("req-4", {
+    sessionId: "session-1",
+    turnId: "turn-2",
+    input: { text: "Try again" },
+  });
+  await service.waitForTurn("session-1", "turn-2");
+
+  assertEquals(nextTurnTranscripts, [[{
+    role: "user",
+    content: "Try again",
+  }]]);
+});
+
+Deno.test("a completed turn promotes its transcript independently of the loop's array", async () => {
+  const returnedTranscripts: HarnessTranscriptMessage[][] = [];
+  const seenTranscripts: (readonly HarnessTranscriptMessage[])[] = [];
+  const createPromptLoop: HarnessInteractivePromptLoopFactory = () => ({
+    runTranscript: (options) => {
+      seenTranscripts.push([...options.transcript]);
+      const transcript: HarnessTranscriptMessage[] = [
+        ...options.transcript,
+        { role: "assistant", content: "Done." },
+      ];
+      returnedTranscripts.push(transcript);
+      return Promise.resolve({
+        model: "gpt-test",
+        finalAssistantText: "Done.",
+        transcript,
+        modelTurns: 1,
+        runState: {} as HarnessPromptLoopResult["runState"],
+      });
+    },
+  });
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop,
+    now: nextIsoNow(),
+  });
+
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Hi" },
+  });
+  await service.waitForTurn("session-1", "turn-1");
+
+  // The loop owns the array it returned; the durable checkpoint must not track
+  // an append made to it after the turn settled.
+  returnedTranscripts[0].push({ role: "assistant", content: "Stray." });
+
+  await service.startTurn("req-3", {
+    sessionId: "session-1",
+    turnId: "turn-2",
+    input: { text: "Again" },
+  });
+  await service.waitForTurn("session-1", "turn-2");
+
+  assertEquals(seenTranscripts[1], [
+    { role: "user", content: "Hi" },
+    { role: "assistant", content: "Done." },
+    { role: "user", content: "Again" },
+  ]);
 });

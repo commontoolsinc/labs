@@ -39,10 +39,12 @@ import {
   harnessCredentialOwnersEqual,
   type LoomLocalHostBinding,
 } from "./contracts/run-manifest.ts";
-import type {
-  HarnessAssistantTranscriptMessage,
-  HarnessToolTranscriptMessage,
-  HarnessTranscriptMessage,
+import {
+  type HarnessAssistantTranscriptMessage,
+  type HarnessToolTranscriptMessage,
+  type HarnessTranscriptMessage,
+  inspectHarnessTranscriptPairing,
+  isResumableHarnessTranscript,
 } from "./contracts/transcript.ts";
 import type { HarnessChatSessionStore } from "./session-store.ts";
 import { HarnessControlError } from "./control-errors.ts";
@@ -77,7 +79,18 @@ export interface CreateHarnessInteractiveChatServiceOptions {
 
 interface HarnessInteractiveChatSessionRecord {
   status: HarnessChatSessionStatus;
-  transcript: HarnessTranscriptMessage[];
+  /**
+   * The last durable resumable transcript: the model history a following turn
+   * is built from. It advances only at a completed turn, so every snapshot
+   * persisted alongside an event is one a provider accepts.
+   */
+  transcript: readonly HarnessTranscriptMessage[];
+  /**
+   * Why a restored session cannot be resumed. Set when the recorded history
+   * could not be repaired into valid model history; a turn started on such a
+   * session is refused rather than sent to a provider.
+   */
+  recoveryError?: HarnessChatError;
   startingTurnId?: string;
   startingTurn?: HarnessChatTurnStatus;
   activeTurnToken?: object;
@@ -349,6 +362,48 @@ const clearActiveTurnStatus = (
     status: "idle",
     reusable: true,
     updatedAt,
+  };
+};
+
+/**
+ * Decide what a recorded session transcript that is not valid model history
+ * should become.
+ *
+ * A transcript whose only defect is that it was cut off mid-turn rolls back to
+ * its safe boundary: the prefix is genuinely resumable, and the conversation
+ * survives. A transcript with no safe boundary would lose the whole
+ * conversation to a silent truncation, and a structurally malformed one is
+ * corrupt rather than merely cut short, so neither is repaired — the session is
+ * refused instead, and the operator is told why.
+ *
+ * Returns `undefined` when the transcript is already valid.
+ */
+const recoverSessionTranscript = (
+  transcript: readonly HarnessTranscriptMessage[],
+):
+  | { transcript: readonly HarnessTranscriptMessage[] }
+  | { unrecoverable: HarnessChatError }
+  | undefined => {
+  const pairing = inspectHarnessTranscriptPairing(transcript);
+  if (pairing.valid) {
+    return undefined;
+  }
+  const truncatedOnly = pairing.defects.every((defect) =>
+    defect.kind === "unresolved_tool_calls"
+  );
+  if (truncatedOnly && pairing.safeBoundary > 0) {
+    return { transcript: transcript.slice(0, pairing.safeBoundary) };
+  }
+  return {
+    unrecoverable: {
+      code: "incomplete_transcript",
+      message:
+        "recorded chat session history does not pair its tool calls with tool results and has no resumable prefix",
+      details: {
+        defects: pairing.defects,
+        safeBoundary: pairing.safeBoundary,
+      },
+    },
   };
 };
 
@@ -726,6 +781,42 @@ export class HarnessInteractiveChatService {
         });
       }
     }
+
+    await this.#recoverRestoredSessionTranscripts();
+  }
+
+  /**
+   * Repair or refuse restored sessions whose recorded history a provider would
+   * reject.
+   *
+   * This runs after every interrupted turn is terminalized, and it has to:
+   * terminalizing a turn resolves the session to idle and reusable, so a
+   * session marked non-reusable before that point would have the marking
+   * overwritten.
+   */
+  async #recoverRestoredSessionTranscripts(): Promise<void> {
+    for (const record of [...this.#sessions.values()]) {
+      const recovered = recoverSessionTranscript(record.transcript);
+      if (recovered === undefined) {
+        continue;
+      }
+      const updatedAt = this.#now();
+      if ("transcript" in recovered) {
+        // `#emitImmediately` persists `record.transcript` alongside the event,
+        // so the rollback and the record of it commit together.
+        record.transcript = recovered.transcript;
+        await this.#emit(record.status.sessionId, undefined, {
+          kind: "status_changed",
+          session: { ...record.status, updatedAt },
+        });
+        continue;
+      }
+      record.recoveryError = recovered.unrecoverable;
+      await this.#emit(record.status.sessionId, undefined, {
+        kind: "status_changed",
+        session: { ...record.status, reusable: false, updatedAt },
+      });
+    }
   }
 
   async handleRequest(
@@ -878,6 +969,18 @@ export class HarnessInteractiveChatService {
     }
     if (record.status.status === "closed") {
       return sessionClosedError(requestId, params.sessionId);
+    }
+    if (record.recoveryError !== undefined) {
+      return createHarnessChatErrorResponse(requestId, record.recoveryError);
+    }
+    // Under the durable checkpoint invariant this holds by construction. It is
+    // kept so a regression surfaces here, named, instead of as an opaque
+    // provider rejection several layers away.
+    if (!isResumableHarnessTranscript(record.transcript)) {
+      return createHarnessChatErrorResponse(requestId, {
+        code: "incomplete_transcript",
+        message: `chat session history is not resumable: ${params.sessionId}`,
+      });
     }
     if (record.activeTask !== undefined) {
       return activeTurnError(requestId, record.status);
@@ -1100,18 +1203,29 @@ export class HarnessInteractiveChatService {
           if (record.canceledTurnIds.has(turnId)) {
             return;
           }
+          // The loop replays the transcript it was seeded with before it
+          // appends anything. Emitting those messages again would duplicate
+          // their tool and assistant events in an append-only log, so only a
+          // strictly longer snapshot is worth reporting.
           if (event.transcript.length <= observedTranscriptLength) {
             return;
           }
           observedTranscriptLength = event.transcript.length;
-          record.transcript = [...event.transcript];
+          // The event carries the turn's live transcript, whose tool calls may
+          // not have their results yet. It is reported and deliberately not
+          // promoted into `record.transcript`: an interrupted turn must not
+          // durably commit history a provider would reject. The full working
+          // transcript is on disk in the run's artifacts either way.
           await this.#emitTranscriptEvent(session.sessionId, turnId, event);
         },
       });
       if (record.canceledTurnIds.has(turnId)) {
         return;
       }
-      record.transcript = result.transcript;
+      // Assigning before the emit promotes the completed transcript inside the
+      // same transaction that records `turn_completed`. The copy keeps the
+      // durable checkpoint independent of the array the loop appended to.
+      record.transcript = [...result.transcript];
       await this.#emit(session.sessionId, turnId, {
         kind: "turn_completed",
         turnId,
@@ -1124,6 +1238,9 @@ export class HarnessInteractiveChatService {
       if (record.canceledTurnIds.has(turnId)) {
         return;
       }
+      // `record.transcript` still holds the transcript from before this turn.
+      // Persisting it here is the rollback: the turn's partial history stays in
+      // the event log and the run artifacts, and never becomes model history.
       await this.#emit(session.sessionId, turnId, {
         kind: "turn_failed",
         turnId,
