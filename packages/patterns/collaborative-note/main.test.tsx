@@ -15,7 +15,9 @@ import {
   propsOf,
   readValue,
 } from "../test/vnode-helpers.ts";
-import CollaborativeNote from "./main.tsx";
+import CollaborativeNote, {
+  normalizePresenceParticipantName,
+} from "./main.tsx";
 
 const ROOM = "collaborative_note_room_01";
 
@@ -35,6 +37,13 @@ export default pattern(() => {
   const assert_profile_setup_visible = assert(() =>
     findNodeById(subject[UI], "collaborative-note-profile-setup") !== undefined
   );
+  const assert_profile_name_is_safe_for_presence = assert(() =>
+    normalizePresenceParticipantName("  Ada\u0000\u0085 Lovelace  ") ===
+      "Ada Lovelace" &&
+    normalizePresenceParticipantName("a".repeat(81)) === "a".repeat(80) &&
+    normalizePresenceParticipantName("😀".repeat(65)) === "😀".repeat(64) &&
+    normalizePresenceParticipantName("\ud800") === ""
+  );
   const action_edit = action(() => note.set("Edited together"));
   const assert_edit_visible = assert(() => {
     const editorProps = propsOf(findElement(subject[UI], "cf-code-editor"));
@@ -45,6 +54,7 @@ export default pattern(() => {
     [TESTS]: [
       { assertion: assert_editor_contract },
       { assertion: assert_profile_setup_visible },
+      { assertion: assert_profile_name_is_safe_for_presence },
       { action: action_edit },
       { assertion: assert_edit_visible },
     ],
