@@ -1,6 +1,15 @@
 import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 
-import type { IPCRemotePost } from "@/protocol/mod.ts";
+import { type IPCRemotePost, NotificationType } from "@/protocol/mod.ts";
+import { describeFailure } from "@/shared/utils.ts";
+
+/**
+ * How much of an undeliverable message to render. Enough to recognise which
+ * message it was, short enough that a hostile payload cannot flood the
+ * channel it is being reported on.
+ */
+const MAX_UNDELIVERABLE_RENDER = 512;
 
 /**
  * Posts one message from the worker to its client. This is the whole of the
@@ -20,7 +29,50 @@ import type { IPCRemotePost } from "@/protocol/mod.ts";
  * does not.
  */
 export function postToClient(message: IPCRemotePost): void {
+  let encoded;
+
+  try {
+    encoded = realmFromFabricValue(message);
+  } catch (error) {
+    // Defense in depth, and the mirror of the two decodes: a value can pass
+    // every `FabricValue` check and still have no encoding -- an object forged
+    // onto a `FabricPrimitive`'s prototype is one -- and this is the only
+    // place a worker speaks. A throw here reaches whatever called it, which
+    // for a console notification is a synchronous `EventTarget` listener,
+    // where it becomes an uncaught error and takes the process down.
+    postUndeliverable(message, error);
+    return;
+  }
+
   // Read off `self` at call time rather than captured at module load, so that
   // a test driving this without a real worker can substitute its own.
-  self.postMessage(realmFromFabricValue(message));
+  self.postMessage(encoded);
+}
+
+/**
+ * Reports a message the encoding refused, in place of the message itself.
+ *
+ * A reply is answered as a failure rather than dropped: the client is awaiting
+ * one, and dropping it would hang that request until it times out. A
+ * notification has nobody waiting, so it becomes an error report carrying a
+ * rendering of what could not be sent -- degraded rather than silent, which
+ * matters most for the console, whose whole job is to say what happened.
+ *
+ * What this posts is built from strings and numbers alone, which the encoding
+ * cannot refuse, so it needs no guard of its own.
+ */
+function postUndeliverable(message: IPCRemotePost, error: unknown): void {
+  const reason = `${describeFailure(error)}: ${
+    toCompactDebugString(message, MAX_UNDELIVERABLE_RENDER)
+  }`;
+  const msgId = (message as { msgId?: unknown }).msgId;
+
+  self.postMessage(realmFromFabricValue(
+    typeof msgId === "number"
+      ? { msgId, error: `Undeliverable message: ${reason}` }
+      : {
+        type: NotificationType.ErrorReport,
+        message: `Undeliverable message: ${reason}`,
+      },
+  ));
 }
