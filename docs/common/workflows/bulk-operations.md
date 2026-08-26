@@ -44,42 +44,38 @@ stage writes without `--apply`, and what the dry run reports differs: a repair
 prints the exact per-piece document diff, a retarget prints where each piece
 stands against its own row's reference pair.
 
-The precondition differs too, and the difference decides what happens when
-something else is writing at the same time.
+The precondition differs too — each stage pins what its own write moves — and
+in both the write is what proves it.
 
-A repair row's precondition is the hash of the document its dry run read, and
-the write is what proves it: the check runs inside the edit closure, which
-re-runs against fresh state on a commit conflict, so a document that moved fails
-its own row rather than being overwritten.
+A repair row's precondition is the hash of the document its dry run read. The
+check runs inside the edit closure, which re-runs against fresh state on a
+commit conflict, so a document that moved fails its own row rather than being
+overwritten.
 
-A retarget row's precondition is the reference pair it records, and the write
-does not prove it. A row runs as a sequence — read the piece's current
-reference, classify it against the pair, resolve the row's source from disk,
-recompute the identity that source produces, then call `setPattern`, which loads
-the current reference for itself and holds its own commit to that and never to
-the pair the row recorded. The classification is a read taken some way before
-the write, not a condition on it.
+A retarget row's precondition is the reference pair it records. A row runs as a
+sequence: read the piece's current reference, classify it against the pair,
+resolve the row's source from disk, recompute the identity that source produces,
+then write. The read classifies and does not guard — a writer landing after it
+is invisible to it — so the reference that read proved rides into the write as
+its own precondition, checked against the snapshot the write takes and again
+inside the transaction that commits it. A piece something else moved is refused
+by name and stops the run, rather than being written over.
 
-What the classification catches is a piece standing on neither of the row's two
-references. At the preflight that reads every row before the first write, such
-a piece keeps the run from starting at all; in a row's own read it stops the run
-there, and every piece after it is named unattempted. What it absorbs instead is
-a piece something else moved onto the row's own target: that classifies as
-landed — the same verdict a resume produces — so the run leaves it alone and
-rewrites nothing. Both outcomes are pinned in
-`packages/piece/test/ops/bulk-retarget.test.ts`, which races a writer against a
-group session and asserts the skip in one run and the stop in the other.
+The classification's own outcomes stand either side of that. A piece on neither
+of the row's references stops the run too: at the preflight that reads every row
+before the first write it keeps the run from starting at all, and in a row's own
+read it stops there, with every piece after it named unattempted. A piece
+another writer moved onto the row's own target classifies as landed — the
+verdict a resumed row carries — so the run skips it without a write. That one
+case is absorbed rather than named, and it is the benign one: the piece is
+where the plan wanted it, though `landed` says only that it is there, never
+that this run put it there.
 
-Between them one window stays open: a move landing after the row's
-classification returns and before `setPattern` reads the piece for itself. A
-piece moved there is carried to the row's target from the reference the other
-writer left it on, the row's pair never being consulted again. Past that read it
-is covered once more — `runSynced` reasserts the identity `setPattern` loaded
-inside every transaction attempt, so a move landing later is rejected with
-"piece pattern changed while the source update was compiling" rather than
-written over. The window is narrow, but it is open, so a retarget plan is a
-record of what a run intended and a check on what it finds, not an interlock
-against a second writer working the same pieces.
+Each of those outcomes is pinned in
+`packages/piece/test/ops/bulk-retarget.test.ts`, which races a writer into the
+classification read in one test and into the gap before the write in another.
+The [bulk operations contract](../../features/piece-bulk-operations.md) is where
+every refusal and the moment it fires are written down.
 
 **The verdict is a second look, never the apply's exit code.** An apply that
 exits zero says the writes it attempted returned success, which is not the same
@@ -121,6 +117,16 @@ that turned out to be. Each member row records the identity the piece runs today
 and whether that source is retained in the space. That second field is the
 rollback question, and the survey answers it before any write is planned rather
 than after one has failed.
+
+What the survey does not do is report as it goes. Nothing reaches stdout, the
+`--out` file, or the hint stream until every piece has been read and the plan is
+whole; the plan is written in one piece at the end, which is what lets the next
+stage consume the file without asking whether it is finished. The cost is that
+silence carries no information: a caller watching a survey that has printed
+nothing has no way to tell a large collection from a read that will not finish,
+because the command offers nothing to tell them apart with. An apply is the
+other way about — given neither `--json` nor `--out`, it prints a line per row
+as it settles them.
 
 ### Act 4 · One piece's pin, without running it
 
@@ -298,9 +304,12 @@ nobody runs.
 API_URL=http://localhost:8000 packages/cli/integration/bulk-ops-demo.sh
 ```
 
-The transcript is the artifact. Acts the mechanism does not yet cover appear at
-the end marked pending, so what the surface will grow stays visible beside what
-it does today.
+The transcript is the artifact, and every act in it runs. Each one makes a
+claim the demo counts: an unmarked act says the command works, a REFUSED act
+says the surface turns it down, and a displayed line that would not re-parse to
+the argv that ran is counted too. A transcript that reads clean is one where
+every one of those claims held, because a run that got any of them wrong cannot
+exit zero.
 
 ## Where to read further
 
