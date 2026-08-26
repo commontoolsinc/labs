@@ -99,19 +99,27 @@ reconnect re-syncs from scratch, as today.
   grows with board content).
 - Both are module constants beside the codec with one test-only setter
   (the `setOwnWriteEchoConfig` shape) so integration tests can force
-  chunking with small payloads.
+  chunking with small payloads. The setter rejects a chunk size below two
+  code units: at least two, the surrogate back-off always leaves a
+  non-empty slice behind.
 
 ## Implementation map
 
 New module `packages/memory/v2/wire-chunking.ts`:
 
-- `splitWireMessage(encoded: string): string[]` — returns `[encoded]`
-  untouched at or under the threshold, else the `fvc1:` frames.
+- `WireChunker` — the sender-side per-connection object that owns the
+  stream counter; one per connection, dropped on close.
+- `splitWireMessage(encoded: string, chunker: WireChunker): string[]` —
+  returns `[encoded]` untouched at or under the threshold, else the
+  `fvc1:` frames numbered from the chunker's counter.
 - `WireReassembler` — `accept(frame: string): string | null`; returns the
   completed payload (or the frame itself for `fvj1:` input with no open
   stream), `null` mid-stream; throws a typed protocol error on the
   violations above. Holds the per-direction state; one per connection per
   direction; dropped on close.
+
+A connection therefore owns a pair: a `WireChunker` outbound and a
+`WireReassembler` inbound, both created at connect and dropped at close.
 
 Flag plumbing in `packages/memory/v2.ts`: `wireChunking` added to
 `MemoryProtocolFlags`, `getMemoryProtocolFlags` (constant `true`, comment
@@ -185,7 +193,7 @@ cf against an older server likewise.
 
 ## Stages
 
-- [ ] Chunk codec module + flag plumbing + unit tests
+- [x] Chunk codec module + flag plumbing + unit tests
 - [ ] Toolshed and standalone host wiring + client wiring + integration
       tests
 - [ ] `EXPERIMENTAL_OPTIONS.md` registry row; full memory suite +
