@@ -1303,9 +1303,10 @@ The implementation evidence for this table is concentrated in:
    for failure-propagating closure persistence and compare the expected
    revision head, current pattern, active origin, and stored argument.
    Mutable-origin activation and reconciliation must guard every revision head
-   and active origin traversed during cycle detection. A path that cannot validate the complete read set
-   atomically fails closed. Add baseline revision migration for existing pieces,
-   including roots whose legacy origin is a raw `patternSource` string.
+   and active origin traversed during cycle detection. A path that cannot
+   validate the complete read set atomically fails closed. Add baseline
+   revision migration for existing pieces, including roots whose legacy origin
+   is a raw `patternSource` string.
    Materialize a durable tracked-or-detached choice; do not infer update
    authority from the string, rollout flags, or the root role. When no durable
    active choice can be established, migrate detached. Resolve a relative legacy
@@ -1356,12 +1357,13 @@ The implementation evidence for this table is concentrated in:
    including the LLM-backed create and edit flows. The piece menu must offer to
    adopt a candidate an automatic update refused, applying that exact reviewed
    candidate through the existing one-use confirmation and keeping the active
-   origin. The piece menu must also let a person type an origin directly: a field that accepts a web or fabric URL,
-   normalizes it under the source URL policy, records it as the active origin
-   with a repoint revision, and immediately resolves it and adopts its source,
-   reporting a resolution failure rather than leaving the piece silently
-   pointed at something unreachable. This is how a piece is moved to a source
-   it has never followed, which history-based repoint cannot express. Before a manual source
+   origin. The piece menu must also let a person type an origin directly: a
+   field that accepts a web or fabric URL, normalizes it under the source URL
+   policy, records it as the active origin with a repoint revision, and
+   immediately resolves it and adopts its source, reporting a resolution
+   failure rather than leaving the piece silently pointed at something
+   unreachable. This is how a piece is moved to a source it has never followed,
+   which history-based repoint cannot express. Before a manual source
    replacement, show incompatible pattern contracts and retained links. Require
    explicit confirmation or a command-line flag to continue. Reject a candidate
    that cannot use the piece's actual retained input. An accepted incompatible
