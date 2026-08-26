@@ -716,6 +716,18 @@ first, and because it is the only stage gated on measurement.
 - [ ] A failure under the shared session degrades to the same stop report,
       with the same remainder named.
 
+### Documentation
+
+The stages deliver behavior; this is what states it outside the plan, so that
+archiving the plan does not take the description of a live feature with it.
+
+- [x] A feature document —
+      [bulk piece operations](../features/piece-bulk-operations.md) — carries
+      the spine, the plan artifact's semantics, the safety model with the
+      moment each refusal fires, the drill's standing guarantees, and the
+      session and timing contracts, and stands alone once this plan is
+      archived. Command and flag detail stays in `packages/cli/README.md`.
+
 ## The drill
 
 Every stage above is finished by a drill that runs in continuous integration
