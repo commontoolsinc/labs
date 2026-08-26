@@ -6239,11 +6239,14 @@ supply; OW29/OW32/OW34 closed):
     open. Observability, recorded: a terminally dropped served event
     is invisible in serving stats (`events.*` has no dropped
     counter; only the scheduler WARN line and the entry's
-    `status: "dropped"` field carry it). Product exposure: ANY ACL
-    change revokes serving sessions by design (sharing is a normal
-    operation), so under ON a served dispatch's cross-space load
-    racing a revocation permanently and silently discards a user's
-    trusted action; the fix direction (load-park failure →
+    `status: "dropped"` field carry it). Product exposure: an ACL change
+    that REMOVES the serving session's authority or changes its
+    delegated owner revokes that session by design
+    (`#revokeDeauthorizedSessions` — authority-PRESERVING grants
+    leave the session valid; Cubic P2 on this PR scoped the claim),
+    so under ON a served dispatch's cross-space load racing such a
+    revocation permanently and silently discards a user's trusted
+    action; the fix direction (load-park failure →
     `deferred`/re-park) touches the seal-adjacent path — OW58's
     "(α)-critical, its own deliberate pass" caution applies, and the
     disposition (fix-before-flip vs. narrow honest step-skips naming
