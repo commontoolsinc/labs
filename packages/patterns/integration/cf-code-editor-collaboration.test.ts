@@ -171,7 +171,12 @@ async function installNextApplyGate(page: Page): Promise<void> {
       | undefined;
     if (!runtime) throw new Error("editor runtime is not available");
 
-    const original = runtime.applyOperation;
+    const prototype = Object.getPrototypeOf(runtime) as typeof runtime;
+    const original = prototype.applyOperation;
+    const ownApplyDescriptor = Object.getOwnPropertyDescriptor(
+      runtime,
+      "applyOperation",
+    );
     const gate = Promise.withResolvers<"apply" | "cancel">();
     const captured = Promise.withResolvers<void>();
     const completed = Promise.withResolvers<void>();
@@ -185,19 +190,32 @@ async function installNextApplyGate(page: Page): Promise<void> {
     globals.__cancelCollaborationApply = () => gate.resolve("cancel");
     globals.__collaborationApplyCaptured = captured.promise;
     globals.__collaborationApplyCompleted = completed.promise;
-    runtime.applyOperation = async (...args: unknown[]) => {
+    const restore = () => {
+      prototype.applyOperation = original;
+      if (ownApplyDescriptor === undefined) {
+        delete (runtime as { applyOperation?: unknown }).applyOperation;
+      } else {
+        Object.defineProperty(runtime, "applyOperation", ownApplyDescriptor);
+      }
+    };
+    const intercept = async function (
+      this: typeof runtime,
+      ...args: unknown[]
+    ): Promise<unknown> {
       captured.resolve();
       const action = await gate.promise;
-      runtime.applyOperation = original;
+      restore();
       try {
         if (action === "cancel") {
           throw new DOMException("collaboration apply cancelled", "AbortError");
         }
-        return await original.apply(runtime, args);
+        return await original.apply(this, args);
       } finally {
         completed.resolve();
       }
     };
+    prototype.applyOperation = intercept;
+    runtime.applyOperation = intercept;
   });
 }
 
