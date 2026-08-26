@@ -100,13 +100,16 @@ export const MAX_LIFETIME_CHANNELS_PER_SPACE = 500;
 
 export interface ControlDeps {
   runtime: Runtime;
+
   /** The toolshed's own space — where registrations live. */
   serviceSpace: string;
   operatorDid: string;
   serviceDids: readonly string[];
   hostsSpace: (space: string) => boolean;
+
   /** See SpaceAuthorityDeps.aclMode — gates the operator-write prediction only. */
   aclMode?: "off" | "observe" | "enforce";
+
   /** Overridable so a test can reach the cap without minting the whole limit. */
   maxChannelsPerOwner?: number;
   maxLifetimeChannelsPerOwner?: number;
@@ -144,6 +147,7 @@ export interface ChannelView {
   revoked?: { at: string; by: string };
   revocations?: { at: string; by: string }[];
   lastSeenAt: string | null;
+
   /**
    * The generation of this registration. Surfaced because `revoke` requires
    * it: it is what binds a revoke to the credential the caller actually looked
@@ -259,8 +263,10 @@ const persist = async (
     existing: IngestRegistration | null;
     callerDid: string;
     ttlDays?: number;
+
     /** The hash being rotated away from, so a stale device can be told to re-pair. */
     rotatedFrom?: string;
+
     /** Consumed atomically with this write, or not at all. */
     requestId: string;
   },

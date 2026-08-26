@@ -9,6 +9,7 @@ import { decodeStored } from "./decode.ts";
 export interface SpaceSummary {
   path: string;
   hasSchedulerBasisTable: boolean;
+
   /** Scheduler basis rows (0 even when the table exists empty). */
   schedulerBasisRows: number;
   commits: number;

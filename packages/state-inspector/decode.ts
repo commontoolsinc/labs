@@ -34,6 +34,7 @@ export interface DecodedLink {
   space?: string;
   path?: readonly string[];
   scope?: string;
+
   /**
    * The schema stored on the link, or `undefined` when it stores none. A
    * stored schema is a JSON Schema, so `true` and `false` are among the values

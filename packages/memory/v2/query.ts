@@ -59,12 +59,14 @@ export type QueryDocKey = `${string}/${ScopeKey}/${string}`;
 export type TrackedGraphState = {
   branch: string;
   tracker: MapSetStringToPathSelectors;
+
   /** Value-link dead-ends the query's walks read as ABSENT (see
    * GraphQueryWalkOptions.onMissedDoc): keyed like the tracker, never
    * delivered — a miss keeps the graph reactive to the document's later
    * creation (the wake pass and the dirty refresh consult it) without
    * putting an absence marker on the wire. */
   missed: MapSetStringToPathSelectors;
+
   /** missKey → the REFERRER keys whose links dead-ended on it. A miss
    * lives while any referrer attributes it: a referrer that is
    * re-walked clears its attributions first, so a link edited away
@@ -72,6 +74,7 @@ export type TrackedGraphState = {
    * attribution-less miss — defensive, no known producer — retires
    * only on its own arrival). */
   missedBy: Map<string, Set<string>>;
+
   /** referrerKey → the miss keys it attributed (the reverse index the
    * re-walk clears by). */
   missesOf: Map<string, Set<string>>;
@@ -284,6 +287,7 @@ export type TrackGraphOptions = {
   readSeq?: number;
   principal?: string;
   sessionId?: string;
+
   /**
    * `queryGraph` only (server-execution v2 stage A, OW17's wire leg):
    * annotate every returned snapshot with its scope INSTANCE
