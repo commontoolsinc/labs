@@ -921,6 +921,23 @@ export class CellImpl<T extends FabricValue>
     return this._kind === "cell" || this._kind === "readonly";
   }
 
+  /**
+   * Throws when this cell is an opaque handle (`asCell: ["opaque"]`) about to
+   * materialize the value behind it. An opaque handle carries identity and
+   * forwards as a link; the value it names is out of reach by contract.
+   * `getRaw()` under its default `lastNode: "top"` stays allowed — it returns
+   * the reference itself, which is what an opaque handle holds.
+   */
+  private refuseOpaqueRead(op: string): void {
+    if (this._kind !== "opaque") return;
+    throw new Error(
+      `Cannot read through an opaque cell: ${op} would materialize the ` +
+        `value, and an opaque handle (asCell: ["opaque"]) grants identity ` +
+        `and forwarding only. Read this location under a schema that does ` +
+        `not mark it opaque.`,
+    );
+  }
+
   [cfcLabelViewSymbol](): CfcLabelView | undefined {
     return cloneCfcLabelView(this._cfcLabelView);
   }
@@ -1156,6 +1173,7 @@ export class CellImpl<T extends FabricValue>
   }
 
   get(options?: { traverseCells?: boolean }): Readonly<StripDefaultBrand<T>> {
+    this.refuseOpaqueRead("get()");
     if (!this.synced) this.sync(); // No await, just kicking this off
 
     // Per-transaction read cache: within one ready transaction, repeatedly
@@ -2908,6 +2926,7 @@ export class CellImpl<T extends FabricValue>
     path?: Readonly<Path>,
     tx?: IExtendedStorageTransaction,
   ): CellResult<DeepKeyLookup<T, Path>> {
+    this.refuseOpaqueRead("getAsQueryResult()");
     if (!this.synced) this.sync(); // No await, just kicking this off
     const subPath = path || [];
     return createQueryResultProxy(
@@ -2985,6 +3004,9 @@ export class CellImpl<T extends FabricValue>
     options?: RawCellReadOptions & { frozen?: boolean },
   ): FabricValue {
     const { frozen = true, lastNode = "top", ...readOptions } = options ?? {};
+    if (lastNode !== "top") {
+      this.refuseOpaqueRead(`getRaw() with lastNode "${lastNode}"`);
+    }
     if (!this.synced) this.sync(); // No await, just kicking this off
     const tx = this.runtime.readTx(this.tx);
     // Resolve all links ON THE WAY to the target, but don't resolve the final
