@@ -13,6 +13,7 @@ import { table } from "@commonfabric/memory/sqlite/schema";
 import type { SqliteDbRef } from "@commonfabric/memory/v2";
 import { Runtime } from "../src/runtime.ts";
 import { createCell } from "../src/cell.ts";
+import { encodeSqliteParams } from "../src/index.ts";
 import { decodeCfLinkValue } from "../src/builtins/sqlite/cf-link.ts";
 import { areNormalizedLinksSame } from "../src/link-utils.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -59,6 +60,12 @@ describe("SqliteDb .exec (commit-folded write)", () => {
       "sqlite",
     ) as unknown as SqliteDbCell;
   }
+
+  it("exports the parameter encoder used by remote SQLite callers", () => {
+    expect(encodeSqliteParams("SELECT :value", { value: null })).toEqual({
+      value: null,
+    });
+  });
 
   it("folds a write atomically with a sibling cell write", async () => {
     const dbRef: SqliteDbRef = {

@@ -4372,6 +4372,19 @@ describe("runtime-processor", () => {
       expect(edited).toBe(false);
     });
 
+    it("rejects a database reference with a non-string owner", async () => {
+      const processor = processorWith(
+        { id: "db-1", tables: { notes: {} }, owner: { id: "not-a-did" } },
+        () => Promise.resolve({ rows: [] }),
+      );
+
+      await expect(processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT 1",
+      })).rejects.toThrow("Invalid SQLite database owner");
+    });
+
     it("commits writes through the database cell's transactional exec", async () => {
       const calls: unknown[][] = [];
       const db = { id: "db-1", tables: { notes: {} } };
