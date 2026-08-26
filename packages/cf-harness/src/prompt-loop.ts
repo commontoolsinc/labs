@@ -926,6 +926,30 @@ const SCRUBBED_CHILD_HANDLE_TOKEN = "[handle-token-removed]";
  * token grammar would be mangled mid-address, leaving the parent unable to
  * address the very cell the child was reporting.
  */
+const HANDLE_SKILL_TEXT_SCRUBBED = "[handle-delivered skill text withheld]";
+
+/**
+ * Every parent-facing return of a delegation that carried a `skillHandle`
+ * passes through here: the exact injected payload — and its JSON-escaped
+ * spelling, for a child that echoes it inside a structured return string —
+ * is replaced with fixed inert text. This closes the VERBATIM channel: the
+ * cell's payload cannot cross into the parent transcript as itself. It is
+ * deliberately not more than that — a child exists to act on the skill, so
+ * what it DID because of the text (including describing it) is its ordinary,
+ * policy-mediated output, not a leak of the payload.
+ */
+const scrubHandleSkillText = (text: string, skillText: string): string => {
+  let scrubbed = text;
+  const escaped = JSON.stringify(skillText).slice(1, -1);
+  for (
+    const needle of skillText === escaped ? [skillText] : [skillText, escaped]
+  ) {
+    if (needle.length === 0) continue;
+    scrubbed = scrubbed.split(needle).join(HANDLE_SKILL_TEXT_SCRUBBED);
+  }
+  return scrubbed;
+};
+
 const resolveChildHandleTokens = (
   childEngine: CfHarnessEngine,
   text: string,
@@ -2624,10 +2648,11 @@ export class CfHarnessPromptLoop {
   /**
    * Helper for `#invokeToolCall()`, which replaces handle tokens in a parsed
    * tool input with their canonical address strings. Two tools are exempt:
-   * `delegate_task`, whose input reaches the child as the model wrote it, and
-   * `describe_handle`, whose input names a token rather than a referent — it
-   * looks the token up in the table itself. Returns `input` itself when no
-   * substitution applies.
+   * `delegate_task`, whose `goal` and `context` reach the child as the model
+   * wrote them (its `skillHandle` is resolved separately, trusted-side,
+   * before dispatch), and `describe_handle`, whose input names a token rather
+   * than a referent — it looks the token up in the table itself. Returns
+   * `input` itself when no substitution applies.
    */
   #resolveHandleTokensInToolInput(
     toolId: string,
@@ -3095,7 +3120,12 @@ export class CfHarnessPromptLoop {
           : handle.startsWith(ADDRESS_HANDLE_TOKEN_PREFIX)
           ? resolveHandleToken(table, handle)
           : resolveHandleRef(table, handle);
-        resolvedDelegateSkill = { text: resolution.value, token: entry!.token };
+        // trimEnd once HERE: the injected block, the activation digest, and
+        // the return scrub must all speak of the identical payload.
+        resolvedDelegateSkill = {
+          text: resolution.value.trimEnd(),
+          token: entry!.token,
+        };
       }
     }
     await this.engine.recordPolicyDecision({
@@ -3749,10 +3779,20 @@ export class CfHarnessPromptLoop {
       // produced usable by the parent: the parent's outbound swap mints the
       // canonical address into a parent token — the same token for a seeded
       // address, a fresh one for an address only the child ever saw.
-      const childFinalText = resolveChildHandleTokens(
-        childEngine,
-        childResult.finalAssistantText,
-      );
+      // Scrubbed BEFORE the summary and the structured-return parse, so both
+      // parent-facing paths see the mediated text.
+      const childFinalText = options.resolvedSkill === undefined
+        ? resolveChildHandleTokens(
+          childEngine,
+          childResult.finalAssistantText,
+        )
+        : scrubHandleSkillText(
+          resolveChildHandleTokens(
+            childEngine,
+            childResult.finalAssistantText,
+          ),
+          options.resolvedSkill.text,
+        );
       summary = childFinalText;
       childModelTurns = childResult.modelTurns;
       const childUsage = childResult.totalUsage ?? childResult.usage;

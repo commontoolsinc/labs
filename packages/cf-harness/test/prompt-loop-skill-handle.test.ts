@@ -199,34 +199,183 @@ describe("prompt-loop delegate_task skillHandle", () => {
   });
 
   it("refuses a skillHandle this run does not hold, before any child exists", async () => {
-    const engine = new CfHarnessEngine({
-      sandboxRuntime: new FakeSandboxRuntime(),
-      runId: "run-skill-handle-unknown",
-      model: "gpt-5.4",
-      cfcEnforcementMode: "disabled",
-    });
-    const requestBodies: unknown[] = [];
-    const loop = new CfHarnessPromptLoop({
-      apiKey: "test-key",
-      engine,
-      fetchFn: scriptedFetch([
-        delegateCallTurn("call-skill-unknown", {
-          goal: "Plan the trip.",
-          skillHandle: "cfh:a:qqqqq",
-        }),
-        assistantTurn("Understood, no such reference."),
-      ], requestBodies),
-    });
+    // A fabric session exists and the run HOLDS a table — just not this
+    // token — so the refusal under test is table membership itself, not the
+    // earlier no-session arm.
+    await withSkillCell(async ({ pieces, ref }) => {
+      const runId = "run-skill-handle-unknown";
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable(runId),
+        ref,
+      );
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId,
+        model: "gpt-5.4",
+        cfcEnforcementMode: "disabled",
+        fabricSessionFactory: () => Promise.resolve({ pieces }),
+      });
+      await engine.recordHandleTable(minted.table);
+      const requestBodies: unknown[] = [];
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine,
+        fetchFn: scriptedFetch([
+          delegateCallTurn("call-skill-unknown", {
+            goal: "Plan the trip.",
+            skillHandle: "cfh:a:qqqqq",
+          }),
+          assistantTurn("Understood, no such reference."),
+        ], requestBodies),
+      });
 
-    const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+      const result = await loop.runPrompt({ prompt: "Delegate the plan." });
 
-    // The refusal is a recoverable invalid-tool-call the model reacts to; no
-    // subagent run was created for it.
-    const toolMessage = result.transcript.find(
-      (message) => message.role === "tool",
-    );
-    expect(toolMessage?.content).toContain("cf-harness.invalid-tool-call");
-    expect(toolMessage?.content).toContain("skillHandle");
-    expect(result.runState.subagentRuns ?? []).toEqual([]);
+      // The refusal is a recoverable invalid-tool-call the model reacts to;
+      // no subagent run was created for it.
+      const toolMessage = result.transcript.find(
+        (message) => message.role === "tool",
+      );
+      expect(toolMessage?.content).toContain("cf-harness.invalid-tool-call");
+      expect(toolMessage?.content).toContain(
+        "does not name a handle this run holds",
+      );
+      expect(result.runState.subagentRuns ?? []).toEqual([]);
+    });
+  });
+
+  it("scrubs a child that echoes the skill text back, on the plain summary path", async () => {
+    await withSkillCell(async ({ pieces, ref }) => {
+      const runId = "run-skill-handle-echo";
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable(runId),
+        ref,
+      );
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId,
+        model: "gpt-5.4",
+        cfcEnforcementMode: "disabled",
+        fabricSessionFactory: () => Promise.resolve({ pieces }),
+      });
+      await engine.recordHandleTable(minted.table);
+      const requestBodies: unknown[] = [];
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine,
+        fetchFn: scriptedFetch([
+          delegateCallTurn("call-skill-echo", {
+            goal: "Plan the trip using the provided skill.",
+            skillHandle: minted.token,
+          }),
+          // A naive child repeats its instructions verbatim.
+          assistantTurn(`Here is what I was told:\n${SKILL_TEXT}`),
+          assistantTurn("Parent received the child summary."),
+        ], requestBodies),
+      });
+
+      const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+
+      // The payload never crosses as itself: the parent's third request (the
+      // one carrying the delegate tool output) holds the scrub marker, not
+      // the canary.
+      const parentText = chatViewOfRequest(requestBodies[2]).messages
+        .map((message) => message.content).join("\n");
+      expect(parentText).not.toContain("CANARY-SKILL-9f4e2");
+      expect(parentText).toContain("skill text withheld");
+      const toolMessage = result.transcript.find(
+        (message) => message.role === "tool",
+      );
+      expect(toolMessage?.content).not.toContain("CANARY-SKILL-9f4e2");
+    });
+  });
+
+  it("scrubs an echo inside a structured return string", async () => {
+    await withSkillCell(async ({ pieces, ref }) => {
+      const runId = "run-skill-handle-echo-structured";
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable(runId),
+        ref,
+      );
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId,
+        model: "gpt-5.4",
+        cfcEnforcementMode: "disabled",
+        fabricSessionFactory: () => Promise.resolve({ pieces }),
+      });
+      await engine.recordHandleTable(minted.table);
+      const requestBodies: unknown[] = [];
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine,
+        fetchFn: scriptedFetch([
+          delegateCallTurn("call-skill-echo-json", {
+            goal: "Plan the trip using the provided skill.",
+            skillHandle: minted.token,
+            returnSchema: {
+              type: "object",
+              properties: { note: { type: "string" } },
+              required: ["note"],
+            },
+          }),
+          // The child returns JSON whose string value embeds the payload —
+          // the JSON-escaped spelling of the skill text.
+          assistantTurn(JSON.stringify({ note: `stole: ${SKILL_TEXT}` })),
+          assistantTurn("Parent received the child summary."),
+        ], requestBodies),
+      });
+
+      const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+
+      const parentText = chatViewOfRequest(requestBodies[2]).messages
+        .map((message) => message.content).join("\n");
+      expect(parentText).not.toContain("CANARY-SKILL-9f4e2");
+      const toolMessage = result.transcript.find(
+        (message) => message.role === "tool",
+      );
+      expect(toolMessage?.content).not.toContain("CANARY-SKILL-9f4e2");
+    });
+  });
+
+  it("records the table token on the activation when the handle is passed as a reference", async () => {
+    await withSkillCell(async ({ pieces, ref }) => {
+      const runId = "run-skill-handle-ref-spelling";
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable(runId),
+        ref,
+      );
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId,
+        model: "gpt-5.4",
+        cfcEnforcementMode: "disabled",
+        fabricSessionFactory: () => Promise.resolve({ pieces }),
+      });
+      await engine.recordHandleTable(minted.table);
+      const requestBodies: unknown[] = [];
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine,
+        fetchFn: scriptedFetch([
+          delegateCallTurn("call-skill-ref", {
+            goal: "Plan the trip using the provided skill.",
+            // The REFERENCE spelling of the same handle: still resolved
+            // through the table, and the child's block carries the TOKEN.
+            skillHandle: ref,
+          }),
+          assistantTurn("Trip planned per the skill."),
+          assistantTurn("Parent received the child summary."),
+        ], requestBodies),
+      });
+
+      await loop.runPrompt({ prompt: "Delegate the plan." });
+
+      const childText = chatViewOfRequest(requestBodies[1]).messages
+        .map((message) => message.content).join("\n");
+      expect(childText).toContain(
+        `<skill_context source="handle:${minted.token}">`,
+      );
+    });
   });
 });
