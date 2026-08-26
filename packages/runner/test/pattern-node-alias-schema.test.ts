@@ -136,7 +136,7 @@ describe("compiled pattern node alias schemas", () => {
     ).toEqual(["cell"]);
   });
 
-  it("reads recursive node arguments shallowly through the alias schema", async () => {
+  it("refuses value reads through the opaque alias and reads shallowly through the module argument schema", async () => {
     const { live, serialized } = await compileSource(PURE_RECURSIVE_SOURCE);
     const aliasSchema = nodeAliasSchema(serialized);
 
@@ -152,9 +152,14 @@ describe("compiled pattern node alias schemas", () => {
       children: [{ title: "child" }],
     });
 
+    // The alias schema marks the forwarded argument opaque, so the read
+    // stops at a handle that refuses to materialize the value behind it.
+    // The value read belongs to the module argument schema below.
     const directRoot = root.get();
     expect(isCell(directRoot)).toBe(true);
-    expect(isCell(directRoot.get().children[0])).toBe(true);
+    expect(() => directRoot.get()).toThrow(
+      "Cannot read through an opaque cell",
+    );
 
     const resultCell = runtime.getCell<any>(
       space,
@@ -171,6 +176,16 @@ describe("compiled pattern node alias schemas", () => {
     )!;
     const childRoot = childArgument.get();
     expect(isCell(childRoot)).toBe(true);
-    expect(isCell(childRoot.get().children[0])).toBe(true);
+    expect(() => childRoot.get()).toThrow(
+      "Cannot read through an opaque cell",
+    );
+
+    // The sanctioned value read drops the opaque wrapper from the schema and
+    // materializes one level, with recursive children still held as cells.
+    const { asCell: _asCell, ...readableSchema } =
+      serialized.nodes[0].module.implementation.argumentSchema;
+    const readable = childArgument.asSchema(readableSchema).get();
+    expect(readable.title).toBe("root");
+    expect(isCell(readable.children[0])).toBe(true);
   });
 });
