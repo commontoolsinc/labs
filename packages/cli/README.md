@@ -112,6 +112,14 @@ arguments cell the way `--input` does. Only commands that take `--input` accept
 it; `#` is reserved for the suffix, so a path key containing `#` needs the
 positional path spelling.
 
+`cf piece apply` replaces a piece's whole input rather than one path within it.
+It validates the document against the pattern's `argumentSchema` and re-executes
+the pattern with it, so a field the schema requires and the document omits is
+refused before anything is written. `cf set` writes at one path and validates
+only that path, which makes the two different operations on the same cell: reach
+for `apply` when the new input is a whole document, and for `set` when it is one
+value in a document that is otherwise correct.
+
 ## Piece discovery
 
 `cf piece ls` lists the pieces in the selected space's piece registry. It reads
@@ -902,6 +910,14 @@ Every registered top-level command appears in `cf --help`. The direct
 launchers use them. Shell completion is the exception: it drops commands whose
 description opens with `Internal:`, because those are spawned by `cf fuse` and
 never typed at a prompt.
+
+## Evaluating patterns from another tool
+
+`cf init` writes a TypeScript environment an external tool can evaluate patterns
+in: the configuration and type declarations an editor, a scratch checkout, or a
+generated workspace needs to resolve `commonfabric` the way this repository
+does. It touches nothing in a space, so it is safe to run anywhere and to run
+again.
 
 ## Installing `cf` on PATH
 
