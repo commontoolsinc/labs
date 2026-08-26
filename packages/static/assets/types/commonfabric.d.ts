@@ -415,16 +415,16 @@ export declare const FabricError: FabricErrorConstructor;
  * violates it can corrupt data-model invariants, as any broken contract can.
  */
 export type FabricValue =
-  | null
+  | bigint
   | boolean
+  | null
   | number
   | string
-  | bigint
   | symbol
-  | FabricSpecialObject
+  | undefined
   | FabricArray
   | FabricPlainObject
-  | undefined;
+  | FabricSpecialObject;
 
 /**
  * The container types that are part of `FabricValue`. Note that
