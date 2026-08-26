@@ -4363,6 +4363,49 @@ describe("runtime-processor", () => {
       ]]);
     });
 
+    it("loads a newly materialized database handle before querying it", async () => {
+      const calls: string[] = [];
+      const db = { id: "db-1", tables: { notes: {} }, scope: "user" };
+      let loaded = false;
+      const cell = {
+        pull: () => {
+          calls.push("pull");
+          return Promise.resolve();
+        },
+        sync: () => {
+          calls.push("sync");
+          loaded = true;
+          return Promise.resolve(db);
+        },
+        getRaw: () => loaded ? db : undefined,
+        asSchema: () => ({ get: () => loaded ? db : undefined }),
+      };
+      const processor = Object.assign(
+        Object.create(RuntimeProcessor.prototype),
+        {
+          runtime: {
+            getCellFromLink: () => cell,
+            storageManager: {
+              open: () => ({
+                sqliteQuery: () => {
+                  calls.push("query");
+                  return Promise.resolve({ rows: [] });
+                },
+              }),
+            },
+          },
+        },
+      ) as RuntimeProcessor;
+
+      await processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT * FROM notes",
+      });
+
+      expect(calls).toEqual(["pull", "sync", "query"]);
+    });
+
     it("converts native SQLite BLOB rows and parameters at the IPC boundary", async () => {
       const calls: unknown[][] = [];
       const processor = processorWith(

@@ -227,15 +227,6 @@ export default pattern<BridgeFixtureInput, BridgeFixtureOutput>((state) => {
   const sessionDatabase: PerSession<SqliteDb> = sqliteDatabase(
     { tables },
   );
-  // One-shot reads materialize the scoped handle cells before the iframe gets
-  // its capabilities. They stay independent of later database invalidations,
-  // so an in-flight guest operation cannot unload its own bridge.
-  const userDatabaseProbe = userDatabase.query<{ value: string }>(
-    "SELECT value FROM bridge_items",
-  );
-  const sessionDatabaseProbe = sessionDatabase.query<{ value: string }>(
-    "SELECT value FROM bridge_items",
-  );
   const context = IframeContext({
     shared: state.shared,
     user: state.user,
@@ -250,10 +241,8 @@ export default pattern<BridgeFixtureInput, BridgeFixtureOutput>((state) => {
     sessionDatabase,
   });
   const source = computed(() =>
-    userDatabaseProbe.pending || sessionDatabaseProbe.pending
-      ? ""
-      : GUEST_HTML + '<span hidden data-reload="' +
-        state.reloadRevision.get() + '"></span>'
+    GUEST_HTML + '<span hidden data-reload="' + state.reloadRevision.get() +
+    '"></span>'
   );
   const reloadGuest = action(() => {
     state.status.set("reloading");

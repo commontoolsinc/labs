@@ -1535,8 +1535,7 @@ export class RuntimeProcessor {
     request: SqliteQueryRequest,
   ): Promise<SqliteQueryResponse> {
     const cell = getCell(this.runtime, request.cell);
-    await cell.pull();
-    const db = this.readSqliteDbRef(cell);
+    const db = await this.pullSqliteDbRef(cell);
     // A direct IPC query has no runner result cell on which to persist the
     // label derived from result-column provenance. Refuse that database shape
     // instead of returning rows with their CFC labels silently stripped.
@@ -1569,8 +1568,7 @@ export class RuntimeProcessor {
 
   async handleSqliteExec(request: SqliteExecRequest): Promise<void> {
     const source = getCell(this.runtime, request.cell);
-    await source.pull();
-    this.readSqliteDbRef(source);
+    await this.pullSqliteDbRef(source);
     const params = request.params === undefined
       ? undefined
       : sqliteParamsForRuntime(this.runtime, request.params) as
@@ -1588,6 +1586,17 @@ export class RuntimeProcessor {
       cell.exec(request.sql, params);
     });
     if (result.error) throw new Error(result.error.message);
+  }
+
+  private async pullSqliteDbRef(cell: Cell<unknown>): Promise<SqliteDbRef> {
+    await cell.pull();
+    if (cell.getRaw({ lastNode: "value" }) === undefined) {
+      // A resolved scoped target can be demanded before its lazy factory write
+      // reaches this client. Load only that first missing value; established
+      // handles stay on the non-blocking pull path for later queries and writes.
+      await cell.sync();
+    }
+    return this.readSqliteDbRef(cell);
   }
 
   private readSqliteDbRef(cell: Cell<unknown>): SqliteDbRef {
