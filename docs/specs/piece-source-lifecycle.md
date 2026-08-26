@@ -69,7 +69,7 @@ otherwise complete first-time creation command into an unimplemented command.
 
 ## Last updated
 
-2026-08-25
+2026-08-26
 
 ## Terms
 
@@ -583,7 +583,10 @@ own transaction. A refusal there leaves the pointer on the candidate and the
 graph on the accepted source. The next open reconciles against the pointer,
 finds it matches what the origin offers, and reports the piece current, so
 neither reconciliation nor the runner's cold-start repair can undo it. Only a
-revert, repoint, or detach can. Staging the candidate in the transition for a
+revert, repoint, or detach can. The source panel does not catch it either. The
+panel names the outcome the last reconciliation reached, and that reconciliation
+compared the pointer, so the panel reports the piece as following an origin
+whose source it is not running. Staging the candidate in the transition for a
 running piece too, so that a refusal costs nothing in either case, is required
 work.
 
@@ -930,7 +933,8 @@ pattern:
    dependency closures, and wait for every write to succeed. A failed write
    fails the transition. It is not converted into a background warning.
 6. In one transaction, compare the expected revision head, current pattern,
-   and active origin. If all remain current, append the revision, retain the
+   active origin, and stored argument. If all remain current, append the
+   revision, restage the argument against the candidate's schema, retain the
    active origin and accepted origin revision, set `patternIdentity` to the
    candidate value even when it is unchanged, and advance the revision head.
 7. Start the accepted pattern on the existing piece result cell.
@@ -977,6 +981,12 @@ reconciliation's outcome and time in each:
 - **Unusable origin.** The piece records a string no resolver can follow. This
   is not detached — the piece is carrying something a person can read and fix —
   and it is not following either.
+
+One case escapes these states while a running piece's transition moves only its
+pointer. A refusal there leaves the pointer on a candidate the graph never ran,
+and every later reconciliation agrees with that pointer, so the panel reports
+Following for a piece that runs its accepted source. Staging the candidate in
+that transition, described under the compatibility policy, is what removes it.
 
 Telling could-not-reach from refused needs a finer answer than reconciliation
 gives today. It reports one outcome for an origin it could not reach and for
@@ -1291,9 +1301,9 @@ The implementation evidence for this table is concentrated in:
    empty value.
 2. Provide one atomic source-transition API used by every caller. It must wait
    for failure-propagating closure persistence and compare the expected
-   revision head, current pattern, and active origin. Mutable-origin activation
-   and reconciliation must guard every revision head and active origin traversed
-   during cycle detection. A path that cannot validate the complete read set
+   revision head, current pattern, active origin, and stored argument.
+   Mutable-origin activation and reconciliation must guard every revision head
+   and active origin traversed during cycle detection. A path that cannot validate the complete read set
    atomically fails closed. Add baseline revision migration for existing pieces,
    including roots whose legacy origin is a raw `patternSource` string.
    Materialize a durable tracked-or-detached choice; do not infer update
