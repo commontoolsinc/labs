@@ -267,7 +267,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
       : undefined;
     postToClient({
       msgId: message.msgId,
-      error: error instanceof Error ? error.message : String(error),
+      error: describeFailure(error),
       ...(code ? { code } : {}),
     });
   }

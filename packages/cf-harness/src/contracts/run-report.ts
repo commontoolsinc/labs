@@ -9,6 +9,7 @@ import type {
 } from "./policy-trace.ts";
 import { countHarnessPolicyDecisions } from "./policy-trace.ts";
 import type { PromptSlotBinding } from "./prompt-slot.ts";
+import type { HarnessFabricSessionCfcPosture } from "../run-state.ts";
 import type { HarnessSubagentRunRef } from "./subagent.ts";
 import type { HarnessToolEffectClass } from "./tool-descriptor.ts";
 import type { HarnessTranscriptMessage } from "./transcript.ts";
@@ -117,6 +118,8 @@ export interface HarnessRunReport {
   totalUsage?: HarnessModelUsage;
   modelUsage?: HarnessModelTurnUsage[];
   cfcEnforcementMode: CfcEnforcementMode;
+  /** The fabric session's resolved CFC posture, when the run had a session. */
+  fabricSessionCfc?: HarnessFabricSessionCfcPosture;
   createdAt?: string;
   updatedAt?: string;
   endedAt?: string;
@@ -154,6 +157,7 @@ export interface CreateHarnessRunReportOptions {
     endedAt?: string;
     terminalReason?: string;
     cfcEnforcementMode: CfcEnforcementMode;
+    fabricSessionCfc?: HarnessFabricSessionCfcPosture;
     artifactRoot?: string;
     transcriptPath?: string;
     promptSlotBinding?: PromptSlotBinding;
@@ -331,6 +335,9 @@ export const createHarnessRunReport = (
       ? { modelUsage: [...(options.modelUsage ?? [])] }
       : {}),
     cfcEnforcementMode: options.runState.cfcEnforcementMode,
+    ...(options.runState.fabricSessionCfc !== undefined
+      ? { fabricSessionCfc: options.runState.fabricSessionCfc }
+      : {}),
     ...(options.runState.createdAt !== undefined
       ? { createdAt: options.runState.createdAt }
       : {}),

@@ -67,8 +67,18 @@ export interface HarnessFabricSessionCfcPosture {
   /** `configured` when the operator set the dial; `preset-pin` otherwise. */
   enforcementModeSource: "configured" | "preset-pin";
   flowLabels: "off" | "observe" | "persist";
-  /** `configured` when the operator set the dial; `default` otherwise. */
-  flowLabelsSource: "configured" | "default";
+  /**
+   * `configured` when the operator set the dial; `posture` when the named
+   * bundle below supplied it; `default` otherwise.
+   */
+  flowLabelsSource: "configured" | "default" | "posture";
+  /**
+   * The named CFC posture bundle the session's runtime opted into, when the
+   * operator selected one (`--fabric-cfc-posture`). The bundle sets more
+   * dials than the two this record itemizes — the full set is
+   * `MAX_ENFORCEMENT_CFC_OPTIONS` in the runner's presets.
+   */
+  posture?: "max-enforcement";
 }
 
 export interface HarnessRunState {

@@ -686,13 +686,15 @@ The prompt/tool loop applies the swaps at three seams. Successful tool output
 bound for model context carries tokens, while the persisted tool-output artifact
 keeps the raw addresses. Model-authored tool arguments resolve tokens back to
 canonical references before policy evaluation, summarization, and dispatch —
-except for `delegate_task`, whose arguments reach the child verbatim, so a token
-there is inert text to the parent boundary. And a sealed subagent
-structured-return string whose raw value names an address comes back as a token
-rather than an opaque `@link` object; the return's `linkedStringCount` counts
-only the positions still sealed. Denial-path tool messages are not swapped; that
-coverage, value handles, and an explicit release/readback mechanism are listed
-in [docs/ROADMAP.md](docs/ROADMAP.md).
+except for `delegate_task`, whose `goal` and `context` reach the child verbatim,
+so a token there is inert text to the parent boundary (its `skillHandle` is the
+one delegate argument the parent boundary resolves itself: trusted-side
+materialization is that parameter's whole point — see "Skill by handle" below).
+And a sealed subagent structured-return string whose raw value names an address
+comes back as a token rather than an opaque `@link` object; the return's
+`linkedStringCount` counts only the positions still sealed. Denial-path tool
+messages are not swapped; that coverage, value handles, and an explicit
+release/readback mechanism are listed in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 #### Well-known grants
 
@@ -899,6 +901,34 @@ with no session configured the tool is absent from the child's surface rather
 than present-but-failing. The `browser`, `web_fetch`, and `web_search` profiles
 do not offer it.
 
+#### Skill by handle
+
+`delegate_task` takes an optional `skillHandle`: a handle the parent holds,
+naming a cell whose string value is skill text for the child. The text is
+materialized on the trusted host side at child spawn — through the same
+resolution contract as every other handle value: table membership mandatory,
+string-only, same-space-only, with a structured refusal naming the reference on
+any miss, delivered before any child exists — and injected into the child's
+context as a `<skill_context source="handle:<token>">` block beside the
+profile's registry preload. The parent never reads the text, and the child never
+holds the handle. The return path is mediated too: every parent-facing return of
+such a delegation has the exact injected payload (and its JSON-escaped spelling)
+scrubbed to fixed inert text, so a child that echoes its instructions verbatim
+cannot walk the payload into the parent transcript. The scrub is deliberately no
+more than that — the child exists to act on the skill, so what it did because of
+the text is its ordinary, policy-mediated output.
+
+A handle-delivered skill bypasses the registry entirely: it is transient run
+state from a cell, the untrusted-acquisition complement to the trusted operator
+`--skills-root`, and for the delegated path it retires selection by name — the
+name-squat surface — in favor of an unforgeable table entry. It carries no
+directory, so it has no supporting-resource index and no scripts;
+`run_skill_script`'s operator allowlist cannot name it, and the skill-context
+preamble that keeps a skill from authorizing tools applies to it unchanged. The
+child's activation record carries `source: "skill-handle"`, the token, and the
+digest of the exact text injected, so the artifacts say which reference supplied
+the skill and what it said.
+
 ### Running patterns against a Fabric space
 
 This is the second half of [the model](#the-model-handles-and-patterns): the
@@ -937,8 +967,8 @@ space's authorization, and only a healthy session is cached for the run. A
 session that fails to build surfaces as an ordinary tool-output error rather
 than a run failure, and the next tool call retries the construction.
 
-Two further flags set the session runtime's CFC dials, and both need the three
-session flags present. `--fabric-cfc-enforcement-mode`
+Three further flags set the session runtime's CFC dials, and each needs the
+three session flags present. `--fabric-cfc-enforcement-mode`
 (`CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE`) accepts `enforce-explicit` or
 `enforce-strict` — raise-only, since the session's runtime preset already pins
 `enforce-explicit`; under `enforce-strict`, a pattern whose writes carry
@@ -946,15 +976,26 @@ confidentiality its target's declared policy does not admit has its commit
 refused. `--fabric-cfc-flow-labels` (`CF_HARNESS_FABRIC_CFC_FLOW_LABELS`)
 accepts `off`, `observe`, or `persist`; `persist` stamps the derived flow labels
 onto everything a pattern's transaction writes, which is what makes a labelled
-read visible to that refusal. These dials govern the fabric session's runtime
-only — `--cfc-enforcement-mode` remains the harness's own dial for tool policy
-and the sandbox, and the two are set independently.
+read visible to that refusal. `--fabric-cfc-posture`
+(`CF_HARNESS_FABRIC_CFC_POSTURE`) accepts `max-enforcement` and opts the
+session's runtime into the named CFC posture bundle
+(`MAX_ENFORCEMENT_CFC_OPTIONS` in the runner's presets): every staged
+enforcement dial on, the standard prompt-caveat policy loaded, and public-only
+ceilings on the network-fetch sinks (the llm sinks carry no ceiling and are
+ungoverned by the posture, pending a boundary-scoped admission mechanism). The
+two per-dial flags still apply over the bundle, so
+`--fabric-cfc-posture max-enforcement
+--fabric-cfc-enforcement-mode enforce-strict`
+is the full-strictness configuration. These dials govern the fabric session's
+runtime only — `--cfc-enforcement-mode` remains the harness's own dial for tool
+policy and the sandbox, and the two are set independently.
 
 A run states both postures rather than leaving them to be inferred: the resolved
 fabric-session posture — each dial's value and whether the operator configured
-it or the preset supplied it — is recorded as `fabricSessionCfc` in
-`run-state.json` and the run report, and the operator summary prints it beside
-the harness's own `cfcMode`.
+it, the named posture bundle supplied it, or the preset's default stood — is
+recorded as `fabricSessionCfc` in `run-state.json` and the run report (with the
+selected bundle, when there is one, as its `posture` field), and the operator
+summary prints it beside the harness's own `cfcMode`.
 
 The tool takes `sourceText` (inline pattern source, at most 256 KiB — an
 over-cap source is a structured tool error), an optional `inputs` object, and an

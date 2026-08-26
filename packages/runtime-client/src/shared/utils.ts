@@ -2,17 +2,18 @@ import { cloneCfcLabelView } from "@commonfabric/runner/cfc/label-view-core";
 import { CellRef } from "@/protocol/mod.ts";
 
 /**
- * Renders a thrown value as text for a message that must be produced no matter
- * what was thrown.
+ * Renders a thrown value as text, for a message that has to be produced
+ * whatever was thrown.
  *
- * A thrown value can refuse even to be stringified -- a null-prototype object
- * has no `toString` to reach, and a hostile proxy can throw from any property
- * read -- so the derivation of a failure's description must not fail in turn.
- * `/undescribable` is the fixed token for that.
+ * A thrown value can refuse even to be stringified: an object made with
+ * `Object.create(null)` has no `toString` to reach, and a proxy can throw from
+ * any property read. So the derivation of a failure's description must not
+ * fail in turn, which is what would turn a report of one failure into a second
+ * one in its place. `/undescribable` is the fixed token for that.
  */
 export function describeFailure(error: unknown): string {
   try {
-    return String(error);
+    return error instanceof Error ? error.message : String(error);
   } catch {
     return "/undescribable";
   }

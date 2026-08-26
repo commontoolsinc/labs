@@ -30,6 +30,7 @@ import {
   runSurvey,
 } from "../lib/bulk.ts";
 import { addressArgument, VerbInputValidationError } from "../lib/callable.ts";
+import { refuseSectionMarker } from "../lib/section-marker.ts";
 import type {
   InvocationIdentity,
   InvocationOutcome,
@@ -1539,6 +1540,27 @@ export function dataCommandAction<
 }
 
 /**
+ * An action that refuses a `--` before it runs.
+ *
+ * `get` and `set` have no callable section, so a marker on their line closes
+ * nothing and sets aside whatever follows it. The raw arguments are what carry
+ * the marker: a trailing one sets nothing aside, so the literal arguments
+ * cannot tell it from a line that wrote none. `call` is not wrapped — it
+ * declares `stopEarly()` and its action reads what the marker set aside, which
+ * is the boundary the marker is for.
+ */
+export function withNoSectionMarker<
+  // deno-lint-ignore no-explicit-any
+  F extends (this: any, ...args: any[]) => unknown,
+>(spelling: string, action: F): F {
+  // deno-lint-ignore no-explicit-any
+  return function (this: any, ...args: any[]) {
+    refuseSectionMarker(spelling, this.getRawArgs());
+    return action.apply(this, args);
+  } as F;
+}
+
+/**
  * The one definition of `get`, mounted under `cf piece` and, through
  * {@link pieceDataCommand}, at top level as `cf get`. `spelling` is only
  * how the command names itself in its own help — and, since 6a, whether
@@ -1654,7 +1676,12 @@ the way --input does.`,
       { conflicts: ["select"] },
     )
     .arguments("[addressOrPath:string] [path:string]")
-    .action(dataCommandAction(spelling, getCellValueFromCommand));
+    .action(
+      dataCommandAction(
+        spelling,
+        withNoSectionMarker(spelling, getCellValueFromCommand),
+      ),
+    );
 }
 
 /**
@@ -1704,7 +1731,12 @@ counts, so cf ${spelling} /of:fid1:.../title needs no path argument. A trailing
         '"#argument" reference suffix spells the same selection)',
     )
     .arguments("[addressOrPath:string] [path:string]")
-    .action(dataCommandAction(spelling, setCellValueFromCommand));
+    .action(
+      dataCommandAction(
+        spelling,
+        withNoSectionMarker(spelling, setCellValueFromCommand),
+      ),
+    );
 }
 
 /**

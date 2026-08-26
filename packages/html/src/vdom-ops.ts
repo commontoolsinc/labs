@@ -24,6 +24,7 @@ export type CreateElementOp = {
   op: "create-element";
   nodeId: number;
   tagName: string;
+
   /**
    * The space of the cell whose render produced this element, present
    * only when it differs from the nearest ancestor element that
@@ -59,6 +60,7 @@ export type SetPropOp = {
   op: "set-prop";
   nodeId: number;
   key: string;
+
   /**
    * The value to set, which is whatever a pattern put on a render node and so
    * is a `FabricValue` entire. The batch crosses inside the envelope's

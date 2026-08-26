@@ -55,7 +55,7 @@ import {
   SpaceHostValidationError,
   unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
-import type { JSONValue, RuntimeOptions } from "@commonfabric/runner";
+import type { RuntimeOptions } from "@commonfabric/runner";
 import {
   cfcLabelViewForCell,
   createRenderConfidentialityResolver,
@@ -175,7 +175,7 @@ import {
   type WriteStackTraceResponse,
 } from "@/protocol/mod.ts";
 import type { VDomOp } from "@/protocol/types.ts";
-import { cellRefToKey } from "@/shared/utils.ts";
+import { cellRefToKey, describeFailure } from "@/shared/utils.ts";
 import { postToClient } from "./post-to-client.ts";
 import {
   postContextualRuntimeError,
@@ -936,7 +936,7 @@ export class RuntimeProcessor {
       } else {
         // For meta cells that aren't link cells, return the raw data
         return {
-          value: rootCell.getMetaRaw(request.meta) as JSONValue | undefined,
+          value: rootCell.getMetaRaw(request.meta) as FabricValue,
         };
       }
     }
@@ -1076,7 +1076,7 @@ export class RuntimeProcessor {
           doNotConvertCellResults: true,
           includeCfcLabelView: true,
         }),
-      );
+      ) as FabricValue;
       // The sink read the raw label on its tracked tx (so cfc writes re-fire
       // it); redact Caveat.source here before it crosses to the main thread.
       const redactedLabel = request.includeCfcLabel
@@ -1092,7 +1092,7 @@ export class RuntimeProcessor {
         postToClient({
           type: NotificationType.CellUpdate,
           cell: request.cell,
-          value: converted as JSONValue,
+          value: converted,
           ...(request.includeCfcLabel ? { cfcLabel: redactedLabel } : {}),
         })
       );
@@ -1480,7 +1480,7 @@ export class RuntimeProcessor {
       if (result.status !== "applied") throw error;
       state = appliedState!;
       sourceReadWarning = `source details could not be refreshed: ${
-        error instanceof Error ? error.message : String(error)
+        describeFailure(error)
       }`;
     }
     const executionWarning = result.status === "applied"
