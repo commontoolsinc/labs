@@ -50,7 +50,11 @@ import {
   type HarnessToolActivity,
   type HarnessToolPolicyDecision,
 } from "./contracts/run-report.ts";
-import type { HarnessSkillRegistry } from "./contracts/skill.ts";
+import type {
+  HarnessSkillActivation,
+  HarnessSkillRegistry,
+} from "./contracts/skill.ts";
+import { HARNESS_SKILL_ACTIVATIONS_TYPE } from "./contracts/skill.ts";
 import {
   asHarnessSubagentFailureReport,
   BROWSER_SUBAGENT_PROFILE,
@@ -98,10 +102,12 @@ import {
   type CreateHarnessEngineOptions,
 } from "./engine.ts";
 import { OpenAICompatibleGatewayClient } from "./gateway/openai-client.ts";
+import { ADDRESS_HANDLE_TOKEN_PREFIX } from "./contracts/handle-table.ts";
 import {
   createHarnessHandleTable,
   defineOwnEntry,
   mintAddressHandle,
+  resolveHandleRef,
   resolveHandleToken,
   swapLinksForTokens,
   swapTokensForRefs,
@@ -113,8 +119,12 @@ import type {
 } from "./model/client.ts";
 import { OpenAICompatibleGatewayModelClient } from "./model/openai-compatible-gateway.ts";
 import { sumHarnessModelUsage } from "./model/usage.ts";
-import { loadHarnessSkillContext } from "./skills/registry.ts";
+import {
+  loadHarnessSkillContext,
+  loadHarnessSkillContextFromText,
+} from "./skills/registry.ts";
 import { isSealedOpaqueLinkObject } from "./structured-result.ts";
+import { resolveHandleValue } from "./tools/handle-values.ts";
 import {
   parseSubagentReturnJson,
   parseSubagentReturnSchema,
@@ -736,6 +746,18 @@ const parseDelegateTaskInput = (
       },
     };
   }
+  if (
+    input.skillHandle !== undefined &&
+    (typeof input.skillHandle !== "string" ||
+      input.skillHandle.trim().length === 0)
+  ) {
+    return {
+      invalid: {
+        field: "skillHandle",
+        expected: "a non-empty handle string, or omit it",
+      },
+    };
+  }
   let parsedReturnSchema: ReturnType<typeof parseSubagentReturnSchema>;
   try {
     parsedReturnSchema = parseSubagentReturnSchema(input.returnSchema);
@@ -762,6 +784,9 @@ const parseDelegateTaskInput = (
         : {}),
       ...(typeof maxModelTurns === "number" ? { maxModelTurns } : {}),
       ...(returnSchema !== undefined ? { returnSchema } : {}),
+      ...(typeof input.skillHandle === "string"
+        ? { skillHandle: input.skillHandle.trim() }
+        : {}),
     },
   };
 };
@@ -2961,6 +2986,7 @@ export class CfHarnessPromptLoop {
       };
     }
     let delegateInput: DelegateTaskToolInput | undefined;
+    let resolvedDelegateSkill: { text: string; token: string } | undefined;
     if (toolId === "delegate_task") {
       const parsedDelegateInput = parseDelegateTaskInput(input);
       if ("invalid" in parsedDelegateInput) {
@@ -3032,6 +3058,45 @@ export class CfHarnessPromptLoop {
         };
       }
       policyDecisionReasonCodes.push("subagent_profile_allowed");
+      if (delegateInput.skillHandle !== undefined) {
+        // Trusted-side materialization, refused BEFORE dispatch: a handle
+        // this run does not hold is a model-written-call mistake (the same
+        // class as an unknown field), stated in terms of the reference and
+        // never the referent, per `resolveHandleValue`'s contract.
+        const resolution = await resolveHandleValue(
+          this.engine.handleValueResolutionContext,
+          delegateInput.skillHandle,
+          "skillHandle",
+        );
+        if (resolution.error !== undefined) {
+          return await this.#rejectInvalidToolCall({
+            toolCall,
+            invalid: {
+              reason: "invalid-argument",
+              toolId: "delegate_task",
+              field: "skillHandle",
+              expected: resolution.error,
+            },
+            sequence,
+            startedAt: activityStartedAt,
+            effectClass: tool.descriptor.effectClass,
+            ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
+            toolInputSummary,
+            policyEventIndexes,
+            recordActivity,
+          });
+        }
+        // The activation records the TOKEN whichever spelling the call used:
+        // the resolution above went through the table, so the entry exists.
+        const table = this.engine.handleTable;
+        const handle = delegateInput.skillHandle;
+        const entry = table === undefined
+          ? undefined
+          : handle.startsWith(ADDRESS_HANDLE_TOKEN_PREFIX)
+          ? resolveHandleToken(table, handle)
+          : resolveHandleRef(table, handle);
+        resolvedDelegateSkill = { text: resolution.value, token: entry!.token };
+      }
     }
     await this.engine.recordPolicyDecision({
       toolActivitySequence: sequence,
@@ -3064,6 +3129,9 @@ export class CfHarnessPromptLoop {
         ? await this.#invokeDelegateTaskTool({
           toolCall,
           input: delegateInput!,
+          ...(resolvedDelegateSkill !== undefined
+            ? { resolvedSkill: resolvedDelegateSkill }
+            : {}),
           model,
           promptSlotBinding,
           signal,
@@ -3419,6 +3487,8 @@ export class CfHarnessPromptLoop {
   async #invokeDelegateTaskTool(options: {
     toolCall: HarnessToolCall;
     input: DelegateTaskToolInput;
+    /** The materialized skillHandle text + token, resolved before dispatch. */
+    resolvedSkill?: { text: string; token: string };
     model: string;
     promptSlotBinding?: PromptSlotBinding;
     signal?: AbortSignal;
@@ -3620,6 +3690,7 @@ export class CfHarnessPromptLoop {
         profileConfig.skillNames !== undefined && skillRegistry !== undefined
           ? availableProfileSkillNames(skillRegistry, profileConfig.skillNames)
           : [];
+      const childActivations: HarnessSkillActivation[] = [];
       if (preloadSkillNames.length > 0 && skillRegistry !== undefined) {
         await childEngine.persistSkillRegistry(skillRegistry);
         const skillContext = await loadHarnessSkillContext({
@@ -3629,8 +3700,30 @@ export class CfHarnessPromptLoop {
           runId: childRunId,
           activatedAt: childCreatedState.updatedAt,
         });
-        await childEngine.persistSkillActivations(skillContext.activations);
+        childActivations.push(...skillContext.activations.activations);
         childSkillContextMessages.push(skillContext.contextText);
+      }
+      if (options.resolvedSkill !== undefined) {
+        // The handle-delivered skill joins the child's context beside the
+        // profile preload, bypassing the registry entirely: transient run
+        // state from a cell, selected by unforgeable table membership rather
+        // than by name.
+        const handleSkill = await loadHarnessSkillContextFromText({
+          text: options.resolvedSkill.text,
+          handleToken: options.resolvedSkill.token,
+          runId: childRunId,
+          activatedAt: childCreatedState.updatedAt,
+        });
+        childActivations.push(handleSkill.activation);
+        childSkillContextMessages.push(handleSkill.contextText);
+      }
+      if (childActivations.length > 0) {
+        await childEngine.persistSkillActivations({
+          type: HARNESS_SKILL_ACTIVATIONS_TYPE,
+          version: 1,
+          generatedAt: childCreatedState.updatedAt,
+          activations: childActivations,
+        });
       }
       const childResult = await childLoop.runPrompt({
         systemPrompt: buildSubagentSystemPrompt(
