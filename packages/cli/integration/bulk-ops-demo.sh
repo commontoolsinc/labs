@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
-# Bulk piece operations as something to watch. What runs today is stages 1
-# through 3 of docs/plans/piece-bulk-operations.md — a board of 113 members
-# surveyed in one process, the plan it emits, the retarget stamp, the
-# containment refusal, a repair (a fixer run dry, applied from its own plan,
-# and resumed as landed), the retarget that plan carries applied over grouped
-# sessions, and the after-survey diffed against the plan it verifies — live
-# rather than asserted. What the later stage adds appears as a
-# PENDING act at the end: the eventual shape of the mechanism stays visible
-# in the transcript, and each stage's checklist in the plan carries the item
-# that converts its act from pending to run, so a landed stage cannot leave
-# this demo describing a smaller tool than the one that exists.
+# Bulk piece operations as something to watch — the whole built surface of
+# docs/plans/piece-bulk-operations.md, live rather than asserted: a board of
+# 113 members surveyed in one process, the plan it emits, the retarget stamp,
+# the containment refusal, a repair (a fixer run dry, applied from its own
+# plan, and resumed as landed), the retarget that plan carries applied over
+# grouped sessions, the after-survey diffed against the plan it verifies, and
+# the reversal derived from that same plan and applied — down to one piece
+# returned to one revision of its own log.
 #
 # This is a demo, not a test. It narrates each command before running it, so
 # the transcript is the artifact. Its companion `bulk-survey-drill.sh` asserts
@@ -19,12 +16,10 @@
 # is no second, prettier spelling of it anywhere in this file: `run` displays
 # `"$@"` and executes `"$@"`, and every act re-parses its own displayed line
 # and compares the words against the argv that ran, so a line a reader
-# retypes is the line that executed — checked, not asserted. The PENDING
-# lines at the end are the one exception, and they look like one: prefixed
-# `»` rather than `$`, they are hypothetical spellings of unbuilt stages and
-# nothing executes them. Unlike the verb-session demo this one carries no
-# `broken` helper: nothing in the running surface is defective, and that
-# helper arrives when an act needs its claim.
+# retypes is the line that executed — checked, not asserted. Unlike the
+# verb-session demo this one carries no `broken` helper: nothing in the
+# running surface is defective, and that helper arrives when an act needs its
+# claim.
 #
 #   API_URL=http://localhost:8000 packages/cli/integration/bulk-ops-demo.sh
 set -uo pipefail
@@ -58,7 +53,7 @@ export CF_IDENTITY
 SPACE="${SPACE:-$(mktemp -u surveyXXXXXXXX)}"
 WORK="$(mktemp -d)"
 
-B=$'\033[1m'; D=$'\033[2m'; C=$'\033[36m'; Y=$'\033[33m'; N=$'\033[0m'
+B=$'\033[1m'; D=$'\033[2m'; C=$'\033[36m'; N=$'\033[0m'
 R=$'\033[31m'
 # Every act makes a claim: an unmarked one says the command works, a REFUSED
 # one says the surface turns this down. Both are counted, so a transcript that
@@ -177,19 +172,6 @@ refused() {
     printf '%s     refusal this act claims%s\n' "$R" "$N"
     UNREFUSED=$((UNREFUSED + 1))
   fi
-}
-
-# Show what a command will do once the capability it needs is built. Display
-# only, and deliberately unchecked: there is nothing to run a signature
-# against until the stage lands. What keeps a pending act from going stale is
-# the plan document instead — each later stage's checklist carries the item
-# that converts its act here from pending to run, the same per-change tick
-# discipline stages 1 and 2 used.
-pending() {
-  printf '\n%s   » %s%s\n' "$Y" "$1" "$N"
-  printf '%s     PENDING — %s%s\n' "$Y" "$2" "$N"
-  printf '%s     will print:%s\n' "$D" "$N"
-  printf '%s\n' "$3" | sed 's/^/       /'
 }
 
 printf '%s\n' "${B}A board-sized survey, watched end to end${N}"
@@ -342,27 +324,88 @@ say "just never claimed otherwise."
 run_loud cf piece survey -s "$SPACE" --list board --out "$WORK/list.jsonl"
 run sh -c "head -1 '$WORK/list.jsonl' | jq -c '{selector, enumerated}'"
 
-act "12 · The rest of the mechanism, by what it waits on"
-say "The plan files this transcript produced are the input to the stage"
-say "below; it needs no different artifact — the path is the one written"
-say "above. The act shows the command that stage adds and what it will"
-say "print — spelled provisionally per the plan, and prefixed »"
-say "because nothing runs it. A stage that lands converts its act from"
-say "PENDING to run; the plan's checklist for that stage says so, the way"
-say "stages 1 through 3 did."
+act "12 · The reversal, derived from the plan that did the move"
+say "Stage 4, live. A rollback needs no second artifact: it is derived from"
+say "the retarget plan itself, in the other direction. Each row's"
+say "precondition is the reference that retarget produced, and its operation"
+say "restores the retained revision carrying the reference the row recorded."
+say "Dry by default, like everything else here."
+run_loud cf piece rollback -s "$SPACE" --plan "$WORK/retarget.jsonl" \
+  --out "$WORK/rollback-dry.json"
+run sh -c "sed 's/^fvj1://' '$WORK/rollback-dry.json' | jq -c '{applied, complete, rows: (.rows | length), verdicts: (.rows | map(.verdict) | unique)}'"
+say "--apply restores. Same engine as the retarget — same preconditions,"
+say "same grouped sessions, same stop that names its remainder — so a piece"
+say "something else moved stops the reversal instead of being overwritten,"
+say "and a piece already back reads as landed."
+run_loud cf piece rollback -s "$SPACE" --plan "$WORK/retarget.jsonl" \
+  --group-size 25 --apply --out "$WORK/rolled-back.json"
+run sh -c "sed 's/^fvj1://' '$WORK/rolled-back.json' | jq -c '{applied, complete, verdicts: (.rows | map(.verdict) | unique)}'"
+say "Re-invoking is the resume here too: every piece is already back, so the"
+say "same command reads all-landed and writes nothing."
+run_loud cf piece rollback -s "$SPACE" --plan "$WORK/retarget.jsonl" --apply \
+  --out "$WORK/rollback-settled.json"
+run sh -c "sed 's/^fvj1://' '$WORK/rollback-settled.json' | jq -c '{applied, complete, verdicts: (.rows | map(.verdict) | unique)}'"
 
-pending "cf piece rollback -s $SPACE $WORK/retarget.jsonl" \
-  "stage 4: the plan derived in the other direction, restoring each row's recorded revision" \
-"113 rollback rows derived, one per retarget row; every prior source
-retained; restores in plan order"
+act "13 · One piece, one revision"
+say "Under the bulk reversal is a single-piece command, useful on its own: a"
+say "piece keeps an append-only log of the source states it has accepted, and"
+say "this returns it to one of them. Without --revision the run lists what"
+say "the piece could be returned to — the id, when it was accepted, the"
+say "reference it carries, whether its source is still there to load, and"
+say "whether the piece runs it now."
+MEMBER=$(sed -n 2p "$WORK/retarget.jsonl" | jq -r .piece)
+run cf piece restore -s "$SPACE" --piece "$MEMBER"
+say "Naming one is the preflight for that revision alone; --apply writes it."
+FORWARD=$(cf piece restore -s "$SPACE" --piece "$MEMBER" --json 2>/dev/null |
+  jq -r '.revisions | map(select(.current == false)) | last | .revisionId')
+run cf piece restore -s "$SPACE" --piece "$MEMBER" --revision "$FORWARD"
+run_loud cf piece restore -s "$SPACE" --piece "$MEMBER" --revision "$FORWARD" \
+  --apply
+
+act "14 · A piece that could not be brought back"
+say "Everything above rests on the prior source still being in the space. A"
+say "piece whose prior source is not retained has no revision to restore, so"
+say "no reversal exists for it — and the plan records that per row, before"
+say "anything moves."
+say "The plan below records it for one row; every other row is untouched."
+jq -c --arg piece "$MEMBER" \
+  'if .piece == $piece then .expect.retained = false else . end' \
+  "$WORK/retarget.jsonl" > "$WORK/unretained.jsonl"
+say "The forward move is where that matters, so that is where it is asked."
+say "Accepting 'this cannot be rolled back' after the move is asking past"
+say "the point of no return, so the live run refuses to start."
+refused "a live move over a row nothing could reverse must be named first" \
+  "not retained for" \
+  cf piece retarget -s "$SPACE" --plan "$WORK/unretained.jsonl" --apply
+say "A dry run is not gated — it moves nothing, and reporting where such a"
+say "piece stands is how an operator finds out there is something to decide."
+run_loud cf piece retarget -s "$SPACE" --plan "$WORK/unretained.jsonl" \
+  --out "$WORK/gated-dry.json"
+say "The reversal refuses the same row for the same reason: a rollback that"
+say "quietly covers fewer pieces than the move it reverses is the failure"
+say "this whole design exists to prevent."
+refused "a row whose prior source is not retained has no reversal" \
+  "not retained for" \
+  cf piece rollback -s "$SPACE" --plan "$WORK/unretained.jsonl"
+say "One rule, one spelling, at both moments — and the way past is per"
+say "piece, by name, at either. One flag over every row would turn many"
+say "decisions into one, which is a different risk from the same decision"
+say "taken many times."
+run_loud cf piece rollback -s "$SPACE" --plan "$WORK/unretained.jsonl" \
+  --accept-unretained "$MEMBER" --out "$WORK/accepted.json"
+run sh -c "sed 's/^fvj1://' '$WORK/accepted.json' | jq -c '{rows: (.rows | length)}'"
+say "One row fewer than the plan carries: the accepted piece is left out, and"
+say "named on the way past so it cannot be inferred only from its absence."
 
 printf '\n%s━━ The shape of it %s\n' "$B" "$N"
 say "One process surveyed a board-sized collection and emitted the plan the"
 say "later stages consume; the same command carried a retarget when asked;"
 say "a second process applied that plan over grouped sessions and reported"
 say "what each piece cost; a third took the survey that says whether it"
-say "worked. And the one refusal shown is the survey's reason to exist: no"
-say "plan that silently misses a piece."
+say "worked; and a fourth reversed the whole move from that same plan,"
+say "restoring each piece to the revision it was on. And the two refusals"
+say "shown are the ones this design exists to make: no plan that silently"
+say "misses a piece, and no reversal that silently covers fewer of them."
 
 if [ "$UNEXPECTED" != "0" ]; then
   printf '\n%s━━ %d act(s) failed that this demo says work%s\n' \

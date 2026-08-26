@@ -11,17 +11,25 @@ import { dirname, join, toFileUrl } from "@std/path";
 
 import { resolvePieceAddress } from "@commonfabric/piece";
 import {
+  type ApplyReport,
+  type ApplyRow,
+  type ApplySessions,
   assertPlanRunsFixer,
   decodePlan,
+  deriveRollbackPlan,
   type Fixer,
   type PiecePin,
+  type PiecePlan,
   type PiecesController,
   type PieceSelector,
   type PlannedRetarget,
   readPiecePin,
   repairPieces,
   type RepairReport,
+  type RestoreOutcome,
+  restorePiece,
   type RetargetSource,
+  rollbackPieces,
   surveyPieces,
   type SurveyResult,
 } from "@commonfabric/piece/ops";
@@ -30,12 +38,7 @@ import {
   programEntryIdentity,
   resolveLocalSourceProgram,
 } from "@commonfabric/piece/ops/bulk-local";
-import {
-  retargetPieces,
-  type RetargetReport,
-  type RetargetRow,
-  type RetargetSessions,
-} from "@commonfabric/piece/ops/bulk-retarget";
+import { retargetPieces } from "@commonfabric/piece/ops/bulk-retarget";
 import type { JSONSchema, RuntimeProgram } from "@commonfabric/runner";
 
 import { loadPieces, type PieceConfig, type SpaceConfig } from "./piece.ts";
@@ -229,6 +232,12 @@ export interface RetargetRunRequest {
    */
   planPath: string;
 
+  /**
+   * Pieces the operator accepts, by name, as ones this move could not be
+   * reversed for — their prior source is not retained. A live run carrying
+   * any such row is refused without them; a dry run needs none.
+   */
+  accept?: readonly string[];
   /** Write each row's source; absent, the run is the classification alone. */
   apply?: boolean;
 
@@ -236,7 +245,7 @@ export interface RetargetRunRequest {
   groupSize?: number;
 
   /** Called as each row settles, for reporting as the run proceeds. */
-  onRow?: (row: RetargetRow) => void;
+  onRow?: (row: ApplyRow) => void;
 }
 
 export interface RetargetRunDependencies {
@@ -262,25 +271,16 @@ async function teardownProblem(
 }
 
 /**
- * Run the retarget: decode the plan file and hand the library a session
- * supply that opens a real session per group and disposes its runtime when
- * the group ends, which closes that session's storage — so a group's pieces
- * stop being live at the boundary rather than accumulating across the run.
- *
- * Dry by default. Every refusal is the library's, the plan's space among
- * them: each session answers for the space this command names, and a plan
- * surveyed elsewhere is refused before a single row is read.
+ * The session supply every plan-driven write stage runs on: a real session
+ * per group, whose runtime is disposed when the group ends — which closes
+ * that session's storage, so a group's pieces stop being live at the
+ * boundary rather than accumulating across the run.
  */
-export async function runRetarget(
+function groupSessions(
   config: SpaceConfig,
-  request: RetargetRunRequest,
-  deps: RetargetRunDependencies = {},
-): Promise<RetargetReport> {
-  const plan = decodePlan(
-    await (deps.readTextFile ?? Deno.readTextFile)(request.planPath),
-  );
-  const load = deps.loadPieces ?? loadPieces;
-  const sessions: RetargetSessions = {
+  load: typeof loadPieces,
+): ApplySessions {
+  return {
     open: () => load(config),
     close: async (pieces) => {
       // Settle first, dispose second. Disposal closes this session's storage
@@ -311,13 +311,141 @@ export async function runRetarget(
       );
     },
   };
+}
+
+/**
+ * Run the retarget: decode the plan file and hand the library the grouped
+ * session supply above.
+ *
+ * Dry by default. Every refusal is the library's, the plan's space among
+ * them: each session answers for the space this command names, and a plan
+ * surveyed elsewhere is refused before a single row is read.
+ */
+export async function runRetarget(
+  config: SpaceConfig,
+  request: RetargetRunRequest,
+  deps: RetargetRunDependencies = {},
+): Promise<ApplyReport> {
+  const plan = decodePlan(
+    await (deps.readTextFile ?? Deno.readTextFile)(request.planPath),
+  );
+  const sessions = groupSessions(config, deps.loadPieces ?? loadPieces);
   return await (deps.retargetPieces ?? retargetPieces)(sessions, {
+    plan,
+    ...(request.accept === undefined ? {} : { accepted: request.accept }),
+    ...(request.apply === true ? { apply: true } : {}),
+    ...(request.groupSize === undefined
+      ? {}
+      : { groupSize: request.groupSize }),
+    ...(request.onRow === undefined ? {} : { onRow: request.onRow }),
+  });
+}
+
+/** What one rollback run is asked to do, parsed off the command line. */
+export interface RollbackRunRequest {
+  /**
+   * The retarget plan this run reverses. There is no second artifact: the
+   * rollback is derived from the plan the retarget ran from, each row's
+   * precondition being the reference that row produced.
+   */
+  planPath: string;
+  /**
+   * Pieces the operator accepts, by name, as ones this rollback cannot
+   * return — their prior source is not retained. Every other unretained row
+   * refuses the derivation, and an acceptance that covers no unretained row
+   * refuses it too.
+   */
+  accept?: readonly string[];
+  /** Restore each row's revision; absent, the run is the classification. */
+  apply?: boolean;
+  /** Pieces one session serves before it is replaced. */
+  groupSize?: number;
+  /** Called as each row settles, for reporting as the run proceeds. */
+  onRow?: (row: ApplyRow) => void;
+  /** The derived plan's `takenAt`; defaults to now. A seam so tests can pin it. */
+  takenAt?: string;
+}
+
+export interface RollbackRunDependencies {
+  loadPieces?: typeof loadPieces;
+  readTextFile?: (path: string) => Promise<string>;
+  rollbackPieces?: typeof rollbackPieces;
+}
+
+/** A rollback run's report, beside the plan the derivation produced. */
+export interface RollbackRunResult {
+  report: ApplyReport;
+  /** The derived plan, so a caller can report what it was run from. */
+  plan: PiecePlan;
+}
+
+/**
+ * Run the rollback: decode the retarget plan, derive its reversal, and hand
+ * the library the same grouped session supply the retarget runs on. Dry by
+ * default. Every refusal is the library's — the derivation's unretained
+ * rows, the plan's space, each row's precondition.
+ */
+export async function runRollback(
+  config: SpaceConfig,
+  request: RollbackRunRequest,
+  deps: RollbackRunDependencies = {},
+): Promise<RollbackRunResult> {
+  const plan = deriveRollbackPlan(
+    decodePlan(
+      await (deps.readTextFile ?? Deno.readTextFile)(request.planPath),
+    ),
+    request.takenAt ?? new Date().toISOString(),
+    request.accept === undefined ? {} : { accepted: request.accept },
+  );
+  const sessions = groupSessions(config, deps.loadPieces ?? loadPieces);
+  const report = await (deps.rollbackPieces ?? rollbackPieces)(sessions, {
     plan,
     ...(request.apply === true ? { apply: true } : {}),
     ...(request.groupSize === undefined
       ? {}
       : { groupSize: request.groupSize }),
     ...(request.onRow === undefined ? {} : { onRow: request.onRow }),
+  });
+  return { report, plan };
+}
+
+/** What one single-piece restore run is asked to do. */
+export interface RestoreRunRequest {
+  /**
+   * The revision to restore. Absent, the run lists what this piece could be
+   * returned to and writes nothing.
+   */
+  revisionId?: string;
+  /** Perform the restore; absent, the run reads and writes nothing. */
+  apply?: boolean;
+}
+
+export interface RestoreRunDependencies {
+  loadPieces?: typeof loadPieces;
+  resolvePieceAddress?: typeof resolvePieceAddress;
+  restorePiece?: typeof restorePiece;
+}
+
+/**
+ * Run the single-piece restore: resolve the address the way every other
+ * piece verb resolves one — slugs included — and hand the library the
+ * piece. Dry by default; the library owns every refusal.
+ */
+export async function runRestore(
+  config: PieceConfig,
+  request: RestoreRunRequest = {},
+  deps: RestoreRunDependencies = {},
+): Promise<RestoreOutcome> {
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  const piece = await (deps.resolvePieceAddress ?? resolvePieceAddress)(
+    pieces,
+    config.piece,
+  );
+  return await (deps.restorePiece ?? restorePiece)(pieces, piece, {
+    ...(request.revisionId === undefined
+      ? {}
+      : { revisionId: request.revisionId }),
+    ...(request.apply === true ? { apply: true } : {}),
   });
 }
 

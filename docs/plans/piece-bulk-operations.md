@@ -672,26 +672,26 @@ retained revision rather than through a second retarget.
 retained-revision restore, useful on its own for any single piece; the
 rollback-plan derivation; and the rollback drill.
 
-- [ ] A completed retarget is fully reversed from its own plan, with no
+- [x] A completed retarget is fully reversed from its own plan, with no
       second artifact needed: each rollback row's precondition is the
       reference the retarget row produced, and its operation restores the
       retained revision carrying the recorded reference.
-- [ ] A row whose prior source was not retained is refused by rollback with
+- [x] A row whose prior source was not retained is refused by rollback with
       the reason named, never silently skipped — and a live run is not
       started with such rows unless the operator has supplied the legacy
       source for them or accepted, by name, that they cannot be rolled back.
-- [ ] The restore of a retained revision is reachable from the same entry
+- [x] The restore of a retained revision is reachable from the same entry
       point as the other operations. Today it is a runtime operation with no
       command in front of it, so this stage is where one appears.
-- [ ] Rollback checks preconditions the same way, so a piece changed by
+- [x] Rollback checks preconditions the same way, so a piece changed by
       something else since the retarget stops the reversal rather than being
       overwritten — and a piece already back on its recorded reference is
       landed, which is what makes a rollback resumable.
-- [ ] A rollback is itself resumable.
-- [ ] The reversal is exercised against a copy, in the drill, before any live
+- [x] A rollback is itself resumable.
+- [x] The reversal is exercised against a copy, in the drill, before any live
       run is allowed to depend on it. A rollback path first attempted during
       the incident it exists for is not a rollback path.
-- [ ] The rollback act in `packages/cli/integration/bulk-ops-demo.sh` stops
+- [x] The rollback act in `packages/cli/integration/bulk-ops-demo.sh` stops
       being pending: the transcript derives and restores live where it now
       shows the provisional spelling.
 

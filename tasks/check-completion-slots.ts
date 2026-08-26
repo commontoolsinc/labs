@@ -111,6 +111,11 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
   ["cause-prefix", "a prefix the caller chooses"],
   ["name", "a name the caller chooses"],
   ["session", "a session id, read out of the data being inspected"],
+  [
+    "revision",
+    "a revision id from one piece's own source log, read off the listing " +
+    "`cf piece restore` prints for it",
+  ],
   ["branch", "a branch name; the default is the empty one"],
   ["cfc-xattr-namespace", "a namespace the caller chooses"],
   // Expressions and lists with their own grammar.

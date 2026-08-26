@@ -133,8 +133,8 @@ containment claim; each entry takes either reference form, and a canonical
 entry's embedded space composes the way it does on `--piece` — supplying the
 space when `--space` is absent, agreeing with it otherwise. Read-only. To watch
 the surface work rather than read about it, `integration/bulk-ops-demo.sh`
-narrates a board-sized survey and repair end to end against a running server,
-with the unbuilt write stages shown as pending acts.
+narrates the whole of it — survey, repair, retarget, and the reversal — end to
+end against a running server.
 
 `cf piece repair` runs a caller-supplied fixer — a TypeScript module whose
 default export is a pure transform from a piece's stored input document to the
@@ -143,6 +143,45 @@ by default, reporting the exact per-piece diff and writing nothing; under
 `--apply` it writes each row in its own transaction, and a plan from a dry run
 drives the apply row for row under its document-hash preconditions (`--plan`).
 The design is `docs/plans/piece-bulk-operations.md`, stage 2.
+
+`cf piece retarget` applies a survey plan's retarget rows: the plan is the whole
+input — it names the pieces, the reference each must still be on, and the source
+each moves to — so the command carries no selection of its own. Serial in plan
+order, each row's precondition proved in the session that writes it, stopping at
+the first failure with every unattempted piece named. Dry by default. Sessions
+are grouped (`--group-size`), so a group boundary is a resume point: a piece
+already on its row's target reads as landed and is not rewritten, which makes
+re-invoking the same command the resume. Applying implies no verdict — the
+verification is `cf piece survey --diff`, a separate invocation by design.
+
+`--apply` refuses to start over a row whose prior source is not retained
+(`expect.retained: false`), because such a piece cannot be returned once it has
+moved — accepting that after the move is asking past the point of no return.
+Each one must be named on `--accept-unretained <piece>`: repeatable, per piece,
+with no blanket form, and an acceptance covering no unretained row of the plan
+is itself refused. The other way past is to supply the legacy source, so a
+reversal has something to restore. A dry run is not gated — it moves nothing,
+and reporting where such a piece stands is how an operator finds out there is
+something to decide. `cf piece rollback` holds acceptances to the same rule at
+the other moment, in the same spelling.
+
+`cf piece rollback` reverses a retarget from that same plan, needing no second
+artifact: each row's precondition becomes the reference the retarget produced,
+and its operation restores the retained revision carrying the reference the row
+recorded. It runs on the retarget's engine, so preconditions, stops, naming, and
+resume are the same. A piece whose prior source is not retained has no restore
+to run: such a row refuses the derivation by name, and the only way past is
+`--accept-unretained <piece>`, which leaves that one piece out and says so —
+repeatable, per piece, with no blanket form. The other way past is to supply the
+legacy source and retarget onto it.
+
+`cf piece restore` returns one piece to a revision of its own append-only source
+log, in front of the runtime's restore of a retained revision. Without
+`--revision` the run lists what the piece could be returned to — the id, when it
+was accepted, the reference it carries, whether its source is still retained,
+and whether the piece runs it now; with one but without `--apply` it is the
+preflight for that revision alone. A piece already running the named revision's
+reference is reported as such and not rewritten.
 
 `cf piece slugs` lists the space's slug index: every name assigned through
 `--slug` or `set-slug`, each resolved to the piece it names. The index records
@@ -806,10 +845,15 @@ The supported output switches are:
   `--json`, the full survey result); its tally and findings go to stderr.
   `piece repair` reserves stdout the same way — the emitted plan, or under
   `--json` the full report in the canonical FabricValue encoding — with its
-  verdict tally and dry-run diff going to stderr. `piece render --watch --json`
-  writes only JSON render records to stdout; watch status goes to stderr.
-  Rendering a piece without a UI fails instead of returning an empty successful
-  JSON stream.
+  verdict tally and dry-run diff going to stderr. `piece retarget` and
+  `piece rollback` reserve stdout for their report in every mode — a line per
+  row as each settles, one canonical document under `--json`, or nothing beside
+  `--out` — and start the pieces they write, so the runtime's console goes to
+  stderr whether or not `--json` is on the line. `piece restore` reserves stdout
+  for its revision listing, or the whole outcome as JSON under `--json`.
+  `piece render --watch --json` writes only JSON render records to stdout; watch
+  status goes to stderr. Rendering a piece without a UI fails instead of
+  returning an empty successful JSON stream.
 - `cf get` and `cf wish` always return JSON. Their `--json` options are
   accepted, documented no-ops for callers that select JSON explicitly.
 - `cf check --json` compiles without evaluating and prints one object with a
