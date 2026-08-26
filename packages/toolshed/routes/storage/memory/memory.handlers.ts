@@ -1,5 +1,6 @@
 import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 import * as MemoryServer from "@commonfabric/memory/v2/server";
+import { getLogger } from "@commonfabric/utils/logger";
 
 import type * as Routes from "./memory.routes.ts";
 import { formatMemWriteTrace, type MemWriteOp } from "./memwrite-trace.ts";
@@ -141,6 +142,19 @@ export const bufferTextMessagesUntilNegotiated = (
 // `memwrite-trace.ts`.
 let memwriteConnSeq = 0;
 
+const frameSizeLogger = getLogger("memory-socket", {
+  enabled: true,
+  level: "warn",
+});
+
+// Deno's WebSocket client rejects any incoming message over 64 MiB
+// ("Frame too large") and closes the connection, so an outbound frame
+// approaching that cap is an outage in the making, not a curiosity — and a
+// payload regression looks like timeouts from the outside (labs#6319).
+// Warning at a quarter of the cap surfaces the growth while every client
+// still loads.
+const OUTBOUND_FRAME_WARN_CODE_UNITS = 16 * 1024 * 1024;
+
 export const attachMemorySocketPipeline = (
   socket: WebSocket,
   negotiation: ReturnType<typeof bufferTextMessagesUntilNegotiated>,
@@ -167,7 +181,19 @@ export const attachMemorySocketPipeline = (
     if (socket.readyState !== WebSocket.OPEN) {
       return;
     }
-    socket.send(encodeMemoryBoundary(message));
+    const encoded = encodeMemoryBoundary(message);
+    if (encoded.length > OUTBOUND_FRAME_WARN_CODE_UNITS) {
+      frameSizeLogger.warn("oversized-outbound-frame", () => [
+        "outbound memory frame at",
+        encoded.length,
+        "code units approaches the 64 MiB client cap;",
+        "type:",
+        (message as { type?: string }).type ?? "unknown",
+        "space:",
+        (message as { space?: string }).space ?? "unknown",
+      ]);
+    }
+    socket.send(encoded);
   });
   const closeConnection = () => {
     connection.close();
