@@ -3334,7 +3334,10 @@ describe("Phase 3 events-down (serving side)", () => {
         "only the warm-up entry may be consequenced while the load fails",
       ).toBe(1);
       // PIN 2 — the ordering barrier: B1 (later arrival, its own healthy
-      // sidecar) must not overtake the deferred A2.
+      // sidecar) must not overtake the deferred A2. PIN 4 is where the
+      // barrier actually bites (mutation: skip the barrier loop in
+      // `failHeadEventLoadPark` → the log reads ["A","B","A"], the same
+      // overtake shape as the OW45 arm-B b01 red).
       expect(storedLog(), "later arrivals hold behind the deferred event")
         .toEqual(["A"]);
       // PIN 3 — the deferral is VISIBLE: the serving stats carry it, and

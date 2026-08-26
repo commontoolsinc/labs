@@ -184,7 +184,7 @@ function notifyEventDropped(
   },
   reason: string,
   servedKind: "dropped" | "deferred" = "dropped",
-  options: { quiet?: boolean } = {},
+  options: { quiet?: boolean; cause?: "load-park" } = {},
 ): void {
   if (options.quiet === true) {
     // A routine, counted pre-dispatch removal (the serving loop's LT1
@@ -196,10 +196,17 @@ function notifyEventDropped(
   // The serving drain's terminal arms (events.md §5): `dropped` — no
   // runnable handler, the drain writes the dropped-event notice as the
   // event's consequence and advances the stream past it (non-wedging);
-  // `deferred` — the handler was UNREACHABLE (a cold-view load), no
-  // consequence is written and a later wave re-drains the entry.
+  // `deferred` — the handler was UNREACHABLE (a cold-view load, or a
+  // required replica load that failed at the dispatch preflight's
+  // park), no consequence is written and a later wave re-drains the
+  // entry. `cause` tells the two deferrals apart for the drain's retry
+  // budget (see ServedEventDispatch.onFailure).
   try {
-    args.served?.onFailure?.({ kind: servedKind, message: reason });
+    args.served?.onFailure?.({
+      kind: servedKind,
+      message: reason,
+      ...(options.cause !== undefined ? { cause: options.cause } : {}),
+    });
   } catch (callbackError) {
     logger.error(
       "schedule-error",
@@ -234,7 +241,7 @@ export function dropQueuedEvent(
   event: QueuedEvent,
   reason: string,
   servedKind: "dropped" | "deferred" = "dropped",
-  options: { quiet?: boolean } = {},
+  options: { quiet?: boolean; cause?: "load-park" } = {},
 ): void {
   const index = state.eventQueue.indexOf(event);
   if (index >= 0) state.eventQueue.splice(index, 1);

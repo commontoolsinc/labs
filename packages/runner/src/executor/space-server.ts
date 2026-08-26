@@ -2690,6 +2690,37 @@ export class SpaceServer implements TransactionSealDestination {
                 streamEntry,
                 onFailure: (outcome) => {
                   if (this.#runtime !== tenure) return;
+                  if (
+                    outcome.kind === "deferred" &&
+                    outcome.cause === "load-park"
+                  ) {
+                    // The pre-dispatch LOAD-PARK deferral
+                    // (verification-coverage.md's OW45 residue member).
+                    // Deliberately NOT on the bounded creation-race
+                    // budget below: that budget exists because a piece
+                    // which never materializes has no runnable handler
+                    // and must eventually harden into §5's drop, while
+                    // here the input doc EXISTS durably and only the
+                    // read path failed — hardening it would restore
+                    // exactly the at-least-once discharge this arm was
+                    // added to prevent. So a persistently failing load
+                    // defers INDEFINITELY: durable, unconsequenced,
+                    // re-tried every drain, WARNed per deferral by the
+                    // scheduler and counted here. The accepted cost is
+                    // that the backstop rescan keeps ticking, so a
+                    // never-healing load holds the space out of its
+                    // idle park; a give-up arm for that is OW54's
+                    // separately tracked territory, not this fix's.
+                    this.#options.stats.events.loadParkDeferrals += 1;
+                    // Never mix budgets: if this entry later defers for
+                    // the cold-view reason, that count starts fresh.
+                    this.#eventDeferrals.delete(entry.eventId);
+                    // The copy left no mark: release the guard so the
+                    // rescan can queue it again.
+                    this.#drainInFlight.delete(eventId);
+                    this.#armDeferredRescan();
+                    return;
+                  }
                   if (outcome.kind === "deferred") {
                     const deferrals =
                       (this.#eventDeferrals.get(entry.eventId) ?? 0) + 1;
@@ -2808,6 +2839,16 @@ export class SpaceServer implements TransactionSealDestination {
             path: ["entries", String(streamEntry.index), "error"],
           }).withTx(tx).set(outcome.message);
         } else {
+          // The recorded observability gap (verification-coverage.md's
+          // OW45 residue record), closed with the load-park fix: a
+          // terminally discharged served event used to leave NO trace
+          // in serving stats — `appended == processed` reads clean
+          // while the user's action is permanently gone. Counted at the
+          // DECISION, so a notice whose commit is refused and re-drains
+          // counts again; read it with the WARNs, never alone.
+          if (outcome.kind === "dropped") {
+            this.#options.stats.events.dropped += 1;
+          }
           runtime.getCellFromLink<string>({
             ...base,
             path: ["entries", String(streamEntry.index), "status"],

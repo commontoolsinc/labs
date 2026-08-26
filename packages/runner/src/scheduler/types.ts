@@ -273,6 +273,20 @@ export type ServedEventDispatch = {
        * runnable handler', never 'the run raced'". */
       kind: "error" | "dropped" | "deferred";
       message: string;
+      /** Which deferral this is, when the drain needs to tell them
+       * apart. `load-park`: the dispatch preflight parked the head on
+       * an in-flight replica load its closure reads and that load
+       * FAILED (verification-coverage.md's OW45 residue member — the
+       * live shape is a serving session revoked by a genesis ACL
+       * landing after activation, healing on the next mount). Its
+       * retry budget is the drain's, not the queued class's bounded
+       * creation-race window: the input is a doc that durably EXISTS
+       * and only the read path failed, so hardening it into §5's drop
+       * would be the same at-least-once discharge this arm exists to
+       * prevent. Absent on the cold-view piece-load deferral, which
+       * keeps its bounded budget (a piece that never materializes has
+       * no runnable handler and must eventually harden). */
+      cause?: "load-park";
     },
   ) => void;
 };
