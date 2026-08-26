@@ -212,9 +212,6 @@ const Note = pattern<NoteInput, NoteOutput>(
     const mentionable = wish<MentionablePiece[] | Default<[]>>(
       { query: "#mentionable", headless: true },
     ).result;
-    const _recentPieces = wish<MinimalPiece[]>(
-      { query: "#recent", headless: true },
-    ).result;
     const mentioned = new Writable<MentionablePiece[]>([]);
 
     // UI state

@@ -517,41 +517,6 @@ export class RuntimeInternals extends EventTarget {
     await this.#client.dispose();
   }
 
-  async trackRecentPiece(space: DID, pieceId: string): Promise<void> {
-    this.#check();
-    try {
-      // Shell compatibility: assumes the space-root pattern exposes a
-      // `trackRecent` handler accepting `{ piece }`.
-      const spaceRoot = await this.getSpaceRootPattern(space);
-      const trackRecent = spaceRoot.cell().key("trackRecent" as any);
-      const page = await this.#client.getPage(pieceId, space);
-      if (!page) return;
-      await (trackRecent as any).send({ piece: page.cell() });
-    } catch (e) {
-      if (this.#disposed) return;
-      console.error("[RuntimeInternals] Failed to track recent piece:", e);
-    }
-  }
-
-  /** Register a navigated piece in ITS OWN space's root pattern. */
-  async registerNavigatedPiece(cell: CellHandle<unknown>): Promise<void> {
-    this.#check();
-    try {
-      // Shell compatibility: assumes the space-root pattern exposes an
-      // `addPiece` handler accepting `{ piece }`.
-      const spaceRoot = await this.getSpaceRootPattern(cell.space());
-      const addPiece = spaceRoot.cell().key("addPiece" as any);
-      await (addPiece as any).send({ piece: cell });
-      await spaceRoot.cell().sync();
-    } catch (e) {
-      if (this.#disposed) return;
-      console.error(
-        "[RuntimeInternals] Failed to register navigated piece:",
-        e,
-      );
-    }
-  }
-
   async #waitForNavigationConvergence(space: DID): Promise<void> {
     this.#check();
     await this.#client.idle();
@@ -587,7 +552,6 @@ export class RuntimeInternals extends EventTarget {
     const pieceId = cell.id().replace(/^of:/, "");
     logger.log("navigate", `Navigating to piece: ${pieceId}`);
 
-    void this.registerNavigatedPiece(cell);
     try {
       await this.#waitForNavigationConvergence(cell.space());
     } catch (error) {

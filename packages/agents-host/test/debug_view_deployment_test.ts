@@ -138,10 +138,7 @@ Deno.test("debug deployment replaces a view when its pattern identity changes", 
       ),
       alternatePieceId,
     );
-    const registeredIds = await registeredPieceIds(
-      defaultPattern,
-      "pieceRegistry",
-    );
+    const registeredIds = await registeredPieceIds(defaultPattern);
     assertEquals(registeredIds, []);
     const originalPiece = await manager.getPieceCell(
       originalPieceId,
@@ -156,35 +153,30 @@ Deno.test("debug deployment replaces a view when its pattern identity changes", 
     );
     assertEquals(alternatePiece.name(), "Alternate agent sessions");
     const reinsertResult = await runtime.editWithRetry((tx) => {
-      for (const name of ["pieceRegistry", "recentPieces"] as const) {
-        const list = defaultPattern.asSchema(undefined).key(name)
-          .resolveAsCell().asSchema(SHALLOW_PIECE_LIST_SCHEMA) as Cell<
-            Cell<unknown>[]
-          >;
-        const listWithTx = list.withTx(tx);
-        const current = listWithTx.getRawUntyped({ frozen: false });
-        if (!Array.isArray(current)) throw new Error(`${name} is not an array`);
-        current.push(originalPiece.getAsLink({
-          base: listWithTx,
-          includeSchema: true,
-        }));
-        listWithTx.setRawUntyped(current);
+      const registry = defaultPattern.asSchema(undefined).key("pieceRegistry")
+        .resolveAsCell().asSchema(SHALLOW_PIECE_LIST_SCHEMA) as Cell<
+          Cell<unknown>[]
+        >;
+      const registryWithTx = registry.withTx(tx);
+      const current = registryWithTx.getRawUntyped({ frozen: false });
+      if (!Array.isArray(current)) {
+        throw new Error("pieceRegistry is not an array");
       }
+      current.push(originalPiece.getAsLink({
+        base: registryWithTx,
+        includeSchema: true,
+      }));
+      registryWithTx.setRawUntyped(current);
     });
     if (reinsertResult.error) throw reinsertResult.error;
     assertEquals(
       await deployAgentSessionsDebugView(manager, target, alternateLocation),
       alternatePieceId,
     );
-    for (const name of ["pieceRegistry", "recentPieces"] as const) {
-      assertEquals(
-        (await registeredPieceIds(defaultPattern, name)).includes(
-          originalPieceId,
-        ),
-        false,
-        name,
-      );
-    }
+    assertEquals(
+      (await registeredPieceIds(defaultPattern)).includes(originalPieceId),
+      false,
+    );
   } finally {
     await runtime.dispose();
     await storageManager.close();
@@ -279,10 +271,9 @@ Deno.test("debug deployment removes a view that fails to start", async () => {
     }
 
     assertEquals(
-      await registeredPieceIds(defaultPattern, "pieceRegistry"),
+      await registeredPieceIds(defaultPattern),
       [],
     );
-    assertEquals(await registeredPieceIds(defaultPattern, "recentPieces"), []);
   } finally {
     await runtime.dispose();
     await storageManager.close();
@@ -341,8 +332,7 @@ Deno.test("debug deployment protects its result before starting", async () => {
     }
 
     assertEquals(startCount, 0);
-    assertEquals(await registeredPieceIds(defaultPattern, "pieceRegistry"), []);
-    assertEquals(await registeredPieceIds(defaultPattern, "recentPieces"), []);
+    assertEquals(await registeredPieceIds(defaultPattern), []);
   } finally {
     await runtime.dispose();
     await storageManager.close();
@@ -395,7 +385,7 @@ Deno.test("debug deployment preserves a view when its replacement fails", async 
     }
 
     assertEquals(
-      await registeredPieceIds(defaultPattern, "pieceRegistry"),
+      await registeredPieceIds(defaultPattern),
       [],
     );
     await target.publish([{
@@ -448,13 +438,9 @@ Deno.test("debug deployment rolls back an aborted registration", async () => {
         new URL("./fixtures/alternate-debug-view.tsx", import.meta.url),
       ),
     };
-    const recentPieces = defaultPattern.asSchema(undefined)
-      .key("recentPieces")
-      .resolveAsCell();
     const abortRegistration = async (
       location: ReturnType<typeof defaultDebugPatternLocation>,
       options: {
-        addCandidateToRecent?: boolean;
         abortAfterCommit?: boolean;
         interceptPrivateRegistration?: boolean;
       } = {},
@@ -509,26 +495,6 @@ Deno.test("debug deployment rolls back an aborted registration", async () => {
           }
           return result;
         }, maxRetries);
-        if (shouldIntercept && options.addCandidateToRecent && !result.error) {
-          const candidate = candidatePiece;
-          if (candidate === undefined) {
-            throw new Error("candidate piece was not started");
-          }
-          const concurrentUpdate = await originalEditWithRetry(
-            (transaction) => {
-              const list = recentPieces.withTx(transaction);
-              const current = list.getRawUntyped({ frozen: false });
-              if (!Array.isArray(current)) {
-                throw new Error("recentPieces is not an array");
-              }
-              list.setRawUntyped([
-                ...current,
-                candidate.getAsLink({ base: list, includeSchema: true }),
-              ]);
-            },
-          );
-          if (concurrentUpdate.error) throw concurrentUpdate.error;
-        }
         return result;
       }) as typeof runtime.editWithRetry;
       try {
@@ -565,15 +531,10 @@ Deno.test("debug deployment rolls back an aborted registration", async () => {
       complete: true,
     }]);
     await abortRegistration(alternateLocation, {
-      addCandidateToRecent: true,
       abortAfterCommit: true,
     });
     assertEquals(
-      await registeredPieceIds(defaultPattern, "pieceRegistry"),
-      [],
-    );
-    assertEquals(
-      await registeredPieceIds(defaultPattern, "recentPieces"),
+      await registeredPieceIds(defaultPattern),
       [],
     );
     assertEquals(await originalPiece.result.get(["sessionCount"]), 1);
@@ -588,11 +549,7 @@ Deno.test("debug deployment rolls back an aborted registration", async () => {
     assertEquals(abortedPrivateRegistration.candidateWasStopped, true);
     assertEquals(registration.getRaw(), originalRegistration);
     assertEquals(
-      await registeredPieceIds(defaultPattern, "pieceRegistry"),
-      [],
-    );
-    assertEquals(
-      await registeredPieceIds(defaultPattern, "recentPieces"),
+      await registeredPieceIds(defaultPattern),
       [],
     );
     await target.publish([{
@@ -604,32 +561,10 @@ Deno.test("debug deployment rolls back an aborted registration", async () => {
     await runtime.settled();
     assertEquals(await originalPiece.result.get(["sessionCount"]), 2);
 
-    const addRecentResult = await runtime.editWithRetry((transaction) => {
-      const list = recentPieces.withTx(transaction);
-      const current = list.getRawUntyped({ frozen: false });
-      if (!Array.isArray(current)) {
-        throw new Error("recentPieces is not an array");
-      }
-      list.setRawUntyped([
-        ...current,
-        originalPiece.getCell().getAsLink({
-          base: list,
-          includeSchema: true,
-        }),
-      ]);
-    });
-    if (addRecentResult.error) throw addRecentResult.error;
-    await abortRegistration(defaultLocation);
-    assertEquals(
-      await registeredPieceIds(defaultPattern, "recentPieces"),
-      [],
-    );
-
     assertEquals(
       await deployAgentSessionsDebugView(manager, target),
       originalPieceId,
     );
-
     await target.publish([{
       source: sourceDescriptor(),
       sessions: [sessionSnapshot(1), sessionSnapshot(2)],
@@ -754,7 +689,7 @@ Deno.test("debug deployment rejects stale registration across runtimes", async (
         );
         assertEquals(registration.getRaw(), competingRegistration);
         assertEquals(
-          await registeredPieceIds(defaultPattern, "pieceRegistry"),
+          await registeredPieceIds(defaultPattern),
           [],
         );
         await target.publish([{
@@ -964,7 +899,7 @@ Deno.test("debug registration rejects writes from another owner", async () => {
       target,
     );
     await readerStorage.synced();
-    assertEquals(await registeredPieceIds(defaultPattern, "pieceRegistry"), []);
+    assertEquals(await registeredPieceIds(defaultPattern), []);
     const registration = readerRuntime.getCell(
       readerSession.space,
       `agent-sessions-debug-registration:${readerSession.as.did()}`,
@@ -1124,7 +1059,7 @@ Deno.test("debug registration rejects another owner-scoped writer", async () => 
   }
 });
 
-Deno.test("debug deployment reports malformed registration lists", async () => {
+Deno.test("debug deployment reports a malformed piece registry", async () => {
   const session = await createSession({
     identity,
     spaceName: `debug-registration-error-${crypto.randomUUID()}`,
@@ -1138,11 +1073,11 @@ Deno.test("debug deployment reports malformed registration lists", async () => {
     const manager = new PiecesController(session, runtime);
     await manager.synced();
     const defaultPattern = await installDefaultPattern(manager);
-    const recentPieces = defaultPattern.asSchema(undefined)
-      .key("recentPieces")
+    const pieceRegistry = defaultPattern.asSchema(undefined)
+      .key("pieceRegistry")
       .resolveAsCell();
     const malformedResult = await runtime.editWithRetry((tx) => {
-      recentPieces.withTx(tx).setRawUntyped({ malformed: true });
+      pieceRegistry.withTx(tx).setRawUntyped({ malformed: true });
     });
     if (malformedResult.error) throw malformedResult.error;
     const target = await AgentFabricTarget.open({
@@ -1154,7 +1089,7 @@ Deno.test("debug deployment reports malformed registration lists", async () => {
     await assertRejects(
       () => deployAgentSessionsDebugView(manager, target),
       Error,
-      "recentPieces is not an array",
+      "pieceRegistry is not an array",
     );
   } finally {
     await runtime.dispose();

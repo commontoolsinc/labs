@@ -30,6 +30,12 @@ import {
   programEntryIdentity,
   resolveLocalSourceProgram,
 } from "@commonfabric/piece/ops/bulk-local";
+import {
+  retargetPieces,
+  type RetargetReport,
+  type RetargetRow,
+  type RetargetSessions,
+} from "@commonfabric/piece/ops/bulk-retarget";
 import type { JSONSchema, RuntimeProgram } from "@commonfabric/runner";
 
 import { loadPieces, type PieceConfig, type SpaceConfig } from "./piece.ts";
@@ -205,6 +211,104 @@ async function importProgramSnapshot(
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
+}
+
+/** What one retarget run is asked to do, parsed off the command line. */
+export interface RetargetRunRequest {
+  /**
+   * The plan file this run consumes. The plan is the whole input: it names
+   * the pieces, the reference each must still be on, and the source each
+   * moves to, so a retarget carries no selection of its own.
+   */
+  planPath: string;
+  /** Write each row's source; absent, the run is the classification alone. */
+  apply?: boolean;
+  /** Pieces one session serves before it is replaced. */
+  groupSize?: number;
+  /** Called as each row settles, for reporting as the run proceeds. */
+  onRow?: (row: RetargetRow) => void;
+}
+
+export interface RetargetRunDependencies {
+  loadPieces?: typeof loadPieces;
+  readTextFile?: (path: string) => Promise<string>;
+  retargetPieces?: typeof retargetPieces;
+}
+
+/**
+ * Run one teardown step, handing back what it broke instead of throwing it.
+ * A session boundary runs every step it has, so an early failure must not
+ * take the later ones with it; what each broke is composed afterwards.
+ */
+async function teardownProblem(
+  step: () => Promise<void>,
+): Promise<string | undefined> {
+  try {
+    await step();
+    return undefined;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+/**
+ * Run the retarget: decode the plan file and hand the library a session
+ * supply that opens a real session per group and disposes its runtime when
+ * the group ends, which closes that session's storage — so a group's pieces
+ * stop being live at the boundary rather than accumulating across the run.
+ *
+ * Dry by default. Every refusal is the library's, the plan's space among
+ * them: each session answers for the space this command names, and a plan
+ * surveyed elsewhere is refused before a single row is read.
+ */
+export async function runRetarget(
+  config: SpaceConfig,
+  request: RetargetRunRequest,
+  deps: RetargetRunDependencies = {},
+): Promise<RetargetReport> {
+  const plan = decodePlan(
+    await (deps.readTextFile ?? Deno.readTextFile)(request.planPath),
+  );
+  const load = deps.loadPieces ?? loadPieces;
+  const sessions: RetargetSessions = {
+    open: () => load(config),
+    close: async (pieces) => {
+      // Settle first, dispose second. Disposal closes this session's storage
+      // without draining it, so a read still in flight would come back
+      // against a closed client — a failure belonging to a session already
+      // being released, reported over the rows the group just produced.
+      //
+      // The disposal happens whether or not the settling did. A failed
+      // settle is reported as a stop rather than crashing the run, so a
+      // session skipped over here would stay open — with its runtime and
+      // its storage — for as long as the process lives, which is the whole
+      // cost the grouping exists to avoid.
+      const settleProblem = await teardownProblem(() => pieces.synced());
+      const disposeProblem = await teardownProblem(() => pieces.dispose());
+      if (settleProblem === undefined && disposeProblem === undefined) return;
+      // The settle failure leads when both fail: it is why this boundary
+      // cannot be trusted, and the disposal that followed it is named after
+      // it rather than instead of it — the composition the library uses for
+      // a wrong-space stop whose session also would not release. Only the
+      // message survives, which is all the library reads off this throw.
+      throw new Error(
+        settleProblem === undefined
+          ? disposeProblem
+          : disposeProblem === undefined
+          ? settleProblem
+          : `${settleProblem.replace(/\.$/, "")}. Its session could not ` +
+            `be disposed either: ${disposeProblem}.`,
+      );
+    },
+  };
+  return await (deps.retargetPieces ?? retargetPieces)(sessions, {
+    plan,
+    ...(request.apply === true ? { apply: true } : {}),
+    ...(request.groupSize === undefined
+      ? {}
+      : { groupSize: request.groupSize }),
+    ...(request.onRow === undefined ? {} : { onRow: request.onRow }),
+  });
 }
 
 /** One `--retarget` flag, parsed: which phase, what source, what label. */

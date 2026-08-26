@@ -52,6 +52,14 @@ describe("JSON command contracts", () => {
       .toBe(true);
     expect(reservesStdoutForCommandOutput(["piece", "set-label", "path"]))
       .toBe(true);
+    // The bulk commands write their plan or their report to stdout, so they
+    // reserve it whether or not --json is on the line.
+    expect(reservesStdoutForCommandOutput(["piece", "survey", "--piece", "b"]))
+      .toBe(true);
+    expect(reservesStdoutForCommandOutput(["piece", "repair", "--piece", "b"]))
+      .toBe(true);
+    expect(reservesStdoutForCommandOutput(["piece", "retarget", "--plan", "p"]))
+      .toBe(true);
     expect(
       reservesStdoutForCommandOutput([
         "piece",
