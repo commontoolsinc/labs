@@ -3073,6 +3073,9 @@ describe("runtime-processor", () => {
         set: (value: unknown) => {
           expect(value).toBe("new value");
         },
+        push: (...values: unknown[]) => {
+          expect(values).toEqual(["new value"]);
+        },
         send: (value: unknown) => {
           expect(value).toBe("new value");
         },
@@ -3119,13 +3122,13 @@ describe("runtime-processor", () => {
       });
     });
 
-    it("prepares cell push transactions before committing (non-blind path)", async () => {
+    it("prepares mergeable cell append transactions before committing", async () => {
       const { processor } = createProcessor();
 
       await RuntimeProcessor.prototype.handleCellPush.call(processor, {
         type: RequestType.CellPush,
         cell: ref,
-        value: "new value",
+        values: ["new value"],
       });
     });
 
@@ -3165,7 +3168,7 @@ describe("runtime-processor", () => {
         RuntimeProcessor.prototype.handleCellPush.call(push.processor, {
           type: RequestType.CellPush,
           cell: ref,
-          value: "new value",
+          values: ["new value"],
         });
         RuntimeProcessor.prototype.handleCellSend.call(send.processor, {
           type: RequestType.CellSend,
@@ -3201,7 +3204,7 @@ describe("runtime-processor", () => {
         RuntimeProcessor.prototype.handleCellPush.call(push.processor, {
           type: RequestType.CellPush,
           cell: ref,
-          value: "new value",
+          values: ["new value"],
         });
         RuntimeProcessor.prototype.handleCellSend.call(send.processor, {
           type: RequestType.CellSend,
@@ -3231,6 +3234,21 @@ describe("runtime-processor", () => {
         value: "new value",
         awaitCommit: true,
       })).rejects.toThrow("set refused");
+    });
+
+    it("returns a confirmed append commit refusal to the caller", async () => {
+      const { processor } = createProcessor({
+        error: { message: "push refused" },
+      });
+
+      await expect(
+        RuntimeProcessor.prototype.handleCellPush.call(processor, {
+          type: RequestType.CellPush,
+          cell: ref,
+          values: ["new value"],
+          awaitCommit: true,
+        }),
+      ).rejects.toThrow("push refused");
     });
 
     it("returns a strict send commit refusal to the caller", async () => {

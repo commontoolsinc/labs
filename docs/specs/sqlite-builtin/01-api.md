@@ -222,6 +222,14 @@ export declare const sqliteQuery: <Row = Record<string, unknown>>(
 `db.query<Row>(sql, opts)` and `sqliteQuery<Row>({ db, sql, ...opts })` lower to
 the same `sqliteQuery` node; choose whichever reads better.
 
+SQLite permits result aliases that Fabric records reserve against prototype
+pollution. A reactive query carries a row containing `constructor`,
+`prototype`, or `__proto__` as an ordered array of `[column, value]` entries
+so the result remains a valid durable Fabric value. Ordinary rows remain
+objects. Code that intentionally selects one of those aliases must handle the
+entry-list form directly; reconstruct an object only at a native boundary that
+will not write the object back into Fabric state.
+
 The **`Row` type argument** carries both the author-facing return type and the
 runtime decode schema. The ts-transformer lowers `<Row>` into an injected
 `rowSchema` property on the call — method-call lowering keyed on the `"sqlite"`

@@ -276,6 +276,34 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
     expect(q.result).toEqual([]);
   });
 
+  it("writes reserved SQLite aliases back in a Fabric-safe row form", async () => {
+    const provider = runtime.storageManager.open(space) as unknown as {
+      sqliteQuery: (...a: unknown[]) => Promise<unknown>;
+    };
+    const original = provider.sqliteQuery.bind(provider);
+    provider.sqliteQuery = () =>
+      Promise.resolve({
+        rows: [Object.fromEntries([
+          ["constructor", 1],
+          ["__proto__", 2],
+        ])],
+      });
+    try {
+      const q = await runQueryToSettled(
+        'SELECT 1 AS "constructor", 2 AS "__proto__"',
+        "sqlite-reserved-alias-writeback",
+      );
+      expect(q.pending).toBe(false);
+      expect(q.error).toBeUndefined();
+      expect(q.result).toEqual([[
+        ["constructor", 1],
+        ["__proto__", 2],
+      ]]);
+    } finally {
+      provider.sqliteQuery = original;
+    }
+  });
+
   it("writes an error result when the sqlite read fails, rather than staying pending", async () => {
     // Force the server read to fail. The builtin must surface that as a settled
     // error result on the query cell, not leave the query pending forever.

@@ -81,6 +81,23 @@ describe("guest", () => {
       }
     });
 
+    it("snapshots queued request arguments before capability handoff", async () => {
+      const fabric = connectFabric();
+      try {
+        const value = { n: 1 };
+        const writing = fabric.cell<{ n: number }>("record").write(value);
+        value.n = 2;
+
+        const host = handOffPort();
+        const request = await receive(host);
+        expect(request.value).toEqual({ n: 1 });
+        send(host, response(request.id));
+        await writing;
+      } finally {
+        fabric.disconnect();
+      }
+    });
+
     it("exposes subscription events as stable cell snapshots", async () => {
       const fabric = connectFabric();
       try {

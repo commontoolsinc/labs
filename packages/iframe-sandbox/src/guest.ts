@@ -45,6 +45,12 @@ export type ResourceSnapshot<T> =
   | { status: "error"; error: FabricBridgeError };
 
 type SnapshotListener<T> = (snapshot: ResourceSnapshot<T>) => void;
+type EncodedBridgeRequest = ReturnType<typeof realmFromFabricValue>;
+
+type QueuedBridgeRequest = {
+  id: number;
+  encoded: EncodedBridgeRequest;
+};
 
 /** Reactive guest-side handle for one named cell resource. */
 export class RemoteCell<T = FabricValue> {
@@ -283,7 +289,7 @@ export class FabricClient {
   #nextRequestId = 0;
   #nextSubscriptionId = 0;
   #pending = new Map<number, PendingRequest>();
-  #queued: BridgeRequest[] = [];
+  #queued: QueuedBridgeRequest[] = [];
   #subscriptions = new Map<string, Subscription>();
   #cells = new Map<string, RemoteCell>();
   #disconnected = false;
@@ -343,11 +349,20 @@ export class FabricClient {
       operation,
       ...fields,
     };
+    let encoded: EncodedBridgeRequest;
+    try {
+      // `postMessage()` snapshots at send time. Queued calls have no port yet,
+      // so clone the encoded form now to preserve the same invocation-time
+      // boundary instead of retaining caller-owned objects by reference.
+      encoded = structuredClone(realmFromFabricValue(request));
+    } catch (cause) {
+      return Promise.reject(cause);
+    }
     const result = Promise.withResolvers<FabricValue | undefined>();
     result.promise.catch(() => {});
     this.#pending.set(id, result);
-    if (this.#port) this.#sendPending(request);
-    else this.#queued.push(request);
+    if (this.#port) this.#sendPending(id, encoded);
+    else this.#queued.push({ id, encoded });
     return result.promise;
   }
 
@@ -401,13 +416,13 @@ export class FabricClient {
     this.#port?.postMessage(realmFromFabricValue(request));
   }
 
-  #sendPending(request: BridgeRequest): void {
+  #sendPending(id: number, encoded: EncodedBridgeRequest): void {
     try {
-      this.#send(request);
+      this.#port?.postMessage(encoded);
     } catch (cause) {
-      const pending = this.#pending.get(request.id);
+      const pending = this.#pending.get(id);
       if (!pending) return;
-      this.#pending.delete(request.id);
+      this.#pending.delete(id);
       pending.reject(cause);
     }
   }
@@ -425,7 +440,9 @@ export class FabricClient {
     this.#port = event.ports[0];
     this.#port.onmessage = this.#onPortMessage;
     this.#port.start();
-    for (const request of this.#queued) this.#sendPending(request);
+    for (const request of this.#queued) {
+      this.#sendPending(request.id, request.encoded);
+    }
     this.#queued = [];
   };
 

@@ -48,6 +48,7 @@ import {
   columnDeclaresIfc,
   type SqliteDbRef as WireSqliteDbRef,
   type SqliteParamsWire,
+  sqliteRowToWire,
 } from "@commonfabric/memory/v2";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 
@@ -1026,27 +1027,31 @@ export function sqliteQuery(
               ? rowLabels.labels.filter((_, i) => keep[i])
               : rowLabels.labels;
             const anyPerRow = perRow.some((l) => l !== undefined);
-            // On the labeled path, write the rows UNDER the label schema: the
-            // schema-aware write is what attaches the per-path `ifc` to each row's
-            // entity doc (recording the policy alone does not). The provider rows
-            // are deep-frozen and reach this write through a proxy; the
-            // schema-aware diff would trip "ownKeys … non-extensible", so write a
-            // plain extensible JSON copy. `editWithRetry` runs
-            // `prepareTxForCommit`, so the CFC-relevant labeled write commits and
-            // the label persists.
-            const resultRows = ((labelSchema || anyPerRow)
-              ? cloneIfNecessary(
-                keptRows as Parameters<typeof cloneIfNecessary>[0],
-                { frozen: false },
-              )
-              : keptRows) as unknown[];
+            // Convert before the Fabric write: SQLite aliases are arbitrary,
+            // while Fabric records reserve prototype-pollution keys. Unsafe
+            // rows use the memory protocol's entry-list representation. On the
+            // labeled path, clone that Fabric-safe form to an extensible value
+            // before the schema-aware diff attaches per-path labels.
+            const resultRows = keptRows.map((row) => {
+              const wireRow = sqliteRowToWire(
+                row as Parameters<typeof sqliteRowToWire>[0],
+              );
+              return labelSchema || anyPerRow
+                ? cloneIfNecessary(
+                  wireRow as Parameters<typeof cloneIfNecessary>[0],
+                  { frozen: false },
+                )
+                : wireRow;
+            }) as unknown[];
             const wrote = await runtime.editWithRetry((wtx) => {
               markEffectCompletion(wtx, effectKey);
               applyRunIdentity(wtx);
               // Stale-writeback guard: a newer query (different inputs -> different
               // hash) may have superseded this one while the RPC was in flight.
               // Only write back if the result cell still records THIS request.
-              if (result.withTx(wtx).get()?.requestHash !== hash) return;
+              if (result.withTx(wtx).get()?.requestHash !== hash) {
+                return;
+              }
               const target = labelSchema
                 ? result.asSchema(labelSchema).withTx(wtx)
                 : result.withTx(wtx);
@@ -1067,7 +1072,9 @@ export function sqliteQuery(
                 const base = result.getAsNormalizedFullLink();
                 for (let i = 0; i < resultRows.length; i++) {
                   const ifc = perRow[i];
-                  if (!ifc) continue;
+                  if (!ifc) {
+                    continue;
+                  }
                   const raw = result.key("result").key(i).withTx(wtx).getRaw();
                   const link = parseLink(raw);
                   if (!link?.id) {

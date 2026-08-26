@@ -111,7 +111,7 @@ export enum RequestType {
   CellSet = "cell:set",
 
   /**
-   * Applies a value to a cell read-modify-write, keeping compare-and-set.
+   * Appends values to an array cell as a mergeable server-side operation.
    * The counterpart to {@link CellSet}'s blind overwrite.
    */
   CellPush = "cell:push",
@@ -840,11 +840,9 @@ export type CellSetRequest = BaseRequest & {
 };
 
 /**
- * The {@link RequestType.CellPush} request: a read-modify-write append.
- * The same wire shape as {@link CellSetRequest}, carrying the whole
- * already-appended array rather than a delta, but routed as its own request
- * so the runtime keeps the read target as a commit precondition. That is
- * the compare-and-set a blind set gives up.
+ * The {@link RequestType.CellPush} request: a mergeable server-side append.
+ * It carries only the invocation-time member snapshots, so an equivalent
+ * client handle with a stale local cache cannot replace a newer array base.
  */
 export type CellPushRequest = BaseRequest & {
   type: RequestType.CellPush;
@@ -854,10 +852,11 @@ export type CellPushRequest = BaseRequest & {
    */
   cell: CellRef;
 
-  /**
-   * The value to apply, whole and already resolved.
-   */
-  value: WireCellValue;
+  /** The members to append, already resolved. */
+  values: WireCellValue[];
+
+  /** Wait for commit confirmation and return a refusal to the caller. */
+  awaitCommit?: boolean;
 };
 
 /**

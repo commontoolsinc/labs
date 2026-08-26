@@ -184,7 +184,7 @@ export class CellHandle<T = unknown> {
     this.#publishValue(snapshot);
     await this.#enqueueOperation(async (queue) => {
       const updateGeneration = this.#updateGeneration;
-      await this.#sendWrite(serialized, RequestType.CellSet);
+      await this.#sendWrite(serialized);
       if (updateGeneration === this.#updateGeneration) {
         queue.value = snapshot;
         queue.hasValue = true;
@@ -262,20 +262,13 @@ export class CellHandle<T = unknown> {
 
   #sendWrite(
     serialized: WireCellValue,
-    type: RequestType.CellSet | RequestType.CellPush,
   ): Promise<void> {
     const cell = this.ref();
-    const request = type === RequestType.CellPush
-      ? this.#conn.request<RequestType.CellPush>({
-        type: RequestType.CellPush,
-        cell,
-        value: serialized,
-      })
-      : this.#conn.request<RequestType.CellSet>({
-        type: RequestType.CellSet,
-        cell,
-        value: serialized,
-      });
+    const request = this.#conn.request<RequestType.CellSet>({
+      type: RequestType.CellSet,
+      cell,
+      value: serialized,
+    });
     return request.catch((error) => {
       if (!this.#conn.signal.aborted) {
         console.error("[CellHandle] Write failed:", error);
@@ -363,33 +356,49 @@ export class CellHandle<T = unknown> {
     return child;
   }
 
-  // A push is read-modify-write: build the appended array locally, then send it
-  // as a CellPush (not CellSet) so the runtime keeps the read-target as a commit
-  // precondition (compare-and-set) — a concurrent push aborts rather than being
-  // clobbered by a blind overwrite.
+  // A push publishes an invocation-time local snapshot, but sends only the
+  // appended members. The runtime owns the authoritative mergeable append, so
+  // an equivalent handle's stale private cache cannot replace committed data.
   push<U>(
     this: CellHandle<U[]>,
     ...values: T extends (infer U)[] ? U[] : never
   ): void {
+    const serializedValues = values.map((value) =>
+      CellHandle.serialize(value as ClientCellValue)
+    );
     const snapshots = values.map((value) => {
-      const serialized = CellHandle.#serialize(
+      const snapshot = CellHandle.#serialize(
         value as ClientCellValue,
         "sigil",
       );
-      return applyValue(serialized, value, this);
+      return applyValue(snapshot, value, this);
     }) as U[];
+    const cached = this.#value;
+    const fallback = cached === undefined ? undefined : applyValue(
+      CellHandle.#serialize(cached as ClientCellValue, "sigil"),
+      cached,
+      this,
+    );
     const append = (queue: CellOperationQueue) => {
-      const current = (queue.hasValue ? queue.value : this.#value) as unknown[];
+      const current = (queue.hasValue ? queue.value : fallback) as unknown[];
       if (!Array.isArray(current)) {
         throw new Error("push() can only be used on array cells");
       }
       const value = [...current, ...snapshots] as unknown as U[];
-      const serialized = this.#serializeWrite(value);
       queue.value = value;
       queue.hasValue = true;
       this.#writeGeneration++;
       this.#publishValue(value);
-      return this.#sendWrite(serialized, RequestType.CellPush);
+      return this.#conn.request<RequestType.CellPush>({
+        type: RequestType.CellPush,
+        cell: this.ref(),
+        values: serializedValues,
+        awaitCommit: true,
+      }).catch((error) => {
+        if (!this.#conn.signal.aborted) {
+          console.error("[CellHandle] Push failed:", error);
+        }
+      });
     };
     void this.#enqueueOperation(append).catch((error) => {
       if (!this.#conn.signal.aborted) {
