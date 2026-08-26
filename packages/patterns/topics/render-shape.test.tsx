@@ -70,11 +70,12 @@ const propValue = (value: any): unknown =>
 /** Every string anywhere in a rendered subtree, so an assertion can ask what
  * the reader would SEE rather than what the model holds. */
 function renderedText(node: unknown, into: string[] = []): string[] {
-  if (Array.isArray(node)) {
-    node.forEach((child) => renderedText(child, into));
+  // Resolved before the array check, for the reason given on `findAllByTag`.
+  const resolved = propValue(node);
+  if (Array.isArray(resolved)) {
+    resolved.forEach((child) => renderedText(child, into));
     return into;
   }
-  const resolved = propValue(node);
   if (typeof resolved === "string") {
     into.push(resolved);
     return into;

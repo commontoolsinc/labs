@@ -68,13 +68,19 @@ function findAllByTag(
   tag: string,
   found: TestVNode[] = [],
 ): TestVNode[] {
-  if (Array.isArray(node)) {
-    node.forEach((child) => findAllByTag(child, tag, found));
+  // Resolved before either test. A compiled reactive child arrives cell-backed,
+  // and asking `Array.isArray` or `isVNode` of the cell rather than its value
+  // stops the walk one level above what it was looking for — a guard that reds
+  // on a correct render, which is no more use than one that misses a wrong one.
+  // `propValue` returns a non-cell unchanged, so the plain path pays nothing.
+  const resolved = propValue(node);
+  if (Array.isArray(resolved)) {
+    resolved.forEach((child) => findAllByTag(child, tag, found));
     return found;
   }
-  if (!isVNode(node)) return found;
-  if (node.name === tag) found.push(node);
-  for (const child of node.children ?? []) findAllByTag(child, tag, found);
+  if (!isVNode(resolved)) return found;
+  if (resolved.name === tag) found.push(resolved);
+  for (const child of resolved.children ?? []) findAllByTag(child, tag, found);
   return found;
 }
 
