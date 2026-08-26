@@ -21,13 +21,30 @@ import {
 
 // ===== Shared types =====
 
-export type TopicLinkKind = "pr" | "topic" | "session" | "web";
+/**
+ * What a link points at — a rendering hint, not a behaviour switch.
+ *
+ * An open domain rather than an enum, deliberately. This value is PROVIDED
+ * data: it reaches a reader through a published result, where the update gate
+ * requires the new type to be a subset of the old one. A closed enum there can
+ * never gain a member, so declaring one is a promise never to learn a new kind
+ * of link — and the set below is a guess about a corpus that keeps growing.
+ *
+ * Well-known values, which the composer offers and the renderer styles:
+ * `"web"`, `"pr"`, `"topic"`, `"session"`. Anything else stores and renders as
+ * itself rather than being refused.
+ */
+export type TopicLinkKind = string;
 
 /** A display snapshot attached atomically to content. Fabric remains the
  * authority for which principal/key performed the write. `kind: "agent"`
  * disambiguates an agent acting with its human user's key. */
 export interface TopicAuthor {
-  kind: "person" | "agent";
+  /** Open for the same reason `TopicLinkKind` is: this is provided data, so a
+   * closed set here could never gain `"service"` or whatever acts next.
+   * Well-known values are `"person"` and `"agent"`, the latter marking an
+   * agent acting with its human user's key. */
+  kind: string;
   name: string;
   avatar?: string;
 }
@@ -46,21 +63,18 @@ export interface AddCommentEvent extends AgentAuthoredEvent {
 }
 
 export interface AddLinkEvent extends AgentAuthoredEvent {
-  /** What the link points at — a rendering hint, not a behavior switch.
-   * Required by the deployed contract even though the handler would default
-   * it to "web": the compat gate compares a verb's event schema in the
-   * result direction, where required-to-optional is refused, so relaxing
-   * this rides the next acknowledged break rather than an ordinary deploy. */
-  kind: TopicLinkKind;
-
+  /** What the link points at — a rendering hint, not a behaviour switch.
+   * Optional because the handler defaults it to `"web"`, and a caller should
+   * not be made to supply a field the verb never needed. */
+  kind?: TopicLinkKind;
   /** The link target. Must be http(s): anything else rejects, because a
    * user-supplied scheme on a shared surface is script execution in every
    * viewer's session. */
   url: string;
-
-  /** Display label. A blank label falls back to the URL; required to be
-   * present for the same gate reason as `kind`. */
-  label: string;
+  /** Display label. Optional, and a blank one falls back to the URL — the
+   * handler has always done that, and requiring the field only kept callers
+   * from relying on it. */
+  label?: string;
 }
 
 export interface SetBodyEvent extends AgentAuthoredEvent {
