@@ -103,6 +103,13 @@ interface HarnessInteractiveChatSessionRecord {
 interface HarnessInteractiveChatEmitOptions {
   turnRecord?: HarnessChatTurnRecord;
   createTurn?: boolean;
+  /**
+   * A transcript to persist with this event and adopt as the session's durable
+   * checkpoint. It replaces `record.transcript` only once the durable write has
+   * committed, so an event that fails to persist leaves the previous checkpoint
+   * in place for the failure path to fall back on.
+   */
+  transcript?: readonly HarnessTranscriptMessage[];
 }
 
 const defaultPromptLoopFactory: HarnessInteractivePromptLoopFactory = (
@@ -323,7 +330,20 @@ const interruptedTurnError = (
   },
 });
 
+/** A prompt loop reported success with history a provider would reject. */
+class HarnessIncompleteTranscriptError extends Error {
+  constructor(turnId: string) {
+    super(
+      `cf-harness chat turn ${turnId} completed with history that does not pair its tool calls with tool results`,
+    );
+    this.name = "HarnessIncompleteTranscriptError";
+  }
+}
+
 const chatTurnError = (error: unknown): HarnessChatError => {
+  if (error instanceof HarnessIncompleteTranscriptError) {
+    return { code: "incomplete_transcript", message: error.message };
+  }
   if (
     error instanceof HarnessControlError &&
     (error.code === "provider-configuration-required" ||
@@ -382,7 +402,10 @@ const recoverSessionTranscript = (
   transcript: readonly HarnessTranscriptMessage[],
 ):
   | { transcript: readonly HarnessTranscriptMessage[] }
-  | { unrecoverable: HarnessChatError }
+  | {
+    unrecoverable: HarnessChatError;
+    safeTranscript: readonly HarnessTranscriptMessage[];
+  }
   | undefined => {
   const pairing = inspectHarnessTranscriptPairing(transcript);
   if (pairing.valid) {
@@ -395,6 +418,7 @@ const recoverSessionTranscript = (
     return { transcript: transcript.slice(0, pairing.safeBoundary) };
   }
   return {
+    safeTranscript: transcript.slice(0, pairing.safeBoundary),
     unrecoverable: {
       code: "incomplete_transcript",
       message:
@@ -801,7 +825,7 @@ export class HarnessInteractiveChatService {
         continue;
       }
       const updatedAt = this.#now();
-      if ("transcript" in recovered) {
+      if (!("unrecoverable" in recovered)) {
         // `#emitImmediately` persists `record.transcript` alongside the event,
         // so the rollback and the record of it commit together.
         record.transcript = recovered.transcript;
@@ -811,11 +835,14 @@ export class HarnessInteractiveChatService {
         });
         continue;
       }
+      // The session is refused either way, but the corrupt history must not be
+      // written back: what lands is the resumable prefix, which for history
+      // corrupt from its first message is empty.
       record.recoveryError = recovered.unrecoverable;
       await this.#emit(record.status.sessionId, undefined, {
         kind: "status_changed",
         session: { ...record.status, reusable: false, updatedAt },
-      });
+      }, { transcript: recovered.safeTranscript });
     }
   }
 
@@ -1222,10 +1249,16 @@ export class HarnessInteractiveChatService {
       if (record.canceledTurnIds.has(turnId)) {
         return;
       }
-      // Assigning before the emit promotes the completed transcript inside the
-      // same transaction that records `turn_completed`. The copy keeps the
-      // durable checkpoint independent of the array the loop appended to.
-      record.transcript = [...result.transcript];
+      // A loop that reports success still has to hand back history a provider
+      // accepts. Checking here keeps an unpaired transcript from being promoted
+      // and advertised as reusable, rather than leaving it to be discovered on
+      // the next turn.
+      if (!isResumableHarnessTranscript(result.transcript)) {
+        throw new HarnessIncompleteTranscriptError(turnId);
+      }
+      // The copy keeps the durable checkpoint independent of the array the loop
+      // appended to. Passing it through the emit promotes it inside the same
+      // transaction that records `turn_completed`, and only if that commits.
       await this.#emit(session.sessionId, turnId, {
         kind: "turn_completed",
         turnId,
@@ -1233,7 +1266,7 @@ export class HarnessInteractiveChatService {
         ...((result.totalUsage ?? result.usage) !== undefined
           ? { usage: result.totalUsage ?? result.usage }
           : {}),
-      });
+      }, { transcript: [...result.transcript] });
     } catch (error) {
       if (record.canceledTurnIds.has(turnId)) {
         return;
@@ -1449,6 +1482,7 @@ export class HarnessInteractiveChatService {
       event,
     });
     const record = this.#sessions.get(sessionId);
+    const transcript = options.transcript ?? record?.transcript ?? [];
     const nextStatus = record === undefined
       ? undefined
       : reduceHarnessChatSessionStatus(record.status, envelope);
@@ -1459,10 +1493,7 @@ export class HarnessInteractiveChatService {
     if (record !== undefined && nextStatus !== undefined) {
       if (nextTurn !== undefined) {
         const saved = await this.#sessionStore?.saveSessionTurnAndAppendEvent({
-          session: {
-            session: nextStatus,
-            transcript: record.transcript,
-          },
+          session: { session: nextStatus, transcript },
           turn: nextTurn,
           event: envelope,
           ...(options.createTurn ? { createTurn: true } : {}),
@@ -1473,7 +1504,7 @@ export class HarnessInteractiveChatService {
       } else {
         await this.#sessionStore?.saveSessionAndAppendEvent({
           session: nextStatus,
-          transcript: record.transcript,
+          transcript,
         }, envelope);
       }
     } else {
@@ -1482,6 +1513,9 @@ export class HarnessInteractiveChatService {
     this.#sequence = sequence;
     this.#events.push(envelope);
     this.#pruneInMemoryEvents();
+    if (record !== undefined && options.transcript !== undefined) {
+      record.transcript = options.transcript;
+    }
     if (record !== undefined && nextStatus !== undefined) {
       record.status = nextStatus;
     }

@@ -70,10 +70,12 @@ The current package provides:
   replay, cancellation, and restore state; a session's durable transcript
   advances only at a completed turn, so a failed, canceled, or interrupted turn
   retains the transcript from before it while its tool and event history stays
-  on the audit trail, and a restored session whose recorded history does not
-  pair its tool calls with tool results is rolled back to its resumable prefix
-  or refused with an `incomplete_transcript` error rather than sent to a
-  provider;
+  on the audit trail; a completed turn's history is checked before it is
+  promoted, and promotion commits with the completion or not at all; and a
+  restored session whose recorded history does not pair its tool calls with tool
+  results keeps only its resumable prefix, resuming from that prefix when the
+  history was merely cut short and otherwise refusing the session with an
+  `incomplete_transcript` error rather than sending it to a provider;
 - CFC modes `disabled`, `observe`, `enforce-explicit`, and `enforce-strict`,
   plus prompt-slot, invocation-context, policy-event, and model-influence
   evidence;

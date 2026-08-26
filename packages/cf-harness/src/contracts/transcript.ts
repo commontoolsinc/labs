@@ -73,7 +73,8 @@ export interface HarnessTranscriptPairing {
   defects: readonly HarnessTranscriptDefect[];
   /**
    * Length of the longest prefix that is itself resumable: the prefix ends
-   * where no tool call is left outstanding.
+   * where no tool call is left outstanding, and never reaches past a
+   * structurally malformed message, whose damage no truncation undoes.
    *
    * Truncating to this boundary can drop an assistant message carrying
    * `providerContinuation` compaction. That is safe — the Responses projection
@@ -137,7 +138,10 @@ export const inspectHarnessTranscriptPairing = (
         // crash-then-next-turn shape, and stays invalid.
         break;
     }
-    if (pending.size === 0) {
+    // Only a prefix free of defects is resumable. An unanswered call is
+    // repaired by cutting the prefix short; an orphan or duplicate is not
+    // repaired by any cut, so the boundary stops before it and stays there.
+    if (pending.size === 0 && defects.length === 0) {
       safeBoundary = messageIndex + 1;
     }
   }

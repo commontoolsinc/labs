@@ -95,6 +95,8 @@ describe("harness transcript pairing", () => {
     expect(pairing.defects).toEqual([
       { kind: "orphan_tool_result", messageIndex: 1, toolCallId: "ghost" },
     ]);
+    // No truncation repairs an orphan, so the boundary stops before it.
+    expect(pairing.safeBoundary).toBe(1);
   });
 
   it("reports a second result for a call that was already answered", () => {
@@ -106,6 +108,7 @@ describe("harness transcript pairing", () => {
     expect(pairing.defects).toEqual([
       { kind: "duplicate_tool_result", messageIndex: 2, toolCallId: "a" },
     ]);
+    expect(pairing.safeBoundary).toBe(2);
   });
 
   it("reports a call id declared twice", () => {
@@ -117,6 +120,8 @@ describe("harness transcript pairing", () => {
     expect(pairing.defects).toEqual([
       { kind: "duplicate_tool_call", messageIndex: 2, toolCallId: "a" },
     ]);
+    // The prefix keeps the answered call and stops before the redeclaration.
+    expect(pairing.safeBoundary).toBe(2);
   });
 
   it("accepts an assistant message carrying only native model tool results", () => {
@@ -153,13 +158,18 @@ describe("harness transcript pairing", () => {
   });
 
   it("projects a transcript truncated at its boundary into paired provider input", async () => {
+    // The boundary has to fall after a complete call/result pair, or the
+    // projection below proves nothing about pairing.
     const transcript = [
       { role: "system", content: "Be careful." } as HarnessTranscriptMessage,
-      user("read both"),
-      assistant("reading", call("a"), call("b")),
+      user("read the first"),
+      assistant("reading", call("a")),
       toolResult("a"),
+      assistant("reading both", call("b"), call("c")),
+      toolResult("b"),
     ];
     const { safeBoundary } = inspectHarnessTranscriptPairing(transcript);
+    expect(safeBoundary).toBe(4);
     const rolledBack = transcript.slice(0, safeBoundary);
     expect(isResumableHarnessTranscript(rolledBack)).toBe(true);
 
@@ -169,13 +179,14 @@ describe("harness transcript pairing", () => {
       "openai",
       "gateway Responses",
     );
-    const calls = new Set(
-      input.filter((item) => item.type === "function_call").map((item) =>
-        item.call_id
-      ),
-    );
-    for (const item of input.filter((i) => i.type === "function_call_output")) {
-      expect(calls.has(item.call_id)).toBe(true);
-    }
+    const calls = input.filter((item) => item.type === "function_call").map((
+      item,
+    ) => item.call_id);
+    const outputs = input.filter((item) => item.type === "function_call_output")
+      .map((item) => item.call_id);
+    expect(calls).toEqual(["a"]);
+    // Every call has exactly one output and every output has its call: a bare
+    // subset check passes on a transcript carrying neither.
+    expect(outputs).toEqual(calls);
   });
 });

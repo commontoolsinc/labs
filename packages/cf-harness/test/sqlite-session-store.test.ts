@@ -1211,6 +1211,11 @@ Deno.test("sqlite session restore refuses a structurally corrupt recorded transc
       "orphan_tool_result",
     );
     assertEquals(reachedTheLoop, false);
+    // Refusing the session is not enough: the corrupt history must not be
+    // written back either, so what remains is the resumable prefix.
+    const stored = (await store.getSession("session-1"))?.transcript ?? [];
+    assertEquals(stored, [{ role: "user", content: "Read the first file" }]);
+    assertEquals(inspectHarnessTranscriptPairing(stored).valid, true);
   } finally {
     store.close();
     await Deno.remove(path);

@@ -1626,12 +1626,14 @@ Deno.test("a turn that fails after the first of two tool results persists no par
 });
 
 Deno.test("tool history survives a failed turn whose model history is rolled back", async () => {
-  const { service } = await runPartialToolTurn(1);
+  const { service, snapshots } = await runPartialToolTurn(1);
 
   const kinds = service.events("session-1").map((event) => event.event.kind);
   assertEquals(kinds.filter((kind) => kind === "tool_started").length, 2);
   assertEquals(kinds.filter((kind) => kind === "tool_completed").length, 1);
   assertEquals(kinds[kinds.length - 1], "turn_failed");
+  // The audit trail is only interesting because the model history went back.
+  assertEquals(snapshots[snapshots.length - 1], []);
   assertEquals(
     service.listTurns({ sessionId: "session-1" }).turns[0].turn.status,
     "failed",
@@ -1751,4 +1753,108 @@ Deno.test("a completed turn promotes its transcript independently of the loop's 
     { role: "assistant", content: "Done." },
     { role: "user", content: "Again" },
   ]);
+});
+
+Deno.test("a completed turn whose transcript is unpaired is failed, not promoted", async () => {
+  const { store, snapshots } = recordingStore();
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: () => ({
+      // A loop that reports success while leaving a tool call unanswered. Its
+      // history would be refused by a provider on the following turn.
+      runTranscript: (options) =>
+        Promise.resolve({
+          model: "gpt-test",
+          finalAssistantText: "Reading.",
+          transcript: [...options.transcript, {
+            role: "assistant" as const,
+            content: "Reading.",
+            toolCalls: [toolCall("call-a")],
+          }],
+          modelTurns: 1,
+          runState: {} as HarnessPromptLoopResult["runState"],
+        }),
+    }),
+    now: nextIsoNow(),
+    sessionStore: store,
+  });
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Read a file" },
+  });
+  await service.waitForTurn("session-1", "turn-1");
+
+  for (const snapshot of snapshots) {
+    assertEquals(inspectHarnessTranscriptPairing(snapshot).valid, true);
+  }
+  assertEquals(snapshots[snapshots.length - 1], []);
+  const turn = service.listTurns({ sessionId: "session-1" }).turns[0];
+  assertEquals(turn.turn.status, "failed");
+  assertEquals(turn.turn.error?.code, "incomplete_transcript");
+});
+
+Deno.test("a completion whose persistence fails leaves the previous checkpoint durable", async () => {
+  const snapshots: HarnessTranscriptMessage[][] = [];
+  let failCompletion = false;
+  const store: HarnessChatSessionStore = {
+    saveSession: (snapshot) => {
+      snapshots.push([...snapshot.transcript]);
+    },
+    getSession: () => undefined,
+    listSessions: () => [],
+    saveSessionAndAppendEvent: (snapshot) => {
+      snapshots.push([...snapshot.transcript]);
+    },
+    saveSessionTurnAndAppendEvent: (mutation) => {
+      if (failCompletion && mutation.event.event.kind === "turn_completed") {
+        throw new Error("the session store went away mid-commit");
+      }
+      snapshots.push([...mutation.session.transcript]);
+      return true;
+    },
+    saveTurn: () => {},
+    getTurn: () => undefined,
+    listTurns: () => [],
+    appendEvent: () => {},
+    listEvents: () => [],
+    latestSequence: () => 0,
+  };
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: () => ({
+      runTranscript: (options) => Promise.resolve(makeResult(options, "Done.")),
+    }),
+    now: nextIsoNow(),
+    sessionStore: store,
+  });
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Hi" },
+  });
+  await service.waitForTurn("session-1", "turn-1");
+  const afterFirstTurn = snapshots[snapshots.length - 1];
+
+  failCompletion = true;
+  await service.startTurn("req-3", {
+    sessionId: "session-1",
+    turnId: "turn-2",
+    input: { text: "Again" },
+  });
+  await service.waitForTurn("session-1", "turn-2");
+
+  // The completion never committed, so the turn is failed and the durable
+  // checkpoint is still the one the first turn left behind.
+  assertEquals(
+    service.listTurns({ sessionId: "session-1" }).turns[1].turn.status,
+    "failed",
+  );
+  assertEquals(snapshots[snapshots.length - 1], afterFirstTurn);
 });
