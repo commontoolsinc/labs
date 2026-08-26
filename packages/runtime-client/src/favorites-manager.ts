@@ -18,6 +18,7 @@ import { CellHandle } from "./cell-handle.ts";
 import type { CellRef } from "./protocol/types.ts";
 import { RuntimeClient } from "./runtime-client.ts";
 import { tagsFromSchema } from "./schema-tags.ts";
+import { describeFailure } from "@/shared/utils.ts";
 
 type HandlerName = "addFavorite" | "removeFavorite";
 
@@ -148,7 +149,9 @@ export class FavoritesManager {
       // A subscriber tearing down or the runtime being disposed while
       // setup is in flight is an expected race, not a failure.
       if (isDisposed || this.#rt.signal.aborted) return;
-      const err = error instanceof Error ? error : new Error(String(error));
+      const err = error instanceof Error
+        ? error
+        : new Error(describeFailure(error));
       if (onError) {
         onError(err);
       } else {
