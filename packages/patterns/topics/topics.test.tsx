@@ -691,6 +691,62 @@ export default pattern(() => {
   // same. A piece built in the pattern body cannot be pushed into a list at
   // all (the write reports a schema mismatch and the action never runs), which
   // is why the entries a board once supplied cannot simply be rebuilt here.
+  // `mention` and `unmention` themselves, on a directly held topic. The board's
+  // PIVOT needs a board — that is why its cases live in
+  // `integration/topic-board-child-contract.test.ts` — but these verbs do not:
+  // each one writes the topic's OWN `mentioned` list, and the set semantics
+  // that make them mergeable are the part worth pinning here.
+  const mentionSubject = Topic({ title: "Mention subject" });
+  // Plain cells, because `MentionEvent.topic` declares `Writable<{ title }>`
+  // rather than a piece: the verb matches by cell identity, and a piece built
+  // in a pattern body cannot be handed to one anyway.
+  const mentionTargetA = new Writable({ title: "Mention target A" });
+  const mentionTargetB = new Writable({ title: "Mention target B" });
+  // A link on the same topic, so the outbound-reference derivation runs over
+  // all three of its sources rather than two. A web URL names no piece, so it
+  // resolves to nothing and is filtered out — the mention counts below are
+  // unaffected, which is the point: a link that is just a link adds no edge.
+  const action_mention_subject_gets_a_link = action(() => {
+    mentionSubject.addLink.send({
+      url: "https://example.com/not-a-piece",
+      agentName: "Sol",
+    });
+  });
+  const assert_plain_link_is_no_mention = assert(() =>
+    (mentionSubject.links ?? []).length === 1 &&
+    (mentionSubject.mentions ?? []).length === 0
+  );
+
+  const action_mention_one = action(() => {
+    mentionSubject.mention?.send({ topic: mentionTargetA });
+  });
+  const assert_mention_recorded = assert(() =>
+    (mentionSubject.mentions ?? []).length === 1
+  );
+  const action_mention_same_again = action(() => {
+    mentionSubject.mention?.send({ topic: mentionTargetA });
+  });
+  // A set-add, not an append: referencing the same piece twice is one
+  // reference, which is what makes concurrent mentions mergeable.
+  const assert_repeat_mention_is_one = assert(() =>
+    (mentionSubject.mentions ?? []).length === 1
+  );
+  const action_mention_second = action(() => {
+    mentionSubject.mention?.send({ topic: mentionTargetB });
+  });
+  const assert_two_distinct_mentions = assert(() =>
+    (mentionSubject.mentions ?? []).length === 2
+  );
+  const action_unmention_first = action(() => {
+    mentionSubject.unmention?.send({ topic: mentionTargetA });
+  });
+  // Removal resolves against durable state rather than rewriting the array,
+  // so the survivor stays the reference it was.
+  const assert_only_the_retracted_one_left = assert(() =>
+    (mentionSubject.mentions ?? []).length === 1 &&
+    equals((mentionSubject.mentions ?? [])[0] as object, mentionTargetB)
+  );
+
   const mentionOne = new Writable({ tag: "mention one" });
   const mentionTwo = new Writable({ tag: "mention two" });
   const uiMentioned = new Writable<unknown[] | Default<[]>>([]);
@@ -881,6 +937,16 @@ export default pattern(() => {
       { assertion: assert_pure_helpers },
       { assertion: assert_self_mention_inert_through_a_twin },
       { assertion: assert_mention_lists_tolerate_a_mid_sync_source },
+      { action: action_mention_subject_gets_a_link },
+      { assertion: assert_plain_link_is_no_mention },
+      { action: action_mention_one },
+      { assertion: assert_mention_recorded },
+      { action: action_mention_same_again },
+      { assertion: assert_repeat_mention_is_one },
+      { action: action_mention_second },
+      { assertion: assert_two_distinct_mentions },
+      { action: action_unmention_first },
+      { assertion: assert_only_the_retracted_one_left },
       { action: action_ui_mentions_two },
       { action: action_drop_one_from_ui },
       { assertion: assert_ui_dropped_only_that_one },
