@@ -87,10 +87,12 @@ wrapper classes (Section 1.4).
 > say where something is defined; consult the package's `exports` map to know
 > where to import it from.
 >
-> Type declarations visible to patterns are in `packages/api/index.ts` (inline
-> `interface` + `declare const` pattern), and must agree with the `data-model`
-> declarations — nothing checks that mechanically. `packages/runner/` wires
-> concrete implementations into builder exports.
+> Type declarations visible to patterns are in
+> `packages/data-model/src/api.ts` (the `interface` + `declare const` pattern),
+> which `packages/api/index.ts` re-exports as part of the `commonfabric`
+> surface. They must agree with the `data-model` declarations they mirror —
+> nothing checks that mechanically. `packages/runner/` wires concrete
+> implementations into builder exports.
 
 ```typescript
 // Shown at module scope.
@@ -869,8 +871,8 @@ annotation carry information.
 
 The brand is a well-known string key rather than a `unique symbol` because
 `interface.ts` is deliberately free of runtime imports, and a `unique symbol`
-would have to be imported as a *value*. `packages/api/index.ts` declares the
-identical member; the two must agree exactly, since a value branded by one
+would have to be imported as a *value*. `packages/data-model/src/api.ts` declares
+the identical member; the two must agree exactly, since a value branded by one
 would otherwise not satisfy the other.
 
 ```typescript

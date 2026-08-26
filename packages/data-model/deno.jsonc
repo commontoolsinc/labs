@@ -40,6 +40,7 @@
   },
   "exports": {
     "./SchemaAndHash": "./src/SchemaAndHash.ts",
+    "./api": "./src/api.ts",
     "./cell-rep": "./src/cell-rep.ts",
     "./codec-common": "./src/codec-common/index.ts",
     "./codec-json": "./src/codec-json/index.ts",

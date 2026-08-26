@@ -261,16 +261,30 @@ export type RuntimeTelemetryMarker = {
 } | {
   // Emitted for every settle episode whose convergence budget deferred work,
   // and for a busy window that crosses the wall-clock heuristic. The deferred
-  // fields are present on the convergence-budget path and carry the labels of
-  // the actions the pass held back. A wave that converges over several passes
+  // fields are present on the convergence-budget path and describe the
+  // actions the pass held back. A wave that converges over several passes
   // exhausts a budget too, so a marker reports a bounded pass rather than a
   // graph that will never settle.
   type: "scheduler.non-settling";
   busyTime: number;
   windowDuration: number;
   busyRatio: number;
-  deferredActions?: string[];
+  deferredActions?: NonSettlingDeferredAction[];
   deferredActionCount?: number;
+};
+
+/**
+ * One deferred action in a non-settling marker. `label` is the action's
+ * display identity — `cf:module/<identity>:<symbol>:<key>` for pattern
+ * actions, `raw:<builtin>:<key>` for builtins, which names no piece.
+ * `pieceId`/`space` carry the action's scheduler observation identity when it
+ * has one: the id of the result cell whose piece the action serves, which is
+ * the attribution a builtin's label cannot provide.
+ */
+export type NonSettlingDeferredAction = {
+  label: string;
+  pieceId?: string;
+  space?: string;
 };
 
 export type RuntimeTelemetryMarkerResult = RuntimeTelemetryMarker & {

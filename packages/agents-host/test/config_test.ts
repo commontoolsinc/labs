@@ -8,10 +8,24 @@ import {
 } from "../src/config.ts";
 import { parseAgentsHostCliOptions } from "../src/cli-options.ts";
 import { basename, join } from "@std/path";
+import { Identity } from "@commonfabric/identity";
+import { assertConfiguredOwner } from "../src/fabric-runtime.ts";
+
+Deno.test("configured owner must match the signing identity", async () => {
+  const owner = await Identity.fromPassphrase("agents host configured owner");
+  const other = await Identity.fromPassphrase("agents host other owner");
+  assertConfiguredOwner(owner, owner.did());
+  assertThrows(
+    () => assertConfiguredOwner(owner, other.did()),
+    Error,
+    "does not match identity",
+  );
+});
 
 Deno.test("parseAgentsHostConfig validates and preserves provider options", () => {
   const config = parseAgentsHostConfig({
     schema: AGENTS_HOST_CONFIG_SCHEMA,
+    ownerDid: "did:key:test-owner",
     collectionIntervalMs: 1_234,
     checkoutRoots: ["/workspace/checkouts"],
     sources: [
@@ -34,6 +48,7 @@ Deno.test("parseAgentsHostConfig validates and preserves provider options", () =
     ],
   });
 
+  assertEquals(config.ownerDid, "did:key:test-owner");
   assertEquals(config.collectionIntervalMs, 1_234);
   assertEquals(config.checkoutRoots, ["/workspace/checkouts"]);
   assertEquals(config.sources, [
@@ -68,6 +83,7 @@ Deno.test("parseAgentsHostConfig validates checkout search roots", () => {
       () =>
         parseAgentsHostConfig({
           schema: AGENTS_HOST_CONFIG_SCHEMA,
+          ownerDid: "did:key:test-owner",
           checkoutRoots,
           sources: [{
             id: "codex",
@@ -80,11 +96,93 @@ Deno.test("parseAgentsHostConfig validates checkout search roots", () => {
   }
 });
 
+Deno.test("parseAgentsHostConfig rejects a non-DID owner", () => {
+  assertThrows(
+    () =>
+      parseAgentsHostConfig({
+        schema: AGENTS_HOST_CONFIG_SCHEMA,
+        ownerDid: "not-a-did",
+        sources: [{
+          id: "codex",
+          driver: "codex-app-server",
+          enabled: true,
+        }],
+      }),
+    Error,
+    "configuration.ownerDid must be a DID",
+  );
+});
+
+Deno.test("parseAgentsHostConfig rejects malformed boundary fields", () => {
+  const source = {
+    id: "codex",
+    driver: "codex-app-server",
+    enabled: true,
+  };
+  const config = {
+    schema: AGENTS_HOST_CONFIG_SCHEMA,
+    ownerDid: "did:key:test-owner",
+    sources: [source],
+  };
+  const cases: Array<[unknown, string]> = [
+    [null, "configuration must be an object"],
+    [{ ...config, extra: true }, "configuration has an unknown field"],
+    [{ ...config, schema: "wrong" }, "configuration.schema must be"],
+    [{ ...config, sources: [] }, "sources must be a non-empty array"],
+    [{ ...config, sources: [null] }, "sources[0] must be an object"],
+    [
+      { ...config, sources: [{ ...source, command: [] }] },
+      "command must be a non-empty string array",
+    ],
+    [
+      { ...config, sources: [{ ...source, env: { BAD: 1 } }] },
+      "env.BAD must be a string",
+    ],
+    [
+      { ...config, sources: [{ ...source, extra: true }] },
+      "sources[0] has an unknown field",
+    ],
+    [
+      { ...config, sources: [{ ...source, driver: "unknown" }] },
+      "driver is not supported",
+    ],
+    [
+      { ...config, sources: [{ ...source, enabled: "yes" }] },
+      "enabled must be a boolean",
+    ],
+    [
+      { ...config, sources: [{ ...source, codexTransport: "unknown" }] },
+      "codexTransport is not supported",
+    ],
+    [
+      { ...config, sources: [{ ...source, allowDangerFullAccess: "yes" }] },
+      "allowDangerFullAccess must be a boolean",
+    ],
+    [
+      { ...config, checkoutRoots: "/workspace" },
+      "checkoutRoots must be a string array",
+    ],
+    [
+      { ...config, checkoutRoots: ["/workspace", "/workspace"] },
+      "checkoutRoots contains a duplicate path",
+    ],
+    [{ ...config, sources: [source, source] }, "duplicate source id"],
+    [
+      { ...config, sources: [{ ...source, enabled: false }] },
+      "must enable at least one source",
+    ],
+  ];
+  for (const [value, message] of cases) {
+    assertThrows(() => parseAgentsHostConfig(value), Error, message);
+  }
+});
+
 Deno.test("parseAgentsHostConfig rejects ambiguous source identities", () => {
   assertThrows(
     () =>
       parseAgentsHostConfig({
         schema: AGENTS_HOST_CONFIG_SCHEMA,
+        ownerDid: "did:key:test-owner",
         sources: [
           {
             id: "Codex",
@@ -103,6 +201,7 @@ Deno.test("parseAgentsHostConfig requires commands for enabled ACP sources", () 
     () =>
       parseAgentsHostConfig({
         schema: AGENTS_HOST_CONFIG_SCHEMA,
+        ownerDid: "did:key:test-owner",
         sources: [{ id: "acp", driver: "acp", enabled: true }],
       }),
     Error,
@@ -119,6 +218,7 @@ Deno.test("loadAgentsHostConfig accepts JSONC", async () => {
       `{
         // One source is enough for a host.
         "schema": "${AGENTS_HOST_CONFIG_SCHEMA}",
+        "ownerDid": "did:key:test-owner",
         "sources": [
           { "id": "claude", "driver": "claude-agent-sdk", "enabled": true }
         ]
@@ -149,6 +249,7 @@ Deno.test("parseAgentsHostConfig rejects invalid collection intervals", () => {
       () =>
         parseAgentsHostConfig({
           schema: AGENTS_HOST_CONFIG_SCHEMA,
+          ownerDid: "did:key:test-owner",
           collectionIntervalMs,
           sources: [{
             id: "codex",

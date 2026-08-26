@@ -98,6 +98,7 @@ import {
   CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON,
   CfcSchemaMigrationError,
 } from "./migration-reason.ts";
+import { verdictReason } from "./verdict-reason.ts";
 import {
   type ReadClassSelection,
   readConsumesEntry,
@@ -3451,7 +3452,12 @@ const verifyInputRequirements = (
   // accumulated across the boundary pass. undefined — the default, whenever
   // no onPrefixProvenance hook is installed — skips all measurement.
   provenance?: CfcPrefixProvenanceSummary,
-): string | undefined => {
+  // `verdict` says whether the failure is a VERDICT on the data (see
+  // cfc/verdict-reason.ts): every check here is, except a `maxConfidentiality`
+  // miss whose policy evaluation could not resolve a manifest or grant — the
+  // label was left un-rewritten, so the attempt after the referenced document
+  // syncs can fit, and tagging it terminal would strand that write.
+): { reason: string; verdict: boolean } | undefined => {
   // The labeled reads the per-entry checks below quantify over, each carrying
   // its activity-clock position. Distinct from the egress side's consumed set
   // (collectConsumedLabel), which stays transaction-global — a sink request
@@ -3566,14 +3572,14 @@ const verifyInputRequirements = (
       entry.path,
     );
     if (unsupportedTrustSensitive !== undefined) {
-      return unsupportedTrustSensitive;
+      return { reason: unsupportedTrustSensitive, verdict: true };
     }
     const disallowedClause = disallowedAuthoredClauseReason(
       entry.schema,
       entry.path,
     );
     if (disallowedClause !== undefined) {
-      return disallowedClause;
+      return { reason: disallowedClause, verdict: true };
     }
     const currentPrincipalFailure = currentPrincipalIntegrityReason(
       tx,
@@ -3581,7 +3587,7 @@ const verifyInputRequirements = (
       entry.path,
     );
     if (currentPrincipalFailure !== undefined) {
-      return currentPrincipalFailure;
+      return { reason: currentPrincipalFailure, verdict: true };
     }
     const writeAuthorizedByFailure = writeAuthorizedByReason(
       tx,
@@ -3597,7 +3603,7 @@ const verifyInputRequirements = (
     ) || writeIsPatternSetupInitialization(tx, target, entry.path) ||
       writeIsSeedMaterialization(tx, target);
     if (writeAuthorizedByFailure !== undefined && !setupProjection) {
-      return writeAuthorizedByFailure;
+      return { reason: writeAuthorizedByFailure, verdict: true };
     }
     const requiredIntegrity = ifc?.requiredIntegrity ?? [];
     const maxConfidentiality = ifc?.maxConfidentiality;
@@ -3689,7 +3695,10 @@ const verifyInputRequirements = (
         cfcFloorTrustContext(tx),
       );
       if (!ok) {
-        return `requiredIntegrity failed at /${entry.path.join("/")}`;
+        return {
+          reason: `requiredIntegrity failed at /${entry.path.join("/")}`,
+          verdict: true,
+        };
       }
     }
 
@@ -3722,6 +3731,7 @@ const verifyInputRequirements = (
           )
         );
       const mode = tx.getCfcState().policyEvaluationMode;
+      let ceilingResolutionIncomplete = false;
       const ok = gating.every((read) => {
         const confidentiality = read.label?.confidentiality ?? [];
         if (mode === "off") return fitsLegacy(confidentiality);
@@ -3742,9 +3752,21 @@ const verifyInputRequirements = (
           // Exhaustion fails closed; otherwise subsumption-fit the REWRITTEN
           // label (spec §8.10.3 clause fit — flat ceilings keep their
           // conjunctive meaning through atomsOutsideCeiling).
-          return outcome.exhausted === false &&
+          const fits = outcome.exhausted === false &&
             atomsOutsideCeiling(outcome.confidentiality, maxConfidentiality)
                 .length === 0;
+          if (!fits && outcome.resolutionFailures.length > 0) {
+            // The miss was evaluated over a manifest or grant that did not
+            // resolve, so the label kept atoms a rewrite might have cleared:
+            // not a verdict (see the return-type note above).
+            noteModulePolicyResolutionFailures(
+              tx,
+              `input requirement /${entry.path.join("/")}`,
+              outcome.resolutionFailures,
+            );
+            ceilingResolutionIncomplete = true;
+          }
+          return fits;
         }
         // observe: decide exactly as `off` would, diagnose the divergence.
         noteModulePolicyResolutionFailures(
@@ -3773,7 +3795,16 @@ const verifyInputRequirements = (
         return decision;
       });
       if (!ok) {
-        return `maxConfidentiality failed at /${entry.path.join("/")}`;
+        // The short-circuit is sound for the verdict: `.every` stops at the
+        // FIRST missing read, so an unresolved read behind it goes
+        // unexamined — but a miss whose evaluation fully resolved dooms the
+        // write on every attempt by itself (the same complete evaluation
+        // re-runs identically, and labels only widen), so unexamined reads
+        // cannot soften a deterministic miss into a retryable one.
+        return {
+          reason: `maxConfidentiality failed at /${entry.path.join("/")}`,
+          verdict: !ceilingResolutionIncomplete,
+        };
       }
     }
   }
@@ -4415,6 +4446,8 @@ const derivePersistedLinkLabel = (
     !hasLabelValues(linkSchemaLabel) && !hasCarriedLabel
   ) {
     return {
+      // Untagged, so retryable: the source document's metadata is not
+      // available in this transaction. It loads, and the re-run decides.
       reason: `missing link source metadata for ${input.target.id} at /${
         input.target.path.join("/")
       }`,
@@ -4760,6 +4793,9 @@ export const loadStoredCfcEnvelope = (
   } catch (error) {
     return {
       status: "unreadable",
+      // Untagged, so retryable: the schema document could not be read in
+      // this transaction. A CID CONTENT mismatch is a different animal — it
+      // is deterministic, and tagged as a verdict where it is detected.
       reason: error instanceof Error
         ? error.message
         : `schema load failed for ${target.id}`,
@@ -5340,6 +5376,14 @@ export const prepareBoundaryCommit = (
   tx: IExtendedStorageTransaction,
   instrumentation?: CfcPrepareInstrumentation,
 ): string[] => {
+  // WATCH(cfc-verdict): every reason recorded here decides whether the commit
+  // is retried. A reason that says policy REFUSED this data — deterministic,
+  // so an identical re-run refuses identically — must be wrapped in
+  // `verdictReason(...)` to make the rejection terminal. Everything else is
+  // left untagged and stays retryable: an input this transaction did not
+  // have, a resolution that failed, a prepared state that drifted. Untagged
+  // is the safe default deliberately; see cfc/verdict-reason.ts for why, and
+  // for what getting it wrong in each direction costs.
   const reasons: string[] = [];
   const state = tx.getCfcState();
   // D4: per-target last-overlapping-write bounds over the ordered write-
@@ -5360,7 +5404,9 @@ export const prepareBoundaryCommit = (
   // chokepoint; surface one fail-closed reason apiece so it rejects in enforce
   // mode and diagnoses in observe, uniformly with every other reason here.
   for (const target of state.unprivilegedSystemWrites ?? []) {
-    reasons.push(`unprivileged write to protected cfc path ${target}`);
+    reasons.push(
+      verdictReason(`unprivileged write to protected cfc path ${target}`),
+    );
   }
   const identityForInput = (
     input: WritePolicyInput,
@@ -5473,6 +5519,8 @@ export const prepareBoundaryCommit = (
       continue;
     }
     reasons.push(
+      // Untagged, so retryable: the schema's write-policy input is not
+      // available in this transaction yet.
       `missing schema write-policy input for ${target.id}`,
     );
   }
@@ -5671,7 +5719,11 @@ export const prepareBoundaryCommit = (
     // runtime's mark, never the payload's unverified policy metadata.
     let ingestVerificationFailed = false;
     if (requirementFailure) {
-      reasons.push(requirementFailure);
+      reasons.push(
+        requirementFailure.verdict
+          ? verdictReason(requirementFailure.reason)
+          : requirementFailure.reason,
+      );
       if (!isIngestTarget) continue;
       ingestVerificationFailed = true;
     }
@@ -5681,7 +5733,7 @@ export const prepareBoundaryCommit = (
       verificationSchema,
     );
     if (trustedEventFailure) {
-      reasons.push(trustedEventFailure);
+      reasons.push(verdictReason(trustedEventFailure));
       if (!isIngestTarget) continue;
       ingestVerificationFailed = true;
     }
@@ -5699,7 +5751,7 @@ export const prepareBoundaryCommit = (
       verificationSchema,
     );
     if (exactCopyFailure) {
-      reasons.push(exactCopyFailure);
+      reasons.push(verdictReason(exactCopyFailure));
       if (!isIngestTarget) continue;
       ingestVerificationFailed = true;
     }
@@ -5879,7 +5931,7 @@ export const prepareBoundaryCommit = (
       });
       if (monotonicityViolations.length > 0) {
         if (state.declaredMonotonicityMode === "enforce") {
-          reasons.push(...monotonicityViolations);
+          reasons.push(...monotonicityViolations.map(verdictReason));
           if (!isIngestTarget) continue;
           // Mirror ingestVerificationFailed above: the runtime's ingest mark
           // (appended below) still persists in non-rejecting modes, but the
@@ -6497,7 +6549,7 @@ export const prepareBoundaryCommit = (
               } (canWrite, §8.12.4): ` +
               offending.map((atom) => JSON.stringify(atom)).join(", ");
             if (writerFitRejects) {
-              reasons.push(misfit);
+              reasons.push(verdictReason(misfit));
             } else {
               tx.noteCfcDiagnostic(`writer-fit(persist-and-flag): ${misfit}`);
             }

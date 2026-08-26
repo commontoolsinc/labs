@@ -26,6 +26,7 @@ Deno.test("session identity rejects empty and control-character values", () => {
 Deno.test("session chunk identity includes its content hash", () => {
   const first = sessionChunkCause(
     "did:key:space",
+    "did:key:owner",
     "codex",
     "session",
     0,
@@ -33,6 +34,7 @@ Deno.test("session chunk identity includes its content hash", () => {
   );
   const second = sessionChunkCause(
     "did:key:space",
+    "did:key:owner",
     "codex",
     "session",
     0,
@@ -40,8 +42,8 @@ Deno.test("session chunk identity includes its content hash", () => {
   );
   assertEquals(first, {
     spaceDid: "did:key:space",
+    ownerDid: "did:key:owner",
     agentConnector: "session-chunk",
-    version: 1,
     sourceId: "codex",
     nativeSessionId: "session",
     part: 0,

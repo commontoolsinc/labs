@@ -13,7 +13,7 @@ export function isPermanentRejection(
  * The names of terminal commit rejections: a commit-time evaluation that
  * DETERMINISTICALLY refused the committed data itself, so re-running the
  * identical handler recomputes the identical refused write and can NEVER
- * converge.
+ * converge. One member per evaluation site:
  *
  * - `RowLabelCommitError` (server-side, wire): a CFC per-row label
  *   commit-rule violation (memory/v2/sqlite/commit-eval.ts, evaluated
@@ -31,10 +31,22 @@ export function isPermanentRejection(
  *   same live echo and refuses identically. Never crosses the wire —
  *   minted in storage/v2.ts (`makeSpeculativeBasisRefusal`) before the
  *   push.
+ * - `CfcCommitRefusalError` (client-side, CFC boundary): flow enforcement
+ *   evaluated the transaction's own reads and writes and refused them
+ *   before storage ever saw the commit (`rejectCommitBeforeStorage` in
+ *   extended-storage-transaction.ts). Carries the prepare refusal reasons
+ *   as a structured `reasons` array. Never crosses the wire either.
+ *   VERDICTS only, and every recorded reason must be one. A reason is a
+ *   verdict when its producer tags it (`cfc/verdict-reason.ts`); an
+ *   untagged reason — an input prepare could not evaluate, a resolution
+ *   that failed, a prepared state a caller disturbed through
+ *   `invalidateCfc` — keeps the retryable `StorageTransactionAborted`
+ *   name, because a fresh attempt can decide differently.
  */
 const TERMINAL_REJECTION_NAMES: ReadonlySet<string> = new Set([
   "RowLabelCommitError",
   "SpeculativeBasisError",
+  "CfcCommitRefusalError",
 ]);
 
 /**
@@ -43,8 +55,9 @@ const TERMINAL_REJECTION_NAMES: ReadonlySet<string> = new Set([
  * terminal like a {@link isPermanentRejection}, but classified separately: a
  * permanent rejection is an idempotency/lineage precondition
  * (`origin-committed`/`receipt-exists`), whereas a terminal rejection refuses
- * the committed data on its own merits (server commit-rule evaluation, or the
- * client-side speculative-basis export refusal). Both must stop the
+ * the committed data on its own merits (server commit-rule evaluation, the
+ * client-side speculative-basis export refusal, or the client's CFC boundary).
+ * Both must stop the
  * handler immediately: a doomed handler that keeps re-running through its retry
  * budget produces speculative rev bumps on each attempt that starve concurrent
  * sibling commits sharing reactive state. Unlike a stale-read
@@ -246,20 +259,14 @@ export function isTransientCommitRejection(
 
 /**
  * The attempt was discarded before it ever reached storage, so there is no
- * server verdict to respect: either the `editWithRetry` callback called
- * `tx.abort()` to throw this attempt away, or CFC enforcement refused to hand
- * the transaction to storage (`rejectCommitBeforeStorage` in
- * extended-storage-transaction.ts). Re-running produces a genuinely new
- * attempt, and — unlike every other rejection class — a discarded attempt costs
- * no round-trip and no `finalizeRejection`, so retrying one is local work
- * rather than churn against the server.
- *
- * It is NOT free of observable churn: `rejectCommitBeforeStorage` calls
- * `runCommitCallbacks(result)`, so every `cell.set(v, cb)` callback and every
- * `tx.addCommitCallback` consumer registered on the discarded transaction fires
- * with the failure — once per doomed attempt, same as any other rejection. The
- * cheapness argument is about server round-trips, not about staying invisible
- * to commit-callback consumers.
+ * server verdict to respect: the `editWithRetry` callback called `tx.abort()`
+ * to throw this attempt away, asking for a fresh one. Re-running produces a
+ * genuinely new attempt, and — unlike every other rejection class — a
+ * discarded attempt costs no round-trip and no `finalizeRejection`, so
+ * retrying one is local work rather than churn against the server. The CFC
+ * boundary refusal shares the never-reached-storage shape but NOT the
+ * convergence argument — the refusal is deterministic — so it carries its own
+ * name (`CfcCommitRefusalError`) and classifies as terminal, not discarded.
  *
  * NOTE the asymmetry with a callback that THROWS: `editWithRetry` aborts that
  * transaction and returns immediately without retrying, because a thrown

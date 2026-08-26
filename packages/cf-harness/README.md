@@ -721,6 +721,28 @@ session that cannot be established leaves the run to proceed without its grants,
 and the CLI says so on stderr rather than staying silent. The grant list is
 designed to grow; the identity's profile is the expected next entry.
 
+#### Operator input cells
+
+`--input-cell <name>=<link>` (repeatable) passes a cell into the run by
+reference: a cell populated in the space before the run exists, handed to the
+run as its input. Cells are the runtime's medium of exchange; the handle minted
+for one is only how the harness names a cell to a model that cannot hold
+addresses. The model is told the token and the operator's `<name>` for it,
+nothing more: the run's inputs reach the model from its first turn while their
+values stay in the fabric, so a prompt never holds a literal it could inline or
+pass on by accident. No shape is stated on the flag, by rule: an input cell
+carries its own declared schema in the fabric — the same place its CFC labels
+live — and `describe_handle` answers from that declaration, so there is one
+source of truth and nothing an operator-written view could drift from or quietly
+claim.
+
+Unlike a grant, an input cell is explicit configuration, so failure is closed
+and loud rather than tolerated: a malformed argument is a usage error, and a
+reference that does not parse, targets another space, or arrives on a run
+without a fabric session fails the run before the model is involved. The cells
+are recorded in run state (`inputCells`), replayed rather than re-minted on
+resume, and reported in the operator summary as `inputCells:`.
+
 #### Inspecting a handle's shape
 
 A token says nothing about what it refers to, and an agent handed one cannot
@@ -745,14 +767,15 @@ piece the token names — and never the value.
 Two sources can answer, in this order. The referent's own declared schema, read
 through the run's fabric session when it has one: a piece's document schema is
 the result schema of the pattern behind it, which is exactly what an agent
-holding a handle to that piece would be wiring into a pattern of its own.
-Failing that, the schema the mint recorded out of the harness's own work — a
-`run_pattern` result reference carries the compiled pattern's result schema,
-which compilation produced anyway, and the entry is marked
-`schemaSource: "harness"`. A run with no session still answers from its own
-table, so shape stays inspectable in every run that has handles at all. A token
-the run's table does not hold comes back `known: false` rather than as an error,
-since a token from another run simply names nothing here.
+holding a handle to that piece would be wiring into a pattern of its own — and
+it is where a cell's CFC labels live, which is why an input cell's shape always
+answers from its own declaration. Failing that, the schema the mint recorded out
+of the harness's own work — a `run_pattern` result reference carries the
+compiled pattern's result schema, which compilation produced anyway, and the
+entry is marked `schemaSource: "harness"`. A run with no session still answers
+from its own table, so shape stays inspectable in every run that has handles at
+all. A token the run's table does not hold comes back `known: false` rather than
+as an error, since a token from another run simply names nothing here.
 
 **What is disclosed is structure and only structure**: property names, types,
 nesting, required-ness, array and object composition, a `type` from the schema

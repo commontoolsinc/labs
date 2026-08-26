@@ -898,7 +898,9 @@ report these through the same collector (deduplicated via §2.2's
 - **Error** `pattern-result:opaque-reserved-key`
   (`reserved-result-keys.ts`, called from `schema-generator.ts`) — a pattern's
   own result declares one of the framework's reserved keys `unknown` at its
-  root; see §6.12
+  root; demoted to a **Warning** under `TransformationOptions.storedSource`
+  (an identity-pinned reload of durable stored source admits nothing new, so
+  the report keeps its visibility and loses its veto); see §6.12
 - **Error** `reactive-capture:unknown-type` (`src/ast/type-building.ts:681`) —
   a captured reactive value's inferred type is `unknown`, so its schema would
   be `{ type: "unknown" }` and the runner would not materialize it, reading it
@@ -936,7 +938,13 @@ as a value.
 
 `reportOpaqueReservedResultKeys` (`src/transformers/reserved-result-keys.ts`)
 reports it as **Error** `pattern-result:opaque-reserved-key`, naming every
-offending key in one diagnostic. It runs from SchemaGeneration, which is the
+offending key in one diagnostic. Under `TransformationOptions.storedSource` —
+the runner engine's cold-recovery recompile of durable stored source, where an
+identity pin guarantees the compile reconstructs an already-admitted artifact
+rather than admitting a new one — the same diagnostic reports as a
+**Warning**: a rule added after those bytes were admitted must not brick
+their reload, while authoring paths stay strict because the author is present
+to fix the shape. It runs from SchemaGeneration, which is the
 one place a declared result exists as the schema it generated — whatever type
 the author named, and whichever inference path §10.2 took to reach it.
 SchemaInjection records the result schema calls and the node to point at

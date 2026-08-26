@@ -4,7 +4,11 @@ import {
   staticCandidates,
   tokenizeLine,
 } from "../lib/completion/mod.ts";
-import { resolveCompletionLine } from "../lib/completion/line.ts";
+import {
+  declaredSlots,
+  resolveCompletionLine,
+} from "../lib/completion/line.ts";
+import { enumeratedOptionNames } from "../lib/completion/static.ts";
 import {
   bashCompletionScript,
   zshCompletionScript,
@@ -369,4 +373,20 @@ Deno.test("the CLI name flows into the generated function names", () => {
   const script = bashCompletionScript("mycf");
   assert(script.includes("_mycf_complete()"));
   assert(script.includes("complete -o nospace -F _mycf_complete mycf"));
+});
+
+Deno.test("every enumerated option name answers at each slot that declares it", () => {
+  // `enumeratedOptionNames` is what the slot gate subtracts from the command
+  // tree, so a name it reports has to answer at the prompt too — otherwise the
+  // gate reads a slot as decided while the slot offers nothing. `--log-level`
+  // is stripped before Cliffy parses and so declares no slot on the tree; it
+  // answers at the root, where the pre-parse globals are read.
+  const declared = declaredSlots(main).options;
+  for (const name of enumeratedOptionNames()) {
+    for (const where of declared.get(name) ?? ["<root>"]) {
+      const path = where === "<root>" ? "" : `${where} `;
+      const values = staticFor(`cf ${path}--${name} `);
+      assert(values.length > 0, `--${name} offers nothing on ${where}`);
+    }
+  }
 });

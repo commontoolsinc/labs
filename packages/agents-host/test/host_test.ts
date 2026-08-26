@@ -20,6 +20,7 @@ import { join } from "@std/path";
 
 const TARGET_DESCRIPTION: AgentsHostTargetDescription = {
   spaceDid: "did:key:test-space",
+  ownerDid: "did:key:test-owner",
   debugPieceId: "debug-piece",
   cells: {
     recentIndex: "recent-cell",
@@ -493,6 +494,7 @@ Deno.test("AgentsHost records command receipt activity without prompt contents",
     await host.start();
     target.sendCommands([{
       schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
       id: "command-1",
       createdAt: "2026-07-20T00:05:00.000Z",
       sourceId: "codex",
@@ -536,6 +538,7 @@ Deno.test("AgentsHost drains admitted commands before stopping drivers", async (
     driver.promptGate = { entered, release };
     target.sendCommands([{
       schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
       id: "command-during-shutdown",
       createdAt: "2026-07-20T00:05:00.000Z",
       sourceId: "codex",
@@ -750,6 +753,7 @@ Deno.test("AgentsHost reports failed post-command session refreshes", async () =
     await host.start();
     target.sendCommands([{
       schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
       id: "command-with-stale-refresh",
       createdAt: "2026-07-20T00:05:00.000Z",
       sourceId: "codex",
@@ -798,6 +802,7 @@ Deno.test("AgentsHost flushes unpublished receipts before stopping", async () =>
     await host.start();
     target.sendCommands([{
       schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
       id: "command-with-publication-failure",
       createdAt: "2026-07-20T00:05:00.000Z",
       sourceId: "codex",
@@ -1077,6 +1082,7 @@ Deno.test("AgentsHost completes shutdown when subscription cancellation fails", 
     const receiptCount = target.receipts.length;
     target.sendCommands([{
       schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
       id: "command-after-stop",
       createdAt: "2026-07-20T00:06:00.000Z",
       sourceId: "codex",

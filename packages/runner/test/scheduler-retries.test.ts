@@ -114,6 +114,7 @@ describe("reactive retries", () => {
         action: Action;
         offBudgetRetries: WeakMap<Action, number>;
       };
+      error?: { name: string; message: string };
     } = {},
   ) => {
     const { rejectPromise = false, shared } = options;
@@ -124,9 +125,11 @@ describe("reactive retries", () => {
       new WeakMap<Action, number>();
     let queued = 0;
     let resubscribed = 0;
-    const error = errorName === undefined
-      ? undefined
-      : { name: errorName, message: `injected ${errorName}` };
+    const reported: Error[] = [];
+    const error = options.error ??
+      (errorName === undefined
+        ? undefined
+        : { name: errorName, message: `injected ${errorName}` });
     const commitPromise =
       (rejectPromise
         ? Promise.reject(error)
@@ -150,8 +153,18 @@ describe("reactive retries", () => {
       },
       getActionId: () => "test-action",
       restoreInvalidCauses: options.restoreInvalidCauses ?? (() => {}),
+      reportTerminalRejection: (terminalError) => {
+        reported.push(terminalError);
+      },
     });
-    return { queued, resubscribed, retries, offBudgetRetries, action };
+    return {
+      queued,
+      resubscribed,
+      retries,
+      offBudgetRetries,
+      action,
+      reported,
+    };
   };
 
   it(
@@ -175,6 +188,55 @@ describe("reactive retries", () => {
       const r = await runWatcher("PreconditionFailedError", 3);
       expect(r.queued).toBe(0);
       expect(r.retries.has(r.action)).toBe(false);
+      // A permanent rejection is a benign lost idempotency race, not a
+      // verdict on the action's output — it stays off the error channel.
+      expect(r.reported).toEqual([]);
+    },
+  );
+
+  it(
+    "surfaces a terminal rejection with its refusal reasons and piece attribution",
+    async () => {
+      // A terminal rejection is a verdict on the action's own output, so it
+      // reaches the error channel. The commit rejection is a plain object;
+      // the surfaced Error keeps its name and structured reasons, and — a
+      // commit rejection carrying no pattern frame — takes its piece
+      // attribution from the action's observation identity, scope stripped.
+      const action = (() => {}) as unknown as Action;
+      (action as {
+        schedulerObservationIdentity?: {
+          pieceId: string;
+          pieceRootId?: string;
+          ownerSpace?: string;
+        };
+      }).schedulerObservationIdentity = {
+        // A `user:` scope key carries its own colon, so attribution must come
+        // from `pieceRootId` rather than from slicing `pieceId`.
+        pieceId: "user:did:key:zPrincipal:of:fid1:attributed",
+        pieceRootId: "of:fid1:attributed",
+        ownerSpace: "did:key:zTest",
+      };
+      const r = await runWatcher("CfcCommitRefusalError", 3, {
+        shared: { action, offBudgetRetries: new WeakMap<Action, number>() },
+        error: {
+          name: "CfcCommitRefusalError",
+          message: "CFC enforcement rejected commit: writer-fit misfit",
+          reasons: ["writer-fit misfit"],
+        } as { name: string; message: string },
+      });
+      expect(r.queued).toBe(0);
+      expect(r.retries.has(r.action)).toBe(false);
+      expect(r.reported.length).toBe(1);
+      const surfaced = r.reported[0] as Error & {
+        reasons?: readonly string[];
+        pieceId?: string;
+        space?: string;
+      };
+      expect(surfaced.name).toBe("CfcCommitRefusalError");
+      expect(surfaced.message).toContain("writer-fit misfit");
+      expect(surfaced.reasons).toEqual(["writer-fit misfit"]);
+      expect(surfaced.pieceId).toBe("of:fid1:attributed");
+      expect(surfaced.space).toBe("did:key:zTest");
     },
   );
 

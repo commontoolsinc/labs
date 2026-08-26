@@ -7,7 +7,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { type Runtime, RuntimeTelemetry } from "@commonfabric/runner";
-import { fabricRuntimeObservations } from "../src/fabric-observations.ts";
+import {
+  comparableEntityHash,
+  fabricRuntimeObservations,
+} from "../src/fabric-observations.ts";
 
 type ErrorListener = (error: {
   pieceId?: string;
@@ -95,12 +98,39 @@ describe("fabric-observations", () => {
       busyTime: 0,
       windowDuration: 1,
       busyRatio: 0,
-      deferredActions: ["cf:module/mod1:__cfLift_1:x"],
+      deferredActions: [{
+        label: "cf:module/mod1:__cfLift_1:x",
+        pieceId: "of:fid1:abc",
+      }],
       deferredActionCount: 2,
     });
     const episodes = observations.episodesSince(start);
     expect(episodes.length).toBe(1);
     expect(episodes[0]!.deferredActionCount).toBe(2);
+    // The marker's piece id is stored as the comparable entity hash — the
+    // same reduction `errorsSince` applies — so a consumer compares hashes,
+    // never raw id strings.
+    expect(episodes[0]!.deferredActions).toEqual([{
+      label: "cf:module/mod1:__cfLift_1:x",
+      pieceId: comparableEntityHash("fid1:abc"),
+    }]);
+  });
+
+  it("records a deferred action without observation identity as label alone", () => {
+    const { runtime, telemetry } = stubRuntime();
+    const observations = fabricRuntimeObservations(runtime);
+    const start = observations.sequence();
+    telemetry.submit({
+      type: "scheduler.non-settling",
+      busyTime: 0,
+      windowDuration: 1,
+      busyRatio: 0,
+      deferredActions: [{ label: "raw:map:abc123" }],
+      deferredActionCount: 1,
+    });
+    expect(observations.episodesSince(start)[0]!.deferredActions).toEqual([
+      { label: "raw:map:abc123" },
+    ]);
   });
 
   it("scopes reads to the window after the captured sequence", () => {

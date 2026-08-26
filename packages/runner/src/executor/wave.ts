@@ -1438,6 +1438,24 @@ export class WaveAccumulator
     }
   }
 
+  /** Name a DROPPED contribution out loud (profile-starvation seat,
+   * 2026-08-25). A dropped contribution's writes vanish with no basis
+   * rows behind them (#basisRowsFor covers survivors only), so a
+   * ONE-SHOT contribution — a bookkeeping continuation, a sidecar
+   * instantiation — that gets dropped has nothing to re-run it, and on
+   * a space that then goes quiet the loss is permanent and previously
+   * INVISIBLE (the r05/p11 profile-starvation stores each carried one
+   * such cascade with a single logged symptom). Requeued events stay
+   * quiet — at-least-once redelivery is that class's normal path. */
+  #warnDropped(contribution: WaveContribution, message: string): void {
+    logger.warn("contribution-dropped", () => [
+      `wave ${this.#space} dropped contribution action=` +
+      `${contribution.context.actionId ?? "<unstamped>"} kind=` +
+      `${contribution.context.kind ?? "<none>"} eventId=` +
+      `${contribution.context.eventId ?? "<none>"}: ${message}`,
+    ]);
+  }
+
   /**
    * The wave commit step (serving-loop.md §3d): per-doc CAS against the
    * wave's basis with per-WRITE-CLASS conflict handling, then one batched
@@ -2821,17 +2839,16 @@ export class WaveAccumulator
       }
       if (droppedWhole.has(idx)) {
         outcome.dispositions[idx] = { kind: "dropped" };
-        this.#withdraw(
-          contribution,
-          orphanRefused.has(idx)
-            ? "orphan delivery refused: the event's durable entry rode an " +
-              "emitter write this wave withdrew, so no entry exists behind " +
-              "this run and nothing re-emits it (events.md §4 — one " +
-              "durable entry, one completed run; stage C build W3, (α3))"
-            : "pure derivation dropped: derived from a withdrawn " +
-              "contribution; its own reads re-run it when fresh state " +
-              "lands (serving-loop.md §3d)",
-        );
+        const message = orphanRefused.has(idx)
+          ? "orphan delivery refused: the event's durable entry rode an " +
+            "emitter write this wave withdrew, so no entry exists behind " +
+            "this run and nothing re-emits it (events.md §4 — one " +
+            "durable entry, one completed run; stage C build W3, (α3))"
+          : "pure derivation dropped: derived from a withdrawn " +
+            "contribution; its own reads re-run it when fresh state " +
+            "lands (serving-loop.md §3d)";
+        this.#warnDropped(contribution, message);
+        this.#withdraw(contribution, message);
         continue;
       }
       if (droppedDocs[idx].size > 0) {
@@ -2847,6 +2864,10 @@ export class WaveAccumulator
         outcome.dispositions[idx] = allDropped
           ? { kind: "dropped" }
           : { kind: "partially-dropped", droppedOps };
+        // No #warnDropped here: a superseded pure derivation is the
+        // EXPECTED recovery path — the superseding authored commit is the
+        // fresh state its readers reconverge from — not the one-shot loss
+        // class the warn exists for.
         // Any surviving ops rode the wave commit; the sealed commit's own
         // overlay rolls back whole and reconverges from the wave commit
         // (or, all-dropped, from the superseding authored commit) arriving
@@ -2881,11 +2902,15 @@ export class WaveAccumulator
   #abortAfterForeignFailure(outcome: WaveCommitOutcome): void {
     for (const contribution of this.#contributions) {
       const idx = contribution.index;
-      this.#withdraw(
-        contribution,
+      const message =
         "foreign provisioning commit failed; home commit withheld — the " +
-          "event stays unconsequenced and replays (protocol.md §2b)",
-      );
+        "event stays unconsequenced and replays (protocol.md §2b)";
+      if (contribution.context.kind !== "event-handler") {
+        // The event-handler arm requeues (at-least-once); everything else
+        // drops with nothing to re-run it — say so (see #warnDropped).
+        this.#warnDropped(contribution, message);
+      }
+      this.#withdraw(contribution, message);
       outcome.dispositions[idx] = contribution.context.kind === "event-handler"
         ? { kind: "requeued" }
         : { kind: "dropped" };

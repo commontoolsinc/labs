@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Bulk piece operations as something to watch. What runs today is stages 1
-# and 2 of docs/plans/piece-bulk-operations.md — a board of 113 members
+# through 3 of docs/plans/piece-bulk-operations.md — a board of 113 members
 # surveyed in one process, the plan it emits, the retarget stamp, the
-# containment refusal, and a repair: a fixer run dry, applied from its own
-# plan, and resumed as landed — live rather than asserted. What the later
-# stages add appears as
-# PENDING acts at the end: the eventual shape of the mechanism stays visible
+# containment refusal, a repair (a fixer run dry, applied from its own plan,
+# and resumed as landed), the retarget that plan carries applied over grouped
+# sessions, and the after-survey diffed against the plan it verifies — live
+# rather than asserted. What the later stage adds appears as a
+# PENDING act at the end: the eventual shape of the mechanism stays visible
 # in the transcript, and each stage's checklist in the plan carries the item
 # that converts its act from pending to run, so a landed stage cannot leave
 # this demo describing a smaller tool than the one that exists.
@@ -284,7 +285,43 @@ run_loud cf piece repair -s "$SPACE" --piece board --path items \
   --fixer "$WORK/fix-titles.ts" --plan "$WORK/repair.jsonl" --apply \
   --out "$WORK/applied.jsonl"
 
-act "8 · The refusal the survey exists to make"
+act "8 · The retarget: the plan carried, then applied"
+say "Stage 3, live. The plan is the whole input — it names the pieces, the"
+say "reference each must still be on, and the source each moves to — so the"
+say "command carries no selection of its own. Dry by default: every row"
+say "classified against its own reference pair, and no write at all."
+run_loud cf piece retarget -s "$SPACE" --plan "$WORK/retarget.jsonl" \
+  --out "$WORK/dry.json"
+run sh -c "sed 's/^fvj1://' '$WORK/dry.json' | jq -c '{applied, complete, verdicts: (.rows | map(.verdict) | unique)}'"
+say "--apply writes. Sessions are grouped rather than opened per piece or"
+say "held open for the whole run: the warm-up amortizes across a group while"
+say "the pieces live at once stay bounded by it, and a group boundary is a"
+say "resume point."
+run_loud cf piece retarget -s "$SPACE" --plan "$WORK/retarget.jsonl" \
+  --group-size 25 --apply --out "$WORK/applied.json"
+say "Every row carries what it cost. A run whose cost per piece is unknown"
+say "cannot be improved, and this is the number a decision to run siblings"
+say "concurrently would be made on."
+run sh -c "sed 's/^fvj1://' '$WORK/applied.json' | jq -c '.rows[0:3] | map({piece, verdict, elapsedMs})'"
+say "Re-invoking is the resume: a piece already on its row's target reads as"
+say "landed and is not rewritten, so the same command finishes a run that"
+say "stopped partway."
+run_loud cf piece retarget -s "$SPACE" --plan "$WORK/retarget.jsonl" --apply \
+  --out "$WORK/resumed.json"
+run sh -c "sed 's/^fvj1://' '$WORK/resumed.json' | jq -c '{applied, complete, verdicts: (.rows | map(.verdict) | unique)}'"
+
+act "9 · The verification is a second survey, never the apply's exit code"
+say "An apply that exits zero is not a verdict. The verdict is a survey"
+say "taken afterwards and held against the plan the run was made from, and"
+say "the two stay separate invocations on purpose."
+run_loud cf piece survey -s "$SPACE" --piece board --path items \
+  --diff "$WORK/retarget.jsonl"
+say "Three outcomes for a planned piece, and the third is what an upgrade"
+say "that half-converged looks like. The member filed after the plan was"
+say "taken is none of them: it is named as held by the space and not by the"
+say "plan, rather than counted as though the plan had asked for it."
+
+act "10 · The refusal the survey exists to make"
 say "Deploy a member directly, so the registry knows a piece the board's"
 say "collection does not hold. A silent subset is the failure bulk operations"
 say "die of, so the survey stops and names it rather than emitting a plan"
@@ -297,7 +334,7 @@ say "The plan the later stages consume is therefore complete by construction:"
 say "an incomplete survey refuses to produce one, and a serialized plan"
 say "carries the incompleteness so no write stage can consume it either."
 
-act "9 · A list survey claims only what it read"
+act "11 · A list survey claims only what it read"
 say "Naming pieces directly skips the containment check — and says so: the"
 say "header records the selector, so a reader of the plan knows no"
 say "containment claim was made. The orphan is still out there; this survey"
@@ -305,23 +342,14 @@ say "just never claimed otherwise."
 run_loud cf piece survey -s "$SPACE" --list board --out "$WORK/list.jsonl"
 run sh -c "head -1 '$WORK/list.jsonl' | jq -c '{selector, enumerated}'"
 
-act "10 · The rest of the mechanism, by what it waits on"
-say "The plan files this transcript produced are the input to every later"
-say "stage; nothing below needs a different artifact — the paths are the"
-say "ones written above. Each act shows the command a stage adds and what"
-say "it will print — spelled provisionally per the plan, and prefixed »"
+act "12 · The rest of the mechanism, by what it waits on"
+say "The plan files this transcript produced are the input to the stage"
+say "below; it needs no different artifact — the path is the one written"
+say "above. The act shows the command that stage adds and what it will"
+say "print — spelled provisionally per the plan, and prefixed »"
 say "because nothing runs it. A stage that lands converts its act from"
 say "PENDING to run; the plan's checklist for that stage says so, the way"
-say "stages 1 and 2 did."
-
-pending "cf piece apply -s $SPACE $WORK/retarget.jsonl" \
-  "stage 3: the retarget apply — serial, precondition-checked, resumable" \
-"row 1/114 fid1:cey7Ro... I9aHKe...#Member -> WPK2FB...#Member landed
-stopped at row 57: the piece moved since the survey; 57 unattempted, named"
-
-pending "cf piece survey -s $SPACE --piece board --path items --diff $WORK/retarget.jsonl" \
-  "stage 3: verification is a second survey against the plan, never the apply's exit code — the diff itself is stage-1 library code waiting on a spelling" \
-"moved as planned: 56 . still outstanding: 57 planned rows . 1 unplanned piece, named"
+say "stages 1 through 3 did."
 
 pending "cf piece rollback -s $SPACE $WORK/retarget.jsonl" \
   "stage 4: the plan derived in the other direction, restoring each row's recorded revision" \
@@ -331,8 +359,10 @@ retained; restores in plan order"
 printf '\n%s━━ The shape of it %s\n' "$B" "$N"
 say "One process surveyed a board-sized collection and emitted the plan the"
 say "later stages consume; the same command carried a retarget when asked;"
-say "and the one refusal shown is the survey's reason to exist: no plan that"
-say "silently misses a piece."
+say "a second process applied that plan over grouped sessions and reported"
+say "what each piece cost; a third took the survey that says whether it"
+say "worked. And the one refusal shown is the survey's reason to exist: no"
+say "plan that silently misses a piece."
 
 if [ "$UNEXPECTED" != "0" ]; then
   printf '\n%s━━ %d act(s) failed that this demo says work%s\n' \
