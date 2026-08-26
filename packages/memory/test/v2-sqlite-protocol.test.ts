@@ -143,11 +143,12 @@ describe("sqlite protocol verbs (loopback)", () => {
     const result = await session.sqliteQuery(
       db,
       "SELECT :payload AS value FROM messages",
-      { payload: { bytes } },
+      { payload: { bytes, nested: [new FabricBytes(new Uint8Array([4, 5]))] } },
     );
 
     expect(JSON.parse(result.rows[0]!.value as string)).toEqual({
       bytes: [1, 2, 3],
+      nested: [[4, 5]],
     });
   });
 

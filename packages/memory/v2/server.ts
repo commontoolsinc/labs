@@ -2523,7 +2523,7 @@ export class Server {
       : Object.fromEntries(message.namedParams);
     const session = this.#sessions.get(message.space, message.sessionId);
     if (session === null) {
-      return respondTypedError<SqliteQueryWireResult>(
+      return respondTypedError<never>(
         message.requestId,
         toError("SessionError", "Unknown session for space"),
       );
@@ -2546,10 +2546,7 @@ export class Server {
           "READ",
         );
       if (deny) {
-        return respondTypedError<SqliteQueryWireResult>(
-          message.requestId,
-          deny,
-        );
+        return respondTypedError<never>(message.requestId, deny);
       }
     }
     try {
@@ -2612,10 +2609,7 @@ export class Server {
           "READ",
         );
         if (deny) {
-          return respondTypedError<SqliteQueryWireResult>(
-            message.requestId,
-            deny,
-          );
+          return respondTypedError<never>(message.requestId, deny);
         }
       }
       return {
