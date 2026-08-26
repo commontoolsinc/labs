@@ -301,7 +301,25 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
         message.data,
       );
     }
-    this.#transport.send(message);
+    // The bookkeeping above -- the timeout, the abort hook, the pending entry
+    // -- is registered on the promise below being returned to someone who will
+    // hold it until a reply settles it. A synchronous throw from `send()`
+    // means no reply is coming and the promise is never returned, so that
+    // bookkeeping would outlive its only holder and reject it into nobody:
+    // sixty seconds later at the timeout, or sooner at disposal, as an
+    // unhandled rejection. `send()` can throw now that the envelope is encoded
+    // there, and `T` is unconstrained, so an ordinary bad value reaches it.
+    //
+    // `#settle()` clears the three, and deliberately does not settle the
+    // deferred: an unsettled promise nobody holds is collected, where a
+    // rejected one is reported. The caller learns of the failure by the throw
+    // rather than through the promise it never received.
+    try {
+      this.#transport.send(message);
+    } catch (error) {
+      this.#settle(msgId);
+      throw error;
+    }
 
     return deferred.promise;
   }

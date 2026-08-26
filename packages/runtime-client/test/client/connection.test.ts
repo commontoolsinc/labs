@@ -69,6 +69,32 @@ async function initializedConnection(
   return connection;
 }
 
+/**
+ * Transport whose `send()` throws, as the real one does when the envelope
+ * holds a value the encoding cannot carry.
+ */
+class ThrowingTransport extends EventEmitter<RuntimeTransportEvents>
+  implements RuntimeTransport {
+  constructor(private readonly failOn: RequestType) {
+    super();
+  }
+
+  send(message: IPCClientMessage | IPCClientNotification): void {
+    if (!("msgId" in message)) return;
+    if (message.data.type === this.failOn) {
+      throw new Error("no encoding for value");
+    }
+    // Everything else is acknowledged, so the connection can initialize.
+    queueMicrotask(() => {
+      this.emit("message", { msgId: message.msgId, data: undefined });
+    });
+  }
+
+  dispose(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
 describe("connection", () => {
   describe("RuntimeConnection disposal", () => {
     it("settles in-flight requests as cancellation on dispose", async () => {
@@ -197,6 +223,31 @@ describe("connection", () => {
       }
 
       expect(warnings.length).toBe(0);
+    });
+
+    it("leaves nothing pending when the send itself throws", async () => {
+      // The throw reaches the caller, and the promise `request()` would have
+      // returned is never returned at all -- so the timeout and abort hook
+      // registered before the send must not be left holding it. Were they,
+      // disposal would reject a promise nobody holds, which is an unhandled
+      // rejection rather than a caught one.
+      const connection = new RuntimeConnection(
+        new ThrowingTransport(RequestType.CellSet),
+      );
+      await connection.initialize({} as InitializationData);
+
+      expect(() =>
+        connection.request({
+          type: RequestType.CellSet,
+          cell: { id: "of:c", space: "did:key:t", scope: "space", path: [] },
+          value: 1,
+        } as never)
+      ).toThrow("no encoding for value");
+
+      expect(connection.getPendingRequestDiagnostics()).toHaveLength(0);
+
+      // Would reject the orphan, if the bookkeeping still held one.
+      await connection.dispose();
     });
 
     it("throws when a notification is sent after disposal", async () => {
