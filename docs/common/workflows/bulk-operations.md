@@ -268,6 +268,16 @@ Naming pieces directly skips the containment check — and says so. The header
 records the selector, so a reader of the plan knows no containment claim was
 made. The orphan is still out there; this survey simply never claimed otherwise.
 
+### Past act 11 · Undoing it
+
+The demo does not stop there. Acts 12 through 14 walk the reversal — a retarget
+undone from the plan that made it, one piece returned to a revision of its own
+source log, and a piece that cannot be brought back at all. They are the same
+spine as the acts above, applied in the other direction, and what each one
+proves is written down in the
+[bulk operations contract](../../features/piece-bulk-operations.md) rather than
+narrated here.
+
 ## How the story is kept honest
 
 Every command above is one `packages/cli/integration/bulk-ops-demo.sh` runs.
@@ -294,6 +304,9 @@ it does today.
 
 ## Where to read further
 
+- [The bulk operations contract](../../features/piece-bulk-operations.md) —
+  what a plan row means, what is proved and when, and every moment one of these
+  operations refuses
 - [`docs/plans/piece-bulk-operations.md`](../../plans/piece-bulk-operations.md)
   — the design: what each stage owes, and what the later ones wait on
 - [`packages/cli/README.md`](../../../packages/cli/README.md) — the reference
