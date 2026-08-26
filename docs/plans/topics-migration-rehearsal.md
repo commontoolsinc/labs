@@ -197,6 +197,34 @@ Do generation A's 39 first, then generation B's 34, then the board. Keeping
 the two transitions separable means that if one storms you know which;
 interleaving them blurs that signal for no benefit.
 
+**This ordering is contested for the Stage B break, and the pre-flight decides
+it.** Children-first is right about write storms and wrong about demand: a
+topic carrying the new shape lands under a board that still demands the old
+one, and if the old board requires a member the new topic retires, the WHOLE
+array reads empty rather than one row failing — the same silent shape the
+paragraph above is guarding against, arriving from the other direction.
+
+Measured on 2026-08-26, against the recorded board contracts and the live
+board's 113 topics:
+
+- The narrowed board reads OLD topics cleanly. `createdAt` is the only member
+  of its eight-member demand without a default, and every one of the 113
+  provides it; `mentions` is absent on all of them and carries `Default<[]>`.
+  So the new board is itself the both-shapes board, and no intermediate
+  vintage is needed.
+- The OLD board is dirty on `createdByName`. It is `required` with no default
+  across the eleven contracts recorded from 2026-07-29 to 2026-08-17, gaining
+  `"default": ""` only from 08-18. The deployed board sits on the older side of
+  that line: no deployed topic carries a `setTitle` stream, so it predates
+  Stage A.
+
+If that holds of the deployed contract, the board moves FIRST for this break
+and the children follow — the reverse of the paragraph above. Confirm it
+rather than inherit it: read the deployed board's argument schema and check
+whether its `createdByName` carries a default. Both orderings are safe once
+the board is on a contract that defaults it; only the old-board window is
+dangerous, and only in the children-first direction.
+
 Run every authored test against the migration source before changing the clone.
 Stop if any test fails. Keep the complete flag set on every topic and board
 revision:
