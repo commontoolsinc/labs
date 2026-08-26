@@ -76,6 +76,7 @@ export type {
   MemorySpace,
   TransactionCommitOptions,
 } from "./storage/interface.ts";
+export { hasOperationStorageCapability } from "./storage/interface.ts";
 export type {
   EntityIdListOptions,
   EntityIdListResult,

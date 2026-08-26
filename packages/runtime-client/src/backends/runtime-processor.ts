@@ -29,6 +29,7 @@ import type { Program } from "@commonfabric/js-compiler";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { setLLMUrl } from "@commonfabric/llm";
 import { type ACL, isACLUser, isCapability } from "@commonfabric/memory/acl";
+import { toValuePath } from "@commonfabric/memory/v2";
 import {
   PieceController,
   PiecesController,
@@ -46,6 +47,7 @@ import {
   entityIdFrom,
   getCellOrThrow,
   getPatternIdentityRef,
+  hasOperationStorageCapability,
   isCell,
   isCellResult,
   markRendererInputTx,
@@ -86,7 +88,6 @@ import {
   resetAllCountBaselines,
   resetAllTimingBaselines,
 } from "@commonfabric/utils/logger";
-
 import {
   getMetaLink,
   KeepAsCell,
@@ -131,6 +132,15 @@ import {
   type LoggerMetadata,
   type LogLevel,
   NotificationType,
+  type OperationApplyRequest,
+  type OperationApplyResponse,
+  type OperationCapabilitiesRequest,
+  type OperationCapabilitiesResponse,
+  type OperationFieldResponse,
+  type OperationQueryRequest,
+  type OperationReleaseRequest,
+  type OperationSubscribeRequest,
+  type OperationUnsubscribeRequest,
   type PageCreateRequest,
   type PageGetAllRequest,
   type PageGetRequest,
@@ -516,6 +526,7 @@ export class RuntimeProcessor {
   private _isDisposed = false;
   private disposingPromise: Promise<void> | undefined;
   private subscriptions = new Map<string, Cancel>();
+  private operationSubscriptions = new Map<string, Cancel>();
   private pieceSourceConfirmations = new Map<
     string,
     { token: string; prepared: PreparedPieceSourceChange }
@@ -840,6 +851,8 @@ export class RuntimeProcessor {
           cancel();
         }
         this.subscriptions.clear();
+        for (const cancel of this.operationSubscriptions.values()) cancel();
+        this.operationSubscriptions.clear();
         this.pieceSourceConfirmations.clear();
 
         // Clean up VDOM mounts
@@ -995,6 +1008,110 @@ export class RuntimeProcessor {
 
   handleCellPush(request: CellPushRequest): void {
     this.applyCellWrite(request, /* blind */ false);
+  }
+
+  private operationReplica(cell: CellGetRequest["cell"]) {
+    const replica = this.runtime.storageManager.open(cell.space).replica;
+    if (!hasOperationStorageCapability(replica)) {
+      throw new Error(
+        "runtime storage does not support collaborative operations",
+      );
+    }
+    return replica;
+  }
+
+  async handleOperationCapabilities(
+    request: OperationCapabilitiesRequest,
+  ): Promise<OperationCapabilitiesResponse> {
+    return {
+      codecs: [...await this.operationReplica(request.cell).operationCodecs()],
+    };
+  }
+
+  async handleOperationQuery(
+    request: OperationQueryRequest,
+  ): Promise<OperationFieldResponse> {
+    const field = await this.operationReplica(request.cell)
+      .queryOperationField({
+        id: request.cell.id,
+        scope: request.cell.scope,
+        path: toValuePath(request.cell.path),
+        ...(request.after === undefined ? {} : { after: request.after }),
+      });
+    return { field };
+  }
+
+  async handleOperationApply(
+    request: OperationApplyRequest,
+  ): Promise<OperationApplyResponse> {
+    const resolution = await this.operationReplica(request.cell)
+      .applyOperation({
+        op: "apply-op",
+        id: request.cell.id,
+        scope: request.cell.scope,
+        path: toValuePath(request.cell.path),
+        codec: request.codec,
+        submissionId: request.submissionId,
+        base: request.base,
+        ...(request.baselineHash === undefined
+          ? {}
+          : { baselineHash: request.baselineHash }),
+        payload: request.payload,
+      });
+    return { resolution };
+  }
+
+  async handleOperationSubscribe(
+    request: OperationSubscribeRequest,
+  ): Promise<BooleanResponse> {
+    if (this.operationSubscriptions.has(request.subscriptionId)) {
+      return { value: false };
+    }
+    const cancel = await this.operationReplica(request.cell)
+      .subscribeOperationField({
+        id: request.cell.id,
+        scope: request.cell.scope,
+        path: toValuePath(request.cell.path),
+        ...(request.after === undefined ? {} : { after: request.after }),
+      }, (field) => {
+        queueMicrotask(() =>
+          self.postMessage({
+            type: NotificationType.OperationUpdate,
+            subscriptionId: request.subscriptionId,
+            field,
+          })
+        );
+      });
+    if (this._isDisposed) {
+      cancel();
+      return { value: false };
+    }
+    this.operationSubscriptions.set(request.subscriptionId, cancel);
+    return { value: true };
+  }
+
+  async handleOperationRelease(
+    request: OperationReleaseRequest,
+  ): Promise<BooleanResponse> {
+    await this.operationReplica(request.cell).releaseOperationField({
+      op: "release-op-field",
+      id: request.cell.id,
+      scope: request.cell.scope,
+      path: toValuePath(request.cell.path),
+      codec: request.codec,
+      cursor: request.cursor,
+    });
+    return { value: true };
+  }
+
+  handleOperationUnsubscribe(
+    request: OperationUnsubscribeRequest,
+  ): BooleanResponse {
+    const cancel = this.operationSubscriptions.get(request.subscriptionId);
+    if (cancel === undefined) return { value: false };
+    this.operationSubscriptions.delete(request.subscriptionId);
+    cancel();
+    return { value: true };
   }
 
   // Shared write path for CellSet/CellPush. In blind mode the set's reads carry no
@@ -1824,6 +1941,18 @@ export class RuntimeProcessor {
         return this.handleCellResolveAsCell(request);
       case RequestType.CellGetCfcLabel:
         return await this.handleCellGetCfcLabel(request);
+      case RequestType.OperationQuery:
+        return await this.handleOperationQuery(request);
+      case RequestType.OperationCapabilities:
+        return await this.handleOperationCapabilities(request);
+      case RequestType.OperationApply:
+        return await this.handleOperationApply(request);
+      case RequestType.OperationRelease:
+        return await this.handleOperationRelease(request);
+      case RequestType.OperationSubscribe:
+        return await this.handleOperationSubscribe(request);
+      case RequestType.OperationUnsubscribe:
+        return this.handleOperationUnsubscribe(request);
       case RequestType.GetCell:
         return this.handleGetCell(request);
       case RequestType.GetHomeSpaceCell:

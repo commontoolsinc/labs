@@ -24,8 +24,15 @@ Implemented on the current branch:
 - `engine-v3` / `.engine-v3` storage roots for the rewritten v2 engine
 - seq/revision-based JSON storage with point-in-time reads
 - lightweight WebSocket framing with `hello`, `session.open`, `transact`,
-  `graph.query`, `session.watch.set`, `session.watch.add`, `session.ack`,
-  `response`, and `session/effect`
+  `graph.query`, `op.query`, `session.watch.set`, `session.watch.add`,
+  `session.ack`, `response`, and `session/effect`
+- experimental collaborative fields: negotiated versioned codec registries,
+  top-level `apply-op` and `release-op-field` commits, submitted and integrated
+  SQLite history, stable epoch/version operation ids, atomic ordinary-value
+  materialization, and direct operation-field query/watch effects
+- a codec-neutral runner and runtime-client collaboration capability plus an
+  opt-in CodeMirror adapter in `cf-code-editor`; ordinary Cell readers continue
+  to consume the derived string value
 - session-scoped watch-union sync with catch-up frames, `removes`, and
   per-verdict catch-up markers with client-side verdict parking (conflicts
   and accepts, CT-1927)
@@ -47,6 +54,9 @@ Explicitly deferred:
 - public branch lifecycle commands on the v2 wire protocol
 - merge proposal generation, merge conflict workflows, and advanced branch
   live-sync optimizations
+- collaborative-field checkpoints, retention floors, submitted-history
+  operator tooling, exhaustive reconnect/browser race coverage, and the
+  structured-codec readiness proof required before a WordGard integration
 - broad protocol-spec reconciliation outside these implementation notes
 
 This is a clean break:

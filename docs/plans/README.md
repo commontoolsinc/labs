@@ -49,6 +49,10 @@ a record: archive it to `docs/history/plans/` following the procedure in
   and packing rules, and the two things a subset breaks and this replaces:
   coverage becomes a trend rather than a gate, and a regression that only
   `main` catches is reported back to the change that introduced it.
+- [Memory `apply-op`](memory-apply-op.md) sequences the editor-neutral
+  collaborative-field substrate, the first CodeMirror codec and editor
+  integration, and the checkpoints and review gates required before a future
+  WordGard codec.
 - [Server-primary execution v2](server-execution-v2.md) sequences the
   greenfield rebuild that executes the server-side-execution v2 spec, with
   per-phase task and success-criteria checkboxes. Its

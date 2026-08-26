@@ -4,13 +4,18 @@ import type {
   SchemaPathSelector,
 } from "@commonfabric/api";
 import type {
+  ApplyOpOperation,
+  ApplyOpResolution,
   ClientCommit,
   CommitClass,
   CommitPrecondition,
   EntityDocument,
   EntityIdListOptions,
   EntityIdListResult,
+  OperationFieldQuery,
+  OperationFieldSnapshot,
   PatchOp,
+  ReleaseOpFieldOperation,
   ScopeKey,
   ScopeKeyIdentity,
   SqliteDbRef,
@@ -20,6 +25,7 @@ import type {
   SqliteRegisterDiskSourceResult,
 } from "@commonfabric/memory/v2";
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
+import type { Cancel } from "../cancel.ts";
 import type { EntityId } from "../create-ref.ts";
 import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import {
@@ -559,6 +565,34 @@ export interface IStorageProvider {
     path: string,
   ): Promise<SqliteRegisterDiskSourceResult>;
 }
+
+export interface IOperationStorageCapability {
+  operationCodecs(): Promise<readonly string[]>;
+
+  queryOperationField(
+    query: Omit<OperationFieldQuery, "principal" | "sessionId">,
+  ): Promise<OperationFieldSnapshot>;
+
+  applyOperation(operation: ApplyOpOperation): Promise<ApplyOpResolution>;
+
+  releaseOperationField(operation: ReleaseOpFieldOperation): Promise<void>;
+
+  subscribeOperationField(
+    query: Omit<OperationFieldQuery, "principal" | "sessionId">,
+    callback: (snapshot: OperationFieldSnapshot) => void,
+  ): Promise<Cancel>;
+}
+
+export const hasOperationStorageCapability = (
+  replica: ISpaceReplica,
+): replica is ISpaceReplica & IOperationStorageCapability => {
+  const candidate = replica as Partial<IOperationStorageCapability>;
+  return typeof candidate.operationCodecs === "function" &&
+    typeof candidate.queryOperationField === "function" &&
+    typeof candidate.applyOperation === "function" &&
+    typeof candidate.releaseOperationField === "function" &&
+    typeof candidate.subscribeOperationField === "function";
+};
 
 /**
  * Extension of {@link IStorageManager} which is supposed to merge into

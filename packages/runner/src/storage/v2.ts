@@ -19,6 +19,8 @@ import {
   type URI,
 } from "@commonfabric/memory/interface";
 import {
+  type ApplyOpOperation,
+  type ApplyOpResolution,
   canResolveScopeKey,
   type CellScope,
   type ClientCommit,
@@ -31,7 +33,10 @@ import {
   type EntityIdListResult,
   getCommitPreconditionsConfig,
   getServerExecutionConfig,
+  type OperationFieldQuery,
+  type OperationFieldSnapshot,
   type PatchOp,
+  type ReleaseOpFieldOperation,
   resolveScopeKey,
   type ScopeKey,
   type ScopeKeyIdentity,
@@ -81,6 +86,7 @@ import * as Differential from "./differential.ts";
 import type {
   IMemoryAddress,
   IMergedChanges,
+  IOperationStorageCapability,
   IPreconditionFailedError,
   IRemoteStorageProviderSettings,
   ISpaceReplica,
@@ -2480,7 +2486,7 @@ const docKey = (id: URI, instance: string): string => `${instance}\0${id}`;
  * caller knows it, the explicit instance key. */
 type LocalDocAddress = { id: URI; scope?: CellScope; scopeKey?: ScopeKey };
 
-class SpaceReplica implements ISpaceReplica {
+class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
   readonly #space: MemorySpace;
   readonly #subscription: IStorageSubscription;
   readonly #scopeKeyIdentity: () => ScopeKeyIdentity;
@@ -2511,9 +2517,7 @@ class SpaceReplica implements ISpaceReplica {
   #sessionSession?: MemoryV2Client.SpaceSession;
   readonly #docs = new Map<string, DocumentRecord>();
   readonly #syncTasks = new Map<string, SyncTask>();
-  readonly #commitPromises = new Set<
-    Promise<Result<Unit, StorageTransactionRejected>>
-  >();
+  readonly #commitPromises = new Set<Promise<unknown>>();
   // Issued-but-unsettled commits that carry pending reads, keyed by localSeq.
   // Scanned by cascadeDroppedDependency when a dependency's optimistic writes
   // are dropped. See the InFlightCommit doc for why zero-pending-read commits
@@ -2550,6 +2554,10 @@ class SpaceReplica implements ISpaceReplica {
   readonly #sinks = new Map<
     string,
     Set<(document: EntityDocument | undefined) => void>
+  >();
+  readonly #operationSinks = new Map<
+    string,
+    Set<(snapshot: OperationFieldSnapshot) => void>
   >();
   #watchView: MemoryV2Client.WatchView | null = null;
   // The specific view instance that `consumeUpdates` is iterating. This can
@@ -2977,6 +2985,117 @@ class SpaceReplica implements ISpaceReplica {
     await this.activeSessionHandle();
   }
 
+  async queryOperationField(
+    query: Omit<OperationFieldQuery, "principal" | "sessionId">,
+  ): Promise<OperationFieldSnapshot> {
+    const { session } = await this.activeSessionHandle();
+    return (await session.queryOperationField(query)).field;
+  }
+
+  async operationCodecs(): Promise<readonly string[]> {
+    const { client } = await this.activeSessionHandle();
+    if (client.serverFlags?.applyOp !== true) return [];
+    return client.serverFlags.operationCodecs ?? [];
+  }
+
+  async applyOperation(
+    operation: ApplyOpOperation,
+  ): Promise<ApplyOpResolution> {
+    const { client, session } = await this.activeSessionHandle();
+    if (client.serverFlags?.applyOp !== true) {
+      throw new Error("memory server does not support apply-op");
+    }
+    const localSeq = this.#nextLocalSeq++;
+    const request = session.transact({
+      localSeq,
+      reads: { confirmed: [], pending: [] },
+      operations: [operation],
+    }, () => this.markRouteWriteIssued());
+    this.#commitPromises.add(request);
+    let applied;
+    try {
+      applied = await request;
+    } finally {
+      this.#commitPromises.delete(request);
+    }
+    const resolution = applied.operationResolutions?.[0];
+    if (resolution === undefined) {
+      throw new Error("apply-op commit returned no operation resolution");
+    }
+    return resolution;
+  }
+
+  async releaseOperationField(
+    operation: ReleaseOpFieldOperation,
+  ): Promise<void> {
+    const { client, session } = await this.activeSessionHandle();
+    if (client.serverFlags?.applyOp !== true) {
+      throw new Error("memory server does not support release-op-field");
+    }
+    const localSeq = this.#nextLocalSeq++;
+    const request = session.transact({
+      localSeq,
+      reads: { confirmed: [], pending: [] },
+      operations: [operation],
+    }, () => this.markRouteWriteIssued());
+    this.#commitPromises.add(request);
+    try {
+      await request;
+    } finally {
+      this.#commitPromises.delete(request);
+    }
+  }
+
+  async subscribeOperationField(
+    query: Omit<OperationFieldQuery, "principal" | "sessionId">,
+    callback: (snapshot: OperationFieldSnapshot) => void,
+  ): Promise<Cancel> {
+    const watchId = `operation:${hashStringOf(query)}`;
+    let callbacks = this.#operationSinks.get(watchId);
+    if (callbacks === undefined) {
+      callbacks = new Set();
+      this.#operationSinks.set(watchId, callbacks);
+    }
+    callbacks.add(callback);
+
+    try {
+      const { session } = await this.activeSessionHandle();
+      const { view, sync } = await session.watchAddSync([{
+        id: watchId,
+        kind: "operation",
+        query,
+      }]);
+      if (this.#closed) {
+        view.close();
+        throw new Error("memory replica closed");
+      }
+      this.#watchView = view;
+      this.applySessionSync(sync, "integrate");
+      if (this.#updatePromises.size === 0) {
+        this.#subscribedWatchView = view;
+        const updates = this.consumeUpdates(view.subscribeSync())
+          .finally(() => {
+            this.#updatePromises.delete(updates);
+            if (this.#subscribedWatchView === view) {
+              this.#subscribedWatchView = null;
+              this.applyParkedAcceptsNow();
+            }
+          });
+        this.#updatePromises.add(updates);
+      }
+    } catch (error) {
+      callbacks.delete(callback);
+      if (callbacks.size === 0) this.#operationSinks.delete(watchId);
+      throw error;
+    }
+
+    return () => {
+      const current = this.#operationSinks.get(watchId);
+      current?.delete(callback);
+      if (current?.size === 0) this.#operationSinks.delete(watchId);
+    };
+  }
+
   async sqliteQuery(
     db: SqliteDbRef,
     sql: string,
@@ -3299,6 +3418,7 @@ class SpaceReplica implements ISpaceReplica {
     this.cancelQueuedWatchRefresh();
     this.#watchView?.close();
     this.#watchView = null;
+    this.#operationSinks.clear();
     // Also close the view the update consumer is bound to, in case it diverged
     // from #watchView; otherwise its pending next() never settles and the
     // `Promise.allSettled([...#updatePromises])` below hangs forever.
@@ -5576,6 +5696,15 @@ class SpaceReplica implements ISpaceReplica {
     sync: SessionSync,
     type: "pull" | "integrate",
   ): void {
+    for (const delivery of sync.operationFields ?? []) {
+      for (const callback of this.#operationSinks.get(delivery.watchId) ?? []) {
+        try {
+          callback(delivery.field);
+        } catch (error) {
+          console.error("operation field subscriber failed", error);
+        }
+      }
+    }
     if (
       sync.upserts.length === 0 &&
       sync.removes.length === 0

@@ -154,6 +154,9 @@ fixed recipe. The recurring debugging questions and where they resolve:
   who), `timeline <space> <id>` (value after each write),
   `diff <space> <id> --from --to` (what changed between two seqs),
   `value-at … --seq` (state at a point).
+- _"What collaborative operation history is retained, and are its checkpoints
+  healthy?"_ → `operations <space> [id]` for field epochs, cursors, submissions,
+  integrated rows, retained floors, and consistency checks.
 - _"Is this space writing more than it should be / has it settled?"_ →
   `churn <space>` (commits + revisions per time bucket, and the entities driving
   the busiest one). `hot` ranks by all-time writes and so cannot separate a

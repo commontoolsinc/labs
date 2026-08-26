@@ -1,441 +1,606 @@
-# 07 — Op Views and Anchored Annotations (Future Work)
+# 07 — Collaborative Operations, Views, and Anchors
 
-This section describes a future extension for collaborative fields whose readers
-may need more than the materialized value. The immediate motivating case is
-collaborative text editing, but the model is intended to be generic enough for
-other field types that use operation-based synchronization.
+This section specifies first-class operation-based collaborative fields in
+Memory v2. CodeMirror text collaboration is the first integration. The storage
+and protocol contract is editor-neutral so a future rich-text codec can reuse
+the same field identity, commit, cursor, receipt, query, subscription, and
+checkpoint machinery.
 
-Phase 1 of Memory v2 returns materialized entity values. That remains the
-default. This document adds a second dimension: some field paths may also expose
-operation-oriented projections and storage-derived label side-data.
+The experimental CodeMirror vertical slice implements the codec, commit,
+query/watch, checkpoint retention, runner, runtime-client, editor, default-
+branch policy, reconnect, and operator-inspection paths described here. The
+structured-codec readiness proof and range-oriented CFC review remain tracked
+in [`../../plans/memory-apply-op.md`](../../plans/memory-apply-op.md).
 
-This is future work. It should land only after the branch/conflict model is
-stable enough to support rebasing or transform-based write classes.
+Materialized entity reads remain the default Memory interface. Collaborative
+fields add an operation-aware write class and two explicit history projections;
+they do not turn every Cell read into an operation-log read.
 
 ---
 
 ## 7.1 Goals
 
-- Preserve the original signed operation payload submitted by the client.
-- Expose a canonical integrated operation stream for readers that need it.
-- Keep the ordinary materialized read path as the default for most queries.
-- Let storage return effective label side-data together with materialized
-  collaborative values when that side-data depends on operation history.
-- Keep user-level annotations as ordinary application data anchored to content,
-  rather than mixing them into the system-owned label side-data plane.
+- Make Memory the sole authority that orders, validates, integrates, and
+  materializes collaborative operations.
+- Preserve the submitted operation payload accepted from the client.
+- Expose a canonical integrated operation stream with resumable field-local
+  cursors.
+- Update the integrated history and ordinary materialized entity value in one
+  SQLite transaction.
+- Keep non-collaborative readers and reactive computations on ordinary entity
+  snapshots.
+- Support multiple trusted, versioned editor codecs without embedding one
+  editor's operation types in the Memory wire protocol.
+- Provide stable operation identifiers that future anchored annotations and
+  range-level provenance can reference.
 
 ## 7.2 Non-Goals
 
-- This document does **not** redesign the full metadata or label model.
-- This document does **not** make every JSON path operation-addressable.
-- This document does **not** require the editor integration layer to compute
-  authoritative labels, rebases, or provenance.
-- This document does **not** standardize a single editor codec. Multiple codecs
-  may exist if the server can validate and transform them.
+- Presence, collaborator lists, selections, and cursors are ephemeral product
+  concerns and are not part of durable `apply-op` history.
+- Clients cannot upload executable codecs or choose untrusted transform logic.
+- The first CodeMirror slice does not implement branch merging, range-level CFC
+  labels, or anchored annotation mutation.
+- Graph traversal remains materialized-only. Operation projections address one
+  field directly.
+- There is no universal operation intermediate representation. Each codec owns
+  its submitted and integrated JSON payload formats.
 
 ---
 
-## 7.3 Why Materialized Reads Are Not Enough
+## 7.3 Terms and Identities
 
-For ordinary `set` and `patch` writes, the stored operation list is usually only
-interesting as a means to reconstruct the current value. Most readers want the
-materialized state, not the individual ops.
+A **collaborative field** is one value-relative path in an entity bound to one
+server-registered codec for the lifetime of a field epoch.
 
-Collaborative editors are different:
+Its durable address is:
 
-- the client often submits an editor-native operation payload, not just a new
-  string
-- the server may need to transform or rebase that payload before integrating it
-- another client may want the canonical integrated ops, not only the final
-  string
-- storage-derived label side-data for the current text may depend on which
-  operations contributed to which ranges
+```text
+(branch, entity id, resolved scope key, path)
+```
 
-The existing v2 commit infrastructure already persists the original signed
-command and authorization separately from the semantic seq-addressed commit
-record. That means Memory v2 already retains part of the "submitted view". The
-missing piece is a query model that can expose it cleanly, alongside the
-integrated and materialized views.
+`path` uses Memory's `ValuePath` vocabulary and is relative to
+`EntityDocument.value`. It does not include the stored `value` segment. The
+engine adds that segment when it derives the ordinary materialization patch.
 
----
+A field has three additional identities:
+
+- **epoch** — a server-assigned generation. Releasing and later reopening the
+  same address creates a new epoch.
+- **version** — the number of canonical logical operations integrated in the
+  epoch. Versions start at zero and increase by one per stored integrated op.
+- **op id** — a stable identifier derived from field address, epoch, and
+  version. It identifies one integrated op independently of the commit that
+  carried its submitted batch.
+
+An operation cursor is `{ epoch, version }`. A bare version is never sufficient
+across field release, entity deletion, branch fork, or history reset.
 
 ## 7.4 Three Projections
 
-Collaborative fields introduce three distinct projections over the same logical
-history:
+### 7.4.1 Submitted projection
 
-### 7.4.1 Submitted View
+The submitted projection is the codec payload exactly as accepted from the
+client, together with its submission id, base cursor, commit sequence, and
+operation index.
 
-The **submitted view** is the operation payload exactly as signed and sent by
-the client. It captures author intent and protocol provenance.
+- It records author intent and protocol provenance.
+- It is ordered by canonical commit order.
+- It is not assumed to be replayable against the latest document.
+- It joins to invocation and authorization records when a commit carries them.
+  The current session-authenticated transport does not imply that every commit
+  payload is independently signed.
 
-Properties:
+### 7.4.2 Integrated projection
 
-- Ordered by canonical commit order on the branch where the write was accepted.
-- Payload is preserved exactly as submitted.
-- Readers can join it back to commit records and, when present,
-  invocation / authorization records.
-- Submitted ops are not assumed to be directly replayable on top of the current
-  document state.
+The integrated projection is the canonical operation stream produced by the
+server codec after validation, transformation, and normalization.
 
-### 7.4.2 Integrated View
+- It is replayable from its epoch baseline or a compatible checkpoint.
+- It is the source consumed by collaborative editor sessions.
+- It may differ from the submitted payload without changing that submitted
+  record.
+- Its prefix is immutable. A cursor that was once valid never names a different
+  operation later.
 
-The **integrated view** is the canonical operation stream that the server
-actually applied after any transform, rebase, or normalization.
+### 7.4.3 Materialized projection
 
-Properties:
+The materialized projection is the ordinary field value produced by applying
+the integrated operations.
 
-- Branch-scoped and replayable.
-- Suitable for editor clients that synchronize by receiving remote ops.
-- May differ from the submitted view even when the resulting materialized value
-  is the same.
-- Must be stable enough to support incremental subscription resume.
+Every accepted `apply-op` that produces canonical logical operations also
+produces an ordinary patch revision for the owning entity in the same
+transaction as the submitted and integrated rows. A canonically empty batch
+leaves the materialized value unchanged. Existing `graph.query`, watch-set
+sync, point-in-time reads, conflict detection, and reactivity therefore
+continue to consume normal entity state.
 
-### 7.4.3 Materialized View
-
-The **materialized view** is the current field value produced by replaying the
-integrated history (or loading a snapshot/checkpoint).
-
-For collaborative text-like values, the materialized view MAY also include
-storage-derived label side-data. That side-data remains storage-owned. The
-editor may render it, but the editor does not author it.
-
-The default query semantics remain materialized reads.
+The three projections are different views of one accepted commit. A client
+cannot author the integrated or materialized projection independently.
 
 ---
 
-## 7.5 Collaborative Field Capability
+## 7.5 Trusted Codec Registry
 
-Operation-oriented projections should be opt-in per field path. The query layer
-must not assume that arbitrary JSON values support submitted or integrated op
-views.
+Memory servers use a process-configured registry of versioned codecs. Codec ids
+are stable wire identifiers such as `codemirror-changeset@1`. Changing payload
+validation or integration semantics requires a new id.
 
-Some capability declaration is required to bind a field path to:
+Conceptually, a codec supplies:
 
-- an operation codec
-- a transform / rebase engine
-- a materializer
-- an annotation-mapping strategy for anchored application annotations
+```text
+validate materialized value
+validate and decode submitted payload
+decode stored integrated payload
+rebase submitted operations over an integrated suffix
+apply canonical operations to the materialized value
+encode canonical operations and the new materialized value
+```
 
-The exact declaration mechanism is future work. It may live in schema metadata,
-server configuration, or both. Regardless of the syntax, the server MUST know
-which paths are collaborative before accepting op-based writes or op-view
-queries on them.
+Codec execution is part of the trusted commit engine and must be:
 
-Illustrative shape:
+- deterministic for the same encoded inputs
+- synchronous and free of network, filesystem, clock, and randomness access
+- bounded by payload, operation-count, and materialized-value limits
+- able to reject malformed payloads without partially mutating storage
 
-```typescript
-// Shown at module scope.
-type OpCodecId = string; // e.g. "text-ot@1", "prosemirror-step@1"
+The Memory protocol carries only codec ids and JSON payloads. It does not carry
+JavaScript modules, package URLs, or client-computed integrated operations.
 
-interface CollaborativeFieldCapability {
-  id: EntityId;
-  path: ReadPath;
-  codec: OpCodecId;
+The server advertises `applyOp` support and its configured codec ids during the
+Memory handshake. A client must fail clearly when its codec is unavailable; it
+must not fall back to whole-value collaborative writes.
+
+### 7.5.1 CodeMirror codec
+
+The first codec uses CodeMirror `ChangeSet` JSON and the central-authority
+rebasing semantics from `@codemirror/collab`.
+
+- The materialized value is a string.
+- A submitted payload is an ordered batch of `{ clientId, changes }` records.
+- Selection/effect data is not accepted as durable content in the first codec.
+- The server rebases the batch over integrated changes after the submitted base
+  cursor and applies the rebased changes to the current string.
+- Empty canonical changes may be omitted; only stored integrated operations
+  advance the field version.
+
+A future rich-text codec may use a JSON document and editor-native steps or
+transactions. It must satisfy the same deterministic contract and cursor
+invariants; no Memory protocol change is required.
+
+---
+
+## 7.6 Field Activation and Lifecycle
+
+The first successful `apply-op` at an inactive address atomically activates a
+new field epoch. That request carries a null cursor and a hash of the baseline
+value the client observed. Memory:
+
+1. reads the current materialized value at the field path
+2. verifies the baseline hash
+3. validates the value with the named codec
+4. creates the next epoch at version zero
+5. integrates the submitted batch in the same transaction
+
+This makes activation an explicit compare-and-apply operation without adding a
+separate declaration race. If the value changed after the client opened the
+editor, activation fails with the current field projection and the client must
+reinitialize or deliberately reconcile.
+
+Multiple clients may race to activate the same inactive field. After the first
+request activates the epoch, another null-cursor request with the same codec and
+baseline hash is interpreted as version zero of that epoch and rebased over the
+operations already accepted there. A different codec or baseline is rejected.
+
+Within an active epoch:
+
+- the codec id is immutable
+- `apply-op` may use an older version in the same epoch and is rebased over the
+  intervening integrated suffix
+- a future version or different epoch is rejected
+- a submission id is unique within the epoch
+
+An explicit `release-op-field` operation deactivates the field without changing
+its materialized value. A later `apply-op` starts a new epoch from the then
+current value. Deleting the owning entity releases all its active collaborative
+fields in the same transaction.
+
+Ordinary `set` or `patch` operations may coexist with collaborative fields only
+when their resulting value preserves every active field they overlap. A write
+that would change an active collaborative field is rejected unless an earlier
+operation in the same commit released that field. This prevents a whole-value
+writer from silently creating history that collaborative clients cannot replay.
+
+---
+
+## 7.7 Write Operations
+
+`apply-op` and `release-op-field` are top-level Memory operations, not
+`PatchOp` variants. `PatchOp` describes a deterministic materialized JSON
+mutation; `apply-op` preserves one submitted representation while the server
+derives a different integrated representation and a materialized patch.
+
+The wire shapes are:
+
+```text
+ApplyOpOperation {
+  op: "apply-op"
+  id: EntityId
+  scope?: CellScope
+  path: ValuePath
+  codec: OpCodecId
+  submissionId: string
+  base: OpCursor | null
+  baselineHash?: string       // required exactly when base is null
+  payload: JSONValue          // codec-defined submitted batch
+}
+
+ReleaseOpFieldOperation {
+  op: "release-op-field"
+  id: EntityId
+  scope?: CellScope
+  path: ValuePath
+  codec: OpCodecId
+  cursor: OpCursor
 }
 ```
 
-This is intentionally minimal. It identifies the field, not the full editor
-contract.
+### 7.7.1 Apply semantics
 
----
+For an active field, the engine performs the following inside
+`applyCommit`'s immediate SQLite transaction:
 
-## 7.6 Write Path Changes
+1. Resolve branch, scope key, entity, and field path.
+2. Load and validate the active field epoch and codec.
+3. Check durable submission-id idempotency.
+4. Reject a future version; load integrated ops after a stale base version.
+5. Ask the codec to validate and rebase the submitted batch.
+6. Apply the canonical operations to the current materialized field value.
+7. Insert the submitted record and canonical integrated rows.
+8. If the canonical batch is non-empty, insert an ordinary patch revision
+   replacing the field value.
+9. Advance the field cursor by the number of canonical operations and store the
+   operation resolution. A canonically empty batch does neither.
+10. Commit all rows or none.
 
-Phase 1 only defines `set`, `patch`, and `delete`. Collaborative fields need a
-new write class whose payload is the original submitted op batch for a declared
-field path.
+Multiple operations in one commit are processed in operation-index order. A
+later operation observes the earlier operation's result. Applying operations to
+different field paths remains atomic with the rest of the commit.
 
-Illustrative extension:
+`apply-op` does not carry an ordinary confirmed read of the field. Its base
+cursor is the field-specific concurrency precondition, and stale bases are
+mergeable through the codec. Other reads in the commit retain normal Memory
+conflict semantics.
 
-```typescript
-// Shown at module scope.
-interface ApplyOpOperation {
-  op: "apply-op";
-  id: EntityId;
-  path: ReadPath;
-  codec: OpCodecId;
-  payload: JSONValue; // codec-defined submitted op batch
-}
+### 7.7.2 Submission idempotency
 
-type Operation =
-  | SetOperation
-  | PatchWriteOperation
-  | DeleteOperation
-  | ApplyOpOperation;
-```
+`submissionId` is durable across session replacement and reconnect:
 
-Semantics:
+- repeating an identical submission in the same field epoch returns its
+  original resolution without integrating it again
+- reusing the id with a different codec, base, or payload is a protocol error
+- normal `(sessionId, localSeq)` replay remains the idempotency boundary for the
+  complete commit
 
-1. The client submits only the original editor payload.
-2. The server validates that the target path is a declared collaborative field.
-3. The server resolves the branch/path version and performs any required
-   transform or rebase.
-4. The server assigns stable identifiers/cursors for the accepted op batch.
-5. The server persists enough information to reconstruct both the submitted and
-   integrated views.
-6. The server updates the materialized field value and any derived side-data
-   checkpoints atomically with the commit.
+### 7.7.3 Resolution and receipt
 
-The server MUST NOT trust client-supplied integrated ops, client-supplied label
-side-data, or client claims about which spans were affected.
+`AppliedCommit` contains one resolution per `apply-op` operation:
 
-### 7.6.1 Receipts
-
-Receipts for op-based writes need more than `{ hash, seq }`. At minimum, the
-client needs a canonical cursor for resume and a way to correlate the submitted
-payload with the integrated result.
-
-Illustrative receipt extension:
-
-```typescript
-// Shown at module scope.
-interface ApplyOpResolution {
-  id: EntityId;
-  path: ReadPath;
-  codec: OpCodecId;
-  version: number; // path-local integrated version after apply
-  opIds: string[]; // stable ids for accepted logical ops
-}
-```
-
-The exact receipt shape is future work, but op-based writes need some path-local
-versioning surface in addition to the entity-level `seq`.
-
----
-
-## 7.7 Storage Model Changes
-
-The current storage model is fact-centric and replay-oriented. Collaborative
-fields add three storage requirements.
-
-### 7.7.1 Queryable Submitted Payloads
-
-The original signed payload already exists in commit/invocation storage. Future
-work must make it queryable without requiring ad hoc joins through raw UCAN
-objects for every read.
-
-This does **not** require duplicating the full signed command into every fact.
-It does require an indexed path from:
-
-- entity id
-- field path
-- branch / seq / commit
-
-to the original submitted op payload.
-
-### 7.7.2 Canonical Integrated Op Log
-
-Integrated ops need their own queryable, replayable history. That history may be
-stored directly in facts, in an adjunct op log keyed from facts/commits, or in
-another storage shape with equivalent integrity guarantees.
-
-Required properties:
-
-- branch-scoped ordering
-- stable op ids or equivalent durable cursors
-- replay without consulting client-local state
-- efficient incremental reads for subscriptions and resume
-
-### 7.7.3 Collaborative Snapshots / Checkpoints
-
-For large collaborative fields, replaying the full integrated op log on every
-read is too expensive. Storage therefore needs checkpoints that can restore:
-
-- the materialized field value
-- any storage-derived label side-data associated with that materialized value
-- the path-local integrated version used as the checkpoint base
-
-This is analogous to entity snapshots in §01/§02, but field-local and
-projection-aware.
-
----
-
-## 7.8 Query Changes
-
-The query model needs an explicit projection selector for collaborative fields.
-The key point is that "return me the current value" and "return me the
-integrated ops since version N" are different queries.
-
-Illustrative request shape:
-
-```typescript
-// Shown at module scope.
-type ProjectionKind =
-  | "materialized"
-  | "submitted-ops"
-  | "integrated-ops";
-
-interface ProjectionRequest {
-  id: EntityId;
-  path: ReadPath;
-  kind: ProjectionKind;
-  fromVersion?: number; // for incremental op reads
-  includeSideData?: {
-    labels?: boolean;
-  };
+```text
+ApplyOpResolution {
+  operationIndex: number
+  address: {
+    branch: BranchName
+    id: EntityId
+    scope?: CellScope
+    scopeKey: string
+    path: ValuePath
+  }
+  codec: OpCodecId
+  submissionId: string
+  from: OpCursor
+  to: OpCursor
+  operations: Array<{
+    opId: string
+    cursor: OpCursor
+    submissionId: string
+    payload: JSONValue
+  }>
+  duplicate: boolean
 }
 ```
 
-Semantics:
+The response includes the canonical operations so the submitting editor can
+confirm or rebase its pending state without waiting for watch fan-out. The same
+operations may later arrive through a subscription and are deduplicated by
+cursor.
 
-- `materialized` returns the current field value.
-- `materialized + includeSideData.labels` may return storage-derived label
-  side-data for that field when available.
-- `submitted-ops` returns original submitted payloads in canonical commit order.
-- `integrated-ops` returns canonical applied ops in integrated order.
-
-The protocol should reject op-view queries for undeclared paths rather than
-falling back silently to materialized reads.
-
-### 7.8.1 Subscriptions
-
-Subscriptions need the same projection distinction:
-
-- a materialized subscription emits updated field values
-- an integrated-op subscription emits accepted integrated ops after a cursor
-- a submitted-op subscription is mainly for audit/debug tooling and may be less
-  common in product paths
-
-The current entity-level seq cursor mechanism is not sufficient on its own for
-op-view subscriptions. Collaborative fields need a path-local resume cursor or
-version in addition to the entity-level `seq`.
-
-### 7.8.2 Graph Queries
-
-Phase 1 graph traversal is materialized and schema-driven. Op-view graph queries
-should be deferred initially. They add difficult questions around topology,
-fan-out, and mixed projections inside one traversal result.
-
-The first incremental step should be:
-
-- direct field queries support `materialized`, `submitted-ops`, and
-  `integrated-ops`
-- graph queries remain materialized-only until a compelling use case exists
+Commit replay reconstructs these resolutions from stored commit resolution
+data. It never reruns a codec against newer state.
 
 ---
 
-## 7.9 Label Side-Data on Materialized Reads
+## 7.8 Storage Model
 
-This document assumes that effective labels remain part of system-controlled
-side-data, not editor-controlled content.
+Collaborative metadata is stored beside, not inside, ordinary entity JSON.
+The initial schema has four logical tables:
 
-For collaborative text-like materialized reads, storage MAY return label
-side-data whose shape includes range-oriented information over the current
-materialized content. This is a derived projection, not a new user-authored
-value.
+### `op_field_epoch`
 
-Properties:
+One current-state row per field address:
 
-- The label side-data is derived from committed history.
-- Clients may render it but do not author it directly.
-- The authoritative computation happens in storage/query code, not in the editor
-  component.
-- The side-data belongs to the materialized projection. It is not a substitute
-  for submitted or integrated op views.
-
-This document intentionally does not define the label language, label algebra,
-or redaction semantics. It only reserves the need for range-oriented side-data
-when the materialized value is sequence-like.
-
----
-
-## 7.10 User-Level Anchored Annotations
-
-User-level annotations are a separate plane from storage-owned label side-data.
-
-Examples include:
-
-- review notes
-- agent instructions
-- bookmarks
-- highlights
-- other application-defined anchored records
-
-These should remain ordinary application data stored in entities/documents with
-their own schemas. What makes them special is not their payload shape, but that
-they are anchored to a collaborative field.
-
-Properties:
-
-- The annotation payload is ordinary system data like any other record.
-- The anchor targets a declared collaborative field path plus a logical range or
-  position within that field.
-- Anchors must map through integrated ops using the field's mapping strategy.
-- Annotation payloads are **not** folded into the system-owned label side-data.
-
-Illustrative shape:
-
-```typescript
-// Shown at module scope.
-interface AnchoredAnnotation {
-  target: {
-    id: EntityId;
-    path: ReadPath;
-  };
-  anchor: JSONValue; // codec-defined anchor/range payload
-  data: JSONValue; // application-defined payload
-}
+```text
+(branch, id, scope_key, path_key) primary key
+epoch
+codec
+version
+baseline_hash
+materialized
+active
+commit_seq
 ```
 
-This keeps the language generic. The system does not privilege "comments" over
-other annotation types.
+Releasing a field keeps this row and marks it inactive; reopening replaces its
+current-state fields with the next epoch. Per-epoch history remains in the
+submission, integrated, and checkpoint tables. `path_key` is the canonical JSON
+Pointer encoding of the value-relative path.
+
+### `op_submission`
+
+One row per accepted submitted batch:
+
+```text
+(branch, id, scope_key, path_key, epoch, submission_id) primary key
+base_version
+submitted_payload
+integrated_from
+integrated_to
+integrated_payload
+commit_seq
+operation_index
+```
+
+The encoded payload is retained directly for efficient submitted-view queries.
+The row also joins to the canonical `commit` record, whose `original` field
+preserves the complete accepted request.
+
+### `op_integrated`
+
+One row per canonical logical operation:
+
+```text
+(branch, id, scope_key, path_key, epoch, version) primary key
+op_id unique
+submission_id
+payload
+commit_seq
+```
+
+Versions are contiguous. The engine must verify `current_version` equals the
+largest stored version before advancing it.
+
+### `op_checkpoint`
+
+Replay checkpoints:
+
+```text
+(branch, id, scope_key, path_key, epoch, version) primary key
+materialized
+commit_seq
+```
+
+The engine writes a version-zero checkpoint when an epoch is activated and
+creates later checkpoints whenever the configured operation-count interval is
+crossed. Creating checkpoint N prunes integrated replay rows only through the
+previous nonzero checkpoint. This one-checkpoint lag keeps the recent suffix
+available to connected editors while bounding transform and query work.
+Submitted rows remain available for duplicate detection and audit.
+
+The materialized entity revision remains the authority for ordinary reads.
+`op_checkpoint.materialized` exists for operation replay and compaction and
+must equal the field value at its cursor.
 
 ---
 
-## 7.11 Branching and Merge Semantics
+## 7.9 Query and Subscription Protocol
 
-Integrated op history is branch-local. The same submitted payload may integrate
-differently on different branches if rebased against different prior history.
+Operation views use direct-field queries. `graph.query` remains
+materialized-only so one traversal never mixes values, operation logs, and
+field-local cursors.
 
-Therefore:
+An `op.query` request identifies a field and an optional `after` cursor. The
+integrated projection is exposed through one `OperationFieldSnapshot` envelope
+containing the current materialized value, baseline hash, current cursor, and
+the integrated suffix after the supplied cursor. Submitted-history queries are
+deferred to operator tooling.
 
-- the submitted view is tied to the original accepted commit payload
-- the integrated view is tied to a branch-local replay order
-- the materialized view is derived from the integrated branch-local history
+An inactive-field response contains a null cursor, the current materialized
+value, its baseline hash, and no operations. It gives a client exactly the
+inputs required for race-free first activation. An active response includes the
+codec id, current non-null cursor, and a `retainedFrom` cursor. A missing,
+wrong-epoch, or older-than-retained cursor produces `reset: true`, the current
+canonical materialized value, and no integrated operations. A cursor at or
+after `retainedFrom` receives the complete contiguous suffix through the
+response cursor.
 
-Merging branches with collaborative fields requires more than ordinary
-path-overlap detection. The merge process must either:
+Live operation delivery extends the existing session watch set with an
+`operation` watch kind. The initial `session.watch.add` response atomically
+installs the watch and returns an `OperationFieldSnapshot`. Later `SessionSync`
+frames carry operation-field effects alongside ordinary entity upserts.
 
-- replay submitted ops through the target branch's transform engine, or
-- materialize a merge result and record new integrated ops that explain it
+The ordering rules are:
 
-This work should remain deferred until the base branch/merge model in §06 is
-implemented end to end.
+- the transact verdict is sent before watch fan-out for the same commit
+- every operation effect names its field cursor; its enclosing `SessionSync`
+  names the covered commit-sequence interval
+- a client applies each cursor at most once
+- reconnect reinstalls the operation watch and filters the immutable suffix by
+  cursor
+- clients behind the retained floor reset from the canonical materialized
+  snapshot; writes behind that floor fail with `OpHistoryUnavailableError`
+
+An operation watch may be installed while the field is inactive. Ordinary
+writes then produce a newer inactive field response, activation produces an
+active response, and release or entity deletion produces an inactive response.
+This closes the race between reading a baseline and the first `apply-op` without
+turning ordinary entity sync into inferred operation history.
+
+An editor should initialize from one field response, track unconfirmed local
+edits in its codec implementation, and consume canonical suffixes thereafter.
+It should not infer operation history from ordinary entity sync frames.
+
+If a mismatched-epoch response arrives while an editor has unconfirmed local
+operations, the client must preserve those local contents and surface an
+explicit reconciliation state.
+It must not silently discard them or apply them to a different epoch. A normal
+disconnect within the same epoch retains the original submission ids and
+resends through the Memory session's outstanding-commit mechanism.
 
 ---
 
-## 7.12 Minimum Protocol/Storage Delta
+## 7.10 Ordinary Reads, Reactivity, and Conflicts
 
-The smallest coherent future increment is:
+The internal consequence of an accepted `apply-op` is an ordinary `patch`
+revision at the field path. Consequently:
 
-1. Add a collaborative field capability declaration.
-2. Add an op-based write class for declared field paths.
-3. Add a direct-field query API with explicit projection selection.
-4. Add a path-local version/cursor for op subscriptions and resume.
-5. Add queryable submitted-payload access and canonical integrated-op storage.
-6. Add collaborative checkpoints for materialized value + derived label
-   side-data.
-7. Keep user-level anchored annotations as separate ordinary data.
+- current and point-in-time entity reads require no collaborative special case
+- entity snapshots continue to bound materialized replay
+- graph-query and watch-set consumers receive ordinary documents
+- confirmed reads overlapping the field conflict exactly as they do for an
+  equivalent patch
+- scheduler dirty-path computation uses the derived materialization patch
 
-Anything smaller risks hiding the distinction between submitted, integrated, and
-materialized history without actually removing it.
+The committing runtime cannot extrapolate a server-rebased result from its
+submitted payload. Server dirty-origin handling therefore treats `apply-op`
+like `patch`: the writer receives the authoritative materialized document in
+the covering session sync rather than suppressing its own echo as a plain
+`set`.
+
+Operation watches and materialized watches may both cover the same field. Their
+payloads serve different consumers, but their commit-sequence ordering must not
+contradict each other.
 
 ---
 
-## 7.13 Open Questions
+## 7.11 Branches
 
-- Should integrated ops reuse `PatchWrite` with richer `PatchOp` variants, or
-  should collaborative writes get a distinct fact/write class?
-- Should the canonical integrated representation preserve editor-native payloads
-  verbatim, normalize into an internal IR, or store both?
-- How much provenance should materialized reads expose beyond label side-data:
-  op ids only, commit refs, or richer contributor spans?
-- Should anchored annotations subscribe through the same projection channel as
-  the field they target, or through ordinary entity subscriptions plus local
-  anchor mapping?
-- What is the right checkpoint granularity for large documents with many
-  collaborative fields in one entity?
+Field addresses and every collaborative storage key include a branch. The
+editor and runtime-client integration operates on the default branch. Memory
+rejects collaborative queries, applies, and releases on child branches. There
+is no Memory branch-merge operation; operation-aware child inheritance and
+collaborative merge semantics remain deferred. Parent cursors are never
+accepted as child cursors.
 
-These questions should be resolved with the concrete editor integrations in
-view, but the projection split in this document should remain stable.
+---
+
+## 7.12 Checkpoints and Retention
+
+The correctness model does not depend on a complete epoch log. Memory creates
+storage-owned checkpoints at deterministic committed cursors. Automatic
+compaction retains one checkpoint of overlap. Explicit maintenance may prune
+through the latest checkpoint only after replaying every later integrated
+operation through the registered codec and verifying that the result equals
+both the field head and the ordinary materialized value.
+
+The lowest remaining contiguous cursor is the epoch's retained-version floor.
+Readers behind it receive a reset snapshot; writers behind it receive
+`OpHistoryUnavailableError`. Submitted records are not pruned with integrated
+replay rows, preserving durable idempotency and the audit projection.
+
+Checkpoint creation is storage-owned. Clients cannot submit a materialized
+checkpoint or claim that it corresponds to an operation cursor.
+
+---
+
+## 7.13 Security and Resource Limits
+
+- Normal Memory WRITE authorization applies to `apply-op` and
+  `release-op-field`; READ authorization applies to operation queries and
+  watches.
+- The server validates scope exactly as for entity operations.
+- Clients cannot submit integrated operations, checkpoints, label side-data, or
+  operation ids.
+- Codec ids must be registered locally and version-pinned.
+- The engine bounds submitted bytes, operations per batch, and materialized
+  document size before accepting a commit.
+- The server imposes protocol-wide limits before invoking codec-specific
+  parsing.
+- Errors disclose no field content beyond what the authenticated session may
+  read.
+
+Checkpoint-lag compaction bounds the transform suffix and integrated query
+suffix. The protocol uses typed `OpHistoryUnavailableError` responses for stale
+writes and snapshot resets for stale readers, so the server performs no
+unbounded collaborative-history work inside the per-space commit lock.
+
+---
+
+## 7.14 Storage-Derived Labels
+
+Range-oriented CFC labels are a future derived projection over integrated
+history. They remain storage-owned side-data associated with a materialized
+checkpoint.
+
+- Clients may render labels but cannot author them through `apply-op`.
+- Codec integration may report affected ranges to a trusted label mapper, but
+  those reports are not authoritative by themselves.
+- The authoritative label computation and validation occur inside the same
+  transaction or deterministic checkpoint derivation.
+- Unlabeled collaborative fields pay no range-label storage cost.
+
+The first CodeMirror implementation does not define or store range-label
+side-data. A future checkpoint schema extension may add it with the required
+label validation contract.
+
+## 7.15 User-Level Anchored Annotations
+
+Comments, instructions, bookmarks, and highlights remain ordinary application
+entities. Their anchors reference a collaborative field address, epoch, and
+codec-defined position or range.
+
+The codec may later provide deterministic anchor mapping through integrated
+operations. Annotation payloads do not enter the system-owned label plane, and
+annotation writes remain normal Memory transactions.
+
+Stable integrated operation ids and epochs are part of this first design so
+adding anchor mapping does not require replacing the collaboration history
+identity model.
+
+---
+
+## 7.16 Normative Invariants
+
+1. **One authority:** only the Memory commit engine produces canonical
+   integrated operations.
+2. **Atomic projections:** submitted rows, integrated rows, cursor advancement,
+   operation resolution, and materialized revision commit together or not at
+   all.
+3. **Immutable prefix:** an integrated cursor never changes meaning.
+4. **Replayable resolution:** replaying `(sessionId, localSeq)` returns the
+   original operation resolution without codec execution.
+5. **Durable submission idempotency:** one submission id cannot integrate twice
+   in one field epoch.
+6. **Materialized compatibility:** an ordinary entity read after the commit
+   returns the codec-produced value.
+7. **No hidden reset:** ordinary writes cannot alter an active collaborative
+   field without releasing it or deleting its entity.
+8. **Codec agreement:** field epoch, submitted rows, integrated rows, queries,
+   and receipts always name the same versioned codec id.
+9. **Cursor completeness:** an active incremental response contains every
+   integrated operation after a matching retained input cursor through its
+   output cursor; an epoch mismatch or unavailable cursor returns an explicit
+   canonical reset snapshot.
+10. **No client authority over derived data:** clients never supply canonical
+    op ids, integrated payloads, checkpoints, or storage-owned label side-data.
+
+## 7.17 Deferred Decisions
+
+- The representation and algebra for range-level CFC side-data.
+- Codec-specific anchor formats and annotation mapping APIs.
+- Collaborative branch merge semantics.
+- Retention durations for submitted audit payloads.
+- Whether mature deployments move codec execution into a more isolated
+  deterministic host while preserving the same registry contract.
+
+These decisions do not change the submitted/integrated/materialized projection
+split, field cursor, or atomic `apply-op` commit contract.

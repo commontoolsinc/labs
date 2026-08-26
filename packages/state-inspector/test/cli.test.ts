@@ -107,6 +107,20 @@ Deno.test("cli: single-space commands dispatch over a seeded DB", async (t) => {
       assertEquals(s.commits, 2);
     });
 
+    await t.step(
+      "operations reports older stores without operation tables",
+      () => {
+        const { code, out } = run(["operations", db, "--json"]);
+        assertEquals(code, 0);
+        assertEquals(JSON.parse(out), {
+          available: false,
+          fieldLimit: 50,
+          fieldsTruncated: false,
+          fields: [],
+        });
+      },
+    );
+
     await t.step("--json BEFORE <db> still works (flag-order fix)", () => {
       const { code, out } = run(["summary", "--json", db]);
       assertEquals(code, 0);
