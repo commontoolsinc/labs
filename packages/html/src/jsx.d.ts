@@ -8,6 +8,7 @@ import type {
   JSXElement,
   RenderNode,
 } from "commonfabric";
+import type { FabricBridge } from "@commonfabric/iframe-sandbox";
 
 /**
  * Used to represent DOM API's where users can either pass
@@ -3588,6 +3589,7 @@ interface CFFileDownloadAttributes<T> extends CFHTMLAttributes<T> {
 
 interface CFIframeAttributes<T> extends CFHTMLAttributes<T> {
   "src": string;
+  "bridge"?: FabricBridge;
   "context"?: object;
   "$context"?: CellLike<any>;
   "resourceKinds"?: Record<

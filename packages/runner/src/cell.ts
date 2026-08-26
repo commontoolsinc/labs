@@ -783,6 +783,31 @@ export function encodeSqliteParams(
       );
     }
   };
+  const encodeNested = (value: unknown): unknown => {
+    assertDefined(value);
+    const cell = asBoundCell(value);
+    if (cell) {
+      const link = cell.toSigilLinkOrNull();
+      if (link === null) {
+        throw new TypeError(
+          "sqlite: a nested Cell parameter must have a durable link",
+        );
+      }
+      return link;
+    }
+    if (Array.isArray(value)) {
+      return value.map(encodeNested);
+    }
+    if (isPlainContainer(value)) {
+      return Object.fromEntries(
+        Object.entries(value).map(([key, member]) => [
+          key,
+          encodeNested(member),
+        ]),
+      );
+    }
+    return value;
+  };
   const encodeOne = (value: unknown, isLinkCol: boolean): unknown => {
     assertDefined(value);
     const cell = asBoundCell(value);
@@ -792,7 +817,7 @@ export function encodeSqliteParams(
       }
       return encodeCellToSigilString(cell);
     }
-    return value;
+    return encodeNested(value);
   };
   if (Array.isArray(params)) {
     const cols = parseSqliteInsertColumns(sql);

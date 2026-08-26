@@ -412,6 +412,64 @@ describe("Fabric iframe bridge", () => {
     }
   });
 
+  it("refuses non-callable named methods", async () => {
+    const channel = new MessageChannel();
+    const host = new FabricBridgeHost(
+      createFabricBridge({
+        service: {
+          kind: "service",
+          methods: { ping: "not callable" },
+        } as unknown as Parameters<typeof createFabricBridge>[0][string],
+      }),
+      channel.port1,
+    );
+    const client = connectFabric();
+    handOff(channel.port2);
+
+    try {
+      await expect(client.describe()).rejects.toMatchObject({
+        code: "operation-failed",
+        message: "Bridge resource `service` method `ping` must be a function.",
+      });
+      await expect(client.call("service", "ping")).rejects.toMatchObject({
+        code: "method-not-supported",
+      });
+    } finally {
+      client.disconnect();
+      host.disconnect();
+    }
+  });
+
+  it("refuses named methods that collide with core operations", async () => {
+    const channel = new MessageChannel();
+    const host = new FabricBridgeHost(
+      createFabricBridge({
+        service: {
+          kind: "service",
+          read: () => "core",
+          methods: { read: () => "named" },
+        },
+      }),
+      channel.port1,
+    );
+    const client = connectFabric();
+    handOff(channel.port2);
+
+    try {
+      await expect(client.describe()).rejects.toMatchObject({
+        code: "operation-failed",
+        message:
+          "Bridge resource `service` method `read` collides with a core operation.",
+      });
+      await expect(client.call("service", "read")).rejects.toMatchObject({
+        code: "method-not-supported",
+      });
+    } finally {
+      client.disconnect();
+      host.disconnect();
+    }
+  });
+
   it("cancels host subscriptions when the guest disconnects", async () => {
     const subscribed = Promise.withResolvers<void>();
     const cancelled = Promise.withResolvers<void>();

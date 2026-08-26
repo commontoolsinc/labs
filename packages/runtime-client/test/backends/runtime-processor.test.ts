@@ -55,6 +55,7 @@ import {
 import {
   assertFabricLoggerFlags,
   cellRefToSigilLink,
+  createCellRef,
   getCell,
   mapCellRefsToSigilLinks,
 } from "@/backends/utils.ts";
@@ -4480,45 +4481,78 @@ describe("runtime-processor", () => {
       );
     });
 
-    it("hydrates linked and nested SQLite bind values", async () => {
+    it("lowers linked and nested SQLite bind values for storage", async () => {
       const calls: unknown[][] = [];
-      const processor = processorWith(
-        { id: "db-1", tables: { notes: {} } },
-        (...args) => {
-          calls.push(args);
-          return Promise.resolve({ rows: [] });
-        },
-      );
-      const linked = { ...ref, id: "of:linked" as CellRef["id"] };
-      const bytes = new FabricBytes(new Uint8Array([7, 8, 9]));
+      const created = createRuntime();
+      try {
+        const linkedCell = created.runtime.getCell(
+          cfcSigner.did(),
+          `sqlite-linked-${crypto.randomUUID()}`,
+        );
+        const linked = createCellRef(linkedCell);
+        const db = { id: "db-1", tables: { notes: {} } };
+        let pulled = false;
+        const source = {
+          pull: () => {
+            pulled = true;
+            return Promise.resolve(db);
+          },
+          getRaw: () => pulled ? db : undefined,
+          asSchema: () => ({ get: () => db }),
+        };
+        const runtime = {
+          getCellFromLink: (cellRef: CellRef) =>
+            cellRef.id === ref.id
+              ? source
+              : created.runtime.getCellFromLink(cellRef),
+          storageManager: {
+            open: () => ({
+              sqliteQuery: (...args: unknown[]) => {
+                calls.push(args);
+                return Promise.resolve({ rows: [] });
+              },
+            }),
+          },
+        };
+        const processor = Object.assign(
+          Object.create(RuntimeProcessor.prototype),
+          { runtime },
+        ) as RuntimeProcessor;
+        const bytes = new FabricBytes(new Uint8Array([7, 8, 9]));
 
-      await processor.handleSqliteQuery({
-        type: RequestType.SqliteQuery,
-        cell: ref,
-        sql: "SELECT :linked, :nested",
-        params: {
-          kind: "named",
-          entries: [
-            ["linked", realmFromFabricValue(linked)],
-            [
-              "nested",
-              realmFromFabricValue({
-                bytes,
-                links: [linked],
-              }),
+        await processor.handleSqliteQuery({
+          type: RequestType.SqliteQuery,
+          cell: ref,
+          sql: "SELECT :linked_cf_link, :nested",
+          params: {
+            kind: "named",
+            entries: [
+              ["linked_cf_link", realmFromFabricValue(linked)],
+              [
+                "nested",
+                realmFromFabricValue({
+                  bytes,
+                  links: [linked],
+                }),
+              ],
             ],
-          ],
-        },
-      });
+          },
+        });
 
-      const params = calls[0]?.[2] as Record<string, unknown>;
-      const nested = params.nested as {
-        bytes: FabricBytes;
-        links: unknown[];
-      };
-      expect(params.linked).toBe(nested.links[0]);
-      expect(nested.bytes).toBeInstanceOf(FabricBytes);
-      expect(nested.bytes.slice()).toEqual(new Uint8Array([7, 8, 9]));
+        const params = calls[0]?.[2] as Record<string, unknown>;
+        const nested = params.nested as {
+          bytes: FabricBytes;
+          links: unknown[];
+        };
+        expect(JSON.parse(params.linked_cf_link as string)).toEqual(
+          nested.links[0],
+        );
+        expect(nested.bytes).toBeInstanceOf(FabricBytes);
+        expect(nested.bytes.slice()).toEqual(new Uint8Array([7, 8, 9]));
+      } finally {
+        await created.runtime.dispose();
+        await created.storageManager.close();
+      }
     });
 
     it("preserves reserved SQLite column names in query rows", async () => {

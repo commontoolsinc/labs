@@ -56,6 +56,58 @@ export function createFabricBridge(
   return { resources };
 }
 
+const CORE_OPERATIONS = new Set(["read", "write", "subscribe"]);
+
+function namedMethodNames(
+  name: string,
+  resource: BridgeResource,
+): string[] {
+  const container = Object.getOwnPropertyDescriptor(resource, "methods");
+  if (!container) return [];
+  if ("value" in container && container.value === undefined) return [];
+  if (
+    !("value" in container) || container.value === null ||
+    typeof container.value !== "object" || Array.isArray(container.value)
+  ) {
+    throw new TypeError(
+      `Bridge resource \`${name}\` methods must be an object.`,
+    );
+  }
+  const methods = container.value as Record<string, unknown>;
+  return Object.keys(methods).sort().map((method) => {
+    if (CORE_OPERATIONS.has(method)) {
+      throw new TypeError(
+        `Bridge resource \`${name}\` method \`${method}\` collides with a core operation.`,
+      );
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(methods, method);
+    if (!descriptor || typeof descriptor.value !== "function") {
+      throw new TypeError(
+        `Bridge resource \`${name}\` method \`${method}\` must be a function.`,
+      );
+    }
+    return method;
+  });
+}
+
+function namedMethod(
+  resource: BridgeResource,
+  method: string | undefined,
+): BridgeMethod | undefined {
+  if (method === undefined || CORE_OPERATIONS.has(method)) return undefined;
+  const container = Object.getOwnPropertyDescriptor(resource, "methods");
+  if (
+    !container || !("value" in container) || container.value === null ||
+    typeof container.value !== "object" || Array.isArray(container.value)
+  ) {
+    return undefined;
+  }
+  const descriptor = Object.getOwnPropertyDescriptor(container.value, method);
+  return descriptor && typeof descriptor.value === "function"
+    ? descriptor.value as BridgeMethod
+    : undefined;
+}
+
 function descriptor(
   name: string,
   resource: BridgeResource,
@@ -84,9 +136,7 @@ function descriptor(
   ) {
     methods.push("subscribe");
   }
-  if (Object.hasOwn(resource, "methods") && resource.methods) {
-    methods.push(...Object.keys(resource.methods).sort());
-  }
+  methods.push(...namedMethodNames(name, resource));
   return {
     name,
     kind: resource.kind,
@@ -192,7 +242,8 @@ export class FabricBridgeHost {
     }
     const handling = this.#operationTail
       ? this.#operationTail.then(() => {
-        if (this.#connected) return this.#handle(decoded);
+        if (!this.#connected) return undefined;
+        return this.#handle(decoded);
       })
       : this.#handle(decoded);
     const tail = handling.catch(() => {});
@@ -226,7 +277,9 @@ export class FabricBridgeHost {
   }
 
   async #perform(request: BridgeRequest): Promise<FabricValue | undefined> {
-    if (request.operation === "describe") return this.#manifest();
+    const operation = request.operation;
+    if (operation === "describe") return this.#manifest();
+    if (operation === "disconnect") return undefined;
 
     const resource = request.resource !== undefined &&
         Object.hasOwn(this.#bridge.resources, request.resource)
@@ -240,7 +293,7 @@ export class FabricBridgeHost {
       );
     }
 
-    switch (request.operation) {
+    switch (operation) {
       case "read":
         if (
           !Object.hasOwn(resource, "read") ||
@@ -267,13 +320,7 @@ export class FabricBridgeHost {
         await resource.write(request.value as FabricValue);
         return undefined;
       case "call": {
-        const methods = Object.hasOwn(resource, "methods")
-          ? resource.methods
-          : undefined;
-        const method = request.method !== undefined && methods &&
-            Object.hasOwn(methods, request.method)
-          ? methods[request.method]
-          : undefined;
+        const method = namedMethod(resource, request.method);
         if (!method) {
           throw bridgeError(
             "method-not-supported",

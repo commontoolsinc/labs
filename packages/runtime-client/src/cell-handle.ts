@@ -409,6 +409,8 @@ export class CellHandle<T = unknown> {
    * If the value is itself a link, follows it to get the actual value.
    */
   async sync(): Promise<Readonly<T> | undefined> {
+    const writes = this.#strictWriteTail;
+    if (writes) await writes;
     const response = await this.#conn.request<
       RequestType.CellGet
     >({
@@ -422,6 +424,8 @@ export class CellHandle<T = unknown> {
 
   /** Demand lazy producers before fetching the current value. */
   async pull(): Promise<Readonly<T> | undefined> {
+    const writes = this.#strictWriteTail;
+    if (writes) await writes;
     const response = await this.#conn.request<RequestType.CellPull>({
       type: RequestType.CellPull,
       cell: this.ref(),

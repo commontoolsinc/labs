@@ -1062,15 +1062,29 @@ describe("cell-handle", () => {
       expect(cell.get()).toEqual({ n: 1 });
     });
 
-    it("starts the first strict write before a later read", async () => {
+    it("waits for every queued strict write before a later read", async () => {
       const requests: RequestType[] = [];
+      const firstWrite = Promise.withResolvers<void>();
+      let stored = { n: 0 };
+      let writes = 0;
       const runtime = {
         [$conn]: () => ({
-          request: (request: { type: RequestType }) => {
+          request: (request: {
+            type: RequestType;
+            value?: { n: number };
+          }) => {
             requests.push(request.type);
-            return Promise.resolve(
-              request.type === RequestType.CellGet ? { value: { n: 1 } } : {},
-            );
+            if (request.type === RequestType.CellSet) {
+              writes++;
+              const commit = () => {
+                stored = request.value!;
+                return {};
+              };
+              return writes === 1
+                ? firstWrite.promise.then(commit)
+                : Promise.resolve(commit());
+            }
+            return Promise.resolve({ value: stored });
           },
           subscribe: () => Promise.resolve(),
           unsubscribe: () => Promise.resolve(),
@@ -1079,10 +1093,20 @@ describe("cell-handle", () => {
       } as unknown as RuntimeClient;
       const cell = new CellHandle(runtime, ref, { n: 0 });
 
-      const writing = cell.setStrict({ n: 1 });
+      const first = cell.setStrict({ n: 1 });
+      const second = cell.setStrict({ n: 2 });
       const reading = cell.sync();
-      expect(requests).toEqual([RequestType.CellSet, RequestType.CellGet]);
-      await Promise.all([writing, reading]);
+      await Promise.resolve();
+      expect(requests).toEqual([RequestType.CellSet]);
+
+      firstWrite.resolve();
+      await expect(reading).resolves.toEqual({ n: 2 });
+      await Promise.all([first, second]);
+      expect(requests).toEqual([
+        RequestType.CellSet,
+        RequestType.CellSet,
+        RequestType.CellGet,
+      ]);
     });
   });
 
