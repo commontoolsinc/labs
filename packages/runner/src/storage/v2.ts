@@ -55,7 +55,7 @@ import {
   PatchApplyError,
 } from "../../../memory/v2/patch.ts";
 import type { JSONSchema } from "../builder/types.ts";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema/schema-hash";
 import type { Cancel } from "../cancel.ts";
 import type { Cell } from "../cell.ts";
 import { collectExternalSchemaRefHashes } from "../schema-decompose.ts";

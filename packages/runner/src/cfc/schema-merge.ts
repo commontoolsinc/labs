@@ -1,5 +1,5 @@
 import type { CfcAtom } from "@commonfabric/api/cfc";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   isObjectNotArray,

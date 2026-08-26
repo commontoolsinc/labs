@@ -1,5 +1,5 @@
 import { BuiltInLLMDialogState } from "@commonfabric/api";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import type {
   BuiltInCompileAndRunParams,

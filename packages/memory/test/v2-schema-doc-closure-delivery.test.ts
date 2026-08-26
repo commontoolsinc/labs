@@ -35,7 +35,7 @@ import { assert } from "@std/assert";
 import { expect } from "@std/expect";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import type { JSONSchema } from "@commonfabric/api";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema/schema-hash";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import { collectExternalSchemaRefHashes } from "../../runner/src/schema-decompose.ts";
 import { isSubschema } from "../../runner/src/schema-walk.ts";

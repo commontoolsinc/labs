@@ -1,7 +1,10 @@
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import { hashSchema, internSchema } from "@commonfabric/data-model/schema-hash";
-import { schemaWithProperties } from "@commonfabric/data-model/schema-utils";
+import {
+  hashSchema,
+  internSchema,
+} from "@commonfabric/data-model-schema/schema-hash";
+import { schemaWithProperties } from "@commonfabric/data-model-schema/schema-utils";
 import type { Result, Unit } from "@commonfabric/memory/interface";
 import {
   resolveScopeKey,

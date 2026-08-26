@@ -2,7 +2,10 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import type { JSONSchemaObj } from "@commonfabric/api";
-import { hashSchema, internSchema } from "@commonfabric/data-model/schema-hash";
+import {
+  hashSchema,
+  internSchema,
+} from "@commonfabric/data-model-schema/schema-hash";
 import { SelectorTracker } from "../src/storage/selector-tracker.ts";
 import { ContextualFlowControl } from "../src/cfc.ts";
 import {

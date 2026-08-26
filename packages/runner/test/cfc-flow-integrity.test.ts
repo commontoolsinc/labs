@@ -3,7 +3,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
 import { Identity } from "@commonfabric/identity";
 
 import {

@@ -27,10 +27,13 @@ import {
   isInternedSchema,
 } from "@/schema-hash.ts";
 import { SchemaAndHash } from "@/SchemaAndHash.ts";
-import { dataUriFromValue } from "@/data-uri-codec.ts";
-import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
-import { hashStringOf, taggedHashStringOf } from "@/value-hash.ts";
-import { isDeepFrozen } from "@/deep-freeze.ts";
+import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import {
+  hashStringOf,
+  taggedHashStringOf,
+} from "@commonfabric/data-model/value-hash";
 import { toDeepFrozenSchema } from "@/schema-utils.ts";
 
 describe("schema-hash", () => {

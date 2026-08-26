@@ -1,7 +1,7 @@
 import type { JSONSchema } from "@commonfabric/api";
 
-import { isDeepFrozen } from "./deep-freeze.ts";
-import type { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import type { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 
 /**
  * Deep-frozen container pairing a `JSONSchema` with its content hash. Ensures

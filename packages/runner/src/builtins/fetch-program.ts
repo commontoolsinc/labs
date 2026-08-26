@@ -1,4 +1,4 @@
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 
 import type { CellScope } from "../builder/types.ts";

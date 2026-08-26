@@ -8,15 +8,19 @@ import type {
   SchemaPathSelector,
 } from "@commonfabric/api";
 
-import { deepFreeze } from "./deep-freeze.ts";
-import { cloneIfNecessary, shallowMutableClone } from "./fabric-value.ts";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import {
+  cloneIfNecessary,
+  FabricPrimitive,
+  type FabricValue,
+  shallowMutableClone,
+} from "@commonfabric/data-model/fabric-value";
 import {
   internSchema,
   internSchemaAsTaggedHashString,
   isInternedSchema,
 } from "./schema-hash.ts";
-import { FabricPrimitive, type FabricValue } from "./interface.ts";
-import { schemaTypeOfFabricPrimitive } from "./fabric-primitives/index.ts";
+import { schemaTypeOfFabricPrimitive } from "./schema-type.ts";
 
 /**
  * Map from `JSONSchema` type names (and special names) to corresponding

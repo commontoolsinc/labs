@@ -1,4 +1,4 @@
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
 import type { JSONSchema } from "../builder/types.ts";
 
 /**

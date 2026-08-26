@@ -9,7 +9,7 @@ import type {
   FabricPlainObject,
   FabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
 import { pieceId } from "@commonfabric/piece";
 import type { PiecesController } from "@commonfabric/piece/ops";
 import {

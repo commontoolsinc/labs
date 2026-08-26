@@ -37,7 +37,7 @@ import {
   repositoryRelativePath,
 } from "@commonfabric/test-support/records";
 
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { Identity } from "@commonfabric/identity";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";

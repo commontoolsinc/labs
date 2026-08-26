@@ -24,7 +24,7 @@
  */
 
 import type { JSONSchema } from "@commonfabric/api";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
 import { collectExternalSchemaRefHashes } from "./schema-decompose.ts";
 
 /** Thrown when a document's content does not hash to its claimed id. */

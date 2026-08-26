@@ -1,6 +1,6 @@
 import { JSONSchemaObj, type JSONValue } from "@commonfabric/api";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 

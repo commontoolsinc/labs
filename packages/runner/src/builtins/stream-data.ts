@@ -1,4 +1,4 @@
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 
 import type { CellScope } from "../builder/types.ts";

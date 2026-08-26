@@ -1,4 +1,4 @@
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
 import { getLogger } from "@commonfabric/utils/logger";
 
 import type { Pattern } from "../builder/types.ts";

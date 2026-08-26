@@ -7,7 +7,7 @@ import {
 } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import type { JSONSchema } from "@commonfabric/api";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema/schema-hash";
 import { encodeMemoryBoundary } from "../v2.ts";
 import {
   applyCommit,

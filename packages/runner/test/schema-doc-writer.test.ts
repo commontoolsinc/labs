@@ -19,7 +19,7 @@ import {
 } from "../src/schema-decompose.ts";
 import { resetContentAddressedSchemasConfig } from "../src/schema-doc-config.ts";
 import { lookupSchemaDocument } from "../src/schema-registry.ts";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema/schema-hash";
 import {
   getSyncSchemaTableConfig,
   resetSyncSchemaTableConfig,

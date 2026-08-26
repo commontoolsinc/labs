@@ -1,0 +1,35 @@
+{
+  "name": "@commonfabric/data-model-schema",
+  "compilerOptions": {
+    "noUncheckedIndexedAccess": true
+  },
+  "imports": {
+    // Dependency guide: ../../docs/development/DEPENDENCIES.md
+    "@/": "./src/"
+  },
+  "tasks": {
+    "check": "deno check .",
+    "just-test": {
+      "description": "Run unit tests",
+      "command": "deno test"
+    },
+    "test": {
+      "description": "Type check & run tests",
+      "dependencies": [
+        "check",
+        "just-test"
+      ]
+    }
+  },
+  "test": {
+    "include": [
+      "test/**/*.test.ts"
+    ]
+  },
+  "exports": {
+    "./SchemaAndHash": "./src/SchemaAndHash.ts",
+    "./schema-hash": "./src/schema-hash.ts",
+    "./schema-type": "./src/schema-type.ts",
+    "./schema-utils": "./src/schema-utils.ts"
+  }
+}

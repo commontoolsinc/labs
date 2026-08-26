@@ -13,7 +13,7 @@
  */
 
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 
 import type { JSONSchema } from "../src/builder/types.ts";

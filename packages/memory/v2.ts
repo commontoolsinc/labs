@@ -12,7 +12,7 @@ import {
   fabricFromJsonValue,
   jsonFromFabricValue,
 } from "@commonfabric/data-model/codecs";
-import { internPathSelector } from "@commonfabric/data-model/schema-utils";
+import { internPathSelector } from "@commonfabric/data-model-schema/schema-utils";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 

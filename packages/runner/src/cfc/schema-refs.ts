@@ -1,6 +1,6 @@
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";

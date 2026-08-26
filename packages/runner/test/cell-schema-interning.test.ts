@@ -10,7 +10,7 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
+import { isInternedSchema } from "@commonfabric/data-model-schema/schema-hash";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";

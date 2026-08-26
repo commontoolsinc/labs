@@ -1,4 +1,4 @@
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
 
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";

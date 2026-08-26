@@ -1,9 +1,9 @@
 import type { FabricValue, JSONSchema } from "@commonfabric/api";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema/schema-hash";
 import {
   internPathSelector,
   REJECTING_SELECTOR,
-} from "@commonfabric/data-model/schema-utils";
+} from "@commonfabric/data-model-schema/schema-utils";
 import {
   createGraphQueryWalkStats,
   createSchemaMemo,

@@ -27,14 +27,14 @@ import type {
   SchemaPathSelector,
 } from "@commonfabric/api";
 
-import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
+import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   FabricBytes,
   FabricEpochDay,
   FabricEpochNsec,
   FabricHash,
   FabricRegExp,
-} from "@/fabric-primitives/index.ts";
+} from "@commonfabric/data-model/fabric-primitives";
 import {
   cloneSchemaMutable,
   emptySchemaObject,

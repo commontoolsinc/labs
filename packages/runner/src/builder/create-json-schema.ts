@@ -2,8 +2,8 @@ import {
   emptySchemaObject,
   schemaForValueType,
   schemaWithProperties,
-} from "@commonfabric/data-model/schema-utils";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+} from "@commonfabric/data-model-schema/schema-utils";
+import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
 import type { JSONSchema, JSONValue } from "./types.ts";
 import { Runtime } from "../runtime.ts";
 import { isCellLink, parseLink } from "../link-utils.ts";

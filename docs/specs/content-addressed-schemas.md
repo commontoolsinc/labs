@@ -60,7 +60,7 @@ durable schema identity: a name that is valid in storage, in queries, and
 across sessions. The system already has the pieces:
 
 - **Schema hashing and interning** — `internSchemaAsTaggedHashString`
-  (`packages/data-model/src/schema-hash.ts`) produces a key-order-independent
+  (`packages/data-model-schema/src/schema-hash.ts`) produces a
   `fid1:` tagged hash; the intern table already gives structurally equal
   schemas one identity per process.
 - **Content-addressed schema documents** — CFC persists schemas as

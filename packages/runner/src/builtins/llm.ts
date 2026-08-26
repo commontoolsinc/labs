@@ -6,8 +6,8 @@ import {
 } from "@commonfabric/api";
 import { cfcAtom } from "@commonfabric/api/cfc";
 import type { Schema } from "@commonfabric/api/schema";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { internSchema } from "@commonfabric/data-model-schema/schema-hash";
+import { toDeepFrozenSchema } from "@commonfabric/data-model-schema/schema-utils";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   DEFAULT_GENERATE_OBJECT_MODELS,
