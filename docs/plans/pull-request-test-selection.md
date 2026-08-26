@@ -576,6 +576,13 @@ listed `it` through `it.ignore` instead of `it`. Every file keeps its own
 `import { describe, it } from "@std/testing/bdd"` unchanged; what that
 specifier means changes once, centrally.
 
+One more thing recommends routing it through a module of ours.
+`@std/testing/bdd` is deprecated: its own documentation says it will be
+removed at 2.0.0, points at `node:test` instead, and describes the
+migration as mostly a matter of changing the import. That specifier in
+1,283 files has to change anyway. Sending it through one module now turns
+that migration into an edit of one file rather than of all of them.
+
 Both consult the same **skip list**: the identities this invocation is not
 to run. A listed test is registered as ignored rather than dropped, so it
 appears in the run's output and in its JUnit report as skipped, and the
@@ -665,11 +672,27 @@ to the `describe`, which still registers and still runs when some of its
 that survives. A test that gets everything it needs from those is
 unaffected.
 
-The problem is a test that reads what a sibling wrote. That pattern is
-here: a scan finds over a hundred files in which one `it` assigns a
-binding another `it` reads. The scan cannot tell a real dependence from a
-`beforeEach` that resets the binding first, and that is the argument for
-measuring the property rather than reading the source for it.
+The problem is a test that reads what a sibling wrote.
+
+The interface says that is not what an `it` is for. `@std/testing/bdd`
+documents `it` as registering "an individual test case", and offers
+`it.only`, `it.skip` and `it.ignore`, none of which means anything unless
+one case can run without its siblings. Jasmine, Jest and Mocha use the
+same vocabulary, and parts of that family shuffle declaration order by
+default to keep the claim honest.
+
+Nothing here enforces it. The module says nothing about ordering, Deno
+runs the cases in the order they were declared, and no part of this
+repository has ever run them in any other order. A dependence between two
+cases is therefore not something anybody would have been told about, and
+the reasonable prior is that some exist.
+
+A scan finds over a hundred files in which one `it` assigns a binding
+another `it` reads. It cannot tell a real dependence from a `beforeEach`
+that resets the binding first, which is both why that number is a
+suspicion rather than a count and why the property has to be measured
+rather than read off the source. The check below is also the first thing
+this repository would have that could detect one at all.
 
 So independence is established per identity, never assumed. Until it is
 established, an identity's siblings are not skipped and its file stays the
