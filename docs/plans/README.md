@@ -36,6 +36,10 @@ a record: archive it to `docs/history/plans/` following the procedure in
   [`../features/vouched-ingest-channel-mint.md`](../features/vouched-ingest-channel-mint.md).
 - [Integration-test video demos](integration-test-video-demos.md) tracks
   optional CI adoption and further fixture hardening.
+- [Memory wire chunking](memory-wire-chunking.md) splits oversized memory
+  protocol messages into bounded WebSocket frames behind a negotiated
+  capability, so a sync response can exceed Deno's 64 MiB client message cap
+  without killing the connection (labs#6319).
 - [Lazy cell materialization](lazy-cell-materialization.md) sequences a
   schema-observing lazy view over a cell, a transaction mode that hands one back
   from every read, and the runner disposition for a reader that touches data the
