@@ -1256,6 +1256,42 @@ describe("cell-handle", () => {
       ]);
       expect(requests.at(-1)?.value).toEqual([2, 3]);
     });
+
+    it("reports a queued append whose committed value is not an array", async () => {
+      const firstWrite = Promise.withResolvers<void>();
+      const reported = Promise.withResolvers<unknown[]>();
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: { type: RequestType }) =>
+            request.type === RequestType.CellSet
+              ? firstWrite.promise.then(() => ({}))
+              : Promise.resolve({}),
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle<number[]>(runtime, ref, [0]);
+      const originalError = console.error;
+      console.error = (...args: unknown[]) => reported.resolve(args);
+
+      try {
+        const writing = cell.setStrict([1]);
+        cell.push(2);
+        cell[$onCellUpdate]("not an array" as unknown as number[]);
+        firstWrite.resolve();
+        await writing;
+
+        const [message, error] = await reported.promise;
+        expect(message).toBe("[CellHandle] Push failed:");
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toBe(
+          "push() can only be used on array cells",
+        );
+      } finally {
+        console.error = originalError;
+      }
+    });
   });
 
   describe("CellHandle hydration meets a fabric class", () => {
