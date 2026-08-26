@@ -6191,6 +6191,42 @@ supply; OW29/OW32/OW34 closed):
     all, does run the create through the barrier, and still loses the
     program in every red. Whether that reopens S-C is the owner's
     call, not a measurement call.
+    **PINNED AND FIXED 2026-08-26 — the commit was NEVER ISSUED by
+    the server on its first served attempt.** Current-main re-baseline
+    reproduced the same four-commit guest store in 2/8 runs overall,
+    2/5 runs that reached the guest opportunity. Instrumentation
+    closed the wire fork: the client DID construct a speculative
+    157-write / three-space profile-create transaction, but under ON
+    `SpeculationOverlayDestination` intentionally dropped its seal
+    before handoff after the terminal served consequence arrived; it
+    was never a wire-bound commit. The authoritative server attempt
+    reached `ProfileHome.inSpace()` before the anonymous target name
+    was cached; `resolvePendingSpaceNamesAndRetry()` resolved it and
+    threw `RetryImmediately`. Served events had `retries: false`, so
+    the scheduler logged `Event handler needed inSpace-name resolution
+    but opted out of retry ... dropping` and discarded that first run
+    instead of rerunning it against the warmed cache. A later
+    home-space wave could rediscover the still-unconsequenced durable
+    event, explaining the intermittent greens; reds received no later
+    wake. The owner ruled the ownership seam: under ON the transaction
+    goes through the server and the client may wait instead of
+    publishing its speculative result. The bounded fix therefore
+    carries the served carriage across the name-resolution requeue and
+    reruns it inside the same scheduler settle, so the installed
+    destination seals it into the SAME wave. `retries: false` remains
+    intact for transient commit failures; this does not add served
+    commit backoff. Red-first pin:
+    `scheduler-events.test.ts` ("reruns a served event after inSpace-name
+    resolution even when commit retries are disabled") failed at one
+    attempt before the fix and passes at two with the served actor and
+    session preserved. Production-shaped lift evidence: 8/8 fresh-store
+    ensure-OFF ON runs green (13-16 s); every guest child contains one
+    98-op authored commit with `patternIdentity` and 16-53 total
+    commits, and no fixed server log carries the old drop warning.
+    Target-member red rate moved from 2/8 overall (2/5 opportunities)
+    to 0/8. This resolves the fork as neither server refusal nor
+    client-side loss before a required wire send: it was the server's
+    name-resolution retry gate preventing issuance.
     **Anti-red-herrings, recorded so the next seat does not
     re-derive them.** `piece-start-commit-failed` is NOT this file's
     discriminator: 13 occurrences across the campaign, 1-2 per run,
