@@ -5,6 +5,7 @@
 import {
   FabricSpecialObject,
   type FabricValue,
+  valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { DID } from "@commonfabric/identity";
 import { type CfcCellLinkRefPayload } from "@commonfabric/runner/cfc";
@@ -665,6 +666,16 @@ function valuesEqual(a: unknown, b: unknown): boolean {
   if (typeof a !== "object") return false;
   if (isCellHandle(a) && isCellHandle(b)) {
     return a.equals(b);
+  }
+
+  // Compared by the data model rather than by this walk, and _before_ the
+  // record branch, which reads enumerable own properties a fabric class does
+  // not have: two `FabricBytes` over different bytes both present as `{}`
+  // there and would compare equal, keeping the old value and telling no
+  // subscriber. Either side is enough to ask, so an instance never compares
+  // equal to a plain record that mimics it.
+  if (a instanceof FabricSpecialObject || b instanceof FabricSpecialObject) {
+    return valueEqual(a as FabricValue, b as FabricValue);
   }
   if (Array.isArray(a)) {
     if (!Array.isArray(b)) return false;

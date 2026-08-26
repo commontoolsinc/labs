@@ -598,6 +598,42 @@ describe("cell-handle", () => {
       expect(calls.length).toBe(after);
     });
 
+    it("notifies when a special object's contents change", () => {
+      // Two `FabricBytes` holding different bytes are different values. Their
+      // state is private, so a walk over enumerable own properties sees `{}`
+      // on both sides and calls them equal -- which would keep the old value
+      // and tell no subscriber. Now that the connection carries one of these
+      // intact, that comparison is reachable.
+      const cell = new CellHandle<FabricBytes>(makeRuntime(), ref);
+      const calls: Array<unknown> = [];
+      cell.subscribe((value) => {
+        calls.push(value);
+      });
+
+      cell[$onCellUpdate](new FabricBytes(new Uint8Array([1])));
+      const after = calls.length;
+      cell[$onCellUpdate](new FabricBytes(new Uint8Array([2])));
+
+      expect(calls.length).toBe(after + 1);
+      expect((calls.at(-1) as FabricBytes).slice()).toEqual(
+        new Uint8Array([2]),
+      );
+    });
+
+    it("does not re-notify when a special object is unchanged", () => {
+      const cell = new CellHandle<FabricBytes>(makeRuntime(), ref);
+      const calls: Array<unknown> = [];
+      cell.subscribe((value) => {
+        calls.push(value);
+      });
+
+      cell[$onCellUpdate](new FabricBytes(new Uint8Array([1, 2])));
+      const after = calls.length;
+      cell[$onCellUpdate](new FabricBytes(new Uint8Array([1, 2])));
+
+      expect(calls.length).toBe(after);
+    });
+
     it("notifies on a 0 -> -0 change", () => {
       // `0` and `-0` are distinct stored values (the content hash
       // distinguishes them); the update must not be dropped.
