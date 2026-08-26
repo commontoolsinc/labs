@@ -5,6 +5,7 @@ import {
   fabricFromRealmValue,
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
+import { FabricLink } from "@commonfabric/data-model/fabric-instances";
 import {
   FabricBytes,
   FabricEpochNsec,
@@ -907,6 +908,26 @@ describe("cell-handle", () => {
 
       expect(hydrated.a.b).toBe(nsec);
       expect(hydrated.c[0]).toBe(bytes);
+    });
+
+    it("refuses a `FabricInstance` in either direction", () => {
+      // A primitive is a leaf, so a walk that stops at it has lost nothing.
+      // An instance is a container reached by its codec contents rather than
+      // by property name, so a cell can sit inside one where these walks
+      // cannot see it -- passing one through would send a handle unconverted,
+      // or hand back a link where a handle belongs. Death before confusion.
+      const link = new FabricLink(
+        Object.freeze({ id: "of:fid1:instance-refusal", path: [] }),
+      );
+
+      expect(() => CellHandle.serialize(link as never)).toThrow(
+        "Cannot yet handle `FabricLink` (a `FabricInstance`)",
+      );
+
+      const handle = new CellHandle(makeRuntime(), makeRef());
+      expect(() => CellHandle.deserialize(handle, link)).toThrow(
+        "Cannot yet handle `FabricLink` (a `FabricInstance`)",
+      );
     });
 
     it("returns a `bigint` and a `symbol` as themselves", () => {

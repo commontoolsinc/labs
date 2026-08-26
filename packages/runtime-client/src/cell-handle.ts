@@ -3,7 +3,8 @@
  */
 
 import {
-  FabricSpecialObject,
+  FabricInstance,
+  FabricPrimitive,
   type FabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
@@ -20,6 +21,7 @@ import {
   linkRefFrom,
   linkRefPayload,
   linkRefPayloadToString,
+  refuseFabricInstance,
   type SigilLink,
 } from "@commonfabric/runner/shared";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -507,12 +509,22 @@ export class CellHandle<T = unknown> {
       return value.map((item) => CellHandle.deserialize(base, item));
     }
 
-    // Hydrated whole, as `serialize()` sends one whole, and for the same
-    // reason: this goes _before_ the record branch, which rebuilds from
-    // enumerable own properties a fabric class does not have and would put
-    // `{}` here in place of the value the connection just carried. Nothing is
-    // lost by not descending -- a sigil link cannot be inside one.
-    if (value instanceof FabricSpecialObject) return value;
+    // A `FabricPrimitive` is a leaf, so stopping at it has already done the
+    // right thing -- and this goes _before_ the record branch, which rebuilds
+    // from enumerable own properties a fabric class does not have and would
+    // put `{}` here in place of the value the connection just carried.
+    if (value instanceof FabricPrimitive) return value;
+
+    // An instance is a container, reached by its codec contents rather than by
+    // property name, so a sigil link can sit inside one where this walk cannot
+    // see it -- and a value handed back unhydrated would carry that link where
+    // a `CellHandle` belongs. Refused rather than passed through, per
+    // "Flag-gated tripwires" in `docs/development/EXPERIMENTAL_OPTIONS.md`.
+    // Nothing reaches this de facto rather than by construction: the worker's
+    // outbound walk refuses an instance too.
+    if (value instanceof FabricInstance) {
+      refuseFabricInstance(value, "when hydrating a value off the connection");
+    }
 
     if (isObjectOrArray(value)) {
       const reference = parseAsCellRef(
@@ -550,12 +562,22 @@ export class CellHandle<T = unknown> {
       return value.map((element) => CellHandle.serialize(element));
     }
 
-    // A `FabricSpecialObject` crosses whole rather than being walked. This
-    // goes _before_ the record test: such a value is also a record, and that
-    // branch would rebuild it from enumerable own properties it is not
-    // supposed to have, putting `{}` on the wire in place of a `FabricBytes`.
-    // Nothing is lost by not descending -- a handle cannot be inside one.
-    if (value instanceof FabricSpecialObject) return value;
+    // A `FabricPrimitive` crosses whole rather than being walked: it is a
+    // leaf, so stopping at it loses nothing. This goes _before_ the record
+    // test, since such a value is also a record and that branch would rebuild
+    // it from enumerable own properties it is not supposed to have, putting
+    // `{}` on the wire in place of a `FabricBytes`.
+    if (value instanceof FabricPrimitive) return value;
+
+    // An instance is a container whose contents this walk cannot reach, so a
+    // `CellHandle` inside one would cross unconverted -- as a handle, which
+    // the wire has no representation for. Refused here rather than downstream:
+    // the worker's `mapCellRefsToSigilLinks()` refuses one as well, and a
+    // refusal there arrives as an error reply, after this handle has already
+    // cached the value and told its subscribers.
+    if (value instanceof FabricInstance) {
+      refuseFabricInstance(value, "when sending a value over this connection");
+    }
 
     if (isObjectOrArray(value)) {
       return Object.fromEntries(
@@ -620,10 +642,17 @@ function applyValue(
     );
   }
 
-  // Carried through whole, as `deserialize()` hydrates one: the record branch
-  // below would rebuild it from enumerable own properties it does not have.
-  if (current instanceof FabricSpecialObject) {
+  // A leaf, carried through whole as `deserialize()` hydrates one: the record
+  // branch below would rebuild it from enumerable own properties it does not
+  // have.
+  if (current instanceof FabricPrimitive) {
     return current;
+  }
+
+  // A container this walk cannot descend, so it cannot preserve a handle
+  // inside one against the incoming value the way it does for a record.
+  if (current instanceof FabricInstance) {
+    refuseFabricInstance(current, "when applying a delivered value");
   }
 
   // For plain objects, recursively apply to each property
@@ -675,14 +704,27 @@ function valuesEqual(a: unknown, b: unknown): boolean {
     return isCellHandle(a) && isCellHandle(b) && a.equals(b);
   }
 
-  // Compared by the data model rather than by this walk, and _before_ the
-  // record branch, which reads enumerable own properties a fabric class does
-  // not have: two `FabricBytes` over different bytes both present as `{}`
-  // there and would compare equal, keeping the old value and telling no
-  // subscriber. Either side is enough to ask, so an instance never compares
-  // equal to a plain record that mimics it.
-  if (a instanceof FabricSpecialObject || b instanceof FabricSpecialObject) {
+  // A `FabricPrimitive` is compared by the data model rather than by this
+  // walk, and _before_ the record branch, which reads enumerable own
+  // properties a fabric class does not have: two `FabricBytes` over different
+  // bytes both present as `{}` there and would compare equal, keeping the old
+  // value and telling no subscriber. Either side is enough to ask, so one
+  // never compares equal to a plain record that mimics it. A primitive is a
+  // leaf, so comparing its content is the whole comparison.
+  if (a instanceof FabricPrimitive || b instanceof FabricPrimitive) {
     return valueEqual(a as FabricValue, b as FabricValue);
+  }
+
+  // An instance is not, and `valueEqual()` would settle its outgoing
+  // references by the data model's rules where this walk has its own -- a
+  // handle compares by the cell it names, not by content. Rather than answer
+  // with a comparison that is right for one of those and wrong for the other,
+  // this refuses.
+  if (a instanceof FabricInstance || b instanceof FabricInstance) {
+    refuseFabricInstance(
+      (a instanceof FabricInstance ? a : b) as FabricInstance,
+      "when comparing a delivered value against the cached one",
+    );
   }
   if (Array.isArray(a)) {
     if (!Array.isArray(b)) return false;
