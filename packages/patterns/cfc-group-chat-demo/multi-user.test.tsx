@@ -1,4 +1,5 @@
 /// <cts-enable />
+
 /**
  * Multi-user pattern test for the CFC group chat demo.
  *

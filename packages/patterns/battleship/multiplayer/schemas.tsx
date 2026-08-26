@@ -61,6 +61,7 @@ import { createEmptyGrid } from "../shared/index.tsx";
 
 export interface PlayerData {
   name: string;
+
   /** Avatar URL or glyph, snapshotted from the joiner's shared profile. */
   avatar?: string;
   ships: Ship[];
@@ -163,6 +164,7 @@ export interface RoomOutput {
   [UI]: PerSession<VNode>;
   myName: string;
   myPlayerNumber: 1 | 2 | null;
+
   /** Fire a shot at the enemy board - exported for testing */
   fireShot: Stream<{ row: number; col: number }>;
 }
