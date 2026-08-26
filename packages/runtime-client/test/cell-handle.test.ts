@@ -196,6 +196,20 @@ describe("cell-handle", () => {
       expect(nested.bytes.slice()).toEqual(new Uint8Array([7, 8, 9]));
       expect(nested.links).toEqual([linkedRef]);
     });
+
+    it("rejects unsupported Fabric special objects in SQLite binds", async () => {
+      const runtime = {
+        [$conn]: () => ({ request: () => Promise.resolve({}) }),
+      } as unknown as RuntimeClient;
+      const database = new CellHandle(runtime, ref);
+
+      await expect(database.execSqlite(
+        "SELECT :nested",
+        { nested: { when: new FabricEpochNsec(1n) } },
+      )).rejects.toThrow(
+        "SQLite bind values support `FabricBytes` but not `FabricEpochNsec`.",
+      );
+    });
   });
 
   describe("CellHandle CFC label IPC", () => {

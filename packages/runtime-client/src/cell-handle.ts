@@ -9,6 +9,7 @@ import {
   type FabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
   fabricFromRealmValue,
   realmFromFabricValue,
@@ -659,7 +660,13 @@ export class CellHandle<T = unknown> {
 
   private static sqliteFabricValue(value: ClientCellValue): FabricValue {
     if (isCellHandle(value)) return value.ref();
-    if (value instanceof FabricSpecialObject) return value;
+    if (value instanceof FabricBytes) return value;
+    if (value instanceof FabricSpecialObject) {
+      throw new TypeError(
+        `SQLite bind values support \`FabricBytes\` but not ` +
+          `\`${value.constructor.name}\`.`,
+      );
+    }
     if (Array.isArray(value)) {
       return value.map((member) => CellHandle.sqliteFabricValue(member));
     }
