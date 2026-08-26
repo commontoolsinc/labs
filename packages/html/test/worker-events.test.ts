@@ -206,6 +206,21 @@ Deno.test("events - serializeEvent", async (t) => {
     assertEquals(serialized.target?.value, "[object Object]");
   });
 
+  await t.step("describes a target value that refuses coercion too", () => {
+    // `String()` reaches for `toString` and `valueOf`; a null-prototype object
+    // has neither, and a circular one has no JSON form either, so both routes
+    // out of the conversion throw. The event still has to reach the worker.
+    const bare = Object.create(null);
+    bare.self = bare;
+    const event = new MockEvent("input", {
+      target: { value: bare },
+    }) as unknown as Event;
+
+    const serialized = serializeEvent(event);
+
+    assertEquals(serialized.target?.value, "/unconvertible");
+  });
+
   await t.step("captures trusted provenance", () => {
     const event = new MockEvent("click", {
       isTrusted: true,

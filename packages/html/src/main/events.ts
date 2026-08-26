@@ -233,10 +233,28 @@ function toSerializableValue(value: unknown): FabricValue {
     // `CellHandle` becomes its sigil link -- and drops what JSON has no
     // representation for. `undefined` comes back from `JSON.stringify()` for a
     // function or a symbol, and a circular reference or a throwing `toJSON()`
-    // lands in the `catch`.
+    // throws out of it.
     const jsonString = JSON.stringify(value);
-    return jsonString !== undefined ? JSON.parse(jsonString) : String(value);
+    if (jsonString !== undefined) return JSON.parse(jsonString);
   } catch {
+    // Described below, as a value with no JSON form at all is.
+  }
+
+  return describeUnconvertible(value);
+}
+
+/**
+ * Renders a value with no JSON form as text, for a description that must be
+ * produced whatever it is handed.
+ *
+ * A value can refuse even to be coerced: `String()` reaches for `toString` and
+ * `valueOf`, and an object made with `Object.create(null)` has no prototype to
+ * find either on. `/unconvertible` is the fixed token for that.
+ */
+function describeUnconvertible(value: unknown): string {
+  try {
     return String(value);
+  } catch {
+    return "/unconvertible";
   }
 }
