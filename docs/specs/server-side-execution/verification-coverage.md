@@ -5682,9 +5682,20 @@ supply; OW29/OW32/OW34 closed):
     arms, asserting on the RAW stored value — resolved reads are
     blind). Live: pre-fix 3/3 red, post-fix 3/3 green ensure-ON, and
     the ensure-OFF store dump post-fix holds 0 corrupt of 24 stored
-    sourceMap fields. Expected on #6248's board: shard 10 greens (its
-    red is this exact deterministic producer); shards 2/6 remain the
-    row's separate profile program-materialization family.
+    sourceMap fields. Legacy residual (recorded, not owed): the
+    fleet's EXISTING poisoned docs are never healed in place — a warm
+    hit skips write-back and a runtimeVersion bump orphans rather than
+    rewrites them — but they are inert going forward (the independent
+    review's planted-corruption probes, review-6320-report.md): with
+    the serving space reachable a value read resolves THROUGH the
+    legacy link and post-fix onward write-backs LAUNDER it to the
+    plain value; with the target dangling the doc loads mapless and
+    compiles fine; and a snapshot-time throw (e.g. an
+    unreachable-space authorization error) degrades that one doc to a
+    cache miss instead of failing the closure load. Healing is
+    deliberately out of scope. Expected on #6248's board: shard 10
+    greens (its red is this exact deterministic producer); shards 2/6
+    remain the row's separate profile program-materialization family.
     **SCOPE RULED 2026-08-24 (the owner; verbatim in the stage-1
     report): production ensures a root for EVERY activated space —
     per-space discrimination is DEFERRED to its own design work — and

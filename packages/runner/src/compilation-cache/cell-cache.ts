@@ -1698,9 +1698,19 @@ export async function loadCompiledClosure(
     // verbatim-reused fields are immune: strings and string arrays either
     // re-derive on write (`deriveModuleRecordFields`) or serialize through
     // `JSON.stringify`.
-    const sourceMap = doc.sourceMap === undefined
-      ? undefined
-      : snapshotQueryResult(doc.sourceMap);
+    let sourceMap: unknown;
+    try {
+      sourceMap = doc.sourceMap === undefined
+        ? undefined
+        : snapshotQueryResult(doc.sourceMap);
+    } catch {
+      // Mirror the policyManifests degradation above: a synchronously
+      // throwing resolution — e.g. an authorization error against an
+      // unreachable space behind a legacy cross-space `/sourceMap` link —
+      // drops THIS doc (a cache miss, so the caller recompiles) instead of
+      // failing the whole closure load.
+      return undefined;
+    }
     if (doc.policyManifests === undefined && sourceMap === undefined) {
       return doc;
     }

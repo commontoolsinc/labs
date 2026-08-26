@@ -219,9 +219,15 @@ describe("compile-cache storage-served closures round-trip as values", () => {
       // per-space storage hit, so its modules are SERVED FROM A's STORAGE and
       // populate the byte cache. Compiling it into B then byte-cache-hits and
       // writes those same module objects back into B — where the shared helper
-      // doc already exists with stored CFC metadata. Before the fix this
-      // write-back aborts with cfc-relevant-transaction-not-prepared
-      // ("missing link source metadata … at /sourceMap").
+      // doc already exists with stored CFC metadata. Before the fix the
+      // corrupt cross-space link COMMITTED even here: in this single-client
+      // emulate topology the foreign space's stored metadata is readable at
+      // prepare time, so the link write derives a label and passes. On the
+      // live client against toolshed that read resolves nothing and the same
+      // write-back ABORTS fail-closed ("missing link source metadata … at
+      // /sourceMap" — the ensure-ON pattern-shard-10 red); that abort arm is
+      // evidenced by the live gate, not by this unit test. Either disposition
+      // is the same corrupt value, which the raw-store assertions below pin.
       await compileInto(rt2, PROGRAM_B, spaceA);
       await compileInto(rt2, PROGRAM_B, spaceB);
 
@@ -230,13 +236,18 @@ describe("compile-cache storage-served closures round-trip as values", () => {
       const identities = await closureIdentities(rt2, spaceA, entryB);
       expect((await closureIdentities(rt2, spaceB, entryB)).length)
         .toBe(identities.length);
+      let docsWithMap = 0;
       for (const identity of identities) {
         const rawA = await rawStoredSourceMap(rt2, spaceA, identity);
         const rawB = await rawStoredSourceMap(rt2, spaceB, identity);
+        if (rawA !== undefined) docsWithMap++;
         expect(rawB).toEqual(rawA);
         expect(JSON.stringify(rawB ?? null)).not.toContain('"/quote"');
         expect(JSON.stringify(rawB ?? null)).not.toContain('"link@');
       }
+      // Vacuity guard: the raw-shape assertions above only mean something if
+      // the closure actually stores source maps.
+      expect(docsWithMap).toBeGreaterThan(0);
     } finally {
       await rt2.dispose();
       await rtSeed.dispose();
@@ -263,15 +274,20 @@ describe("compile-cache storage-served closures round-trip as values", () => {
       const identities = await closureIdentities(rt2, spaceA, entry);
       expect((await closureIdentities(rt2, spaceC, entry)).length)
         .toBe(identities.length);
+      let docsWithMap = 0;
       for (const identity of identities) {
         const rawA = await rawStoredSourceMap(rt2, spaceA, identity);
         const rawC = await rawStoredSourceMap(rt2, spaceC, identity);
+        if (rawA !== undefined) docsWithMap++;
         // The fresh space's stored sourceMap is the VALUE, not a (quoted)
         // link into the space that served the modules.
         expect(JSON.stringify(rawC ?? null)).not.toContain('"/quote"');
         expect(JSON.stringify(rawC ?? null)).not.toContain('"link@');
         expect(rawC).toEqual(rawA);
       }
+      // Vacuity guard: the raw-shape assertions above only mean something if
+      // the closure actually stores source maps.
+      expect(docsWithMap).toBeGreaterThan(0);
     } finally {
       await rt2.dispose();
       await rtSeed.dispose();
