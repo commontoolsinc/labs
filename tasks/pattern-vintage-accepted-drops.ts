@@ -78,11 +78,11 @@ export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
   {
     pattern: "topics/main.tsx",
     paths: [
-      // The unsigned caller retires, and the display names it fed go with it.
+      // The unsigned caller retires. The per-topic display names it fed go
+      // with it, and are listed once below among the narrowed demand rather
+      // than twice — the two removals take the same paths.
       "myName",
       "setMyName",
-      "topics[].createdByName",
-      "mentionable[].createdByName",
       // --- the demand narrowing (docs/history/topics-demand-narrowing-break.md)
       // The board demanded the topic's whole published surface of every stored
       // topic, three verb streams among them. A holder's required demands are

@@ -293,7 +293,7 @@ export default pattern(() => {
   // The verbs, and every read of what they write, are exercised on a direct
   // instance. The board's demand carries neither the verbs nor the thread,
   // links, or update stamps they produce, and a topic built here cannot be put
-  // on a board to be reached through it. `addTopic`'s own create behaviour is
+  // on a board to be reached through it. `addTopic`'s own create behavior is
   // still asserted through the board below, on the fields it does demand.
   const boardVerbTopic = Topic({
     title: "Board verb target",

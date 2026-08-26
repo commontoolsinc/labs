@@ -21,7 +21,7 @@ import {
 // ===== Shared types =====
 
 /**
- * What a link points at — a rendering hint, not a behaviour switch.
+ * What a link points at — a rendering hint, not a behavior switch.
  *
  * An open domain rather than an enum, deliberately. This value is PROVIDED
  * data: it reaches a reader through a published result, where the update gate
@@ -68,14 +68,16 @@ export interface AddCommentEvent extends AgentAuthoredEvent {
 }
 
 export interface AddLinkEvent extends AgentAuthoredEvent {
-  /** What the link points at — a rendering hint, not a behaviour switch.
+  /** What the link points at — a rendering hint, not a behavior switch.
    * Optional because the handler defaults it to `"web"`, and a caller should
    * not be made to supply a field the verb never needed. */
   kind?: TopicLinkKind;
+
   /** The link target. Must be http(s): anything else rejects, because a
    * user-supplied scheme on a shared surface is script execution in every
    * viewer's session. */
   url: string;
+
   /** Display label. Optional, and a blank one falls back to the URL — the
    * handler has always done that, and requiring the field only kept callers
    * from relying on it. */
@@ -188,14 +190,15 @@ export interface TopicComment {
   /** Snapshot taken at write time (profile enrichment comes later; never gate
    * authorship on a profile wish — CT-1879). Comments carry no minted id:
    * array elements have stable entity identity; future editing addresses
-   * elements by reference (`equals()`), not by a synthetic key. */
-  /** Every comment written from now on carries one, because `addComment`
-   * requires a signature. Still OPTIONAL with a default, and that is not a
-   * hedge: a comment stored by the unsigned path has no author, and a stored
-   * record type has to accept what is already stored. Requiring it here does
-   * not make old comments signed — it makes a deployed piece holding one
-   * impossible to update at all, which `deno task pattern-vintage` refuses
-   * rather than discovers in production. */
+   * elements by reference (`equals()`), not by a synthetic key.
+   *
+   * Every comment written from now on carries one, because `addComment`
+   * requires a signature. Still OPTIONAL, and that is not a hedge: a comment
+   * stored by the unsigned path has no author, and a stored record type has to
+   * accept what is already stored. Requiring it here does not make old comments
+   * signed — it makes a deployed piece holding one impossible to update at all,
+   * which `deno task pattern-vintage` refuses rather than discovers in
+   * production. */
   author?: TopicAuthor;
   body: string | Default<"">;
   sentAt: number | Default<0>;
@@ -236,6 +239,7 @@ export interface TopicInput {
    * like `myName` (and backfillable as a one-time link-bind on pieces created
    * before it existed). Absent, the editor simply offers no completions. */
   mentionable?: Writable<TopicMentionable[] | Default<[]>>;
+
   /** Where this topic's `[Label][key]` mentions point, keyed by the token that
    * appears in the body. The editor owns the contents; this pattern owns the
    * cell, which is what makes a mention durable and — because each entry holds
@@ -337,14 +341,6 @@ export interface TopicCrossrefRow {
 }
 
 /**
- * The least a board row needs from a topic: its title, and the scalars a
- * full-board survey summarises.
- *
- * An input projection, not a published type — every reference this pattern
- * publishes is declared at `TopicPiece`. Keeping it out of the published
- * surface is what leaves it free to shrink.
- */
-/**
  * What the body editor's `@`-mention autocomplete needs of a sibling: the
  * display name it lists, and the title it matches on.
  *
@@ -359,6 +355,14 @@ export interface TopicMentionable {
   title: string | Default<"">;
 }
 
+/**
+ * The least a board row needs from a topic: its title, and the scalars a
+ * full-board survey summarizes.
+ *
+ * An input projection, not a published type — every reference this pattern
+ * publishes is declared at `TopicPiece`. Keeping it out of the published
+ * surface is what leaves it free to shrink.
+ */
 export interface TopicSummary {
   /** The topic's title. Defaulted rather than required, like every other
    * field a board card renders: the card list is a mapped sub-pattern, so
@@ -397,6 +401,7 @@ export interface TopicPiece extends TopicSummary {
    * retained topic may not have produced this path yet; its persisted title
    * remains authoritative until it does. */
   [NAME]: string | Default<""> | undefined;
+
   /** The living document, verbatim Markdown. `setBody` replaces it whole. */
   body: string | Default<"">;
 
@@ -475,6 +480,7 @@ export interface TopicPiece extends TopicSummary {
    * that lacked them does not survive it, and the reason for the optionality
    * goes with it. */
   mention: Stream<MentionEvent>;
+
   /** Stop referencing a piece: removes every `mention`-made entry naming it.
    * References made in the prose are retracted by editing the prose, not by
    * this. Optional on the projection for the same reason as `mention`. */

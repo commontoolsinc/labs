@@ -359,15 +359,18 @@ const cardsByActivity = lift(
 export interface TopicsOutput {
   [NAME]: string;
   [UI]: VNode;
+
   /** The board's topics, in filing order, through the shape the board demands
    * of them: the display scalars and the mention universe, and no verbs. A
    * caller that means to mutate a topic addresses the topic itself, where its
    * own schema governs. Survey through `index` instead; read this when you
    * already know which topic you are expanding. */
   topics: TopicDemand[];
+
   /** The same list, under the name the topic pattern's editor autocompletes
    * over — what `addTopic` wires into each child as its mention universe. */
   mentionable: TopicDemand[] | Default<[]>;
+
   /** How many topics the board holds, nulls included. */
   topicCount: number;
 
@@ -392,6 +395,7 @@ export interface TopicsOutput {
    * finishes a create. Returns the created topic as its survey row — the
    * reference plus the write-time facts the pattern resolved. */
   addTopic: Stream<AddTopicEvent, AddTopicResult>;
+
   /** Submit the footer composer as the current viewer's canonical Profile. */
   submitTopic: Stream<void>;
 }
@@ -402,6 +406,7 @@ export interface TopicsOutput {
 export const submitProfileTopic = handler<void, {
   topics: Writable<TopicDemand[] | Default<[]>>;
   mentionable: Writable<TopicDemand[] | Default<[]>>;
+
   /** `Writable` only because that is what the factory boundary accepts: the
    * input this is handed straight to declares `ReadonlyCell`, and a
    * `ReadonlyCell` held in handler state is not assignable to it — handler
