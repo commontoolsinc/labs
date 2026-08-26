@@ -150,12 +150,16 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return this.#pendingWrites;
   }
 
-  async operationCodecs<T>(cell: CellHandle<T>): Promise<readonly string[]> {
+  async operationCodecs<T>(
+    cell: CellHandle<T>,
+    operationSessionId?: string,
+  ): Promise<readonly string[]> {
     const response = await this.#conn.request<
       RequestType.OperationCapabilities
     >({
       type: RequestType.OperationCapabilities,
       cell: cell.ref(),
+      ...(operationSessionId === undefined ? {} : { operationSessionId }),
     });
     return response.codecs;
   }
@@ -163,10 +167,12 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   async queryOperationField<T>(
     cell: CellHandle<T>,
     after?: OpCursor,
+    operationSessionId?: string,
   ): Promise<OperationFieldSnapshot> {
     const response = await this.#conn.request<RequestType.OperationQuery>({
       type: RequestType.OperationQuery,
       cell: cell.ref(),
+      ...(operationSessionId === undefined ? {} : { operationSessionId }),
       ...(after === undefined ? {} : { after }),
     });
     return operationFieldFromWire(response.field);
@@ -181,10 +187,12 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       baselineHash?: string;
       payload: FabricValue;
     },
+    operationSessionId?: string,
   ): Promise<ApplyOpResolution> {
     const response = await this.#conn.request<RequestType.OperationApply>({
       type: RequestType.OperationApply,
       cell: cell.ref(),
+      ...(operationSessionId === undefined ? {} : { operationSessionId }),
       ...operation,
       payload: realmFromFabricValue(operation.payload),
     });
@@ -195,6 +203,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     cell: CellHandle<T>,
     callback: (field: OperationFieldSnapshot) => void,
     after?: OpCursor,
+    operationSessionId?: string,
   ): Promise<() => void> {
     const subscriptionId = crypto.randomUUID();
     this.#operationSubscriptions.set(subscriptionId, callback);
@@ -205,6 +214,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
         type: RequestType.OperationSubscribe,
         subscriptionId,
         cell: cell.ref(),
+        ...(operationSessionId === undefined ? {} : { operationSessionId }),
         ...(after === undefined ? {} : { after }),
       });
       if (!response.value) {
@@ -238,16 +248,25 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     cell: CellHandle<T>,
     codec: string,
     cursor: OpCursor,
+    operationSessionId?: string,
   ): Promise<void> {
     const response = await this.#conn.request<RequestType.OperationRelease>({
       type: RequestType.OperationRelease,
       cell: cell.ref(),
+      ...(operationSessionId === undefined ? {} : { operationSessionId }),
       codec,
       cursor,
     });
     if (!response.value) {
       throw new Error("operation field was not released");
     }
+  }
+
+  async closeOperationSession(operationSessionId: string): Promise<void> {
+    await this.#conn.request<RequestType.OperationSessionClose>({
+      type: RequestType.OperationSessionClose,
+      operationSessionId,
+    });
   }
 
   /**

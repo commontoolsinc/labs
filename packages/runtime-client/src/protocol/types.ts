@@ -152,6 +152,9 @@ export enum RequestType {
   /** Stops an operation subscription. */
   OperationUnsubscribe = "operation:unsubscribe",
 
+  /** Forgets a client's pinned operation target. */
+  OperationSessionClose = "operation:session-close",
+
   // Runtime operations
 
   /**
@@ -907,6 +910,7 @@ export type CellGetCfcLabelRequest = BaseRequest & {
 export type OperationQueryRequest = BaseRequest & {
   type: RequestType.OperationQuery;
   cell: CellRef;
+  operationSessionId?: string;
   after?: OpCursor;
 };
 
@@ -914,12 +918,14 @@ export type OperationQueryRequest = BaseRequest & {
 export type OperationCapabilitiesRequest = BaseRequest & {
   type: RequestType.OperationCapabilities;
   cell: CellRef;
+  operationSessionId?: string;
 };
 
 /** The {@link RequestType.OperationApply} request. */
 export type OperationApplyRequest = BaseRequest & {
   type: RequestType.OperationApply;
   cell: CellRef;
+  operationSessionId?: string;
   codec: string;
   submissionId: string;
   base: OpCursor | null;
@@ -932,6 +938,7 @@ export type OperationSubscribeRequest = BaseRequest & {
   type: RequestType.OperationSubscribe;
   subscriptionId: string;
   cell: CellRef;
+  operationSessionId?: string;
   after?: OpCursor;
 };
 
@@ -939,6 +946,7 @@ export type OperationSubscribeRequest = BaseRequest & {
 export type OperationReleaseRequest = BaseRequest & {
   type: RequestType.OperationRelease;
   cell: CellRef;
+  operationSessionId?: string;
   codec: string;
   cursor: OpCursor;
 };
@@ -947,6 +955,12 @@ export type OperationReleaseRequest = BaseRequest & {
 export type OperationUnsubscribeRequest = BaseRequest & {
   type: RequestType.OperationUnsubscribe;
   subscriptionId: string;
+};
+
+/** The {@link RequestType.OperationSessionClose} request. */
+export type OperationSessionCloseRequest = BaseRequest & {
+  type: RequestType.OperationSessionClose;
+  operationSessionId: string;
 };
 
 /** A response carrying one operation-backed field snapshot. */
@@ -2399,6 +2413,7 @@ export type IPCClientRequest =
   | OperationReleaseRequest
   | OperationSubscribeRequest
   | OperationUnsubscribeRequest
+  | OperationSessionCloseRequest
   | GetCellRequest
   | GetHomeSpaceCellRequest
   | EnsureHomePatternRunningRequest
@@ -3034,6 +3049,10 @@ export type Commands = {
   };
   [RequestType.OperationUnsubscribe]: {
     request: OperationUnsubscribeRequest;
+    response: BooleanResponse;
+  };
+  [RequestType.OperationSessionClose]: {
+    request: OperationSessionCloseRequest;
     response: BooleanResponse;
   };
   // Page requests

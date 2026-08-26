@@ -4,6 +4,8 @@ import {
   operationBaselineHash,
 } from "@commonfabric/memory/v2/operation-codec";
 import {
+  type ApplyOpOperation,
+  type ApplyOpResolution,
   type OperationFieldSnapshot,
   type SessionSync,
   toValuePath,
@@ -24,6 +26,125 @@ import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 const signer = await Identity.fromPassphrase("operation storage capability");
 
 describe("operation storage capability", () => {
+  it("replays watches and pre-issue applies across a route replacement", async () => {
+    const sync: SessionSync = {
+      type: "sync",
+      fromSeq: 0,
+      toSeq: 0,
+      upserts: [],
+      removes: [],
+    };
+    const firstApply = defer<never>();
+    const applyStarted = defer<void>();
+    const appliedSubmissionIds: string[] = [];
+    let sessions = 0;
+    let watchAdds = 0;
+    const resolution = {
+      operationIndex: 0,
+      address: {
+        branch: "",
+        id: "of:route-operation",
+        scopeKey: "space",
+        path: toValuePath([]),
+      },
+      codec: "test@1",
+      submissionId: "route:1",
+      from: { epoch: 1, version: 0 },
+      to: { epoch: 1, version: 1 },
+      operations: [],
+      duplicate: false,
+    } satisfies ApplyOpResolution;
+    const storage = new (class extends V2StorageManager {
+      constructor() {
+        super(
+          {
+            as: signer,
+            memoryHost: new URL("https://default-toolshed.test"),
+          },
+          {
+            create: () => {
+              sessions++;
+              const sessionNumber = sessions;
+              const client = {
+                serverFlags: {
+                  applyOp: true,
+                  operationCodecs: ["test@1"],
+                },
+                close: () => Promise.resolve(),
+              } as unknown as MemoryV2Client.Client;
+              const session = {
+                watchAddSync: () => {
+                  watchAdds++;
+                  return Promise.resolve({
+                    view: MemoryV2Client.WatchView.fromSync(sync),
+                    sync,
+                    precedingSyncs: [],
+                  });
+                },
+                watchRemoveSync: () =>
+                  Promise.resolve({
+                    view: MemoryV2Client.WatchView.fromSync(sync),
+                    sync,
+                    precedingSyncs: [],
+                  }),
+                transact: (commit: {
+                  operations: ApplyOpOperation[];
+                }) => {
+                  appliedSubmissionIds.push(
+                    commit.operations[0].submissionId,
+                  );
+                  if (sessionNumber === 1) {
+                    applyStarted.resolve();
+                    return firstApply.promise;
+                  }
+                  return Promise.resolve({
+                    operationResolutions: [resolution],
+                  });
+                },
+              } as unknown as MemoryV2Client.SpaceSession;
+              return Promise.resolve({ client, session });
+            },
+          },
+        );
+      }
+    })();
+    const provider = storage.open(signer.did());
+    expect(hasOperationStorageCapability(provider)).toBe(true);
+    if (!hasOperationStorageCapability(provider)) return;
+
+    const cancel = await provider.subscribeOperationField({
+      id: "of:route-operation",
+      path: toValuePath([]),
+    }, () => {});
+    const applying = provider.applyOperation({
+      op: "apply-op",
+      id: "of:route-operation",
+      path: toValuePath([]),
+      codec: "test@1",
+      submissionId: "route:1",
+      base: null,
+      baselineHash: "baseline",
+      payload: {},
+    });
+    await applyStarted.promise;
+
+    expect(
+      storage.registerSpaceHost(
+        signer.did(),
+        "https://hinted-toolshed.test",
+      ),
+    ).toBe(true);
+    firstApply.reject(new Error("memory replica route replaced"));
+    await storage.crossSpaceSettled();
+
+    await expect(applying).resolves.toEqual(resolution);
+    expect(sessions).toBe(2);
+    expect(watchAdds).toBe(2);
+    expect(appliedSubmissionIds).toEqual(["route:1", "route:1"]);
+    cancel();
+    await storage.closeNow();
+  });
+
   it("fails closed when Memory lacks operation support or a resolution", async () => {
     const unsupportedClient = {
       serverFlags: { applyOp: false },

@@ -73,6 +73,7 @@ export type {
 export type {
   ChangeGroup,
   IExtendedStorageTransaction,
+  IOperationStorageCapability,
   MemorySpace,
   TransactionCommitOptions,
 } from "./storage/interface.ts";

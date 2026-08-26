@@ -584,9 +584,9 @@ export interface IOperationStorageCapability {
 }
 
 export const hasOperationStorageCapability = (
-  replica: ISpaceReplica,
-): replica is ISpaceReplica & IOperationStorageCapability => {
-  const candidate = replica as Partial<IOperationStorageCapability>;
+  value: unknown,
+): value is IOperationStorageCapability => {
+  const candidate = value as Partial<IOperationStorageCapability>;
   return typeof candidate.operationCodecs === "function" &&
     typeof candidate.queryOperationField === "function" &&
     typeof candidate.applyOperation === "function" &&

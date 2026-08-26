@@ -5,7 +5,10 @@ import {
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { Identity } from "@commonfabric/identity";
 import type { OperationFieldSnapshot } from "@commonfabric/memory/v2";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { RuntimeProcessor } from "../src/backends/runtime-processor.ts";
 import type { CellHandle } from "../src/cell-handle.ts";
 import { RuntimeClient } from "../src/runtime-client.ts";
@@ -14,6 +17,20 @@ import {
   NotificationType,
   RequestType,
 } from "../src/protocol/mod.ts";
+
+const operationRuntime = (
+  capability: Record<string, unknown>,
+  resolved?: CellRef,
+) => ({
+  getCellFromLink: (cell: CellRef) => ({
+    resolveAsCell: () => ({
+      getAsNormalizedFullLink: () => resolved ?? cell,
+    }),
+  }),
+  storageManager: {
+    open: () => ({ ...capability, replica: capability }),
+  },
+});
 
 describe("RuntimeClient operation collaboration", () => {
   it("queries, applies, and subscribes through the worker protocol", async () => {
@@ -99,6 +116,7 @@ describe("RuntimeClient operation collaboration", () => {
           case RequestType.OperationRelease:
           case RequestType.OperationSubscribe:
           case RequestType.OperationUnsubscribe:
+          case RequestType.OperationSessionClose:
             return Promise.resolve({ value: true });
           default:
             throw new Error(`unexpected request: ${request.type}`);
@@ -109,11 +127,18 @@ describe("RuntimeClient operation collaboration", () => {
       new (conn: never, options: unknown): RuntimeClient;
     })(conn, {});
     const cell = { ref: () => cellRef } as CellHandle<unknown>;
+    const operationSessionId = "operation-session:1";
 
-    expect(await client.operationCodecs(cell)).toEqual([
+    expect(await client.operationCodecs(cell, operationSessionId)).toEqual([
       "codemirror-changeset@1",
     ]);
-    expect(await client.queryOperationField(cell)).toEqual(initial);
+    expect(
+      await client.queryOperationField(
+        cell,
+        undefined,
+        operationSessionId,
+      ),
+    ).toEqual(initial);
     expect(
       await client.applyOperation(cell, {
         codec: "codemirror-changeset@1",
@@ -121,18 +146,22 @@ describe("RuntimeClient operation collaboration", () => {
         base: null,
         baselineHash: "baseline",
         payload: { updates: [] },
-      }),
+      }, operationSessionId),
     ).toEqual(resolution);
     await client.releaseOperationField(
       cell,
       "codemirror-changeset@1",
       { epoch: 1, version: 1 },
+      operationSessionId,
     );
+    await client.closeOperationSession(operationSessionId);
 
     const delivered: OperationFieldSnapshot[] = [];
     const unsubscribe = await client.subscribeOperationField(
       cell,
       (field) => delivered.push(field),
+      undefined,
+      operationSessionId,
     );
     const subscribe = requests.at(-1) as {
       type: RequestType;
@@ -154,6 +183,7 @@ describe("RuntimeClient operation collaboration", () => {
         RequestType.OperationQuery,
         RequestType.OperationApply,
         RequestType.OperationRelease,
+        RequestType.OperationSessionClose,
         RequestType.OperationSubscribe,
         RequestType.OperationUnsubscribe,
       ]);
@@ -161,6 +191,15 @@ describe("RuntimeClient operation collaboration", () => {
       (request as { type: RequestType }).type === RequestType.OperationApply
     ) as { payload: Parameters<typeof fabricFromRealmValue>[0] };
     expect(fabricFromRealmValue(apply.payload)).toEqual({ updates: [] });
+    expect(
+      requests.filter((request) =>
+        (request as { operationSessionId?: string }).operationSessionId !==
+          undefined
+      ).every((request) =>
+        (request as { operationSessionId?: string }).operationSessionId ===
+          operationSessionId
+      ),
+    ).toBe(true);
   });
 
   it("compensates when the worker loses a subscribe response", async () => {
@@ -297,9 +336,7 @@ describe("RuntimeClient operation collaboration", () => {
       subscribeOperationField: () => Promise.resolve(() => {}),
     };
     const processor = Object.assign(Object.create(RuntimeProcessor.prototype), {
-      runtime: {
-        storageManager: { open: () => ({ replica }) },
-      },
+      runtime: operationRuntime(replica),
     }) as RuntimeProcessor;
     const cell = {
       space: "did:key:z6Mk-operation-client",
@@ -364,7 +401,7 @@ describe("RuntimeClient operation collaboration", () => {
       },
     };
     const processor = Object.assign(Object.create(RuntimeProcessor.prototype), {
-      runtime: { storageManager: { open: () => ({ replica }) } },
+      runtime: operationRuntime(replica),
       operationSubscriptions: new Map(),
       _isDisposed: false,
     }) as RuntimeProcessor;
@@ -466,7 +503,7 @@ describe("RuntimeClient operation collaboration", () => {
     const unsupported = Object.assign(
       Object.create(RuntimeProcessor.prototype),
       {
-        runtime: { storageManager: { open: () => ({ replica: {} }) } },
+        runtime: operationRuntime({}),
       },
     ) as RuntimeProcessor;
     await expect(unsupported.handleOperationCapabilities({ cell } as never))
@@ -495,11 +532,238 @@ describe("RuntimeClient operation collaboration", () => {
     })(runtime, {}, "did:key:z6Mk-dispose", {}, telemetry);
     (processor as any).operationSubscriptions.set(
       "subscription:dispose",
-      () => cancellations++,
+      { cancelled: false, cancel: () => cancellations++ },
     );
 
     await processor.dispose();
 
     expect(cancellations).toBe(1);
+  });
+
+  it("cancels a worker watch whose unsubscribe arrives during installation", async () => {
+    const installed = Promise.withResolvers<() => void>();
+    let cancellations = 0;
+    const capability = {
+      operationCodecs: () => Promise.resolve(["test@1"]),
+      queryOperationField: () => Promise.resolve({}),
+      applyOperation: () => Promise.resolve({}),
+      releaseOperationField: () => Promise.resolve(),
+      subscribeOperationField: () => installed.promise,
+    };
+    const processor = Object.assign(Object.create(RuntimeProcessor.prototype), {
+      runtime: operationRuntime(capability),
+      operationSubscriptions: new Map(),
+      _isDisposed: false,
+    }) as RuntimeProcessor;
+    const request = {
+      cell: {
+        space: "did:key:z6Mk-runtime",
+        id: "of:pending-watch",
+        path: [],
+      },
+      subscriptionId: "subscription:pending",
+    };
+
+    const subscribing = processor.handleOperationSubscribe(request as never);
+    expect(processor.handleOperationUnsubscribe(request as never)).toEqual({
+      value: true,
+    });
+    installed.resolve(() => cancellations++);
+
+    await expect(subscribing).resolves.toEqual({ value: false });
+    expect(cancellations).toBe(1);
+    expect((processor as any).operationSubscriptions.size).toBe(0);
+  });
+
+  it("pins one resolved target for an operation session", async () => {
+    const alias = {
+      space: "did:key:z6Mk-runtime" as CellRef["space"],
+      id: "of:alias",
+      path: ["content"],
+      scope: "space" as const,
+    };
+    const targetA = { ...alias, id: "of:target-a" };
+    const targetB = { ...alias, id: "of:target-b" };
+    let resolved = targetA;
+    const addressed: string[] = [];
+    const field: OperationFieldSnapshot = {
+      branch: "",
+      id: targetA.id,
+      scope: "space",
+      scopeKey: "space",
+      path: targetA.path as unknown as OperationFieldSnapshot["path"],
+      active: true,
+      codec: "test@1",
+      cursor: { epoch: 1, version: 0 },
+      baselineHash: "baseline",
+      materialized: "value",
+      operations: [],
+    };
+    const capability = {
+      operationCodecs: () => Promise.resolve(["test@1"]),
+      queryOperationField: (query: { id: string }) => {
+        addressed.push(`query:${query.id}`);
+        return Promise.resolve(field);
+      },
+      applyOperation: (operation: { id: string; submissionId: string }) => {
+        addressed.push(`apply:${operation.id}`);
+        return Promise.resolve({
+          operationIndex: 0,
+          address: {
+            branch: "",
+            id: operation.id,
+            scope: "space",
+            scopeKey: "space",
+            path: field.path,
+          },
+          codec: "test@1",
+          submissionId: operation.submissionId,
+          from: { epoch: 1, version: 0 },
+          to: { epoch: 1, version: 0 },
+          operations: [],
+          duplicate: false,
+        });
+      },
+      subscribeOperationField: (
+        query: { id: string },
+        _callback: unknown,
+      ) => {
+        addressed.push(`subscribe:${query.id}`);
+        return Promise.resolve(() => {});
+      },
+      releaseOperationField: (operation: { id: string }) => {
+        addressed.push(`release:${operation.id}`);
+        return Promise.resolve();
+      },
+    };
+    const runtime = {
+      getCellFromLink: () => ({
+        resolveAsCell: () => ({
+          getAsNormalizedFullLink: () => resolved,
+        }),
+      }),
+      storageManager: {
+        open: () => ({ ...capability, replica: capability }),
+      },
+    };
+    const processor = Object.assign(Object.create(RuntimeProcessor.prototype), {
+      runtime,
+      operationSubscriptions: new Map(),
+      _isDisposed: false,
+    }) as RuntimeProcessor;
+
+    await processor.handleOperationQuery({
+      cell: alias,
+      operationSessionId: "session:one",
+    } as never);
+    await expect(processor.handleOperationQuery({
+      cell: { ...alias, id: "of:other-alias" },
+      operationSessionId: "session:one",
+    } as never)).rejects.toThrow("cannot change its source cell");
+    resolved = targetB;
+    await processor.handleOperationQuery({
+      cell: alias,
+      operationSessionId: "session:two",
+    } as never);
+    await processor.handleOperationSubscribe({
+      cell: alias,
+      operationSessionId: "session:two",
+      subscriptionId: "subscription:two",
+    } as never);
+    await processor.handleOperationApply({
+      cell: alias,
+      operationSessionId: "session:one",
+      codec: "test@1",
+      submissionId: "submission:1",
+      base: { epoch: 1, version: 0 },
+      payload: realmFromFabricValue("change"),
+    } as never);
+    await processor.handleOperationSubscribe({
+      cell: alias,
+      operationSessionId: "session:one",
+      subscriptionId: "subscription:pin",
+    } as never);
+    await processor.handleOperationRelease({
+      cell: alias,
+      operationSessionId: "session:one",
+      codec: "test@1",
+      cursor: { epoch: 1, version: 0 },
+    } as never);
+
+    expect(addressed).toEqual([
+      "query:of:target-a",
+      "query:of:target-b",
+      "subscribe:of:target-b",
+      "apply:of:target-a",
+      "subscribe:of:target-a",
+      "release:of:target-a",
+    ]);
+    expect(processor.handleOperationUnsubscribe({
+      subscriptionId: "subscription:pin",
+    } as never)).toEqual({ value: true });
+    expect(processor.handleOperationUnsubscribe({
+      subscriptionId: "subscription:two",
+    } as never)).toEqual({ value: true });
+
+    resolved = targetA;
+    await processor.handleOperationQuery({
+      cell: alias,
+      operationSessionId: "session:abandoned",
+    } as never);
+    expect(processor.handleOperationSessionClose({
+      operationSessionId: "session:abandoned",
+    } as never)).toEqual({ value: true });
+    resolved = targetB;
+    await processor.handleOperationQuery({
+      cell: alias,
+      operationSessionId: "session:abandoned",
+    } as never);
+    expect(addressed.slice(-2)).toEqual([
+      "query:of:target-a",
+      "query:of:target-b",
+    ]);
+  });
+
+  it("addresses operation fields through a real linked cell target", async () => {
+    const identity = await Identity.fromPassphrase("operation linked target");
+    const storage = StorageManager.emulate({ as: identity });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://toolshed.test"),
+      storageManager: storage,
+    });
+    const space = identity.did();
+    try {
+      const tx = runtime.edit();
+      const target = runtime.getCell<string>(
+        space,
+        "of:operation-target",
+        undefined,
+        tx,
+      );
+      target.set("value");
+      const alias = runtime.getCell<string>(
+        space,
+        "of:operation-alias",
+        undefined,
+        tx,
+      );
+      alias.set(target);
+      expect((await tx.commit()).error).toBeUndefined();
+      const targetId = target.resolveAsCell().getAsNormalizedFullLink().id;
+
+      const processor = Object.assign(
+        Object.create(RuntimeProcessor.prototype),
+        { runtime },
+      ) as RuntimeProcessor;
+      const field = await processor.handleOperationQuery({
+        cell: alias.getAsNormalizedFullLink() as unknown as CellRef,
+      } as never);
+
+      expect(field.field.id).toBe(targetId);
+      expect(fabricFromRealmValue(field.field.materialized)).toBe("value");
+    } finally {
+      await runtime.dispose();
+      await storage.close();
+    }
   });
 });

@@ -2131,6 +2131,14 @@ type ProviderSyncRequest = {
   instance?: ScopeKey;
 };
 
+type ProviderOperationSubscription = {
+  query: Omit<OperationFieldQuery, "principal" | "sessionId">;
+  callback: (snapshot: OperationFieldSnapshot) => void;
+  cancel?: Cancel;
+  install?: Promise<void>;
+  closed: boolean;
+};
+
 /**
  * Minimal marker sink — structurally the Runtime's `RuntimeTelemetry`.
  * Kept structural (type-only import) so the storage layer takes no runtime
@@ -2138,7 +2146,7 @@ type ProviderSyncRequest = {
  */
 type TelemetrySink = { submit(marker: RuntimeTelemetryMarker): void };
 
-class Provider implements IStorageProvider {
+class Provider implements IStorageProvider, IOperationStorageCapability {
   replica: SpaceReplica;
   // Registered reads to replay when a provisional replica is replaced, keyed
   // by document and then by the normalized selector. A normalized selector is
@@ -2151,6 +2159,7 @@ class Provider implements IStorageProvider {
   >();
   #destroyed = false;
   #routeAbort = new AbortController();
+  #operationSubscriptions = new Set<ProviderOperationSubscription>();
 
   constructor(
     readonly options: ProviderOptions,
@@ -2251,6 +2260,102 @@ class Provider implements IStorageProvider {
     );
   }
 
+  operationCodecs(): Promise<readonly string[]> {
+    return this.followReplacement((replica) => replica.operationCodecs());
+  }
+
+  queryOperationField(
+    query: Omit<OperationFieldQuery, "principal" | "sessionId">,
+  ): Promise<OperationFieldSnapshot> {
+    return this.followReplacement((replica) =>
+      replica.queryOperationField(query)
+    );
+  }
+
+  applyOperation(operation: ApplyOpOperation): Promise<ApplyOpResolution> {
+    return this.followReplacement((replica) =>
+      replica.applyOperation(operation)
+    );
+  }
+
+  releaseOperationField(operation: ReleaseOpFieldOperation): Promise<void> {
+    return this.followReplacement((replica) =>
+      replica.releaseOperationField(operation)
+    );
+  }
+
+  async subscribeOperationField(
+    query: Omit<OperationFieldQuery, "principal" | "sessionId">,
+    callback: (snapshot: OperationFieldSnapshot) => void,
+  ): Promise<Cancel> {
+    if (this.#destroyed) throw new Error("memory provider closed");
+    const subscription: ProviderOperationSubscription = {
+      query,
+      callback,
+      closed: false,
+    };
+    this.#operationSubscriptions.add(subscription);
+    try {
+      await this.ensureOperationSubscription(subscription);
+    } catch (error) {
+      subscription.closed = true;
+      this.#operationSubscriptions.delete(subscription);
+      throw error;
+    }
+    if (subscription.closed || this.#destroyed) {
+      throw new Error("memory provider closed");
+    }
+    return () => {
+      if (subscription.closed) return;
+      subscription.closed = true;
+      this.#operationSubscriptions.delete(subscription);
+      subscription.cancel?.();
+      subscription.cancel = undefined;
+    };
+  }
+
+  private ensureOperationSubscription(
+    subscription: ProviderOperationSubscription,
+  ): Promise<void> {
+    if (subscription.install !== undefined) return subscription.install;
+    const install = this.installOperationSubscription(subscription);
+    subscription.install = install;
+    const clear = () => {
+      if (subscription.install === install) subscription.install = undefined;
+    };
+    install.then(clear, clear);
+    return install;
+  }
+
+  private async installOperationSubscription(
+    subscription: ProviderOperationSubscription,
+  ): Promise<void> {
+    while (!subscription.closed && !this.#destroyed) {
+      const replica = this.replica;
+      let cancel: Cancel;
+      try {
+        cancel = await replica.subscribeOperationField(
+          subscription.query,
+          subscription.callback,
+        );
+      } catch (error) {
+        if (replica !== this.replica && !this.#destroyed) continue;
+        throw error;
+      }
+      if (subscription.closed || this.#destroyed) {
+        cancel();
+        return;
+      }
+      if (replica !== this.replica) {
+        cancel();
+        continue;
+      }
+      subscription.cancel?.();
+      subscription.cancel = cancel;
+      return;
+    }
+  }
+
   canReplaceProvisionalReplica(): boolean {
     const { generation, writeIssuedGeneration } = this.options.routeState;
     return writeIssuedGeneration !== generation;
@@ -2266,6 +2371,10 @@ class Provider implements IStorageProvider {
     this.#routeAbort = new AbortController();
     const replacement = this.createReplica();
     this.replica = replacement;
+    for (const subscription of this.#operationSubscriptions) {
+      subscription.cancel?.();
+      subscription.cancel = undefined;
+    }
     previous.redirectOverlappingReadsTo((uri, selector, scope, instance) =>
       this.replaySync(replacement, uri, selector, scope, instance)
     );
@@ -2273,11 +2382,14 @@ class Provider implements IStorageProvider {
     previous.closeNow();
     const requests = [...this.#syncRequests.values()]
       .flatMap((bySelector) => [...bySelector.values()]);
-    await Promise.all(
-      requests.map(({ uri, selector, scope, instance }) =>
+    await Promise.all([
+      ...requests.map(({ uri, selector, scope, instance }) =>
         this.replaySync(replacement, uri, selector, scope, instance)
       ),
-    );
+      ...[...this.#operationSubscriptions].map((subscription) =>
+        this.ensureOperationSubscription(subscription)
+      ),
+    ]);
   }
 
   synced(): Promise<void> {
@@ -2354,6 +2466,11 @@ class Provider implements IStorageProvider {
       return;
     }
     this.#destroyed = true;
+    for (const subscription of this.#operationSubscriptions) {
+      subscription.closed = true;
+      subscription.cancel?.();
+    }
+    this.#operationSubscriptions.clear();
     this.#routeAbort.abort(new Error("memory replica closed"));
     this.options.routeState.generation++;
     await this.replica.close();
@@ -2362,6 +2479,11 @@ class Provider implements IStorageProvider {
   async destroyNow(): Promise<void> {
     if (!this.#destroyed) {
       this.#destroyed = true;
+      for (const subscription of this.#operationSubscriptions) {
+        subscription.closed = true;
+        subscription.cancel?.();
+      }
+      this.#operationSubscriptions.clear();
       this.#routeAbort.abort(new Error("memory replica closed"));
       this.options.routeState.generation++;
     }
