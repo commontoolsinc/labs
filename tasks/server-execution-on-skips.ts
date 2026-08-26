@@ -192,39 +192,6 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
   // verification-coverage.md OW60, not as a flaky test.
   patterns: [
     {
-      // The post-client-absorb-fix ON gate is 9/10 at the CI lane's
-      // ensure-off
-      // posture. The earlier read-side residues are likely closed by
-      // intervening fixes: r01 has the matching read-side delivery
-      // mechanism story, while r06/r09 have absence-of-observation only
-      // because their keyless-identity mechanism was never root-caused.
-      // The sole red is a new shape: the target stops after six durable
-      // note appends, with one `pattern-swap-setup-error` reporting that
-      // recursive schema validation made no progress. Its root keeps a
-      // real pattern identity, and `pattern-load-error` stays at zero.
-      // The store-incomplete setup-error shape is the current charge;
-      // verification-coverage.md OW45 and its linked historical report
-      // carry the full ledger and discriminators. The entry lifts when
-      // this step greens ON 10/10 quiet-and-loaded; the flip PR needs
-      // this list empty.
-      file: "integration/default-app.test.ts",
-      step: "should persist and reload every rapidly created notebook note",
-      phase: "phase-7",
-      reason: "Real ON-regime defect, RE-MEASURED 2026-08-26 " +
-        "(verification-coverage.md OW45 arm B): the " +
-        "post-client-absorb-fix gate " +
-        "is 9/10. The earlier read-side r01/r06/r09 residues are " +
-        "likely closed by intervening fixes — r01 has the matching " +
-        "read-side delivery mechanism story; r06/r09 have " +
-        "absence-of-observation only. The sole red is a new " +
-        "store-incomplete setup-error shape: the step stops after six " +
-        "durable note appends with one pattern-swap-setup-error " +
-        "(recursive schema validation made no progress), a real root " +
-        "pattern identity, and zero pattern-load-error. Root cause " +
-        "unknown. Lifts when the fixed step greens ON 10/10 " +
-        "quiet-and-loaded; catch-up-and-start remains closed.",
-    },
-    {
       // Re-listed by the lunch-poll identity PR (#5744). This file was
       // LIFTED 2026-08-19 for the swatch-stall class (stage-C W3.1 —
       // history in the header comment above); the profile-first join

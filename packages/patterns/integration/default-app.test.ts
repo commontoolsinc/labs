@@ -36,16 +36,8 @@ const SERVER_EXECUTION_FROM_ENV = experimentalOptionsFromEnv(Deno.env.get)
 // The ON arm's STEP-level skip guard (tasks/server-execution-on-skips.ts):
 // a step listed there for this file is skipped ONLY under the ON posture,
 // loudly (its reason is printed), and only while the entry exists — the OFF
-// arm and an unlisted step always run. The "persist and reload" step stays
-// guarded under OW45: with the step's own interim-race trap fixed (its
-// assertions bind to the wait's approved summary), the remaining ON red is
-// a real client-side readCell starvation on FIRST HYDRATION of freshly
-// created served state (no reload sits between the creates and the reads —
-// the step's only navigation precedes the notebook's existence) — sticky
-// undefined at the readCell surface while the store holds every append and
-// the reactive render path serves the same notes — measured 2026-08-22 at
-// the true ON topology on the FIXED step. The skip guards CI against that
-// product defect, not against the test.
+// arm and an unlisted step always run. The rapid notebook step currently has
+// no entry, so this guard runs it in both postures.
 function onArmStepSkip(step: string): { ignore: boolean } {
   if (SERVER_EXECUTION_FROM_ENV !== true) return { ignore: false };
   const entry = serverExecutionOnStepSkip(
