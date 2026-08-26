@@ -14,9 +14,14 @@
 
 import { Identity } from "@commonfabric/identity";
 
-import { encodeMemoryBoundary } from "../v2.ts";
+import { encodeMemoryBoundary, parseMemoryProtocolFlags } from "../v2.ts";
 import * as MemoryServer from "./server.ts";
 import { verifySessionOpenAuthorization } from "./session-open-auth.ts";
+import {
+  splitWireMessage,
+  WireChunker,
+  WireReassembler,
+} from "./wire-chunking.ts";
 
 const standaloneMemoryAudience = (await Identity.fromPassphrase(
   "common tools standalone memory audience",
@@ -71,9 +76,26 @@ export class StandaloneMemoryServer {
       }
       const { socket, response } = Deno.upgradeWebSocket(request);
       const connectionTag = nextConnectionTag++;
+      // The chunk-framing state of this connection: a reassembler for what the
+      // client sends and a chunker for what goes back (`wire-chunking.ts`).
+      // Chunking toward the client waits on its `hello`, which arrives before
+      // the server has anything of its own to say.
+      const reassembler = new WireReassembler();
+      const chunker = new WireChunker();
+      let chunkToClient = false;
+      let negotiated = false;
       const connection = memory.connect((message) => {
-        if (socket.readyState === WebSocket.OPEN) {
-          socket.send(encodeMemoryBoundary(message));
+        if (socket.readyState !== WebSocket.OPEN) {
+          return;
+        }
+        const encoded = encodeMemoryBoundary(message);
+        // `hello.ok` goes out whole in every build: a client dispatches on the
+        // envelope tag before it has negotiated anything.
+        const frames = chunkToClient && message.type !== "hello.ok"
+          ? splitWireMessage(encoded, chunker)
+          : [encoded];
+        for (const frame of frames) {
+          socket.send(frame);
         }
       });
       const debugWrites = Deno.env.get("CF_DEBUG_MEMORY_WRITES") === "1";
@@ -83,10 +105,28 @@ export class StandaloneMemoryServer {
           connection.close();
           return;
         }
-        if (debugWrites) {
-          logCommitOperations(connectionTag, event.data);
+        let reassembled: string | null;
+        try {
+          reassembled = reassembler.accept(event.data);
+        } catch {
+          // Chunk framing that cannot be resynchronized; the client
+          // reconnects and re-syncs from scratch.
+          socket.close(1002, "memory websocket chunk framing error");
+          connection.close();
+          return;
         }
-        connection.receive(event.data).catch(() => {
+        if (reassembled === null) {
+          return;
+        }
+        const payload = reassembled;
+        if (!negotiated) {
+          negotiated = true;
+          chunkToClient = advertisesWireChunking(payload);
+        }
+        if (debugWrites) {
+          logCommitOperations(connectionTag, payload);
+        }
+        connection.receive(payload).catch(() => {
           if (socket.readyState === WebSocket.OPEN) {
             socket.close(1011, "memory websocket receive failure");
           }
@@ -116,6 +156,15 @@ export class StandaloneMemoryServer {
     await this.#http.shutdown();
     await this.#memory.close();
   }
+}
+
+// Whether the client's `hello` advertised that it reassembles chunk frames.
+// A first message that is not a `hello` advertises nothing, and the server
+// sends every message to that client in one frame.
+function advertisesWireChunking(payload: string): boolean {
+  const message = MemoryServer.parseClientMessage(payload);
+  if (message === null || message.type !== "hello") return false;
+  return parseMemoryProtocolFlags(message.flags)?.wireChunking === true;
 }
 
 // Best-effort per-commit write tracing (CF_DEBUG_MEMORY_WRITES=1): one line

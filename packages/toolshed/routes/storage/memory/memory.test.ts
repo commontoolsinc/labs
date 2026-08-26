@@ -11,6 +11,13 @@ import {
   MEMORY_PROTOCOL,
   type SessionOpenChallenge,
 } from "@commonfabric/memory/v2";
+import {
+  resetWireChunkingConfig,
+  setWireChunkingConfig,
+  splitWireMessage,
+  WireChunker,
+  WireReassembler,
+} from "@commonfabric/memory/v2/wire-chunking";
 import { type JSONSchema, Runtime } from "@commonfabric/runner";
 import { resolvedSchema } from "../../../../runner/test/schema-ref-helpers.ts";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -110,6 +117,36 @@ const readJsonMessage = async <Message extends FabricValue>(
   });
 
   return decodeMemoryBoundary<Message>(payload);
+};
+
+/**
+ * Reads whole messages off a socket that may deliver them as chunk frames,
+ * keeping every raw frame so a test can say how they crossed the wire.
+ */
+const readChunkedMessages = (socket: WebSocket) => {
+  const raw: string[] = [];
+  const reassembler = new WireReassembler();
+  const ready: string[] = [];
+  const waiting: ((payload: string) => void)[] = [];
+  socket.addEventListener("message", (event) => {
+    if (typeof event.data !== "string") return;
+    raw.push(event.data);
+    const payload = reassembler.accept(event.data);
+    if (payload === null) return;
+    const waiter = waiting.shift();
+    if (waiter === undefined) ready.push(payload);
+    else waiter(payload);
+  });
+  return {
+    raw,
+    async message<Message extends FabricValue>(): Promise<Message> {
+      const queued = ready.shift();
+      const payload = queued ?? await new Promise<string>((resolve) => {
+        waiting.push(resolve);
+      });
+      return decodeMemoryBoundary<Message>(payload);
+    },
+  };
 };
 
 const createRuntime = (identity: Identity, base: URL) =>
@@ -341,6 +378,94 @@ serialTest("memory websocket negotiates a session", async () => {
 
     socket.close();
   } finally {
+    await server.shutdown();
+  }
+});
+
+serialTest("memory websocket chunks an oversized frame each way", async () => {
+  const identity = await Identity.fromPassphrase("memory-route-wire-chunking");
+  const server = Deno.serve({ port: 0 }, app.fetch);
+  const address = new URL(
+    `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
+  );
+  const space = identity.did();
+  // Forced down to a size a session open crosses, so an exchange a test can
+  // hold in memory exercises the framing a 90 MB sync needs on a real board.
+  setWireChunkingConfig({ chunkSize: 128 });
+  let socket: WebSocket | undefined;
+
+  try {
+    socket = await openSocket(address);
+    const frames = readChunkedMessages(socket);
+    socket.send(encodeMemoryBoundary(HELLO));
+
+    const hello = await frames.message<HelloOkWithSessionOpen>();
+    assertEquals(hello.type, "hello.ok");
+    // The handshake is never chunked, whatever the sizes say.
+    assert(frames.raw.every((frame) => frame.startsWith("fvj1:")));
+
+    const auth = await createSessionOpenAuth(
+      identity,
+      space,
+      {},
+      hello.sessionOpen,
+    );
+    const request = splitWireMessage(
+      encodeMemoryBoundary({
+        type: "session.open",
+        requestId: "open-1",
+        space,
+        session: {},
+        ...auth,
+      }),
+      new WireChunker(),
+    );
+    assert(request.length > 1, "the session open has to cross the chunk size");
+    for (const frame of request) socket.send(frame);
+
+    const opened = await frames.message<{
+      type: "response";
+      requestId: string;
+      ok: { sessionId: string };
+    }>();
+    // The server put the request back together, and answered in chunks of
+    // its own.
+    assertEquals(opened.type, "response");
+    assertEquals(opened.requestId, "open-1");
+    assert(opened.ok.sessionId.length > 0);
+    assert(frames.raw.some((frame) => frame.startsWith("fvc1:")));
+  } finally {
+    socket?.close();
+    resetWireChunkingConfig();
+    await server.shutdown();
+  }
+});
+
+serialTest("memory websocket closes on a chunk frame it cannot place", async () => {
+  const server = Deno.serve({ port: 0 }, app.fetch);
+  const address = new URL(
+    `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
+  );
+  let socket: WebSocket | undefined;
+
+  try {
+    socket = await openSocket(address);
+    const opened = socket;
+    const closed = new Promise<CloseEvent>((resolve) => {
+      opened.addEventListener("close", (event) => resolve(event), {
+        once: true,
+      });
+    });
+    socket.send(encodeMemoryBoundary(HELLO));
+    await readJsonMessage(socket);
+
+    // A stream that opens at an index no receiver can be waiting for. The
+    // route cannot resynchronize the connection, so it drops it.
+    socket.send("fvc1:0:3:4:nonsense");
+
+    assertEquals((await closed).code, 1002);
+  } finally {
+    socket?.close();
     await server.shutdown();
   }
 });

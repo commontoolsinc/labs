@@ -1,5 +1,13 @@
-import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
+import {
+  encodeMemoryBoundary,
+  parseMemoryProtocolFlags,
+} from "@commonfabric/memory/v2";
 import * as MemoryServer from "@commonfabric/memory/v2/server";
+import {
+  splitWireMessage,
+  WireChunker,
+  WireReassembler,
+} from "@commonfabric/memory/v2/wire-chunking";
 
 import type * as Routes from "./memory.routes.ts";
 import { formatMemWriteTrace, type MemWriteOp } from "./memwrite-trace.ts";
@@ -146,9 +154,33 @@ export const attachMemorySocketPipeline = (
   negotiation: ReturnType<typeof bufferTextMessagesUntilNegotiated>,
   firstMessage: string,
 ): boolean => {
-  if (MemoryServer.parseClientMessage(firstMessage) === null) {
+  // The chunk-framing state of this connection: a reassembler for everything
+  // the client sends and a chunker for everything the server sends back, both
+  // dropped with the connection (`memory/v2/wire-chunking.ts`).
+  const reassembler = new WireReassembler();
+  const chunker = new WireChunker();
+
+  // The handshake is never chunked, so the first frame is a whole message. A
+  // chunk frame here is a protocol violation, and reads as one: the caller
+  // closes the socket rather than serving it.
+  let firstPayload: string | null;
+  try {
+    firstPayload = reassembler.accept(firstMessage);
+  } catch {
     return false;
   }
+  if (firstPayload === null) {
+    return false;
+  }
+  const hello = MemoryServer.parseClientMessage(firstPayload);
+  if (hello === null) {
+    return false;
+  }
+  // Chunk toward this client only if its `hello` advertised that it
+  // reassembles. Anything else — an older client, a first message that is not
+  // a `hello` — keeps every message in one frame, exactly as before.
+  const chunkToClient = hello.type === "hello" &&
+    parseMemoryProtocolFlags(hello.flags)?.wireChunking === true;
 
   const safeSocketClose = (code: number, reason: string) => {
     if (
@@ -167,7 +199,15 @@ export const attachMemorySocketPipeline = (
     if (socket.readyState !== WebSocket.OPEN) {
       return;
     }
-    socket.send(encodeMemoryBoundary(message));
+    const encoded = encodeMemoryBoundary(message);
+    // `hello.ok` goes out whole in every build: a client dispatches on the
+    // envelope tag, and it has not negotiated anything yet when this arrives.
+    const frames = chunkToClient && message.type !== "hello.ok"
+      ? splitWireMessage(encoded, chunker)
+      : [encoded];
+    for (const frame of frames) {
+      socket.send(frame);
+    }
   });
   const closeConnection = () => {
     connection.close();
@@ -200,10 +240,26 @@ export const attachMemorySocketPipeline = (
 
   void (async () => {
     try {
-      await connection.receive(firstMessage);
-      logMemWrites(firstMessage);
+      await connection.receive(firstPayload);
+      logMemWrites(firstPayload);
       negotiation.handoff({
-        onMessage(message) {
+        onMessage(frame) {
+          // Messages buffered through negotiation replay in arrival order, so
+          // one reassembler covers the whole connection.
+          let payload: string | null;
+          try {
+            payload = reassembler.accept(frame);
+          } catch {
+            // Chunk framing that cannot be resynchronized. The client
+            // reconnects and re-syncs from scratch.
+            safeSocketClose(1002, "Memory websocket chunk framing error");
+            closeConnection();
+            return;
+          }
+          if (payload === null) {
+            return;
+          }
+          const message = payload;
           // Trace only after the receive resolves, so a message whose receive
           // fails (the fatal-error path below) is not logged as a write.
           void connection.receive(message).then(

@@ -38,6 +38,11 @@ import type { Server } from "./server.ts";
 import { containsReservedSchemaRefSubstring } from "./sync-schema-ref.ts";
 import { expandServerMessageSchemas } from "./sync-schema-table.ts";
 import { type ArmedTurn, armTurn } from "./turn.ts";
+import {
+  splitWireMessage,
+  WireChunker,
+  WireReassembler,
+} from "./wire-chunking.ts";
 
 export type Transport = {
   send(payload: string): Promise<void>;
@@ -166,6 +171,17 @@ export class Client {
   #serverFlags: MemoryProtocolFlags | null = null;
   #reconnecting: Promise<void> | null = null;
   #cancelReconnectDelay: (() => void) | null = null;
+  // The chunk-framing state of the live connection, one object per direction
+  // (`v2/wire-chunking.ts`). Both are replaced when the transport closes: a
+  // stream in flight is abandoned there, and the reconnect re-syncs.
+  #chunker = new WireChunker();
+  #reassembler = new WireReassembler();
+  // The frames of one chunked message reach the server contiguously, so a
+  // chunked send excludes every other send while it emits. A message that
+  // fits one frame keeps the direct path it has always taken and waits only
+  // while a chunked send is actually in flight.
+  #chunkedSend: Promise<void> | null = null;
+  #unchunkedSends = new Set<Promise<void>>();
   #connected = false;
   #closed = false;
   // Set when a reconnect handshake fails for a reason retrying cannot change (a
@@ -293,7 +309,7 @@ export class Client {
     // observes the rejection.
     pending.promise.catch(() => {});
     this.#pending.set(requestId, pending);
-    await this.transport.send(encodeMemoryBoundary(message));
+    await this.sendMessage(message);
     const result = await pending.promise as ResponseMessage<Result>;
     if (result.error) {
       const error = new Error(result.error.message);
@@ -372,7 +388,74 @@ export class Client {
     }
   }
 
-  private onMessage(payload: string): void {
+  /**
+   * Sends one post-handshake message, as a single frame or — toward a server
+   * that advertised `wireChunking`, for a payload past the chunk size — as the
+   * frames of one chunk stream. The `hello` above never comes through here:
+   * the handshake is one frame in every build, so a peer can dispatch on the
+   * envelope tag before it has negotiated anything.
+   */
+  private sendMessage(message: FabricPlainObject): Promise<void> {
+    const encoded = encodeMemoryBoundary(message);
+    if (this.#serverFlags?.wireChunking !== true) {
+      return this.sendFrame(encoded);
+    }
+    const frames = splitWireMessage(encoded, this.#chunker);
+    if (frames.length === 1) {
+      return this.sendFrame(frames[0]);
+    }
+    const previous = this.#chunkedSend;
+    const sending = (async () => {
+      // An earlier stream finishes first, and so does every single frame
+      // already handed to the transport: nothing may land between this
+      // stream's first frame and its last.
+      await previous?.catch(() => undefined);
+      await Promise.allSettled([...this.#unchunkedSends]);
+      for (const frame of frames) {
+        await this.transport.send(frame);
+      }
+    })();
+    const settled = sending.then(() => undefined, () => undefined);
+    this.#chunkedSend = settled;
+    void settled.then(() => {
+      if (this.#chunkedSend === settled) {
+        this.#chunkedSend = null;
+      }
+    });
+    return sending;
+  }
+
+  private async sendFrame(frame: string): Promise<void> {
+    while (this.#chunkedSend !== null) {
+      await this.#chunkedSend;
+    }
+    const sending = this.transport.send(frame);
+    this.#unchunkedSends.add(sending);
+    try {
+      await sending;
+    } finally {
+      this.#unchunkedSends.delete(sending);
+    }
+  }
+
+  private onMessage(frame: string): void {
+    let payload: string | null;
+    try {
+      payload = this.#reassembler.accept(frame);
+    } catch (cause) {
+      // Chunk framing the client cannot resynchronize: what the open stream
+      // held is gone, and every later frame of it would reassemble into
+      // nonsense. Drop the connection and let the reconnect re-sync.
+      this.failConnection(
+        cause instanceof Error ? cause : new Error(String(cause)),
+      );
+      return;
+    }
+    // A frame that leaves a stream unfinished carries no message of its own.
+    if (payload === null) {
+      return;
+    }
+
     let message: unknown;
     try {
       message = decodeMemoryBoundary(payload);
@@ -504,10 +587,25 @@ export class Client {
     }
   }
 
+  /**
+   * Drops a connection this client cannot keep talking on, as though the peer
+   * had closed it: pending work fails with a `ConnectionError` and the
+   * reconnect loop takes over from there.
+   */
+  private failConnection(cause: Error): void {
+    const error = toConnectionError(cause);
+    void this.transport.close().catch(() => undefined);
+    this.onClose(error);
+  }
+
   private onClose(error?: Error): void {
     if (this.#closed) {
       return;
     }
+    // The framing state belongs to the connection that just went: a stream in
+    // flight either way is abandoned, and the next connection starts clean.
+    this.#chunker = new WireChunker();
+    this.#reassembler = new WireReassembler();
     this.#connected = false;
     for (const session of this.#spaces) {
       session.handleDisconnect();
@@ -1714,9 +1812,15 @@ export const loopback = (server: Server): Transport => {
     queue.push(encodeMemoryBoundary(message));
     schedule();
   });
+  // A loopback server has no frame ceiling to stay under, so it delivers every
+  // message whole. The client above still chunks toward it — the flags say the
+  // peer reassembles, and over loopback that peer is here.
+  const reassembler = new WireReassembler();
   return {
     async send(payload: string) {
-      await connection.receive(payload);
+      const message = reassembler.accept(payload);
+      if (message === null) return;
+      await connection.receive(message);
     },
     close() {
       closed = true;
