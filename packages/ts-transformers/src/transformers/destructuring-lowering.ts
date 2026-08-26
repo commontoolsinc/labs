@@ -15,6 +15,7 @@ export interface DestructureBinding {
   readonly localName: string;
   readonly path: readonly PathSegment[];
   readonly directKeyExpression?: ts.Expression;
+
   /** Binding syntax represented by the lowered declaration. */
   readonly bindingNode: ts.Identifier | ts.BindingElement;
 }

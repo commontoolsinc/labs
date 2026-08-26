@@ -293,6 +293,7 @@ interface OuterCellContract {
 interface PathSchemaContract {
   schema: JSONSchema;
   root: JSONSchema;
+
   /** A valid producer value can omit an ancestor on the localized path. */
   mayBeMissing?: boolean;
 }
@@ -300,12 +301,16 @@ interface PathSchemaContract {
 interface DurableSchemaPath {
   root: JSONSchema;
   path: (string | number)[];
+
   /** Producer-document path corresponding to `path[schemaBaseDepth]`. */
   rawBasePath: (string | number)[];
+
   /** Projection ancestors in `path` that do not exist in the producer doc. */
   schemaBaseDepth: number;
+
   /** Materialized schema root used to validate the complete staged value. */
   validationCell: Cell<unknown>;
+
   /** Path within `validationCell` changed by the producer write. */
   validationPath: (string | number)[];
 }
@@ -340,10 +345,13 @@ interface StoredCellTopology {
 export interface PiecePatternSourceRef {
   /** Immutable in-fabric reference to the verified source closure. */
   ref: string;
+
   /** Optional caller-supplied repository associated with the source tree. */
   repository?: string;
+
   /** Authored entry path within the program's compilation root. */
   entry?: string;
+
   /** Optional mutable/update provenance carried by `patternSource`. */
   origin?: string;
 }
@@ -385,6 +393,7 @@ export interface PieceSourceCompatibilityIssues {
   schema?: string;
   argument?: string;
   retainedLinks?: string;
+
   /**
    * The CFC schema envelope stored on the piece's argument document cannot
    * merge with the candidate's argument schema — or cannot be read at all.
@@ -420,6 +429,7 @@ export interface PieceSourceCompatibilityIssues {
 export interface PatternCompatibilityReport {
   compatible: boolean;
   issues: PieceSourceCompatibilityIssues;
+
   /** Every issue joined, or `undefined` when compatible. */
   message?: string;
   candidate: { identity: string; symbol: string };
@@ -2211,6 +2221,7 @@ export function assertSuppliedLinkSchemasCompatible(
     basePath?: readonly (string | number)[];
     destinationIsStream?: boolean;
     destinationRoot?: JSONSchema;
+
     /**
      * The prior pattern's argument schema, supplied only on a pattern update
      * over existing state. A linked document with no producer-owned metadata —
@@ -2223,6 +2234,7 @@ export function assertSuppliedLinkSchemasCompatible(
      * so a fresh link to an arbitrary contract-less document is still refused.
      */
     priorArgumentSchema?: JSONSchema;
+
     /**
      * The caller writes each supplied link's ORIGINAL envelope back, rather
      * than rebuilding it from a materialized read.

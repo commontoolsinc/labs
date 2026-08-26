@@ -11,8 +11,10 @@ const MAX_RETAINED_INPUT_BYTES = 256 * 1024;
 export interface BufferedViewInput {
   readonly kind: "bytes";
   readonly bytes: Uint8Array;
+
   /** A raw-byte language established before the retained preview was decoded. */
   readonly language?: Language;
+
   /** The streamed detector consumed all bytes without selecting a byte
    * language. Later decoding can proceed directly as text. */
   readonly byteLanguageDetectionComplete?: boolean;

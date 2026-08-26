@@ -279,6 +279,7 @@ describe("Phase 4 client-effect channel", () => {
     options: {
       navigations?: string[];
       sessionId?: string;
+
       /** Custom navigate callback (wins over `navigations`) — the
        * enactment-failure tests inject throwing callbacks here. */
       navigate?: (

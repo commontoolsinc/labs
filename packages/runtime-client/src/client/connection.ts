@@ -142,6 +142,7 @@ export interface VDomConnection {
   ackBatch(mountId: number, batchId: number): void;
   onBatch(handler: (notification: VDomBatchNotification) => void): void;
   offBatch(handler: (notification: VDomBatchNotification) => void): void;
+
   /** Unregister the teardown — call when ending normally, not via disposal. */
   detach(): void;
 }

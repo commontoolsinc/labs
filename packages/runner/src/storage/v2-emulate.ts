@@ -17,6 +17,7 @@ export const newLoopbackServer = (options?: {
   audience?: string;
   subscriptionRefreshDelayMs?: number | "manual";
   store?: URL;
+
   /** The session registry's detached-session TTL (tests): how long a
    * closed connection's sessions — and their watches, i.e. their DEMAND
    * — linger before pruning. Default 30 s (the server's resume window). */

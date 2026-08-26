@@ -359,6 +359,7 @@ export const BYTES = BYTE_SIZES.map(
 export const BIGINTS = BYTE_SIZES.map(
   (size) => [size, makeBigint(size)] as const,
 );
+
 /** Leaf counts for every omnibus series, so the three are read against each other. */
 const OMNIBUS_SIZES = [10, 100, 1000] as const;
 

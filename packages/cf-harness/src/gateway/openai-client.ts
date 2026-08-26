@@ -18,6 +18,7 @@ export interface OpenAICompatibleGatewayClientOptions {
   chatCompletionTransportRetries?: number;
   chatCompletionRetryDelayMs?: number;
   fetchFn?: HarnessFetch;
+
   /**
    * What caused these requests. Resolved from the process when absent.
    */
@@ -76,6 +77,7 @@ export type OpenAIChatMessageContent =
 
 export interface OpenAIChatCompletionMessage {
   role: OpenAIChatMessageRole;
+
   /** Absent on tool-call-only turns from some providers, not just null. */
   content?: OpenAIChatMessageContent;
   tool_calls?: readonly OpenAIChatCompletionToolCall[];
@@ -110,6 +112,7 @@ export interface OpenAIResponsesRequest {
   store?: boolean;
   stream?: boolean;
   include?: readonly string[];
+
   /**
    * Server-side compaction. When rendered tokens cross `compact_threshold`,
    * the provider folds prior context into an encrypted compaction item and

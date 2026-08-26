@@ -46,6 +46,7 @@ type SchemaDefinitions = NonNullable<JSONSchemaObj["$defs"]>;
 type SchemaRefSummary = {
   /** All refs below this fragment, excluding dormant `$defs` bodies. */
   all: ReadonlySet<string>;
+
   /** Local definition names resolved by this fragment's definition scope. */
   localDefinitions: ReadonlySet<string>;
 };

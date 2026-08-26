@@ -157,6 +157,7 @@ function findCallbackArgument(
 
 interface BuilderSite {
   readonly tag: string;
+
   /** The builder call whose authored position must be recoverable. For a
    * hoisted `const __cfLift_N = __cfHelpers.lift(...)` this is the INNER
    * call; for a top-level authored builder it is the call itself. */
@@ -255,6 +256,7 @@ function collectRewrittenSites(
 
 async function transformFixtureToAst(): Promise<{
   transformed: ts.SourceFile;
+
   /** The pre-transform source file, whose text the recovered positions index
    * into (it carries the `transformCfDirective` helper-import prelude). */
   original: ts.SourceFile;

@@ -203,6 +203,7 @@ const EAGER_RESULT_BUILTIN_REFS = new Set([
 
 type InternalCellDescriptor = {
   partialCause: JSONValue;
+
   /**
    * Entity kind of the materialized cell's id. Part of the manifest match
    * key alongside `partialCause`: a kind flip across pattern versions must
@@ -813,21 +814,28 @@ type SetupResult<R> = {
 type SetupValidationOptions = {
   /** Optional invariant over the argument stored before setup changes it. */
   validateCurrentArgument?: (argumentCell: Cell<unknown>) => void;
+
   /** Optional layer-specific invariant checked inside the setup transaction. */
   validateArgumentLinks?: (
     argumentCell: Cell<unknown>,
     argumentSchema: JSONSchema,
   ) => void;
+
   /** Optional repository locator written atomically with pattern setup. */
   patternRepository?: string;
+
   /** Source lifecycle change written atomically with pattern setup. */
   pieceSourceTransition?: PieceSourceTransition;
+
   /** Record a detached creation revision when setting up a new piece. */
   initializePieceSourceHistory?: boolean;
+
   /** Mutable source origin recorded with a new piece's creation revision. */
   initialPieceSourceOrigin?: string;
+
   /** Rebuild stored setup state even when patternIdentity already matches. */
   reapplyStoredSetup?: boolean;
+
   /** Keep the next start on the persisted-result dependency-sync path. */
   prepareForResume?: boolean;
 };
@@ -846,9 +854,11 @@ export interface PieceSourceRevision {
   revisionId: string;
   timestamp: number;
   pattern: { identity: string; symbol: string };
+
   /** Link retaining the exact content-addressed source closure. */
   source: SigilLink;
   origin?: string;
+
   /** The legacy origin string, when normalizing it changed its value. */
   recordedOrigin?: string;
   operation: PieceSourceRevisionOperation;
@@ -870,6 +880,7 @@ export interface PieceSourceTransition {
   baseline: PieceSourceTransitionBaseline;
   timestamp: number;
   operation: Exclude<PieceSourceRevisionOperation, "baseline" | "create">;
+
   /** The active origin after the transition. Null means detached. */
   origin: string | null;
   expected: PieceSourceSnapshot;
@@ -878,8 +889,10 @@ export interface PieceSourceTransition {
 
 type RunResult<R> = {
   resultCell: Cell<R>;
+
   /** The exact local cancel registration installed by this invocation. */
   installedCancel?: Cancel;
+
   /**
    * Cancels a start that this invocation deferred until its transaction
    * commits. Before installation it tombstones the pending start; afterwards
@@ -1364,8 +1377,10 @@ export function isStoredArgumentSchemaRefusal(error: unknown): boolean {
 interface SetupStateReuse {
   /** Same pattern as the last run, so stored setup state is this run's own. */
   sameStoredSetup: boolean;
+
   /** Re-point the stored argument at this schema and validate it. */
   restageStoredArgument: boolean;
+
   /**
    * Same stored setup AND a completion marker that POSITIVELY names this
    * pattern. Distinct from `!restageStoredArgument`, which is also true when the
@@ -4533,6 +4548,7 @@ export class Runner {
   // §2 — the resolver also normalizes the raw `undefined:` form the
   // previous string interpolation produced for scope-less links, which
   // merges with `space:`, the same instance by definition).
+
   /** Stage P2-F (the F1 fold-in, RULED 2026-08-13): a piece-start
    * setup/instantiation commit failure is fire-and-forget by design but
    * NEVER silent — loud in every arm, and handed to the serving

@@ -96,6 +96,7 @@ const propValue = (value: any): unknown =>
 // runtime: a declared result adds nothing to the generated schema (C3
 // withdrawn — results flow schema-free through receipts), so the stored
 // schema a legacy piece is validated against is unchanged.
+
 /**
  * What a topic pattern deployed before the current paths existed publishes.
  *

@@ -1,16 +1,27 @@
 /**
- * Type-only declarations, the `FabricInstance` base class, and the protocol
- * symbols keyed on a fabric class, for the fabric data model. This file is
- * intentionally free of runtime imports from other data-model modules (only
- * `import type` is used) so that it can be imported by any module without
- * creating circular dependencies.
+ * The `FabricSpecialObject` class hierarchy and the conversion-layer types of
+ * the fabric data model, together with the pattern-visible value types that
+ * `api.ts` declares, re-exported here so that this module carries the whole
+ * `FabricValue` vocabulary. It is intentionally free of runtime imports (only
+ * `import type` is used) so that any module can import it without creating a
+ * circular dependency.
  *
- * NOTE: `api.ts` mirrors these types (and those from
- * `fabric-primitives/FabricHash.ts`, `fabric-primitives/FabricEpochNsec.ts`)
- * for the pattern compiler, which reaches them through `@commonfabric/api`.
- * Changes here must be kept in sync with the corresponding declarations
- * there.
+ * The classes here and the declarations in `api.ts` describe the same shapes,
+ * and the assertions at the end of this file stop compiling when they drift.
+ * The concrete classes under `fabric-primitives/` and `fabric-instances/`
+ * carry the same kind of guard, each beside its own definition.
  */
+
+import type {
+  FabricArray,
+  FabricContainerValue,
+  FabricInstance as ApiFabricInstance,
+  FabricPlainObject,
+  FabricPrimitive as ApiFabricPrimitive,
+  FabricSpecialObject as ApiFabricSpecialObject,
+  FabricValue,
+  NonNullableFabricValue,
+} from "./api.ts";
 
 //
 // `FabricSpecialObject`
@@ -33,9 +44,10 @@
  *
  * It is a well-known string key rather than a `unique symbol` because that
  * would require importing a symbol *value*, and this file is deliberately free
- * of runtime imports (see the file header). `api.ts` declares the
- * identical member; the two must agree exactly, or a value branded by one will
- * not satisfy the other.
+ * of runtime imports (see the file header). `api.ts` declares the identical
+ * member, and the assertions at the end of this file stop compiling if the two
+ * stop agreeing; a value branded by one would otherwise not satisfy the
+ * other.
  */
 export abstract class FabricSpecialObject {
   declare readonly "@commonfabric/FabricSpecialObject": true;
@@ -128,82 +140,19 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
 //
 
 /**
- * The full set of values that the fabric storage layer can represent. This is
- * the strongly-typed "middle layer" of the three-layer architecture:
- *
- *     JavaScript "wild west" (`unknown`)
- *       <-> `FabricValue`
- *       <-> serialized (`Uint8Array`)
- *
- * Most native JS object types enter the fabric layer via wrapper classes that
- * extend `FabricInstance`; other special values extend `FabricPrimitive`. Both
- * of those reach `FabricValue` through the common `FabricSpecialObject` arm.
- * The non-object values (`bigint` and the other scalars) are direct members of
- * the union instead, not routed through that arm. Some native types are
- * converted to `FabricPrimitive`s during conversion.
- *
- * `undefined` is preserved.
- *
- * `symbol` values are restricted at runtime to **registry-interned** symbols --
- * those for which `Symbol.keyFor(s)` returns a string. These are portable
- * across realms and processes via their registry key. Unique symbols
- * (`Symbol(desc)`) are not portable and are rejected at the fabric boundary.
- * TypeScript's `symbol` type cannot distinguish the two, so the gate is a
- * runtime one, and it is the same gate at every point a symbol is admitted or
- * refused: `Symbol.keyFor(value) !== undefined`.
- *
- * **Deep-frozen honesty (mandatory).** A `FabricValue` must report its frozen
- * state truthfully and permanently. In particular, a `FabricPlainObject` or
- * `FabricArray` is data-only: it must not expose an own accessor
- * (getter/setter) whose result can contradict, or change after, the value's
- * frozen state -- once a `FabricValue` graph is deeply frozen, its contents are
- * fixed. (For a `FabricInstance`, the analogous obligation is on its
- * `[IS_DEEP_FROZEN]` report; see `BaseFabricInstance`.) The rest of the system
- * -- the data model in general and `isDeepFrozen()` specifically, but also the
- * entire codebase that _uses_ the data model -- relies on this to cache
- * deep-frozen proofs by root identity without re-validating; a value that
- * violates it can corrupt data-model invariants, as any broken contract can.
+ * The pattern-visible fabric value types, declared in `api.ts` and re-exported
+ * here so that this module carries the whole `FabricValue` vocabulary. `api.ts`
+ * is where they have to be declared: it reaches patterns by being inlined into
+ * the type module the pattern compiler serves, and so may name no import,
+ * which makes it the leaf of this pair.
  */
-export type FabricValue =
-  | bigint
-  | boolean
-  | null
-  | number
-  | string
-  | symbol
-  | undefined
-  | FabricArray
-  | FabricPlainObject
-  | FabricSpecialObject;
-
-/**
- * The container types that are part of `FabricValue`. Note that
- * `FabricSpecialObject` is a combination of container and non-container.
- */
-export type FabricContainerValue =
-  | FabricArray
-  | FabricInstance // One of the two direct subclasses of `FabricSpecialObject`.
-  | FabricPlainObject;
-
-/** A `FabricValue` other than `null` or `undefined`. */
-export type NonNullableFabricValue = NonNullable<FabricValue>;
-
-/** Read-only array of `FabricValue`s. */
-export interface FabricArray extends ReadonlyArray<FabricValue> {}
-
-/**
- * Object/record of `FabricValue`s.
- *
- * The names `__proto__` and `constructor` are refused at the boundaries where
- * values enter or leave storage, so no `FabricPlainObject` carries one. The
- * type cannot say as much -- a string index signature admits every string --
- * so the guarantee is the boundary's, not TypeScript's. Note the internal copy
- * loops are unguarded and rely on it: they rebuild records by assignment,
- * which for `__proto__` would repoint the copy's prototype rather than
- * creating a property.
- */
-export interface FabricPlainObject
-  extends Readonly<Record<string, FabricValue>> {}
+export type {
+  FabricArray,
+  FabricContainerValue,
+  FabricPlainObject,
+  FabricValue,
+  NonNullableFabricValue,
+};
 
 /**
  * Single "layer" of fabric conversion -- the result of shallow conversion
@@ -280,3 +229,29 @@ export type FabricConvertibleValue =
   | FabricNativeObject
   | readonly FabricConvertibleValue[]
   | { readonly [key: string]: FabricConvertibleValue };
+
+//
+// Agreement with the pattern-visible declarations
+//
+
+/** Whether `A` and `B` are mutually assignable. */
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+
+/** Compiles only when its argument is `true`. */
+type MustBeTrue<T extends true> = T;
+
+// Compile-time checks that the abstract base classes above and the
+// declarations in `api.ts` -- which is what a pattern compiles against --
+// describe the same shape.
+//
+// Mutual assignability, not `satisfies`. A one-way check passes when the class
+// carries a member the declaration omits, since the extra member only makes
+// the class more assignable; that is the direction a pattern feels, because
+// the member it cannot reach is the one missing from the declaration. Both
+// directions have to be asserted for a member added on either side alone to
+// fail here.
+type _SpecialObjectAgrees = MustBeTrue<
+  Same<FabricSpecialObject, ApiFabricSpecialObject>
+>;
+type _InstanceAgrees = MustBeTrue<Same<FabricInstance, ApiFabricInstance>>;
+type _PrimitiveAgrees = MustBeTrue<Same<FabricPrimitive, ApiFabricPrimitive>>;

@@ -110,6 +110,7 @@ export interface GmailExtractorInput {
      * - {{email.snippet}} - Brief preview
      */
     promptTemplate: string;
+
     /**
      * JSON Schema for the extraction result.
      * The LLM will generate objects conforming to this schema.
@@ -149,8 +150,10 @@ export interface AnalysisItem<T = unknown> {
 export interface GmailExtractorOutput {
   /** Raw emails from Gmail */
   emails: Email[];
+
   /** Count of emails fetched */
   emailCount: number;
+
   /** Analysis results (empty when extraction not provided) */
   rawAnalyses: Array<{
     email: Email;
@@ -161,18 +164,24 @@ export interface GmailExtractorOutput {
     pending: boolean;
     error: unknown;
   }>;
+
   /** Count of pending analyses */
   pendingCount: number;
+
   /** Count of completed analyses */
   completedCount: number;
+
   /** Whether Gmail is connected */
   isConnected: boolean;
 
   // Operations (Streams, not functions)
+
   /** Refresh emails from Gmail */
   refresh: Stream<unknown>;
+
   /** Add labels to a message */
   addLabels: Stream<{ messageId: string; labels: string[] }>;
+
   /** Remove labels from a message */
   removeLabels: Stream<{ messageId: string; labels: string[] }>;
 

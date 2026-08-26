@@ -47,16 +47,20 @@ import { readMaybeGzippedText } from "./gzip.ts";
 
 export type ReplayInvocationOracle = {
   ok: boolean;
+
   /** TraverseFailure code when ok is false. */
   code?: string;
+
   /** Truncated structural hash of the returned value ("undefined" if so). */
   hash: string;
 };
 
 export type ReplayOracle = {
   invocations: ReplayInvocationOracle[];
+
   /** Sorted unique read descriptors: `space|scope|id|<json path>|flags`. */
   readSet: string[];
+
   /**
    * Per context id: sorted `trackerKey::selectorHash` entries. Only contexts
    * shared by multiple invocations or with includeMeta (the server query
@@ -100,6 +104,7 @@ export type ReplayLatencySample = {
   ms: number;
   selector: number;
   docId: string;
+
   /** Counter deltas for this single invocation. */
   schemaCalls: number;
   anyOfBranches: number;
@@ -114,6 +119,7 @@ export type ReplayLatencyReport = {
   p999: number;
   max: number;
   mean: number;
+
   /** The N slowest invocations, slowest first. */
   slowest: ReplayLatencySample[];
 };
@@ -251,6 +257,7 @@ export function replayFixture(
   options: {
     collectOracle?: boolean;
     limit?: number;
+
     /** Collect per-invocation latency samples (slight timing overhead). */
     collectLatency?: boolean;
   } = {},

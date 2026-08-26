@@ -146,6 +146,7 @@ export const createHarnessHandleTable = (
 export interface MintAddressHandleOptions {
   /** Digest seam; defaults to SHA-256. */
   hasher?: HandleTokenHasher;
+
   /**
    * Shape of the value at the address, when the caller already knows it out of
    * its OWN work — the result schema of a pattern this harness compiled and

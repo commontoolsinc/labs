@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-env
+
 /**
  * The credential-free shipping step every CI test job ends with: gather the
  * job's spooled record fragments and its JUnit files into one artifact

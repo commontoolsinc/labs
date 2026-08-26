@@ -40,15 +40,19 @@
 export interface AcceptedContractBreak {
   /** Pattern key: the path relative to `packages/patterns`. */
   pattern: string;
+
   /** Baseline labels (filename stems) this pattern may fail to apply over. */
   baselines: readonly string[];
+
   /**
    * Schema paths this break may blame, spelled as the compatibility proof
    * spells them. A finding blaming anything else stands.
    */
   paths: readonly string[];
+
   /** Why the break was accepted. */
   reason: string;
+
   /**
    * Repo-relative path of the decision record under `docs/history/` — the
    * deliberation behind this entry's declaration. Its existence is enforced

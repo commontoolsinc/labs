@@ -53,6 +53,7 @@ const bob = { principal: "did:key:p2f-bob", sessionId: "bob-s1" as never };
 describe("stage P2-F per-(action × instance) run supply", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+
   /** Every ServerRunInfo the production stamping choke points hand the
    * installed stamper, in order. */
   let stamped: ServerRunInfo[];

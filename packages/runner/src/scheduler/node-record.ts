@@ -13,6 +13,7 @@ export interface SchedulerGateState {
   throttleReadyAt?: number;
   backoffUntil?: number;
   backoffStreak: number;
+
   /** Backoff passes charged to the current idle-wait episode. */
   convergenceHoldPasses: number;
 }
@@ -38,6 +39,7 @@ export interface SchedulerNode {
   provisionalDemandPass?: number;
   gate: SchedulerGateState;
   passRuns: number;
+
   /** Server-execution v2 fan-out stage B: the node's known-scope
    * ratchet and per-instance record (scheduler/fan-out.ts). Present ONLY
    * once the serving loop's demand registry supplied demanders for this
@@ -66,6 +68,7 @@ export class NodeRegistry {
 
   readonly effects: ReadonlySet<Action> = this.activeEffects;
   readonly computations: ReadonlySet<Action> = this.activeComputations;
+
   /** (d′) — the STANDING, refcounted `demandedWriters` root
    * kind (design §2.4; serving-loop.md §1's "a demanded instance's
    * writers hold demand … while any session tracks the instance"): the

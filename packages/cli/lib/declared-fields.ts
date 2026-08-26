@@ -85,6 +85,7 @@ export interface DeclaredFieldSource {
 export interface DeclaredFields {
   sources: DeclaredFieldSource[];
   honorsUndeclared: boolean;
+
   /** Every name any reached member marks required. A conjunction constrains
    * one value from all its members at once, so a name any of them requires is
    * required of the value. A DISJUNCTION contributes none — a value satisfies

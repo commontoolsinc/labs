@@ -289,14 +289,19 @@ export class CFToolsChip extends BaseElement {
 
   /** Chip label shown in the pill. */
   declare label: string;
+
   /** Show the number of tools next to the label. */
   declare showCount: boolean;
+
   /** If true, hovering/focus opens the panel. */
   declare openOnHover: boolean;
+
   /** If true, clicking toggles the panel. */
   declare toggleOnClick: boolean;
+
   /** Current open state. Reflected to attribute. */
   declare open: boolean;
+
   /** Tools array shown in the panel. Accepts array, record, or CellHandle. */
   @property({ attribute: false })
   accessor tools:

@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-run --allow-env --allow-net
+
 /**
  * Entry point for the root `deno task test`. The implementation lives in
  * workspace-tests.ts because `deno coverage` skips files whose names end in

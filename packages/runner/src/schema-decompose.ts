@@ -71,6 +71,7 @@ export const SCHEMA_DOCUMENT_REF_PREFIX = "cid:";
 export type ExternalSchemaRef = {
   /** Tagged hash of the referenced document (the id without `cid:`). */
   readonly taggedHash: string;
+
   /**
    * For a reference into a cyclic-group document: the member definition's
    * name. Absent for a bare reference to a document's own schema.
@@ -86,6 +87,7 @@ export type DecomposedSchema = {
    * the root reduced to a single reference into a cyclic group.
    */
   readonly rootRef: string;
+
   /**
    * Every document in the closure, keyed by tagged hash, values interned.
    * Iteration order is dependency-first: a document precedes every document

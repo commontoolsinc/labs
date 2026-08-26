@@ -14,10 +14,13 @@ import { ContextualFlowControl } from "./cfc.ts";
 export interface SchemaFormatOptions {
   /** Definitions map for resolving $ref references */
   defs?: Record<string, JSONSchema>;
+
   /** Current recursion depth (internal use) */
   depth?: number;
+
   /** Maximum recursion depth before abbreviating (default: 4) */
   maxDepth?: number;
+
   /** Current indentation level (internal use) */
   indent?: number;
 }

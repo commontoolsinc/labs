@@ -40,10 +40,13 @@ export interface PieceDiffRow {
   piece: string;
   phase?: string;
   status: PieceDiffStatus;
+
   /** The reference the plan recorded. */
   before: PatternRef;
+
   /** The reference the after-survey read; absent when the piece is `missing`. */
   after?: PatternRef;
+
   /** The reference the row's operation produces, when the row carries one. */
   target?: PatternRef;
 }
@@ -51,6 +54,7 @@ export interface PieceDiffRow {
 /** A diff over every plan row, plus what the after-survey saw beyond them. */
 export interface PlanDiff {
   rows: readonly PieceDiffRow[];
+
   /** Pieces the after-survey holds that the plan does not. */
   unplanned: readonly string[];
   counts: Readonly<Record<PieceDiffStatus, number>>;

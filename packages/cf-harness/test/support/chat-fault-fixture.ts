@@ -35,6 +35,7 @@ export const FAULT_KINDS: readonly ChatFault[] = ["error", "cancel"];
 export interface FaultingToolLoopOptions {
   /** Held by a test that wants to act while the loop sits mid-tool. */
   release?: Promise<void>;
+
   /**
    * Called once the loop has reported everything it ever will. A test that
    * inspects the store while an interrupted turn is still in flight waits on

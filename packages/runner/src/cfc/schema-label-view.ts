@@ -11,6 +11,7 @@ export interface CfcSchemaEntry {
   readonly path: readonly string[];
   readonly label: IFCLabel;
   readonly schema: JSONSchema;
+
   /** The schema document that resolves local references inside `.schema`. */
   readonly root: JSONSchema;
 }

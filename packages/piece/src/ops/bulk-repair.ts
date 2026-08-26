@@ -107,13 +107,17 @@ export type RepairVerdict =
 /** One piece's row in a repair report. */
 export interface RepairRow {
   piece: string;
+
   /** The plan row's phase label, carried as the survey stamped it. */
   phase?: string;
   verdict: RepairVerdict;
+
   /** What a refused, moved, or failed row broke; absent otherwise. */
   problem?: string;
+
   /** The exact changes the fixer would make (or made); absent when none. */
   changes?: readonly DocumentChange[];
+
   /**
    * The hash of the stored document this row's verdict was computed from —
    * the precondition a plan row carries. Absent where no document was read.
@@ -124,14 +128,17 @@ export interface RepairRow {
 /** What one repair run found, and — under `apply` — did. */
 export interface RepairReport {
   rows: readonly RepairRow[];
+
   /**
    * The run as a plan artifact: the survey's header, and one row per
    * evaluated piece carrying its document-hash precondition — with the
    * repair operation stamped when the run was given a fixer name to record.
    */
   plan: PiecePlan;
+
   /** Documents written. Zero on a dry run and on a conforming re-run. */
   applied: number;
+
   /**
    * True when every row is `conforms` or `repaired`: nothing refused,
    * nothing moved, nothing failed, nothing unattempted. A dry run is
@@ -144,12 +151,14 @@ export interface RepairReport {
 export interface RepairOptions {
   selector: PieceSelector;
   fixer: Fixer;
+
   /**
    * The fixer's name as the plan should record it — a module path or a
    * label. With one, the emitted plan's evaluated rows carry the repair
    * operation; without, they carry only the pre-state record.
    */
   fixerName?: string;
+
   /**
    * The content identity of the fixer module's authored closure — the pin
    * the name cannot be. Recorded on every emitted repair op, and held
@@ -158,6 +167,7 @@ export interface RepairOptions {
    * spelled or what it holds today.
    */
   fixerIdentity?: string;
+
   /**
    * A previously emitted plan, which then IS the execution: its rows run
    * in its order, each row's recorded document hash is its precondition,
@@ -169,6 +179,7 @@ export interface RepairOptions {
    * fixer no longer changes is landed, whatever it hashes to now.
    */
   plan?: PiecePlan;
+
   /**
    * Write the documents the fixer produces. Absent, the run is the
    * dry-run report — the exact per-piece diff, and no write at all.
@@ -540,10 +551,12 @@ type RowDecision =
   | {
     kind: "change";
     documentHash: string;
+
     /** The stored document the decision was computed from — what an
      * applied row's changes are measured against, so the write path's own
      * additions show in the report. */
     before: Record<string, unknown>;
+
     /** The evaluated answer — the exact document a write must land, so
      * the report and the write cannot describe two different evaluations
      * of a fixer that lied to the purity probe. */
@@ -626,6 +639,7 @@ export async function repairPieces(
     phase?: string;
     expect: PiecePlanRow["expect"];
     expectedHash?: string;
+
     /** The plan row this one executes, carried into the emitted artifact
      * for every verdict short of landed, so a stopped run's artifact can
      * be supplied straight back. */

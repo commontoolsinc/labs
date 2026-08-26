@@ -76,15 +76,18 @@ export type RetargetVerdict =
 /** One piece's row in a retarget report. */
 export interface RetargetRow {
   piece: string;
+
   /** The plan row's phase label, carried as the plan stamped it. */
   phase?: string;
   verdict: RetargetVerdict;
+
   /**
    * What a moved, refused, or failed row broke; absent otherwise. A row
    * names its own piece's trouble alone — the run's own, a session that
    * would not open or close, is the report's `stopReason`.
    */
   problem?: string;
+
   /**
    * The row's wall-clock cost in milliseconds, present on every row an
    * apply session began work on: a row reclassified as landed, moved, or
@@ -100,8 +103,10 @@ export interface RetargetRow {
 /** What one retarget run found, and — under `apply` — did. */
 export interface RetargetReport {
   rows: readonly RetargetRow[];
+
   /** Sources applied. Zero on a dry run and on a fully landed re-run. */
   applied: number;
+
   /**
    * True when every row is `landed` (or, on a dry run, `outstanding` —
    * that is the dry run's answer, not a defect) and no session boundary
@@ -109,6 +114,7 @@ export interface RetargetReport {
    * unattempted, and every session this run opened was released.
    */
   complete: boolean;
+
   /**
    * Why the run stopped when no piece is at fault: a session that could not
    * be opened, could not be released, or opened onto a space other than the
@@ -123,17 +129,20 @@ export interface RetargetReport {
 
 export interface RetargetOptions {
   plan: PiecePlan;
+
   /**
    * Write the sources the rows resolve. Absent, the run is the preflight
    * classification alone — where every piece stands, and no write at all.
    */
   apply?: boolean;
+
   /**
    * Pieces served by one session before it is replaced. The knob the
    * design requires: warm-up amortizes across a group while the pieces
    * live at once stay bounded by it.
    */
   groupSize?: number;
+
   /**
    * Called as each row settles, for reporting as the run proceeds. A throw
    * from it is the caller's error rather than the run's: it reaches the
@@ -142,6 +151,7 @@ export interface RetargetOptions {
    * `failed`.
    */
   onRow?: (row: RetargetRow) => void;
+
   /** The clock behind `elapsedMs`, injectable for deterministic tests. */
   now?: () => number;
 }
@@ -284,6 +294,7 @@ export async function retargetPieces(
     "landed" | "outstanding" | { blocked: RetargetRow }
   >();
   let startBlocked = false;
+
   /** The run's own trouble, as opposed to any piece's: see `stopReason`. */
   let sessionProblem: string | undefined;
   {

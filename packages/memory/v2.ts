@@ -396,18 +396,22 @@ export type StreamEventFiredAt = {
  */
 export type StreamEventEntry = {
   eventId: string;
+
   /** The stream this entry targets — self-describing so the drain, the
    * dropped-notice reader, and compaction never need a reverse map. */
   stream: StreamLinkRef;
   payload?: FabricValue;
   firedAt?: StreamEventFiredAt;
+
   /** Engine-stamped: the appending commit's seq. */
   seq?: number;
+
   /** Runtime-injection provenance for the payload's injected keys,
    * carried so the server-side handler run's closed-world gate judges
    * the payload as the firing client's runtime did (same in-process
    * trust as today's client-side enforcement). */
   runtimeInjectedEventKeys?: string[];
+
   /** The firing RUNTIME's attestation that the sent event was
    * RENDERER-TRUSTED — it carried the process-local renderer-trust mark
    * (`markRendererTrustedEvent`, set by the renderer's dispatch and
@@ -422,15 +426,19 @@ export type StreamEventEntry = {
    * present; a present value must be `true` (admission refuses any
    * other). Absent = not attested. */
   rendererTrusted?: true;
+
   /** Processing-side (SpaceServer-written): consequences committed. */
   consequenced?: boolean;
+
   /** Processing-side: the handler threw — the error IS the consequence
    * (events.md §5). */
   error?: string;
+
   /** Processing-side: the dropped-event notice (events.md §5 T7) —
    * `{ status: "dropped", reason }` on the entry itself. */
   status?: "dropped";
   reason?: string;
+
   /** Processing-side (OW14, protocol.md §2b's LT4 ruling): failure
    * notices for CROSS-SPACE appends this event's handler emitted whose
    * DELIVERY was refused deterministically at the target — written by
@@ -598,6 +606,7 @@ export const identityOfScopeKey = (
   }
   return undefined;
 };
+
 /**
  * The identity annotation on one write WITHIN a derived-class commit's body
  * (protocol.md §1's transaction identity model, §7's closed metadata list).
@@ -760,6 +769,7 @@ export type ConfirmedRead = {
   branch?: BranchName;
   path: ReadPath;
   seq: number;
+
   /**
    * When true, this is a SHALLOW (shape-only) read — the reader observed the
    * container at `path` (its key set / existence) but did NOT depend on the deep
@@ -776,6 +786,7 @@ export type PendingRead = {
   id: EntityId;
   scope?: CellScope;
   path: ReadPath;
+
   /**
    * The reader's pending-stack dependency set for this document. An array
    * lists EVERY pending layer the read's materialized view sat on; each
@@ -789,6 +800,7 @@ export type PendingRead = {
    * lower-layer dependencies).
    */
   localSeq: number | number[];
+
   /**
    * The reader's confirmed basis for THIS document, in the SERVER's
    * space-log seq space (an accepted-commit `seq`, NOT the session's
@@ -815,6 +827,7 @@ export type PendingRead = {
    * docs/specs/memory-v2/09-invariants.md.
    */
   basisSeq?: number;
+
   /** See {@link ConfirmedRead.nonRecursive}. */
   nonRecursive?: boolean;
 };
@@ -822,6 +835,7 @@ export type PendingRead = {
 export type CommitPrecondition =
   | {
     kind: "origin-committed";
+
     /** localSeq of a commit from the SAME session in this space. */
     originLocalSeq: number;
   }
@@ -854,6 +868,7 @@ export type ClientCommit = {
     baseBranch: BranchName;
     baseSeq: number;
   };
+
   /** Server-execution v2 Phase 3 (events.md §1): the commit's declared
    * event appends. Only flag-ON clients produce this; admission under
    * the flag runs the dedupe-horizon CAS and stamps `firedAt` + `seq`
@@ -875,8 +890,10 @@ export type SessionOpenResult = {
 export type MemoryProtocolFlags = {
   modernCellRep: boolean;
   commitPreconditions: boolean;
+
   /** Hash-keyed per-frame schema table. */
   syncSchemaTableV2: boolean;
+
   /**
    * Server capability (CFC Phase 3.c): commit-folded `sqlite` writes to
    * rule-bearing tables are re-derived through the shared row-label evaluator
@@ -888,6 +905,7 @@ export type MemoryProtocolFlags = {
    * (not configuration), so a server of this version always advertises it.
    */
   sqliteCommitRowLabelEval: boolean;
+
   /**
    * Server capability (CT-1872 1c): pending reads may carry an ARRAY
    * `localSeq` naming every pending layer the read sat on (resolution
@@ -900,6 +918,7 @@ export type MemoryProtocolFlags = {
    * version always advertises it.
    */
   pendingReadStacks: boolean;
+
   /**
    * Server capability (CT-1927): the server stages a `caughtUpLocalSeq`
    * catch-up obligation for every accept and every conflict rejection —
@@ -915,10 +934,13 @@ export type MemoryProtocolFlags = {
    * version always advertises it.
    */
   verdictCatchUpMarkers: boolean;
+
   /** The server can list live space-scoped entity identifiers without values. */
   entityIdListing: boolean;
+
   /** The server can page one stable entity-identifier snapshot. */
   entityIdPagination: boolean;
+
   /** The server can test one entity identifier without loading its value. */
   entityIdLookup: boolean;
 };
@@ -965,6 +987,7 @@ export type SessionDescriptor = {
   sessionId?: SessionId;
   seenSeq?: number;
   sessionToken?: SessionToken;
+
   /**
    * The session-level delegated READ binding (OW31, READ side RULED
    * 2026-08-19: the service identity reads a space's ACL only; every
@@ -998,6 +1021,7 @@ export type SessionOpenRequest = {
 export type GraphQueryRoot = {
   id: EntityId;
   scope?: CellScope;
+
   /**
    * The explicit scope INSTANCE this read names (protocol.md §2's read
    * row; the read half of §1's transaction identity model, ledger LD5).
@@ -1024,6 +1048,7 @@ export type EntitySnapshot = {
   branch: BranchName;
   id: EntityId;
   scope?: CellScope;
+
   /**
    * The scope INSTANCE this snapshot is of (server-execution v2 stage A,
    * OW17's wire leg): present ONLY in responses to a lease-holder session
@@ -1037,6 +1062,7 @@ export type EntitySnapshot = {
   scopeKey?: ScopeKey;
   seq: number;
   document: EntityDocument | null;
+
   /** As on {@link SessionSyncUpsert}: the covering commit's class,
    * populated only under the server-execution flag and only for
    * `seq > 0` (a seq-0 snapshot has no covering commit). */
@@ -1086,6 +1112,7 @@ export type SessionSyncUpsert = {
   branch: BranchName;
   id: EntityId;
   scope?: CellScope;
+
   /**
    * The scope INSTANCE this upsert is of (server-execution v2 stage A,
    * OW17's wire leg — the ONE write-side addition to the frame shape).
@@ -1102,6 +1129,7 @@ export type SessionSyncUpsert = {
   seq: number;
   doc?: EntityDocument;
   deleted?: true;
+
   /**
    * The commit CLASS of the covering commit — the commit whose write
    * produced this snapshot's `seq` (`commit.seq` is unique, and every
@@ -1123,6 +1151,7 @@ export type SessionSyncRemove = {
   branch: BranchName;
   id: EntityId;
   scope?: CellScope;
+
   /** As on {@link SessionSyncUpsert}: the instance, lease-holder frames only. */
   scopeKey?: ScopeKey;
 };
@@ -1202,6 +1231,7 @@ export type SqliteDbRef = {
   id: string;
   tables?: Record<string, FabricValue>;
   scope?: CellScope;
+
   /** The db's owner — the principal that created the SqliteDb cell. Resolves
    *  the per-row label rule's `dbOwner()` term (CFC Phase 3); a FIXED db
    *  property, captured once at handle creation, never the acting reader. */
@@ -1265,6 +1295,7 @@ export function dbNeedsColumnProvenance(
 
 export type SqliteQueryResult = {
   rows: FabricPlainObject[];
+
   /** Per-result-column origin, present ONLY when the db needs provenance for
    *  CFC labeling — any column declares `ifc` (Phase 2) or any table declares
    *  a per-row label rule (Phase 3); see `dbNeedsColumnProvenance`. An aliased
@@ -1288,8 +1319,10 @@ export type SqliteRegisterDiskSourceRequest = {
   requestId: string;
   space: string;
   sessionId: SessionId;
+
   /** Handle cell id (content-derived from (serviceSpace, absPath); see cf). */
   id: string;
+
   /** Absolute path to the on-disk SQLite file. */
   path: string;
 };
@@ -1348,6 +1381,7 @@ export type V2Error = {
   message: string;
   precondition?: string;
   retryAfterSeq?: number;
+
   /**
    * Present on an `AuthorizationError` that a fresh handshake can heal — the
    * connection-challenge and invocation-freshness anti-replay races (an expired,

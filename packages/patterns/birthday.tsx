@@ -70,8 +70,10 @@ const getMonthName = (month: string): string => {
 export interface BirthdayModuleInput {
   /** Birth month (1-12 as string) */
   birthMonth: string | Default<"">;
+
   /** Birth day (1-31 as string) */
   birthDay: string | Default<"">;
+
   /** Birth year (e.g., "1990") */
   birthYear: string | Default<"">;
 }

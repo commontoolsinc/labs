@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read
+
 /**
  * Where a run's elapsed time went, and how much of it nothing accounts for.
  *

@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-run=git
+
 /**
  * Fails when a tracked source file contains a control codepoint below 0x20
  * other than newline.
@@ -98,8 +99,10 @@ export function isGovernedPath(path: string): boolean {
 export interface ControlViolation {
   file: string;
   line: number;
+
   /** The offending codepoint, e.g. `0x00`. */
   code: number;
+
   /** How many times it occurs in the file, so a CRLF file reports once. */
   count: number;
 }

@@ -31,6 +31,7 @@ export type SchedulerBasisEntry = {
   entitySpace: string;
   entity: string;
   entityScopeKey: string;
+
   /** The input's seq at read time, in the entity's own space's sequence;
    * in-wave reads share the wave's own commit seq. */
   seq: number;

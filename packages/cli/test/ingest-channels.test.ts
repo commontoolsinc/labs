@@ -49,8 +49,10 @@ interface RecordedRequest {
 
 interface StubReply {
   status?: number;
+
   /** Serialized as JSON. */
   body?: unknown;
+
   /** Sent verbatim, for the not-JSON case. */
   raw?: string;
 }

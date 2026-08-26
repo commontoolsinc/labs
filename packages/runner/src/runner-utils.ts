@@ -423,6 +423,7 @@ export function mergeSchemaDefaults<T>(
       schema: JSONSchema,
       fullSchema: JSONSchema,
     ) => boolean;
+
     /** Disambiguate otherwise-valid top-level union default candidates. */
     acceptUnionCandidate?: (candidate: unknown) => boolean;
   } = {},

@@ -62,6 +62,7 @@ export class CFAudioVisualizer extends BaseElement {
 
   /** Pre-allocated array for frequency data to avoid GC pressure */
   private _frequencyData?: Uint8Array<ArrayBuffer>;
+
   /** Pre-allocated array for normalized waveform values */
   private _waveformBuffer: number[] = [];
 

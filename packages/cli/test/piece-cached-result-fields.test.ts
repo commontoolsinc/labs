@@ -50,6 +50,7 @@ const FIELDS = ["title", "shout", "loud"];
 interface LivePieceReport {
   cached: CachedResultField[];
   primitive: CachedResultField[];
+
   /** The entity each field's own stored link names, before any is followed. */
   firstHop: Record<string, string>;
 }

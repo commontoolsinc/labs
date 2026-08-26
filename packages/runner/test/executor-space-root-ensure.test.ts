@@ -104,6 +104,7 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
   let mintedTxs: IExtendedStorageTransaction[];
   let stats: ServingLoopStats;
   let cleanups: Array<() => Promise<void>>;
+
   /** ONE localSeq counter across every SpaceServer this test builds —
    * the HOST's contract (host.ts #sinkLocalSeq: the counter is
    * process-lifetime and SURVIVES park/re-activate, because every

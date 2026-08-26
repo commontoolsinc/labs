@@ -32,28 +32,37 @@ import {
 export interface ItemOutput {
   /** File a new item beneath this one. */
   addChild: Stream<AddChildEvent, AddChildResult>;
+
   /** Append a progress note. Notes are append-only; nothing rewrites one. */
   recordNote: Stream<RecordNoteEvent, RecordNoteResult>;
+
   /** Mark this item done. Descendants are left alone — finishing a parent
    * says nothing about its children, which is what `openBelow` reports. */
   finish: Stream<FinishEvent, FinishResult>;
+
   /** Record that this item waits on another. The blocker may be anywhere on
    * the board — this is the edge that makes the tree a graph. */
   blockOn: Stream<BlockOnEvent, BlockOnResult>;
+
   /** Mark this item archived. Declares no result — the value-less shape. */
   archive: Stream<void>;
   [NAME]: string;
   title: string;
+
   /** "open" until a verb changes it — "done" or "archived". */
   status: string;
+
   /** Append-only progress record. Each entry carries a time the caller did not
    * supply and could not have supplied — the pattern reads the clock. */
   notes: Note[];
+
   /** The item this one files under, or null at a root. Carried so a caller can
    * walk up as well as down, per the documented self-reference shape. */
   parent: ItemOutput | null;
+
   /** The tree. */
   children: ItemOutput[];
+
   /** Items this one waits on. These are not descendants — a blocker can live
    * anywhere in the board, which is what turns the tree into a graph and makes
    * one item reachable by two different paths. */
@@ -96,6 +105,7 @@ interface RecordNoteResult {
   /** The note as persisted, including the time the pattern stamped on it. A
    * caller cannot compute `at` — that is the whole reason this comes back. */
   note: Note;
+
   /** How many notes this item now carries, after the append. */
   noteCount: number;
 }
@@ -108,6 +118,7 @@ interface FinishEvent {
 interface FinishResult {
   /** When the item was finished, as persisted. */
   at: number;
+
   /** Descendants still open beneath this item. Zero means the subtree is
    * genuinely done; anything else is the caller's next question, and it takes
    * a walk of the whole subtree to answer. */
@@ -124,10 +135,12 @@ interface BlockOnEvent {
 interface BlockOnResult {
   /** The item that now waits — this one. */
   blocked: ItemOutput;
+
   /** The item it waits on. Still a reference: it arrived as one, is stored as
    * one, and is handed back as one, so the caller gets an address rather than
    * a copy of the target. */
   on: Writable<ItemOutput>;
+
   /** How many items this one waits on, after the edge was written. */
   blockedOnCount: number;
 }
@@ -235,8 +248,10 @@ interface BoardInput {
  * directly. */
 interface BoardOutput {
   [NAME]: string;
+
   /** Root items only. The tree hangs off each one's `children`. */
   items: ItemOutput[];
+
   /** File a new root item on the board. */
   addItem: Stream<AddItemEvent, AddItemResult>;
 }

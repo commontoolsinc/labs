@@ -24,6 +24,7 @@ export interface SelectionCases {
  */
 export interface ViewLanguageFixture {
   readonly languageId: string;
+
   /** Other adapters that deliberately share this fixture's token evidence. */
   readonly highlightingPeers?: readonly string[];
   readonly surveyRepository: string;

@@ -36,6 +36,7 @@ export interface SourceViewNode {
   type: string;
   label: string;
   stats?: { totalTime: number; runCount: number };
+
   /** Content identity of the pattern this node belongs to. */
   patternIdentity?: string;
 }

@@ -10,6 +10,7 @@ export enum WorkerIPCMessageType {
 export type InitializationData = {
   did: string;
   toolshedUrl: string;
+
   /**
    * The service's signer, as a `codec-realm` encoding of the `FabricKeyPair`
    * it signs with. Encoded rather than plain because that is the one format

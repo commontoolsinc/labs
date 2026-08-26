@@ -591,6 +591,7 @@ function getEnvMeasuresEnabled(): boolean {
  * sample — and a reader who does not know that will attribute a whole run from
  * its setup. Raising it has to be reachable from wherever emission is.
  */
+
 /**
  * What `CF_TIMING_MEASURES_CAP` means, separated from reading it.
  *
@@ -745,6 +746,7 @@ export interface GetLoggerOptions {
    * environment, or `info` when it names none.
    */
   level?: LogLevel;
+
   /**
    * How many total calls to go between debug messages summarizing the
    * counts. `0` disables the summaries entirely. Defaults to `100`.

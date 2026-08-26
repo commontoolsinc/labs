@@ -24,8 +24,10 @@ import { VERIFIED_BINDING_METADATA_FIELD } from "@commonfabric/utils/sandbox-con
 export type VerifiedProvenance = {
   /** Module content identity (prefix-free `cf:module/<hash>` hash). */
   identity: string;
+
   /** Export / `__cfReg` symbol of the registered factory (absent: dynamic). */
   symbol?: string;
+
   /**
    * Symbol-less dynamic provenance: in-session-only authority — never
    * serializable to a cross-session `$implRef`. No production writer exists
@@ -35,6 +37,7 @@ export type VerifiedProvenance = {
    * honor.
    */
   dynamic?: true;
+
   /** CT-1665 verified binding identity, when the factory carried one. */
   bindingIdentity?: { sourceFile: string; bindingPath: string[] };
 };

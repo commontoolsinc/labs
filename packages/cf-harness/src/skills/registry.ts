@@ -65,6 +65,7 @@ export interface HarnessSkillContextLoadResult {
 export interface LoadHarnessSkillContextFromTextOptions {
   /** The skill text a handle resolved to. */
   text: string;
+
   /** The parent-held token the text was materialized through. */
   handleToken: string;
   runId: string;

@@ -24,8 +24,10 @@ const space = signer.did();
 type Outcome = {
   rejection: string | undefined;
   aggregate: unknown;
+
   /** Ids of element documents left without a `result` meta. */
   missing: string[];
+
   /** The element the held reconcile created. */
   createdId: string | undefined;
 };

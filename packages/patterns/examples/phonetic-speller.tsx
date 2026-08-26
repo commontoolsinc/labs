@@ -54,8 +54,10 @@ interface PhoneticSpellerInput {
 export interface PhoneticSpellerOutput {
   [NAME]: string;
   [UI]: VNode;
+
   /** `text` spelled out, one code word per letter it recognizes. */
   spelled: string;
+
   /** Every code word the file holds, in the order the file stores them. */
   codeWords: string[];
 }

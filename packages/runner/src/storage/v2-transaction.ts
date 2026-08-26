@@ -872,6 +872,7 @@ class V2TransactionJournal implements ITransactionJournal {
 export class V2StorageTransaction implements IStorageTransaction {
   changeGroup?: ChangeGroup;
   immediate?: boolean;
+
   /**
    * The scope INSTANCE identity this transaction's scoped reads and
    * writes resolve against (IStorageTransaction.scopeKeyIdentity —

@@ -9,6 +9,7 @@ import { CompilerStackLoadError } from "@commonfabric/runner";
 import {
   ClientNotificationType,
   isWorkerConsoleNotification,
+  NotificationType,
   RequestType,
   RuntimeErrorCode,
   TransportNotificationType,
@@ -439,6 +440,42 @@ describe("web-worker-console-bridge", () => {
           (globalThis as { postMessage?: unknown }).postMessage =
             originalPostMessage;
         }
+      }
+    });
+
+    it("reports a message that carries no `msgId` to reply under", async () => {
+      // A reply is addressed by `msgId`, and `null` carries none. It reaches
+      // the guard rather than the decode's `catch`: `null` is a `FabricValue`,
+      // so the envelope decodes it to itself and it fails `isIPCClientMessage`
+      // downstream, which is where `Invalid IPC request` is thrown.
+      //
+      // Decoded as the client's transport decodes it: `postToClient()` encodes
+      // the envelope, so what a raw capture sees is the encoding.
+      const posted: Posted[] = [];
+      const originalPostMessage =
+        (globalThis as { postMessage?: unknown }).postMessage;
+      (globalThis as { postMessage: (m: unknown) => void }).postMessage = (
+        m: unknown,
+      ) => {
+        posted.push(fabricFromRealmValue(m as never) as Posted);
+      };
+      const realConsoleError = console.error;
+      console.error = () => {};
+
+      try {
+        await import("@/backends/web-worker/index.ts");
+        posted.length = 0;
+
+        await dispatch(null);
+
+        expect(posted).toHaveLength(1);
+        expect(posted[0].type).toBe(NotificationType.ErrorReport);
+        expect(posted[0].message).toContain("Malformed message");
+        expect(Object.hasOwn(posted[0], "msgId")).toBe(false);
+      } finally {
+        console.error = realConsoleError;
+        (globalThis as { postMessage?: unknown }).postMessage =
+          originalPostMessage;
       }
     });
 

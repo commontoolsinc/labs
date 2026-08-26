@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-env --allow-run=git
+
 /**
  * Fails when a `FileSystemProgramResolver` is constructed outside the one
  * operation that builds a program from local files.

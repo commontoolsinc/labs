@@ -38,8 +38,10 @@ import { toDebugKindString } from "./value-debug.ts";
 export interface CloneOptions {
   /** Whether the result should be frozen. Default: `true`. */
   frozen?: boolean;
+
   /** Whether to clone deeply or shallowly. Default: `true`. */
   deep?: boolean;
+
   /**
    * Force a copy to be made.
    *

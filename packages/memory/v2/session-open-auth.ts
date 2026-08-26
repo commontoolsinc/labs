@@ -104,10 +104,13 @@ export const wireAuthorizationOf = (
 export type VerifySessionOpenOptions = {
   /** This server's own audience identity. */
   audience: string;
+
   /** The challenge issued to this connection. */
   challenge: SessionOpenChallenge;
+
   /** Current unix time in seconds (defaults to now). Injectable for tests. */
   nowSeconds?: number;
+
   /** Grace window for `exp` to tolerate client/server clock skew. */
   clockSkewSeconds?: number;
 };

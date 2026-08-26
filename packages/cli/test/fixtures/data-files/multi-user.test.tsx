@@ -1,4 +1,5 @@
 /// <cts-enable />
+
 /**
  * Each participant of a multi-user test compiles the pattern in its own
  * worker, so an attachment made where the workers are spawned does not reach

@@ -46,14 +46,19 @@ export type TraverseFixtureAddress = {
 export type TraverseFixtureInvocation = {
   /** Address passed to `SchemaObjectTraverser.traverse()`. */
   address: TraverseFixtureAddress;
+
   /** Index into the fixture's `selectors` table. */
   selector: number;
+
   /** Index into the fixture's `links` table, when traverse() got a link. */
   link?: number;
+
   /** `TraversalContext.includeMeta` (true on the query path). */
   includeMeta: boolean;
+
   /** Invocations sharing this id shared one `TraversalContext`. */
   context: number;
+
   /** Invocations sharing this id shared one `SchemaMemo`. */
   memo?: number;
 };
@@ -68,6 +73,7 @@ export type TraverseFixture = {
   };
   selectors: SchemaPathSelector[];
   links: NormalizedFullLink[];
+
   /** Full fact values keyed by `space|scope|id|type`. */
   docs: Record<string, FabricValue>;
   invocations: TraverseFixtureInvocation[];

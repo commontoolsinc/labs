@@ -248,6 +248,7 @@ const TEST_AUDIENCE = "did:key:z6Mk-runner-retry-classification-audience";
 
 class CountingLoopbackSessionFactory implements SessionFactory {
   readonly supportsAclBootstrap = true;
+
   /** Commits sent for the ACL document, across all sessions. */
   aclCommits = 0;
   #aclDocId: string;
@@ -399,8 +400,10 @@ Deno.test("a server ProtocolError reaches editWithRetry by name, once", async ()
 // in storage/rejection.ts.
 class SessionErrorSessionFactory implements SessionFactory {
   readonly supportsAclBootstrap = true;
+
   /** Mounts created — how many times a session was (re)opened. */
   sessions = 0;
+
   /** transact() calls made after `arm()`. */
   commits = 0;
   #armed = false;

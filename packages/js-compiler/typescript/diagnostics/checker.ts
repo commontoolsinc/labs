@@ -7,6 +7,7 @@ import {
 
 export interface CheckerOptions {
   messageTransformer?: DiagnosticMessageTransformer;
+
   /**
    * Compiling durable STORED pattern source (see
    * `TypeScriptCompilerOptions.storedSource`): authoring-hygiene-only codes

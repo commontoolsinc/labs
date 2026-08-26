@@ -40,6 +40,7 @@ export interface HandleState {
   writeTarget?: unknown;
   cfcAuthorizedOperations: Set<CfcExistingWritebackOperation>;
   cfcAuthorizationAnnotation?: CfcNodeAnnotation;
+
   /**
    * For a read-only snapshot of a generated file, when its bytes were
    * published. A getattr on this handle reports it so the size and the

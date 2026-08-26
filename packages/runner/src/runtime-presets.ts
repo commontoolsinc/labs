@@ -433,8 +433,10 @@ export function adoptServerExperimentalOptions(
 export interface DeployedClientExperimentalParams {
   /** The deployment this client runs against. */
   apiUrl: URL;
+
   /** Reads this process's environment; pass `Deno.env.get` in Deno contexts. */
   env: EnvReader;
+
   /**
    * Cancels the request. A caller whose startup is cancellable must pass its
    * signal: without one, a deployment that accepts the connection and then
@@ -442,6 +444,7 @@ export interface DeployedClientExperimentalParams {
    * no shutdown can reach it.
    */
   signal?: AbortSignal;
+
   /** Injectable for tests; the real `fetch` otherwise. */
   fetch?: typeof globalThis.fetch;
 }
@@ -592,8 +595,10 @@ export const MAX_ENFORCEMENT_CFC_OPTIONS = Object.freeze(
 interface CoreParams {
   /** Base URL of the memory/API service this runtime talks to. */
   apiUrl: URL;
+
   /** Storage backend — `StorageManager.open(...)` against a deployment, or `.emulate(...)` in-memory. */
   storageManager: IStorageManager;
+
   /**
    * Experimental flags. Required on purpose: pass
    * `experimentalOptionsFromEnv(Deno.env.get)` where the environment should
@@ -602,6 +607,7 @@ interface CoreParams {
    * where an omitted field was silent drift.
    */
   experimental: ExperimentalOptions;
+
   /**
    * Opt this runtime into a named CFC posture bundle
    * ({@link MAX_ENFORCEMENT_CFC_OPTIONS}). Applied in {@link coreOptions},
@@ -617,6 +623,7 @@ interface CoreParams {
  * modes) get flipped HERE, in one reviewed place, for every preset user at
  * once — the constructor defaults then only govern non-preset constructions.
  */
+
 /**
  * The first-party server-execution default for the DEPLOYED-TOPOLOGY
  * presets (server-execution v2, docs/plans/server-execution-v2.md Phase
@@ -683,12 +690,16 @@ export interface ProductionServerPresetParams extends CoreParams {
 export interface RemoteClientPresetParams extends CoreParams {
   errorHandlers?: ErrorHandler[];
   navigateCallback?: NavigateCallback;
+
   /** Shared compiled-module-byte cache (integration suites). */
   moduleByteCache?: ModuleByteCache;
+
   /** Trust provenance for CFC-relevant writes (pieces controller). */
   trustSnapshotProvider?: () => TrustSnapshot | undefined;
+
   /** Statement-coverage collector for the pattern integration harness. */
   patternCoverage?: PatternCoverageCollector;
+
   /**
    * Host-controlled rollout dials, the browserWorker precedent: a client
    * host (cf-harness's fabric session) may raise enforcement and turn on
@@ -705,10 +716,13 @@ export interface PatternTestPresetParams extends CoreParams {
   errorHandlers?: ErrorHandler[];
   navigateCallback?: NavigateCallback;
   moduleByteCache?: ModuleByteCache;
+
   /** Per-test laxer mode; defaults to the shared core pin. */
   cfcEnforcementMode?: CfcEnforcementMode;
+
   /** Statement-coverage collector for `cf test` and the pattern harnesses. */
   patternCoverage?: PatternCoverageCollector;
+
   /** Records what a run materializes; see the vintage capture. */
   onPatternInstantiated?: PatternInstantiationObserver;
 }
@@ -716,6 +730,7 @@ export interface PatternTestPresetParams extends CoreParams {
 export interface BrowserWorkerPresetParams extends CoreParams {
   /** Map from space DIDs to HTTP or HTTPS origins selected by the shell host. */
   spaceHostMap?: Record<string, string>;
+
   /** Host-controlled rollout dials, from `InitializationData`. */
   cfcEnforcementMode?: CfcEnforcementMode;
   cfcFlowLabels?: CfcFlowLabelsMode;
@@ -725,6 +740,7 @@ export interface BrowserWorkerPresetParams extends CoreParams {
   errorHandlers?: ErrorHandler[];
   navigateCallback?: NavigateCallback;
   pieceCreatedCallback?: PieceCreatedCallback;
+
   /** Statement-coverage collector, set only on the coverage-collecting shell build. */
   patternCoverage?: PatternCoverageCollector;
 }
@@ -736,6 +752,7 @@ export interface UnitTestPresetParams extends Omit<CoreParams, "experimental"> {
   errorHandlers?: ErrorHandler[];
   moduleByteCache?: ModuleByteCache;
   cfcEnforcementMode?: CfcEnforcementMode;
+
   /** Scheduler tests shrink the backoff/retry window. */
   commitBackpressure?: Partial<CommitBackpressurePolicy>;
 }

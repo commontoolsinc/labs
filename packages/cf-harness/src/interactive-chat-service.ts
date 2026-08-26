@@ -64,6 +64,7 @@ export type HarnessInteractiveChatEventListener = (
 
 export interface CreateHarnessInteractiveChatServiceOptions {
   basePromptLoopOptions?: CreateHarnessPromptLoopOptions;
+
   /**
    * The single authenticated owner bound to this service process. Required
    * for openai-codex; interactive requests cannot select or replace it.
@@ -79,12 +80,14 @@ export interface CreateHarnessInteractiveChatServiceOptions {
 
 interface HarnessInteractiveChatSessionRecord {
   status: HarnessChatSessionStatus;
+
   /**
    * The last durable resumable transcript: the model history a following turn
    * is built from. It advances only at a completed turn, so every snapshot
    * persisted alongside an event is one a provider accepts.
    */
   transcript: readonly HarnessTranscriptMessage[];
+
   /**
    * Why a restored session cannot be resumed. Set when the recorded history
    * could not be repaired into valid model history; a turn started on such a
@@ -103,6 +106,7 @@ interface HarnessInteractiveChatSessionRecord {
 interface HarnessInteractiveChatEmitOptions {
   turnRecord?: HarnessChatTurnRecord;
   createTurn?: boolean;
+
   /**
    * A transcript to persist with this event and adopt as the session's durable
    * checkpoint. It replaces `record.transcript` only once the durable write has

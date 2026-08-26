@@ -388,6 +388,7 @@ export class Scheduler {
   private subscriptionState!: SchedulerSubscriptionState;
   private subscribeActionState!: SchedulerSubscribeActionState;
   private unsubscribeState!: SchedulerUnsubscribeActionState;
+
   /** The storage subscriber registered in the constructor, kept so `dispose`
    * can hand it back. */
   readonly #storageSubscription: IStorageSubscription;
@@ -1066,6 +1067,7 @@ export class Scheduler {
    * and `user:bob`, name ONE entity whose one node writes both). The
    * count is the number of registry instance keys naming the entity. */
   private readonly demandedEntityRefs = new Map<SpaceScopeAndURI, number>();
+
   /** Per-runtime enter/leave/re-arm tallies. The SpaceServer reads the
    * enter/leave DELTA per pass and folds it into its space-lived
    * `stats.demand` accumulators (these reset with the runtime on a
@@ -1291,6 +1293,7 @@ export class Scheduler {
       eventId?: string;
       originTx?: IExtendedStorageTransaction;
       time?: number;
+
       /**
        * Payload keys the RUNTIME itself injected into `event`'s value —
        * provenance for the closed-world gate, forwarded from the send's
@@ -1298,11 +1301,13 @@ export class Scheduler {
        * `StreamSendOptions` (cell.ts).
        */
       runtimeInjectedEventKeys?: readonly string[];
+
       /** Server-execution v2 Phase 3: the serving drain's per-event
        * carriage — acting identity, the durable stream entry, and the
        * failure hook (QueuedEvent.served). Passed only by the
        * SpaceServer's drain; absent everywhere client-side. */
       served?: ServedEventDispatch;
+
       /** The client-echo cascade thread (QueuedEvent.parentEventId):
        * the emitting run's event id, passed by cell.ts's plain
        * queueEvent for a send from within a speculation-stamped

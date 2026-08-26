@@ -42,20 +42,28 @@ type LocationState = "idle" | "requesting" | "watching" | "error";
 export interface LocationData {
   /** Unique ID for this location capture */
   id: string;
+
   /** Latitude in decimal degrees */
   latitude: number;
+
   /** Longitude in decimal degrees */
   longitude: number;
+
   /** Accuracy of the position in meters */
   accuracy: number;
+
   /** Altitude in meters above sea level (if available) */
   altitude?: number;
+
   /** Accuracy of altitude in meters (if available) */
   altitudeAccuracy?: number;
+
   /** Direction of travel in degrees (0-360, if available) */
   heading?: number;
+
   /** Speed in meters per second (if available) */
   speed?: number;
+
   /** Unix timestamp in milliseconds when the location was captured */
   timestamp: number;
 }

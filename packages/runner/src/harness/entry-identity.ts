@@ -133,6 +133,7 @@ export function computeEntryIdentity(
 export interface EntryIdentityOptions {
   /** Additional entry roots beyond `main`. */
   sourceRoots?: readonly string[];
+
   /** Files stored uninterpreted as data. */
   dataFiles?: readonly string[];
 }

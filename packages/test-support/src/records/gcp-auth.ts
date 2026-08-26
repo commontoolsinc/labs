@@ -8,6 +8,7 @@
 
 export interface ServiceAccountKey {
   client_email: string;
+
   /** PEM, PKCS#8. */
   private_key: string;
   token_uri: string;

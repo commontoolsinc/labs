@@ -58,13 +58,17 @@ const MODULE_IDENTITY = "pf1v3J_M5Nep7cq-Uh8EYG0ZQaE217FfDfcjbwGdjVI";
 
 interface SeedEntity {
   id: string;
+
   /** The stored document, written once per revision. */
   document: Record<string, unknown>;
   revisions: number;
+
   /** Branch the revisions are written on. Defaults to the space branch. */
   branch?: string;
+
   /** Written after the revisions: the entity's visible head is a tombstone. */
   deleted?: boolean;
+
   /** Scope the revisions are written under. Defaults to the shared scope. */
   scope?: string;
 }
@@ -662,6 +666,7 @@ describe("scan-extent", () => {
 
   describe("a fingerprint of a child branch", () => {
     const MINE = "user:did:key:zBob";
+
     /** A parent entity the child overrides, and a parent-only user scope. */
     const forked = (run: (space: SpaceDb) => void) =>
       withSeeded(
@@ -713,6 +718,7 @@ describe("scan-extent", () => {
 
   describe("an entity deleted in one scope and live in another", () => {
     const MINE = "user:did:key:zBob";
+
     /** Shared value kept; the per-user copy written and then deleted. */
     const halfDeleted = (run: (space: SpaceDb) => void) =>
       withSeeded(

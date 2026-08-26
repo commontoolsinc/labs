@@ -50,16 +50,22 @@ type CalendarOperation = "create" | "update" | "delete" | "rsvp";
 type EventDraft = {
   /** Event title/summary */
   summary: string | Default<"">;
+
   /** Start datetime (ISO or datetime-local format) */
   start: string | Default<"">;
+
   /** End datetime (ISO or datetime-local format) */
   end: string | Default<"">;
+
   /** Calendar ID (primary for main calendar) */
   calendarId: string | Default<"primary">;
+
   /** Event description */
   description: string | Default<"">;
+
   /** Event location */
   location: string | Default<"">;
+
   /** Attendee emails (comma-separated) */
   attendeesText: string | Default<"">;
 };
@@ -67,8 +73,10 @@ type EventDraft = {
 type ExistingEvent = {
   /** Event ID for update/delete/rsvp */
   id: string;
+
   /** Calendar ID */
   calendarId: string;
+
   /** Event summary for display */
   summary?: string;
 } | null;
@@ -109,6 +117,7 @@ interface Input {
       location: "";
       attendeesText: "";
     }>;
+
   /** Existing event for update/delete/rsvp operations */
   existingEvent: ExistingEvent | Default<null>;
 }

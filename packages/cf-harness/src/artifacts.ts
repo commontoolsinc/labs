@@ -79,6 +79,7 @@ const writeJsonFile = async (path: string, value: unknown): Promise<void> => {
 export interface HarnessArtifactStore {
   readonly artifactRoot: string;
   readonly runRoot: string;
+
   /**
    * Host directory where image-attachment snapshots may be written, for
    * stores backed by a writable filesystem. Stores without a writable

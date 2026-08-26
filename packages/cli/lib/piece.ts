@@ -127,8 +127,10 @@ export interface EntryConfig {
   mainExport?: string;
   repository?: string;
   rootPath?: string;
+
   /** Test entry paths whose resolved source closures travel with the piece. */
   testPaths?: string[];
+
   /** Data file paths stored with the piece and never compiled. */
   dataFilePaths?: string[];
 }
@@ -139,6 +141,7 @@ export interface SpaceConfig {
   identity: string;
   jsonOutput?: boolean;
   deferSpaceCellSync?: boolean;
+
   /**
    * Space DIDs embedded in LLM-friendly references given to this command,
    * carried here when `space` is a name rather than a DID. A name only
@@ -158,6 +161,7 @@ export interface PieceSearchResult {
 export interface PieceConfig extends SpaceConfig {
   piece: string;
   pieceScope?: CellScope;
+
   /**
    * Path segments embedded in an LLM-friendly `--piece` reference. A command
    * that reads or writes at a path prepends these to its positional path
@@ -165,6 +169,7 @@ export interface PieceConfig extends SpaceConfig {
    * carries them.
    */
   piecePath?: (string | number)[];
+
   /**
    * True when the reference carried the `#argument` suffix: the caller
    * selected the piece's arguments cell. A command that takes `--input`
@@ -353,6 +358,7 @@ async function resultProjectionFailedAtPath(
  */
 export interface ResolvedPieceCallable extends CallableResolution {
   commandSpec: ExecCommandSpec;
+
   /**
    * This verb's documentation, resolved on demand — a thunk for the same
    * reason `declaredResult` is one, and attached under the same condition:
@@ -381,8 +387,10 @@ export interface PieceCallableDependencies extends CallableExecutionDeps {
 export interface ExecutedPieceCallable {
   helpText?: string;
   outputText?: string;
+
   /** Handler invocation outcome, passed through from ExecutedCallable. */
   invocation?: InvocationOutcome;
+
   /** Tool result cell address, passed through from ExecutedCallable. */
   resultRef?: CallableResultRef;
   parsed: ParsedExecArgs;
@@ -1954,6 +1962,7 @@ export interface PieceCallablesListing {
   /** The deployed pattern's source identity; null when the piece exposes
    * none (e.g. harness doubles). */
   pattern: PiecePatternRef | null;
+
   /** Present when the listing is a LOWER BOUND rather than the surface,
    * naming what it could not read. `verbs` is still every callable the
    * listing found, and every row in it is still real.
@@ -1974,16 +1983,20 @@ export interface PieceCallablesListing {
 export interface PieceCallableListing {
   name: string;
   kind: "handler" | "tool";
+
   /** Which cell the callable lives on. `result` shadows `input` on a name
    * collision, matching `cf piece call`'s resolution order. */
   on: "result" | "input";
+
   /** The verb's input schema — the same schema `call <verb> --help --json`
    * serves. `true` means unconstrained. */
   inputSchema: JSONSchema | true;
+
   /** What the verb hands back: a tool's pattern result schema, a handler's
    * declared result. Absent when the verb declares none — the value-less
    * shape, which is the common one. */
   outputSchema?: JSONSchema;
+
   /**
    * What the verb is FOR, in the author's own words: the doc comment on the
    * pattern property declaring it, the same prose `call <verb> --help` prints
@@ -1995,10 +2008,12 @@ export interface PieceCallableListing {
    * caller who wrote it and calls it documentation.
    */
   description?: string;
+
   /** Listing mark: a UI affordance outside the headless contract (inferred
    * from session-scoped handler bindings at compile time). Hidden from the
    * default listing; always callable. */
   tier?: "wrapper";
+
   /** Listing mark: `@deprecated` JSDoc on the verb, lowered to the standard
    * schema annotation. Hidden from the default listing; always callable. */
   deprecated?: boolean;
@@ -2195,6 +2210,7 @@ export interface DeclaredVerbProse {
    * merged into it.
    */
   description?: string;
+
   /**
    * The verb's declared event schema with its `$ref` followed against the
    * result schema's own root, so the field descriptions inside the `$defs`
@@ -2513,13 +2529,16 @@ interface ProseWalk {
  */
 interface ProseWalkState {
   readonly edits: DescriptionEdit[];
+
   /** Paths already recorded, so the first account of a position wins. Two
    * positions sharing one `$defs` target can each reach it now that the guard
    * is path-scoped, and without this the later one would silently overwrite
    * the earlier. */
   readonly written: Set<string>;
+
   /** Served `$defs` names open on the current descent. */
   readonly openDefinitions: string[];
+
   /** Declared references open on the current expansion, each with the scope it
    * was followed in — the same reference in two different scopes is two
    * different targets. */
@@ -3761,6 +3780,7 @@ export async function generateSpaceMap(
 export interface CachedResultField {
   /** The field's name on the piece's result. */
   name: string;
+
   /** The computed documents crossed while resolving the field's value. */
   cells: CachedResultCell[];
 }
@@ -3769,10 +3789,13 @@ export interface CachedResultField {
 export interface CachedResultCell {
   /** The computed entity's id. */
   id: string;
+
   /** The space whose commit sequence contains `derivedAtCommit`. */
   space: MemorySpace;
+
   /** The computed entity's memory scope. */
   scope: CellScope;
+
   /**
    * The commit the entity's document last stood at. Absent when the local
    * replica holds no confirmed version of that document.
@@ -3851,14 +3874,17 @@ export interface PieceInspection {
   patternRef?: PiecePatternRef;
   source?: Readonly<unknown>;
   result: Readonly<unknown> | null | undefined;
+
   /**
    * The commit the argument document behind `source` last stood at. It can be
    * ordered against a {@link CachedResultCell} commit only when both have the
    * same `space`.
    */
   sourceCommit?: number;
+
   /** The space whose commit sequence contains `sourceCommit`. */
   sourceSpace?: MemorySpace;
+
   /** The fields of `result` whose resolution crosses a computed-cell cache. */
   cachedResultFields: CachedResultField[];
   readingFrom: Array<{ id: string; name?: string }>;

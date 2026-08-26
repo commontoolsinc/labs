@@ -22,10 +22,13 @@ import {
 export interface VDomSessionLog {
   /** Cell references passed to `mount`, in order. */
   mounted: CellRef[];
+
   /** Mount ids passed to `unmount`, in order. */
   unmounted: number[];
+
   /** Whether the renderer detached its disposal teardown. */
   detached: boolean;
+
   /** Whether a VDOM session was attached at all. */
   attached: boolean;
 }

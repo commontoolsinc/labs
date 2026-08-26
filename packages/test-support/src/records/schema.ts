@@ -18,10 +18,13 @@ export interface TestIdentity {
   /** Class of check: "unit", "browser", "pattern", "integration",
    * "typecheck", "lint", "format", or "gate". */
   k: string;
+
   /** Owning workspace member, or "repo". */
   s: string;
+
   /** Name as reported by the test's own runner. */
   n: string;
+
   /** Non-default configuration under which the test ran. */
   v?: string;
 }
@@ -41,6 +44,7 @@ export interface TestRecord {
   test: TestIdentity;
   outcome: "pass" | "fail" | "skip";
   durationMs: number;
+
   /** Repository-relative source file, when reliably known. Metadata, not
    * identity. */
   file?: string;
@@ -52,14 +56,19 @@ export interface CiContext {
   workflowRunId: string;
   runAttempt: number;
   workflow: string;
+
   /** Job identity including the matrix leg, as in "Test (3/8)". */
   job: string;
+
   /** Shard label like "3/8" when the job is sharded. */
   shard?: string;
+
   /** Pull request head commit; `commit` is the ephemeral merge commit. */
   headCommit?: string;
+
   /** Triggering event, from the trusted payload: "push", "pull_request". */
   event?: string;
+
   /**
    * True when the run's head repository differs from the base repository.
    * Stamped from the trusted payload, never from job artifacts: record
@@ -73,17 +82,22 @@ export interface CiContext {
 export interface RunContext {
   schema: typeof RECORD_SCHEMA_VERSION;
   line: "context";
+
   /** ULID; unique per uploaded object. */
   reportId: string;
+
   /** Canonical repository name, as in "commontoolsinc/labs". */
   repo: string;
+
   /** Full hash of the commit the tests ran against. */
   commit: string;
+
   /** True when the working tree had uncommitted changes. */
   dirty: boolean;
   branch?: string;
   env: "ci" | "local";
   ci?: CiContext;
+
   /**
    * Opaque label for the operating agent: CF_TEST_AGENT, or the
    * harness a run was started under when that variable is unset.
@@ -92,6 +106,7 @@ export interface RunContext {
   os: string;
   arch: string;
   denoVersion: string;
+
   /** ISO 8601 UTC. */
   startedAt: string;
 }

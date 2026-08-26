@@ -143,6 +143,7 @@ const createOnlyMarkKey = (
 
 type CfcInstrumentationHooks = {
   onRelevantTx?(): void;
+
   /** Stage C tuning T1: one flow-label probe was evaluated (`computed`) or
    * answered from the memoized negative verdict (`memo`). Measurement
    * only. */

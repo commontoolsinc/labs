@@ -1885,6 +1885,7 @@ export class PatternManager {
    * fails the compile: refs-only pattern JSON makes a durable closure in `space`
    * part of the compilation contract.
    */
+
   /** Attach the trigger's §2b carriage ONLY for a write target FOREIGN
    * to the serving manager's home space (OW31 seat S-A): home-space
    * writebacks and every client writeback stay plain bookkeeping —

@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-run --allow-env --allow-net
+
 /**
  * Runs a command and spools one record from its exit code:
  *

@@ -216,6 +216,7 @@ function getSymbolTypeAtSource(
 interface CapabilitySummaryMemo {
   /** `{ checker, includeNestedCallbacks: true }` analyses. */
   readonly nested: WeakMap<ts.Node, FunctionCapabilitySummary>;
+
   /** Non-nested analyses (fallback after a recorded-summary miss). */
   readonly fallback: WeakMap<ts.Node, FunctionCapabilitySummary>;
 }

@@ -13,6 +13,7 @@ export interface StatOpts {
   size: number;
   uid?: number;
   gid?: number;
+
   /** Modification time in milliseconds since the epoch. */
   mtime?: number;
 }
@@ -32,6 +33,7 @@ export interface FileInfo {
 
 export interface MountHandle {
   session: Deno.PointerValue;
+
   /** Channel pointer on macOS (FUSE v2), session pointer on Linux (FUSE v3). */
   notifyTarget: Deno.PointerValue;
 }
@@ -165,8 +167,10 @@ export interface FusePlatform {
   OPS_SIZE: number;
   OPS_OFFSETS: Readonly<Record<string, number>>;
   FUSE_ARGS_STRUCT_SIZE: number;
+
   /** Byte offset of st_size within struct stat. */
   STAT_ST_SIZE_OFFSET: number;
+
   /** Byte offset of st_mtim(espec) within struct stat. */
   STAT_ST_MTIM_OFFSET: number;
 
@@ -190,6 +194,7 @@ export interface FusePlatform {
   ENOSYS: number;
   ENODATA: number;
   ENOTSUP: number;
+
   /** Byte offset of fh within fuse_file_info. */
   FH_OFFSET: number;
 
