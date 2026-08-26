@@ -40,8 +40,7 @@ export function postToClient(message: IPCRemotePost): void {
     // place a worker speaks. A throw here reaches whatever called it, which
     // for a console notification is a synchronous `EventTarget` listener,
     // where it becomes an uncaught error and takes the process down.
-    postUndeliverable(message, error);
-    return;
+    encoded = realmFromFabricValue(undeliverableMessageFrom(message, error));
   }
 
   // Read off `self` at call time rather than captured at module load, so that
@@ -50,7 +49,7 @@ export function postToClient(message: IPCRemotePost): void {
 }
 
 /**
- * Reports a message the encoding refused, in place of the message itself.
+ * Builds what stands in for a message the encoding refused.
  *
  * A reply is answered as a failure rather than dropped: the client is awaiting
  * one, and dropping it would hang that request until it times out. A
@@ -58,21 +57,19 @@ export function postToClient(message: IPCRemotePost): void {
  * rendering of what could not be sent -- degraded rather than silent, which
  * matters most for the console, whose whole job is to say what happened.
  *
- * What this posts is built from strings and numbers alone, which the encoding
- * cannot refuse, so it needs no guard of its own.
+ * What this returns is built from strings and numbers alone, which the
+ * encoding cannot refuse, so the caller encodes it without a guard.
  */
-function postUndeliverable(message: IPCRemotePost, error: unknown): void {
-  const reason = `${describeFailure(error)}: ${
+function undeliverableMessageFrom(
+  message: IPCRemotePost,
+  error: unknown,
+): IPCRemotePost {
+  const reason = `Undeliverable message: ${describeFailure(error)}: ${
     toCompactDebugString(message, MAX_UNDELIVERABLE_RENDER)
   }`;
   const msgId = (message as { msgId?: unknown }).msgId;
 
-  self.postMessage(realmFromFabricValue(
-    typeof msgId === "number"
-      ? { msgId, error: `Undeliverable message: ${reason}` }
-      : {
-        type: NotificationType.ErrorReport,
-        message: `Undeliverable message: ${reason}`,
-      },
-  ));
+  return typeof msgId === "number"
+    ? { msgId, error: reason }
+    : { type: NotificationType.ErrorReport, message: reason };
 }
