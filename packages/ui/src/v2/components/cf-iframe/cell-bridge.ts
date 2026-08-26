@@ -96,6 +96,35 @@ function sqliteInput(value: FabricValue | undefined): {
   };
 }
 
+function isSqliteDbValue(value: unknown): boolean {
+  return value !== null && typeof value === "object" &&
+    typeof (value as { id?: unknown }).id === "string";
+}
+
+async function demandSqliteSource(
+  source: CellHandle<unknown>,
+  authority: CellHandle<unknown>,
+): Promise<void> {
+  const cancel = source.subscribe(() => {});
+  try {
+    await source.pull();
+    const current = await source.resolveAsCell();
+    if (!current.equals(authority)) {
+      throw new TypeError(
+        "SQLite source resolved outside its granted capability.",
+      );
+    }
+    const value = await authority.asSchema({
+      type: "object",
+      additionalProperties: true,
+    }).pull();
+    if (isSqliteDbValue(value)) return;
+    throw new TypeError("SQLite source did not materialize a valid SqliteDb.");
+  } finally {
+    cancel();
+  }
+}
+
 function cellResource(
   cell: CellHandle<unknown>,
   schema: JSONSchema | undefined,
@@ -295,22 +324,21 @@ export async function resolveCellContextBridge(
       ? resourceKinds[name]
       : undefined;
     const declaredKind = kindHint ?? cellKind(properties[name]);
-    const prepareSqliteOperation = declaredKind === "sqlite"
-      ? async () => {
-        // Pull the source path, not only its resolved target. A scoped SQLite
-        // factory can be lazy for this browser session; the source path retains
-        // the producer edge that materializes its concrete handle. Repeat this
-        // demand when an operation starts because initial bridge resolution can
-        // precede producer registration. The resolved target below remains the
-        // fixed capability authority.
-        await source.pull();
-      }
-      : undefined;
-    if (prepareSqliteOperation) {
-      await prepareSqliteOperation();
+    if (declaredKind === "sqlite") {
+      await source.pull();
     }
     const cell = await source.resolveAsCell();
     const resolvedSchema = cell.ref().schema;
+    const prepareSqliteOperation = declaredKind === "sqlite"
+      ? async () => {
+        // Demand the source path, not only its resolved target. A scoped SQLite
+        // factory can be lazy for this browser session; the source path retains
+        // the producer edge that materializes its concrete handle. A sink keeps
+        // that demand live through the pull, then resolution is checked against
+        // the fixed capability authority before that target is used.
+        await demandSqliteSource(source, cell);
+      }
+      : undefined;
     return [
       name,
       cellResource(

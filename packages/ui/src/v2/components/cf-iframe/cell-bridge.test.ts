@@ -206,7 +206,16 @@ describe("cf-iframe cell bridge", () => {
             });
           }
           if (request.type === RequestType.CellPull) {
-            return Promise.resolve({ value: undefined });
+            return Promise.resolve({
+              value: request.cell.path[0] === "database" ||
+                  request.cell.id === "of:database"
+                ? {
+                  id: "fid1:database",
+                  tables: { notes: { type: "object" } },
+                  scope: "space",
+                }
+                : undefined,
+            });
           }
           if (request.type === RequestType.SqliteQuery) {
             return Promise.resolve({ rows: [] });
@@ -264,7 +273,7 @@ describe("cf-iframe cell bridge", () => {
       requests.filter(({ type }) => type === RequestType.CellPull).map(
         ({ cell }) => cell.path,
       ),
-    ).toEqual([["database"], ["database"]]);
+    ).toEqual([["database"], ["database"], []]);
     expect(
       requests.filter(({ type, cell }) =>
         type === RequestType.CellResolveAsCell && cell.path.length > 0
@@ -280,7 +289,107 @@ describe("cf-iframe cell bridge", () => {
         scope: "space",
         schema: undefined,
       },
+      {
+        path: ["database"],
+        scope: "space",
+        schema: undefined,
+      },
     ]);
+  });
+
+  it("demands a lazy scoped SQLite handle before its first query", async () => {
+    const subscriptions: CellRef[] = [];
+    const databaseValue = {
+      id: "fid1:user-database",
+      scope: "user",
+      owner: "did:key:user",
+      tables: {},
+    };
+    let materialized = false;
+    let retargeted = false;
+    let sqliteQueries = 0;
+    const runtime = {
+      [$conn]: () => ({
+        request: (request: { type: RequestType; cell: CellRef }) => {
+          if (request.type === RequestType.CellGet) {
+            return Promise.resolve({ value: { database: undefined } });
+          }
+          if (request.type === RequestType.CellPull) {
+            return Promise.resolve({
+              value: materialized && request.cell.id === "of:user-database"
+                ? databaseValue
+                : undefined,
+            });
+          }
+          if (request.type === RequestType.CellResolveAsCell) {
+            return Promise.resolve({
+              cell: request.cell.path.length === 0
+                ? {
+                  ...request.cell,
+                  id: "of:resolved-context",
+                  schema: {
+                    type: "object",
+                    properties: {
+                      database: { type: "object", properties: {} },
+                    },
+                  },
+                }
+                : {
+                  ...request.cell,
+                  id: retargeted
+                    ? "of:other-user-database"
+                    : "of:user-database",
+                  scope: "user",
+                  path: [],
+                  schema: { type: "object", properties: {} },
+                },
+            });
+          }
+          if (request.type === RequestType.SqliteQuery) {
+            sqliteQueries++;
+            if (!materialized) {
+              return Promise.reject(
+                new TypeError(
+                  "SQLite operations require a valid SqliteDb cell handle.",
+                ),
+              );
+            }
+            return Promise.resolve({ rows: [] });
+          }
+          return Promise.resolve({});
+        },
+        subscribe: (cell: CellHandle<unknown>) => {
+          subscriptions.push(cell.ref());
+          if (cell.ref().path[0] === "database") {
+            queueMicrotask(() => {
+              materialized = true;
+              cell[$onCellUpdate](databaseValue);
+            });
+          }
+          return Promise.resolve();
+        },
+        unsubscribe: () => Promise.resolve(),
+        signal: { aborted: false },
+      }),
+    } as unknown as RuntimeClient;
+    const context = new CellHandle<Record<string, unknown>>(runtime, {
+      ...ref,
+      schema: true,
+    });
+
+    const bridge = await resolveCellContextBridge(context, {
+      database: "sqlite",
+    });
+
+    await expect(
+      bridge.resources.database.methods!.query({ sql: "SELECT 1" }),
+    ).resolves.toEqual({ rows: [] });
+    expect(subscriptions.map(({ path }) => path)).toContainEqual(["database"]);
+    retargeted = true;
+    await expect(
+      bridge.resources.database.methods!.query({ sql: "SELECT 2" }),
+    ).rejects.toThrow("resolved outside its granted capability");
+    expect(sqliteQueries).toBe(1);
   });
 
   it("ignores inherited resource-kind hints", async () => {
