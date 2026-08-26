@@ -58,10 +58,13 @@ export const spaceHostEntrySchema = {
   properties: {
     /** The space DID this fact is about — the table key. */
     did: { type: "string" },
+
     /** HTTP or HTTPS origin currently serving the space. */
     host: { type: "string" },
+
     /** ISO timestamp of when this fact was recorded. */
     updatedAt: { type: "string" },
+
     /** Who recorded it (e.g. "local-source-sync", "share-link"). */
     source: { type: "string" },
   },

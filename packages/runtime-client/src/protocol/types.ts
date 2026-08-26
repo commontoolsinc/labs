@@ -581,6 +581,7 @@ export type InitializationData = {
    * The space's name, where the client knows it. Temporary.
    */
   spaceName?: string;
+
   /** Temporary identity of space, encoded as `identity` above is. */
   spaceIdentity?: RealmEncodedValue;
 
@@ -1008,6 +1009,7 @@ export type LogLevel = "debug" | "info" | "warn" | "error";
  */
 export type SetLoggerLevelRequest = BaseRequest & {
   type: RequestType.SetLoggerLevel;
+
   /** Logger name. If not provided, sets level for all loggers. */
   loggerName?: string;
 
@@ -1023,6 +1025,7 @@ export type SetLoggerLevelRequest = BaseRequest & {
  */
 export type SetLoggerEnabledRequest = BaseRequest & {
   type: RequestType.SetLoggerEnabled;
+
   /** Logger name. If not provided, sets enabled for all loggers. */
   loggerName?: string;
 
@@ -1238,6 +1241,7 @@ export type PatternSourceInfo = {
    * Every file of the pattern, code and data alike.
    */
   files: PatternSourceFile[];
+
   /** Names among `files` that carry data rather than code. */
   dataFiles?: string[];
 };
@@ -1270,6 +1274,7 @@ export type SetBreakpointsRequest = BaseRequest & {
  */
 export type UploadBlobRequest = BaseRequest & {
   type: RequestType.UploadBlob;
+
   /** The space the blob belongs to — uploads target ITS host. */
   space: DID;
 
@@ -1486,6 +1491,7 @@ export type LoggerFlagsData = Record<
  */
 export type PageCreateRequest = BaseRequest & {
   type: RequestType.PageCreate;
+
   /** The space the piece is created in — part of its address. */
   space: DID;
 
@@ -1707,6 +1713,7 @@ export type PieceCloneRequest = BaseRequest & {
    * The space to copy into.
    */
   destinationSpace: DID;
+
   /** Seed the clone with snapshots of the source piece's durable data. */
   copyData?: boolean;
 };
@@ -1729,6 +1736,7 @@ export type PieceOriginView = {
    * How that URL resolves.
    */
   kind: PieceOriginKind;
+
   /** The URL as recorded on the piece, when normalization changed it. */
   recorded?: string;
 };
@@ -1852,6 +1860,7 @@ export type PieceSourceView = {
    * Every file of the source, code and data alike.
    */
   files: PatternSourceFile[];
+
   /** Names among `files` that carry data rather than code. */
   dataFiles?: string[];
 
@@ -1888,6 +1897,7 @@ export type PieceSourceRevisionSourceView = {
    * The files as of that revision.
    */
   files: PatternSourceFile[];
+
   /** Names among `files` that carry data rather than code. */
   dataFiles?: string[];
 };
@@ -1928,6 +1938,7 @@ export type PieceUpdateSourceRequest = BaseRequest & {
    * What to change about which source the piece follows.
    */
   action: PieceSourceAction;
+
   /** Opaque token returned with an incompatibility warning. */
   confirmationToken?: string;
 };
@@ -2050,12 +2061,16 @@ export type BaseClientNotification = {
  */
 export type VDomEventNotification = BaseClientNotification & {
   type: ClientNotificationType.VDomEvent;
+
   /** The mount ID that this event belongs to */
   mountId: number;
+
   /** The handler ID that should process this event */
   handlerId: number;
+
   /** The serialized event data */
   event: SerializedDomEvent;
+
   /** The node ID where the event occurred */
   nodeId: number;
 };
@@ -2200,8 +2215,10 @@ export type SerializedEventTarget = {
  */
 export type VDomMountRequest = BaseRequest & {
   type: RequestType.VDomMount;
+
   /** Unique ID for this mount instance (used to match unmount) */
   mountId: number;
+
   /** The cell to render as VDOM */
   cell: CellRef;
 };
@@ -2211,6 +2228,7 @@ export type VDomMountRequest = BaseRequest & {
  */
 export type VDomUnmountRequest = BaseRequest & {
   type: RequestType.VDomUnmount;
+
   /** The mount ID to stop */
   mountId: number;
 };
@@ -2220,8 +2238,10 @@ export type VDomUnmountRequest = BaseRequest & {
  */
 export type VDomBatchAppliedNotification = BaseClientNotification & {
   type: ClientNotificationType.VDomBatchApplied;
+
   /** The mount ID that received the batch */
   mountId: number;
+
   /** The applied batch ID */
   batchId: number;
 };
@@ -2667,8 +2687,10 @@ export type { VDomOp };
  */
 export type VDomBatchNotification = {
   type: NotificationType.VDomBatch;
+
   /** Identifier for this batch (for debugging/logging) */
   batchId: number;
+
   /** The operations to apply, in order */
   ops: VDomOp[];
 
@@ -2678,6 +2700,7 @@ export type VDomBatchNotification = {
    * Absent when the batch says nothing about the root at all.
    */
   rootId?: number | null;
+
   /** The mount ID this batch belongs to */
   mountId?: number;
 };
@@ -2980,6 +3003,7 @@ export type Commands = {
 export type CommandRequest<T> = T extends keyof Commands
   ? Commands[T]["request"]
   : never;
+
 /**
  * The response shape a given {@link RequestType} yields, read out of
  * {@link Commands}. `never` for anything that is not a request type, as

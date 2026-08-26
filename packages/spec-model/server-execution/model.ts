@@ -92,6 +92,7 @@ export interface HandlerSpec {
   writes: ScopeKind[];
   cascadeTo?: { space: SpaceId; stream: DocId };
   navigate?: boolean;
+
   /** events §5's drop predicate: the handler CANNOT RUN when this
    * doc is absent (deleted meanwhile) — the unrunnable case. */
   requiresDoc?: DocId;
@@ -111,6 +112,7 @@ export interface StreamEntry {
   eventId: EventId;
   firedAt: { user?: UserId; session: SessionId | "server" };
   consequenced: boolean;
+
   /** error-is-the-consequence surface (events §5). */
   error?: string;
 }
@@ -125,6 +127,7 @@ export interface WriteRow {
   doc: DocId;
   scopeKey: string;
   value: number;
+
   /** acting identity per action run; absent for runs with none. */
   attribution?: Acting;
 }
@@ -132,6 +135,7 @@ export interface WriteRow {
 export interface CommitRecord {
   seq: number;
   class: "authored" | "derived";
+
   /** "session:<u>:<s>" for client commits; "service:<space>" else. */
   envelope: string;
   holder?: string;
@@ -139,6 +143,7 @@ export interface CommitRecord {
   consequenceOf?: EventId[];
   writes: WriteRow[];
   waveId?: number;
+
   /** LT1: same-space cascade entries carried as WRITE-LEVEL rows of
    * THIS commit (eventId + inherited firedAt) — so the oracle can
    * reject an implementation persisting the append separately. */
@@ -147,6 +152,7 @@ export interface CommitRecord {
     eventId: EventId;
     firedAt: StreamEntry["firedAt"];
   }>;
+
   /** the watermark DOC write — rides ONLY the last split, and only
    * when W advanced (serving-loop §3). */
   watermarkDoc?: boolean;
@@ -162,20 +168,25 @@ export interface Intent {
 export interface SpaceState {
   seq: number;
   streams: Record<DocId, StreamState>;
+
   /** `${doc}/${scopeKey}` -> value. */
   docs: Record<string, number>;
+
   /** sessionKey -> intents (the effects doc's per-session instance). */
   effects: Record<string, Intent[]>;
   W: number;
   commits: CommitRecord[];
   leaseHolder: string | null;
+
   /** lease tenure counter: bumps at every (re)acquire (model-only
    * audit — lets properties detect a stale-tenure admission). */
   tenure: number;
+
   /** per-doc-instance head seq — what the wave commit CASes
    * against (serving-loop §3d). */
   docHeads: Record<string, number>;
   derivations: DerivationSpec[];
+
   /** FP1 (RULED): pending cross-space appends as DURABLE rows,
    * written inside the wave's own transaction and deleted on
    * delivery-ack — they survive a crash. */
@@ -193,18 +204,23 @@ export interface OutboxEntry {
 
 export interface ServerState {
   alive: boolean;
+
   /** the EFFECT half of the outbox stays process-local (serving-loop
    * §5 as ruled — crash recovery re-misses from memo keys); appends
    * no longer live here (FP1 ruled: durable rows on SpaceState). */
   outbox: OutboxEntry[];
+
   /** audit trail of append entries destroyed by crashes — with FP1
    * ruled (durable rows) this MUST stay empty on every schedule. */
   lostAppends: OutboxEntry[];
+
   /** bumped per genuinely-new process (DR1: holder's process part). */
   processGen: number;
+
   /** derived commits sealed + sent but not yet admitted — in flight
    * at the store's door, the lease-fencing race's carrier. */
   pendingProbes: Array<{ holder: string; tenure: number }>;
+
   /** a computed-but-uncommitted wave (in-memory: a crash loses it,
    * an authored commit can land under it — serving-loop §3d). */
   pendingWave: PendingWave | null;
@@ -214,6 +230,7 @@ export interface ServerState {
 export interface EventContribution {
   eventId: EventId;
   stream: DocId;
+
   /** null for cascade entries minted this wave (seq at commit). */
   entrySeq: number | null;
   parent?: EventId;
@@ -225,10 +242,13 @@ export interface EventContribution {
   }>;
   cascadesCross: OutboxEntry[];
   intents: Array<{ key: string; target: string }>;
+
   /** events §5 DROP — the handler could not run at all. */
   dropped?: string;
+
   /** handler-run error (error-is-the-consequence). */
   errored?: string;
+
   /** events §4: an admitted at-or-below-horizon duplicate — skipped
    * at processing, counted, never run. */
   skipped?: boolean;
@@ -236,9 +256,11 @@ export interface EventContribution {
 
 export interface PendingWave {
   waveId: number;
+
   /** store seq at compute start — the wave's read basis. */
   basisSeq: number;
   contributions: EventContribution[];
+
   /** re-derivable derivation outputs (drop class, §3d). */
   pureWrites: WriteRow[];
   exhausted: boolean;
@@ -248,8 +270,10 @@ export interface ClientSession {
   user: UserId;
   session: SessionId;
   connected: SpaceId[];
+
   /** overlay record of enacted nonces — reload-WIPED (LT8). */
   enactedNonces: number[];
+
   /** model-only audit: nonce -> times actually enacted. */
   enactCount: Record<number, number>;
 }
@@ -258,31 +282,41 @@ export interface World {
   spaces: Record<SpaceId, SpaceState>;
   servers: Record<SpaceId, ServerState>;
   clients: Record<SessionId, ClientSession>;
+
   /** chain root per event (audit-only; inheritance ground truth). */
   rootOf: Record<EventId, Acting>;
   nextEvent: number;
   nextNonce: number;
+
   /** spec-breach detections (must stay empty on legal schedules). */
   violations: string[];
   trace: string[];
+
   /** config: split every wave commit in two (serving-loop §3). */
   splitWaves: boolean;
+
   /** DR1's in-process discipline: abort in-flight commits BEFORE
    * reacquiring (serving-loop §2's stop-committing MUST). */
   leaseDiscipline: boolean;
+
   /** admitted derived probes sealed under an ENDED tenure — must
    * stay 0 whenever the discipline is on. */
   staleAdmissions: number;
+
   /** all admitted probes (audit — also keeps a successful delivery
    * from state-colliding with the pre-seal world in the explorer). */
   admittedProbes: number;
+
   /** max events processed per wave (null = unbounded) —
    * serving-loop §3's budget-exhaustion rule. */
   waveBudget: number | null;
+
   /** superseded pure derived writes dropped at commit (§3d). */
   supersededWrites: number;
+
   /** events rolled back to unconsequenced at commit (§3d REQUEUE). */
   requeues: number;
+
   /** duplicate events skipped at processing time (events §4). */
   skippedIdempotent: number;
 }
@@ -1150,20 +1184,26 @@ export function explore(
 export interface FanoutState {
   /** The principals that exist (each may demand its own instance). */
   principals: UserId[];
+
   /** The ONE broad-slot redirect fact (scopes §2: the link INTO the
    * narrower scope is itself shared state at the broader scope, so one
    * written redirect narrows the node for EVERY reader at once). */
   narrowed: boolean;
+
   /** Demanded instance keys (a subscription per principal). */
   demanded: string[];
+
   /** instanceKey -> the input generation its value is current through.
    * Pre-narrowing the only legal key is `space`; post-narrowing only
    * `user:<p>` keys (the never-ragged shape the properties pin). */
   instances: Record<string, number>;
+
   /** The shared upstream input's generation (an authored input). */
   input: number;
+
   /** ONE watermark integer for the whole node (scopes §9). */
   W: number;
+
   /** Every run, as `action × instance` (serving-loop §3c): one entry
    * per RUN with the single instance it ran as and wrote. */
   runs: Array<{ instanceKey: string; wrote: string }>;

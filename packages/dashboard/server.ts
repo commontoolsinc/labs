@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-net --allow-run=deno,git --allow-read --allow-write --allow-env
+
 /**
  * Runs the fabric wall: the live dashboard everything else in this package
  * feeds. Each tile lives under tiles/ and is registered once in registry.ts,

@@ -200,6 +200,7 @@ export async function describeStateWaitFailure(
 
 export interface ShellIntegrationConfig {
   pipeConsole?: boolean;
+
   /**
    * When `true` (the default), `afterEach` throws if any browser
    * `console.error` message was collected during the test.
@@ -209,6 +210,7 @@ export interface ShellIntegrationConfig {
    * be narrowly allowlisted.
    */
   failOnConsoleError?: boolean;
+
   /**
    * Strings or RegExps that match console error messages that are known-
    * benign for this suite.  A collected error is suppressed (does not
@@ -228,6 +230,7 @@ export interface ShellIntegrationConfig {
    * ```
    */
   allowedConsoleErrors?: (string | RegExp)[];
+
   /** Optional participant metadata used only by `deno task demo`. */
   presentation?: PresentationParticipant;
 }

@@ -60,16 +60,22 @@ interface CandidateLike {
 interface TrialCandidate {
   /** Uppercased participant identifier. */
   id: string;
+
   /** Participant age capped to a sensible inclusive range. */
   age: number;
+
   /** Primary condition label stored in title case. */
   condition: string;
+
   /** Whether informed consent has been collected. */
   consentGiven: boolean;
+
   /** Latest biomarker score from screening, 0-100 range. */
   biomarkerScore: number;
+
   /** Recruiting site in title case. */
   site: string;
+
   /** Indicates if prior therapy disqualifies the participant. */
   priorTherapy: boolean;
 }
@@ -159,16 +165,22 @@ const sanitizeCandidates = (
 interface EnrollmentCriteria {
   /** Minimum allowed age, inclusive. */
   minAge: number;
+
   /** Maximum allowed age, inclusive. */
   maxAge: number;
+
   /** Required condition label; null accepts any condition. */
   requiredCondition: string | null;
+
   /** Lowest acceptable biomarker score. */
   minBiomarkerScore: number;
+
   /** Whether consent is mandatory prior to enrollment. */
   requireConsent: boolean;
+
   /** Approved recruiting sites. Empty array means all sites. */
   allowedSites: string[];
+
   /** Permits participants that already received therapy. */
   allowPriorTherapy: boolean;
 }

@@ -20,25 +20,34 @@ const CONSOLE_TAIL_LIMIT = 40;
 export interface ShellPageProbe {
   /** The document's own URL, which a redirect can make differ from the one requested. */
   url: string;
+
   /** The document's title. */
   title: string;
+
   /**
    * HTTP status of the navigation response, taken from the page's navigation
    * timing entry. Absent for a document that came from no network response.
    */
   status?: number;
+
   /** Whether the shell's root element, `x-root-view`, is in the document. */
   rootView: boolean;
+
   /** Whether the shell has published itself on `globalThis.app`. */
   app: boolean;
+
   /** The view `globalThis.app` holds, read from its serialized state. */
   view?: unknown;
+
   /** Why that state could not be read, when `app` is set and reading it threw. */
   viewError?: string;
+
   /** The DID of the identity that state carries, where it carries one. */
   identityDid?: string;
+
   /** The start of the document's rendered text. */
   text: string;
+
   /**
    * The console messages `Page.applyConsoleFormatter` retained in the page,
    * oldest first, each prefixed with how long before the probe it was logged.
