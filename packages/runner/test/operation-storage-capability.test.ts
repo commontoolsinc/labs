@@ -221,6 +221,30 @@ describe("operation storage capability", () => {
     };
     const view = MemoryV2Client.WatchView.fromSync(sync);
     const removed = defer<readonly string[]>();
+    const observerQuery = {
+      id: "of:removal-observer",
+      path: toValuePath([]),
+    };
+    const observerWatchId = `operation:${hashStringOf(observerQuery)}`;
+    const observedDuringRemoval = defer<OperationFieldSnapshot>();
+    const precedingRemovalSync: SessionSync = {
+      ...sync,
+      operationFields: [{
+        watchId: observerWatchId,
+        field: {
+          branch: "",
+          id: observerQuery.id,
+          scopeKey: "space",
+          path: observerQuery.path,
+          active: false,
+          codec: null,
+          cursor: null,
+          baselineHash: "observer-baseline",
+          materialized: "observer-value",
+          operations: [],
+        },
+      }],
+    };
     let removalCount = 0;
     const session = {
       watchAddSync: (_watches: WatchSpec[]) =>
@@ -228,7 +252,11 @@ describe("operation storage capability", () => {
       watchRemoveSync: (watchIds: readonly string[]) => {
         removalCount++;
         if (removalCount === 1) removed.resolve(watchIds);
-        return Promise.resolve({ view, sync, precedingSyncs: [] });
+        return Promise.resolve({
+          view,
+          sync,
+          precedingSyncs: removalCount === 1 ? [precedingRemovalSync] : [],
+        });
       },
     } as unknown as MemoryV2Client.SpaceSession;
     const client = {
@@ -252,6 +280,11 @@ describe("operation storage capability", () => {
       throw new Error("operation capability unavailable");
     }
 
+    const cancelObserver = await replica.subscribeOperationField(
+      observerQuery,
+      (snapshot) => observedDuringRemoval.resolve(snapshot),
+    );
+
     const query = {
       id: "of:operation-watch",
       path: toValuePath(["body"]),
@@ -269,6 +302,10 @@ describe("operation storage capability", () => {
     cancelSecond();
 
     expect(await removed.promise).toHaveLength(1);
+    expect(await observedDuringRemoval.promise).toMatchObject({
+      id: observerQuery.id,
+      materialized: "observer-value",
+    });
     const cancelAfterRemoval = await replica.subscribeOperationField(
       query,
       () => {},
@@ -281,6 +318,7 @@ describe("operation storage capability", () => {
     );
     expect(removalCount).toBe(2);
     cancelAfterSecondRemoval();
+    cancelObserver();
     await storage.closeNow();
   });
 
@@ -409,9 +447,13 @@ describe("operation storage capability", () => {
       sync: SessionSync;
       precedingSyncs: SessionSync[];
     }>();
+    const additionStarted = defer<void>();
     const lateAdditionView = MemoryV2Client.WatchView.fromSync(sync);
     const addingStorage = createStorage({
-      watchAddSync: () => addition.promise,
+      watchAddSync: () => {
+        additionStarted.resolve();
+        return addition.promise;
+      },
     } as unknown as MemoryV2Client.SpaceSession);
     const addingReplica = addingStorage.open(signer.did()).replica;
     if (!hasOperationStorageCapability(addingReplica)) return;
@@ -419,7 +461,7 @@ describe("operation storage capability", () => {
       id: "of:late-addition",
       path: toValuePath([]),
     }, () => {});
-    await Promise.resolve();
+    await additionStarted.promise;
     (addingReplica as unknown as { closeNow(): void }).closeNow();
     addition.resolve({
       view: lateAdditionView,
