@@ -455,19 +455,22 @@ selection, and it is the same independence question [asked of unit
 tests](#skipping-assumes-tests-do-not-lean-on-each-other). The answer may
 well be a handful of sections rather than 23, and a handful is enough.
 
-`pattern-reload` needs nothing done to it, because it *is* one identity.
-`packages/patterns/integration/reload/` holds a single file with a single
-`it()`, so the finest subset the suite has and the whole suite are the
-same thing. Its runner could subset if there were anything to subset: the
-underlying command is a plain
-`deno test` over a glob, which takes file paths and `--filter` like every
-other Deno suite. What stands in the way is two layers above it —
-`tasks/integration.ts` dispatches `patterns-reload` in a branch that sits
-ahead of the one honoring the name filter, so a filter passed to that
-target is silently dropped, and `packages/patterns`' `integration:reload`
-task hard-codes its glob. If a second reload case ever lands, moving that
-branch below the filter branch is the whole of what makes the suite
-subsettable.
+`pattern-reload` needs nothing done to it, and is not a special case
+either. `packages/patterns/integration/reload/` holds a single file with a
+single `it()`, which is a fact about what is in the directory rather than
+a property of the suite: it runs `deno test` like the other integration
+suites, and [the skip
+list](#selecting-one-test-rather-than-one-file) reaches inside its file
+without anything being threaded through `tasks/integration.ts` to get
+there.
+
+What that layer would block is subsetting the suite's *files*, if it ever
+had more than one. `tasks/integration.ts` dispatches `patterns-reload` in
+a branch ahead of the one honoring the name filter, so a filter handed to
+that target is dropped without a word, and `packages/patterns`'
+`integration:reload` task hard-codes its glob. Neither matters while the
+directory holds one file. If a second reload case lands, moving that
+branch below the filter branch is the whole of the fix.
 
 `pattern-reload` also shows why capabilities are named rather than
 implied. It needs a server, but not the one the other integration suites
@@ -579,6 +582,16 @@ listed `it` through `it.ignore` instead of `it`. Every file keeps its own
 `import { describe, it } from "@std/testing/bdd"` unchanged; what that
 specifier means changes once, centrally.
 
+Neither interception needs anything from the layers between the workflow
+and the test. The import map is repository-wide, and the skip list's
+environment variable is inherited by whatever a task spawns, so a suite
+reached through `tasks/integration.ts` or a package's own runner is
+reached without those learning a new flag. `--filter` would have needed
+every one of them to pass it along, and at least one does not:
+`tasks/integration.ts` dispatches `patterns-reload` in a branch that sits
+ahead of the one honoring the name filter, so a filter handed to that
+target is dropped without a word. That suite is reachable here anyway.
+
 One more thing recommends routing it through a module of ours.
 `@std/testing/bdd` is deprecated: its own documentation says it will be
 removed at 2.0.0, points at `node:test` instead, and describes the
@@ -622,14 +635,14 @@ mechanism is a skip list rather than a selection list.
 
 ### Every invocation unit, and the identities inside it
 
-There are nine kinds of invocation unit across the topology, and only one
+There are eight kinds of invocation unit across the topology, and only one
 of them holds more than one identity today. That one holds almost everything:
 the workspace and runner unit shards alone carry 15,997 of the reference
 build's 17,999 executions.
 
 | Invocation unit | Suites | Identities inside it | Reaching one of them |
 | --- | --- | --- | --- |
-| A `deno test` file | `workspace-unit`, `runner-unit`, `pattern-integration` and its ON arm, `package-integration` and its ON arm, `generated-patterns`, `cli-deno` | Every bare `Deno.test` in the file, and every `it`, named as its describe chain joined with `" > "`. The container testcase Deno also reports is dropped at ingestion, so a `describe` is not an identity | The skip list, through the preload for a bare `Deno.test` and through the remapped `describe`/`it` for the rest. This is the row the whole section is about. |
+| A `deno test` file | `workspace-unit`, `runner-unit`, `pattern-integration` and its ON arm, `package-integration` and its ON arm, `generated-patterns`, `cli-deno`, `pattern-reload` | Every bare `Deno.test` in the file, and every `it`, named as its describe chain joined with `" > "`. The container testcase Deno also reports is dropped at ingestion, so a `describe` is not an identity | The skip list, through the preload for a bare `Deno.test` and through the remapped `describe`/`it` for the rest. This is the row the whole section is about. |
 | A pattern file run by `cf test` | `pattern-unit` | One. The runner writes one record per pattern file | Nothing to reach: the file is the identity. |
 | A pattern file checked by the compatibility gate | `pattern-compat` | One, named `pattern-compat <key>`, which the task appends itself as each file's verdict is known | Nothing to reach. The task already takes `--only` to restrict which files it reads. |
 | A single-step arm of `integration.sh` | `cli-core` | One, named for its step | Nothing to reach. The script's own whole-invocation record is suite-level and belongs to no invocation unit at all. |
@@ -637,14 +650,20 @@ build's 17,999 executions.
 | One `deno check` invocation | `typecheck` | One, named for the path group it checked, which the task records itself | Nothing to reach. |
 | A whole task carrying one record | `cfcheck`, `pattern-vintage` | One, for everything the task did | Nothing to reach, and nothing finer exists: the suite is its own identity. |
 | A script recording one identity for its whole run | `cli-fuse` | One today, 23 once its `success` markers become step markers | Not reachable until the script is split, which [it must be](#todays-jobs-as-suites). This is the one row the topology is not allowed to leave as it is. |
-| A file holding a single test | `pattern-reload` | One | Nothing to reach: the finest subset and the whole suite are already the same thing. |
 
-Seven of the nine rows are already one identity per invocation, which is
+Six of the eight rows are already one identity per invocation, which is
 why this change is smaller than removing a concept sounds. The topology
 does not gain a mechanism for them; they simply stop being described as
 items holding one identity each and start being described as identities.
-The ninth, `cli-fuse`, is one identity only because nothing finer was ever
-recorded, and it is the row this plan requires somebody to fix.
+The seventh, `cli-fuse`, is one identity only because nothing finer was
+ever recorded, and it is the row this plan requires somebody to fix.
+
+`pattern-reload` is in the first row and not in a row of its own, which is
+worth saying because the plan used to treat it as a special case. It runs
+`deno test` over a directory that happens to hold one file holding one
+`it`, and holding one of something is a fact about today's contents rather
+than a property of the invocation unit. A second `it` would make it an
+ordinary member of that row with nothing to change.
 
 ### What it reaches, and what it does not
 
