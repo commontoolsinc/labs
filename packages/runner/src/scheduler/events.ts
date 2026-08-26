@@ -1450,6 +1450,11 @@ export async function dispatchQueuedEvent(state: {
     // transaction and re-queue the event so the handler re-runs and resolves the
     // name synchronously.
     if (error instanceof RetryImmediately) {
+      logger.warn("event-in-space-resolution-retry", () => [
+        `event=${queuedEvent.id}`,
+        `handler=${handlerId}`,
+        error.message,
+      ]);
       if (tx.status().status === "ready") {
         tx.abort(error);
       }
@@ -1469,6 +1474,11 @@ export async function dispatchQueuedEvent(state: {
     }
 
     if (error) {
+      logger.warn("event-run-aborted", () => [
+        `event=${queuedEvent.id}`,
+        `handler=${handlerId}`,
+        error instanceof Error ? error.message : String(error),
+      ]);
       try {
         state.handleError(error as Error, action);
       } finally {
@@ -1504,6 +1514,12 @@ export async function dispatchQueuedEvent(state: {
     const telemetryWrites = log.writes
       .slice(0, EVENT_COMMIT_TELEMETRY_WRITE_LIMIT)
       .map(formatEventCommitAddress);
+    logger.warn("event-commit-issued", () => [
+      `event=${queuedEvent.id}`,
+      `handler=${handlerId}`,
+      `writes=${log.writes.length}`,
+      `spaces=${[...new Set(log.writes.map(({ space }) => space))].join(",")}`,
+    ]);
     // Do not await event commits here. commit() applies the transaction
     // locally before returning, and the scheduler must let later client work
     // continue against that speculative state while server confirmation is in
@@ -1515,6 +1531,11 @@ export async function dispatchQueuedEvent(state: {
     // barrier, which the client-facing idle (Scheduler.idleWithPendingCommits)
     // waits on without blocking the scheduler loop here.
     const handleCommitResult = (error: EventCommitError | undefined): void => {
+      logger.warn("event-commit-settled", () => [
+        `event=${queuedEvent.id}`,
+        `handler=${handlerId}`,
+        error === undefined ? "success" : `error=${error.message}`,
+      ]);
       if (
         served !== undefined && error !== undefined &&
         isLt1LateSealRefusal(error)

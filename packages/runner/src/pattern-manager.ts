@@ -571,13 +571,24 @@ export class PatternManager {
 
     const entryRef = this.getArtifactEntryRef(pattern);
     if (!entryRef) return;
+    logger.warn("closure-replication-started", () => [
+      `entry=${entryRef.identity}`,
+      `from=${fromSpace}`,
+      `to=${toSpace}`,
+    ]);
     const replication = this.replicateClosures(
       entryRef.identity,
       fromSpace,
       toSpace,
       undefined,
       delegated,
-    ).catch((error) => {
+    ).then(() => {
+      logger.warn("closure-replication-completed", () => [
+        `entry=${entryRef.identity}`,
+        `from=${fromSpace}`,
+        `to=${toSpace}`,
+      ]);
+    }).catch((error) => {
       logger.error("closure-replication-failed", () => [
         `entry=${entryRef.identity}`,
         `from=${fromSpace}`,

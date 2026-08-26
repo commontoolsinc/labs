@@ -203,6 +203,11 @@ const multiSpaceCommitLogger = getLogger("storage.v2.multi-space-commit", {
   level: "error",
 });
 
+const crossSpaceCommitTraceLogger = getLogger(
+  "storage.v2.cross-space-commit-trace",
+  { enabled: true, level: "warn" },
+);
+
 const toStoreError = (error: unknown): StorageTransactionRejected => {
   const message = error instanceof Error ? error.message : String(error);
   return {
@@ -2407,6 +2412,15 @@ export class V2StorageTransaction implements IStorageTransaction {
       return result;
     }
 
+    crossSpaceCommitTraceLogger.warn("cross-space-commit-planned", () => [
+      commits.map(({ space, native }) => ({
+        space,
+        operations: native.operations.length,
+        preconditions: native.preconditions?.length ?? 0,
+        sqliteOperations: native.sqliteOps?.length ?? 0,
+      })),
+    ]);
+
     const validation = this.validate();
     if (validation.error) {
       // Rejected before reaching storage, so the activity stays: the scheduler
@@ -2478,6 +2492,11 @@ export class V2StorageTransaction implements IStorageTransaction {
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     for (let i = 0; i < commits.length; i++) {
       const { space, native } = commits[i];
+      crossSpaceCommitTraceLogger.warn("cross-space-commit-issued", () => [
+        `index=${i}`,
+        `space=${space}`,
+        `operations=${native.operations.length}`,
+      ]);
       const replica = this.replicaForCommit(space);
       if (!replica.commitNative) {
         throw new Error("memory v2 replica does not support commitNative()");
@@ -2501,6 +2520,14 @@ export class V2StorageTransaction implements IStorageTransaction {
           );
           return { error: result.error };
         }
+        crossSpaceCommitTraceLogger.warn(
+          "cross-space-commit-accepted",
+          () => [
+            `index=${i}`,
+            `space=${space}`,
+            `operations=${native.operations.length}`,
+          ],
+        );
       } catch (error) {
         multiSpaceCommitLogger.error(
           "multi-space-commit-rejected",
