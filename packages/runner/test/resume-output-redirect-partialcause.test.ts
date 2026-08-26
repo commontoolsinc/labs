@@ -176,6 +176,43 @@ describe("firstResolvedOutputRedirect vs partialCause aliases", () => {
     expect(found?.id).toBe(spot.getAsNormalizedFullLink().id);
   });
 
+  it("returns a cause-only first entry of an ARRAY binding as the spot", () => {
+    // Output bindings are usually objects, so the array descent otherwise
+    // goes unexercised: a list-shaped binding is scanned in order, and a
+    // cause-only first entry IS the found spot — taken as parsed, never
+    // read — with the ordinary spot after it left alone.
+    const tx = rt.edit();
+    const base = rt.getCell<Record<string, unknown>>(
+      space,
+      "cause-only-array-base",
+      undefined,
+      tx,
+    );
+    const spot = rt.getCell<Record<string, unknown>>(
+      space,
+      "cause-only-array-spot",
+      undefined,
+      tx,
+    );
+    const twin = getDerivedInternalCellLink(base, {
+      partialCause: { "$generated": 3 },
+    });
+    const binding = [
+      createSigilLinkFromParsedLink(twin, { overwrite: "redirect" }),
+      spot.getAsWriteRedirectLink({ base }),
+    ];
+
+    const found = firstResolvedOutputRedirect(
+      rt,
+      tx,
+      binding,
+      base,
+      new Set([twin.id]),
+    );
+    tx.abort("test: read-only");
+    expect(found?.id).toBe(twin.id);
+  });
+
   it("returns undefined (not a throw) when outputs hold ONLY such aliases", () => {
     const tx = rt.edit();
     const base = rt.getCell<Record<string, unknown>>(
