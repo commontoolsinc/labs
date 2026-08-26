@@ -3536,7 +3536,10 @@ export class PieceController<T = unknown> {
       if (options.copyData) {
         await restoreCloneInternals(clone.getCell(), internals);
       }
-      await destination.startPiece(clone.getCell());
+      // Opening rather than merely starting: a clone follows the piece it
+      // was taken from, and following begins with the subscription the open
+      // installs.
+      await destination.openPiece(clone.getCell());
     } catch (error) {
       const cleanupErrors: unknown[] = [];
       try {

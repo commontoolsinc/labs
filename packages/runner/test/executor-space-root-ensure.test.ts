@@ -227,7 +227,6 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
           servingPosture: true,
           experimental: {
             serverExecution: true,
-            systemPatternAutoUpdate: true,
           },
         });
         // Record every transaction the serving runtime mints, so the
@@ -304,7 +303,7 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     expect(stats.rootEnsure.failures).toBe(0);
   });
 
-  it("park/re-activate converges on ONE root and reconciles an aged identity before anything loads it", async () => {
+  it("park/re-activate converges on ONE root and leaves its source alone", async () => {
     await seedAcl({ [space]: "OWNER" });
     const created = newSpaceServer();
     expect(await created.activate()).toBe(true);
@@ -314,22 +313,21 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     await probe.sync();
     await waitUntil(() => probe.get() !== undefined, "root linked");
     const firstRoot = await resolveRootEventually(reader);
-    const agedIdentity = await identityFor(HOME_PATH);
-    expect(getPatternIdentityRef(firstRoot)?.identity).toBe(agedIdentity);
+    const bornIdentity = await identityFor(HOME_PATH);
+    expect(getPatternIdentityRef(firstRoot)?.identity).toBe(bornIdentity);
 
-    // The served source moves while the space is parked — the aged
-    // space. Re-activation's ensure must swap the stored identity
-    // forward as its freshness half, before any load of the obsolete
-    // identity. A SpaceServer is single-tenure (park() is terminal on
-    // the instance; the HOST builds a fresh one per re-activation), so
-    // the second tenure is a second SpaceServer over the same engine
-    // and the SAME stats object — the counters span tenures like the
-    // host's do.
+    // The served source moves while the space is parked. Following a root's
+    // origin belongs to whoever OPENS the piece, and a serving tenure opens
+    // none, so re-activation owes the space existence and nothing more: one
+    // root, still running the source it was born from. A SpaceServer is
+    // single-tenure (park() is terminal on the instance; the HOST builds a
+    // fresh one per re-activation), so the second tenure is a second
+    // SpaceServer over the same engine and the SAME stats object — the
+    // counters span tenures like the host's do.
     await created.park("test-age");
     await created.whenParked;
     files.set(HOME_PATH, rootSource("home-v2"));
-    const freshIdentity = await identityFor(HOME_PATH);
-    expect(freshIdentity).not.toBe(agedIdentity);
+    expect(await identityFor(HOME_PATH)).not.toBe(bornIdentity);
 
     const second = newSpaceServer();
     expect(await second.activate()).toBe(true);
@@ -337,53 +335,21 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
       () => stats.rootEnsure.runs === 2,
       "second tenure's ensure",
     );
-    // The server side first: the second tenure RESOLVED (created stays
-    // 1 — one root ever) and its freshness half MOVED the identity.
+    // The second tenure RESOLVED: created stays 1, one root ever.
     expect(stats.rootEnsure.created).toBe(1);
-    await waitUntil(
-      () => stats.rootEnsure.reconciled === 1,
-      "second tenure's reconcile counted",
-    );
+    expect(stats.rootEnsure.failures).toBe(0);
 
-    // Then the DURABLE outcome: a fresh replica per attempt (client
-    // push freshness of meta is a different mechanism's contract; the
-    // ensure's promise is the store).
-    {
-      const deadline = Date.now() + 20_000;
-      while (true) {
-        const probeReader = clientRuntime(readerSigner);
-        const current = await resolveRootEventually(probeReader);
-        if (getPatternIdentityRef(current)?.identity === freshIdentity) {
-          expect(getEntityId(current)).toEqual(getEntityId(firstRoot));
-          break;
-        }
-        if (Date.now() > deadline) {
-          throw new Error("timed out waiting for aged identity reconcile");
-        }
-        await new Promise((resolve) => setTimeout(resolve, 250));
-      }
-    }
-
-    // F1 (adversarial review of this PR): the FRESHNESS half's
-    // transactions must carry the resolved OWNER's snapshot too — the
-    // update arm runs `runtime.setup` on the root (the label-minting
-    // class), and a transaction's birth snapshot is the AMBIENT SERVICE
-    // one (`trustSnapshotProvider()`), which the updater's bookkeeping
-    // stamp deliberately leaves alone. Without the ensure's hook
-    // threaded through `checkDefaultPattern`, every stale space's next
-    // activation restages its root AS THE SERVICE — OW59's named
-    // restage shape. Asserted on the LIVE transactions the reconcile
-    // minted (watched RED before the hook existed: actingPrincipal was
-    // the service DID).
-    const reconcileTxs = mintedTxs.filter((tx) =>
-      waveRunContextOf(tx)?.actionId?.startsWith("pattern-update/") === true
-    );
-    expect(reconcileTxs.length).toBeGreaterThan(0);
-    for (const tx of reconcileTxs) {
-      const snapshot = tx.getCfcState().trustSnapshot;
-      expect(snapshot?.actingPrincipal).toBe(space);
-      expect(snapshot?.actingPrincipal).not.toBe(serviceSigner.did());
-    }
+    const probeReader = clientRuntime(readerSigner);
+    const current = await resolveRootEventually(probeReader);
+    expect(getEntityId(current)).toEqual(getEntityId(firstRoot));
+    expect(getPatternIdentityRef(current)?.identity).toBe(bornIdentity);
+    // Nothing the tenure did followed the root's origin, so its identity
+    // route was never asked.
+    expect(
+      mintedTxs.some((tx) =>
+        waveRunContextOf(tx)?.actionId?.startsWith("source-reconcile/") === true
+      ),
+    ).toBe(false);
   });
 
   it("a plain space-cell subscriber SURVIVES a replica that fails to absorb the cid schema docs (OW61 containment at the live producer)", async () => {
@@ -692,7 +658,6 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
           servingPosture: true,
           experimental: {
             serverExecution: true,
-            systemPatternAutoUpdate: true,
           },
         });
         return {
@@ -755,7 +720,6 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     expect(stats.rootEnsure).toEqual({
       runs: 0,
       created: 0,
-      reconciled: 0,
       skippedNoOwner: 0,
       failures: 0,
     });

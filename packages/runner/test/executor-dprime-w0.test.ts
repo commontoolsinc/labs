@@ -234,7 +234,6 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
           servingPosture: true,
           experimental: {
             serverExecution: true,
-            systemPatternAutoUpdate: false,
           },
         });
         runtime.scheduler.setActionRunTraceEnabled(true);

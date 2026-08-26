@@ -17,6 +17,7 @@ import {
   DEFAULT_APP_PATTERN_SOURCE,
   PiecesController,
 } from "../src/ops/pieces-controller.ts";
+import { reconcilePieceSource } from "../src/ops/piece-origin.ts";
 
 // The route that ref expands to — what the toolshed serves, and what the
 // worker names the module by when it compiles the pattern over HTTP.
@@ -130,7 +131,6 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     runtime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
-      experimental: { systemPatternAutoUpdate: true },
     });
     const session = await createSession({
       identity: signer,
@@ -183,7 +183,13 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     // N+1: the toolshed now serves a newer default-app (its `summary` logic
     // changed). Roll forward in place.
     stub.setSource(ROOT_V2);
-    expect(await controller.checkAndUpdateDefaultPattern()).toBe("updated");
+    expect(
+      await reconcilePieceSource(
+        runtime,
+        (await controller
+          .getDefaultPattern(false))!,
+      ),
+    ).toBe("updated");
     // Let the pattern watcher observe the meta change and re-instantiate, then
     // pull the root so the new instance actually executes (pull-based graph).
     await runtime.idle();
@@ -279,7 +285,6 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     const freshRuntime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager: readerStorage,
-      experimental: { systemPatternAutoUpdate: true },
     });
     const freshController = new PiecesController(session, freshRuntime);
     let cancelPieceRegistrySink: (() => void) | undefined;
@@ -297,9 +302,8 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
       ).toBeUndefined();
       const coldRoot = await freshController.getDefaultPattern(false);
       expect(coldRoot).toBeDefined();
-      expect(
-        await freshController.checkAndUpdateDefaultPattern(coldRoot),
-      ).toBe("updated");
+      expect(await reconcilePieceSource(freshRuntime, coldRoot!))
+        .toBe("updated");
       expect(
         readerReplica.get?.(profileLink.id, profileLink.scope),
       ).toBeDefined();
@@ -379,9 +383,9 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     await controller.startPiece(metadataOnlyRoot);
     expect(metadataOnlyRoot.key("profileName").getRaw()).toBeUndefined();
 
-    const outcome = await controller.checkAndUpdateDefaultPattern(
-      metadataOnlyRoot,
-    );
+    // Opening the root re-stages a document its pinned pattern did not set
+    // up, which is what repairs the projection.
+    await controller.ensureDefaultPattern();
     await runtime.idle();
 
     const repairedRoot = metadataOnlyRoot.asSchema(
@@ -402,7 +406,6 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     await runtime.idle();
 
     expect(pieceRegistry).toEqual(SEEDED_PIECES);
-    expect(outcome).toBe("updated");
     cancelPieceRegistrySink();
   });
 });

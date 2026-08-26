@@ -1516,11 +1516,11 @@ export class RuntimeProcessor {
     const homeSpaceCell = this.runtime.getHomeSpaceCell();
     await homeSpaceCell.sync();
 
-    // Always the PiecesController path: ensureDefaultPattern() reconciles the
-    // persisted identity and carries the cold-start setup repair that heals an
-    // aged home root. Starting the pattern directly here would skip that
-    // repair, and with `systemPatternAutoUpdate` unset nothing else heals the
-    // root — so no fast path belongs in front of the controller.
+    // Always the PiecesController path: ensureDefaultPattern() follows the
+    // root's origin and carries the cold-start setup repair that heals an aged
+    // home root. Starting the pattern directly here would skip both, and
+    // nothing else heals the root — so no fast path belongs in front of the
+    // controller.
     const homeSession: Session = {
       as: this.identity,
       space: this.runtime.userIdentityDID,

@@ -453,7 +453,6 @@ describe("Phase 3 events-down (serving side)", () => {
           servingPosture: true,
           experimental: {
             serverExecution: true,
-            systemPatternAutoUpdate: false,
           },
         });
         const edit = runtime.edit.bind(runtime);

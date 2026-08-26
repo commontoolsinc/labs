@@ -455,11 +455,12 @@ Deno.test("debug deployment rolls back an aborted registration", async () => {
       let candidateWasStopped = false;
       let interceptRegistrationCommit = false;
       let commitCount = 0;
-      manager.startPiece = (async (piece, options) => {
-        await originalStartPiece.call(manager, piece, options);
-        if (typeof piece !== "string") candidatePiece = piece;
-        interceptRegistrationCommit = true;
-      }) as typeof manager.startPiece;
+      manager.startPiece =
+        (async (piece: Parameters<typeof originalStartPiece>[0]) => {
+          await originalStartPiece.call(manager, piece);
+          if (typeof piece !== "string") candidatePiece = piece;
+          interceptRegistrationCommit = true;
+        }) as typeof manager.startPiece;
       runtime.runner.stop = ((piece) => {
         if (piece === candidatePiece) candidateWasStopped = true;
         return originalStop(piece);
@@ -637,10 +638,11 @@ Deno.test("debug deployment rejects stale registration across runtimes", async (
       );
       let interceptRegistrationCommit = false;
       let intercepted = false;
-      readerManager.startPiece = (async (piece, options) => {
-        await originalStartPiece.call(readerManager, piece, options);
-        interceptRegistrationCommit = true;
-      }) as typeof readerManager.startPiece;
+      readerManager.startPiece =
+        (async (piece: Parameters<typeof originalStartPiece>[0]) => {
+          await originalStartPiece.call(readerManager, piece);
+          interceptRegistrationCommit = true;
+        }) as typeof readerManager.startPiece;
       readerRuntime.editWithRetry = ((action, maxRetries) =>
         originalEditWithRetry((transaction) => {
           const result = action(transaction);
@@ -1173,10 +1175,11 @@ Deno.test("debug deployment rejects an in-place registry change", async () => {
     const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
     let injectRegistryChange = false;
     let registryChangeInjected = false;
-    manager.startPiece = (async (piece, options) => {
-      await originalStartPiece.call(manager, piece, options);
-      injectRegistryChange = true;
-    }) as typeof manager.startPiece;
+    manager.startPiece =
+      (async (piece: Parameters<typeof originalStartPiece>[0]) => {
+        await originalStartPiece.call(manager, piece);
+        injectRegistryChange = true;
+      }) as typeof manager.startPiece;
     runtime.editWithRetry = (async (action, maxRetries) => {
       if (injectRegistryChange && !registryChangeInjected) {
         registryChangeInjected = true;

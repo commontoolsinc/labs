@@ -639,9 +639,6 @@ export type InitializationData = {
    */
   experimental?: {
     modernCellRep?: boolean;
-    // Roll a space's system root pattern (home included) forward in place
-    // when its toolshed serves a newer identity. Default off.
-    systemPatternAutoUpdate?: boolean;
     // Server-execution v2 (docs/specs/server-side-execution/). The host
     // DECLARES its posture here so the worker runs the same arm — the
     // flag previously rode only as an untyped excess property, and any

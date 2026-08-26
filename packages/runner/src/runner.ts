@@ -215,7 +215,6 @@ type InternalCellDescriptor = {
 
 type StartAttempt = {
   readonly lifecycleEpoch: number;
-  readonly schedulePatternUpdate: boolean;
   readonly generationsByDoc: Map<string, number>;
   readonly preResolutionStopKeys: Set<string>;
   // The result this attempt resolved to, which a link start only learns by
@@ -968,10 +967,6 @@ function defersInitialRunUntilSynced(
 // Options shared by run()/startWithTx()/startAfterSuccessfulCommit().
 type RunnerRunOptions = {
   doNotUpdateOnPatternChange?: boolean;
-  // Default roots reconcile against their system source before start (or are
-  // compiled from that source during creation), so their caller suppresses
-  // the otherwise-automatic lazy check while retaining identity hot-swaps.
-  schedulePatternUpdate?: boolean;
   // Resumed-from-synced-state: hold each action's initial rehydration/run until
   // the space has finished syncing, so consumers don't race the data.
   awaitSyncBeforeInitialRun?: boolean;
@@ -2546,19 +2541,14 @@ export class Runner {
    * of a start, and concurrent callers — several views asking for the same
    * space root during one page load, say — would otherwise each run it in
    * full. Joining shares the outcome, rejection included, and runs under the
-   * first caller's options: a joiner's `schedulePatternUpdate` is not applied,
-   * which matches the already-running fast path, where only the attempt that
-   * instantiates schedules the update check. A call made after a stop never
+   * first caller's options. A call made after a stop never
    * joins — the stop moved the doc's start generation, so the held attempt is
    * no longer current and a fresh attempt runs. Calls entering through
    * different docs whose links resolve to the same piece do not join either;
    * they run separate resolutions and converge at the registration guard
    * before instantiation.
    */
-  start<T = any>(
-    resultCell: Cell<T>,
-    options: { schedulePatternUpdate?: boolean } = {},
-  ): Promise<boolean> {
+  start<T = any>(resultCell: Cell<T>): Promise<boolean> {
     const startKey = this.getDocKey(resultCell);
     const inFlight = this.#inFlightStartsByDoc.get(startKey);
     if (
@@ -2568,7 +2558,6 @@ export class Runner {
     }
     const attempt: StartAttempt = {
       lifecycleEpoch: this.lifecycleEpoch,
-      schedulePatternUpdate: options.schedulePatternUpdate ?? true,
       generationsByDoc: new Map(),
       preResolutionStopKeys: new Set(),
     };
@@ -2725,7 +2714,6 @@ export class Runner {
       tx?: IExtendedStorageTransaction;
       givenPattern?: Pattern;
       doNotUpdateOnPatternChange?: boolean;
-      schedulePatternUpdate?: boolean;
       schedulerRehydration?: SchedulerRehydrationSubscriptionOptions;
       // Resumed-from-synced-state: hold each action's initial rehydration/run
       // until the space has finished syncing, so consumers don't race the data.
@@ -2738,7 +2726,6 @@ export class Runner {
       tx,
       givenPattern,
       doNotUpdateOnPatternChange,
-      schedulePatternUpdate = true,
     } = options;
     const key = this.getDocKey(resultCell);
     this.locallyStoppedResults.delete(key);
@@ -2833,20 +2820,6 @@ export class Runner {
             pattern,
             schedulerRehydration,
           );
-        }
-        if (!doNotUpdateOnPatternChange && schedulePatternUpdate) {
-          // Source reconciliation is lazy for ordinary pieces: the current
-          // pattern is fully instantiated first, and only a successful commit
-          // launches the fire-and-forget check. An aborted setup must neither
-          // fetch nor mutate a piece that never came into existence.
-          actualTx.addCommitCallback((_tx, result) => {
-            if (
-              !result.error && active &&
-              startLifecycleEpoch === this.lifecycleEpoch
-            ) {
-              this.runtime.patternUpdater.schedule(resultCell);
-            }
-          });
         }
       } finally {
         if (shouldCommit) {
@@ -3054,16 +3027,15 @@ export class Runner {
                 // blank-section state). Roll the pointer back to the RUNNING
                 // pattern's identity, durably, with a superseded-check so a
                 // legitimate concurrent repoint wins. Gated on the same flag
-                // as the rest of the heal family; thrown load errors (which
-                // may be transient) never trigger this. Two verdicts are NOT
-                // definitive and must never trigger it either: with CFC
-                // enforcement disabled, loadPatternByIdentity returns
-                // undefined for anything outside the in-memory index (probe
-                // unsupported, not artifact dead); and a session-synthetic
-                // keyless running ref must never be written durably (a fresh
-                // runtime is guaranteed unable to load it).
+                // thrown load errors (which may be transient) never
+                // trigger this. Two verdicts are NOT definitive and must never
+                // trigger it either: with CFC enforcement disabled,
+                // loadPatternByIdentity returns undefined for anything outside
+                // the in-memory index (probe unsupported, not artifact dead);
+                // and a session-synthetic keyless running ref must never be
+                // written durably (a fresh runtime is guaranteed unable to
+                // load it).
                 if (
-                  this.runtime.experimental.systemPatternAutoUpdate &&
                   this.runtime.cfcEnforcementMode !== "disabled" &&
                   runningRef !== undefined &&
                   !PatternManager.isKeylessPatternIdentity(
@@ -3075,9 +3047,7 @@ export class Runner {
                   const rollForward = this.runtime.editWithRetry((tx) => {
                     // Async pointer repair from the meta watcher's load
                     // promise — no scheduler run stamps it; bookkeeping
-                    // per serving-loop.md §3d (the serving runtime runs
-                    // with systemPatternAutoUpdate, so this path is
-                    // live server-side).
+                    // per serving-loop.md §3d.
                     this.runtime.stampServerRun(tx, {
                       actionId:
                         `pattern-pointer-rollforward/${resultCell.sourceURI}`,
@@ -3168,9 +3138,8 @@ export class Runner {
     // repair the home ROOT got in startEnsuredDefaultPattern, reachable at last
     // for the nested pieces that never pass through it.
     //
-    // The repair is not gated by `systemPatternAutoUpdate`: that flag governs
-    // updates which move the durable identity pointer, while this setup replays
-    // the pattern the pointer already names. On exactly that
+    // The repair moves no durable identity pointer; this setup replays the
+    // pattern the pointer already names. On exactly that
     // failure, re-run the pinned pattern's OWN setup state (samePattern=true:
     // materializes the missing internal cells but leaves the existing argument
     // — the piece's data — untouched; no roll-forward, no user-data rewrite),
@@ -3533,7 +3502,6 @@ export class Runner {
       try {
         attempt.installedRegistration = this.startCore(rootCell, {
           givenPattern: resolvedPattern,
-          schedulePatternUpdate: attempt.schedulePatternUpdate,
         });
       } catch (err) {
         return Promise.reject(err);
@@ -3574,7 +3542,6 @@ export class Runner {
       try {
         attempt.installedRegistration = this.startCore(rootCell, {
           givenPattern: resolvedPattern,
-          schedulePatternUpdate: attempt.schedulePatternUpdate,
           schedulerRehydration: this.schedulerRehydrationOptions(
             rootCell,
             // Resumed from a synced state (it just awaited
@@ -3608,7 +3575,6 @@ export class Runner {
       tx,
       givenPattern,
       doNotUpdateOnPatternChange: options.doNotUpdateOnPatternChange,
-      schedulePatternUpdate: options.schedulePatternUpdate,
       awaitSyncBeforeInitialRun: options.awaitSyncBeforeInitialRun,
       parentPieceRootId: options.parentPieceRootId,
     });
@@ -4043,7 +4009,6 @@ export class Runner {
   ): Promise<boolean> {
     const attempt: StartAttempt = {
       lifecycleEpoch: this.lifecycleEpoch,
-      schedulePatternUpdate: true,
       generationsByDoc: new Map(),
       preResolutionStopKeys: new Set(),
     };
@@ -5106,8 +5071,19 @@ export class Runner {
     this.stopResult(resultCell);
   }
 
+  /**
+   * Whether this runner currently holds a running graph for `resultCell`.
+   *
+   * The source reconciler asks: a running piece is re-instantiated in place by
+   * the pattern watcher when its identity moves, while one that is not running
+   * needs the swap to stage the new pattern over its document itself.
+   */
+  isRunning<T>(resultCell: Cell<T>): boolean {
+    return this.cancels.has(this.getDocKey(resultCell));
+  }
+
   private stopResult<T>(resultCell: Cell<T>): void {
-    this.runtime.patternUpdater.unwatch(resultCell);
+    this.runtime.sourceReconciler.unwatch(resultCell);
     const key = this.getDocKey(resultCell);
     this.independentlyStartedResults.delete(key);
     // TODO(hixie): This reaches every pending commit-gated start for the result,
