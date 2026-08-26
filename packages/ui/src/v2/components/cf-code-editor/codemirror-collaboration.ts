@@ -6,6 +6,7 @@ import {
   type Update,
 } from "@codemirror/collab";
 import {
+  type ChangeDesc,
   ChangeSet,
   type Compartment,
   type EditorState,
@@ -35,6 +36,12 @@ export type CodeMirrorOperationPayload = {
 export type CodeMirrorSubmission = {
   baseVersion: number;
   payload: CodeMirrorOperationPayload;
+};
+
+/** Read-only document synchronization state exposed to ephemeral consumers. */
+export type CodeMirrorSynchronizationSnapshot = {
+  confirmedCursor: OpCursor;
+  pendingChanges: readonly ChangeDesc[];
 };
 
 /** Preserves both values when a new epoch cannot absorb unconfirmed edits. */
@@ -238,6 +245,9 @@ export class CodeMirrorCollaborationController {
   readonly #clientId: string;
   readonly #operationSessionId = crypto.randomUUID();
   readonly #onError: (error: Error) => void;
+  readonly #synchronizationObservers = new Set<
+    (snapshot: CodeMirrorSynchronizationSnapshot | null) => void
+  >();
   #cursor: OpCursor | null = null;
   #baselineHash = "";
   #unsubscribe: (() => void) | undefined;
@@ -260,6 +270,25 @@ export class CodeMirrorCollaborationController {
 
   get active(): boolean {
     return this.#canProcess() && !this.#closing;
+  }
+
+  get synchronizationSnapshot(): CodeMirrorSynchronizationSnapshot | null {
+    if (!this.active || this.#cursor === null) return null;
+    return {
+      confirmedCursor: { ...this.#cursor },
+      pendingChanges: sendableUpdates(this.#view.state).map((update) =>
+        update.changes
+      ),
+    };
+  }
+
+  /** Observes canonical cursor advancement without granting operation control. */
+  observeSynchronization(
+    observer: (snapshot: CodeMirrorSynchronizationSnapshot | null) => void,
+  ): () => void {
+    this.#synchronizationObservers.add(observer);
+    this.#notifySynchronizationObserver(observer, this.synchronizationSnapshot);
+    return () => this.#synchronizationObservers.delete(observer);
   }
 
   #canProcess(): boolean {
@@ -315,6 +344,7 @@ export class CodeMirrorCollaborationController {
 
   async localDocChanged(): Promise<void> {
     if (!this.active || this.#failed) return;
+    this.#notifySynchronization();
     await this.#flush();
   }
 
@@ -332,6 +362,8 @@ export class CodeMirrorCollaborationController {
     this.#unsubscribe?.();
     this.#unsubscribe = undefined;
     this.#closeOperationSession();
+    this.#notifySynchronization();
+    this.#synchronizationObservers.clear();
   }
 
   #closeOperationSession(): void {
@@ -432,6 +464,7 @@ export class CodeMirrorCollaborationController {
     this.#cursor = snapshot.cursor;
     this.#baselineHash = snapshot.baselineHash;
     this.#ready = true;
+    this.#notifySynchronization();
   }
 
   #receive(snapshot: OperationFieldSnapshot): void {
@@ -550,6 +583,7 @@ export class CodeMirrorCollaborationController {
         version: getSyncedVersion(this.#view.state),
       };
       this.#baselineHash = snapshot.baselineHash;
+      this.#notifySynchronization();
       if (
         sendableUpdates(this.#view.state).length === 0 &&
         this.#view.state.doc.toString() !== snapshot.materialized
@@ -641,6 +675,7 @@ export class CodeMirrorCollaborationController {
       syncedVersion === resolution.to.version
     ) {
       this.#cursor = resolution.to;
+      this.#notifySynchronization();
       return;
     }
     if (
@@ -675,6 +710,7 @@ export class CodeMirrorCollaborationController {
       epoch: resolution.to.epoch,
       version: getSyncedVersion(this.#view.state),
     };
+    this.#notifySynchronization();
   }
 
   #fail(cause: unknown): void {
@@ -682,7 +718,26 @@ export class CodeMirrorCollaborationController {
     this.#failed = true;
     this.#unsubscribe?.();
     this.#unsubscribe = undefined;
+    this.#notifySynchronization();
     const error = cause instanceof Error ? cause : new Error(String(cause));
     this.#onError(error);
+  }
+
+  #notifySynchronization(): void {
+    const snapshot = this.synchronizationSnapshot;
+    for (const observer of this.#synchronizationObservers) {
+      this.#notifySynchronizationObserver(observer, snapshot);
+    }
+  }
+
+  #notifySynchronizationObserver(
+    observer: (snapshot: CodeMirrorSynchronizationSnapshot | null) => void,
+    snapshot: CodeMirrorSynchronizationSnapshot | null,
+  ): void {
+    try {
+      observer(snapshot);
+    } catch {
+      // Ephemeral observers cannot become part of Memory's operation path.
+    }
   }
 }

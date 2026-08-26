@@ -882,6 +882,26 @@ describe("CodeMirror operation collaboration", () => {
     expect(sendableUpdates(view.state)).toHaveLength(0);
     await controller.stop();
   });
+
+  it("isolates synchronization observers from the Memory operation path", async () => {
+    const accepted = acceptedResolution("abc", 1, "X");
+    const { controller, view, errors } = controllerHarness({
+      initial: inactiveSnapshot("abc"),
+      followup: activeSnapshot("aXbc", accepted),
+      apply: () => accepted,
+    });
+
+    await controller.start();
+    controller.observeSynchronization(() => {
+      throw new Error("presence failed");
+    });
+    view.dispatch({ changes: { from: 1, insert: "X" } });
+    await controller.localDocChanged();
+
+    expect(errors).toEqual([]);
+    expect(view.state.doc.toString()).toBe("aXbc");
+    expect(sendableUpdates(view.state)).toHaveLength(0);
+  });
 });
 
 function inactiveSnapshot(materialized: string): OperationFieldSnapshot {
