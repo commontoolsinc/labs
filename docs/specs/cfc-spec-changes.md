@@ -304,6 +304,36 @@ clause-subsumption predicate; tests `cfc-writer-fit.test.ts`. Two items stay
 open on the confidentiality side: (a) the standard-profile default, and (d)
 the residency half of the write ceiling, recorded next.
 
+One narrowing landed alongside: the measurement quantifies over paths a
+schema could have declared a policy at, and the raw meta seam is not one.
+`setMetaRaw` lands on a document-root sibling of `value` (`schema`,
+`internal`, `patternIdentity`, and the rest of the `MetaField` union), which
+no value schema describes. The seam is outside the check at every rung, so a
+meta path raises neither a strict reject nor a persist-and-flag diagnostic.
+
+A ceiling can still resolve at a meta path, from a document-root declared
+entry by longest prefix, and that route is skipped too. The entry sits at
+logical `[]`, the payload root, and reaches the seam only because
+canonicalization strips a leading `value`. Honoring it would make a piece
+updatable or not according to whether its pattern carries a root `ifc`.
+Declaring on a single result field, which is how a pattern normally labels
+one, leaves the seam's ceiling empty; the piece is then un-updatable under
+strict, because the pattern updater, `setsrc`, and setup over an existing
+piece all stamp meta.
+
+Nothing is laundered. A path counts as meta only while no payload write
+landed on it too, so a transaction writing both leaves the path measured; the
+ancestor collapse runs over measured paths only, so an exempt meta path
+cannot shadow a value write beneath it; meta paths remain flow-label targets,
+so the join persists there and the egress, display, and observation gates
+read the unchanged label; and the seam shares the document, space, and
+replica set of the value surface beside it, so it reaches no further. The
+residual is the shared namespace: where a payload field carries a `MetaField`
+name, an exempt meta write can raise the stored derived label at their common
+logical path past what that field declares. That is over-taint, so reads stay
+protected, and giving the envelope seam its own path space is the fix. Shares
+the meta-seam predicate with the schema write-policy requirement (#6077).
+
 (d) **[normative] Residency fit — the ceiling a document carries by living
 where it lives.** The fit measurement joins the target's declared policy with
 one RESIDENCY clause, `Space(<the space the document resides in>)`. A flow

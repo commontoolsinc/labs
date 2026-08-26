@@ -1523,6 +1523,25 @@ const valueWriteTargets = (
   return result;
 };
 
+/**
+ * Whether every write a transaction recorded at `path` on one target arrived
+ * on the raw meta seam — the document-root siblings of `value` that
+ * `setMetaRaw` addresses (`schema`, `internal`, `patternIdentity`, and the
+ * rest of the `MetaField` union).
+ *
+ * No value schema describes that seam, so the two rules that ask a schema
+ * about a path — the write-policy requirement and the §8.12.4 writer-fit
+ * measurement — have nothing to ask about a meta-seam path, and both consult
+ * this one predicate. A meta root and a payload field of the same name share
+ * one logical path, which is why `valueWriteTargets` records the answer per
+ * path across every write that reached it rather than per write: a path is
+ * meta only while no payload write landed there too.
+ */
+const isMetaSeamPath = (
+  metaOnlyByPath: ReadonlyMap<string, boolean> | undefined,
+  path: readonly string[],
+): boolean => metaOnlyByPath?.get(pathKey(path)) === true;
+
 // ---------------------------------------------------------------------------
 // S16 flow labels (default transition): one conservative confidentiality join
 // per transaction — everything the transaction observed taints everything it
@@ -5509,17 +5528,14 @@ export const prepareBoundaryCommit = (
       continue;
     }
     // The schema write-policy requirement quantifies over the paths a
-    // schema could describe. A raw meta-seam write is not one: `setMetaRaw`
-    // lands on a document-root sibling of `value` (`slug`,
-    // `patternIdentity`, and the rest of the `MetaField` union), and no
-    // schema describes that seam, so demanding a policy input for it
-    // rejects every meta write on a labeled document — slug assignment, the
-    // pattern updater's identity swap, setup over an existing piece, and
-    // the source-lifecycle transitions. These paths stay flow-label
-    // targets: the write above still carries the transaction's join onto
-    // the document, so nothing is laundered by skipping them here.
+    // schema could describe. A raw meta-seam write is not one, so demanding
+    // a policy input for it rejects every meta write on a labeled document —
+    // slug assignment, the pattern updater's identity swap, setup over an
+    // existing piece, and the source-lifecycle transitions. These paths stay
+    // flow-label targets: the write above still carries the transaction's
+    // join onto the document, so nothing is laundered by skipping them here.
     const policyPaths = target.paths.filter((path) =>
-      target.metaOnlyByPath.get(pathKey(path)) !== true
+      !isMetaSeamPath(target.metaOnlyByPath, path)
     );
     if (policyPaths.length === 0) {
       continue;
@@ -6528,17 +6544,39 @@ export const prepareBoundaryCommit = (
           structureStampPaths.push(structureContainerPath);
         }
       }
-      for (const path of derivedStampPaths) {
-        // Deeper stamped paths are redundant with a stamped ancestor; only
-        // collapse against paths that actually receive a covering entry.
-        if (
-          derivedStampPaths.some((other) =>
-            other.length < path.length && isPrefix(other, path)
-          )
-        ) {
-          continue;
-        }
-        if (flowConfidentiality.length > 0) {
+      // Writer-fit measures the paths a schema could have declared a policy
+      // at, and the raw meta seam is not one: no value schema describes the
+      // document-root siblings of `value`. The measurement is skipped there
+      // at every rung, so a meta path raises neither a strict reject nor a
+      // persist-and-flag diagnostic.
+      //
+      // A ceiling can still resolve at a meta path, from a document-root
+      // declared entry by longest prefix. The skip is unconditional anyway:
+      // that entry sits at logical `[]`, the PAYLOAD root, and reaches the
+      // seam only because canonicalization strips a leading `"value"`.
+      //
+      // Meta paths stay flow stamp targets in the loop below, so the join
+      // still lands on them as the `derived` component. Where a payload
+      // field carries a `MetaField` name the two share one logical path, so
+      // an exempt meta write can raise the stored derived label there past
+      // what that field declares — over-taint, which leaves the declared
+      // entry untouched and reads protected.
+      if (flowConfidentiality.length > 0) {
+        const measuredPaths = derivedStampPaths.filter((path) =>
+          !isMetaSeamPath(flowTarget?.metaOnlyByPath, path)
+        );
+        for (const path of measuredPaths) {
+          // Deeper paths are covered by the write at a measured ancestor;
+          // collapse against measured paths only, so an exempt meta path
+          // never shadows a value write below it (a payload field named
+          // `schema` shares the meta root's logical path).
+          if (
+            measuredPaths.some((other) =>
+              other.length < path.length && isPrefix(other, path)
+            )
+          ) {
+            continue;
+          }
           // Absent declared entries resolve to the EMPTY ceiling ("public
           // store"), never the undefined "no ceiling" — a tainted write to
           // an undeclared store is the canonical misfit, and fitting it
@@ -6574,6 +6612,17 @@ export const prepareBoundaryCommit = (
               tx.noteCfcDiagnostic(`writer-fit(persist-and-flag): ${misfit}`);
             }
           }
+        }
+      }
+      for (const path of derivedStampPaths) {
+        // Deeper stamped paths are redundant with a stamped ancestor; only
+        // collapse against paths that actually receive a covering entry.
+        if (
+          derivedStampPaths.some((other) =>
+            other.length < path.length && isPrefix(other, path)
+          )
+        ) {
+          continue;
         }
         // C2 persist split (C0 §5/§8): the per-tx join lands as two
         // per-class entries instead of one covering entry. The `value`
