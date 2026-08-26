@@ -73,9 +73,9 @@ The current package provides:
   on the audit trail; a completed turn's history is checked before it is
   promoted, and promotion commits with the completion or not at all; and a
   restored session whose recorded history does not pair its tool calls with tool
-  results keeps only its resumable prefix, resuming from that prefix when the
-  history was merely cut short and otherwise refusing the session with an
-  `incomplete_transcript` error rather than sending it to a provider;
+  results preserves that history and adds explicit unknown-outcome results for
+  missing results, while orphan results and duplicate call IDs refuse the
+  session locally rather than sending malformed history to a provider;
 - CFC modes `disabled`, `observe`, `enforce-explicit`, and `enforce-strict`,
   plus prompt-slot, invocation-context, policy-event, and model-influence
   evidence;

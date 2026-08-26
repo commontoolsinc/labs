@@ -408,8 +408,10 @@ interface NormalizedHarnessChatTranscript {
 /**
  * Makes persisted tool exchanges safe for the next provider request without
  * deleting model-visible history. Missing results become explicit
- * unknown-outcome results at the batch boundary, preserving both the original
- * call (including any compaction continuation) and everything after it.
+ * unknown-outcome results at the declaring batch boundary, retaining both the
+ * original call (including any compaction continuation) and every later
+ * message. Existing results pair by call id across the whole transcript, not
+ * by adjacency; only results still missing after that scan are synthesized.
  *
  * A tool result without a pending call cannot be repaired honestly: inventing
  * a call would claim an invocation that may never have happened, while deleting
@@ -423,68 +425,61 @@ const normalizeIncompleteToolExchanges = (
   const normalized: HarnessTranscriptMessage[] = [];
   const synthesizedToolCallIds: string[] = [];
   const seenToolCallIds = new Set<string>();
-  let pendingToolCalls: HarnessToolCall[] = [];
-  let pendingToolCallIds = new Set<string>();
-
-  const completePendingBatch = (): void => {
-    for (const toolCall of pendingToolCalls) {
-      if (!pendingToolCallIds.has(toolCall.id)) {
-        continue;
-      }
-      normalized.push(unknownToolOutcome(toolCall));
-      synthesizedToolCallIds.push(toolCall.id);
-    }
-    pendingToolCalls = [];
-    pendingToolCallIds = new Set();
-  };
+  const pendingToolCalls = new Map<
+    string,
+    { toolCall: HarnessToolCall; transcriptIndex: number }
+  >();
 
   for (const [index, message] of transcript.entries()) {
-    if (pendingToolCalls.length > 0) {
-      if (message.role === "tool") {
-        if (!pendingToolCallIds.delete(message.toolCallId)) {
-          throw new MalformedHarnessChatTranscriptError(
-            "tool_result_without_pending_call",
-            index,
-          );
-        }
-        normalized.push(message);
-        if (pendingToolCallIds.size === 0) {
-          pendingToolCalls = [];
-        }
-        continue;
-      }
-      completePendingBatch();
-    }
-
     if (message.role === "tool") {
-      throw new MalformedHarnessChatTranscriptError(
-        "tool_result_without_pending_call",
-        index,
-      );
+      if (!pendingToolCalls.delete(message.toolCallId)) {
+        throw new MalformedHarnessChatTranscriptError(
+          "tool_result_without_pending_call",
+          index,
+        );
+      }
+      continue;
     }
-    normalized.push(message);
     if (message.role !== "assistant" || !message.toolCalls?.length) {
       continue;
     }
-    const toolCallIds = message.toolCalls.map((toolCall) => toolCall.id);
     const batchToolCallIds = new Set<string>();
-    for (const toolCallId of toolCallIds) {
+    for (const toolCall of message.toolCalls) {
       if (
-        seenToolCallIds.has(toolCallId) ||
-        batchToolCallIds.has(toolCallId)
+        seenToolCallIds.has(toolCall.id) ||
+        batchToolCallIds.has(toolCall.id)
       ) {
         throw new MalformedHarnessChatTranscriptError(
           "duplicate_tool_call_id",
           index,
         );
       }
-      batchToolCallIds.add(toolCallId);
-      seenToolCallIds.add(toolCallId);
+      batchToolCallIds.add(toolCall.id);
+      seenToolCallIds.add(toolCall.id);
+      pendingToolCalls.set(toolCall.id, { toolCall, transcriptIndex: index });
     }
-    pendingToolCallIds = batchToolCallIds;
-    pendingToolCalls = [...message.toolCalls];
   }
-  completePendingBatch();
+
+  const insertions = new Map<number, HarnessToolCall[]>();
+  for (const { toolCall, transcriptIndex } of pendingToolCalls.values()) {
+    // Keep a batch's real contiguous results in their recorded order, then
+    // close only its missing calls before later conversation or compaction can
+    // move the provider projection boundary past the declaring call.
+    let insertionIndex = transcriptIndex;
+    while (transcript[insertionIndex + 1]?.role === "tool") {
+      insertionIndex += 1;
+    }
+    const calls = insertions.get(insertionIndex) ?? [];
+    calls.push(toolCall);
+    insertions.set(insertionIndex, calls);
+  }
+  for (const [index, message] of transcript.entries()) {
+    normalized.push(message);
+    for (const toolCall of insertions.get(index) ?? []) {
+      normalized.push(unknownToolOutcome(toolCall));
+      synthesizedToolCallIds.push(toolCall.id);
+    }
+  }
   return { transcript: normalized, synthesizedToolCallIds };
 };
 
@@ -1002,9 +997,14 @@ export class HarnessInteractiveChatService {
           session: { ...record.status, updatedAt },
         }, { transcript: normalizedTranscript });
       } catch (error) {
-        record.recoveryError = normalizationPersistenceError(
-          record.status.sessionId,
-        );
+        // #emit adopts the transcript only after the store commit, before it
+        // notifies the listener. A listener fault must still propagate, but it
+        // cannot turn already-durable provider-safe history into a refusal.
+        if (record.transcript !== normalizedTranscript) {
+          record.recoveryError = normalizationPersistenceError(
+            record.status.sessionId,
+          );
+        }
         throw error;
       }
     }

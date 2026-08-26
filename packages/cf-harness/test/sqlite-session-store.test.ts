@@ -23,6 +23,7 @@ import {
   type HarnessTranscriptMessage,
   inspectHarnessTranscriptPairing,
 } from "../src/contracts/transcript.ts";
+import { toResponsesInput } from "../src/model/responses-protocol.ts";
 import {
   type ChatFault,
   FAULT_POINTS,
@@ -1126,7 +1127,6 @@ Deno.test("sqlite session restore preserves partial batches later history and co
           type: "function",
           function: { name: "read_file", arguments: '{"path":"two"}' },
         }],
-        providerContinuation: compaction,
       },
       {
         role: "tool",
@@ -1135,7 +1135,11 @@ Deno.test("sqlite session restore preserves partial batches later history and co
         content: '{"contents":"one"}',
       },
       { role: "user", content: "A later valid question" },
-      { role: "assistant", content: "A later valid answer" },
+      {
+        role: "assistant",
+        content: "A later valid answer",
+        providerContinuation: compaction,
+      },
     ];
     store.saveSession({ session, transcript: partial });
 
@@ -1153,15 +1157,31 @@ Deno.test("sqlite session restore preserves partial batches later history and co
     assertEquals(normalized.length, partial.length + 1);
     assertEquals(normalized.slice(0, 3), partial.slice(0, 3));
     assertEquals(
-      (normalized[1] as Extract<
+      (normalized[partial.length] as Extract<
         HarnessTranscriptMessage,
         { role: "assistant" }
       >)
         .providerContinuation,
       compaction,
     );
-    assertUnknownToolOutcome(normalized[3], "call-missing", "read_file");
+    assertUnknownToolOutcome(
+      normalized[3],
+      "call-missing",
+      "read_file",
+    );
     assertEquals(normalized.slice(4), partial.slice(3));
+    const { input } = await toResponsesInput(
+      normalized,
+      "gpt-test",
+      "openai-compatible-gateway",
+      "gateway Responses",
+    );
+    const calls = input.filter((item) => item.type === "function_call").map(
+      (item) => item.call_id,
+    );
+    const results = input.filter((item) => item.type === "function_call_output")
+      .map((item) => item.call_id);
+    assertEquals(results, calls);
   } finally {
     store.close();
     await Deno.remove(path);
@@ -1211,6 +1231,56 @@ Deno.test("sqlite session restore leaves complete tool exchanges byte-for-byte u
     await service.initializeFromStore();
 
     assertEquals(store.getSession(session.sessionId)?.transcript, complete);
+  } finally {
+    store.close();
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("sqlite session restore pairs late tool results across interleaved history", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const store = await openSqliteHarnessChatSessionStore({
+    url: toFileUrl(path),
+  });
+
+  try {
+    const session = createHarnessChatSessionStatus({
+      sessionId: "session-interleaved-result",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      workspace: { hostPath: "/workspace" },
+    });
+    const complete: HarnessTranscriptMessage[] = [
+      {
+        role: "assistant",
+        content: "Reading it.",
+        toolCalls: [toolCall("call-late")],
+      },
+      { role: "user", content: "Also summarize it." },
+      { role: "assistant", content: "I will." },
+      {
+        role: "tool",
+        toolCallId: "call-late",
+        toolName: "read_file",
+        content: '{"contents":"one"}',
+      },
+    ];
+    store.saveSession({ session, transcript: complete });
+
+    const service = new HarnessInteractiveChatService({
+      createPromptLoop: () => ({
+        runTranscript: (options) =>
+          Promise.resolve(makeResult(options, "Should not run.")),
+      }),
+      sessionStore: store,
+    });
+    await service.initializeFromStore();
+
+    assertEquals(service.status(session.sessionId).sessions[0].reusable, true);
+    assertEquals(store.getSession(session.sessionId)?.transcript, complete);
+    assertEquals(
+      service.listEvents({ sessionId: session.sessionId }).events,
+      [],
+    );
   } finally {
     store.close();
     await Deno.remove(path);
@@ -1853,6 +1923,70 @@ Deno.test("sqlite session restore normalizes a truncated transcript without dele
     assertEquals(next, [
       ...normalized,
       { role: "user", content: "Try again" },
+    ]);
+  } finally {
+    store.close();
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("a listener failure after normalization commit does not poison the session", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const store = await openSqliteHarnessChatSessionStore({
+    url: toFileUrl(path),
+  });
+  try {
+    const incomplete: readonly HarnessTranscriptMessage[] = [
+      { role: "user", content: "Read it" },
+      {
+        role: "assistant",
+        content: "Reading it.",
+        toolCalls: [toolCall("call-interrupted")],
+      },
+    ];
+    await store.saveSession(recordedSession(incomplete));
+
+    const listenerError = new Error("listener rejected the recovery event");
+    let listenerCalls = 0;
+    let next: readonly HarnessTranscriptMessage[] = [];
+    const restored = new HarnessInteractiveChatService({
+      createPromptLoop: () => ({
+        runTranscript: (runOptions) => {
+          next = [...runOptions.transcript];
+          return Promise.resolve(makeResult(runOptions, "Recovered."));
+        },
+      }),
+      now: nextIsoNow(),
+      onEvent: () => {
+        listenerCalls += 1;
+        if (listenerCalls === 1) {
+          throw listenerError;
+        }
+      },
+      sessionStore: store,
+    });
+
+    const error = await assertRejects(() => restored.initializeFromStore());
+    assertEquals(error, listenerError);
+    const normalized = (await store.getSession("session-1"))?.transcript ?? [];
+    assertEquals(normalized.slice(0, 2), incomplete);
+    assertEquals(normalized.length, 3);
+    assertUnknownToolOutcome(
+      normalized[2],
+      "call-interrupted",
+      "read_file",
+    );
+
+    const followUp = await restored.startTurn("req-1", {
+      sessionId: "session-1",
+      turnId: "turn-1",
+      input: { text: "Continue" },
+    });
+    assertEquals(followUp.ok, true);
+    await restored.waitForTurn("session-1", "turn-1");
+    assertEquals(next, [
+      ...normalized,
+      { role: "user", content: "Continue" },
     ]);
   } finally {
     store.close();
