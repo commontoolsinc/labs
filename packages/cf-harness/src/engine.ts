@@ -77,6 +77,7 @@ import {
   type HarnessFabricSessionFactory,
 } from "./fabric-session.ts";
 import { assertValidHarnessHandleTable } from "./handle-table.ts";
+import type { HandleValueResolutionContext } from "./tools/handle-values.ts";
 import type { HarnessWellKnownGrant } from "./contracts/well-known-grants.ts";
 import {
   mintWellKnownGrants,
@@ -796,6 +797,21 @@ export class CfHarnessEngine {
     return this.#runState.handleTable === undefined
       ? undefined
       : structuredClone(this.#runState.handleTable);
+  }
+
+  /**
+   * What `resolveHandleValue` needs from this run: the handle table and the
+   * fabric session, when the run has one. For trusted-side resolutions the
+   * prompt loop performs itself (a `delegate_task` skillHandle), where no
+   * tool context exists to carry them.
+   */
+  get handleValueResolutionContext(): HandleValueResolutionContext {
+    return {
+      handleTable: this.handleTable,
+      ...(this.#fabricSessionFactory !== undefined
+        ? { getFabricSession: this.#fabricSessionFactory }
+        : {}),
+    };
   }
 
   /**

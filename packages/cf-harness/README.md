@@ -686,13 +686,15 @@ The prompt/tool loop applies the swaps at three seams. Successful tool output
 bound for model context carries tokens, while the persisted tool-output artifact
 keeps the raw addresses. Model-authored tool arguments resolve tokens back to
 canonical references before policy evaluation, summarization, and dispatch —
-except for `delegate_task`, whose arguments reach the child verbatim, so a token
-there is inert text to the parent boundary. And a sealed subagent
-structured-return string whose raw value names an address comes back as a token
-rather than an opaque `@link` object; the return's `linkedStringCount` counts
-only the positions still sealed. Denial-path tool messages are not swapped; that
-coverage, value handles, and an explicit release/readback mechanism are listed
-in [docs/ROADMAP.md](docs/ROADMAP.md).
+except for `delegate_task`, whose `goal` and `context` reach the child verbatim,
+so a token there is inert text to the parent boundary (its `skillHandle` is the
+one delegate argument the parent boundary resolves itself: trusted-side
+materialization is that parameter's whole point — see "Skill by handle" below).
+And a sealed subagent structured-return string whose raw value names an address
+comes back as a token rather than an opaque `@link` object; the return's
+`linkedStringCount` counts only the positions still sealed. Denial-path tool
+messages are not swapped; that coverage, value handles, and an explicit
+release/readback mechanism are listed in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 #### Well-known grants
 
@@ -898,6 +900,34 @@ session, so it can call `run_pattern` itself, under the same gate as the parent:
 with no session configured the tool is absent from the child's surface rather
 than present-but-failing. The `browser`, `web_fetch`, and `web_search` profiles
 do not offer it.
+
+#### Skill by handle
+
+`delegate_task` takes an optional `skillHandle`: a handle the parent holds,
+naming a cell whose string value is skill text for the child. The text is
+materialized on the trusted host side at child spawn — through the same
+resolution contract as every other handle value: table membership mandatory,
+string-only, same-space-only, with a structured refusal naming the reference on
+any miss, delivered before any child exists — and injected into the child's
+context as a `<skill_context source="handle:<token>">` block beside the
+profile's registry preload. The parent never reads the text, and the child never
+holds the handle. The return path is mediated too: every parent-facing return of
+such a delegation has the exact injected payload (and its JSON-escaped spelling)
+scrubbed to fixed inert text, so a child that echoes its instructions verbatim
+cannot walk the payload into the parent transcript. The scrub is deliberately no
+more than that — the child exists to act on the skill, so what it did because of
+the text is its ordinary, policy-mediated output.
+
+A handle-delivered skill bypasses the registry entirely: it is transient run
+state from a cell, the untrusted-acquisition complement to the trusted operator
+`--skills-root`, and for the delegated path it retires selection by name — the
+name-squat surface — in favor of an unforgeable table entry. It carries no
+directory, so it has no supporting-resource index and no scripts;
+`run_skill_script`'s operator allowlist cannot name it, and the skill-context
+preamble that keeps a skill from authorizing tools applies to it unchanged. The
+child's activation record carries `source: "skill-handle"`, the token, and the
+digest of the exact text injected, so the artifacts say which reference supplied
+the skill and what it said.
 
 ### Running patterns against a Fabric space
 
