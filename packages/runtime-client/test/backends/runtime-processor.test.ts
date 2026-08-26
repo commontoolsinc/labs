@@ -4411,9 +4411,10 @@ describe("runtime-processor", () => {
       ]]);
     });
 
-    it("loads a scoped database handle that pull has not materialized", async () => {
+    it("waits for a scoped database factory commit before loading its handle", async () => {
       const calls: string[] = [];
       const db = { id: "db-1", tables: { notes: {} }, scope: "user" };
+      let committed = false;
       let loaded = false;
       const cell = {
         pull: () => {
@@ -4422,8 +4423,8 @@ describe("runtime-processor", () => {
         },
         sync: () => {
           calls.push("sync");
-          loaded = true;
-          return Promise.resolve(db);
+          loaded = committed;
+          return Promise.resolve(loaded ? db : undefined);
         },
         getRaw: () => loaded ? db : undefined,
         asSchema: () => ({ get: () => loaded ? db : undefined }),
@@ -4433,6 +4434,13 @@ describe("runtime-processor", () => {
         {
           runtime: {
             getCellFromLink: () => cell,
+            scheduler: {
+              idleWithPendingCommits: () => {
+                calls.push("commits");
+                committed = true;
+                return Promise.resolve();
+              },
+            },
             storageManager: {
               open: () => ({
                 sqliteQuery: () => {
@@ -4451,7 +4459,7 @@ describe("runtime-processor", () => {
         sql: "SELECT * FROM notes",
       });
 
-      expect(calls).toEqual(["pull", "sync", "query"]);
+      expect(calls).toEqual(["pull", "commits", "sync", "query"]);
     });
 
     it("keeps SQLite BLOB parameters encoded across the storage boundary", async () => {
