@@ -466,17 +466,19 @@ export interface TopicPiece extends TopicSummary {
    * itself, stored as a reference. The browser equivalent is picking a
    * completion in the body editor, which writes the same map.
    *
-   * OPTIONAL, unlike the verbs beside them, and for the reason every added path
-   * on this projection is: a topic deployed before these existed carries
-   * neither, and a required property it cannot produce refuses its update
-   * outright. The older verbs predate every deployed generation, so they can
-   * stay required; these cannot. */
-  mention?: Stream<MentionEvent>;
-
+   * Required, like the verbs beside them. They were optional because a topic
+   * deployed before they existed carries neither, and a required property a
+   * piece cannot produce refuses its update — but an optional verb is its own
+   * defect: it pushes a maybe to every call site whose obvious spelling,
+   * `piece.verb?.send(...)`, skips in silence rather than failing. This change
+   * is already a rehearsed break that rewrites every topic, so the generation
+   * that lacked them does not survive it, and the reason for the optionality
+   * goes with it. */
+  mention: Stream<MentionEvent>;
   /** Stop referencing a piece: removes every `mention`-made entry naming it.
    * References made in the prose are retracted by editing the prose, not by
    * this. Optional on the projection for the same reason as `mention`. */
-  unmention?: Stream<UnmentionEvent>;
+  unmention: Stream<UnmentionEvent>;
 }
 
 /**
