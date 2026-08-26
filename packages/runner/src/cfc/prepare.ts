@@ -3755,7 +3755,11 @@ const verifyInputRequirements = (
           const fits = outcome.exhausted === false &&
             atomsOutsideCeiling(outcome.confidentiality, maxConfidentiality)
                 .length === 0;
-          if (!fits && outcome.resolutionFailures.length > 0) {
+          if (
+            !fits &&
+            (outcome.resolutionFailures.length > 0 ||
+              outcome.grantResolutionUnavailable)
+          ) {
             // The miss was evaluated over a manifest or grant that did not
             // resolve, so the label kept atoms a rewrite might have cleared:
             // not a verdict (see the return-type note above).
@@ -4943,8 +4947,11 @@ const evaluateGatedConfidentiality = (
     readonly reference: unknown;
     readonly reason: string;
   }[];
+  /** A grant lookup could not be read; see `createTxCfcGrantResolver`. */
+  grantResolutionUnavailable: boolean;
 } => {
   const state = tx.getCfcState();
+  const grantAvailability = { unavailable: false };
   const result = evaluateExchangeRules(
     { confidentiality: [...confidentiality] },
     state.policySnapshot,
@@ -4959,7 +4966,9 @@ const evaluateGatedConfidentiality = (
       // consulted address+digest into the prepare state for the B5-style
       // digest binding. Rides the same cfcPolicyEvaluation dial as the rest
       // of this evaluation — this function only runs when the dial is on.
-      grantResolver: createTxCfcGrantResolver(tx),
+      grantResolver: createTxCfcGrantResolver(tx, {
+        availability: grantAvailability,
+      }),
       grantConsumption: consumption,
       modulePolicyResolver: createTxCfcModulePolicyResolver(
         tx,
@@ -4982,6 +4991,7 @@ const evaluateGatedConfidentiality = (
     exhausted: result.exhausted,
     firings: result.firings.length,
     resolutionFailures: result.resolutionFailures,
+    grantResolutionUnavailable: grantAvailability.unavailable,
   };
 };
 
@@ -5034,6 +5044,14 @@ const verifySinkRequestCeilings = (
   const reasons: string[] = [];
   for (const [sink, ceiling] of gatedSinks) {
     let effective = consumed.confidentiality;
+    // Whether the fits-decision below is a pure function of this
+    // transaction's data — a VERDICT (see verdict-reason.ts). Two things
+    // make it not, both enforce-mode availability holes in the rewrite: a
+    // module policy manifest that did not resolve, and a grant lookup that
+    // could not be read — either might carry the discharge that admits the
+    // request on an attempt that resolves it. `off` and `observe` decide on
+    // the raw label every time, so their refusal is always a verdict.
+    let verdict = true;
     if (mode !== "off") {
       // Boundary context for this release site (spec §8.10.5 / §15.4): the
       // sink name plus its class. Every sink in the initial inventory is a
@@ -5083,6 +5101,8 @@ const verifySinkRequestCeilings = (
           continue;
         }
         effective = outcome.confidentiality;
+        verdict = outcome.resolutionFailures.length === 0 &&
+          !outcome.grantResolutionUnavailable;
       } else {
         // observe: decide exactly as `off` would; diagnose what enforce
         // would have done differently.
@@ -5123,10 +5143,10 @@ const verifySinkRequestCeilings = (
     if (offending.length > 0) {
       // Name the offending atom(s) so an observe-mode diagnostic identifies the
       // exact (sink, atom) pair that needs a ceiling entry (review on #3993).
-      reasons.push(
-        `sink-request confidentiality exceeds ceiling for ${sink}: ` +
-          offending.map((atom) => JSON.stringify(atom)).join(", "),
-      );
+      const reason = `sink-request confidentiality exceeds ceiling for ` +
+        `${sink}: ` +
+        offending.map((atom) => JSON.stringify(atom)).join(", ");
+      reasons.push(verdict ? verdictReason(reason) : reason);
     }
   }
   return reasons;

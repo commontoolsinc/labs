@@ -3,6 +3,7 @@ import {
   type CfcFlowLabelsMode,
   isCfcEnforcementMode,
 } from "@commonfabric/runner/cfc";
+import type { CfcPosture } from "@commonfabric/runner";
 import type { HarnessCfcEnforcementModeSource } from "./contracts/cfc-policy-snapshot.ts";
 import {
   type HarnessCredentialOwnerRef,
@@ -40,7 +41,9 @@ export type HarnessFabricCfcFlowLabelsMode = CfcFlowLabelsMode;
  * the run offers `run_pattern` in the parent tool surface; when absent, the
  * tool is unavailable. The optional CFC dials reach the session's Runtime;
  * unset means the remoteClient preset's first-party posture
- * (`enforce-explicit`, flow labels off).
+ * (`enforce-explicit`, flow labels off). `cfcPosture` opts the runtime into
+ * a named bundle (`MAX_ENFORCEMENT_CFC_OPTIONS` in the runner's presets);
+ * the two dials still apply over it.
  */
 export interface HarnessFabricSessionConfig {
   apiUrl: string;
@@ -48,6 +51,7 @@ export interface HarnessFabricSessionConfig {
   space: string;
   cfcEnforcementMode?: HarnessFabricCfcEnforcementMode;
   cfcFlowLabels?: HarnessFabricCfcFlowLabelsMode;
+  cfcPosture?: CfcPosture;
 }
 export type HarnessModelProviderId =
   | "openai-compatible-gateway"

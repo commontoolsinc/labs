@@ -5,6 +5,7 @@ import {
   type RuntimeOptions,
   runtimePresets,
 } from "@commonfabric/runner";
+import { publishCfcPosture } from "@/lib/cfc-posture.ts";
 import { publishExperimentalPosture } from "@/lib/experimental-posture.ts";
 import type { env as ToolshedEnv } from "@/env.ts";
 
@@ -56,6 +57,7 @@ export function createToolshedRuntime(
   // than re-read from the environment, so a client adopting this deployment's
   // posture gets the flags actually in effect here.
   publishExperimentalPosture(runtime.experimental);
+  publishCfcPosture(runtime);
   // Fire-and-forget; the attach itself is exported and unit-tested.
   void attachRuntimeOtelBridge(runtime, config);
   return runtime;
