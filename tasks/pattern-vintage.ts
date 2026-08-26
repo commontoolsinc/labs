@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run -A
+
 /**
  * Tier 2's gate: replay every pinned vintage under TODAY's pattern source.
  *

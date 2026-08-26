@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-run=git
+
 /**
  * Guards tasks/test-identity-aliases.jsonl, the append-only file that
  * bridges test-identity renames for readers of the test-run record store

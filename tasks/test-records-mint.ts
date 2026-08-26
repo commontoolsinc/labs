@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-env --allow-net
+
 /**
  * Mints a personal test-records key. Runs inside the dispatch-gated minting
  * workflow with the broker's federated token: dispatching a workflow takes
@@ -74,6 +75,7 @@ export function usernameOfDisplayName(displayName: string): string | undefined {
 export interface GcpClient {
   token: string;
   fetchImpl: typeof fetch;
+
   /**
    * Waits out the window in which a just-created service account is not
    * yet visible to the other services that name it. Tests pass a no-op.
@@ -334,6 +336,7 @@ export interface MintRunOptions {
   username: string;
   out: string;
   client: GcpClient;
+
   /** GITHUB_OUTPUT file to append the fingerprint line to, when set. */
   githubOutput?: string;
 }

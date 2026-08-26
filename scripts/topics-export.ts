@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-run --allow-read --allow-write
+
 /**
  * Export every topic's authored content from a Topics space snapshot,
  * offline. The export is the restore payload `topics-restore.ts` consumes,

@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-env --allow-net
+
 /**
  * The activity lease. A key's validity window cannot be extended, so the
  * one-month lifetime is enforced here instead of by key expiry: daily, with

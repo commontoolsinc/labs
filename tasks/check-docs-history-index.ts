@@ -29,6 +29,7 @@ const HISTORY_DIR = "docs/history";
 export interface IndexEntry {
   /** 1-based line number in the index. */
   readonly lineNumber: number;
+
   /** Link targets on that line, relative to docs/history/. */
   readonly targets: readonly string[];
 }
@@ -140,6 +141,7 @@ export function coversPath(target: string, documentPath: string): boolean {
 export interface HistoryTree {
   /** Every archived document, excluding README.md and INDEX.md. */
   readonly documents: readonly string[];
+
   /** Every path an entry may point at: those documents and every directory. */
   readonly paths: ReadonlySet<string>;
 }

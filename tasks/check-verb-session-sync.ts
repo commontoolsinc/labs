@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read
+
 /**
  * Fails when a verb-session document drifts from the demo that runs it.
  *
