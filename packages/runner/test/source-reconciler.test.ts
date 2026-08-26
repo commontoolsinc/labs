@@ -724,6 +724,48 @@ describe("piece source reconciliation", () => {
       expect(identityRequests).toBe(1);
     });
 
+    it("starts a fresh pass for a piece reopened as its abandoned one unwinds", async () => {
+      // Stopping a piece abandons the pass in flight for it. Opening it again
+      // before that pass has finished unwinding must not be answered by the
+      // abandoned one: the piece would start on source its origin had already
+      // replaced, which is the whole thing reconciling before a start prevents.
+      const v2Identity = await identityFor(source("v2"));
+      const identityRequested = defer<void>();
+      identityGate = defer();
+      let identityRequests = 0;
+      const piece = await preparePiece(async (input) => {
+        const url = new URL(
+          input instanceof Request
+            ? input.url
+            : input instanceof URL
+            ? input.href
+            : input,
+        );
+        if (url.searchParams.has("identity")) {
+          identityRequests++;
+          identityRequested.resolve();
+          await identityGate!.promise;
+          return new Response(v2Identity);
+        }
+        return new Response(
+          url.pathname === SOURCE_PATH ? source("v2") : parentSource,
+        );
+      });
+      await stampSource(piece, PARENT_SOURCE);
+
+      const abandoned = reconcile(piece);
+      await identityRequested.promise;
+      runtime.sourceReconciler.unwatch(piece);
+      const reopened = reconcile(piece);
+      identityGate.resolve();
+      await abandoned;
+      await reopened;
+      await runtime.sourceReconciler.idle();
+
+      expect(identityRequests).toBe(2);
+      expect(getPatternIdentityRef(piece)?.identity).toBe(v2Identity);
+    });
+
     it("does not apply an update once the recorded origin has changed", async () => {
       const v2Identity = await identityFor(source("v2"));
       const identityRequested = defer();
