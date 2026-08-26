@@ -911,7 +911,12 @@ string-only, same-space-only, with a structured refusal naming the reference on
 any miss, delivered before any child exists — and injected into the child's
 context as a `<skill_context source="handle:<token>">` block beside the
 profile's registry preload. The parent never reads the text, and the child never
-holds the handle.
+holds the handle. The return path is mediated too: every parent-facing return of
+such a delegation has the exact injected payload (and its JSON-escaped spelling)
+scrubbed to fixed inert text, so a child that echoes its instructions verbatim
+cannot walk the payload into the parent transcript. The scrub is deliberately no
+more than that — the child exists to act on the skill, so what it did because of
+the text is its ordinary, policy-mediated output.
 
 A handle-delivered skill bypasses the registry entirely: it is transient run
 state from a cell, the untrusted-acquisition complement to the trusted operator
