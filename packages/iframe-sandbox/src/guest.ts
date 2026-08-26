@@ -51,6 +51,7 @@ export class RemoteCell<T = FabricValue> {
   readonly #client: FabricClient;
   readonly #name: string;
   readonly #listeners = new Set<SnapshotListener<T>>();
+  readonly #activeReads = new Set<Promise<void>>();
   #snapshot: ResourceSnapshot<T> = { status: "loading" };
   #unsubscribeRemote: (() => void) | undefined;
   #writeTail: Promise<void> | undefined;
@@ -92,6 +93,8 @@ export class RemoteCell<T = FabricValue> {
   }
 
   async #read(): Promise<T> {
+    const completion = Promise.withResolvers<void>();
+    this.#activeReads.add(completion.promise);
     const before = this.#snapshot;
     const generation = ++this.#readGeneration;
     const eventGeneration = this.#eventGeneration;
@@ -116,6 +119,9 @@ export class RemoteCell<T = FabricValue> {
         this.#setError(error);
       }
       throw error;
+    } finally {
+      this.#activeReads.delete(completion.promise);
+      completion.resolve();
     }
   }
 
@@ -125,6 +131,9 @@ export class RemoteCell<T = FabricValue> {
 
   update(updater: (current: T) => T): Promise<void> {
     return this.#enqueueWrite(async () => {
+      if (this.#activeReads.size > 0) {
+        await Promise.all(this.#activeReads);
+      }
       const snapshot = this.#snapshot;
       const current = snapshot.status === "ready"
         ? snapshot.value

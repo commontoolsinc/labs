@@ -52,6 +52,11 @@ function loadingQuery<Row>(): QuerySnapshot<Row> {
   return { status: "loading", rows: undefined, error: undefined };
 }
 
+type KeyedQuerySnapshot<Row> = {
+  key: string;
+  snapshot: QuerySnapshot<Row>;
+};
+
 /** Builds hooks against the React instance already used by the guest app. */
 export function createFabricReact(react: ReactHooks, client: FabricClient) {
   function useCell<T = FabricValue>(
@@ -93,43 +98,46 @@ export function createFabricReact(react: ReactHooks, client: FabricClient) {
     const paramsKey = hashStringOf(params ?? null);
     const queryKey = hashStringOf({ name, sql, params: params ?? null });
     const activeQuery = react.useRef<string | undefined>(undefined);
-    const generations = react.useRef(new Map<string, number>());
-    const [states, setStates] = react.useState<Map<string, QuerySnapshot<Row>>>(
-      () => new Map([[queryKey, loadingQuery()]]),
-    );
-    const snapshot = states.get(queryKey) ?? loadingQuery<Row>();
+    const generation = react.useRef(0);
+    const [state, setState] = react.useState<KeyedQuerySnapshot<Row>>(() => ({
+      key: queryKey,
+      snapshot: loadingQuery(),
+    }));
+    const snapshot = state.key === queryKey
+      ? state.snapshot
+      : loadingQuery<Row>();
 
     const refresh = react.useCallback(async () => {
       if (activeQuery.current !== queryKey) return;
-      const request = (generations.current.get(queryKey) ?? 0) + 1;
-      generations.current.set(queryKey, request);
-      setStates((current) => {
-        const next = new Map(current);
-        next.set(queryKey, loadingQuery());
-        return next;
+      const request = ++generation.current;
+      setState({
+        key: queryKey,
+        snapshot: loadingQuery(),
       });
       try {
         const result = await database.query<Row>(sql, params);
-        if (request !== generations.current.get(queryKey)) return;
-        setStates((current) => {
-          const next = new Map(current);
-          next.set(queryKey, {
+        if (
+          activeQuery.current !== queryKey || request !== generation.current
+        ) return;
+        setState({
+          key: queryKey,
+          snapshot: {
             status: "ready",
             rows: result.rows,
             error: undefined,
-          });
-          return next;
+          },
         });
       } catch (cause) {
-        if (request !== generations.current.get(queryKey)) return;
-        setStates((current) => {
-          const next = new Map(current);
-          next.set(queryKey, {
+        if (
+          activeQuery.current !== queryKey || request !== generation.current
+        ) return;
+        setState({
+          key: queryKey,
+          snapshot: {
             status: "error",
             rows: undefined,
             error: cause instanceof Error ? cause : new Error(String(cause)),
-          });
-          return next;
+          },
         });
       }
     }, [database, sql, paramsKey, queryKey]);
@@ -139,11 +147,10 @@ export function createFabricReact(react: ReactHooks, client: FabricClient) {
       const unsubscribe = database.subscribeInvalidation(() => void refresh());
       void refresh();
       return () => {
-        if (activeQuery.current === queryKey) activeQuery.current = undefined;
-        generations.current.set(
-          queryKey,
-          (generations.current.get(queryKey) ?? 0) + 1,
-        );
+        if (activeQuery.current === queryKey) {
+          activeQuery.current = undefined;
+          generation.current++;
+        }
         unsubscribe();
       };
     }, [database, queryKey, refresh]);

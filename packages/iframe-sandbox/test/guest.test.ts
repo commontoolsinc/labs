@@ -418,6 +418,33 @@ describe("guest", () => {
       expect(writes).toEqual([2, 3]);
     });
 
+    it("waits for an active read before applying an updater", async () => {
+      const latestRead = Promise.withResolvers<FabricValue | undefined>();
+      const writes: number[] = [];
+      let reads = 0;
+      const client = {
+        request: (operation: string, fields: { value?: FabricValue }) => {
+          if (operation === "read") {
+            return reads++ === 0 ? Promise.resolve(1) : latestRead.promise;
+          }
+          writes.push(fields.value as number);
+          return Promise.resolve(undefined);
+        },
+      } as unknown as FabricClient;
+      const cell = new RemoteCell<number>(client, "count");
+
+      await expect(cell.read()).resolves.toBe(1);
+      const reading = cell.read();
+      const updating = cell.update((value) => value + 1);
+      await Promise.resolve();
+      expect(writes).toEqual([]);
+
+      latestRead.resolve(2);
+      await Promise.all([reading, updating]);
+      expect(writes).toEqual([3]);
+      expect(cell.getSnapshot()).toEqual({ status: "ready", value: 3 });
+    });
+
     it("cleans up a request when sending it fails synchronously", async () => {
       const fabric = connectFabric();
       try {

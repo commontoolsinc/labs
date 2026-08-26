@@ -10,6 +10,20 @@ import {
   type ReactHooks,
 } from "../src/react.ts";
 
+function containsValue(value: unknown, expected: unknown): boolean {
+  if (value === expected) return true;
+  if (Array.isArray(value)) {
+    return value.some((item) => containsValue(item, expected));
+  }
+  if (value instanceof Map) {
+    return [...value.entries()].some(([key, item]) =>
+      containsValue(key, expected) || containsValue(item, expected)
+    );
+  }
+  return value !== null && typeof value === "object" &&
+    Object.values(value).some((item) => containsValue(item, expected));
+}
+
 function withUpdater<
   T,
   Remote extends {
@@ -389,9 +403,9 @@ describe("React bridge adapter", () => {
               ? (next as (current: unknown) => unknown)(states[index])
               : next;
             if (
-              [...(states[index] as Map<string, QuerySnapshot<unknown>>)
-                .values()]
-                .some((snapshot) => snapshot.status === "ready")
+              (states[index] as {
+                snapshot?: QuerySnapshot<unknown>;
+              }).snapshot?.status === "ready"
             ) {
               aliceReady.resolve();
             }
@@ -423,6 +437,9 @@ describe("React bridge adapter", () => {
       error: undefined,
     });
     expect(typeof bob.refresh).toBe("function");
+    const cleanupBob = effects[0]?.();
+    expect(containsValue(states[0], "alice")).toBe(false);
+    if (typeof cleanupBob === "function") cleanupBob();
   });
 
   it("keeps the current query when a retained old refresh completes", async () => {
