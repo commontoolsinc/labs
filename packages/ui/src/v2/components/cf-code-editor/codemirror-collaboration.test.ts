@@ -578,6 +578,38 @@ describe("CodeMirror operation collaboration", () => {
     expect(controller.active).toBe(true);
   });
 
+  it("starts a clean operation baseline after an inactive ordinary replacement", async () => {
+    let subscriber: ((snapshot: OperationFieldSnapshot) => void) | undefined;
+    const accepted = acceptedResolution(
+      "random string",
+      "random string".length,
+      "!",
+    );
+    const { controller, view, errors } = controllerHarness({
+      initial: inactiveSnapshot("legacy string"),
+      followup: activeSnapshot("random string!", accepted),
+      apply: () => accepted,
+      subscribe: (callback) => subscriber = callback,
+    });
+    await controller.start();
+
+    subscriber?.(inactiveSnapshot("random string"));
+    expect(view.state.doc.toString()).toBe("random string");
+    expect(sendableUpdates(view.state)).toEqual([]);
+
+    view.dispatch({
+      changes: {
+        from: "random string".length,
+        insert: "!",
+      },
+    });
+    await controller.localDocChanged();
+
+    expect(errors).toEqual([]);
+    expect(view.state.doc.toString()).toBe("random string!");
+    expect(sendableUpdates(view.state)).toEqual([]);
+  });
+
   it("reinstalls reset and epoch snapshots only without pending edits", async () => {
     let subscriber: ((snapshot: OperationFieldSnapshot) => void) | undefined;
     const initialResolution = acceptedResolution("abc", 1, "X");

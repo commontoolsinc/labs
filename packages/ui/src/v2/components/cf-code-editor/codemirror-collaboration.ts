@@ -469,16 +469,14 @@ export class CodeMirrorCollaborationController {
           return;
         }
         if (sendableUpdates(this.#view.state).length === 0) {
-          this.#baselineHash = snapshot.baselineHash;
           if (this.#view.state.doc.toString() !== snapshot.materialized) {
-            this.#view.dispatch({
-              changes: {
-                from: 0,
-                to: this.#view.state.doc.length,
-                insert: snapshot.materialized,
-              },
-              annotations: Transaction.remote.of(true),
-            });
+            // Reinstall the collaboration state as well as the document. A
+            // normal document transaction would otherwise be recorded as a
+            // local version-zero update and replay the replacement when this
+            // inactive field is first activated.
+            this.#install(snapshot);
+          } else {
+            this.#baselineHash = snapshot.baselineHash;
           }
         } else if (this.#view.state.doc.toString() !== snapshot.materialized) {
           throw new CodeMirrorReconciliationError(

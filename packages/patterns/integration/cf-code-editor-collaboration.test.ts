@@ -17,6 +17,7 @@ import {
   type PiecesController,
 } from "./pieces-controller.ts";
 import {
+  clickCfButton,
   waitForActiveSpaceRoot,
   waitForRuntimeIdle,
 } from "./cfc-browser-helpers.ts";
@@ -530,6 +531,10 @@ describe("cf-code-editor collaboration", () => {
         },
         start: true,
       }),
+      legacyReplace: await cc.create(source, {
+        input: { content: "legacy string" },
+        start: true,
+      }),
     };
 
     await new ACLManager(cc.runtime, cc.getSpace()).set(ANYONE_USER, "WRITE");
@@ -659,6 +664,51 @@ describe("cf-code-editor collaboration", () => {
     ]);
     assertEquals(aliceContent, bobContent);
     assertEquals(materialized, aliceContent);
+    assertEquals(await collaborationErrors(alicePage), []);
+    assertEquals(await collaborationErrors(bobPage), []);
+  });
+
+  it("replaces a legacy string through an ordinary handler and keeps editing", async () => {
+    await navigateBoth(pieces.legacyReplace);
+    const alicePage = aliceShell.page();
+    const bobPage = bobShell.page();
+
+    assertEquals(await editorContent(alicePage), "legacy string");
+    assertEquals(await editorContent(bobPage), "legacy string");
+
+    await clickCfButton(alicePage, "#replace-content");
+    await Promise.all([
+      waitForCondition(alicePage, editorContainsTokens, {
+        args: [["random string"]],
+      }),
+      waitForCondition(bobPage, editorContainsTokens, {
+        args: [["random string"]],
+      }),
+      awaitMaterialized("legacyReplace", (value) => value === "random string"),
+    ]);
+    assertEquals(await editorContent(alicePage), "random string");
+    assertEquals(await editorContent(bobPage), "random string");
+
+    await dispatchEdit(
+      bobPage,
+      "random string".length,
+      "random string".length,
+      "!",
+    );
+    await Promise.all([
+      waitForCondition(alicePage, editorContainsTokens, {
+        args: [["random string!"]],
+      }),
+      waitForCondition(bobPage, editorContainsTokens, {
+        args: [["random string!"]],
+      }),
+      awaitMaterialized(
+        "legacyReplace",
+        (value) => value === "random string!",
+      ),
+    ]);
+    assertEquals(await editorContent(alicePage), "random string!");
+    assertEquals(await editorContent(bobPage), "random string!");
     assertEquals(await collaborationErrors(alicePage), []);
     assertEquals(await collaborationErrors(bobPage), []);
   });
