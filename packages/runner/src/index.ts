@@ -25,6 +25,7 @@ export type {
   RuntimeOptions,
   SpaceCellContents,
 } from "./runtime.ts";
+export { EXPERIMENTAL_DEFAULTS } from "./runtime.ts";
 export {
   ADOPT_SERVER_FLAGS_ENV,
   type BrowserWorkerPresetParams,

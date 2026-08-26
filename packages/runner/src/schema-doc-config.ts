@@ -14,7 +14,15 @@
  * turning it off stops emission without un-writing anything.
  */
 
-let contentAddressedSchemas = true;
+/**
+ * What the flag is worth when nothing sets it. Named because the runner's
+ * `EXPERIMENTAL_DEFAULTS` aggregates this value rather than restating it: a
+ * restated copy could not change what an unset runtime runs, because the
+ * runtime reads this module's state back rather than that table.
+ */
+export const CONTENT_ADDRESSED_SCHEMAS_DEFAULT = true;
+
+let contentAddressedSchemas: boolean = CONTENT_ADDRESSED_SCHEMAS_DEFAULT;
 
 /**
  * Sets the flag; `undefined` keeps the current state (the built-in default
@@ -33,5 +41,5 @@ export function getContentAddressedSchemasConfig(): boolean {
 
 /** Restores the flag to its default. */
 export function resetContentAddressedSchemasConfig(): void {
-  contentAddressedSchemas = true;
+  contentAddressedSchemas = CONTENT_ADDRESSED_SCHEMAS_DEFAULT;
 }

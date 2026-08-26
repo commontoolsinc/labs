@@ -66,12 +66,15 @@ than experimental-feature gates are listed in
 These flags make up the `ExperimentalOptions` interface in
 [`packages/runner/src/runtime.ts`](../../packages/runner/src/runtime.ts). They
 are passed as `new Runtime({ experimental: { ... } })`. Each flag defaults to
-`undefined`, which means "take the built-in default". `commitPreconditions`,
-`plainResultReceipts`, `computedCellIds` and `lazyMaterialization` default on;
-`serverExecution` resolves an unset flag to the ONE first-party default
-`SERVER_EXECUTION_DEFAULT_ENABLED` in the deployed-topology presets — `false`
-today, Phase 7 having landed flip-ready DARK (its section); the other flags in
-this category default off unless their section says otherwise.
+`undefined`, which means "take the built-in default", and what that default is
+for every flag is `EXPERIMENTAL_DEFAULTS` in the same file — one table rather
+than a list here that could drift from it, aggregating the ambient flags'
+defaults from the modules that own them. Read it there; today
+`contentAddressedSchemas`, `commitPreconditions`, `plainResultReceipts`,
+`computedCellIds` and `lazyMaterialization` are on and the rest are off.
+`serverExecution` is the one whose entry is not a literal: it is the ONE
+first-party default `SERVER_EXECUTION_DEFAULT_ENABLED`, `false` today, Phase 7
+having landed flip-ready DARK (its section).
 
 The mapping from environment variable to flag is defined once, canonically, as
 `EXPERIMENTAL_ENV_VARS` in
@@ -1427,12 +1430,26 @@ For the enforcement mode in the interactive tools, use `CF_CFC_MODE`.
 
 ## Verifying flags are working
 
-When any experimental flag is explicitly overridden, the `Runtime` constructor
-logs it on startup, for example:
+When a `Runtime` runs a flag at anything other than its built-in default, the
+constructor names it on startup, for example:
 
 ```
-Experimental flag overrides: modernCellRep=true
+Non-default experimental flags: modernCellRep=true
 ```
+
+A runtime running every default says nothing, which is what makes the line
+worth reading: it answers "is this process running something unusual?", and a
+listing of every flag it resolved would bury that answer. Two constructions
+pass flags explicitly while running nothing unusual, and neither prints — the
+deployed-topology presets, which select the fleet's own server-execution arm on
+every toolshed start and every `cf` command, and a client that adopted a stock
+deployment's whole posture ([Clients that are not built alongside their
+server](#clients-that-are-not-built-alongside-their-server)).
+
+`serverExecution` is reported only when a construction SELECTED an arm other
+than the first-party default. A flag-less runtime in a serving process inherits
+the process's arm through the ambient flag rather than choosing one, so naming
+it there would claim a decision that runtime did not make.
 
 - Server-side: look in the toolshed log.
 - Browser-side: look in the browser developer console (the message comes from
@@ -1463,12 +1480,29 @@ design docs).
 ## Implementation details
 
 The Category 1 flags are declared as the `ExperimentalOptions` interface in
-[`packages/runner/src/runtime.ts`](../../packages/runner/src/runtime.ts). The
-`Runtime` constructor merges the provided flags with the built-in defaults
-(`commitPreconditions`, `plainResultReceipts`, and `computedCellIds` true, the
-other Category 1 flags false), propagates each one to its ambient control point,
-and then reads the effective state back so that `runtime.experimental.*`
+[`packages/runner/src/runtime.ts`](../../packages/runner/src/runtime.ts),
+beside `EXPERIMENTAL_DEFAULTS`, the total record of what each one is worth
+unset. The `Runtime` constructor propagates the flags it was given to their
+ambient control points and reads the effective state back, then fills what is
+still unset from that table, so `runtime.experimental.*` carries every flag and
 reflects what is actually in effect.
+
+The order matters and is not free to change: an unset flag has to reach the
+ambient setters as `undefined`, which they read as "leave the process's state
+alone". Writing a default in before that point would have a flag-less
+construction stomp what a co-hosted runtime established. The startup banner
+comes last, from `nonDefaultExperimentalFlags`, which compares the resolved
+posture against that same table — `serverExecution` excepted, and read from
+what the construction selected, so an arm inherited from the process is not
+reported as this runtime's divergence.
+
+Three entries in the table are imported from the module that owns the flag's
+ambient control point rather than written out: `MODERN_CELL_REP_DEFAULT`,
+`CONTENT_ADDRESSED_SCHEMAS_DEFAULT` and `COMMIT_PRECONDITIONS_DEFAULT`. What an
+unset runtime resolves for those is that module's own state, so a value
+restated here would say what the default is without being able to change it —
+and this table is where the change is meant to be made. The other four have no
+ambient home, so the table is their declaration.
 
 First-party construction config is centralized in
 [`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts),

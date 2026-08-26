@@ -1,5 +1,6 @@
 import {
   getModernCellRepConfig,
+  MODERN_CELL_REP_DEFAULT,
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
@@ -9,6 +10,7 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
   acquireServerExecutionEnabler,
+  COMMIT_PRECONDITIONS_DEFAULT,
   commitPreconditionValueHash,
   getCommitPreconditionsConfig,
   getServerExecutionConfig,
@@ -16,12 +18,14 @@ import {
   resolveScopeKey,
   type ScopeKey,
   type ScopeKeyIdentity,
+  SERVER_EXECUTION_DEFAULT_ENABLED,
   serverExecutionEnablerCount,
   setCommitPreconditionsConfig,
   setServerExecutionConfig,
 } from "@commonfabric/memory/v2";
 import { RuntimeTelemetry } from "@commonfabric/runner";
 import {
+  CONTENT_ADDRESSED_SCHEMAS_DEFAULT,
   getContentAddressedSchemasConfig,
   setContentAddressedSchemasConfig,
 } from "./schema-doc-config.ts";
@@ -276,6 +280,82 @@ export interface ExperimentalOptions {
    * unlike v1's SERVER_PRIMARY_EXECUTION so archived docs never alias it.
    */
   serverExecution?: boolean | undefined;
+}
+
+/**
+ * What every experimental flag is worth when nothing sets it: the value a
+ * `Runtime` resolves an unset flag to, and the baseline
+ * {@link nonDefaultExperimentalFlags} reports divergence from.
+ *
+ * The one place to look a default up. They were previously spread across the
+ * constructor and three ambient modules and restated in prose in
+ * `docs/development/EXPERIMENTAL_OPTIONS.md`, where the copy could drift from
+ * the code without anything noticing. Typed as a total record over the flags,
+ * so a new flag does not compile until it declares what "unset" means for it.
+ *
+ * Two bounds on that. This table is what a flag defaults TO, not what any
+ * given process is running: the three ambient flags can be moved by a
+ * co-hosted runtime, and the constructor reads the effective value back
+ * rather than assuming this one. And it is not the sole DECLARATION site —
+ * those three defaults belong to the module that owns each control point, and
+ * are imported rather than restated, because a copy here could state a
+ * default without being able to move it.
+ */
+export const EXPERIMENTAL_DEFAULTS = {
+  // Three flags reach the process through an ambient control point in a lower
+  // layer, and that module's own state is what an unset runtime resolves. The
+  // value is imported from there rather than restated here: a copy could say
+  // what the default is without being able to change it, and this table is
+  // advertised as the place to change one.
+  modernCellRep: MODERN_CELL_REP_DEFAULT,
+  contentAddressedSchemas: CONTENT_ADDRESSED_SCHEMAS_DEFAULT,
+  commitPreconditions: COMMIT_PRECONDITIONS_DEFAULT,
+  // These four have no ambient home — they are consumed from the Runtime
+  // instance — so this table IS their declaration, and changing one here
+  // changes what an unset runtime runs.
+  plainResultReceipts: true,
+  computedCellIds: true,
+  lazyMaterialization: true,
+  systemPatternAutoUpdate: false,
+  // The ONE first-party default (server-execution v2 Phase 7): the arm the
+  // fleet runs when nobody selects one. Deliberately not the ambient
+  // zero-value `false`, which is what a flag-less construction inherits
+  // rather than what a deployment means by "default". This entry is a
+  // BASELINE only — the constructor never falls back to it, because a
+  // flag-less runtime reads the process's ambient arm instead.
+  serverExecution: SERVER_EXECUTION_DEFAULT_ENABLED,
+} as const satisfies Record<keyof ExperimentalOptions, boolean>;
+
+/**
+ * The flags a runtime runs that are not {@link EXPERIMENTAL_DEFAULTS}, as
+ * `name=value` strings, in flag order. What the startup banner reports:
+ * telling an operator what is unusual about this process is the question the
+ * banner exists to answer, and a list of everything it resolved buries that.
+ *
+ * `resolved` is the runtime's effective posture, every flag present; `selected`
+ * is what its caller passed, which omits whatever it left unset. Reading from
+ * `resolved` is what lets an ambient value a co-hosted runtime established be
+ * reported, and costs nothing for an unset flag, which resolves to its default
+ * and is suppressed either way.
+ *
+ * `serverExecution` is the one flag read from `selected` instead: a flag-less
+ * runtime in a serving process inherits the process's arm rather than choosing
+ * one, so reporting it as this runtime's divergence would be a claim about a
+ * decision it did not make.
+ */
+export function nonDefaultExperimentalFlags(
+  resolved: ExperimentalOptions,
+  selected: ExperimentalOptions,
+): string[] {
+  const flags: string[] = [];
+  for (const [flag, byDefault] of Object.entries(EXPERIMENTAL_DEFAULTS)) {
+    const key = flag as keyof ExperimentalOptions;
+    const value = key === "serverExecution" ? selected[key] : resolved[key];
+    if (value !== undefined && value !== byDefault) {
+      flags.push(`${key}=${value}`);
+    }
+  }
+  return flags;
 }
 
 /**
@@ -1204,42 +1284,8 @@ export class Runtime {
           "would silently bypass the custom provider for acting runs.",
       );
     }
-    this.experimental = {
-      modernCellRep: undefined,
-      commitPreconditions: undefined,
-      plainResultReceipts: undefined,
-      computedCellIds: undefined,
-      lazyMaterialization: undefined,
-      serverExecution: undefined,
-      ...options.experimental,
-    };
-
-    // Log any overridden experimental flags. Never on stdout: the cf CLI's
-    // machine-readable output (`cf piece ls` etc.) is consumed by scripts, and
-    // this banner made every command's stdout non-empty under a flag override.
-    // Not console.error/warn either: the cf test console enforcement fails
-    // tests on those. Direct process stderr in Deno; plain console in browser
-    // realms (no stdout contract there).
-    const overrideFlags = Object.entries(this.experimental)
-      .filter(([_, v]) => v !== undefined)
-      .map(([k, v]) => `${k}=${v}`);
-    if (overrideFlags.length > 0) {
-      const banner = `Experimental flag overrides: ${overrideFlags.join(", ")}`;
-      if (typeof Deno !== "undefined" && Deno.stderr) {
-        Deno.stderr.writeSync(new TextEncoder().encode(banner + "\n"));
-      } else {
-        console.log(banner);
-      }
-    }
-
-    // Unlike ambient flags, computedCellIds and plainResultReceipts are
-    // consumed from this Runtime instance (the builder frame and the runner's
-    // receipt-only branch respectively). Normalize their local defaults after
-    // override logging so an omitted option does not appear as an explicit
-    // `true` override.
-    this.experimental.computedCellIds ??= true;
-    this.experimental.plainResultReceipts ??= true;
-    this.experimental.lazyMaterialization ??= true;
+    const selectedExperimental = options.experimental ?? {};
+    this.experimental = { ...selectedExperimental };
 
     // Propagate experimental flags to their ambient control points, then read
     // back the effective state so `experimental.*` reflects what is actually in
@@ -1288,6 +1334,35 @@ export class Runtime {
     // flag-less construction reads the ambient state through.
     this.experimental.serverExecution = this.#explicitServerExecution ??
       getServerExecutionConfig();
+
+    // The flags with no ambient home — consumed from this instance, by the
+    // builder frame, the runner's receipt-only branch, the lift materializer
+    // and the pattern updater — take their defaults here. `??=`, because the
+    // read-backs above already resolved every other flag.
+    for (const [flag, byDefault] of Object.entries(EXPERIMENTAL_DEFAULTS)) {
+      const key = flag as keyof ExperimentalOptions;
+      this.experimental[key] ??= byDefault;
+    }
+
+    // What is unusual about this process, and nothing else: an operator reads
+    // this to check a flag took effect, and a list of everything resolved
+    // buries the answer. Never on stdout — the cf CLI's machine-readable
+    // output (`cf piece ls` etc.) is consumed by scripts, and this banner made
+    // every command's stdout non-empty. Not console.error/warn either: the cf
+    // test console enforcement fails tests on those. Direct process stderr in
+    // Deno; plain console in browser realms (no stdout contract there).
+    const nonDefault = nonDefaultExperimentalFlags(
+      this.experimental,
+      selectedExperimental,
+    );
+    if (nonDefault.length > 0) {
+      const banner = `Non-default experimental flags: ${nonDefault.join(", ")}`;
+      if (typeof Deno !== "undefined" && Deno.stderr) {
+        Deno.stderr.writeSync(new TextEncoder().encode(banner + "\n"));
+      } else {
+        console.log(banner);
+      }
+    }
     this.servingPosture = options.servingPosture === true;
     // Everything below can throw (URL parsing, host validation, engine
     // construction). The enabler claimed above is process-global state,
