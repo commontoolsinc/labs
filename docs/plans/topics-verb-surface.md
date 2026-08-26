@@ -66,7 +66,7 @@ makes the whole array unreadable, while a default materializes in its place.
 
 | stage | carries | state |
 | --- | --- | --- |
-| A | compatible updates: verb and event prose, the describe layer, optional `addLink` fields, `setTitle`, a compact `addTopic` result | landed in source |
+| A | compatible updates: verb and event prose, the describe layer, `setTitle`, a compact `addTopic` result | landed in source |
 | B | one rehearsed break, four items batched | in progress |
 | C | items gated on platform work | designed for, not started |
 
@@ -92,7 +92,9 @@ rehearsal four times:
 3. **Retire `myName`, `setMyName`, `createdByName`, `authorName`** and their
    mirrors in results.
 4. **Open the `kind` value domains** on links and authors, which are closed
-   enums in provided data and so cannot widen.
+   enums in provided data and so cannot widen — and with them relax
+   `addLink`'s `kind` and `label`, which the handler already defaults and
+   which the gate refuses to relax on their own. **Landed.**
 
 Item 1 additionally needs, before it can land:
 
