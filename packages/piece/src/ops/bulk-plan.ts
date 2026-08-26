@@ -75,6 +75,23 @@ export interface PieceExpect {
   retained: boolean;
 
   /**
+   * The origin the piece follows, exactly as the piece records it; absent
+   * when the piece is detached. A retarget writes a source a human chose
+   * and detaches the piece from its origin, so this is the record of what
+   * the run detaches — and the string an operator writes back to re-attach it
+   * by hand afterwards.
+   *
+   * The recorded spelling alone. `PieceOrigin` carries two more fields, the
+   * canonical URL and the kind, and `classifyOrigin` derives both from this
+   * string — the URL against the host this deployment routes the space to —
+   * so recording either would put a re-derivable fact in the artifact in a
+   * spelling that reads differently elsewhere. Re-attaching takes the string
+   * the piece stored and nothing else, which is also how
+   * `RestoreOutcome.origin` spells the same fact.
+   */
+  origin?: string;
+
+  /**
    * The revision the piece is at, when it already keeps a source-revision log.
    * A piece with no log yet — a legacy piece — has none until its first
    * transition appends a baseline revision, so a survey cannot read one for it.
@@ -446,6 +463,14 @@ export function deriveRollbackPlan(
     return [{
       piece: row.piece,
       ...(row.phase === undefined ? {} : { phase: row.phase }),
+      // No `origin`: the retarget this reverses detached the piece, so a
+      // detached piece is the precondition, and carrying the forward row's
+      // origin would claim the reversal detaches something already gone.
+      // Re-attaching is not the restore's to do either — a restore detaches
+      // in its own right (`docs/specs/piece-source-lifecycle.md`), and the
+      // only re-attachment the runtime has, `follow`, resolves the origin
+      // NOW and adopts whatever source it currently ships, which is not the
+      // reference a rollback promises to land.
       expect: {
         patternIdentity: row.op.patternIdentity,
         symbol: row.op.symbol,
@@ -564,6 +589,7 @@ function isPlanRow(value: unknown): value is PiecePlanRow {
     expect.patternIdentity === "" ||
     typeof expect.symbol !== "string" || expect.symbol === "" ||
     typeof expect.retained !== "boolean" ||
+    !isOptionalName(expect.origin) ||
     !isOptionalName(expect.revisionId) ||
     !isOptionalName(expect.documentHash)
   ) return false;

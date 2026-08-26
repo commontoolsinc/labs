@@ -11,6 +11,17 @@
  * immediately before the write, and a source that no longer produces the
  * reference its row recorded is refused rather than applied.
  *
+ * The write detaches the piece from the origin it follows: the source it
+ * runs afterwards is the one this plan names, chosen by a human, and a piece
+ * that went on taking its origin's next update would leave that plan's
+ * reviewer having approved a reference the piece does not keep. What the run
+ * detaches is recorded — the plan row's `expect.origin`, carried onto every
+ * report row — and re-attached by hand or not at all. Nothing here
+ * re-attaches: the runtime's `follow` resolves the origin NOW and adopts
+ * whatever source it currently ships, which is not the reference a rollback
+ * promises to land, and the restore a rollback runs detaches in its own
+ * right by design (`docs/specs/piece-source-lifecycle.md`).
+ *
  * The row's own precondition rides into the write rather than stopping at
  * the recheck that proved it. A piece is read once to classify it and again
  * by the write itself, and a writer landing between those two reads is

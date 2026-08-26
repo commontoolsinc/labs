@@ -14,7 +14,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
-import { Runtime } from "@commonfabric/runner";
+import { Runtime, setPatternSource } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import {
@@ -275,6 +275,43 @@ describe("bulk-retarget", () => {
     expect(pin?.patternIdentity).toBe(
       (plan.rows[0].op as RetargetOp).patternIdentity,
     );
+  });
+
+  it("carries the plan's origin onto every report row, and the write detaches it", async () => {
+    const { plan, ids } = await seed(1);
+    const origin = "https://origins.test/member.tsx";
+    const stamper = await sessions.open();
+    const target = await stamper.get(ids[0], false);
+    const { error } = await stamper.runtime.editWithRetry((tx) => {
+      setPatternSource(target.getCell(), tx, origin);
+    });
+    if (error !== undefined) throw error;
+    await stamper.synced();
+    await sessions.close(stamper);
+    const following: PiecePlan = {
+      header: plan.header,
+      rows: [{
+        ...plan.rows[0],
+        expect: { ...plan.rows[0].expect, origin },
+      }],
+    };
+
+    const dry = await retargetPieces(sessions, { plan: following });
+    const applied = await retargetPieces(sessions, {
+      plan: following,
+      apply: true,
+    });
+
+    // The dry run is the only moment the detach is still a decision, so the
+    // origin rides that row as much as the applied one.
+    expect(dry.rows[0].verdict).toBe("outstanding");
+    expect(dry.rows[0].origin).toBe(origin);
+    expect(applied.rows[0].verdict).toBe("applied");
+    expect(applied.rows[0].origin).toBe(origin);
+    // What the report records is a real detach: the piece follows nothing
+    // afterwards, and re-attaching it is by hand from the string the row
+    // carried.
+    expect((await pinOf(ids[0]))?.origin).toBeUndefined();
   });
 
   it("resumes as a re-invocation: landed rows are not rewritten", async () => {

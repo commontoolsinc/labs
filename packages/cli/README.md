@@ -154,6 +154,13 @@ already on its row's target reads as landed and is not rewritten, which makes
 re-invoking the same command the resume. Applying implies no verdict — the
 verification is `cf piece survey --diff`, a separate invocation by design.
 
+Each write detaches its piece from the origin it follows: what it runs
+afterwards is the source the plan names. That is recorded rather than gated —
+the survey reads the origin into the row's `expect.origin` and every report row
+for that piece carries it, on the dry run as much as under `--apply`, so what
+the run detaches is in hand while it is still a decision. Re-attaching
+afterwards is by hand, from the string the report names.
+
 `--apply` refuses to start over a row whose prior source is not retained
 (`expect.retained: false`), because such a piece cannot be returned once it has
 moved — accepting that after the move is asking past the point of no return.

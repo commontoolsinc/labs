@@ -98,6 +98,24 @@ describe("piece-retarget", () => {
       );
     });
 
+    it("carries the origin the plan recorded, on a dry row as on an applied one", () => {
+      const origin = "https://origins.test/member.tsx";
+      // The dry run is the only moment the detach is still a decision, so
+      // the line states the origin rather than a tense; the verdict says
+      // whether this row's write happened.
+      expect(
+        formatApplyRow({
+          piece: "fid1:aaa",
+          phase: "items",
+          verdict: "outstanding",
+          origin,
+        }),
+      ).toBe(`outstanding fid1:aaa items origin ${origin}`);
+      expect(formatApplyRow({ ...REPORT.rows[0], origin })).toBe(
+        `applied fid1:aaa items 412ms origin ${origin}`,
+      );
+    });
+
     it("carries what a row broke, and omits what a row does not have", () => {
       expect(
         formatApplyRow({
@@ -141,6 +159,58 @@ describe("piece-retarget", () => {
       // what it exists for.
       expect(printedWhenSettled).toEqual([1, 2]);
       expect(hints).toEqual(["applied: 1 · landed: 1 · written: 1"]);
+    });
+
+    it("names each row that landed with a warning", async () => {
+      const hints: string[] = [];
+      const warned: ApplyReport = {
+        rows: [
+          { ...REPORT.rows[0], warning: "the piece ran with a warning" },
+          REPORT.rows[1],
+        ],
+        applied: 1,
+        complete: true,
+      };
+      await captureStdout(() =>
+        retargetFromCommand(OPTIONS, {
+          runRetarget: () => Promise.resolve(warned),
+          printHint: (message) => {
+            hints.push(message);
+          },
+        })
+      );
+      // A warned row landed, so it is not among the stopped rows the exit
+      // message names; the hint is the only place a human reads it.
+      expect(hints).toContain(
+        "applied: fid1:aaa warned: the piece ran with a warning",
+      );
+    });
+
+    it("names how many rows record an origin the write detaches", async () => {
+      const hints: string[] = [];
+      const following: ApplyReport = {
+        rows: [
+          { ...REPORT.rows[0], origin: "https://origins.test/member.tsx" },
+          REPORT.rows[1],
+        ],
+        applied: 1,
+        complete: true,
+      };
+      await captureStdout(() =>
+        retargetFromCommand(OPTIONS, {
+          runRetarget: () => Promise.resolve(following),
+          printHint: (message) => {
+            hints.push(message);
+          },
+        })
+      );
+      // One line rather than one per piece: an origin-following row is
+      // nearly every row on a board that has one, and the report itself
+      // names each origin.
+      expect(hints).toContain(
+        "1 of 2 rows record an origin the write detaches; the report names " +
+          "each one, and re-attaching is by hand.",
+      );
     });
 
     it("passes the plan path, the apply flag, and the group size through", async () => {

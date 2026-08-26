@@ -4061,7 +4061,9 @@ export class PieceController<T = unknown> {
   }
 
   /**
-   * Replace the piece's source with `program`.
+   * Replace the piece's source with `program`, detaching the piece from the
+   * origin it follows: what it runs afterwards is `program` and stays
+   * `program` until something writes it again.
    *
    * `expectedPattern` pins the reference this write may run over, exactly as
    * {@link changeSource}'s does and for the same window. The snapshot read
@@ -4144,6 +4146,10 @@ export class PieceController<T = unknown> {
         if (!options?.dangerouslyAllowIncompatibleSchema) {
           assertPatternSchemasBackwardCompatible(previousPattern, pattern);
         }
+        // The `null` is the origin: this transition detaches. A caller
+        // supplying the source has chosen what the piece runs, and a piece
+        // that went on taking its origin's next update would run something
+        // that caller never named.
         transition = pieceSourceTransition(
           expected,
           "edit",

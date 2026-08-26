@@ -3324,6 +3324,10 @@ export async function inspectPieceFromCommand(
         ...(pin.revisionId === undefined
           ? []
           : [`revision: ${pin.revisionId}`]),
+        // Absent for a detached piece, which is what a retarget leaves
+        // behind: the pin reports the origin the piece follows now, not
+        // one it once did.
+        ...(pin.origin === undefined ? [] : [`origin:   ${pin.origin}`]),
         `retained: ${pin.retained}`,
       ].join("\n"),
     );
@@ -3817,9 +3821,13 @@ export interface RetargetCommandDependencies extends ApplyCommandDependencies {
 
 /**
  * One report row as a line: the verdict, the piece, its phase, what the row
- * cost, and what it broke. The cost is on the line rather than in a summary
- * because a run whose cost per piece is unknown cannot be improved, and the
- * number has to arrive while there is still a run to reason about.
+ * cost, the origin the plan recorded for it, and what it broke. The cost is
+ * on the line rather than in a summary because a run whose cost per piece is
+ * unknown cannot be improved, and the number has to arrive while there is
+ * still a run to reason about. The origin is on the line for the same
+ * reason: a retarget's write detaches the piece from it, and this string is
+ * what re-attaching by hand takes. The verdict says whether this row's write
+ * happened, so the line states the origin rather than a tense.
  */
 export function formatApplyRow(row: ApplyRow): string {
   return [
@@ -3827,6 +3835,7 @@ export function formatApplyRow(row: ApplyRow): string {
     row.piece,
     ...(row.phase === undefined ? [] : [row.phase]),
     ...(row.elapsedMs === undefined ? [] : [`${row.elapsedMs}ms`]),
+    ...(row.origin === undefined ? [] : [`origin ${row.origin}`]),
     ...(row.warning === undefined ? [] : [`! ${row.warning}`]),
     ...(row.problem === undefined ? [] : [`- ${row.problem}`]),
   ].join(" ");
@@ -3933,6 +3942,19 @@ async function reportApplyRun(
     if (row.warning !== undefined) {
       printHint(`${row.verdict}: ${row.piece} warned: ${row.warning}`);
     }
+  }
+  // A retarget's write detaches the piece from its origin, and the report
+  // names the origin on each such row. One line rather than one per piece:
+  // an origin-following row is nearly every row on a board that has one, and
+  // a per-row hint would bury the stop lines the operator has to act on.
+  // Nothing re-attaches, so the line says where the work goes.
+  const following = report.rows.filter((row) => row.origin !== undefined);
+  if (following.length > 0) {
+    printHint(
+      `${following.length} of ${report.rows.length} rows record an origin ` +
+        `the write detaches; the report names each one, and re-attaching ` +
+        `is by hand.`,
+    );
   }
   if (!report.complete) {
     const settled = (row: ApplyRow) =>
