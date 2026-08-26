@@ -211,7 +211,10 @@ export function markDurableReadTx(tx: object): void {
 }
 
 export function isDurableReadTx(tx: object): boolean {
-  return durableReadTxs.has(tx);
+  for (const layer of blindWriteTxChain(tx)) {
+    if (durableReadTxs.has(layer)) return true;
+  }
+  return false;
 }
 
 // Lazy materialization: a marked transaction hands a reader views that resolve

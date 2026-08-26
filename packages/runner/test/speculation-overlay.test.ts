@@ -45,6 +45,7 @@ import {
 import {
   ignoreReadForScheduling,
   internalVerifierRead,
+  isDurableReadTx,
   isInternalVerifierRead,
   isReadIgnoredForCommit,
   markDurableReadTx,
@@ -52,6 +53,7 @@ import {
   setBlindStructuralTarget,
   unmarkUiInputBlindWriteTx,
 } from "../src/storage/reactivity-log.ts";
+import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 import { getDirectTransactionReadActivities } from "../src/storage/transaction-inspection.ts";
 import { isTerminalRejection } from "../src/storage/rejection.ts";
 import type { PostCommitSideEffect } from "../src/cfc/types.ts";
@@ -2153,8 +2155,10 @@ describe("Phase 2 speculation overlay", () => {
 
     const tx = clientRuntime.edit();
     markDurableReadTx(tx);
-    expect(database.withTx(tx).get()).toEqual({ id: "db-1", rev: 1 });
-    database.key("rev").withTx(tx).set(2);
+    const wrapped = new TransactionWrapper(tx);
+    expect(isDurableReadTx(wrapped)).toBe(true);
+    expect(database.withTx(wrapped).get()).toEqual({ id: "db-1", rev: 1 });
+    database.key("rev").withTx(wrapped).set(2);
     clientRuntime.prepareTxForCommit(tx);
     const outcome = await tx.commit();
 
