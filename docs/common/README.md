@@ -89,6 +89,7 @@ on the Common Fabric runtime.
 - [workflows/development.md](workflows/development.md) — `cf` CLI loop: check, deploy, setsrc, inspect, link
 - [workflows/pattern-testing.md](workflows/pattern-testing.md) — writing and running pattern tests
 - [workflows/handlers-cli-testing.md](workflows/handlers-cli-testing.md) — invoking mounted callables from the CLI
+- [workflows/bulk-operations.md](workflows/bulk-operations.md) — surveying, repairing and retargeting a collection of deployed pieces: the plan as the unit of work, dry-by-default applies, and why the verdict is a second survey
 
 ### verbs/ — driving a deployed piece through `cf`
 

@@ -41,7 +41,24 @@ export const TOUR_PATH = "docs/common/verbs/the-verb-session.md";
 
 /** Every document held to the demo. Both quote commands and name acts, and a
  * command invented in either is wrong the same way. */
-export const DOC_PATHS = [TOUR_PATH, WALKTHROUGH_PATH];
+export const BULK_DEMO_PATH = "packages/cli/integration/bulk-ops-demo.sh";
+export const BULK_TOUR_PATH = "docs/common/workflows/bulk-operations.md";
+
+/**
+ * Each document, paired with the demo that runs the session it describes.
+ *
+ * A document is held to its own demo and no other: the verb tour and its
+ * walkthrough describe one session, and the bulk tour describes a different
+ * one. Pairing them here is what lets a second story be added without either
+ * demo having to grow commands the other document quotes.
+ */
+export const DOC_DEMOS: ReadonlyArray<{ doc: string; demo: string }> = [
+  { doc: TOUR_PATH, demo: DEMO_PATH },
+  { doc: WALKTHROUGH_PATH, demo: DEMO_PATH },
+  { doc: BULK_TOUR_PATH, demo: BULK_DEMO_PATH },
+];
+
+export const DOC_PATHS = DOC_DEMOS.map((pair) => pair.doc);
 
 /** The comment that exempts the next `cf` line in a walkthrough bash block.
  * The marker alone is not enough: an exemption without a reason is one
@@ -134,9 +151,10 @@ function extractCf(line: string): string | null {
   return span.trim();
 }
 
-/** Every command the demo runs, as normalized token lists: `run`, `refused`,
- * and `broken` lines execute theirs, and a `pending` line's first argument is
- * the command it promises. */
+/** Every command a demo runs, as normalized token lists: `run`, `run_loud`,
+ * `refused` and `broken` lines execute theirs, and a `pending` line's first
+ * argument is the command it promises. `run_loud` differs from `run` only in
+ * how much of the output it shows, so both are commands the demo ran. */
 export function demoCommands(shText: string): string[][] {
   const commands: string[][] = [];
   for (const line of joinContinuations(shText)) {
@@ -144,7 +162,10 @@ export function demoCommands(shText: string): string[][] {
     const tokens = tokenize(trimmed);
     if (tokens.length === 0) continue;
     const head = tokens[0]!;
-    if (head === "run" || head === "refused" || head === "broken") {
+    if (
+      head === "run" || head === "run_loud" || head === "refused" ||
+      head === "broken"
+    ) {
       const at = tokens.indexOf("cf");
       if (at !== -1) commands.push(dropSpaceFlag(tokens.slice(at)));
       continue;
@@ -331,16 +352,26 @@ export async function main(deps: {
 } = {}): Promise<number> {
   const log = deps.log ?? console.log;
   const error = deps.error ?? console.error;
-  const shText = await Deno.readTextFile(
-    deps.shPath ?? join(REPO_ROOT, DEMO_PATH),
-  );
-  const docPaths = deps.mdPath === undefined ? DOC_PATHS : [deps.mdPath];
+  // An override names one pairing; otherwise every document is read against
+  // the demo it was written from.
+  const pairs = deps.mdPath === undefined
+    ? DOC_DEMOS
+    : [{ doc: deps.mdPath, demo: deps.shPath ?? DEMO_PATH }];
+  const demoText = new Map<string, string>();
   const violations: string[] = [];
-  for (const docPath of docPaths) {
+  for (const { doc, demo } of pairs) {
+    if (!demoText.has(demo)) {
+      demoText.set(
+        demo,
+        await Deno.readTextFile(
+          demo.startsWith("/") ? demo : join(REPO_ROOT, demo),
+        ),
+      );
+    }
     const mdText = await Deno.readTextFile(
-      docPath.startsWith("/") ? docPath : join(REPO_ROOT, docPath),
+      doc.startsWith("/") ? doc : join(REPO_ROOT, doc),
     );
-    violations.push(...findViolations(shText, mdText, docPath));
+    violations.push(...findViolations(demoText.get(demo)!, mdText, doc));
   }
   if (violations.length > 0) {
     error(`verb-session sync: ${violations.length} violation(s)\n`);
@@ -348,7 +379,7 @@ export async function main(deps: {
     return 1;
   }
   log(
-    `Commands and act references in ${docPaths.length} document(s) all ` +
+    `Commands and act references in ${pairs.length} document(s) all ` +
       `match the demo.`,
   );
   return 0;
