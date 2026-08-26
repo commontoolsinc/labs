@@ -990,8 +990,8 @@ describe("cell-handle", () => {
       // `toStrictEqual`, because `toEqual` ignores an `undefined`-valued key
       // in both directions -- so it would pass just as well if `c` were
       // dropped entirely. Carrying a _present_ `undefined` is one of the
-      // properties `WireCellValue` exists to have over `JSONValue`, which
-      // makes it the half of this fixture most worth actually asserting.
+      // properties a `FabricValue` has and a `JSONValue` does not, which makes
+      // it the half of this fixture most worth actually asserting.
       expect(CellHandle.serialize({ a: 1, b: [true, null], c: undefined }))
         .toStrictEqual({ a: 1, b: [true, null], c: undefined });
     });

@@ -740,19 +740,6 @@ export type CellGetRequest = BaseRequest & {
 };
 
 /**
- * A cell's value as this connection carries it: the data a cell holds, with a
- * `CellRef` wherever a cell sat.
- *
- * `FabricValue` is the whole of what it can be, the envelope's encoding
- * carrying that domain entire -- a `bigint` as itself, a `symbol` under a tag,
- * a `FabricBytes` as bytes. The name survives the widening because it states
- * the one thing the type cannot: that a cell is replaced by a reference to it
- * rather than serialized, which is what `CellHandle.serialize()` does going
- * out and `CellHandle.deserialize()` undoes coming back.
- */
-export type WireCellValue = FabricValue;
-
-/**
  * The {@link RequestType.CellSet} request. `value` is the whole
  * already-resolved value rather than a delta.
  */
@@ -767,7 +754,7 @@ export type CellSetRequest = BaseRequest & {
   /**
    * The value to store, whole and already resolved.
    */
-  value: WireCellValue;
+  value: FabricValue;
 };
 
 /**
@@ -788,7 +775,7 @@ export type CellPushRequest = BaseRequest & {
   /**
    * The value to apply, whole and already resolved.
    */
-  value: WireCellValue;
+  value: FabricValue;
 };
 
 /**
@@ -806,7 +793,7 @@ export type CellSendRequest = BaseRequest & {
   /**
    * The event to deliver.
    */
-  event: WireCellValue;
+  event: FabricValue;
 };
 
 /**
@@ -2324,10 +2311,10 @@ export type BooleanResponse = {
 };
 
 /**
- * A cell's value on its way _out_ of the worker, which `WireCellValue` is on
- * its way in. The two directions carry the same domain, which they did not
- * before the envelope was encoded: outbound lost a `FabricPrimitive` to
- * structured clone where inbound refused one outright.
+ * A cell's value on its way _out_ of the worker. The two directions carry the
+ * same domain, which they did not before the envelope was encoded: outbound
+ * lost a `FabricPrimitive` to structured clone where inbound refused one
+ * outright.
  */
 export type CellValueResponse = {
   /**
@@ -2335,7 +2322,7 @@ export type CellValueResponse = {
    * `undefined` is a `FabricValue` and a value a cell can hold, so it is what
    * both answers look like.
    */
-  value: WireCellValue;
+  value: FabricValue;
 };
 
 /**
@@ -2462,7 +2449,7 @@ export type CellUpdateNotification = {
    */
   cell: CellRef;
   /** Its new value, as {@link CellValueResponse} carries the pulled form. */
-  value: WireCellValue;
+  value: FabricValue;
 
   /**
    * The cell's current display label, present only for a subscription that

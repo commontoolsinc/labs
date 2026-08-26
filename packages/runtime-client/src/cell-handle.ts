@@ -33,7 +33,6 @@ import {
   type CfcLabelView,
   JSONValue,
   RequestType,
-  type WireCellValue,
 } from "./protocol/mod.ts";
 import { $conn, type RuntimeClient } from "./runtime-client.ts";
 
@@ -55,7 +54,7 @@ export const $onCellUpdate = Symbol("$onCellUpdate");
  * The container arms are here too, since theirs hold `FabricValue` where these
  * hold handles as well.
  *
- * The connection carries all of it: `WireCellValue` is the same domain with a
+ * The connection carries all of it: `FabricValue` is the same domain with a
  * `CellRef` wherever a handle sat.
  */
 export type ClientCellValue =
@@ -564,7 +563,7 @@ export class CellHandle<T = unknown> {
    * @throws If the value holds a `FabricInstance`, which is a container this
    *   walk cannot descend and so cannot convert a handle inside.
    */
-  static serialize(value: ClientCellValue): WireCellValue {
+  static serialize(value: ClientCellValue): FabricValue {
     if (isCellHandle(value)) return value.ref();
 
     if (Array.isArray(value)) {
@@ -605,7 +604,7 @@ export class CellHandle<T = unknown> {
     // Cast because `Array.isArray()` does not narrow a `readonly` array out of
     // the union, though it does catch one at run time -- so the arm TypeScript
     // still sees here cannot actually reach it.
-    return value as WireCellValue;
+    return value as FabricValue;
   }
 }
 

@@ -168,7 +168,6 @@ import {
   type VDomMountRequest,
   type VDomMountResponse,
   type VDomUnmountRequest,
-  type WireCellValue,
   type WriteStackTraceResponse,
 } from "@/protocol/mod.ts";
 import type { VDomOp } from "@/protocol/types.ts";
@@ -927,7 +926,7 @@ export class RuntimeProcessor {
         doNotConvertCellResults: true,
         includeCfcLabelView: true,
       }),
-    ) as WireCellValue;
+    ) as FabricValue;
     // The resolved cell's own schema-bearing ref, when asked for — for a meta
     // link read this addresses the linked cell itself, so the caller can
     // subscribe to it or consult its schema's declarations.
