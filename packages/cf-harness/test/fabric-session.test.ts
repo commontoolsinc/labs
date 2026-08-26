@@ -3,9 +3,39 @@ import { expect } from "@std/expect";
 import {
   cacheHarnessFabricSessionFactory,
   type HarnessFabricSession,
+  harnessFabricSessionControllerOptions,
 } from "../src/fabric-session.ts";
 
 describe("fabric-session", () => {
+  describe("harnessFabricSessionControllerOptions()", () => {
+    const base = {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+    };
+
+    it("resolves the space and API URL and carries no dial the config omits", () => {
+      const options = harnessFabricSessionControllerOptions(base);
+      expect(options.apiUrl.href).toBe("https://toolshed.example/");
+      expect(options.space).toBe("my-space");
+      expect("cfcEnforcementMode" in options).toBe(false);
+      expect("cfcFlowLabels" in options).toBe(false);
+      expect("cfcPosture" in options).toBe(false);
+    });
+
+    it("carries every dial the config sets, posture included", () => {
+      const options = harnessFabricSessionControllerOptions({
+        ...base,
+        cfcEnforcementMode: "enforce-strict",
+        cfcFlowLabels: "persist",
+        cfcPosture: "max-enforcement",
+      });
+      expect(options.cfcEnforcementMode).toBe("enforce-strict");
+      expect(options.cfcFlowLabels).toBe("persist");
+      expect(options.cfcPosture).toBe("max-enforcement");
+    });
+  });
+
   describe("cacheHarnessFabricSessionFactory()", () => {
     it("returns the same session promise for every call", async () => {
       let calls = 0;

@@ -90,9 +90,28 @@ export type LobbyRosterValue =
   | Default<typeof DEFAULT_LOBBY_ROSTER>;
 export type LobbyRosterCell = Writable<LobbyRosterValue>;
 
+/**
+ * The roster of explicit lobby-admin roles. It carries three contracts:
+ *
+ * - `RequiresIntegrity` is the floor: a value landing at this path has to
+ *   carry a `lobby-admin` endorsement;
+ * - `AddIntegrity` on the list mints that endorsement, so a write through this
+ *   schema meets the floor. The endorsement each entry carries through
+ *   `LobbyAdminRole` labels the entries, and does not reach the list path the
+ *   roster is written at. With the mint on the list, the floor accepts every
+ *   write this schema makes, the profile links stored under `subject`
+ *   included;
+ * - `TrustedActionWrite`, so `commitTrustedLobbyAction` is the only handler
+ *   that may modify the roster, and only from a gesture on the trusted lobby
+ *   surface. That binding is what decides who may write. Pattern setup and
+ *   seed materialization install a value here without going through it.
+ */
 export type LobbyAdminList = RequiresIntegrity<
   TrustedActionWrite<
-    LobbyAdminRole[],
+    AddIntegrity<
+      LobbyAdminRole[],
+      readonly [typeof LOBBY_ADMIN_INTEGRITY]
+    >,
     typeof commitTrustedLobbyAction,
     typeof TRUSTED_LOBBY_ACTION,
     typeof TRUSTED_LOBBY_SURFACE

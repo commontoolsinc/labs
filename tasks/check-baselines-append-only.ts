@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-run=git
+
 /**
  * The pattern-update gate's safety argument is that `--update` can only ADD a
  * baseline — a command that could remove one could remove the very baseline

@@ -45,6 +45,7 @@ import {
 
 /** Filenames the layout depends on. */
 const MANIFEST = "clone.json";
+
 /**
  * Per-entity baseline hashes, written beside the manifest at clone time.
  *
@@ -61,14 +62,19 @@ const PRISTINE_DIR = "pristine";
 export interface CloneManifest {
   /** Schema version of this file, so a future reader can refuse politely. */
   version: 1;
+
   /** Space DID — the clone keeps it (see the design doc's identity section). */
   space: string;
+
   /** Where the snapshot came from: a path or URL, verbatim, for provenance. */
   source: string;
+
   /** ISO timestamp the clone was taken. */
   createdAt: string;
+
   /** SHA-256 of the pristine snapshot file. */
   snapshotHash: string;
+
   /**
    * SHA-256 of the per-entity baseline sidecar.
    *
@@ -81,6 +87,7 @@ export interface CloneManifest {
    */
   baselineHash?: string;
   snapshotBytes: number;
+
   /** Durable counts at clone time — the cheap half of "did content survive?". */
   counts: {
     commits: number;
@@ -88,6 +95,7 @@ export interface CloneManifest {
     entities: number;
     maxSeq: number;
   };
+
   /**
    * Content fingerprint at clone time, generated cells excluded.
    *
@@ -110,15 +118,19 @@ export interface CloneManifest {
 export interface CreateCloneOptions {
   /** Path to a `.sqlite` snapshot (a server-side `VACUUM INTO` output). */
   source: string;
+
   /** Space DID; determines the on-disk filename the server resolves. */
   space: string;
+
   /** Destination clone directory. Created if absent, must be empty otherwise. */
   targetDir: string;
+
   /**
    * Store directories that must never be written to — normally the live
    * server's. Callers pass what the environment says (`MEMORY_DIR`/`DB_PATH`).
    */
   forbiddenDirs?: string[];
+
   /** Timestamp source, injectable so tests need no clock. */
   now?: () => Date;
 }
@@ -126,6 +138,7 @@ export interface CreateCloneOptions {
 export interface ClonePaths {
   dir: string;
   manifestPath: string;
+
   /** Per-entity baseline hashes (see {@link BASELINE}). */
   baselinePath: string;
   pristinePath: string;
@@ -353,6 +366,7 @@ export interface VerifyResult {
    * so the tool does not guess — see `okAfterMigration`.
    */
   ok: boolean;
+
   /**
    * Relaxed: the baseline is intact and nothing was REMOVED.
    *
@@ -363,13 +377,16 @@ export interface VerifyResult {
    * checked separately.
    */
   okAfterMigration: boolean;
+
   /** The pristine snapshot still hashes to what the manifest recorded. */
   baselineIntact: boolean;
+
   /** Working-copy counts, against the manifest's. */
   counts: {
     manifest: CloneManifest["counts"];
     working: CloneManifest["counts"];
   };
+
   /** Working-copy content fingerprint, and whether it matches the baseline. */
   fingerprint: {
     manifest: string;
@@ -377,6 +394,7 @@ export interface VerifyResult {
     match: boolean;
     excludedGenerated: number;
   };
+
   /**
    * WHAT moved, against the pristine baseline — the part an operator can act on.
    *
@@ -393,10 +411,12 @@ export interface VerifyResult {
     removed: number;
     changed: number;
     added: number;
+
     /** Counts per entity kind, so "74 pieces" reads differently from "74 cells". */
     changedByKind: Record<string, number>;
     removedByKind: Record<string, number>;
   };
+
   /**
    * How much of the store the fingerprint could not speak for, on each side.
    *

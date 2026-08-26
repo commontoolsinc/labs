@@ -292,6 +292,7 @@ interface JsonTreeBuild {
     key: string,
     value: unknown,
   ) => CallableKind | null;
+
   /**
    * Nodes to project, in the order their entries will be created. A slot is
    * emptied as its node is taken, so a build holds only the nodes still

@@ -45,10 +45,13 @@ type ClosenessLevel = "intimate" | "close" | "casual" | "distant";
 export interface RelationshipModuleInput {
   /** Relationship types (e.g., friend, family, colleague) */
   relationTypes: string[] | Default<[]>;
+
   /** Closeness level */
   closeness: ClosenessLevel | "" | Default<"">;
+
   /** How we met */
   howWeMet: string | Default<"">;
+
   /** Inner circle member */
   innerCircle: boolean | Default<false>;
 }

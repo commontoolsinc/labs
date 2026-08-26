@@ -119,13 +119,16 @@ export type SpaceRootCreationHooks = {
    * extraction.
    */
   stampCreationTx?: (tx: IExtendedStorageTransaction) => void;
+
   /** Phase timing (the controller's `timePiecePhase`); defaults to a
    * pass-through so the serving seat pays nothing. */
   timePhase?: <T>(name: string, fn: () => Promise<T>) => Promise<T>;
+
   /** The fetch the program resolve uses. The client passes nothing (the
    * platform fetch, its historical behavior); the serving seat passes
    * `runtime.fetch` so tests can serve pattern sources in-process. */
   fetch?: RuntimeFetch;
+
   /** The space-cell handle the creation transaction's re-check reads
    * through. The controller passes its OWN synced instance (its
    * historical read source — and the piece suite's creation-race test
@@ -258,6 +261,7 @@ export type EnsureSpaceRootResult = {
    * root; this call created it; or this call's creation lost the OCC
    * race and resolved the winner's root. */
   outcome: "resolved-existing" | "created" | "raced-existing";
+
   /** The freshness half's verdict. A root this call created was compiled
    * from the current source moments ago — reconciling it would probe the
    * route to learn what we just compiled — so it is "skipped-fresh"; a
@@ -289,6 +293,7 @@ export async function ensureSpaceRootPattern(
   options: {
     isHomeSpace: boolean;
     stampCreationTx?: (tx: IExtendedStorageTransaction) => void;
+
     /** Per-attempt hook for the freshness half's write arms (threaded
      * into `checkDefaultPattern`): the serving seat passes its
      * owner-snapshot setter so the reconcile's transactions — the

@@ -27,6 +27,7 @@ import ports from "@commonfabric/ports" with { type: "json" };
 
 /** A directive tells the shell to complete something only it can do well. */
 export type Directive =
+
   /** Hand off to the shell's own file completion, filtered by glob. */
   | { readonly kind: "files"; readonly glob?: string }
   /** Hand off to the shell's directory completion. */
@@ -275,10 +276,13 @@ async function callableCandidates(
 export interface VerbListingLike {
   readonly name: string;
   readonly kind: string;
+
   /** The author's doc comment on the verb, where the listing carries one. */
   readonly description?: string;
+
   /** A UI affordance rather than a headless verb. Hidden by `cf piece verbs`. */
   readonly tier?: string;
+
   /** `@deprecated` on the verb. Hidden by `cf piece verbs`. */
   readonly deprecated?: boolean;
 }
@@ -407,10 +411,10 @@ export function splitPathPrefix(
  * offering none. `wish` shapes what its query resolved to, and resolving a
  * wish commits a cell to the space: a Tab must not write.
  */
-const PROJECTION_SOURCE_COMMANDS: ReadonlySet<string> = new Set([
+const PROJECTION_SOURCE_COMMANDS: readonly string[] = [
   "piece get",
   "get",
-]);
+];
 
 /**
  * Field paths into the value a read returns, for `--select` and `--schema`.
@@ -428,7 +432,6 @@ function projectionFieldCandidates(
   flag: "select" | "schema",
 ): (line: CompletionLine) => Promise<ProviderResult> {
   return async (line) => {
-    if (!PROJECTION_SOURCE_COMMANDS.has(line.path.join(" "))) return NOTHING;
     // `--schema` reads a JSON Schema or an `@file` as well as this list, and
     // both are recognized by their first character. Neither is a field path.
     if (flag === "schema" && /^[@{]/.test(line.word)) return NOTHING;
@@ -515,10 +518,13 @@ export async function acceptedProjections(
 export function splitSelectPrefix(typed: string): {
   /** Elements already closed, trailing comma included. */
   list: string;
+
   /** Segments already closed within the element being typed. */
   path: string[];
+
   /** Those segments as written, trailing dot included. */
   prefix: string;
+
   /** Whether nothing has been typed yet in this element. */
   atElementStart: boolean;
 } {
@@ -819,7 +825,6 @@ export function wishTargetCandidates(): ProviderResult {
     { value: "#journal", description: "space-relative" },
     { value: "#learned", description: "space-relative" },
     { value: "#mentionable", description: "space-relative" },
-    { value: "#recent", description: "space-relative" },
     { value: "#pieceRegistry", description: "space-relative" },
     { value: "/", description: "the space's root" },
   ]);
@@ -855,6 +860,18 @@ function namesRemote(line: CompletionLine): boolean {
 }
 
 /**
+ * An option's provider, and the command paths it answers on.
+ *
+ * `commands` is absent on a provider that answers wherever the option is
+ * declared, and carries the paths of one restricted by {@link onlyOn}. The
+ * gate reads it: a key alone says which option was decided about, and only the
+ * paths say on which commands.
+ */
+export type OptionProvider =
+  & ((line: CompletionLine) => Promise<ProviderResult>)
+  & { readonly commands?: readonly string[] };
+
+/**
  * Restrict a provider to the commands whose option of that name means this.
  *
  * The option table is keyed by long name alone, and a name can mean two things
@@ -866,10 +883,11 @@ function namesRemote(line: CompletionLine): boolean {
 function onlyOn(
   commands: readonly string[],
   provider: (line: CompletionLine) => Promise<ProviderResult>,
-): (line: CompletionLine) => Promise<ProviderResult> {
+): OptionProvider {
   const paths = new Set(commands);
-  return (line) =>
+  const scoped = (line: CompletionLine) =>
     paths.has(line.path.join(" ")) ? provider(line) : Promise.resolve(NOTHING);
+  return Object.assign(scoped, { commands });
 }
 
 /** The commands whose `--root` is the directory their sources resolve against. */
@@ -882,6 +900,12 @@ const ROOT_DIRECTORY_COMMANDS: readonly string[] = [
   "test",
 ];
 
+/** Every command whose `--root` this table answers, in both meanings. */
+const ROOT_COMMANDS: readonly string[] = [
+  ...ROOT_DIRECTORY_COMMANDS,
+  "inspect graph",
+];
+
 /**
  * `--root` by what it names: a source directory on the commands that resolve
  * imports and authored paths against one, and on `cf inspect graph` the entity
@@ -891,13 +915,9 @@ const ROOT_DIRECTORY_COMMANDS: readonly string[] = [
  * read from the space the command already names.
  */
 function rootCandidates(line: CompletionLine): Promise<ProviderResult> {
-  const command = line.path.join(" ");
-  if (command === "inspect graph") return entityCandidates(line);
-  return Promise.resolve(
-    ROOT_DIRECTORY_COMMANDS.includes(command)
-      ? directive({ kind: "dirs" })
-      : NOTHING,
-  );
+  return line.path.join(" ") === "inspect graph"
+    ? entityCandidates(line)
+    : Promise.resolve(directive({ kind: "dirs" }));
 }
 
 /** API URLs worth offering: the environment's, plus the local dev server. */
@@ -921,12 +941,16 @@ function patternFiles(): Promise<ProviderResult> {
  * Option values by long name. A name absent here falls through to the shell's
  * own file completion only when the option is path-shaped.
  */
-const OPTION_VALUE_PROVIDERS: Readonly<
-  Record<string, (line: CompletionLine) => Promise<ProviderResult>>
-> = {
+const OPTION_VALUE_PROVIDERS: Readonly<Record<string, OptionProvider>> = {
   piece: pieceCandidates,
-  select: projectionFieldCandidates("select"),
-  schema: projectionFieldCandidates("schema"),
+  select: onlyOn(
+    PROJECTION_SOURCE_COMMANDS,
+    projectionFieldCandidates("select"),
+  ),
+  schema: onlyOn(
+    PROJECTION_SOURCE_COMMANDS,
+    projectionFieldCandidates("schema"),
+  ),
   space: () => spaceCandidates(),
   "api-url": () => Promise.resolve(apiUrlCandidates()),
   // `--remote` takes what `--api-url` takes: the toolshed to read from.
@@ -934,7 +958,7 @@ const OPTION_VALUE_PROVIDERS: Readonly<
   identity: () => Promise.resolve(directive({ kind: "files", glob: "*.key" })),
   // A source directory on the commands that compile one, and an entity on
   // `inspect graph`.
-  root: rootCandidates,
+  root: onlyOn(ROOT_COMMANDS, rootCandidates),
   test: patternFiles,
   // A data file has no fixed extension; the shell's own file completion is the
   // only honest candidate set.
@@ -945,11 +969,29 @@ const OPTION_VALUE_PROVIDERS: Readonly<
     ["space clone"],
     () => Promise.resolve(directive({ kind: "dirs" })),
   ),
+  // `--list` names a piece to survey or repair instead of a collection, so it
+  // takes what `--piece` takes. Scoped, because a `--list` elsewhere would
+  // mean something else entirely.
+  list: onlyOn(["piece survey", "piece repair"], pieceCandidates),
+  // `cf piece survey --validator` reads a JSON-schema file.
+  validator: () => Promise.resolve(directive({ kind: "files" })),
+  // `cf piece repair --fixer` names a TypeScript module whose default export
+  // is the transform; `--plan` reads the rows a survey wrote.
+  fixer: () => Promise.resolve(directive({ kind: "files", glob: "*.ts" })),
+  plan: () => Promise.resolve(directive({ kind: "files" })),
+  // `cf piece survey --diff` reads the plan the survey is checked against,
+  // which is the file `--out` wrote.
+  diff: () => Promise.resolve(directive({ kind: "files" })),
   // `cf inspect --dir` is an extra directory to search for space DBs.
   dir: () => Promise.resolve(directive({ kind: "dirs" })),
   // `cf inspect html --out` and `cf check --output` write a file.
   out: () => Promise.resolve(directive({ kind: "files" })),
   output: () => Promise.resolve(directive({ kind: "files" })),
+  // The remaining path-shaped values: two artifacts `cf test` writes, and the
+  // state file `cf fuse mount` passes to its child.
+  "pattern-coverage-dir": () => Promise.resolve(directive({ kind: "dirs" })),
+  "timing-measures-out": () => Promise.resolve(directive({ kind: "files" })),
+  "cfc-writeback-state": () => Promise.resolve(directive({ kind: "files" })),
   // A snapshot file on `space clone`, and a sequence number on `inspect diff`.
   from: onlyOn(
     ["space clone"],
@@ -1090,6 +1132,34 @@ function inspectEntityProviders(): Record<
     entries[`inspect ${command}:entity`] = entityCandidates;
   }
   return entries;
+}
+
+/**
+ * What both provider tables answer, as command paths.
+ *
+ * For the gate that asks whether every slot has been decided about. Both keys
+ * are derivable from the same command tree `resolveCompletionLine` walks, so
+ * the drift between the tree and these tables is machine-detectable — in both
+ * directions, since an entry matching no slot is the same subtraction run the
+ * other way.
+ *
+ * An option maps to the command paths its provider answers on, or to `null`
+ * where it answers on every command declaring it. A scoped provider answers
+ * nothing off its paths, so a key alone would report those commands as decided
+ * when what they get is silence.
+ */
+export function completionProviderKeys(): {
+  readonly options: ReadonlyMap<string, readonly string[] | null>;
+  readonly arguments: ReadonlySet<string>;
+} {
+  const options = new Map<string, readonly string[] | null>();
+  for (const [name, provider] of Object.entries(OPTION_VALUE_PROVIDERS)) {
+    options.set(name, provider.commands ?? null);
+  }
+  return {
+    options,
+    arguments: new Set(Object.keys(ARGUMENT_PROVIDERS)),
+  };
 }
 
 /**

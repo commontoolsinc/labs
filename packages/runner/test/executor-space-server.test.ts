@@ -1381,6 +1381,7 @@ describe("stage G SpaceServer recovery seams", () => {
         probe: string;
         pieceRootId: string;
         actionId: string;
+
         /** The EARLY-EMIT shape (fan-out stage B): send FIRST, read user
          * scope AFTER. */
         emitBeforeRead?: boolean;

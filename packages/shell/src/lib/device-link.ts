@@ -84,6 +84,7 @@ export function looksLikeDeviceLink(hash: string): boolean {
 
 /** What the URL turned out to contain. */
 export type DeviceLinkFragment =
+
   /** No device link present — boot normally, say nothing. */
   | { kind: "absent" }
   /** A well-formed device link. */

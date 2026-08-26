@@ -378,6 +378,7 @@ export type DiffAndUpdateOptions = IReadOptions & {
 export interface DiffWalkState {
   /** Shared-reference / cycle tracking: source value → normalized link. */
   seen: Map<any, NormalizedFullLink>;
+
   /**
    * When present, a plain object sitting in an array that is not already a
    * link gets anchored into an entity document of its own, its id drawn from
@@ -456,6 +457,7 @@ export function diffAndUpdate(
 export type ChangeSet = {
   location: NormalizedFullLink;
   value: FabricValue;
+
   /**
    * When true, the change removes the slot at `location` (object key
    * removal or array hole) instead of writing a value; `value` is

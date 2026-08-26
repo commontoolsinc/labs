@@ -13,6 +13,7 @@ import {
 export interface SchemaOpaqueLinkSanitizationResult {
   value: unknown;
   linkedStringCount: number;
+
   /**
    * The paths of the positions THIS sanitization sealed, in walk order. A
    * caller-provided opaque link the schema admits is preserved, not sealed,

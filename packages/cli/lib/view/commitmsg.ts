@@ -51,6 +51,7 @@ const emailCommitAt = (
 export interface CommitMessage {
   /** The commit hash, as printed after `commit `. */
   readonly sha: string;
+
   /** First and last (inclusive) 0-based line indices of the indented message. */
   readonly start: number;
   readonly end: number;
@@ -59,6 +60,7 @@ export interface CommitMessage {
 export interface CommitHeader {
   /** The commit hash, as printed after `commit `. */
   readonly sha: string;
+
   /** The 0-based line index of the `commit` header. */
   readonly line: number;
 }
@@ -246,10 +248,13 @@ export function sameCommit(sha: string, head: string): boolean {
 export interface GitRunner {
   /** The current commit's full hash, or null (not a repo, or git failed). */
   headSha(): string | null;
+
   /** The symbolic ref checked out at HEAD, or `HEAD` when detached. */
   headRef?(): string | null;
+
   /** Resolve an abbreviated commit name to its full object id. */
   resolveCommit?(sha: string): string | null;
+
   /** Whether the old and new blob names in one file diff belong to a commit
    * and its first parent. Paths use Git's repository-relative form. */
   commitMatchesDiff?(
@@ -259,9 +264,11 @@ export interface GitRunner {
     oldObject: string,
     newObject: string,
   ): boolean;
+
   /** Read a file's blob from `commit`, addressed by its absolute workspace
    * path. A path absent from the commit returns null. */
   fileAtCommit(commit: string, path: string): string | null;
+
   /** Apply only the change from `before` to `after` to `committed`. */
   applyFileChanges(
     committed: string,
@@ -269,6 +276,7 @@ export interface GitRunner {
     after: string,
     path: string,
   ): string;
+
   /** Amend HEAD with each file's exact contents. A null message preserves the
    * existing commit message byte for byte. Merge the change from the current
    * HEAD into the real index, preserving staged changes that do not conflict.

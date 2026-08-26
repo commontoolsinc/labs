@@ -36,14 +36,19 @@ export type SpaceRole =
 
 export interface SpaceSignals {
   did: string;
+
   /** A home-piece was found here (result keys include profiles + createProfile). */
   isHome: boolean;
+
   /** Profile space DIDs from this home's `profiles[]` cells (cross-space links). */
   profileDids: string[];
+
   /** Session principal DIDs from `commit.session_id` (owners acting here). */
   principals: string[];
+
   /** Dominant (most frequent) session principal, if any. */
   principal: string | null;
+
   /** All cross-space link target space DIDs (space ≠ self). */
   crossSpaceDids: string[];
   commits: number;
@@ -182,12 +187,15 @@ export function analyzeSpaceSignals(
 export interface GroupedSpace {
   did: string;
   role: SpaceRole;
+
   /** A local DB file was found for this DID. */
   present: boolean;
+
   /** Present but with zero commits — a pre-created placeholder. */
   empty: boolean;
   commits?: number;
   entities?: number;
+
   /** Why this space is in the group / has this role. */
   evidence: string[];
 }
@@ -195,6 +203,7 @@ export interface GroupedSpace {
 export interface SpaceGroup {
   /** The owner principal / home DID this group centers on. */
   principal: string;
+
   /** A non-empty home space was found locally for the principal. */
   homePresent: boolean;
   spaces: GroupedSpace[];
@@ -202,6 +211,7 @@ export interface SpaceGroup {
 
 export interface GroupingResult {
   groups: SpaceGroup[];
+
   /** Discovered spaces not attachable to any principal. */
   ungrouped: GroupedSpace[];
 }

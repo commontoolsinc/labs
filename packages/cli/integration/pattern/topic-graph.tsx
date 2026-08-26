@@ -17,19 +17,24 @@ interface TopicEntry {
   id: string;
   title: string;
   body: string;
+
   /** Attribution, interim `agentName` style (verb contract decision 5). */
   createdBy: string;
+
   /** "" until the body is revised. */
   bodyUpdatedBy: string;
+
   /** Ids of sibling topics this topic's body references. */
   references: string[];
 }
 
 interface CreateTopicEvent {
   title: string;
+
   /** The topic's initial body, part of the create's atomic unit. */
   body: string;
   agentName: string;
+
   /** Ids the body references, recorded as explicit edges. */
   references?: string[];
 }
@@ -65,6 +70,7 @@ interface TopicGraphOutput {
   [NAME]: string;
   topics: TopicEntry[];
   topicCount: number;
+
   /** Reciprocal edges, derived at read time and never persisted — topic id →
    * ids of the topics whose `references` name it. A derived result over a list
    * of children, which is what this fixture exercises the CLI against. */

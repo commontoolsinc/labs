@@ -16,7 +16,8 @@
 # at all. They read no state, so a fabric cannot change what they answer, and
 # they are asserted one by one — kind and glob — in
 # packages/cli/test/completion-providers.test.ts, which is where a constant
-# belongs. Nothing here re-checks them.
+# belongs. Nothing here re-checks them, and `deno task check-completion-slots`
+# is what catches a slot with no entry at all.
 #
 # The exception is an option name that means two things on two commands —
 # --from, --to, --root, --scope. There the answer turns on which command was

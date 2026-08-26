@@ -34,8 +34,10 @@ export interface NoteOutput {
   [NAME]: string;
   title: string;
   body: string;
+
   /** Bumped by `append`, so a caller can tell a write happened. */
   revision: number;
+
   /** Append a line to the body. */
   append: Stream<AppendEvent, AppendResult>;
 }
@@ -101,6 +103,7 @@ interface SetLabelResult {
   /** The label as persisted — verbatim, so a caller can confirm the round
    * trip rather than assuming it. */
   label: string;
+
   /** The revision this write produced. A caller cannot compute it: it depends
    * on what was already stored. */
   revision: number;

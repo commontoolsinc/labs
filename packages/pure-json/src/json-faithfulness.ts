@@ -57,6 +57,7 @@ import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 export interface JsonUnfaithfulValue {
   /** RFC 6901 JSON Pointer to the value; `""` is the whole input. */
   readonly pointer: string;
+
   /** Why JSON would not carry it, e.g. `` `NaN` (becomes `null`) ``. */
   readonly reason: string;
 }

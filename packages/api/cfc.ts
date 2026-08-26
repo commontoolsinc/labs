@@ -273,6 +273,7 @@ export type CfcThisPolicySubjectPattern = CfcAtomObject & {
 
 export type CfcThisPolicyPattern = CfcAtomObject & {
   readonly thisPolicy: true;
+
   /** Non-enumerable authoring affordance; lowers to `thisPolicyField`. */
   readonly subject: CfcThisPolicySubjectPattern;
 };

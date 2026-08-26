@@ -58,6 +58,7 @@ export const bareMentionId = (uri: string): string => {
 export interface NoteOutput extends NotePiece {
   [NAME]: string;
   [UI]: VNode;
+
   /** A note is always markdown, so it declares that arm rather than the whole
    * `FsProjection` union: the open arm types every field loosely, and a reader
    * of this projection wants `content` as the string it is. */
@@ -71,6 +72,7 @@ export interface NoteOutput extends NotePiece {
   summary: string;
   mentioned: MentionablePiece[] | Default<[]>;
   backlinks: MentionablePiece[];
+
   /**
    * Where this note's `[Label][key]` mentions point. The default matches the
    * input's; see `NoteInput.references` for why they have to.
@@ -81,13 +83,16 @@ export interface NoteOutput extends NotePiece {
   grep: PatternToolResult<{ content: string }>;
   translate: PatternToolResult<{ content: string }>;
   editContent: Stream<{ detail: { value: string } }>;
+
   /** Take an edited filesystem projection, definitions and all. */
   editProjection: Stream<{ body: string }>;
   setTitle: Stream<string>;
   appendLink: Stream<{ piece: Writable<MentionablePiece> }>;
   createNewNote: Stream<void>;
+
   /** Parent notebook reference, null if not in a notebook */
   parentNotebook: NotebookPiece | null;
+
   /** Tile variant (CT-1764): the minimal embedded UI used when a container
    * (e.g. Record) renders this note via `<cf-render variant="tile">`. */
   [TILE_UI]: VNode;
@@ -211,9 +216,6 @@ const Note = pattern<NoteInput, NoteOutput>(
     }).result!;
     const mentionable = wish<MentionablePiece[] | Default<[]>>(
       { query: "#mentionable", headless: true },
-    ).result;
-    const _recentPieces = wish<MinimalPiece[]>(
-      { query: "#recent", headless: true },
     ).result;
     const mentioned = new Writable<MentionablePiece[]>([]);
 

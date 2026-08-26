@@ -19,6 +19,7 @@ export type TelemetryAnnotations = {
   writes: NormalizedFullLink[];
   materializerWriteEnvelopes?: NormalizedFullLink[];
   ignoredSchedulingWrites?: NormalizedFullLink[];
+
   /**
    * Concrete structural surface for a transformer-proven complete source lift.
    * This is runner-owned metadata; raw modules, handlers, and unresolved
@@ -40,12 +41,14 @@ export type SchedulerObservationIdentity = {
   branch?: string;
   pieceId: string;
   processGeneration?: number;
+
   /** The piece root's RAW doc id (no scope-key prefix — `pieceId` above
    * is instance-keyed for shaper buckets). The per-(action × instance)
    * run supply (server-execution v2 stage P2-F) resolves an action's
    * demanded instances through this id at the reactive-action choke
    * point. */
   pieceRootId?: string;
+
   /** The DEMAND roots this action's instances resolve through (Phase 7):
    * `pieceRootId` plus every ANCESTOR piece root that instantiated it —
    * a nested pattern node's or a result-as-pattern child's actions are
@@ -76,6 +79,7 @@ export type EventHandler =
       tx: IExtendedStorageTransaction,
       event: any,
     ) => void;
+
     /**
      * Optional callback to ensure the handler's input docs are locally
      * available before the handler body runs. A handler reads its asCell
@@ -106,6 +110,7 @@ export type AnnotatedEventHandler = EventHandler & TelemetryAnnotations;
  */
 export type ReactivityLog = {
   reads: IMemorySpaceAddress[];
+
   /** Reads that should not invalidate on child writes unless they add a new key */
   shallowReads: IMemorySpaceAddress[];
   writes: IMemorySpaceAddress[];
@@ -130,6 +135,7 @@ export type SettleIterationStats = {
   workSetSize: number;
   orderSize: number;
   actionsRun: number;
+
   /** Action IDs in the work set (truncated to top entries) */
   actions: { id: string; type: "effect" | "computation" }[];
   durationMs: number;
@@ -157,6 +163,7 @@ export type ActionRunTraceEntry = {
   durationMs: number;
   declaredWrites: ActionRunTraceAddress[];
   actualWrites: ActionRunTraceAddress[];
+
   /** Server-execution v2 fan-out stage B: the instance key a fanned-out
    * run was stamped with (`space` for the probe, `user:…`/`session:…`
    * otherwise); absent on every other run. */
@@ -227,6 +234,7 @@ export const LT1_LATE_SEAL_REFUSED = "lt1-late-seal-refused";
 export type ServedEventDispatch = {
   firedAt?: { user?: string; session?: string };
   streamEntry?: { sidecarId: string; index: number; seq: number };
+
   /** The EMITTING run's durable event id for a same-wave cascade
    * (C8d; review 2026-08-11 M2): cell.ts's LT1 same-space emission
    * queues the emitted event in-process with the emitter's own
@@ -237,6 +245,7 @@ export type ServedEventDispatch = {
    * eventId to fold on; a requeued derivation withdraws the entry
    * with its own contribution). */
   parentEventId?: string;
+
   /** The LT1 same-space in-process copy's APPENDING-WAVE identity
    * (server-execution v2 stage C build W3, (α); events.md §4's RULED
    * one-entry-one-completed-run sentence): the EMITTING run's
@@ -271,6 +280,7 @@ export type ServedEventDispatch = {
 export type QueuedEvent = {
   /** Durable event id minted at send (spec §7.5). */
   readonly id: string;
+
   /** The EMITTING run's event id for a CLIENT-side same-wave cascade
    * echo (independent review M1, 2026-08-11): cell.ts's plain
    * queueEvent threads it when the send came from within a
@@ -282,6 +292,7 @@ export type QueuedEvent = {
    * deferred-vs-dropped (the drain's cold-view deferral), and a
    * client echo must keep today's dropped shape. */
   readonly parentEventId?: string;
+
   /**
    * Whether `id` was supplied by the caller rather than minted at enqueue. A
    * caller-supplied id is a durable delivery id: the handling's receipt
@@ -291,6 +302,7 @@ export type QueuedEvent = {
    * (spec §7.6, the backlog-cap exclusions).
    */
   readonly callerSuppliedId?: boolean;
+
   /**
    * Monotonic stamp minted at first enqueue and carried unchanged across
    * requeues (backoff, name-resolution). Commits are not awaited, so several
@@ -300,6 +312,7 @@ export type QueuedEvent = {
    * before it.
    */
   readonly enqueueSeq: number;
+
   /**
    * The wall-clock instant (ms) bound to this event, captured at its causal
    * origin: carried forward unchanged from the emitting handler's frame, or a
@@ -310,12 +323,14 @@ export type QueuedEvent = {
    * reads the instant of the event that actually dispatches.
    */
   time?: number;
+
   /** The transaction whose handler sent this event, when transactional. */
   readonly originTx?: IExtendedStorageTransaction;
   eventLink: NormalizedFullLink;
   action: Action;
   handler: EventHandler;
   event: any;
+
   /**
    * Payload keys the RUNTIME itself injected into `event`'s value (send's
    * internal `runtimeInjectedEventKeys` option — the LLM tool-call path's
@@ -326,14 +341,17 @@ export type QueuedEvent = {
    * newest event's payload, and the marker must describe THAT payload.
    */
   runtimeInjectedEventKeys?: readonly string[];
+
   /**
    * The FIFO slot was reserved before its handler's piece finished loading.
    * A loading head parks the whole event queue so later, already-registered
    * handlers cannot overtake it.
    */
   handlerLoadPending?: boolean;
+
   /** Internal exactly-once guard for terminal pre-dispatch drops. */
   finalOutcomeNotified?: boolean;
+
   /**
    * Whether a transient failure for this event should be retried. `true` routes
    * a transient commit failure through the exponential-backoff window and lets
@@ -346,6 +364,7 @@ export type QueuedEvent = {
    */
   retry: boolean;
   onCommit?: (tx: IExtendedStorageTransaction) => void;
+
   /**
    * Server-execution v2 Phase 3 (events-down): the serving drain's
    * per-event carriage. `firedAt` is the server-stamped acting identity
@@ -361,12 +380,14 @@ export type QueuedEvent = {
    */
   served?: ServedEventDispatch;
   notBefore?: number;
+
   /**
    * Number of transient commit failures this intent has hit. Drives the
    * exponential backoff exponent; carried across backoff retries. Covers every
    * transient commit failure, not only conflicts.
    */
   retryAttempts?: number;
+
   /**
    * Wall-clock deadline (performance.now()) after which a still-failing intent
    * surfaces a terminal error instead of retrying. Set from the first transient

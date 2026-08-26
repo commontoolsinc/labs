@@ -278,6 +278,7 @@ export interface TestResult {
 export interface NavigationEvent {
   /** Name ($NAME) of the navigation target, if available */
   name?: string;
+
   /** Index of the action that triggered this navigation */
   afterActionIndex: number;
 }
@@ -287,36 +288,46 @@ export interface TestRunResult {
   results: TestResult[];
   totalDurationMs: number;
   error?: string;
+
   /** Navigation events recorded during the test run */
   navigations: NavigationEvent[];
+
   /** Runtime errors captured via errorHandlers during the test run */
   runtimeErrors: string[];
+
   /** If true, runtime errors are expected and should not fail the test */
   allowRuntimeErrors?: boolean;
+
   /** If set, runtime errors are REQUIRED: the run fails when none (or, for a
    * number, a different count) were captured. Like expectNonIdempotent, this
    * asserts the loudness fires — it is not a mere tolerance — so reverting a
    * throwing rejection to a silent return fails the suite. Implies
    * allowRuntimeErrors for the captured errors themselves. */
   expectRuntimeErrors?: boolean | number;
+
   /** Non-idempotent computation names detected by the idempotency check */
   nonIdempotent: string[];
+
   /** If true, non-idempotent computations are expected: detected violations
    * don't fail the test, and detecting NONE fails it (the flag asserts the
    * detector fires; it is not a mere tolerance). */
   expectNonIdempotent?: boolean;
+
   /**
    * console.error() calls captured via the harness console event during the
    * run phase, plus logger-level error activity detected via count deltas.
    */
   consoleErrors: string[];
+
   /** If true, console errors are expected and should not fail the test. */
   allowConsoleErrors?: boolean;
+
   /**
    * console.warn() calls captured via the harness console event during the
    * run phase, plus logger-level warn activity detected via count deltas.
    */
   consoleWarnings: string[];
+
   /** If true, console warnings are expected and should not fail the test. */
   allowConsoleWarnings?: boolean;
 }
@@ -324,35 +335,47 @@ export interface TestRunResult {
 export interface TestRunnerOptions {
   timeout?: number;
   verbose?: boolean;
+
   /**
    * Root directory for resolving imports. If not provided, the nearest
    * ancestor of the test file whose deno.json(c) declares a package name is
    * used, falling back to the test file's directory.
    */
   root?: string;
+
   /**
    * Data file paths to attach, so a pattern under test that reads one with
    * `dataFile` reads here what it will read once deployed.
    */
   dataFilePaths?: string[];
+
   /** Print logger stats for steps slower than this (ms). 0 = every step. Default 5000. Only applies when verbose is true. */
   statsThreshold?: number;
+
   /** Timing categories to always print in verbose stats output. Matched by exact name or prefix. */
   statsInclude?: string[];
+
   /** Number of per-step scheduler action deltas to print. Default 10. */
   statsActionLimit?: number;
+
   /** Override CFC enforcement mode for the test runtime. */
   cfcEnforcementMode?: CfcEnforcementMode;
+
   /** Shared compiled-module-byte cache for direct harness compiles. */
   moduleByteCache?: ModuleByteCache;
+
   /** Print storage-related logger timings and counts after each test file. */
   storageStats?: boolean;
+
   /** Limit for storage timing/count tables when storageStats is enabled. */
   storageStatsLimit?: number;
+
   /** Directory for pattern runtime coverage LCOV artifacts. */
   patternCoverageDir?: string;
+
   /** Keep the test descriptor's `$UI` demanded for the full test run. */
   continuousUI?: boolean;
+
   /**
    * Spool one test record per file run, named by the file's
    * repository-relative path.
@@ -363,6 +386,7 @@ export interface TestRunnerOptions {
    * rather than a test of this repository.
    */
   recordResults?: boolean;
+
   /**
    * Emit a `performance.measure` per logger time span and write them here.
    *
@@ -373,6 +397,7 @@ export interface TestRunnerOptions {
    * count starts multiplying.
    */
   timingMeasuresOut?: string;
+
   /**
    * Run against a caller-supplied identity and storage manager, and observe
    * what the run instantiates.
@@ -397,6 +422,7 @@ export interface TestRunnerOptions {
   storageHost?: {
     identity: Identity;
     storageManager: RuntimeOptions["storageManager"];
+
     /**
      * Cause for the test pattern's result cell, pinning its entity id.
      *
@@ -405,6 +431,7 @@ export interface TestRunnerOptions {
      * differs every run can never be addressed again.
      */
     resultCause?: unknown;
+
     /** Records every pattern the run materializes; see the vintage capture. */
     onPatternInstantiated?: PatternInstantiationObserver;
   };
@@ -1227,7 +1254,7 @@ export async function runTestPattern(
     // 3. Set up defaultPattern so wish({ query: "#default" }) resolves.
     // In production, default-app.tsx provides this. The test harness must
     // create a minimal equivalent so patterns that use wish("#default") to
-    // access pieceRegistry, recentPieces, etc. work correctly.
+    // access the piece registry and related space services work correctly.
     await withPhase(["runTestPattern", "defaultPatternSetup"], async () => {
       const setupTx = runtime.edit();
       const spaceCell = runtime.getCell(space, space, undefined, setupTx);
@@ -1260,7 +1287,6 @@ export async function runTestPattern(
         },
         parseLink(addPiece),
       );
-      (defaultPatternCell as any).key("recentPieces").set([]);
       (defaultPatternCell as any).key("backlinksIndex").set({
         mentionable: [],
       });

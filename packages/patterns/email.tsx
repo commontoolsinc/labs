@@ -34,6 +34,7 @@ export const MODULE_METADATA: ModuleMetadata = {
 export interface EmailModuleInput {
   /** Label for this email (Personal, Work, School, etc.) */
   label: string | Default<"Personal">;
+
   /** Email address */
   address: string | Default<"">;
 }

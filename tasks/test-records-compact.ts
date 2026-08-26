@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-env --allow-net
+
 /**
  * The compactor: rewrites each closed day of raw records as one rollup
  * object under the dataset's aggregated/ area, so full-history consumers
@@ -67,6 +68,7 @@ export interface CompactOptions {
   plan: boolean;
   bucket: string;
   rawPrefix: string;
+
   /** Required unless plan is set. */
   token?: string;
   fetchImpl?: typeof fetch;

@@ -146,6 +146,7 @@ export const createHarnessHandleTable = (
 export interface MintAddressHandleOptions {
   /** Digest seam; defaults to SHA-256. */
   hasher?: HandleTokenHasher;
+
   /**
    * Shape of the value at the address, when the caller already knows it out of
    * its OWN work — the result schema of a pattern this harness compiled and
@@ -524,6 +525,11 @@ export const assertValidHarnessHandleTable = (
         `invalid handle table: entry \`${entry.token}\` has an unknown schemaSource \`${
           String(entry.schemaSource)
         }\``,
+      );
+    }
+    if (entry.schemaSource !== undefined && entry.schema === undefined) {
+      throw new Error(
+        `invalid handle table: entry \`${entry.token}\` claims schema provenance \`${entry.schemaSource}\` with no schema`,
       );
     }
     if (tokens.has(entry.token)) {

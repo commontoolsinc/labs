@@ -9,6 +9,7 @@ import { CompilerStackLoadError } from "@commonfabric/runner";
 import {
   ClientNotificationType,
   isWorkerConsoleNotification,
+  NotificationType,
   RequestType,
   RuntimeErrorCode,
   TransportNotificationType,
@@ -431,6 +432,40 @@ describe("web-worker-console-bridge", () => {
           (globalThis as { postMessage?: unknown }).postMessage =
             originalPostMessage;
         }
+      }
+    });
+
+    it("reports a message that carries no `msgId` to reply under", async () => {
+      // `message` is whatever was posted, and a reply is addressed by
+      // `msgId`. `null` has none: the entry throws `Invalid IPC request` for
+      // it, and reading `msgId` off it inside the `catch` would throw from the
+      // one place a throw has nowhere to go -- out of this async listener it
+      // is an unhandled rejection, and the report never gets posted at all.
+      const posted: Posted[] = [];
+      const originalPostMessage =
+        (globalThis as { postMessage?: unknown }).postMessage;
+      (globalThis as { postMessage: (m: Posted) => void }).postMessage = (
+        m: Posted,
+      ) => {
+        posted.push(m);
+      };
+      const realConsoleError = console.error;
+      console.error = () => {};
+
+      try {
+        await import("@/backends/web-worker/index.ts");
+        posted.length = 0;
+
+        await dispatch(null);
+
+        expect(posted).toHaveLength(1);
+        expect(posted[0].type).toBe(NotificationType.ErrorReport);
+        expect(posted[0].message).toContain("Malformed message");
+        expect(Object.hasOwn(posted[0], "msgId")).toBe(false);
+      } finally {
+        console.error = realConsoleError;
+        (globalThis as { postMessage?: unknown }).postMessage =
+          originalPostMessage;
       }
     });
 

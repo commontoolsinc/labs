@@ -56,6 +56,7 @@ export interface HarnessHandleEntry {
   /** The full token, prefix included (`cfh:a:<suffix>`). */
   token: string;
   kind: HarnessHandleKind;
+
   /**
    * Canonical LLM-friendly link string of the referent — the
    * `/[@did/]<id>[@scope][/path]` form serialized by the runner's
@@ -63,11 +64,13 @@ export interface HarnessHandleEntry {
    * `ref`.
    */
   ref: string;
+
   /**
    * The runner's `addressKey()` of the referent's normalized link. Entry
    * identity: minting the same address twice returns the existing token.
    */
   addressKey: string;
+
   /**
    * Shape of the value at the referent, when a mint knew it — the compiled
    * pattern's result schema behind a `run_pattern` result reference. Absent
@@ -75,6 +78,7 @@ export interface HarnessHandleEntry {
    * no mint reads the cell to fill this in.
    */
   schema?: JSONSchema;
+
   /**
    * Where {@link HarnessHandleEntry.schema} came from. `harness` means a
    * harness step supplied it out of its own work — the schema a pattern WE

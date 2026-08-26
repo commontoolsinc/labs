@@ -13,14 +13,22 @@ export interface DescribeHandleToolInput {
 
 export interface DescribeHandleToolOutput {
   outputId: string;
+
   /** The token as asked about, echoed so a reply stands on its own. */
   token: string;
+
   /** Whether this run's handle table holds the token. */
   known: boolean;
-  /** Whether the entry carries a harness-derived schema to report. */
+
+  /** Whether a schema was found to report, from either source. */
   hasSchema: boolean;
-  /** The recorded schema, when the entry carries a harness-derived one. */
+
+  /**
+   * The reported schema: fabric-declared, or harness-derived, whichever
+   * answered first in that order.
+   */
   schema?: JSONSchema;
+
   /**
    * Path segments of the referent within its piece — which field of which
    * piece the token names. Read off the entry's already-parsed reference, so
@@ -46,15 +54,17 @@ export interface DescribeHandleToolOutput {
  *
  * Two shapes can answer, in this order:
  *
- * 1. The schema the mint recorded out of the harness's OWN work — the result
- *    schema of a pattern this harness compiled and ran, marked
- *    `schemaSource: "harness"` on the entry.
- * 2. The schema the referent DECLARES in the fabric, read through the run's
+ * 1. The schema the referent DECLARES in the fabric, read through the run's
  *    session when it has one. A piece's document schema is the result schema
  *    of the pattern behind it, which is the shape an agent holding a handle to
- *    that piece would be wiring into a pattern of its own. The read is of the
- *    document's declared schema and of nothing else; the referent's value is
- *    not read, and a reference outside the session's own space is not followed.
+ *    that piece would be wiring into a pattern of its own — and it is where a
+ *    cell's CFC labels live, so an input cell's shape always answers from its
+ *    own declaration. The read is of the document's declared schema and of
+ *    nothing else; the referent's value is not read, and a reference outside
+ *    the session's own space is not followed.
+ * 2. The schema the mint recorded out of the harness's OWN work — the result
+ *    schema of a pattern this harness compiled and ran, marked
+ *    `schemaSource: "harness"` on the entry.
  *
  * Either way what leaves this tool is STRUCTURE. A JSON Schema is a place a
  * value can hide — `const`, `enum`, `default` and `examples` carry values

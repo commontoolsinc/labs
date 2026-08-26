@@ -64,10 +64,12 @@ const failureParkBackoffDelayMs = (
 
 export type ExecutorHostOptions = {
   server: MemoryServer;
+
   /** The service identity (DID) DR1 holders are minted from — also the
    * loopback sessions' principal (the read-row admission matches it,
    * protocol.md §2). */
   serviceIdentity: string;
+
   /** Build a serving runtime for one space over the loopback plane. The
    * factory owns auth and runtime options; it MUST pass
    * `experimental: { serverExecution: true, systemPatternAutoUpdate:
@@ -78,6 +80,7 @@ export type ExecutorHostOptions = {
     dispose: () => Promise<void>;
   }>;
   policy?: SpaceServerPolicy;
+
   /** The RULED test switch for the tenure's space-root ensure (OW45
    * arm-B stage 1, RULED 2026-08-24 — see SpaceServerOptions.
    * ensureSpaceRoots): default ON (production posture); `false`
@@ -91,11 +94,13 @@ export class ExecutorHost {
   readonly #options: ExecutorHostOptions;
   readonly #spaces = new Map<string, SpaceServer>();
   readonly #activating = new Map<string, Promise<void>>();
+
   /** Records admitted while a space's activation is still in flight
    * (before its SpaceServer registers): buffered here, drained into the
    * feed at registration — an admission racing activation must never be
    * dropped (its seq may pass the activation's scan head). */
   readonly #pendingNotices = new Map<string, AdmittedCommitNotice[]>();
+
   /** The ONE process-lifetime localSeq counter for every sink this host
    * builds (the replay keying — engine-wave-sink.ts): survives
    * park/re-activate, shared across ALL spaces. It must be
@@ -114,11 +119,13 @@ export class ExecutorHost {
    * in every store (the engine keys replay by equality, never
    * contiguity). */
   readonly #sinkLocalSeq = { value: 0 };
+
   /** Consecutive `loop-failed` parks per space (the re-activation
    * backoff's streak). Incremented at each failure park, cleared by a
    * successfully committed wave — real served progress, not merely a
    * runtime that got built (every crash-loop tenure builds one). */
   readonly #failureParkStreaks = new Map<string, number>();
+
   /** Wakers for in-flight backoff sleeps — close() flushes them so a
    * delayed re-activation never stalls shutdown. */
   readonly #backoffWakers = new Set<() => void>();

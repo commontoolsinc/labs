@@ -158,10 +158,12 @@ type OverlayEntry = {
   space: MemorySpace;
   localSeq: number;
   resolveVerdict: (verdict: SealedCommitVerdict) => void;
+
   /** The highest confirmed store seq this run's reads sat on — the
    * watermark threshold at which the authoritative derivation covers
    * everything this speculation consumed. */
   confirmedFloor: number;
+
   /** Docs this run read through PENDING (unpromoted) layers: unacked
    * authored origins (the user mid-typing), parked promotions, or
    * earlier speculation entries. The entry stays alive while any
@@ -170,12 +172,14 @@ type OverlayEntry = {
    * layer whose promotion is merely parked no longer blocks: the wave
    * consumed the origin, so the authoritative coverage is real). */
   pendingReadDocs: Array<{ id: URI; scope?: CellScope }>;
+
   /** The localSeqs of the pending layers this run read through — its
    * ORIGINS. Retirement needs each origin ACKED with `W >= ackSeq`
    * (speculation.md §4 step 3); an origin that never acks (a retired
    * lower speculation, a rejected input) contributes no floor — the
    * store won upstream and the confirmed basis governs. */
   originLocalSeqs: number[];
+
   /** The doc instances this run WROTE (speculation.md §4's arrival-gated
    * retirement, RULED 2026-08-16): the entry retires only once every one
    * of them holds a CONFIRMED value at seq ≥ the entry's floor — the
@@ -191,11 +195,13 @@ type OverlayEntry = {
   writtenDocs: Array<{
     id: URI;
     scope?: CellScope;
+
     /** Whether the run's op on the doc is a whole-doc set/delete (the
      * supersede-by-newer rider may drop an OLDER entry's layer under it
      * invisibly) or a patch (path-relative — never dropped under). */
     wholeDoc: boolean;
   }>;
+
   /** The scheduler action whose run sealed this entry (the writer), for
    * the supersede-by-newer rider: a NEWER entry of the same writer whose
    * whole-doc ops cover every doc of an older entry retires the older one
@@ -203,18 +209,21 @@ type OverlayEntry = {
    * invisible — no flip), bounding entry growth for a never-served
    * instance that keeps changing. */
   sourceAction?: object;
+
   /** Resolves when the entry's verdict has been APPLIED (pending
    * dropped). Retirement chains a re-sweep on it: a chained entry
    * blocked on this one unblocks only after the drop, which is async
    * relative to the verdict — and on a quiet space no further
    * watermark event would re-sweep. */
   settled: Promise<unknown>;
+
   /** origin `intent(eventId)` (speculation.md §1): set on event-handler
    * echoes — the fired event's durable id. `retireIntent` withdraws by
    * it when the authoritative consequences (or the dropped-event
    * notice) arrive (speculation.md §4 step 2); the watermark sweep
    * stays the backstop. */
   eventId?: string;
+
   /** The emitting run's event id for a CLIENT CASCADE child's echo (the
    * speculation run context's `parentEventId`, threaded by cell.ts's
    * plain `queueEvent` for a send from within a speculation-stamped
@@ -236,21 +245,26 @@ type OverlayEntry = {
 export class SpeculationOverlayDestination
   implements TransactionSealDestination {
   readonly #runtime: Runtime;
+
   /** space -> localSeq -> entry. */
   readonly #entries = new Map<MemorySpace, Map<number, OverlayEntry>>();
+
   /** space -> cancel fn for the watermark-doc sink driving retirement. */
   readonly #watermarkSinks = new Map<MemorySpace, () => void>();
+
   /** space -> release fn for the origin-accept wake installed on the
    * replica (speculation.md §4; leg-C 2026-08-13): a sweep that ran
    * while an origin's verdict was in flight skipped its entries as
    * blocked, and the covering watermark event has already passed — the
    * ack wake re-sweeps so a then-quiet space cannot strand them. */
   readonly #ackObserverReleases = new Map<MemorySpace, () => void>();
+
   /** space -> release fn for the ARRIVAL wake installed on the replica
    * (ISpaceReplica.speculationArrivalObserver; stage C tuning T2): a
    * frame that moves the confirmed seq of a doc some entry wrote
    * re-sweeps the space. */
   readonly #arrivalObserverReleases = new Map<MemorySpace, () => void>();
+
   /** Intents whose TERMINAL consequence this overlay has observed
    * (consequenced / errored / dropped / refused), keyed by eventId (a
    * per-fire mint — event-identity.ts — unique across spaces), bounded and
@@ -260,6 +274,7 @@ export class SpeculationOverlayDestination
    * (speculation.md §4 step 2) — and is not registered. */
   readonly #terminalIntents = new Set<string>();
   static readonly #MAX_TERMINAL_INTENTS = 4096;
+
   /** The client cascade THREAD (stage C W2.1): cascade child eventId →
    * its emitter's eventId, recorded at the seal of every event-handler
    * echo that carries a `parentEventId` — with or without writes, so a
@@ -271,17 +286,21 @@ export class SpeculationOverlayDestination
    * whose terminal consequence just arrived. A link is needed only for
    * the round trip between a cascade's seal and its root's consequence. */
   readonly #cascadeParents = new Map<string, string>();
+
   /** Walk cap for the ancestry walk — ids are fresh per attempt, so no
    * cycle exists; the cap only bounds a pathological depth. */
   static readonly #MAX_CASCADE_DEPTH = 64;
+
   /** Transactions dropped as late echoes: `deferSealedEffects` owns and
    * DROPS their enactable effects too (the closed-overlay arm's shape) —
    * an optimistic navigation for a run whose writes were discarded must
    * not enact. */
   readonly #droppedLateEchoTxs = new WeakSet<object>();
+
   /** DIAGNOSTIC counters (tests). */
   #arrivalSweeps = 0;
   #lateEchoDrops = 0;
+
   /** Stage C W2.1: cascade-child echoes retired because an ANCESTOR
    * intent's terminal consequence arrived (`retireIntent` walked the
    * cascade thread to them), and the subset retired while NO doc they
@@ -289,6 +308,7 @@ export class SpeculationOverlayDestination
    * flicker witness (see `retireIntent`). */
   #cascadeEchoRetirements = 0;
   #cascadeEchoRetirementsUnarrived = 0;
+
   /** F6 telemetry (combined review 2026-08-19): the silent-strand
    * distinguishers. A `#cascadeParents` eviction at the 4096 bound, or
    * an ancestry walk stopped at the 64-hop depth cap with chain
@@ -298,8 +318,10 @@ export class SpeculationOverlayDestination
    * workload; nonzero is the signal to look. */
   #cascadeThreadEvictions = 0;
   #cascadeWalkDepthCaps = 0;
+
   /** space -> last observed watermark (for registration-time sweeps). */
   readonly #watermarks = new Map<MemorySpace, number>();
+
   /** Fired-intent notice watch (events.md §5, speculation.md §4 step 2,
    * §5): space -> sidecarId -> eventIds awaiting their consequence
    * signal — the OUTSTANDING set, which is the spec's own bound (§5:
@@ -310,6 +332,7 @@ export class SpeculationOverlayDestination
     MemorySpace,
     Map<string, Set<string>>
   >();
+
   /** The intent LISTENER (server-execution v2 stage C design (e), RULED
    * 2026-08-18): ONE non-reactive storage-notification subscription per
    * overlay, installed by `trackIntent` while any intent is outstanding
@@ -322,6 +345,7 @@ export class SpeculationOverlayDestination
    * one raw replica read, ZERO transactions, ZERO probes, ZERO scheduler
    * runs, no demand edge. */
   #intentListener: CoalescedDocListener | undefined;
+
   /** space\0sidecarId -> per-sidecar check state: entry-index HINTS the
    * differential's leaf paths named since the last check (a mark on
    * entry i arrives as `["value","entries","<i>","consequenced"]`),
@@ -329,17 +353,20 @@ export class SpeculationOverlayDestination
    * move (a re-append lands behind concurrent entries; compaction, when
    * built, shifts the tail down), so a hint is never trusted unread. */
   readonly #intentSidecarStates = new Map<string, { hints: Set<number> }>();
+
   /** DIAGNOSTIC counters (tests; the `commonfabric.*` surface reads the
    * logger keys — `speculation-overlay/intent-*`). */
   #intentCheckCount = 0;
   #intentCheckVisits = 0;
   #intentCheckMaxVisits = 0;
   #intentListenerInstalls = 0;
+
   /** Subscribers to terminal intent outcomes — the events.md §5 "the
    * client MUST be signaled so the UI can react" hook. */
   readonly #intentOutcomeSubscribers = new Set<
     (outcome: EventIntentOutcome) => void
   >();
+
   /** Per-intent consequence waiters (verdict blocker, 2026-08-12): the
    * send path's durable-ack coupling awaits an intent's TERMINAL
    * consequence — consequenced (server handling committed), errored,
@@ -352,6 +379,7 @@ export class SpeculationOverlayDestination
     Array<(outcome: IntentConsequence) => void>
   >();
   readonly #intentConsequenceMemo = new Map<string, IntentConsequence>();
+
   /** Resolvers parked by `waitForIntentQuiescence`, flushed by the same
    * untrack step that empties the outstanding-intent set (and by close). */
   #intentQuiescenceWaiters: Array<() => void> = [];
@@ -1543,6 +1571,7 @@ export class SpeculationOverlayDestination
       ) => { confirmedSeq: number; pendingLocalSeqs: number[] })
       | null
       | undefined;
+
     /** The mark frame's seq (the sidecar's confirmed seq at this check);
      * 0 = unknown → the witness does not count. */
     let markSeq: number | undefined;

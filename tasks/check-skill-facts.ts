@@ -243,6 +243,7 @@ export interface SkillDoc {
 export interface Drift {
   /** Repo-relative path of the doc making the citation. */
   file: string;
+
   /** 1-based line within that doc. */
   line: number;
   message: string;

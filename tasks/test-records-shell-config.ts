@@ -24,6 +24,7 @@ export type ShellKind = "zsh" | "bash" | "fish" | "posix";
 
 /** What one profile file's update did. */
 export type ProfileOutcome =
+
   /** The line was appended. */
   | "added"
   /** The variable is already exported with this value. */
@@ -45,6 +46,7 @@ export type ProfileOutcome =
 export interface ProfileUpdate {
   path: string;
   outcome: ProfileOutcome;
+
   /** The line already in the file, for a conflict or an unexported set. */
   existing?: string;
 }
@@ -53,8 +55,10 @@ export interface ProfileUpdate {
 export interface ProfileSetting {
   /** The line, as the profile carries it. */
   line: string;
+
   /** Whether the assignment reaches the programs the shell starts. */
   exported: boolean;
+
   /** The path it names, read the way the shell reads it. */
   value: string;
 }
@@ -403,6 +407,7 @@ export async function exportFromProfiles(
 
 /** What one profile file's removal did. */
 export type RemovalOutcome =
+
   /** The line this tool wrote was taken out. */
   | "removed"
   /** The variable is set by a line this tool did not write. */
@@ -411,6 +416,7 @@ export type RemovalOutcome =
 export interface ProfileRemoval {
   path: string;
   outcome: RemovalOutcome;
+
   /** The line left in place, for one this tool did not write. */
   existing?: string;
 }

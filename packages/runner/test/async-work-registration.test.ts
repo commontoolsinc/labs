@@ -1,4 +1,5 @@
 /// <reference path="./clock.d.ts" />
+
 /**
  * Async builtin work must reach `runtime.trackAsyncWork()`, and it must reach
  * it under the run that started it.

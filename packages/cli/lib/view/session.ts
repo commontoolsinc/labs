@@ -97,6 +97,7 @@ import {
 export interface SessionOptions {
   color: boolean;
   showLineNumbers: boolean;
+
   /** Initial representation, falling back to source when none is available. */
   viewMode?: ViewMode;
 }
@@ -123,12 +124,16 @@ interface PeekOverlay {
   source?: readonly Line[];
   mode: "info" | "source";
   targets: readonly CardTarget[];
+
   /** Index into `targets` of the highlighted reference, or -1. */
   cardSel: number;
+
   /** The node this card describes (its subject), for `z` to reveal. */
   node?: StructureNode;
+
   /** Footer for overlays without a toggle (e.g. help). */
   staticFooter?: string;
+
   /** The `info` lines are verbatim source (a definition peek, an opened file),
    * not a structured card, so the overlay is drawn as a blue editor window even
    * in "info" mode. */
@@ -167,8 +172,10 @@ interface ExpansionLayoutCache {
 interface ExpandOffer {
   /** Screen row in the undecorated layout. */
   readonly row: number | null;
+
   /** Document line carrying the expansion triangle. */
   readonly markerLine: number | null;
+
   /** Document line passed to the context expander. */
   readonly line: number;
   readonly up: boolean;
@@ -182,6 +189,7 @@ interface ExpandEdge extends ExpandOffer {
 interface FoldAnchor {
   readonly docLine: number;
   readonly sourceCol: number;
+
   /** Display column within a collapsed summary that remains collapsed. */
   readonly syntheticDisplayCol?: number;
 }
@@ -192,10 +200,13 @@ interface JumpEntry {
   /** Document line the jump lands the viewport on (a file header or a `commit`
    * header line). */
   readonly line: number;
+
   /** The styled row shown in the list. */
   readonly display: Line;
+
   /** Lower-cased text the filter matches against. */
   readonly filterText: string;
+
   /** Short name for the "Jumped to …" confirmation. */
   readonly name: string;
 }
@@ -207,14 +218,18 @@ export class Session {
   private viewMode: ViewMode = "source";
   private color: boolean;
   private lineNumberMode: LineNumberMode = "off";
+
   /** How long logical lines continue on later screen rows. */
   private wrapMode: WrapMode = "off";
+
   /** How non-printable characters are shown; edit mode forces the first mode. */
   private displayMode: DisplayMode = DISPLAY_MODES[0];
+
   /** Indices (document order) of the diff files collapsed to a summary line.
    * Cleared when the text cursor is revealed, since hidden lines cannot be
    * edited. `this.top` is a display row while any file is collapsed. */
   private collapsed = new Set<number>();
+
   /** Bumped whenever `collapsed` changes, to invalidate the fold-plan cache. */
   private foldVersion = 0;
   private foldFileCache?: { doc: Document; files: DiffFileRange[] };
@@ -257,6 +272,7 @@ export class Session {
   };
   private nonPrintCache?: { doc: Document; value: boolean };
   private fileLineCache?: { doc: Document; value: (number | null)[] | null };
+
   /** Diff metadata lines, cached against the parsed document. */
   private diffMetadataCache?: { doc: Document; lines: readonly number[] };
 
@@ -268,6 +284,7 @@ export class Session {
   private query = "";
   private matches: Match[] = [];
   private currentMatch = 0;
+
   /** Where an edit-mode search (Ctrl-S) began, so its focused match is the
    * first at or after the cursor and Enter lands the cursor there. Null for a
    * normal-mode `/` search. */
@@ -277,55 +294,67 @@ export class Session {
   private input = "";
   private overlay: PeekOverlay | null = null;
   private overlayScroll = 0;
+
   /** The overlays followed to reach the current one, so Esc walks back through
    * the chain of cards and file peeks. Empty when the current overlay is the
    * first one opened from the main view. */
   private overlayStack: Array<{ overlay: PeekOverlay; scroll: number }> = [];
   private semantics?: Semantics;
   quit = false;
+
   /** An edit patched only the changed lines for speed; a full re-parse (for
    * structure, cross-references, and multi-line token colors) is owed. The
    * driver runs it on a short idle, so typing stays responsive. */
   needsReparse = false;
+
   /** What the last key revealed (Ctrl-L in pager mode), for the driver to walk
    * the lines in a few at a time with {@link revealFrame}: the display row they
    * start at, how many there are, and whether they came from above the hunk (so
    * the viewport holds still) or below it (so it slides as they land). The next
    * key clears it. */
   pendingReveal: { row: number; count: number; up: boolean } | null = null;
+
   /** A prompt button was just activated. Holds the frame that shows it pushed —
    * the dialog with that button drawn mid-press — so the driver can play the
    * press for a moment before the action's result appears. The next key clears
    * it. */
   pendingPush: { doc: Document; view: ViewState } | null = null;
+
   /** The last key set a message that takes itself away again rather than sitting
    * in the bar — Ctrl-L pressed where it is not offered, which changed nothing
    * else. The driver leaves it up for a moment and then calls
    * {@link expireMessage}; the next key takes it away too. */
   transientMessage = false;
+
   /** How much context each hunk can reveal, cached against the document. */
   private roomCache?: { doc: Document; room: ReadonlyMap<number, HunkRoom> };
 
   // --- editing ---
   private source?: EditableSource;
   private buffer?: EditBuffer;
+
   /** Incremental highlighter for the current buffer, created lazily on the first
    * edit and discarded (re-baselined) on each deferred re-parse and file swap. */
   private highlighter?: Highlighter;
+
   /** Row of the added line a context-line split produced, so undoing that edit
    * collapses the pair back — even after moving the cursor away and back — while
    * editing an author-written -/+ pair to match does not. Overwritten by the
    * next split, cleared on a collapse or when the buffer text is replaced. */
   private splitRow: number | null = null;
   private cursorOn = false;
+
   /** Pending C-x prefix (Emacs chord), reset by the next key. */
   private chord: "ctrl-x" | null = null;
+
   /** Which button the active prompt's Tab focus rests on — an index into its
    * button row. Space and Enter activate it; it is reset to the default button
    * each time a prompt opens. */
   private dialogFocus = 0;
+
   /** What the active save prompt does on confirm. */
   private savePromptThen: "quit" | null = null;
+
   /** Filenames a save would write, computed when the quit prompt opens and
    * listed above it. */
   private editedFiles: string[] = [];
@@ -338,6 +367,7 @@ export class Session {
   private pickerSel = 0;
 
   // --- jump list (i) ---
+
   /** Every file and commit in the diff, in document order; the filter narrows
    * this into the shown {@link jumpEntries}. */
   private jumpAll: JumpEntry[] = [];

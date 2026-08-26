@@ -48,6 +48,7 @@ export type Panel = "source" | "origin" | "data" | "actions" | "access";
 /** One entry in the menu, and the panel it opens. */
 interface MenuEntry {
   label: string;
+
   /** Stable hook for tests, exposed as the entry's `test-id`. */
   testId: string;
   panel: Panel;
@@ -212,9 +213,11 @@ function toDisplay(
 /** One dispatchable handler stream found on the piece. */
 export interface PieceAction {
   name: string;
+
   /** Which side of the piece carries it. */
   source: "result" | "argument";
   handle: CellHandle;
+
   /**
    * The event schema the handler declares, when one is known: the schema a
    * stream handle read through the piece's schema carries is the handler's
@@ -2771,10 +2774,13 @@ export function openPieceMenu(
     cell: CellHandle;
     x: number;
     y: number;
+
     /** The element the click came from, whose theme the menu adopts. */
     themeFrom?: Element;
+
     /** The rendered piece to highlight while the menu remains open. */
     highlightedPiece?: Element;
+
     /** A nested pattern root to highlight within the rendered piece. */
     highlightTarget?: Element;
   },

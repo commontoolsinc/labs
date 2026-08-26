@@ -258,6 +258,7 @@ function conflictAdmissionMode(): ConflictAdmissionMode {
     return "off";
   }
 }
+
 /**
  * Identity of one data-URI pull: the URI, the schema it was read against, the
  * path into it, and where it lives.
@@ -354,6 +355,7 @@ type PendingVersion =
 
 type ConfirmedVersion = MaterializedVersion & {
   seq: number;
+
   /**
    * The class of the covering commit — the commit whose write produced
    * `seq` (speculation.md §4's arrival-witness predicate, RULED
@@ -399,6 +401,7 @@ type PendingCommitRead = {
   id: URI;
   scope?: CellScope;
   path: DocumentPath;
+
   /**
    * Every pending layer the read's materialized view sat on, as an array —
    * each must resolve to an accepted commit (server pending-dependency
@@ -412,6 +415,7 @@ type PendingCommitRead = {
    * commit the client cascade-rejects.
    */
   localSeq: number | number[];
+
   /**
    * The reader's confirmed basis for THIS document, in the SERVER's seq
    * space — the same value the confirmed branch emits as `seq`, which the
@@ -573,6 +577,7 @@ const dropMaterializedSuffix = (
 
 export interface Options {
   as: Signer;
+
   /**
    * Base URL of the default memory host. The storage endpoint path
    * (`/api/storage/memory`) is joined internally — pass the host, not
@@ -580,6 +585,7 @@ export interface Options {
    * WebSocket, or secure WebSocket.
    */
   memoryHost: URL;
+
   /**
    * Optional map from space DIDs to HTTP or HTTPS origin overrides. A space
    * listed here opens its storage connection against that host; absent map or
@@ -591,9 +597,11 @@ export interface Options {
   spaceHostMap?: Record<string, string>;
   id?: string;
   settings?: IRemoteStorageProviderSettings;
+
   /** Space authority used only for fresh named-space ACL genesis. The durable
    *  replica session still authenticates as `as`. */
   spaceIdentity?: Signer;
+
   /** The event-intent queue's store seam (server-execution v2 Phase 3;
    *  events.md §5; LT9 re-ruled 2026-08-15: PROCESS-LIFETIME — reload
    *  survival is a non-goal this round). Absent = one in-memory store per
@@ -601,12 +609,14 @@ export interface Options {
    *  replacement carries the predecessor's undischarged intents to the
    *  successor. Tests inject their own to observe or fail the store. */
   eventAppendQueueStore?: EventAppendQueueStore;
+
   /** OW27 (server-execution v2 Phase 7): the client event-append queue's
    *  per-stream send pacing — pace-never-drop, README §3.8. Absent = the
    *  default posture (`DEFAULT_EVENT_APPEND_PACING`); `false` = unpaced.
    *  Lives only in the flag-gated append path (the OFF arm never
    *  constructs the queue). */
   eventAppendPacing?: EventAppendPacing | false;
+
   /** Server-execution v2 Phase 5: declares this manager a SERVING
    *  manager whose home space is `servingHomeSpace`. Providers opened
    *  for OTHER spaces refuse scoped (user/session) reads fail-closed
@@ -851,26 +861,34 @@ export class StorageManager implements IStorageManager {
   #sessionFactory: SessionFactory;
   #eventAppendQueueStore?: EventAppendQueueStore;
   #eventAppendPacing?: EventAppendPacing | false;
+
   /** Phase 5: the serving manager's home space (Options.servingHomeSpace). */
   #servingHomeSpace?: MemorySpace;
   #spaceIdentities = new Map<MemorySpace, Signer>();
+
   /** Genesis ACL owners registered beside a space identity (OW31): the
    * ACTING user a serving-side provisioning run supplied. Keyed apart so
    * the client path (no owner registered) stays byte-identical. */
   #spaceGenesisOwners = new Map<MemorySpace, string>();
+
   /** Seed map from Options — fixed for the manager's lifetime. */
   #seedHosts: Record<string, string>;
+
   /** Late-bound host hints; see registerSpaceHost. */
   #dynamicHosts = new Map<string, string>();
+
   /** Base URL the default storage route is resolved from, held as text so a
    *  caller mutating their URL object cannot move the route. */
   #memoryHost: string;
+
   /** WebSocket storage endpoint used by an unseeded, unhinted space; read it
    *  through #resolveDefaultStorageRoute(). */
   #defaultStorageRoute?: string;
+
   /** Whether #defaultStorageRoute holds the result of a resolution attempt.
    *  Separate from the value, which is undefined when resolution failed. */
   #defaultStorageRouteResolved = false;
+
   /** Late-bound marker sink (the Runtime's telemetry bus); see setTelemetry. */
   #telemetry?: TelemetrySink;
 
@@ -1618,6 +1636,7 @@ export class StorageManager implements IStorageManager {
       space: MemorySpace;
       scope: CellScope;
       id: URI;
+
       /** The explicit instance an instance-named load targets (stage A);
        * the key — and the address the scheduler's park machinery
        * cross-matches — is then per THAT instance. */
@@ -2056,6 +2075,7 @@ type ProviderOptions = {
   space: MemorySpace;
   settings: IRemoteStorageProviderSettings;
   subscription: IStorageSubscription;
+
   /**
    * The owning manager's authenticated session identity
    * (IStorageManager.scopeKeyIdentity) — what the replica's notification
@@ -2070,12 +2090,16 @@ type ProviderOptions = {
   syncReplayDependencies: (
     document: EntityDocument | undefined,
   ) => Promise<Error | undefined>;
+
   /** Late-bound: resolves to the Runtime's telemetry bus once attached. */
   getTelemetry?: () => TelemetrySink | undefined;
+
   /** The LT9 event-intent persistence seam (see Options). */
   eventAppendQueueStore?: EventAppendQueueStore;
+
   /** OW27 per-stream send pacing (see Options). */
   eventAppendPacing?: EventAppendPacing | false;
+
   /** Server-execution v2 Phase 5 (protocol.md §2's grant-scoped read
    * design, RULED 2026-08-13 — the delegated-scoped-read fail-closed
    * precondition): set on a SERVING manager's FOREIGN-space providers.
@@ -2096,6 +2120,7 @@ type ProviderSyncRequest = {
   uri: URI;
   selector: SchemaPathSelector;
   scope?: CellScope;
+
   /** The explicit instance an instance-named load targets (stage A). */
   instance?: ScopeKey;
 };
@@ -2342,6 +2367,7 @@ type WatchAddress = {
   id: URI;
   type: MIME;
   scope?: CellScope;
+
   /** The explicit instance an instance-named load targets (stage A). */
   scopeKey?: ScopeKey;
 };
@@ -2396,6 +2422,7 @@ class StorageTransactionRejectionError extends Error {
  */
 type InFlightCommit = {
   readonly localSeq: number;
+
   /**
    * The unique localSeqs named by `commit.reads.pending` — every in-flight
    * commit this one's read view sits on (resolution-only lower-layer reads
@@ -2405,22 +2432,26 @@ type InFlightCommit = {
   readonly operations: NativeCommitOperation[];
   readonly source?: IStorageTransaction;
   readonly commit: ClientCommit;
+
   /** The identity the commit's operations were applied under (a served
    * per-instance run's; absent = the replica's own) — its verdict
    * promotes or drops exactly those instances' pending layers. */
   readonly identity?: ScopeKeyIdentity;
+
   /**
    * Resolves when a rejection is fabricated locally for this commit (a
    * pending dependency was dropped, or the replica reset). Raced against the
    * server verdict in `pushCommit`.
    */
   readonly localRejection: PromiseWithResolvers<StorageTransactionRejected>;
+
   /**
    * Set synchronously BEFORE `localRejection` resolves, so `pushCommit`'s
    * pre-send checkpoints can observe the rejection without racing the
    * microtask queue. `undefined` means "not locally rejected".
    */
   localRejectionValue?: StorageTransactionRejected;
+
   /** True once `pushCommit`'s finally ran — the outcome is finalized and the
    * entry can no longer be cascaded. */
   settled: boolean;
@@ -2453,6 +2484,7 @@ class SpaceReplica implements ISpaceReplica {
   readonly #space: MemorySpace;
   readonly #subscription: IStorageSubscription;
   readonly #scopeKeyIdentity: () => ScopeKeyIdentity;
+
   /** The replica's OWN instance keys per scope name, resolved once (the
    * manager's identity is stable for the manager's live span — `close()`
    * ends it and the replicas with it): the doc-key hot path resolves an
@@ -2467,9 +2499,11 @@ class SpaceReplica implements ISpaceReplica {
     client: MemoryV2Client.Client;
     session: MemoryV2Client.SpaceSession;
   }>;
+
   /** The client of the last RESOLVED session handle — for synchronous
    *  capability reads (`sqliteServerCommitRowLabelEval`). */
   #sessionClient?: MemoryV2Client.Client;
+
   /** The session of the last RESOLVED handle — read synchronously so
    *  `authorizationError()` can observe a denial that terminated the session
    *  during reconnect, which closes its watch view without a fresh watch result
@@ -2530,6 +2564,7 @@ class SpaceReplica implements ISpaceReplica {
   );
   #watchedIds = new Set<string>();
   #nextLocalSeq = 1;
+
   /** The Phase-3 event-intent queue (events.md §5, LT9), created on the
    * first fire into this space. Owns fired-order discharge and the
    * duplicate-as-delivered classification; its entries are the client's
@@ -2537,6 +2572,7 @@ class SpaceReplica implements ISpaceReplica {
   #eventAppendQueue?: EventAppendQueue;
   #eventAppendQueueStore?: EventAppendQueueStore;
   #eventAppendPacing?: EventAppendPacing | false;
+
   /** Phase 5's producer-side foreign-scoped-read refusal (see
    * ProviderOptions.refuseForeignScopedReads). */
   #refuseForeignScopedReads = false;
@@ -2556,6 +2592,7 @@ class SpaceReplica implements ISpaceReplica {
   #parkedAccepts = new Map<number, {
     operations: NativeCommitOperation[];
     applied: AppliedCommit;
+
     /** Resolves when the parked application runs — the commit promise's
      * resolution point (CT-1950): the caller may then act on its
      * subscribed view as one reflecting the committed write. */
@@ -3153,6 +3190,7 @@ class SpaceReplica implements ISpaceReplica {
    * decision) runs inside settlement, so consulting the parked set
    * before settlement would race it.
    */
+
   /**
    * Queue one event append for this space (server-execution v2 Phase 3;
    * events.md §1, §5): the client's ONLY computational commit under the

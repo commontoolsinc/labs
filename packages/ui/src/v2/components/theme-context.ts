@@ -30,84 +30,123 @@ export type StatusIntent = "info" | "success" | "warning" | "error";
 export interface CFTheme {
   /** Font family for text content */
   fontFamily: string;
+
   /** Monospace font family for code */
   monoFontFamily: string;
+
   /** Base font size for UI elements */
   fontSize: string;
+
   /** Border radius for UI elements */
   borderRadius: string;
+
   /** Overall density/spacing preference */
   density: "compact" | "comfortable" | "spacious";
+
   /** Color scheme preference */
   colorScheme: ColorScheme;
+
   /** Animation speed preference */
   animationSpeed: "none" | "slow" | "normal" | "fast";
+
   /** Roundness scalar (0-1). Scales all structural radii. */
   roundness: number;
+
   /** Typography scale factor (0.8-1.2). */
   scale: number;
+
   /** Motion scalar (0-1). Scales transition durations. 0 = instant. */
   motion: number;
+
   /** Color palette with semantic tokens that adapt to light/dark */
   colors: {
     /** Primary brand color */
     primary: ColorToken;
+
     /** Primary foreground (text on primary) */
     primaryForeground: ColorToken;
+
     /** Secondary color */
     secondary: ColorToken;
+
     /** Secondary foreground */
     secondaryForeground: ColorToken;
+
     /** Main background color */
     background: ColorToken;
+
     /** Surface color (cards, containers) */
     surface: ColorToken;
+
     /** Surface hover state */
     surfaceHover: ColorToken;
+
     /** Primary text color */
     text: ColorToken;
+
     /** Muted/secondary text color */
     textMuted: ColorToken;
+
     /** Border color */
     border: ColorToken;
+
     /** Muted border color */
     borderMuted: ColorToken;
+
     /** Success color */
     success: ColorToken;
+
     /** Success foreground */
     successForeground: ColorToken;
+
     /** Error color */
     error: ColorToken;
+
     /** Error foreground */
     errorForeground: ColorToken;
+
     /** Warning color */
     warning: ColorToken;
+
     /** Warning foreground */
     warningForeground: ColorToken;
+
     /** Accent color for highlights */
     accent: ColorToken;
+
     /** Accent foreground */
     accentForeground: ColorToken;
+
     /** Brand color (purple) */
     brand: ColorToken;
+
     /** Brand foreground (text on brand) */
     brandForeground: ColorToken;
+
     /** Tertiary text color */
     textTertiary: ColorToken;
+
     /** Disabled text color */
     textDisabled: ColorToken;
+
     /** Disabled surface color */
     surfaceDisabled: ColorToken;
+
     /** Surface pressed state */
     surfacePressed: ColorToken;
+
     /** Tertiary surface color */
     surfaceTertiary: ColorToken;
+
     /** Inverse surface color */
     surfaceInverse: ColorToken;
+
     /** Secondary text on colored backgrounds */
     textOnColorSecondary: ColorToken;
+
     /** Text on inverse surfaces */
     textOnInverse: ColorToken;
+
     /** Pressed text color */
     textPressed: ColorToken;
   };

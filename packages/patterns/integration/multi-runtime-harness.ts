@@ -59,11 +59,13 @@ export type { RuntimeDiagnosticsSnapshot };
 export interface MultiRuntimeSessionSpec {
   /** Label used in error messages and as the identity passphrase seed. */
   label: string;
+
   /**
    * Identity for this session. Pass the same Identity in two specs to model
    * one user with two concurrent sessions (e.g. two browser tabs).
    */
   identity?: Identity;
+
   /**
    * Test-only network shaping: delay every storage WebSocket frame (both
    * directions) in this session's realm by this many milliseconds. Reproduces
@@ -76,8 +78,10 @@ export interface MultiRuntimeSessionSpec {
 export interface MultiRuntimeHarnessOptions {
   /** Path to the pattern entry file (e.g. `<dir>/main.tsx`). */
   programPath: string;
+
   /** Module-resolution root, usually the `packages/patterns` directory. */
   rootPath: string;
+
   /**
    * Data files to store with the pattern, as paths on disk. A file the pattern
    * reads with `dataFile()` is attached from that call alone and needs no
@@ -86,12 +90,15 @@ export interface MultiRuntimeHarnessOptions {
    * request rather than being attached here.
    */
   dataFilePaths?: readonly string[];
+
   /** Optional initial pattern input for the bootstrap-created piece. */
   input?: Record<string, FabricValue>;
+
   /** Enable scheduler graph/stats/action diagnostics for this harness run. */
   diagnostics?: boolean;
   sessions: (string | MultiRuntimeSessionSpec)[];
   spaceName?: string;
+
   /**
    * When set, sessions talk to a running toolshed at this URL instead of the
    * self-hosted in-process storage server.
@@ -101,6 +108,7 @@ export interface MultiRuntimeHarnessOptions {
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const RPC_TIMEOUT_MS = 120_000;
+
 /** Total event-consequence quiescence budget per `settle()` call on a
  * toolshed-backed harness (see `settle`): generous against the measured
  * ~2–3 s serving drain of a 40-event pipelined storm, small against the

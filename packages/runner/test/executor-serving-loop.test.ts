@@ -115,6 +115,7 @@ describe("stage F serving loop", () => {
   let clientRuntime: Runtime;
   let servingRuntime: Runtime | undefined;
   let onServingRuntime: ((runtime: Runtime) => Promise<void>) | undefined;
+
   /** Stage G: the serving runtime's injected fetch (egress stub) —
    * effectful builtins served by the loop call THIS, never the network. */
   let servingFetch:

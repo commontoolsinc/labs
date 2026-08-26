@@ -41,6 +41,7 @@ export interface RemapCtx {
   newToDiff: Map<number, number>;
   diffLineStarts: number[];
   rawLines: string[];
+
   /** Line starts of the source text the nodes were parsed from. */
   sourceLineStarts: number[];
   sourceOmitsUtf8Bom: boolean;

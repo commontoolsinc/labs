@@ -39,6 +39,7 @@ export type ServingLoopStats = {
   authoredSeen: number;
   effectAcks: number;
   derivedCommits: number;
+
   /** `derivedCommits`, attributed per space (the space DID as the key).
    * The process-wide total cannot scope a delta to the space under test
    * on a shared host — another space's serving activity in the window
@@ -54,14 +55,17 @@ export type ServingLoopStats = {
    * {@link bumpDerivedCommits} only, which keeps total and row in
    * lockstep. */
   derivedCommitsBySpace: Record<string, number>;
+
   /** Counts folded out of `derivedCommitsBySpace` by the cap eviction
    * (never a lost commit — the process-wide total keeps them). */
   derivedCommitsBySpaceDropped: number;
+
   /** Demanded-structure loads that THREW (serving-loop.md §1: a value
    * the server cannot serve is counted AND surfaced here, not just
    * logged). Counted per attempt; the loop retries the root on each
    * subsequent input-driven demand cycle until the load lands. */
   structureLoadFailures: number;
+
   /** Demanded-structure ensure attempts that returned FALSE — the root
    * carried no loadable pattern identity yet, typically the creation
    * race (the demand cycle ran before the piece's instantiation
@@ -72,6 +76,7 @@ export type ServingLoopStats = {
    * loadable (e.g. a plain value doc demanded as if it owned a
    * piece). */
   structureLoadDeferred: number;
+
   /** Demanded roots whose consecutive-deferral streak crossed
    * `STRUCTURE_LOAD_STUCK_AFTER` (space-server.ts) — counted ONCE per
    * crossing, so a nonzero value names roots that are effectively
@@ -86,6 +91,7 @@ export type ServingLoopStats = {
    * lifetime. The companion WARN log (`structure-load-stuck`) fires
    * at the crossing and at each doubling while the streak grows. */
   structureLoadStuck: number;
+
   /** Demanded roots that reached the TERMINAL not-loadable state
    * (server-execution v2 stage P2-F, the OW19 demand-cycle design): the
    * root's doc is confirmed synced from the durable store and carries
@@ -95,12 +101,14 @@ export type ServingLoopStats = {
    * Counted per terminalization, so a root that re-arms and
    * terminalizes again counts again. */
   structureLoadTerminal: number;
+
   /** Terminal roots RE-ARMED by a commit touching one of their observed
    * docs (the OW19 re-arm half): the root returns to the pending set
    * and the next cycle retries its load — this is what keeps the
    * terminal state safe for the creation race (a not-yet-created
    * piece's instantiation commit re-arms and then loads). */
   structureLoadRearmed: number;
+
   /** Waves whose W advance was CLAMPED below the input batch head
    * because inbound foreign novelty was still shadowed by a parked own
    * write (the settle input barrier, Phase 2 revisit (a):
@@ -108,6 +116,7 @@ export type ServingLoopStats = {
    * not a failure — W catches up the wave after the shadow clears — but
    * a count that grows without settling flags a wedged marker channel. */
   watermarkClamped: number;
+
   /** Write-carrying transactions REFUSED at the wave's seal because no
    * run context was stamped (serving-loop.md §3d, RULED 2026-08-05).
    * Structurally zero when every server-side commit path declares its
@@ -117,6 +126,7 @@ export type ServingLoopStats = {
    * landing, so the demanded derivation never materialized). Counted
    * here so the storm is a health-stats fact, not a log-grep. */
   unstampedSealRefusals: number;
+
   /** Served navigate-intent transactions whose seal FAILED — resolved
    * `{ error }` or rejected (navigate-to.ts's intent-commit arms,
    * independent review NOTE-b). Every failure requeues the owning
@@ -126,16 +136,19 @@ export type ServingLoopStats = {
    * the loop is burning re-drains on them, never that navigations are
    * being lost. */
   servedIntentSealFailures: number;
+
   /** Park-time runtime disposes that overran their deadline and were
    * abandoned (park LIVENESS, the lunch-wall containment): a hung
    * dispose must never wedge `whenParked` and every recovery chained
    * behind it. Nonzero says a serving runtime refused to tear down —
    * loud in logs, counted here. */
   parkDisposeTimeouts: number;
+
   /** Failure-park re-activations delayed by the host's streak backoff
    * (a permanently-failing space must reactivate at a bounded rate,
    * not as fast as admissions arrive). */
   reactivationBackoffs: number;
+
   /** Foreign-space writes refused at wave ACCUMULATION (serving-loop.md
    * §3d, RULED 2026-08-14 (c); Phase 5 keeps the counter for the
    * accept gate's refusals): action-scoped — the writing action fails,
@@ -145,6 +158,7 @@ export type ServingLoopStats = {
    * (an acting identity reaching for a space it holds no structural
    * grant on — protocol.md §2b's authorization predicate). */
   foreignWriteRefusals: number;
+
   /** Foreign co-hosted ENGINE resolutions that FAILED at the wave's
    * commit step (Phase 5, the F1b isolation): the failing space's
    * contributions withdraw action-scoped (events requeue, derivations
@@ -154,6 +168,7 @@ export type ServingLoopStats = {
    * cannot open (disk trouble, or a provisioning target with an
    * unusable path). */
   foreignEngineFailures: number;
+
   /** EXPLICIT WARM REQUESTS issued (serving-loop.md §1's third
    * activation trigger; RULED 2026-08-21): one per foreign provisioning
    * batch a wave durably committed — the serving-side provisioning path
@@ -163,6 +178,7 @@ export type ServingLoopStats = {
    * residual). Counted at issue; an already-active target consumes the
    * request as a demand-union no-op. */
   warmRequests: number;
+
   /** Server-execution v2 fan-out stage B (design §B5, RULED 2026-08-16
    * accept-and-count): derivation runs under the wave-level FALLBACK
    * identity — an action NOBODY demands with an identity — that
@@ -173,6 +189,7 @@ export type ServingLoopStats = {
    * (the service identity runs NO demanded work); a growing count names
    * an eager/idle-scheduled narrowing node no principal watches. */
   undemandedNarrowingRuns: number;
+
   /** Fan-out stage B's early-emit guard (design §F risk 4, RULED
    * 2026-08-16 fail-closed): a demanded derivation run that EMITTED an
    * event before its scope ratchet had moved — the emission carried a
@@ -181,12 +198,15 @@ export type ServingLoopStats = {
    * has learned the scope, so the retry emits correctly attributed.
    * Never silently sessionless. Counted per refusal. */
   earlyEmitRefusals: number;
+
   /** Fan-out stage B's ARRIVAL RE-ARMS (design §A): demand-registry
    * passes that found a new (principal, session) demander for a root
    * and re-armed the narrowed nodes beneath it for that demander. */
   demandArrivals: number;
+
   /** max over active spaces of (store head seq − W). */
   watermarkLag: number;
+
   /** The (d′) `demand` counter block (serving-loop.md §7; stage-C design
    * §6 W4). Demand is memory v2's tracked-ids closure and the demand walk
    * is deleted, so there is NO `walkRuns` counter — its absence is T9′'s
@@ -228,6 +248,7 @@ export type ServingLoopStats = {
     demandPassMs: number;
     pushGrowthWakes: number;
     watchWakes: number;
+
     /** Demand-pass wakes from WARM captures (the explicit warm
      * request's staged instances entering the tenure's warm demand,
      * serving-loop.md §1; RULED 2026-08-21) — counted apart so
@@ -236,6 +257,7 @@ export type ServingLoopStats = {
      * coalescing. */
     warmWakes: number;
   };
+
   /** SERVER SETTLE per authored input (serving-loop.md §7; stage-C design
    * §6 W4's metric): from the authored commit's ADMISSION on the server
    * (its seq, `enqueueCommit`) to W COVERING it (the wave commit whose
@@ -260,6 +282,7 @@ export type ServingLoopStats = {
       waves: number;
       cycles: number;
       growthWakes: number;
+
       /** VALUE-ONLY at coverage; promoted to STRUCTURAL-GROWTH (by
        * ADJACENCY — the most recently covered input) when a push-growth
        * wake fires AFTER this input's coverage and a later derived commit
@@ -267,21 +290,26 @@ export type ServingLoopStats = {
        * promoted entry). */
       class: "value-only" | "structural-growth";
       eventAppend: boolean;
+
       /** ms from admission to the structural-growth LANDING (the derived
        * commit after the growth wake); present only when promoted. */
       msGrowth?: number;
+
       /** waves from admission through the growth landing; present only
        * when promoted. */
       growthWaves?: number;
+
       /** ms from the growth WAKE to its landing (the demand-wake grace +
        * derive); present only when promoted and a wake time was seen. */
       graceMs?: number;
+
       /** performance.now() of the growth landing; present only when
        * promoted. */
       growthLandedAt?: number;
     }>;
     dropped: number;
   };
+
   /** S1 — DRAIN-SETTLE QUIESCENCE ADVANCES (RULED 2026-08-19,
    * protocol.md §4's amendment; stage-c/swatch-stall-rootcause.md §4):
    * W covering the space's own committed derived tail at quiescence,
@@ -292,9 +320,11 @@ export type ServingLoopStats = {
    * bookkeeping commit. */
   settleAdvances: {
     count: number;
+
     /** The last advance's step: advancedTo − the coverage it advanced
      * from (how many tail-derivation seqs the quiescence covered). */
     lastDelta: number;
+
     /** Bounded series (same discipline as settle.series): one row per
      * quiescence advance, so W4 can split advance-only waves out of
      * the per-input settle timings. */
@@ -306,6 +336,7 @@ export type ServingLoopStats = {
     processed: number;
     coalescedPerWaveMax: number;
     skippedIdempotent: number;
+
     /** Stage C tuning (T3's companion guard): drain passes that found a
      * pending entry whose EARLIER drain copy is still queued or in flight
      * in the serving scheduler (its dispatch has not reached its commit
@@ -318,6 +349,7 @@ export type ServingLoopStats = {
      * that grows without `processed` settling names a drain copy that
      * never completes. */
     drainInFlightSkips: number;
+
     /** OW45 arm-B round: entries stuck at the drain's PRE-QUEUE
      * deferral barrier (a lagging sidecar view, a failing sidecar
      * sync, or a queue-time throw — the third under its own
@@ -333,6 +365,7 @@ export type ServingLoopStats = {
      * order-preserved — the §5 pattern the queued class has) is the
      * register's owed follow-up on the OW45 row. */
     preQueueDeferralStuck: number;
+
     /** Stage C build W3, (α1) — events.md §4's RULED one-entry-one-
      * completed-run sentence: LT1 same-space in-process copies (`served
      * !== undefined && served.streamEntry === undefined`) the flush
@@ -342,6 +375,7 @@ export type ServingLoopStats = {
      * drain delivers it ONCE, with a `streamEntry`. Routine under short
      * waves; grows with `wavesBudgetExhausted`. */
     lt1LeftoversPurged: number;
+
     /** Stage C build W3, (α1b) — the in-flight residue the purge cannot
      * reach: LT1 in-process copies that were RUNNING at the deadline and
      * sealed OUTSIDE their appending wave (the wave their emitter sealed
@@ -361,6 +395,7 @@ export type ServingLoopStats = {
      * `processed` never settles names a handler whose in-process copy
      * keeps missing its wave. */
     lt1LateSealsRefused: number;
+
     /** Stage C build W3, (α3) — the orphan REFUSAL (events.md §4's third
      * clause): event-handler runs of an LT1 cascade whose durable entry
      * rode an emitter write the wave WITHDREW (a derivation's superseded
@@ -377,6 +412,7 @@ export type ServingLoopStats = {
     queued: number;
     completed: number;
     failed: number;
+
     /** Phase 6 (serving-loop.md §5's per-space budgets): dispatch
      * holds — an admitted network effect waiting on the outstanding
      * cap or an egress-rate token. Growth under load is the budget
@@ -384,6 +420,7 @@ export type ServingLoopStats = {
     budgetDeferrals: number;
   };
   lease: { held: number; lost: number };
+
   /** OW45 arm-B server-ensure stage 1 (design PR #6209 §10): the
    * SpaceServer's space-root ensure — one lease-guarded owed step per
    * tenure (existence + freshness, no start). Counting caveat (review
@@ -401,16 +438,20 @@ export type ServingLoopStats = {
   rootEnsure: {
     /** Completed ensure runs, any outcome. */
     runs: number;
+
     /** Runs whose creation transaction materialized the root. */
     created: number;
+
     /** Runs whose freshness reconcile moved the root ("updated" or
      * "repaired-provenance" from the awaited default-root check). */
     reconciled: number;
+
     /** Fail-closed skips: the space's ACL resolved no concrete owner
      * (missing, invalid, retracted, ANYONE-only). The tenure serves
      * without a root ensure and NEVER substitutes the service DID
      * (OW53's ruled shape); the next tenure retries. */
     skippedNoOwner: number;
+
     /** Ensure attempts that threw (source resolve, compile, creation,
      * or resolution failure). Counted AND warned; cleared for the
      * tenure — the next tenure retries — so a deterministic failure

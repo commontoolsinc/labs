@@ -37,8 +37,10 @@ export interface CfcPolicyCompilerManifestV1 {
 export interface BuilderSourceSite {
   /** Authored line, 1-based. */
   readonly line: number;
+
   /** Authored column, 0-based. */
   readonly col: number;
+
   /** Declaration name visible in authored source, when one exists. */
   readonly bindingName?: string;
 }

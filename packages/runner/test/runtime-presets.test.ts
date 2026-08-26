@@ -7,6 +7,8 @@ import {
   EXPERIMENTAL_FLAG_AUTHORITY,
   experimentalOptionsForDeployedClient,
   experimentalOptionsFromEnv,
+  MAX_ENFORCEMENT_CFC_OPTIONS,
+  MAX_ENFORCEMENT_SINK_CEILINGS,
   parseServerExperimentalOptions,
   RUNTIME_OPTION_KEYS,
   type RuntimeOptionKey,
@@ -85,6 +87,7 @@ const DEPLOYMENT_FACING: PresetName[] = [
 ];
 
 type MinimalTreatment =
+
   /** Equals the sentinel passed in, in every preset. */
   | { treat: "per-site" }
   /** Present in every preset with this exact shared value. */
@@ -660,6 +663,90 @@ describe("runtimePresets conformance (CT-1814)", () => {
         expect(warnings.length).toBe(1);
         expect(String(warnings[0][0])).toContain(ADOPT_SERVER_FLAGS_ENV);
       });
+    });
+  });
+
+  describe("cfcPosture: max-enforcement (CT-2075)", () => {
+    const posture = { cfcPosture: "max-enforcement" } as const;
+    const postureOutputs: Record<PresetName, RuntimeOptions> = {
+      productionServer: runtimePresets.productionServer({
+        ...minimalCore,
+        ...posture,
+      }),
+      remoteClient: runtimePresets.remoteClient({ ...minimalCore, ...posture }),
+      patternTest: runtimePresets.patternTest({ ...minimalCore, ...posture }),
+      localDev: runtimePresets.localDev({ ...minimalCore, ...posture }),
+      browserWorker: runtimePresets.browserWorker({
+        ...minimalCore,
+        ...posture,
+      }),
+      unitTest: runtimePresets.unitTest({ apiUrl, storageManager, ...posture }),
+    };
+
+    it("spreads exactly the named bundle over each preset's minimal output", () => {
+      for (const preset of PRESET_NAMES) {
+        expect(postureOutputs[preset], preset).toEqual({
+          ...minimalOutputs[preset],
+          ...MAX_ENFORCEMENT_CFC_OPTIONS,
+        });
+      }
+    });
+
+    it("keeps the shared enforcement-mode pin out of the bundle", () => {
+      // Strict is a per-session host raise, not part of the bundle: the pin
+      // must come through unchanged so the raise below is the only way up.
+      expect(Object.keys(MAX_ENFORCEMENT_CFC_OPTIONS))
+        .not.toContain("cfcEnforcementMode");
+      expect(postureOutputs.remoteClient.cfcEnforcementMode)
+        .toBe("enforce-explicit");
+    });
+
+    it("lets a host session dial apply over the bundle", () => {
+      const output = runtimePresets.remoteClient({
+        ...minimalCore,
+        ...posture,
+        cfcEnforcementMode: "enforce-strict",
+      });
+      expect(output.cfcEnforcementMode).toBe("enforce-strict");
+      // The bundle's persist is what makes the strict raise conform.
+      expect(output.cfcFlowLabels).toBe("persist");
+    });
+
+    it("ceilings every network-fetch sink public-only and no llm sink", () => {
+      expect(MAX_ENFORCEMENT_SINK_CEILINGS).toEqual({
+        fetchBinary: [],
+        fetchText: [],
+        fetchJson: [],
+        fetchJsonUnchecked: [],
+        fetchProgram: [],
+        streamData: [],
+      });
+    });
+
+    it("constructs a working Runtime with the dials and policy resolved", async () => {
+      const emulated = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime(runtimePresets.unitTest({
+        apiUrl: new URL(import.meta.url),
+        storageManager: emulated,
+        ...posture,
+      }));
+      try {
+        expect(runtime.cfcEnforcementMode).toBe("enforce-explicit");
+        expect(runtime.cfcFlowLabels).toBe("persist");
+        expect(runtime.cfcWriteFloor).toBe("enforce");
+        expect(runtime.cfcTriggerReadGating).toBe(true);
+        expect(runtime.cfcPolicyEvaluation).toBe("enforce");
+        expect(runtime.cfcDeclaredMonotonicity).toBe("enforce");
+        expect(runtime.cfcLabelMetadataProtection).toBe("enforce");
+        // The §10.1 records validated and digested at boot (fail-closed
+        // config: a malformed bundle would have thrown in the constructor).
+        expect(runtime.cfcPolicySnapshot).toBeDefined();
+        expect(runtime.cfcSinkMaxConfidentiality)
+          .toEqual(MAX_ENFORCEMENT_SINK_CEILINGS);
+      } finally {
+        await runtime.dispose();
+        await emulated.close();
+      }
     });
   });
 

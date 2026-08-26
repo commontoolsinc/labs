@@ -196,6 +196,7 @@ export const createHarnessImageAttachment = async (
     workspaceHostPath: string;
     cwd: string;
     path: string;
+
     /**
      * Directory to snapshot the image bytes into. When provided, the
      * attachment materializes from the snapshot for the rest of the run and

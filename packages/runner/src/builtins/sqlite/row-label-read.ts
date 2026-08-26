@@ -38,19 +38,25 @@ export interface PerRowIfc {
 export interface RowLabelReadArgs {
   /** Declared table schemas (`db.tables`, wire-supplied — re-validated). */
   tables: Record<string, unknown> | undefined;
+
   /** Per-result-column TRUE origins (`res.columns`); undefined when the
    *  server captured none. */
   columns: readonly ResultColumn[] | undefined;
   rows: readonly unknown[];
+
   /** The db's owner (db ref), resolving the rule's `dbOwner()` term. */
   owner?: string;
+
   /** Per-column (Phase 2) confidentiality atoms of the labeled projection —
    *  they ride every row, so they count against the ceiling too. */
   staticConfidentiality?: readonly CfcConfClause[];
+
   /** Declared output ceiling (placeholders already resolved). */
   ceiling?: readonly CfcConfClause[];
+
   /** What to do when a row's label exceeds the ceiling (default "fail"). */
   onExceed?: unknown;
+
   /** CFC Phase 3.b read-time clearance: when set, keep only rows the acting
    *  reader may read (a declared existence release, §8.17/inv-14). Requires the
    *  rule-bearing table to opt in (`rowLabelReadClearance`); never for
@@ -64,9 +70,11 @@ export type RowLabelReadResult =
     /** Per kept-order row: the per-row label for its row entity doc, or
      *  undefined when the row carries no per-row label. */
     labels: (PerRowIfc | undefined)[];
+
     /** Row keep-mask under a declared ceiling and/or read-time clearance
      *  (undefined: neither declared). */
     keep: boolean[] | undefined;
+
     /** CFC Phase 3.b: rows withheld because the acting reader could not read
      *  them (a declared, audited existence release). 0/undefined when no
      *  clearance was requested. */

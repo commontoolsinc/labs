@@ -403,6 +403,76 @@ see [File headers](#file-headers) below. Everything else in that shape is the
 defect. To title a region of a file or a class, use a section marker, which is
 a `//` block; see [Section markers](#section-markers) above.
 
+### The blank line above
+
+A doc comment takes a blank line above it, except where it is the first thing
+in its file or bracketed block, and except in the two constructs `deno fmt`
+will not keep one in.
+
+That blank line is what separates a documented declaration from whatever
+precedes it, and within those bounds it holds uniformly: a function after
+another function, an interface property after another property, an array
+element after another element.
+
+Two positions have nothing above to separate from, and so take no blank line:
+
+- **The first line of a file**, where a file header opens the file. A shebang
+  or a file-scoped pragma is something above, though, and takes the blank line
+  like anything else.
+- **Directly under an opening bracket** — `{`, `(`, or `[` — where the doc
+  comment belongs to the first member, parameter, or element of the block. The
+  bracket is the separator.
+
+The dense cases are the ones the rule is for. An interface whose properties
+each carry a one-line doc comment reads as an undifferentiated run of lines
+without it, and pairing each comment to its property is work left to the
+reader:
+
+```ts
+// Shown at module scope.
+
+/** Everything known about one donut. */
+export interface Donut {
+  /** Style, such as `cruller` or `fritter`. */
+  readonly style: string;
+
+  /** Desired fryer temperature, in Kelvin. */
+  readonly temperature: number;
+
+  /** Toppings, in the order they are applied. */
+  readonly toppings: readonly string[];
+}
+```
+
+Two constructs are exempt because the formatter overrules the rule there.
+`deno fmt` removes a blank line between two items of a parenthesized list, and
+between two arms of a union or intersection type, so a documented parameter
+list, argument list, or union runs unbroken:
+
+```ts
+// Shown at module scope.
+
+/** Fries one donut to order. */
+export function fry(
+  /** Style to fry. */
+  style: string,
+  /** Desired fryer temperature, in Kelvin. */
+  temperature: number,
+): void {}
+
+/** What a fryer is doing right now. */
+export type FryerState =
+  /** Idle, at whatever temperature it last held. */
+  | { readonly kind: "idle" }
+  /** Coming up to temperature, with the shortfall in Kelvin. */
+  | { readonly kind: "heating"; readonly shortfall: number }
+  /** Frying, with the count of donuts in the basket. */
+  | { readonly kind: "frying"; readonly count: number };
+```
+
+Object types, tuple types, array literals, and class and interface bodies all
+keep their blank lines, so the rule holds in full there.
+
 ### What gets one
 
 - Every file, as a header, except for the kinds listed under

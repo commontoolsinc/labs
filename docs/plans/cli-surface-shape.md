@@ -490,6 +490,26 @@ reader with no edit and no warning.
 **A colon-joined `host:space:piece`.** A handle contains a colon, a DID contains
 two, and a host carries a port, so the token cannot be split from either end.
 
+**A bare `--` before the read options on the commands that have no callable
+section.** Accepting it on `get`, `set` and `wish` would make the marker a
+prefix introducing the read options rather than a boundary closing a section,
+which is one mental model instead of two and lets a line move between `call` and
+`get` unedited. It is refused on both counts it would have to earn.
+
+The model contradicts the one flag it cannot govern: `--help` written past the
+marker reaches the callable, deliberately, so a marker that introduces read
+options would have to except the one flag that is never an unknown one. And the
+marker stays mandatory on `call` and `exec` whatever the markerless commands
+accept, so the rule becomes optional here and required there — weaker than
+*the marker appears exactly where something else owns flags in between*, which
+a caller derives rather than memorizes.
+
+What the markerless commands owe is a refusal rather than acceptance. A `--`
+written on one sets every word after it aside, and an action that reads none of
+them returns an unprojected value and exits zero — the same silent
+reinterpretation as a field named for a read option, and the reason the marker
+is refused where it closes nothing.
+
 ### Precedent worth not re-deriving
 
 Position deciding which entity a flag applies to is well-established.

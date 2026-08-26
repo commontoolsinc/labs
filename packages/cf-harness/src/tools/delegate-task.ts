@@ -55,6 +55,11 @@ export const delegateTaskTool: HarnessToolDefinition<
           description:
             "Optional JSON Schema for a structured child return. When provided, the child must return only JSON matching this schema; open-ended strings are linkified before the parent sees them.",
         },
+        skillHandle: {
+          type: "string",
+          description:
+            "Optional handle (cfh:a:… token) naming a cell whose string value is skill text for the child. The text is materialized on the trusted host side and injected into the child's context; this run never sees it.",
+        },
       },
     },
     tags: ["subagent", "orchestration"],

@@ -24,8 +24,10 @@ export const MODULE_METADATA: ModuleMetadata = {
 export interface TimingModuleInput {
   /** Prep time in minutes */
   prepTime: number | null | Default<null>;
+
   /** Cook time in minutes */
   cookTime: number | null | Default<null>;
+
   /** Rest time in minutes */
   restTime: number | null | Default<null>;
 }

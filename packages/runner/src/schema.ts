@@ -1133,14 +1133,17 @@ function readValueAtResolvedLink(
 export interface ValidateAndTransformOptions {
   /** When true, also read into each Cell created for asCell fields to capture dependencies */
   traverseCells?: boolean;
+
   /** When true, cells created during traversal are marked as already synced */
   synced?: boolean;
+
   /**
    * Set by a schema view reading one of its children: a mismatch there is a
    * refusal the reader must be told about, not the `undefined` a root read
    * yields, which a reader cannot tell from an absent value.
    */
   mismatchThrows?: boolean;
+
   /**
    * Set by a schema view reading one of its children: this is a step inside a
    * read the entry point already began, so the entry-point-only work — the

@@ -817,6 +817,7 @@ export type Engine = {
   snapshotRetention: number;
   legacyCommitMetadataRefsRequired: boolean;
   statements: PreparedStatements;
+
   /**
    * Documents already decoded, by the revision each one is.
    *
@@ -835,6 +836,7 @@ export type Engine = {
    * a patched revision costs a base document plus every patch over it.
    */
   documentCache: Map<string, EntityDocument | null>;
+
   /**
    * Where {@link cacheDocumentForRevision} puts entries while a commit is
    * open, so they reach {@link Engine.documentCache} only once its rows are
@@ -903,11 +905,13 @@ export type ApplyCommitOptions = {
   invocationPayload?: FabricValue;
   authorization?: AuthorizationRecord;
   commit: ClientCommit;
+
   /** Map of cell-db id -> attach alias for `sqlite` ops in this commit. The
    *  server attaches these BEFORE applyCommit (ATTACH can't run in a txn); the
    *  apply loop executes the SQL inside the commit's transaction against the
    *  alias. (docs/specs/sqlite-builtin/plans/atomic-writes.md) */
   sqliteAttachments?: ReadonlyMap<string, string>;
+
   /** The commit's class (docs/specs/server-side-execution/protocol.md §1),
    *  determined by the ADMISSION PATH that processed the commit — the
    *  session-facing transact path is `authored` (the default here, since
@@ -917,6 +921,7 @@ export type ApplyCommitOptions = {
    *  client-supplied value: `ClientCommit` cannot express a class, so a field
    *  smuggled into the payload is inert. */
   commitClass?: CommitClass;
+
   /** The producing lease holder of a `derived`-class commit — the DR1
    *  per-process identity the SpaceServer minted at process start
    *  (serving-loop.md §2). Admission compares it against the space's live
@@ -925,6 +930,7 @@ export type ApplyCommitOptions = {
    *  a holder, and no session-facing path supplies one. Meaningless (and
    *  ignored) on other classes. */
   holder?: string;
+
   /** Per-write identity annotations of a `derived`-class commit
    *  (protocol.md §1): the explicit `scope_key` on scoped writes
    *  (ADDRESSING — consumed here to key rows, since the service envelope
@@ -933,6 +939,7 @@ export type ApplyCommitOptions = {
    *  Server-internal like `commitClass`; rejected on any other class
    *  (protocol.md §7's closed list). */
   annotations?: readonly DerivedWriteAnnotation[];
+
   /** Server-internal (the wave path only — applyWaveCommit sets it when
    *  the wave carries outbound append rows): permit a commit with zero
    *  operations. An appends-only wave MUST still commit — its durable
@@ -940,11 +947,13 @@ export type ApplyCommitOptions = {
    *  refusal would lose the appends with nothing to re-emit them. Never
    *  reachable from any session-facing path. */
   allowEmptyOperations?: boolean;
+
   /** The eventIds whose handler consequences this `derived`-class commit
    *  carries (protocol.md §7 — `consequenceOf`, derived only; bounded by
    *  the wave's input, never graph-scaled). Stored on the commit row;
    *  rejected on any other class. */
   consequenceOf?: readonly string[];
+
   /** The watermark this `derived`-class commit is current through
    *  (protocol.md §4, §7 — `derivedThrough`, derived only; every split of
    *  one wave repeats the same value). Stored on the commit row; rejected
@@ -952,6 +961,7 @@ export type ApplyCommitOptions = {
    *  outside a serving loop (tests driving the accumulator directly) has
    *  no watermark to carry, and the column stays NULL. */
   derivedThrough?: number;
+
   /** Server-produced AUTHORED admission (protocol.md §2's delegated row,
    *  §2b — outbox event appends, `.inSpace` provisioning): the commit's
    *  metadata carries the ORIGINATING chain actor + the capability grant,
@@ -965,6 +975,7 @@ export type ApplyCommitOptions = {
     actingPrincipal: string;
     actingSession?: string;
     capabilityRef: string;
+
     /** The Phase-3 floor carve-out for sessionless space-scope emissions
      *  (SHAPE RULED 2026-08-05, protocol.md §2; implemented with Phase
      *  3's events): the completeness floor admits an ABSENT acting
@@ -1000,6 +1011,7 @@ export type AppliedCommit = {
   seq: number;
   branch: BranchName;
   revisions: AppliedRevision[];
+
   /** True when the commit was an exact REPLAY of one this session
    * already applied — the stored result was returned and NOTHING was
    * inserted. Side-effect carriage riding the apply (the wave commit's
@@ -1008,6 +1020,7 @@ export type AppliedCommit = {
    * have been delivered and retired — re-inserting resurrects
    * delivered appends as duplicate delivery work). */
   replayed?: true;
+
   /**
    * Operation indexes whose `cid:` set matched the stored content exactly
    * and applied as a no-op: no revision, no head advance, no dirty mark.
@@ -1023,6 +1036,7 @@ export type ReadOptions = {
   sessionId?: SessionId;
   branch?: BranchName;
   seq?: number;
+
   /** The explicit scope INSTANCE to read (protocol.md §2's read row —
    *  the read half of the transaction identity model). When present it
    *  bypasses the session-identity resolution: the caller (a lease
@@ -1795,13 +1809,16 @@ WHERE branch = :branch AND id LIKE :prefix AND op != 'delete'
  * entry) pruned too. */
 export type RetirableEffectsInstance = {
   scopeKey: string;
+
   /** Entries surviving retirement (unacked intents persist — a reload
    * re-reads and may re-enact them, LT8). */
   remainingEntries: EffectIntentEntry[];
+
   /** Ack marks surviving retirement: acks whose entry still stands
    * (structurally none today — an ack retires its entry — kept exact
    * so the write is a pure prune, never an invention). */
   remainingAcks: Record<string, true>;
+
   /** The acked nonces this retirement consumes (diagnostics). */
   retiredNonces: string[];
 };
@@ -1921,8 +1938,10 @@ export const serverSeq = (engine: Engine): number => {
  * `firedAt` into the clone only. */
 type EventAppendStamp = {
   opIndex: number;
+
   /** Index into the op's `patches` array; absent for a whole-doc `set`. */
   patchIndex?: number;
+
   /** Index into the patch's `values` array (append/add-unique) or the
    * written array value (add/replace/set). */
   valueIndex: number;
@@ -2063,6 +2082,7 @@ const validateEventAppends = (
     principal?: string;
     sessionId: SessionId;
     delegated?: NonNullable<ApplyCommitOptions["delegated"]>;
+
     /** Derived-class scoped-op keys (the annotation ADDRESSING), for the
      * dedupe read of scoped sidecars. */
     scopeKeyByOpIndex: ReadonlyMap<number, string>;
@@ -2973,6 +2993,7 @@ export const applyWaveCommit = (
     waveBasis: {
       /** The wave's input snapshot seq (per-doc CAS basis). */
       basisSeq: number;
+
       /** Per doc-instance key (`${id} ${scopeKey}`): the head the wave's
        * rebase decision observed. Re-verification requires these docs to
        * sit at EXACTLY that head — §3d's re-CAS against the new head; a
@@ -2980,6 +3001,7 @@ export const applyWaveCommit = (
       rebasedHeads: ReadonlyArray<{ doc: string; head: number }>;
     };
     basisInstances?: readonly WaveBasisInstance[];
+
     /** The wave's outbound cross-space appends (serving-loop.md §5,
      * FP1): durable rows written INSIDE this very transaction — the
      * basis-row carriage pattern. Deleted later, on delivery-ack, by
@@ -4220,6 +4242,7 @@ const writeOperation = (
     operation: Exclude<Operation, SqliteOperation>;
     principal?: string;
     sessionId: SessionId;
+
     /** The explicit scope_key of a derived commit's scoped write
      * (protocol.md §1's ADDRESSING): admission validated it against the
      * declared scope; when present it keys the row instead of a

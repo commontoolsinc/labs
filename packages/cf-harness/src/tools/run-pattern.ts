@@ -4,7 +4,10 @@ import {
   compileAndSavePattern,
   getPatternIdentityRef,
 } from "@commonfabric/runner";
-import { validateAgainstSchema } from "@commonfabric/runner/cfc";
+import {
+  selectReferencedCfcSchemaDefs,
+  validateAgainstSchema,
+} from "@commonfabric/runner/cfc";
 import {
   createLLMFriendlyLink,
   FRAMEWORK_RESULT_KEYS,
@@ -40,8 +43,10 @@ export const RUN_PATTERN_MAX_SOURCE_TEXT_BYTES = 256 * 1024;
 export interface RunPatternToolSuccessOutput {
   outputId: string;
   status: "ok";
+
   /** Canonical LLM-friendly link to the piece's result cell. */
   resultRef: string;
+
   /**
    * The compiled pattern's result schema — the shape of whatever
    * `resultRef` names. Known here for free, since compilation produced it,
@@ -53,6 +58,7 @@ export interface RunPatternToolSuccessOutput {
    * schema.
    */
   resultRefSchema: JSONSchema;
+
   /**
    * Piece id for the persisted tool-output artifact. A bare fabric
    * identifier the handle boundary never swaps, and the piece cell is the
@@ -60,12 +66,15 @@ export interface RunPatternToolSuccessOutput {
    * rendering; only `resultRef` reaches model context.
    */
   pieceId: string;
+
   /** Sanitized result value; present only when `resultSchema` was given. */
   value?: unknown;
   linkedStringCount?: number;
+
   /** Why `value` is absent despite a `resultSchema`: the raw result did not
    * match the schema. */
   valueError?: string;
+
   /**
    * Raw result value for the persisted tool-output artifact. Stripped from
    * the model-facing rendering by the prompt loop, so only the sanitized
@@ -78,12 +87,14 @@ export interface RunPatternToolErrorOutput {
   outputId: string;
   status: "compile-error" | "error" | "cancelled";
   message: string;
+
   /**
    * The durable piece a post-persistence failure leaves behind, for the
    * persisted artifact's run-to-piece provenance. Stripped from the
    * model-facing rendering like the success output's `pieceId`.
    */
   pieceId?: string;
+
   /**
    * The failing computation's own message, retained for the persisted
    * artifact and stripped from the model-facing rendering: a computation
@@ -365,6 +376,7 @@ export const runPatternTool: HarnessToolDefinition<
       status: RunPatternToolErrorOutput["status"],
       message: string,
     ): RunPatternToolErrorOutput => ({ outputId, status, message });
+
     /**
      * `detail` is what the cancellation left behind that the caller would
      * otherwise have to discover by looking: a durable effect the run had
@@ -560,12 +572,38 @@ export const runPatternTool: HarnessToolDefinition<
         `run_pattern input "${key}" does not match the pattern's argument schema: ${failure}`,
       );
     };
+    // A property schema referring into the argument schema's `$defs` leaves
+    // its root behind when it becomes a cell's whole schema, so the read
+    // schema carries the referenced definitions along —
+    // `selectReferencedCfcSchemaDefs` computes that closure, honoring a
+    // property's own `$defs` scope over the root's.
+    const argumentDefs = isObjectNotArray(argumentSchema) &&
+        isObjectNotArray((argumentSchema as { $defs?: unknown }).$defs)
+      ? (argumentSchema as { $defs: Record<string, JSONSchema> }).$defs
+      : undefined;
+    const readSchemaForKey = (key: string): JSONSchema | undefined => {
+      const propertySchema = argumentSchemaForKey(key);
+      if (propertySchema === undefined || !isObjectNotArray(propertySchema)) {
+        return propertySchema;
+      }
+      const defs = selectReferencedCfcSchemaDefs(propertySchema, argumentDefs);
+      return defs === undefined ? propertySchema : {
+        ...propertySchema,
+        $defs: defs,
+      };
+    };
     for (const { key, cell } of liveCellInputs) {
-      if (argumentSchemaForKey(key) === undefined) {
+      const readSchema = readSchemaForKey(key);
+      if (readSchema === undefined) {
         continue;
       }
-      await cell.sync();
-      const mismatch = argumentMismatch(key, cell.get());
+      // The read goes through the argument schema: a schema-less sync can
+      // complete without data for a referent that needs schema-driven
+      // materialization (a registry grant is one), and its `undefined` would
+      // be measured here as the cell's value.
+      const typedCell = cell.asSchema(readSchema);
+      await typedCell.sync();
+      const mismatch = argumentMismatch(key, typedCell.get());
       if (mismatch !== undefined) {
         return mismatch;
       }

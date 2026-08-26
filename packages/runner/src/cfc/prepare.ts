@@ -267,6 +267,7 @@ const effectiveReadLabel = (
   read: {
     nonRecursive: boolean | undefined;
     consumes: ReadClassSelection;
+
     /**
      * Entries excluded from this read's consumption on top of class
      * selection. Sole current user is `deriveFlowJoin`'s pair of template
@@ -1522,6 +1523,25 @@ const valueWriteTargets = (
   }
   return result;
 };
+
+/**
+ * Whether every write a transaction recorded at `path` on one target arrived
+ * on the raw meta seam — the document-root siblings of `value` that
+ * `setMetaRaw` addresses (`schema`, `internal`, `patternIdentity`, and the
+ * rest of the `MetaField` union).
+ *
+ * No value schema describes that seam, so the two rules that ask a schema
+ * about a path — the write-policy requirement and the §8.12.4 writer-fit
+ * measurement — have nothing to ask about a meta-seam path, and both consult
+ * this one predicate. A meta root and a payload field of the same name share
+ * one logical path, which is why `valueWriteTargets` records the answer per
+ * path across every write that reached it rather than per write: a path is
+ * meta only while no payload write landed there too.
+ */
+const isMetaSeamPath = (
+  metaOnlyByPath: ReadonlyMap<string, boolean> | undefined,
+  path: readonly string[],
+): boolean => metaOnlyByPath?.get(pathKey(path)) === true;
 
 // ---------------------------------------------------------------------------
 // S16 flow labels (default transition): one conservative confidentiality join
@@ -3196,6 +3216,7 @@ type WritePrefixBounds = {
     },
     path: readonly string[],
   ): number;
+
   /**
    * Stage-0 instrumentation only (docs/specs/cfc-value-level-provenance.md
    * §6): whether the transaction logged ANY value-surface write attempt.
@@ -3282,6 +3303,7 @@ const buildWritePrefixBounds = (
 
 /** How a protected write's activity-clock bound was obtained. */
 export type CfcPrefixBoundSource =
+
   /** A logged overlapping write attempt — the prefix engaged. */
   | "real"
   /**
@@ -3302,6 +3324,7 @@ export type CfcPrefixBoundSource =
 export type CfcPrefixProvenanceWrite = {
   /** Document id of the protected write's target. */
   id: string;
+
   /**
    * Protected schema-entry path as an RFC 6901 JSON pointer (e.g. "/out";
    * "" is the root; "~"/"/" in property names escape as "~0"/"~1"), so
@@ -3309,10 +3332,13 @@ export type CfcPrefixProvenanceWrite = {
    */
   path: string;
   boundSource: CfcPrefixBoundSource;
+
   /** Gated reads within this write's D4 prefix (post-S7-exemption). */
   prefixGatedReads: number;
+
   /** What the pre-D4 transaction-global gate would have counted. */
   txGlobalGatedReads: number;
+
   /** Provenance-only reads within the prefix the S7 exemption excluded. */
   s7ExemptionFires: number;
 };
@@ -3326,18 +3352,23 @@ export type CfcPrefixProvenanceWrite = {
 export type CfcPrefixProvenanceSummary = {
   /** Protected writes measured (may exceed writes.length — see the cap). */
   protectedWrites: number;
+
   /** Sum of per-write prefix-gated read counts. */
   prefixGatedReads: number;
+
   /** Sum of per-write pre-D4 transaction-global gated-read counts. */
   txGlobalGatedReads: number;
+
   /** Bound-source classification counts across protected writes. */
   boundSources: {
     real: number;
     infinityFallback: number;
     clockLess: number;
   };
+
   /** Total S7 provenance-only exemption fires within prefixes. */
   s7ExemptionFires: number;
+
   /**
    * Non-internal read activities without an activity-clock position,
    * treated at -Infinity (joining every prefix). Deliberate -Infinity
@@ -3345,6 +3376,7 @@ export type CfcPrefixProvenanceSummary = {
    * write, so this is per-prepare, not per-write.
    */
   clockLessReads: number;
+
   /** Per-write detail, capped at CFC_PREFIX_PROVENANCE_MAX_WRITES. */
   writes: CfcPrefixProvenanceWrite[];
 };
@@ -3755,7 +3787,11 @@ const verifyInputRequirements = (
           const fits = outcome.exhausted === false &&
             atomsOutsideCeiling(outcome.confidentiality, maxConfidentiality)
                 .length === 0;
-          if (!fits && outcome.resolutionFailures.length > 0) {
+          if (
+            !fits &&
+            (outcome.resolutionFailures.length > 0 ||
+              outcome.grantResolutionUnavailable)
+          ) {
             // The miss was evaluated over a manifest or grant that did not
             // resolve, so the label kept atoms a rewrite might have cleared:
             // not a verdict (see the return-type note above).
@@ -4943,8 +4979,12 @@ const evaluateGatedConfidentiality = (
     readonly reference: unknown;
     readonly reason: string;
   }[];
+
+  /** A grant lookup could not be read; see `createTxCfcGrantResolver`. */
+  grantResolutionUnavailable: boolean;
 } => {
   const state = tx.getCfcState();
+  const grantAvailability = { unavailable: false };
   const result = evaluateExchangeRules(
     { confidentiality: [...confidentiality] },
     state.policySnapshot,
@@ -4959,7 +4999,9 @@ const evaluateGatedConfidentiality = (
       // consulted address+digest into the prepare state for the B5-style
       // digest binding. Rides the same cfcPolicyEvaluation dial as the rest
       // of this evaluation — this function only runs when the dial is on.
-      grantResolver: createTxCfcGrantResolver(tx),
+      grantResolver: createTxCfcGrantResolver(tx, {
+        availability: grantAvailability,
+      }),
       grantConsumption: consumption,
       modulePolicyResolver: createTxCfcModulePolicyResolver(
         tx,
@@ -4982,6 +5024,7 @@ const evaluateGatedConfidentiality = (
     exhausted: result.exhausted,
     firings: result.firings.length,
     resolutionFailures: result.resolutionFailures,
+    grantResolutionUnavailable: grantAvailability.unavailable,
   };
 };
 
@@ -5034,6 +5077,14 @@ const verifySinkRequestCeilings = (
   const reasons: string[] = [];
   for (const [sink, ceiling] of gatedSinks) {
     let effective = consumed.confidentiality;
+    // Whether the fits-decision below is a pure function of this
+    // transaction's data — a VERDICT (see verdict-reason.ts). Two things
+    // make it not, both enforce-mode availability holes in the rewrite: a
+    // module policy manifest that did not resolve, and a grant lookup that
+    // could not be read — either might carry the discharge that admits the
+    // request on an attempt that resolves it. `off` and `observe` decide on
+    // the raw label every time, so their refusal is always a verdict.
+    let verdict = true;
     if (mode !== "off") {
       // Boundary context for this release site (spec §8.10.5 / §15.4): the
       // sink name plus its class. Every sink in the initial inventory is a
@@ -5083,6 +5134,8 @@ const verifySinkRequestCeilings = (
           continue;
         }
         effective = outcome.confidentiality;
+        verdict = outcome.resolutionFailures.length === 0 &&
+          !outcome.grantResolutionUnavailable;
       } else {
         // observe: decide exactly as `off` would; diagnose what enforce
         // would have done differently.
@@ -5123,10 +5176,10 @@ const verifySinkRequestCeilings = (
     if (offending.length > 0) {
       // Name the offending atom(s) so an observe-mode diagnostic identifies the
       // exact (sink, atom) pair that needs a ceiling entry (review on #3993).
-      reasons.push(
-        `sink-request confidentiality exceeds ceiling for ${sink}: ` +
-          offending.map((atom) => JSON.stringify(atom)).join(", "),
-      );
+      const reason = `sink-request confidentiality exceeds ceiling for ` +
+        `${sink}: ` +
+        offending.map((atom) => JSON.stringify(atom)).join(", ");
+      reasons.push(verdict ? verdictReason(reason) : reason);
     }
   }
   return reasons;
@@ -5489,17 +5542,14 @@ export const prepareBoundaryCommit = (
       continue;
     }
     // The schema write-policy requirement quantifies over the paths a
-    // schema could describe. A raw meta-seam write is not one: `setMetaRaw`
-    // lands on a document-root sibling of `value` (`slug`,
-    // `patternIdentity`, and the rest of the `MetaField` union), and no
-    // schema describes that seam, so demanding a policy input for it
-    // rejects every meta write on a labeled document — slug assignment, the
-    // pattern updater's identity swap, setup over an existing piece, and
-    // the source-lifecycle transitions. These paths stay flow-label
-    // targets: the write above still carries the transaction's join onto
-    // the document, so nothing is laundered by skipping them here.
+    // schema could describe. A raw meta-seam write is not one, so demanding
+    // a policy input for it rejects every meta write on a labeled document —
+    // slug assignment, the pattern updater's identity swap, setup over an
+    // existing piece, and the source-lifecycle transitions. These paths stay
+    // flow-label targets: the write above still carries the transaction's
+    // join onto the document, so nothing is laundered by skipping them here.
     const policyPaths = target.paths.filter((path) =>
-      target.metaOnlyByPath.get(pathKey(path)) !== true
+      !isMetaSeamPath(target.metaOnlyByPath, path)
     );
     if (policyPaths.length === 0) {
       continue;
@@ -6508,17 +6558,39 @@ export const prepareBoundaryCommit = (
           structureStampPaths.push(structureContainerPath);
         }
       }
-      for (const path of derivedStampPaths) {
-        // Deeper stamped paths are redundant with a stamped ancestor; only
-        // collapse against paths that actually receive a covering entry.
-        if (
-          derivedStampPaths.some((other) =>
-            other.length < path.length && isPrefix(other, path)
-          )
-        ) {
-          continue;
-        }
-        if (flowConfidentiality.length > 0) {
+      // Writer-fit measures the paths a schema could have declared a policy
+      // at, and the raw meta seam is not one: no value schema describes the
+      // document-root siblings of `value`. The measurement is skipped there
+      // at every rung, so a meta path raises neither a strict reject nor a
+      // persist-and-flag diagnostic.
+      //
+      // A ceiling can still resolve at a meta path, from a document-root
+      // declared entry by longest prefix. The skip is unconditional anyway:
+      // that entry sits at logical `[]`, the PAYLOAD root, and reaches the
+      // seam only because canonicalization strips a leading `"value"`.
+      //
+      // Meta paths stay flow stamp targets in the loop below, so the join
+      // still lands on them as the `derived` component. Where a payload
+      // field carries a `MetaField` name the two share one logical path, so
+      // an exempt meta write can raise the stored derived label there past
+      // what that field declares — over-taint, which leaves the declared
+      // entry untouched and reads protected.
+      if (flowConfidentiality.length > 0) {
+        const measuredPaths = derivedStampPaths.filter((path) =>
+          !isMetaSeamPath(flowTarget?.metaOnlyByPath, path)
+        );
+        for (const path of measuredPaths) {
+          // Deeper paths are covered by the write at a measured ancestor;
+          // collapse against measured paths only, so an exempt meta path
+          // never shadows a value write below it (a payload field named
+          // `schema` shares the meta root's logical path).
+          if (
+            measuredPaths.some((other) =>
+              other.length < path.length && isPrefix(other, path)
+            )
+          ) {
+            continue;
+          }
           // Absent declared entries resolve to the EMPTY ceiling ("public
           // store"), never the undefined "no ceiling" — a tainted write to
           // an undeclared store is the canonical misfit, and fitting it
@@ -6554,6 +6626,17 @@ export const prepareBoundaryCommit = (
               tx.noteCfcDiagnostic(`writer-fit(persist-and-flag): ${misfit}`);
             }
           }
+        }
+      }
+      for (const path of derivedStampPaths) {
+        // Deeper stamped paths are redundant with a stamped ancestor; only
+        // collapse against paths that actually receive a covering entry.
+        if (
+          derivedStampPaths.some((other) =>
+            other.length < path.length && isPrefix(other, path)
+          )
+        ) {
+          continue;
         }
         // C2 persist split (C0 §5/§8): the per-tx join lands as two
         // per-class entries instead of one covering entry. The `value`

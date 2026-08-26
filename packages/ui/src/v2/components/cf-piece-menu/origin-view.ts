@@ -11,6 +11,7 @@ import type { PieceOriginView } from "@commonfabric/runtime-client";
 export interface OriginDescription {
   /** Short label naming the kind of origin. */
   label: string;
+
   /** One sentence on what that origin can do. */
   detail: string;
 }

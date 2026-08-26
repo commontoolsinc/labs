@@ -24,6 +24,7 @@ import type { SpaceDb } from "./db.ts";
 export interface ChurnBucket {
   /** Bucket start, UTC, `YYYY-MM-DD HH:MM:SS` (the store's own clock format). */
   start: string;
+
   /** Unix seconds for the bucket start — for plotting without re-parsing. */
   startEpoch: number;
   commits: number;
@@ -41,9 +42,11 @@ export interface ChurnEntity {
 export interface ChurnReport {
   bucketSeconds: number;
   branch: string;
+
   /** First and last bucket start the curve covers (null on an empty window). */
   from: string | null;
   to: string | null;
+
   /**
    * Start of the last bucket that actually holds a commit (null when none do).
    *
@@ -54,6 +57,7 @@ export interface ChurnReport {
    */
   lastCommit: string | null;
   totals: { commits: number; revisions: number };
+
   /**
    * Contiguous, zero-filled from `from` to `to` so gaps read as quiet.
    *
@@ -64,10 +68,13 @@ export interface ChurnReport {
    * stopped.
    */
   buckets: ChurnBucket[];
+
   /** The busiest bucket by commits, or null when the window is empty. */
   peak: ChurnBucket | null;
+
   /** Top writers inside `peak` — what to blame for the busiest minute. */
   peakEntities: ChurnEntity[];
+
   /**
    * Commits whose `created_at` SQLite could not parse as a time, and which are
    * therefore absent from every bucket. Nonzero means the curve is incomplete —
@@ -78,8 +85,10 @@ export interface ChurnReport {
 
 export interface ChurnOptions {
   branch?: string;
+
   /** Bucket width in seconds. Default 60. */
   bucketSeconds?: number;
+
   /**
    * Lower bound on `commit.created_at`, inclusive. `YYYY-MM-DD HH:MM:SS` or ISO.
    *
@@ -87,6 +96,7 @@ export interface ChurnOptions {
    * just the part of it that happened to contain writes.
    */
   since?: string;
+
   /**
    * Upper bound on `commit.created_at`, exclusive.
    *
@@ -95,6 +105,7 @@ export interface ChurnOptions {
    * are reported instead of implied.
    */
   until?: string;
+
   /** How many entities to attribute the peak bucket to. Default 10. */
   top?: number;
 }

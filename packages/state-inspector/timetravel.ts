@@ -53,19 +53,25 @@ export type StoredValueKind =
 export interface ValueChange {
   /** Slash-delimited path of the change. */
   path: string;
+
   /** Exact path segments, e.g. `["value", "items", "0"]`. */
   pathSegments?: string[];
   kind: ChangeKind;
   before?: unknown;
   after?: unknown;
+
   /** Set when `before` is the annotation for a stored `undefined` value. */
   beforeIsUndefined?: true;
+
   /** Set when `after` is the annotation for a stored `undefined` value. */
   afterIsUndefined?: true;
+
   /** Set when different stored values have equal display annotations. */
   annotationCollision?: true;
+
   /** Stored value kind for `before` when display annotations collide. */
   beforeValueKind?: StoredValueKind;
+
   /** Stored value kind for `after` when display annotations collide. */
   afterValueKind?: StoredValueKind;
 }
@@ -416,16 +422,22 @@ export interface TimelineStep {
   commitSeq: number;
   session: string;
   createdAt: string;
+
   /** One-line summary of the entity's value after this write. */
   summary: string;
+
   /** Whether the entity is known to exist after this write. */
   exists: boolean;
+
   /** Number of changes from the preceding state. */
   changes: number;
+
   /** Set when the preceding or current state could not be reconstructed. */
   changesKnown?: false;
+
   /** Set when the entity's state after this write could not be reconstructed. */
   stateKnown?: false;
+
   /** The reconstruction error, when this write could not establish state. */
   error?: string;
 }
@@ -544,10 +556,13 @@ export interface SpaceTimelineEntry {
   commitSeq: number;
   createdAt: string;
   session: string;
+
   /** Entities touched (revisions) in this commit. */
   touched: number;
+
   /** Entities seen here for the first time. */
   created: number;
+
   /** Cumulative distinct entities up to and including this commit. */
   cumulativeEntities: number;
 }

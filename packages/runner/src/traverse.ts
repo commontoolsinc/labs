@@ -614,11 +614,14 @@ type PreparedAnyOfBranch = {
   /** Original option was the `false` schema: counted, never matched. */
   optionIsFalse: boolean;
   merged: JSONSchema;
+
   /** Prefilter verdict known statically (boolean merged / unresolved $ref). */
   constant: boolean | undefined;
   hasAsCell: boolean;
+
   /** Normalized type list of the resolved merged schema, if constrained. */
   types: readonly JSONSchemaTypes[] | undefined;
+
   /** Required property names, when the resolved type admits objects. */
   required: readonly string[] | undefined;
 };
@@ -1243,6 +1246,7 @@ export type PointerCycleTracker = CompoundCycleTracker<
 export type TraversalContext = {
   tracker: PointerCycleTracker;
   schemaTracker: MapSet<string, SchemaPathSelector>;
+
   /**
    * The acting identity this traversal's schema-tracker keys resolve
    * scoped addresses against (key-vocabulary.md §1 sites 5–6): coverage
@@ -1255,6 +1259,7 @@ export type TraversalContext = {
   scopeKeyIdentity: ScopeKeyIdentity;
   includeMeta: boolean;
   metaDocsVisited: Set<string>;
+
   /**
    * Reports a followed link whose target document is absent from the local
    * replica. Cross-space targets (target space !== `sourceSpace`) can never
@@ -1272,6 +1277,7 @@ export type TraversalContext = {
      * the miss so a referrer that changes away retires it. */
     source?: { id: string; scope?: CellScope },
   ) => void;
+
   /**
    * Schema-document tracker keys this traversal has already attempted to
    * load, so one traversal reads each referenced document at most once. A
@@ -1279,6 +1285,7 @@ export type TraversalContext = {
    * (triggered by the arrival) retries.
    */
   schemaDocsLoaded: Set<string>;
+
   /**
    * `\${space}/\${taggedHash}` keys for the schema documents this traversal
    * loaded AND verified, qualified by the space each was collected from —
@@ -1523,6 +1530,7 @@ class StandardObjectCreator implements IObjectCreator<FabricValue> {
   ): FabricValue {
     return defaultValue;
   }
+
   /**
    * When processing queries, we want JSON, so we replace undefined with null.
    *
@@ -3709,6 +3717,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
 
   // Generally handles anyOf
   // TODO(@ubik2): Need to break this up -- it's too long
+
   /**
    * Traverse the doc with the specified schema.
    *

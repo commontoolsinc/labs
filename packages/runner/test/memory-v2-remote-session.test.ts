@@ -277,6 +277,7 @@ class RecordingWebSocket extends EventTarget {
       },
     );
   }
+
   /** Resolves once `count` sockets have been dialed — no polling. */
   static whenDialed(count: number): Promise<void> {
     if (RecordingWebSocket.dialed.length >= count) return Promise.resolve();

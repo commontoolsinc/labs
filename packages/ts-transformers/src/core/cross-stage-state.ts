@@ -27,6 +27,7 @@ import type {
 export interface NodeTypeLinks {
   /** Cached per-function capability summary (was `capabilitySummaryRegistry`). */
   capabilitySummary?: FunctionCapabilitySummary;
+
   /**
    * Whether SchemaInjection has finalized this builder call/new node (was
    * `schemaInjectedRegistry`). A bare presence flag with NO getOriginalNode
@@ -34,6 +35,7 @@ export interface NodeTypeLinks {
    * pre-injection user call, which must NOT read as injected.
    */
   schemaInjected?: true;
+
   /**
    * For a `toSchema` call SchemaInjection created to describe a pattern's
    * RESULT, the authored node a diagnostic about that schema points at. The
@@ -111,6 +113,7 @@ export class CrossStageState {
   > {
     return this.#policyManifests;
   }
+
   /**
    * Bare cross-package channels (the published boundary contract). Read
    * directly by the schema-generator package as plain WeakMaps; they must NOT

@@ -42,10 +42,13 @@ export type ServerExecutionOnSkip = {
   /** Test file, relative to the suite's package root (the directory the
    * suite's `deno test` runs from), e.g. "integration/counter.test.ts". */
   file: string;
+
   /** The plan phase that, once landed, unskips this file (or step). */
   phase: ServerExecutionPhase;
+
   /** Why the ON arm cannot run this file (or step) before that phase. */
   reason: string;
+
   /**
    * STEP-LEVEL entry (Phase 7 fixer, 2026-08-16): the exact name of ONE
    * `it`/step inside `file` that the ON arm skips while the REST of the
@@ -126,6 +129,7 @@ const SUITE_PACKAGE_DIR: Record<ServerExecutionSuite, string> = {
  * residual; its sibling `cfc-group-chat-demo-two-browsers` was
  * un-skipped by fan-out stage B (2026-08-17, 3/3 green).
  */
+
 /**
  * The two-browser gates' Phase-7 reason (the client-side
  * `scheduler-non-settling` loop, verification-coverage.md OW32) RETIRED
@@ -188,56 +192,37 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
   // verification-coverage.md OW60, not as a flaky test.
   patterns: [
     {
-      // The entry's charge NARROWED 2026-08-24 (the catch-up-and-start
-      // build's 10/10 gate at the fix head — ensure-off, the CI ON
-      // lanes' posture; fresh store + posture probe per run,
-      // quiet-and-loaded, per-run ledger on the PR). The b04
-      // client-start DEATH — the flag-ON client's navigate-deferred
-      // piece start dying terminally on a stale-confirmed-read
-      // ConflictError with no recovery arm — is CLOSED by the RULED
-      // catch-up-and-start recovery (the refusal is "the server won the
-      // race": await the conflict's readiness, then start from the
-      // served documents through the ordinary load walk, committing
-      // nothing; verification-coverage.md OW45's CATCH-UP-AND-START
-      // block, serving-loop.md §3d RULED 2026-08-24). The gate watched
-      // that recovery fire live in EVERY run (1-2 per run, zero
-      // terminal deferred-start deaths, zero recovery failures) and
-      // resurrect the notebook space's refused root start in the GREEN
-      // runs (7/10, steps 22-46 s). The residue that keeps this entry
-      // is READ-SIDE, two members, neither reachable from the
-      // deferred-start error arm: (i) r01 — the single-chain readCell
-      // starvation (piece context fully live, internal noteCount 7,
-      // render holds all 7 notes, the predicate's readCell of the
-      // argument's redirect-linked notes undefined across the full
-      // 300 s net; silent — zero error lines); (ii) r06+r09 — the
-      // stranded whole-piece mid-session read death (every read of the
-      // piece returns nothing at diagnostics time) with an identical
-      // chain in both: the notebook space's root recovery fired, no
-      // start died, then ONE watcher `pattern-load-error` for a
-      // KEYLESS identity — the CT-1923 stranded-state shape; the
-      // durable store's pointers are all real identities, so the
-      // keyless ref is session-side. Both members store-verified
-      // zero-loss (all 7 /value/notes appends present, serving loop
-      // healthy). This disproves the fork memo's working hypothesis
-      // that the h01/h05/rf2 shapes were "the same die-off" as the
-      // start class. Lifts when the read-side residue closes and the
-      // fixed step greens ON 10/10 quiet-and-loaded; the flip PR needs
-      // this list EMPTY.
+      // The post-client-absorb-fix ON gate is 9/10 at the CI lane's
+      // ensure-off
+      // posture. The earlier read-side residues are likely closed by
+      // intervening fixes: r01 has the matching read-side delivery
+      // mechanism story, while r06/r09 have absence-of-observation only
+      // because their keyless-identity mechanism was never root-caused.
+      // The sole red is a new shape: the target stops after six durable
+      // note appends, with one `pattern-swap-setup-error` reporting that
+      // recursive schema validation made no progress. Its root keeps a
+      // real pattern identity, and `pattern-load-error` stays at zero.
+      // The store-incomplete setup-error shape is the current charge;
+      // verification-coverage.md OW45 and its linked historical report
+      // carry the full ledger and discriminators. The entry lifts when
+      // this step greens ON 10/10 quiet-and-loaded; the flip PR needs
+      // this list empty.
       file: "integration/default-app.test.ts",
       step: "should persist and reload every rapidly created notebook note",
       phase: "phase-7",
-      reason: "Real ON-regime client defect, NARROWED 2026-08-24 " +
-        "(verification-coverage.md OW45 arm B): the b04 client-start " +
-        "death is CLOSED by the ruled catch-up-and-start recovery — " +
-        "watched live at the fix-head gate — and the remaining charge " +
-        "is the read-side residue: the client's readCell of the " +
-        "argument's redirect-linked notes sticky-undefined for the " +
-        "full net with the piece context live (r01), or the whole " +
-        "piece's reads dead mid-session behind a keyless " +
-        "pattern-load-error (r06/r09, the CT-1923 stranded shape) — " +
-        "while the store holds every append: no data loss, no " +
-        "deferred-start death. Lifts when that residue closes and the " +
-        "fixed step greens ON 10/10.",
+      reason: "Real ON-regime defect, RE-MEASURED 2026-08-26 " +
+        "(verification-coverage.md OW45 arm B): the " +
+        "post-client-absorb-fix gate " +
+        "is 9/10. The earlier read-side r01/r06/r09 residues are " +
+        "likely closed by intervening fixes — r01 has the matching " +
+        "read-side delivery mechanism story; r06/r09 have " +
+        "absence-of-observation only. The sole red is a new " +
+        "store-incomplete setup-error shape: the step stops after six " +
+        "durable note appends with one pattern-swap-setup-error " +
+        "(recursive schema validation made no progress), a real root " +
+        "pattern identity, and zero pattern-load-error. Root cause " +
+        "unknown. Lifts when the fixed step greens ON 10/10 " +
+        "quiet-and-loaded; catch-up-and-start remains closed.",
     },
     {
       // Re-listed by the lunch-poll identity PR (#5744). This file was

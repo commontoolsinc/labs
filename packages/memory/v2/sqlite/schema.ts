@@ -13,8 +13,10 @@ import { buildRowLabelSpec, type RowLabelRule } from "./row-label.ts";
 
 export type ColumnSchema = {
   type: string;
+
   /** Verbatim SQLite column type/constraints for DDL, e.g. "integer primary key". */
   sqlType: string;
+
   /** Marks a `_cf_link` column (stored TEXT, surfaced as a Cell). */
   cfLink?: true;
   [key: string]: FabricValue;

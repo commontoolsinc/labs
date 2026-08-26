@@ -70,24 +70,34 @@ const setTyped = handler<{ value: string }, { typed: Writable<string> }>(
 export interface ReactiveNowOutput {
   [NAME]: string;
   [UI]: VNode;
+
   /** The piece's first-load time, "HH:MM:SS" (or "…" before #now resolves). */
   loadedAt: string;
+
   /** The ticking current time, "HH:MM:SS" (or "…"). */
   now: string;
+
   /** Whole seconds since load, e.g. "12s ago" (or "…"). */
   sinceLoad: string;
+
   /** How many times the tap handler has actually been delivered. */
   taps: number;
+
   /** Coarse time the last tap was delivered ("—" before the first). */
   lastTapAt: string;
+
   /** The tap event stream (also driven by the button). */
   tap: Stream<Record<string, never>>;
+
   /** The current text of the bound `$value` box. */
   typed: string;
+
   /** Length of `typed`, derived — updates as the keystroke write propagates. */
   charCount: number;
+
   /** `typed` upper-cased, derived — a second observer of the same cell flip. */
   echo: string;
+
   /** Test-only stream to set the text box (the browser uses the `$value` bind). */
   type: Stream<{ value: string }>;
 }

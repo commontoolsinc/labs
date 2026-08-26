@@ -72,22 +72,28 @@ const logger = getLogger("effects-channel", {
 
 export class EffectsChannel {
   readonly #runtime: Runtime;
+
   /** The enacted-nonce record (LT8): reload-wiped by construction. A
    * FAILED enactment retracts its nonce (owner review P1-1), so the
    * record holds successes and in-flight attempts only. */
   readonly #enacted = new Set<string>();
+
   /** In-flight enactments by nonce — the outcome every ack must chain
    * on (protocol.md §5's "enacts, THEN commits an authored ack"):
    * resolves true on success (record kept, acks release), false on
    * failure (record retracted; the entry — still unacked in the store
    * — re-enacts on a later delivery). */
   readonly #enactInFlight = new Map<string, Promise<boolean>>();
+
   /** Spaces whose session effects instance this channel watches. */
   readonly #spaces = new Set<MemorySpace>();
+
   /** The ONE storage-notification listener (design (e) item 13). */
   #listener: CoalescedDocListener | undefined;
+
   /** DIAGNOSTIC (tests): reconciles run from notifications / re-reads. */
   #reconciles = 0;
+
   /** In-flight ack writes (`${space}\0${nonce}`) — one authored ack per
    * nonce at a time; a failed ack retries on the next sink delivery
    * (the entry is still unacked there). */

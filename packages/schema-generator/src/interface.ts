@@ -38,6 +38,7 @@ export type SchemaHints = WeakMap<ts.Node, SchemaHint>;
 /** Options that affect schema generation without changing the authored type. */
 export interface SchemaGenerationOptions {
   readonly widenLiterals?: boolean;
+
   /**
    * Resolves a TypeScript source-file name to the writer identity that should
    * be embedded in `WriteAuthorizedBy` metadata. Transformer callers use this
@@ -54,42 +55,57 @@ export interface SchemaGenerationOptions {
  */
 export interface GenerationContext {
   // Immutable context (set once)
+
   /** TypeScript type checker */
   readonly typeChecker: ts.TypeChecker;
+
   /** Pre-computed cyclic type set */
   readonly cyclicTypes: ReadonlySet<ts.Type>;
+
   /** Pre-computed cyclic name set */
   readonly cyclicNames: ReadonlySet<string>;
 
   // Accumulating state (grows during generation)
+
   /** Named type definitions for $refs */
   definitions: Record<string, SchemaDefinition>;
+
   /** Which $refs have been emitted */
   emittedRefs: Set<string>;
 
   // Stack state (push/pop during recursion)
+
   /** Current recursion path for cycle detection */
   definitionStack: Set<string | ts.Type>;
+
   /** Currently building these named types */
   inProgressNames: Set<string>;
 
   // Optional context
+
   /** Type node for additional context */
   typeNode?: ts.TypeNode;
+
   /** Source file name for authoring metadata that needs stable file identity */
   sourceFileName?: string;
+
   /** Source file for resolving names from synthetic type nodes */
   sourceFile?: ts.SourceFile;
+
   /** Optional type registry for synthetic nodes */
   typeRegistry?: WeakMap<ts.Node, ts.Type>;
+
   /** Widen literal types to base types during schema generation */
   widenLiterals?: boolean;
+
   /** Resolve writer-claim file spelling and optional mint-time identity. */
   writerIdentityForSourceFile?: (
     fileName: string,
   ) => WriterSourceIdentity;
+
   /** Schema hints for overriding default behavior (keyed by TypeNode) */
   schemaHints?: SchemaHints;
+
   /** Override for array items schema, propagated from wrapper types */
   arrayItemsOverride?: JSONSchema;
 }

@@ -1,4 +1,5 @@
 /// <cts-enable />
+
 /**
  * An action step's `event` payload in a multi-user run. Alice sends an object
  * payload and asserts on what the handler recorded, so the assertion fails if

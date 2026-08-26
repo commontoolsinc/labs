@@ -259,6 +259,11 @@ Each of these gates fails CI on its own, and none of them run as part of
   dependency declarations across the workspace
 - `deno task check-package-cycles` — two packages that import each other, the
   part of "Dependencies run downward" above that a machine can settle
+- `deno task check-completion-slots` — a `cf` option or positional nobody
+  decided about completing. Shell completion's values come from two
+  hand-maintained tables, and a slot missing from both is silent: it offers
+  nothing, exactly as an unreachable fabric does. Give it candidates, or record
+  in the task why it has none
 - `deno task check-local-program` — a program built from local files by hand
   rather than through `resolveLocalProgram`, which silently drops any data files
   the caller attached

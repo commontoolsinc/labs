@@ -18,8 +18,10 @@ export interface AssignSlugToolInput {
 export interface AssignSlugToolSuccessOutput {
   outputId: string;
   status: "ok";
+
   /** The assigned slug, the caller's own word echoed back. */
   slug: string;
+
   /**
    * Absolute URL for the named piece, composed from the session's API URL
    * and the space's configured name. Absent when the session was configured

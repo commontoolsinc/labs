@@ -42,8 +42,10 @@ export const cfcPolicyManifestDocId = (
 export type ExchangeRule = {
   /** Stable identifier: diagnostics, canonical evaluation order, digests. */
   readonly id: string;
+
   /** Target pattern selecting the clause alternative this rule rewrites. */
   readonly appliesTo: AtomPattern;
+
   /**
    * Conjunctive guards (spec §4.3.2 preCondition). `confidentiality` are the
    * non-target side conditions; `integrity` match against available
@@ -62,6 +64,7 @@ export type ExchangeRule = {
     readonly boundary?: readonly AtomPattern[];
     readonly policyState?: readonly AtomPattern[];
   };
+
   /**
    * Scope for the non-target confidentiality side conditions. Default
    * `targetClause`: they must match alternatives of the SAME clause as the
@@ -69,6 +72,7 @@ export type ExchangeRule = {
    * label.
    */
   readonly preConfScope?: "targetClause" | "anywhere";
+
   /**
    * Effect when the rule fires on a matched clause alternative. Exactly one
    * of the two forms (validated): `addAlternatives` instantiates patterns
@@ -130,6 +134,7 @@ export type CfcPolicyRecordInput = {
   readonly id: string;
   readonly rules: readonly ExchangeRule[];
   readonly digest?: string;
+
   /** Scope mode (see {@link CfcPolicySelection}); defaults to `ambient`. */
   readonly selection?: CfcPolicySelection;
 };

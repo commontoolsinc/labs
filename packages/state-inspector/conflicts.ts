@@ -38,6 +38,7 @@ export interface Writer {
   seq: number;
   commitSeq: number;
   session: string;
+
   /** The writer's identity (principal DID parsed from the session). */
   principal?: string;
   op: string;
@@ -46,20 +47,27 @@ export interface Writer {
 
 export interface ContendedEntity {
   id: string;
+
   /** Distinct writer sessions. */
   sessions: number;
+
   /** Distinct writer IDENTITIES — `>=2` is real cross-user contention vs the
    * same user editing from multiple tabs/devices. */
   principals: number;
+
   /** True when ≥2 distinct identities wrote it (multi-user, not multi-session). */
   multiUser: boolean;
   writes: number;
+
   /** Writer timeline, seq-ordered. */
   writers: Writer[];
+
   /** Sessions alternate (A→B→A) — concurrent back-and-forth, not a handoff. */
   interleaved: boolean;
+
   /** Lost-update reads (attached by the explorer bundle for multi-user cells). */
   staleReads?: StaleRead[];
+
   /** True once stale-read analysis ran for this cell. `false`/absent on a
    * multi-user cell means analysis was SKIPPED (a cap), not that it's clean —
    * the UI must distinguish "no anomaly" from "not analyzed". */
@@ -151,20 +159,27 @@ export interface StaleRead {
   /** The commit that read the entity. */
   readerCommitSeq: number;
   readerSession: string;
+
   /** The seq the reader saw the entity at. */
   readAtSeq: number;
+
   /** The read's declared path within the entity (`[]` = whole document). */
   readPath: string[];
+
   /** The branch the read resolved against (`read.branch ?? readerCommit.branch`). */
   readBranch: string;
+
   /** The resolved scope_key the read targeted (engine `resolveScopeKey`). */
   readScopeKey: string;
+
   /** A conflicting write the engine's own check would have rejected. */
   missedWriteSeq: number;
   missedWriteSession: string;
+
   /** The op of the conflicting write (`set`/`delete` always conflict; `patch`
    * only when its paths overlap the read — `patchOverlapsRead`). */
   missedWriteOp: string;
+
   /** True when the reader ALSO wrote the entity (a real lost-update risk). */
   readerAlsoWrote: boolean;
 }
@@ -173,10 +188,12 @@ export interface EntityConflicts {
   id: string;
   writers: Writer[];
   writerSessions: number;
+
   /** Distinct writer identities — `>=2` is real cross-user contention. */
   writerPrincipals: number;
   multiUser: boolean;
   interleaved: boolean;
+
   /** Stale reads: the reader committed without seeing a prior concurrent write. */
   staleReads: StaleRead[];
 }

@@ -30,14 +30,19 @@ export interface DirEntry {
 export interface FileGateway {
   /** The working directory the picker opens at when there is no current file. */
   cwd(): string;
+
   /** A directory's entries, or null when it cannot be read. */
   list(absDir: string): DirEntry[] | null;
+
   /** Open a file: its source and decoded buffer, or null on failure. */
   open(absPath: string): { source: EditableSource; text: string } | null;
+
   /** Join a directory and a path segment, normalized. */
   join(dir: string, segment: string): string;
+
   /** The parent directory of a path. */
   parent(path: string): string;
+
   /** The final path segment (for display). */
   base(path: string): string;
 }

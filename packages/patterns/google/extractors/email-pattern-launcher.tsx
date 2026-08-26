@@ -54,6 +54,7 @@ import UnitedFlightTrackerPattern from "./united-flight-tracker.tsx";
 interface RegistryEntry {
   /** Path to the pattern file (relative to /api/patterns/) */
   patternUri: string;
+
   /** Glob-style email patterns (e.g., "*@usps.com") */
   emailPatterns: string[];
 }
@@ -62,8 +63,10 @@ interface RegistryEntry {
 interface PatternMatchInfo {
   /** Path to the pattern file */
   patternUri: string;
+
   /** The full registry entry */
   entry: RegistryEntry;
+
   /** Email addresses that triggered this pattern */
   matchedEmails: string[];
 }

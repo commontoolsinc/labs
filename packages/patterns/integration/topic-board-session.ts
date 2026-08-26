@@ -23,6 +23,7 @@ import { type TopicBoardFixture, topicTitle } from "./topic-board-fixture.ts";
 
 export interface BoardSessionTarget {
   fixture: TopicBoardFixture;
+
   /** The identity the board was seeded under, and is read back with. */
   identity: Identity;
 }

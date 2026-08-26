@@ -17,8 +17,10 @@ interface Fixture {
   heard(now: number): void;
   lost(): void;
   check(now: number): boolean;
+
   /** The browser losing the connection and retrying it on its own. */
   connectionDropped(): void;
+
   /** The connection being made, and the first event arriving on it. */
   connectionMade(now: number): void;
 }

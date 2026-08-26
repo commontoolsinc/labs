@@ -1,7 +1,13 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
+import ts from "typescript";
 
-import { generateCommonfabricTypes } from "./generate-commonfabric-types.ts";
+import {
+  generateCommonfabricTypes,
+  inlineWorkspaceModules,
+  moduleSpecifierOf,
+  readInlinedModule,
+} from "./generate-commonfabric-types.ts";
 
 /**
  * Tests for the `commonfabric` type generator.
@@ -21,6 +27,10 @@ const GENERATED_URL = new URL(
   import.meta.url,
 );
 const SOURCE_URL = new URL("../../api/index.ts", import.meta.url);
+const INLINED_URL = new URL(
+  "../../data-model/src/api.ts",
+  import.meta.url,
+);
 
 describe("generate-commonfabric-types", () => {
   describe("generateCommonfabricTypes()", () => {
@@ -45,14 +55,47 @@ describe("generate-commonfabric-types", () => {
       expect(generated).toContain("deno task check-commonfabric-types");
     });
 
-    it("returns text ending with the pattern API module verbatim", async () => {
+    it("returns text opening with the header and then the API module", async () => {
       const generated = await generateCommonfabricTypes();
       const source = Deno.readTextFileSync(SOURCE_URL);
-      expect(generated.endsWith(source)).toBe(true);
-      // The header is what precedes it, and nothing else is interposed.
-      expect(generated.slice(0, -source.length)).toMatch(
-        /^(\/\/[^\n]*\n)+\n$/,
+      // The header is a run of comment lines and a blank; the API module's own
+      // doc comment starts immediately after, with nothing interposed.
+      const [, header, rest] = generated.match(
+        /^((?:\/\/[^\n]*\n)+\n)([^]*)$/,
+      )!;
+      expect(header).toContain("Do not edit by hand");
+      expect(rest.startsWith(source.slice(0, source.indexOf("\nimport"))))
+        .toBe(true);
+    });
+
+    it("returns text whose every module specifier is relative", async () => {
+      // The pattern compiler resolves a relative specifier by path-join and a
+      // bare one not at all, so a bare specifier surviving into the generated
+      // file names a module the sandbox cannot load. Parsed rather than
+      // grepped: `FABRIC_SPECIAL_OBJECT_BRAND`'s own value is the string
+      // "@commonfabric/FabricSpecialObject", which a substring test reads as a
+      // specifier.
+      const source = ts.createSourceFile(
+        "commonfabric.d.ts",
+        await generateCommonfabricTypes(),
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.TS,
       );
+      const specifiers = source.statements
+        .map((statement) => moduleSpecifierOf(statement))
+        .filter((specifier) => specifier !== undefined);
+      expect(specifiers.length).toBeGreaterThan(0);
+      expect(specifiers.filter((s) => !s.startsWith("."))).toEqual([]);
+    });
+
+    it("returns text carrying the inlined module's declarations", async () => {
+      const generated = await generateCommonfabricTypes();
+      const inlined = Deno.readTextFileSync(INLINED_URL);
+      expect(generated).toContain(
+        "export declare const FabricHash: FabricHashConstructor;",
+      );
+      expect(generated).toContain(inlined.trimEnd());
     });
 
     it("reads the module named by its argument", async () => {
@@ -65,6 +108,105 @@ describe("generate-commonfabric-types", () => {
       } finally {
         await Deno.remove(path);
       }
+    });
+  });
+
+  describe("moduleSpecifierOf()", () => {
+    function firstStatement(text: string): ts.Statement {
+      const source = ts.createSourceFile(
+        "x.ts",
+        text,
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.TS,
+      );
+      return source.statements[0]!;
+    }
+
+    it("returns the specifier of an import declaration", () => {
+      expect(moduleSpecifierOf(firstStatement('import "./a.ts";')))
+        .toBe("./a.ts");
+    });
+
+    it("returns the specifier of an export declaration", () => {
+      expect(moduleSpecifierOf(firstStatement('export * from "./b.ts";')))
+        .toBe("./b.ts");
+    });
+
+    it("returns `undefined` for an export with no specifier", () => {
+      expect(moduleSpecifierOf(firstStatement("export {};"))).toBe(undefined);
+    });
+
+    it("returns `undefined` for a statement that is not a module edge", () => {
+      expect(moduleSpecifierOf(firstStatement("const a = 1;"))).toBe(undefined);
+    });
+  });
+
+  describe("readInlinedModule()", () => {
+    it("returns the named module's text without its trailing newlines", async () => {
+      const text = await readInlinedModule("@commonfabric/data-model/api");
+      expect(text.endsWith("\n")).toBe(false);
+      expect(text).toContain("export declare const FabricHash");
+    });
+
+    it("throws when the named module names a specifier of its own", async () => {
+      // A barrel re-exports, so its text carries a specifier the pattern
+      // compiler could not resolve once inlined.
+      await expect(readInlinedModule("@commonfabric/static")).rejects.toThrow(
+        /Cannot inline/,
+      );
+    });
+
+    it("throws when the specifier names no export", async () => {
+      await expect(readInlinedModule("@commonfabric/data-model/nope")).rejects
+        .toThrow();
+    });
+  });
+
+  describe("inlineWorkspaceModules()", () => {
+    it("returns the text unchanged when it names no workspace specifier", async () => {
+      const text = 'import type { A } from "./a.ts";\n\nexport type B = A;\n';
+      expect(await inlineWorkspaceModules(text, "x.ts")).toBe(text);
+    });
+
+    it("replaces a workspace `export * from` with that module's text", async () => {
+      const text = 'export * from "@commonfabric/data-model/api";\n';
+      const result = await inlineWorkspaceModules(text, "x.ts");
+      expect(result).toContain("export declare const FabricHash");
+      expect(result).not.toContain("@commonfabric/data-model/api");
+    });
+
+    it("drops an `import type` from a module being inlined", async () => {
+      const text = "import type { FabricHash } from" +
+        ' "@commonfabric/data-model/api";\n\n' +
+        'export * from "@commonfabric/data-model/api";\n';
+      const result = await inlineWorkspaceModules(text, "x.ts");
+      expect(result.startsWith("/**")).toBe(true);
+      expect(result).not.toContain("import type");
+    });
+
+    it("throws on a named re-export from a workspace specifier", async () => {
+      const text =
+        'export { FabricHash } from "@commonfabric/data-model/api";\n';
+      await expect(inlineWorkspaceModules(text, "x.ts")).rejects.toThrow(
+        /neither an `export \* from` to inline/,
+      );
+    });
+
+    it("throws on a value import from a workspace specifier", async () => {
+      const text =
+        'import { deepFreeze } from "@commonfabric/data-model/api";' +
+        '\n\nexport * from "@commonfabric/data-model/api";\n';
+      await expect(inlineWorkspaceModules(text, "x.ts")).rejects.toThrow(
+        /cannot be generated/,
+      );
+    });
+
+    it("throws on an `import type` from a module not being inlined", async () => {
+      const text = 'import type { A } from "@commonfabric/data-model/api";\n';
+      await expect(inlineWorkspaceModules(text, "x.ts")).rejects.toThrow(
+        /cannot be generated/,
+      );
     });
   });
 });

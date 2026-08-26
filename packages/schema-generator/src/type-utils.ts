@@ -415,6 +415,7 @@ export function getNativeTypeSchema(
 
   return resolve(type);
 }
+
 /**
  * Return a public/stable named key for a type if and only if it has a useful
  * symbol name. Filters out anonymous ("__type") and wrapper/container names

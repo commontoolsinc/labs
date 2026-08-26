@@ -46,6 +46,7 @@ export const MEASURE_DETAIL = "|";
  * and grouping by it is the whole point, so an occurrence's identity is
  * stripped here and read separately by anything that wants it.
  */
+
 /**
  * The emitter percent-encodes both fields, so a key or detail containing a
  * separator survives the round trip instead of being read back as a split that

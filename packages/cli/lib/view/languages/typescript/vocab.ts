@@ -29,14 +29,19 @@ export const CALL_NAMES: ReadonlySet<string> = COMMONFABRIC_CALL_EXPORT_NAMES;
 
 /** `packages/ts-transformers/src/core/cf-helpers.ts` `CF_HELPERS_IDENTIFIER`. */
 export const CF_HELPERS_IDENTIFIER = "__cfHelpers";
+
 /** `cf-helpers.ts` `CF_DATA_HELPER_IDENTIFIER`. */
 export const CF_DATA_HELPER_IDENTIFIER = "__cfDataHelper";
+
 /** `ast/call-kind.ts` `SYNTHETIC_LIFT_HOIST_PREFIX` (`const __cfLift_N = …`). */
 export const SYNTHETIC_LIFT_HOIST_PREFIX = "__cfLift";
+
 /** `ast/call-kind.ts` `SYNTHETIC_PATTERN_HOIST_PREFIX` (`const __cfPattern_N = …`). */
 export const SYNTHETIC_PATTERN_HOIST_PREFIX = "__cfPattern";
+
 /** `ast/call-kind.ts` `FUNCTION_HARDENING_HELPER_PREFIX`. */
 export const FUNCTION_HARDENING_HELPER_PREFIX = "__cfHardenFn";
+
 /** `ast/call-kind.ts` `SYNTHETIC_MODULE_CALLBACK_PREFIX`. */
 export const SYNTHETIC_MODULE_CALLBACK_PREFIX = "__cfModuleCallback";
 

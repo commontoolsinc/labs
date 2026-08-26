@@ -1,6 +1,7 @@
 /** Decoded text plus the matching encoder for later saves. */
 export interface DecodedLanguageSource {
   readonly text: string;
+
   /** Whether the decoded source began with a UTF-8 byte-order mark. */
   readonly hasUtf8Bom: boolean;
   encode(text: string): Uint8Array;

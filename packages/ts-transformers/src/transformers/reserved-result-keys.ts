@@ -70,7 +70,7 @@ function isOpaque(schema: unknown): boolean {
  * value it accepted before — so a consumer seam cannot narrow it either.
  */
 export function reportOpaqueReservedResultKeys(
-  context: Pick<TransformationContext, "reportDiagnosticOnce">,
+  context: Pick<TransformationContext, "reportDiagnosticOnce" | "options">,
   schema: unknown,
   anchor: ts.Node,
 ): void {
@@ -96,7 +96,11 @@ export function reportOpaqueReservedResultKeys(
     : " Name the type the field holds.";
 
   context.reportDiagnosticOnce({
-    severity: "error",
+    // Admission is judged once; reconstruction re-judges nothing. Stored
+    // source already carrying this shape was accepted when it was deployed,
+    // and an identity-pinned reload can admit nothing new — so there the
+    // report keeps its visibility and loses its veto.
+    severity: context.options.storedSource ? "warning" : "error",
     type: "pattern-result:opaque-reserved-key",
     message: `pattern() output ${plural ? "fields" : "field"} ${names} ` +
       `${plural ? "are" : "is"} declared \`unknown\`, so the result schema ` +

@@ -11,6 +11,7 @@
 const fixtureName = Deno.args[0] ?? "notebook-test";
 const rounds = Deno.args[1] ?? "2";
 const outPrefix = Deno.args[2] ?? `/tmp/traverse-${fixtureName}`;
+
 /** Optional: forwarded to profile-target to replay a single invocation. */
 const onlyInvocation = Deno.args[3];
 const INSPECT_PORT = 9911;

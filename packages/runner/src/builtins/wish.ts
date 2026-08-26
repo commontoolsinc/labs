@@ -189,7 +189,6 @@ function getResolutionKind(parsed: ParsedWishTarget): string {
     case "#summaryIndex":
     case "#knowledgeGraph":
     case "#pieceRegistry":
-    case "#recent":
     case "#now":
       return "space-target";
     case "#favorites":
@@ -250,8 +249,10 @@ type WishContext = {
   parentCell: Cell<any>;
   spaceCell?: Cell<unknown>;
   scope?: ("~" | "." | "profile" | string)[];
+
   /** Cached #now cell to avoid non-idempotent re-runs from Date.now() */
   nowCell?: Cell<unknown>;
+
   /** The wish node's cause, keying the durable one-shot #now capture cell. */
   nowCause?: Cell<any>[];
   usedHomeSpace?: boolean;
@@ -584,6 +585,7 @@ function searchFavoritesForHashtag(
 
 type HashtagSearchResult = {
   matches: BaseResolution[];
+
   /** true when cell data has loaded (even if empty); false when still pending */
   loaded: boolean;
 };
@@ -1269,7 +1271,6 @@ function resolveSpaceTarget(
     "#summaryIndex": ["defaultPattern", "summaryIndex"],
     "#knowledgeGraph": ["defaultPattern", "knowledgeGraph"],
 
-    "#recent": ["defaultPattern", "recentPieces"],
     "#suggestions": ["defaultPattern", "suggestionHistory"],
   };
 
@@ -1324,7 +1325,7 @@ function resolveSpaceTarget(
  *
  * Resolution paths:
  * 1. Well-known space targets (/, #default, #mentionable, #pieceRegistry,
- *    #recent, #now)
+ *    #now)
  * 2. Well-known home space targets (#favorites, #journal, #learned, #profile)
  * 3. Hashtag search (arbitrary #tags in favorites/mentionables)
  */
@@ -1707,8 +1708,10 @@ export const wishSidecarDiagnostics = {
   /** Continuations registered on the profile-create fetch (one per launch
    * that found no cached pattern — the duplicate-launch producer). */
   profileCreateFetchContinuations: 0,
+
   /** runSidecarInOwnTx invocations (instantiation attempts). */
   sidecarRunsStarted: 0,
+
   /** Conflict-class losers that yielded to a materialized winner. */
   sidecarRunsRaced: 0,
 };

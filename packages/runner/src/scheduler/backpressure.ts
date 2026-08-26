@@ -27,8 +27,10 @@ export interface CommitBackpressurePolicy {
    * curve only grows into real spacing once a conflict persists.
    */
   baseDelayMs: number;
+
   /** Ceiling on the per-retry delay, in milliseconds. */
   maxDelayMs: number;
+
   /**
    * Fraction of the computed delay subtracted at random, in [0, 1]. 0.5 spreads
    * each delay across the lower 50% of the capped value so concurrent writers
@@ -36,6 +38,7 @@ export interface CommitBackpressurePolicy {
    * delay never exceeds maxDelayMs.
    */
   jitter: number;
+
   /**
    * Total wall-clock time a transient conflict may be retried before the write
    * surfaces a terminal error, in milliseconds. Measured from the first

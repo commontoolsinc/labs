@@ -10,6 +10,7 @@ import { resolveOriginal } from "../builder/pattern-metadata.ts";
 export interface AuthoredDebugSource {
   /** Canonical `cf:module/.../<path>:<line>:<col>` source location. */
   readonly src?: string;
+
   /** Authored declaration name, when the function has one. */
   readonly bindingName?: string;
 }

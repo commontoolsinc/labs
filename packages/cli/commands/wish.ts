@@ -2,6 +2,7 @@ import { Command, ValidationError } from "@cliffy/command";
 import { type DID, isDID } from "@commonfabric/identity";
 import { parseCellPath } from "@commonfabric/runner";
 import { cliText } from "../lib/cli-name.ts";
+import { refuseSectionMarker } from "../lib/section-marker.ts";
 import { render } from "../lib/render.ts";
 import { getDidFromFile } from "../lib/identity.ts";
 import { absPath } from "../lib/utils.ts";
@@ -165,7 +166,7 @@ PROFILE TARGETS (resolve against the IDENTITY's home space; '--space' optional):
   #profileSpace   Its own space cell
 
 OTHER TARGETS (space-relative; pass '--space'):
-  #favorites  #journal  #learned  #mentionable  #recent  /  #pieceRegistry  …
+  #favorites  #journal  #learned  #mentionable  /  #pieceRegistry  …
 
 ZERO-PROFILE: when no profile exists yet, the wish surfaces an error; this
 command prints it to stderr and exits non-zero (use --allow-empty to instead
@@ -248,6 +249,9 @@ export const wish = new Command()
     "Return the resolved target's address instead of its contents.",
   )
   .arguments("<target:string>")
-  .action(async (options, target) => {
+  .action(async function (options, target) {
+    // `wish` reads a target directly, so it has no callable section and no
+    // marker to close one. See lib/section-marker.ts.
+    refuseSectionMarker("wish", this.getRawArgs());
     await wishAction(options, target);
   });

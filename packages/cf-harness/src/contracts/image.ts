@@ -12,6 +12,7 @@ export interface HarnessImageAttachment {
   mediaType: HarnessImageMediaType;
   bytes: number;
   digest: string;
+
   /**
    * Content-addressed copy of the image taken when the attachment was
    * created. When present, materialization reads this snapshot instead of

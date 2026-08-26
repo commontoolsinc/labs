@@ -33,8 +33,10 @@ export interface MemWriteOp {
   op?: string;
   id?: unknown;
   scope?: unknown;
+
   /** Present for `set`/`delete`; absent for `patch` (value lives in `patches`). */
   value?: unknown;
+
   /** JSON-patch entries for `patch` ops, each `{ path, value, ... }`. */
   patches?: unknown;
 }

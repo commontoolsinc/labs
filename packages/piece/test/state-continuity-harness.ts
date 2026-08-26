@@ -132,6 +132,7 @@ function serverOver(storeDir: string): MemoryV2Server.Server {
 
 export interface VintageRuntime {
   runtime: Runtime;
+
   /**
    * The store behind `runtime`, exposed so another harness can write into the
    * same file. The vintage capture hands this to the pattern-test runner so a
@@ -139,8 +140,10 @@ export interface VintageRuntime {
    * handlers, rather than a bare materialized root with nothing in it.
    */
   storageManager: StorageManager;
+
   /** The PRIMARY space: the signer's own, and the one a fixture is named for. */
   space: string;
+
   /**
    * Every space this runtime was restored WITH, primary and companions alike,
    * sorted. Empty for a fresh store.
@@ -158,6 +161,7 @@ export interface VintageRuntime {
    */
   restoredSpaces: readonly string[];
   storeDir: string;
+
   /**
    * Snapshot EVERY space this runtime wrote — the primary to `destPath`, the
    * rest into its companion directory. Crash-consistent, runs no migrations.
@@ -471,8 +475,10 @@ export const VINTAGE_MANIFEST_CAUSE = {
 export interface VintageManifestEntry {
   identity: string;
   symbol: string;
+
   /** Entry filename, repo-root-relative (`/packages/patterns/system/home.tsx`). */
   main?: string;
+
   /** Entity id of the result cell the pattern was materialized onto. */
   cellId: string;
   space: string;
@@ -713,10 +719,10 @@ export function comparableState(value: unknown): unknown {
  * It is not a corner. Measured on the committed fixtures, `unknown` is what a
  * declared `unknown` field and an INDEX SIGNATURE both lower to — the second
  * as `additionalProperties: {"type": "unknown"}` — and `default-app.tsx`
- * declares `[key: string]: unknown` on its output. Its root holds `recentPieces`,
- * `summaryIndex` (a whole nested pattern result) and `trackRecent` (a stream);
- * under the stored schema verbatim all three read back carrying none of their
- * contents, and a change that stranded any of them would have replayed clean.
+ * declares `[key: string]: unknown` on its output. Its root holds
+ * `summaryIndex`, a whole nested pattern result. Under the stored schema
+ * verbatim it reads back carrying none of its contents, and a change that
+ * stranded it would have replayed clean.
  *
  * `required` goes for a different reason, measured on the committed topics
  * fixture. A schema-driven read returns `undefined` for the WHOLE object when a
@@ -937,11 +943,11 @@ export function isReduction(value: unknown): boolean {
  *   for a key the document does hold. It could, before
  *   `schemaRelaxedForComparison`: an `unknown` position resolves to `undefined`
  *   whatever is stored there, and measured on the committed `default-app.tsx`
- *   fixture that hid `recentPieces`, `summaryIndex` and `trackRecent` — three
- *   keys holding real state, indistinguishable here from three keys holding
- *   nothing. Whatever else changes, the two must not be allowed to collapse
- *   again.
+ *   fixture that hid `summaryIndex`, which held real state and was
+ *   indistinguishable here from a key holding nothing. Whatever else changes,
+ *   the two must not be allowed to collapse again.
  */
+
 /**
  * Whether one side is a schema written as a content-addressed reference and
  * the other the same schema written out. Representation is not state: a
@@ -1041,6 +1047,7 @@ export interface StateFinding {
   key: string;
   before: unknown;
   after: unknown;
+
   /**
    * The value went from something to nothing, rather than to something else.
    * FAILS the gate; a bare change only warns.
@@ -1380,6 +1387,7 @@ function describeError(error: unknown): string {
 export interface MaterializeOutcome {
   /** The setup-commit rejection, if the candidate could not be applied. */
   error?: string;
+
   /**
    * Set when the refusal is that the candidate module does not define the
    * recorded symbol. A field rather than a message shape, because `error` is
@@ -1389,8 +1397,10 @@ export interface MaterializeOutcome {
    * beside the message instead of inside it.
    */
   missingArtifact?: true;
+
   /** The root's value after a successful materialize. */
   value?: Record<string, unknown>;
+
   /**
    * The candidate's compiled result schema. Handed back so a caller that needs
    * to address the root afterwards reads it off the pattern that was actually
@@ -1398,8 +1408,10 @@ export interface MaterializeOutcome {
    * agree.
    */
   resultSchema: unknown;
+
   /** The candidate's compiled argument schema, for the same reason. */
   argumentSchema: unknown;
+
   /**
    * Identity of the pattern that was materialized — the artifact entry ref's
    * identity, not a hash of the source text. A fixture is NAMED with this, so

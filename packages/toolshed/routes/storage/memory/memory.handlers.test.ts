@@ -11,6 +11,7 @@ import {
 import {
   attachMemorySocketPipeline,
   bufferTextMessagesUntilNegotiated,
+  warnOnOversizedOutboundFrame,
 } from "./memory.handlers.ts";
 import { memoryServer } from "@/routes/storage/memory.ts";
 
@@ -89,6 +90,61 @@ describe("memory.handlers", () => {
       await runHelloThroughPipeline(fake, WebSocket.CLOSED);
 
       expect(fake.sent).toEqual([]);
+    });
+  });
+
+  describe("warnOnOversizedOutboundFrame", () => {
+    const captureWarn = () => {
+      const calls: { key: string; args: unknown[] }[] = [];
+      const warn = (key: string, lazyArgs: () => unknown[]) => {
+        calls.push({ key, args: lazyArgs() });
+      };
+      return { calls, warn };
+    };
+
+    it("stays silent for a frame at or under the byte threshold", () => {
+      const { calls, warn } = captureWarn();
+
+      warnOnOversizedOutboundFrame("a".repeat(30), {}, 30, warn);
+
+      expect(calls).toEqual([]);
+    });
+
+    it("warns past the threshold with the byte size, type, and space", () => {
+      const { calls, warn } = captureWarn();
+
+      warnOnOversizedOutboundFrame(
+        "a".repeat(31),
+        { type: "session/effect", space: "did:key:zExample" },
+        30,
+        warn,
+      );
+
+      expect(calls.length).toBe(1);
+      expect(calls[0].key).toBe("oversized-outbound-frame");
+      expect(calls[0].args).toContain(31);
+      expect(calls[0].args).toContain("session/effect");
+      expect(calls[0].args).toContain("did:key:zExample");
+    });
+
+    it("measures bytes, not code units, for non-ASCII content", () => {
+      // Eight emoji are 16 code units but 32 UTF-8 bytes: under a
+      // code-unit reading of the 30-byte threshold, over a byte reading.
+      const { calls, warn } = captureWarn();
+
+      warnOnOversizedOutboundFrame("😀".repeat(8), {}, 30, warn);
+
+      expect(calls.length).toBe(1);
+      expect(calls[0].args).toContain(32);
+    });
+
+    it("names an absent type and space as unknown", () => {
+      const { calls, warn } = captureWarn();
+
+      warnOnOversizedOutboundFrame("a".repeat(31), {}, 30, warn);
+
+      expect(calls.length).toBe(1);
+      expect(calls[0].args).toContain("unknown");
     });
   });
 });

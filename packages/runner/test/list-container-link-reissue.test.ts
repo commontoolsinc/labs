@@ -109,6 +109,7 @@ const makeServer = () =>
 /** How one reconcile of the coordinator under test went. */
 type ReconcileRecord = {
   attempt: number;
+
   /** Whether this reconcile called `sendResult`, the container link's only writer. */
   issuedLink: boolean;
   outcome: string;

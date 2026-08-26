@@ -5,6 +5,12 @@
  * Workspace code should import these types via `@commonfabric/builder`.
  */
 
+import type {
+  FabricBytes,
+  FabricHash,
+  FabricValue,
+} from "@commonfabric/data-model/api";
+
 import type { Cfc, CurrentPrincipal, WriteAuthorizedBy } from "./cfc.ts";
 
 // ============================================================================
@@ -25,350 +31,12 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
 // Fabric Value Types
 // ============================================================================
 //
-// Pattern-visible declarations for the fabric value type system. Canonical
-// implementations live in data-model submodule files (interface.ts,
-// fabric-primitives/FabricHash.ts, fabric-primitives/FabricEpochNsec.ts, etc.)
-// — these inline declarations mirror the public surface so the pattern compiler
-// can resolve them without relative imports.
-//
-// SYNC NOTE: These declarations must stay in sync with the canonical
-// definitions in the submodule files. If they drift, pattern type-checking
-// will diverge from runtime behavior.
-//
-// Every concrete FabricPrimitive subclass must have an instanceof-capable
-// declaration here (interface + constructor + declare-const with `new`).
+// Declared by `@commonfabric/data-model`, and re-exported here. The pattern
+// compiler resolves no bare specifier, so `generate-commonfabric-types.ts`
+// inlines this module's text when it builds the type file the sandbox is
+// served.
 
-/**
- * The nominal brand key declared on `FabricSpecialObject`. It exists only in
- * the type system — a runtime instance never carries the key; `instanceof
- * FabricSpecialObject` is its runtime form. Schema `required` presence
- * checks must therefore treat this key as satisfied by any
- * `FabricSpecialObject` rather than probing for it with `in`.
- */
-export const FABRIC_SPECIAL_OBJECT_BRAND = "@commonfabric/FabricSpecialObject";
-
-/**
- * Common base class for `FabricInstance` and `FabricPrimitive`. Enables a
- * single `instanceof` check for any fabric-system value type.
- *
- * The `@commonfabric/FabricSpecialObject` member is a nominal brand with no
- * runtime existence — see the canonical declaration in
- * `data-model/src/interface.ts` for why it is a well-known string key and not
- * a `unique symbol`. The two declarations must agree exactly.
- */
-export interface FabricSpecialObject {
-  readonly "@commonfabric/FabricSpecialObject": true;
-}
-
-export interface FabricSpecialObjectConstructor {
-  prototype: FabricSpecialObject;
-}
-
-export declare const FabricSpecialObject:
-  & FabricSpecialObjectConstructor
-  & (abstract new (...args: any) => FabricSpecialObject);
-
-/**
- * Abstract base class for values that participate in the fabric protocol.
- *
- * An instance holds all of its state privately and makes it reachable only
- * through members, so it has no own properties at all. A structural view of
- * one -- a spread, `Object.keys()`, a naive walk -- therefore sees nothing.
- */
-export interface FabricInstance extends FabricSpecialObject {
-  shallowClone(frozen: boolean): FabricInstance;
-}
-
-export interface FabricInstanceConstructor {
-  prototype: FabricInstance;
-}
-
-export declare const FabricInstance:
-  & FabricInstanceConstructor
-  & (abstract new (...args: any) => FabricInstance);
-
-/** Abstract base class for `FabricPrimitive` types. */
-export interface FabricPrimitive extends FabricSpecialObject {}
-
-export interface FabricPrimitiveConstructor {
-  prototype: FabricPrimitive;
-}
-
-export declare const FabricPrimitive:
-  & FabricPrimitiveConstructor
-  & (abstract new (...args: any) => FabricPrimitive);
-
-/**
- * Temporal type representing nanoseconds from the POSIX Epoch.
- * Wraps a `bigint` value.
- */
-export interface FabricEpochNsec extends FabricPrimitive {
-  readonly value: bigint;
-}
-
-export interface FabricEpochNsecConstructor {
-  new (value: bigint): FabricEpochNsec;
-  prototype: FabricEpochNsec;
-}
-
-export declare const FabricEpochNsec: FabricEpochNsecConstructor;
-
-/**
- * Temporal type representing a particular day, as a count of days from the
- * POSIX Epoch. Wraps a `bigint` value.
- */
-export interface FabricEpochDay extends FabricPrimitive {
-  readonly value: bigint;
-}
-
-export interface FabricEpochDayConstructor {
-  new (value: bigint): FabricEpochDay;
-  prototype: FabricEpochDay;
-}
-
-export declare const FabricEpochDay: FabricEpochDayConstructor;
-
-/**
- * A content-addressed identifier: a hash digest paired with an algorithm tag.
- * Extends `FabricPrimitive` -- treated like a primitive in the fabric type
- * system (always frozen, passes through conversion unchanged).
- */
-export interface FabricHash extends FabricPrimitive {
-  readonly tag: string;
-  readonly bytes: Uint8Array;
-  readonly length: number;
-  readonly hashString: string;
-  toString(): string;
-}
-
-export interface FabricHashConstructor {
-  new (
-    hash: Uint8Array | ArrayBufferLike,
-    tag: string,
-    transfer?: boolean,
-  ): FabricHash;
-  prototype: FabricHash;
-}
-
-export declare const FabricHash: FabricHashConstructor;
-
-/**
- * The modern, object-shaped form of a link reference, wrapping the link's
- * addressing payload (a `FabricPlainObject`: its addressing fields plus an optional
- * `schema`). Extends `FabricInstance` (not `FabricPrimitive`): the payload is an
- * outgoing reference (it may carry an arbitrary-`FabricValue` `schema`), so a
- * link is a small object graph, not a leaf.
- */
-export interface FabricLink extends FabricInstance {
-  readonly payload: FabricPlainObject;
-}
-
-export interface FabricLinkConstructor {
-  new (payload: FabricPlainObject): FabricLink;
-  prototype: FabricLink;
-}
-
-export declare const FabricLink: FabricLinkConstructor;
-
-/**
- * An immutable, frozen sequence of bytes. Extends `FabricPrimitive` --
- * treated like a primitive in the fabric type system (always frozen, passes
- * through conversion unchanged). Read the bytes with `slice()`,
- * `sliceBuffer()`, or `copyInto()`.
- */
-export interface FabricBytes extends FabricPrimitive {
-  readonly length: number;
-  slice(start?: number, end?: number): Uint8Array<ArrayBuffer>;
-  sliceBuffer(start?: number, end?: number): ArrayBuffer;
-  copyInto(target: Uint8Array, offset?: number, length?: number): number;
-}
-
-export interface FabricBytesConstructor {
-  new (bytes: Uint8Array | ArrayBufferLike, transfer?: boolean): FabricBytes;
-  prototype: FabricBytes;
-}
-
-export declare const FabricBytes: FabricBytesConstructor;
-
-/**
- * An immutable regular expression. Extends `FabricPrimitive` -- treated like a
- * primitive in the fabric type system (always frozen, passes through
- * conversion unchanged).
- *
- * The pattern is held as a flavor / source / flags triple rather than as a
- * native `RegExp`, so that flavors with no native representation can still be
- * carried. `value` reconstitutes a native `RegExp` where one exists.
- */
-export interface FabricRegExp extends FabricPrimitive {
-  readonly source: string;
-  readonly flags: string;
-  readonly flavor: string;
-
-  /**
-   * A fresh native `RegExp` equivalent to this value, returned anew on each
-   * call so the internal instance is never aliased out. Throws for a flavor
-   * with no native `RegExp` representation.
-   */
-  readonly value: RegExp;
-}
-
-export interface FabricRegExpConstructor {
-  new (regex: RegExp): FabricRegExp;
-  new (flavor: string, source: string, flags: string): FabricRegExp;
-  prototype: FabricRegExp;
-}
-
-export declare const FabricRegExp: FabricRegExpConstructor;
-
-/**
- * An immutable asymmetric key pair. Extends `FabricPrimitive` -- treated like
- * a primitive in the fabric type system (always frozen, passes through
- * conversion unchanged).
- *
- * An instance either holds handles -- two `CryptoKey`s, whose material this
- * realm may have no way to reach -- or holds material, the two keys as bytes.
- * `hasMaterial` says which, and every accessor belonging to the other arm
- * throws.
- */
-export interface FabricKeyPair extends FabricPrimitive {
-  readonly algorithm: string;
-  readonly hasMaterial: boolean;
-
-  /**
-   * A `CryptoKeyPair` holding this instance's two keys. The record is a new
-   * object on each call, so a caller may do as it likes with it; the two
-   * `CryptoKey`s within it are this instance's own, and are the same two
-   * objects on every call. Throws when this instance holds material.
-   */
-  readonly cryptoKeyPair: CryptoKeyPair;
-
-  /** The public key's handle. Throws when this instance holds material. */
-  readonly publicCryptoKey: CryptoKey;
-
-  /** The private key's handle. Throws when this instance holds material. */
-  readonly privateCryptoKey: CryptoKey;
-
-  /** The public key's bytes. Throws when this instance holds handles. */
-  readonly publicKeyBytes: FabricBytes;
-
-  /** The private key's bytes. Throws when this instance holds handles. */
-  readonly privateKeyBytes: FabricBytes;
-}
-
-export interface FabricKeyPairConstructor {
-  new (pair: CryptoKeyPair): FabricKeyPair;
-  new (
-    algorithm: string,
-    publicKey: FabricBytes | Uint8Array,
-    privateKey: FabricBytes | Uint8Array,
-  ): FabricKeyPair;
-  prototype: FabricKeyPair;
-}
-
-export declare const FabricKeyPair: FabricKeyPairConstructor;
-
-/**
- * Structured state for constructing a `FabricError`. The fixed-schema slots
- * are `FabricValue`-typed; `extras` carries any custom enumerable properties,
- * whose keys must not collide with the slot names.
- */
-export type FabricErrorState = {
-  /** Constructor name of the originating native `Error` (e.g. `"TypeError"`). */
-  readonly type: string;
-  /** The `.name` property. Omit to mean "same as `type`". */
-  readonly name?: string | null | undefined;
-  /** The `.message` property. */
-  readonly message: string;
-  /** The `.stack` property, or `undefined`. */
-  readonly stack: string | undefined;
-  /** The `.cause` value, in `FabricValue` form, or `undefined`. */
-  readonly cause: FabricValue | undefined;
-  /** Custom enumerable own properties, in `FabricValue` form. */
-  readonly extras?:
-    | Iterable<readonly [string, FabricValue]>
-    | Readonly<Record<string, FabricValue>>
-    | undefined;
-};
-
-/**
- * An error carried as a `FabricValue`. Extends `FabricInstance` (not
- * `FabricPrimitive`): it holds fixed-schema slots plus a bag of extras, and
- * `cause` may be an arbitrary `FabricValue`, so it is a small object graph
- * rather than a leaf.
- *
- * Like every `FabricInstance` it is mutable until frozen, and every mutator --
- * the slot setters along with `setExtra()` and `deleteExtra()` -- throws once
- * the instance is frozen.
- */
-export interface FabricError extends FabricInstance {
-  type: string;
-  name: string;
-  message: string;
-  stack: string | undefined;
-  cause: FabricValue | undefined;
-
-  getExtra(key: string): FabricValue | undefined;
-  hasExtra(key: string): boolean;
-  setExtra(key: string, value: FabricValue): void;
-  deleteExtra(key: string): boolean;
-  readonly extraSize: number;
-  extraKeys(): IterableIterator<string>;
-  extraEntries(): IterableIterator<[string, FabricValue]>;
-}
-
-export interface FabricErrorConstructor {
-  new (state: FabricErrorState): FabricError;
-  fromNativeError(error: Error): FabricError;
-  prototype: FabricError;
-}
-
-export declare const FabricError: FabricErrorConstructor;
-
-// TODO(danfuzz): `FabricMap` and `FabricSet` are deliberately absent from the
-// declarations above. Both need substantial rework before they are useful, and
-// declaring them here would imply a utility they do not yet have. Their
-// absence is a decision, not an oversight; revisit once that rework lands.
-
-/**
- * The full set of values that the fabric storage layer can represent.
- *
- * From a typesystem perspective, all `FabricValue`s are immutable (deeply
- * read-only), _except_ members of the `FabricInstance` tree. `FabricInstance`s
- * expose arbitrary methods which can cause a change of instance state including
- * changing the set of outgoing references from the instance. This is an
- * _intentional_ hole, because TypeScript has no ergonomic/pithy way to express
- * the desired semantics. (To be clear, it _can_ be done, just not cleanly.)
- */
-export type FabricValue =
-  | null
-  | boolean
-  | number
-  | string
-  | bigint
-  | symbol
-  | FabricSpecialObject
-  | FabricArray
-  | FabricPlainObject
-  | undefined;
-
-/**
- * The container types that are part of `FabricValue`. Note that
- * `FabricSpecialObject` is a combination of container and non-container.
- */
-export type FabricContainerValue =
-  | FabricArray
-  | FabricInstance // One of the two direct subclasses of `FabricSpecialObject`.
-  | FabricPlainObject;
-
-/** A `FabricValue` other than `null` or `undefined`. */
-export type NonNullableFabricValue = NonNullable<FabricValue>;
-
-/** Read-only array of `FabricValue`s. */
-export interface FabricArray extends ReadonlyArray<FabricValue> {}
-
-/** Read-only object/record of `FabricValue`s. */
-export interface FabricPlainObject
-  extends Readonly<Record<string, FabricValue>> {}
+export * from "@commonfabric/data-model/api";
 
 // ============================================================================
 // Fabric Execution Value Types
@@ -583,6 +251,7 @@ export interface IReadable<T> {
    * {@link IReadable} interface docs for the frozenness contract.
    */
   get(options?: { traverseCells?: boolean }): Readonly<StripDefaultBrand<T>>;
+
   /**
    * Read the cell's current value without creating a reactive dependency.
    * Unlike `get()`, calling `sample()` inside a lift won't cause the lift
@@ -647,6 +316,7 @@ export interface IWritable<T, C extends AnyBrandedCell<any>> {
    * the frozenness contract on the input.
    */
   set(value: T | AnyCellWrapping<T>): C;
+
   /**
    * Merge a partial object value into the cell. Implemented as a
    * per-key `set()`, so the same frozenness contract applies. See
@@ -656,6 +326,7 @@ export interface IWritable<T, C extends AnyBrandedCell<any>> {
     this: IsThisObject,
     values: V extends object ? AnyCellWrapping<V> : never,
   ): C;
+
   /**
    * Append one or more values to an array cell. See the
    * {@link IWritable} interface docs for the frozenness contract on the
@@ -665,6 +336,7 @@ export interface IWritable<T, C extends AnyBrandedCell<any>> {
     this: IsThisArray,
     ...value: T extends (infer U)[] ? (U | AnyCellWrapping<U>)[] : never
   ): void;
+
   /**
    * Add one or more values to an array cell as a set: each value is appended
    * only if no existing element equals it. Mergeable — concurrent adds of
@@ -674,6 +346,7 @@ export interface IWritable<T, C extends AnyBrandedCell<any>> {
     this: IsThisArray,
     ...value: T extends (infer U)[] ? (U | AnyCellWrapping<U>)[] : never
   ): void;
+
   /**
    * Add `by` (default 1, may be negative) to a number cell. Mergeable —
    * concurrent increments sum against durable state rather than clobber.
@@ -683,6 +356,7 @@ export interface IWritable<T, C extends AnyBrandedCell<any>> {
     this: IsThisArray,
     ref: T extends (infer U)[] ? (U | AnyBrandedCell<U>) : never,
   ): void;
+
   /**
    * Remove every element equal to `ref` by stored value (a cell matches by its
    * link). Mergeable — resolved against durable state, so concurrent removes of
@@ -976,6 +650,7 @@ export interface IKeyable<out T, Wrap extends HKT> {
   ): Apply<Wrap, T[K1][K2][K3][K4][K5][K6][K7][K8][K9][K10]>;
   // Fallback for 11+ keys or unknown keys
   key(...keys: PropertyKey[]): Apply<Wrap, any>;
+
   /**
    * A cell for the entity deterministically derived from this array and `idKey`
    * — the entity a keyed element is identified by. The same `idKey` always
@@ -1939,6 +1614,7 @@ export type JSONSchemaObj = {
   readonly $id?: string;
   readonly $ref?: string;
   readonly $defs?: Readonly<Record<string, JSONSchema>>;
+
   /** @deprecated Use `$defs` for 2019-09/Draft 8 or later */
   readonly definitions?: Readonly<Record<string, JSONSchema>>;
 
@@ -2142,6 +1818,7 @@ export type BuiltInLLMTextPart = {
 
 export type BuiltInLLMImagePart = {
   type: "image";
+
   /**
    * The image, as a string -- a URL or a data URI. Deliberately not
    * `Uint8Array` / `ArrayBuffer` / `URL`: an LLM request is snapshotted through
@@ -2247,35 +1924,42 @@ export interface BuiltInLLMParams {
   maxTokens?: number;
   builtinTools?: boolean;
   observationMaxConfidentiality?: readonly JSONValue[];
+
   /**
    * Specifies the mode of operation for the LLM.
    * - `"json"`: Indicates that the LLM should process and return data in JSON format.
    * This parameter is optional and defaults to undefined, which may result in standard behavior.
    */
   mode?: "json";
+
   /**
    * Tools that can be called by the LLM during generation.
    * Each tool has a description, input schema, and handler function that runs client-side.
    */
   tools?: Record<string, BuiltInLLMTool>;
+
   /**
    * Enable Google Search grounding (shorthand for the `google_search` native
    * model tool). Source URLs are surfaced on the state's `groundingSources`.
    */
   search?: boolean;
+
   /** Raw native model tool ids to request, e.g. `["google_search"]`. */
   nativeModelToolIds?: readonly string[];
+
   /**
    * Context cells to make available to the LLM.
    * These cells appear in the system prompt with their schemas and current values.
    */
   context?: Record<string, AnyCell<any>>;
+
   /**
    * When provided, injects a `presentResult` built-in tool that the LLM can call
    * to present a structured result matching this schema. The result is stored on the
    * dialog state's `result` field. Can be called multiple times (overwrites previous).
    */
   resultSchema?: JSONSchema;
+
   /**
    * Optional named queue to route async operations through.
    */
@@ -2288,6 +1972,7 @@ export interface BuiltInLLMState {
   partial?: string;
   error?: string;
   cancelGeneration: Stream<void>;
+
   /** Web sources from native search grounding, when `search`/`google_search` was requested. */
   groundingSources?: readonly BuiltInLLMGroundingSource[];
 }
@@ -2331,6 +2016,7 @@ export type BuiltInGenerateObjectParams =
     schemaSanitizePromptInjection?: boolean;
     metadata?: Record<string, string | undefined | object>;
     tools?: Record<string, BuiltInLLMTool>;
+
     /**
      * Enable Google Search grounding (shorthand for the `google_search`
      * native model tool). Real, current web results inform the answer, and
@@ -2338,6 +2024,7 @@ export type BuiltInGenerateObjectParams =
      * (generateText / llm only — generateObject does not surface them).
      */
     search?: boolean;
+
     /**
      * Raw native model tool ids to request (e.g. `["google_search"]`).
      * `search: true` is the friendly shorthand for `["google_search"]`.
@@ -2358,6 +2045,7 @@ export type BuiltInGenerateObjectParams =
     schemaSanitizePromptInjection?: boolean;
     metadata?: Record<string, string | undefined | object>;
     tools?: Record<string, BuiltInLLMTool>;
+
     /**
      * Enable Google Search grounding (shorthand for the `google_search`
      * native model tool). Real, current web results inform the answer, and
@@ -2365,6 +2053,7 @@ export type BuiltInGenerateObjectParams =
      * (generateText / llm only — generateObject does not surface them).
      */
     search?: boolean;
+
     /**
      * Raw native model tool ids to request (e.g. `["google_search"]`).
      * `search: true` is the friendly shorthand for `["google_search"]`.
@@ -2382,6 +2071,7 @@ export type BuiltInGenerateTextParams =
     model?: string;
     maxTokens?: number;
     tools?: Record<string, BuiltInLLMTool>;
+
     /**
      * Enable Google Search grounding (shorthand for the `google_search`
      * native model tool). Real, current web results inform the answer, and
@@ -2389,6 +2079,7 @@ export type BuiltInGenerateTextParams =
      * (generateText / llm only — generateObject does not surface them).
      */
     search?: boolean;
+
     /**
      * Raw native model tool ids to request (e.g. `["google_search"]`).
      * `search: true` is the friendly shorthand for `["google_search"]`.
@@ -2404,6 +2095,7 @@ export type BuiltInGenerateTextParams =
     model?: string;
     maxTokens?: number;
     tools?: Record<string, BuiltInLLMTool>;
+
     /**
      * Enable Google Search grounding (shorthand for the `google_search`
      * native model tool). Real, current web results inform the answer, and
@@ -2411,6 +2103,7 @@ export type BuiltInGenerateTextParams =
      * (generateText / llm only — generateObject does not surface them).
      */
     search?: boolean;
+
     /**
      * Raw native model tool ids to request (e.g. `["google_search"]`).
      * `search: true` is the friendly shorthand for `["google_search"]`.
@@ -2425,6 +2118,7 @@ export interface BuiltInGenerateTextState {
   error?: string;
   partial?: string;
   requestHash?: string;
+
   /** Web sources from native search grounding, when `search`/`google_search` was requested. */
   groundingSources?: readonly BuiltInLLMGroundingSource[];
 }
@@ -2432,6 +2126,7 @@ export interface BuiltInGenerateTextState {
 export interface BuiltInCompileAndRunParams<T> {
   files: Array<{ name: string; contents: string }>;
   main: string;
+
   /**
    * Names of entries in `files` that carry data rather than code. A pattern
    * reads one with `dataFile()`; nothing compiles, imports, or transforms it.
@@ -2466,6 +2161,7 @@ export interface BuiltInCompileAndRunState<T> {
 // derived from these types, so it would silently downgrade live cells to dead
 // values. (`SELF` and the consumer-facing factory result deliberately use the
 // same unstripped `R`.)
+
 /**
  * The reserved output fields the runtime reads off a pattern's result, each
  * typed so a value of the wrong shape under a reserved key is a compile error.
@@ -2888,10 +2584,12 @@ export type FetchOptions = {
   method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "OPTIONS" | "HEAD";
   redirect?: "follow" | "error" | "manual";
 };
+
 /** Result shape of fetchBinary: the raw response bytes plus the media type. */
 export type FetchBinaryResult = {
   /** Response body as a byte buffer; read it with `slice()` / `copyInto()`. */
   bytes: FabricBytes;
+
   /** Media type from the Content-Type response header, e.g. "image/png". */
   mediaType: string;
 };
@@ -3022,6 +2720,7 @@ export type DataFileFunction = (path: string) => string;
 // --- SQLite builtins (docs/specs/sqlite-builtin) ---
 
 declare const __sqliteDb: unique symbol;
+
 /**
  * Database handle. Empty to pattern code; a cell reference to the runtime
  * via the `toCell` back-pointer. Patterns only ever *forward* it (to sqliteQuery
@@ -3047,10 +2746,13 @@ export interface ISqliteQueryable {
     options?: {
       params?: ReadonlyArray<unknown> | Record<string, unknown>;
       reactOn?: unknown;
+
       /** CFC Phase 3: declared output ceiling (see SqliteQueryParams). */
       maxConfidentiality?: ReadonlyArray<unknown>;
+
       /** `"fail"` (default) | `"skip"` when a row exceeds the ceiling. */
       onExceed?: "fail" | "skip";
+
       /** CFC Phase 3.b: filter rows to those the acting reader may read (a
        *  declared existence release). Requires the table to opt in via
        *  `table(…, { allowReadClearance: true })`; never for aggregates. The
@@ -3093,6 +2795,7 @@ export type SqliteDatabaseFunction = {
     options?: { tables?: SqliteTableSchemas },
     source?: SqliteDatabaseSource,
   ): Reactive<SqliteDb>;
+
   /** Bind the db (and so its on-disk file) to a scope. The transformer lowers
    *  `const db: PerUser<SqliteDb> = sqliteDatabase(...)` to `.asScope("user")`;
    *  call it explicitly for the same effect. */
@@ -3104,6 +2807,7 @@ export type SqliteQueryParams = {
   sql: string;
   params?: ReadonlyArray<unknown> | Record<string, unknown>;
   reactOn?: unknown;
+
   /** CFC Phase 3: the declared output ceiling — the maximum confidentiality
    *  the RESULT may carry (a consumer contract, not reader clearance).
    *  Placeholder atoms `{__ctCurrentPrincipal: true}` (the acting user) and
@@ -3111,10 +2815,12 @@ export type SqliteQueryParams = {
    *  typed alternative is `MaxConfidentiality<Row, …>` on the Row schema —
    *  declare the ceiling once, not both ways. */
   maxConfidentiality?: ReadonlyArray<unknown>;
+
   /** What to do when a row's label exceeds the ceiling: `"fail"` (default —
    *  refuse the whole query) or `"skip"` (drop the offending rows; a declared
    *  existence release, row-returning queries only — never aggregates). */
   onExceed?: "fail" | "skip";
+
   /** CFC Phase 3.b read-time clearance: when `true`, filter rows to those the
    *  acting reader may read (a declared existence release under §8.17/inv-14).
    *  Requires the touched rule-bearing table to opt in via
@@ -3169,26 +2875,34 @@ export type SqliteTableFunction = (
 export interface CfSqliteHelpers {
   table: SqliteTableFunction;
   cfLink: SqliteCfLinkFunction;
+
   /** Regex (forced global) over a column ⟹ ordered match list (split+clean). */
   match(
     field: SqliteRowFieldRef,
     re: RegExp,
     opts?: { group?: number; min?: number },
   ): unknown;
+
   /** `did:<protocol>:<v>` per extracted value (protocol-implied normalization). */
   principal(protocol: string, of: unknown): unknown;
+
   /** Conjunctive clauses — every term an independent requirement. */
   all(...terms: unknown[]): unknown;
+
   /** ONE authored OR-clause (reserved: errors until OR-clause support). */
   any(...terms: unknown[]): unknown;
+
   /** Integrity meet (set ∩). Integrity-only. */
   intersect(...terms: unknown[]): unknown;
+
   /** Include `then` only when the regex tests true against the column. */
   whenMatches(field: SqliteRowFieldRef, re: RegExp, then: unknown): unknown;
+
   /** The db's owner (fixed, from the db ref — never the acting reader). */
   dbOwner(): unknown;
   endorsedBy(p: unknown): unknown;
   authoredBy(p: unknown): unknown;
+
   /** A literal atom (escape hatch). */
   constant(atom: unknown): unknown;
 }
@@ -3203,12 +2917,14 @@ export type WishParams = {
   path?: string[];
   context?: Record<string, any>;
   schema?: JSONSchema;
+
   /**
    * Search scope for hashtag queries: "~" = favorites (home), "." = mentionables (current space),
    * "profile" = current user's profile elements.
    * Default (undefined) = favorites only for backward compatibility.
    */
   scope?: (DID | "~" | "." | "profile")[];
+
   /**
    * When true, skip the suggestion/picker UI pattern (suggestion.tsx).
    * Multiple candidates are returned as-is without disambiguation.
@@ -3514,6 +3230,7 @@ export type SchemaFunction = <T extends JSONSchema>(schema: T) => T;
 // toSchema is a compile-time transformer that converts TypeScript types to JSONSchema
 // The actual implementation is done by the TypeScript transformer
 export type ToSchemaFunction = <T>(options?: Partial<JSONSchema>) => JSONSchema;
+
 /** Internal compiler-emitted helper for top-level data materialization. */
 export type CfDataFunction = <T>(value: T) => T;
 
@@ -3580,6 +3297,7 @@ export declare const ifElse: IfElseFunction;
 export declare const when: WhenFunction;
 export declare const unless: UnlessFunction;
 export declare const uiVariant: UIVariantFunction;
+
 /** @deprecated Use generateText() or generateObject() instead */
 export declare const llm: LLMFunction;
 export declare const llmDialog: LLMDialogFunction;
@@ -3602,6 +3320,7 @@ export declare const cfSqlite: CfSqliteHelpers;
 export declare const navigateTo: NavigateToFunction;
 export declare const inspectConfLabel: InspectConfLabelFunction;
 export declare const wish: WishFunction;
+
 /**
  * Tag a multi-user test descriptor for `cf test` (identity at runtime; a
  * call expression keeps the descriptor's pattern factories out of the
@@ -3611,6 +3330,7 @@ export declare const multiUserTest: <T extends MultiUserTestDescriptor>(
   descriptor: T,
 ) => T;
 export declare const createNodeFactory: CreateNodeFactoryFunction;
+
 /** @deprecated Use Cell.of(defaultValue?) instead */
 export declare const cell: CellTypeConstructor<AsCell>["of"];
 export declare const equals: EqualsFunction;

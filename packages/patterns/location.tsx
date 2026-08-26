@@ -24,8 +24,10 @@ export const MODULE_METADATA: ModuleMetadata = {
 export interface LocationModuleInput {
   /** Location name (e.g., venue, landmark) */
   locationName: string | Default<"">;
+
   /** Full address */
   locationAddress: string | Default<"">;
+
   /** Coordinates in lat,lng format */
   coordinates: string | Default<"">;
 }

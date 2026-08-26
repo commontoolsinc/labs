@@ -117,6 +117,7 @@ export interface RuntimeTelemetrySink {
 export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   identity: Identity;
   apiUrl: URL;
+
   /**
    * Optional map from space DIDs to HTTP or HTTPS origins, forwarded to the
    * worker. Spaces absent from the map resolve to `apiUrl`, the default host.
@@ -124,12 +125,14 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   spaceHostMap?: Record<string, string>;
   experimental?: ExperimentalRuntimeFlags;
   cfcEnforcementMode?: RuntimeCfcEnforcementMode;
+
   /**
    * Flow-label propagation dial (S16). Shell hosts default to "observe"
    * (Epic H1): derive the per-tx conservative join and emit diagnostics,
    * persisting nothing — the measurement stage before "persist".
    */
   cfcFlowLabels?: RuntimeCfcFlowLabelsMode;
+
   /**
    * Populate the default render confidentiality ceiling (Epic H3a). When
    * true, the worker's display sinks gate labeled values against the
@@ -140,23 +143,27 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
    */
   cfcRenderCeiling?: boolean;
   trustSnapshot?: RuntimeTrustSnapshot | null;
+
   /**
    * This shell build's identifier (normally `COMMIT_SHA`). Deployed builds use
    * it to select the immutable `/builds/<clientVersion>/` worker asset graph.
    */
   clientVersion?: string;
+
   /**
    * When true, forward the worker runtime's console output to the main
    * thread so it reaches devtools and integration-test console capture.
    * Off by default.
    */
   forwardWorkerConsole?: boolean;
+
   /**
    * When true, the worker runtime instruments pattern compiles for statement
    * coverage; the integration harness pulls the accumulated hits at teardown.
    * Test/CI only, off by default. See docs/development/COVERAGE.md.
    */
   patternCoverage?: boolean;
+
   /**
    * When true, the worker's remote storage overlaps watch-refresh round trips
    * up to a bounded window instead of strict single-flight
@@ -164,6 +171,7 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
    * StorageManager.open time so it takes effect on the next runtime (reload).
    */
   concurrentWatchRefresh?: boolean;
+
   /**
    * Override the runtime worker URL. By default, deployed builds use the
    * immutable `/builds/<clientVersion>/` asset namespace while local builds
@@ -171,6 +179,7 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
    */
   workerUrl?: URL;
   getBuildHash?: () => Promise<string | undefined>;
+
   /**
    * Optional telemetry sink (browser OTel bridge). Purely additive and gated by
    * the embedder: when omitted, no telemetry work happens.
@@ -517,41 +526,6 @@ export class RuntimeInternals extends EventTarget {
     await this.#client.dispose();
   }
 
-  async trackRecentPiece(space: DID, pieceId: string): Promise<void> {
-    this.#check();
-    try {
-      // Shell compatibility: assumes the space-root pattern exposes a
-      // `trackRecent` handler accepting `{ piece }`.
-      const spaceRoot = await this.getSpaceRootPattern(space);
-      const trackRecent = spaceRoot.cell().key("trackRecent" as any);
-      const page = await this.#client.getPage(pieceId, space);
-      if (!page) return;
-      await (trackRecent as any).send({ piece: page.cell() });
-    } catch (e) {
-      if (this.#disposed) return;
-      console.error("[RuntimeInternals] Failed to track recent piece:", e);
-    }
-  }
-
-  /** Register a navigated piece in ITS OWN space's root pattern. */
-  async registerNavigatedPiece(cell: CellHandle<unknown>): Promise<void> {
-    this.#check();
-    try {
-      // Shell compatibility: assumes the space-root pattern exposes an
-      // `addPiece` handler accepting `{ piece }`.
-      const spaceRoot = await this.getSpaceRootPattern(cell.space());
-      const addPiece = spaceRoot.cell().key("addPiece" as any);
-      await (addPiece as any).send({ piece: cell });
-      await spaceRoot.cell().sync();
-    } catch (e) {
-      if (this.#disposed) return;
-      console.error(
-        "[RuntimeInternals] Failed to register navigated piece:",
-        e,
-      );
-    }
-  }
-
   async #waitForNavigationConvergence(space: DID): Promise<void> {
     this.#check();
     await this.#client.idle();
@@ -587,7 +561,6 @@ export class RuntimeInternals extends EventTarget {
     const pieceId = cell.id().replace(/^of:/, "");
     logger.log("navigate", `Navigating to piece: ${pieceId}`);
 
-    void this.registerNavigatedPiece(cell);
     try {
       await this.#waitForNavigationConvergence(cell.space());
     } catch (error) {

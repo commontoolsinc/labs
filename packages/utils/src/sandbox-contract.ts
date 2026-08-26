@@ -125,6 +125,7 @@ export const SANDBOX_WITHHELD_GLOBALS = Object.freeze(
     "self",
   ] as const,
 );
+
 /** Name of a global withheld from a sandbox compartment. */
 export type SandboxWithheldGlobalName =
   (typeof SANDBOX_WITHHELD_GLOBALS)[number];
@@ -146,6 +147,7 @@ export const TRUSTED_BUILDERS = Object.freeze(
     "pattern",
   ] as const,
 );
+
 /** Name of a trusted builder. */
 export type TrustedBuilderName = (typeof TRUSTED_BUILDERS)[number];
 
@@ -167,6 +169,7 @@ export const TRUSTED_DATA_HELPERS = Object.freeze(
     "__cf_data",
   ] as const,
 );
+
 /** Name of a trusted data helper. */
 export type TrustedDataHelperName = (typeof TRUSTED_DATA_HELPERS)[number];
 

@@ -72,7 +72,10 @@ type Right = { [NAME]: string; [UI]: VNode; label: string };
 
 The compiler rejects the first form: `pattern-result:opaque-reserved-key`,
 raised at the `pattern()` call by `reserved-result-keys.ts` in
-`packages/ts-transformers`. It reaches the root of a **result** schema and
+`packages/ts-transformers`. The rejection applies where an author can act —
+`cf check`, deploy, candidate admission; the runtime's identity-pinned reload
+of already-deployed stored source demotes it to a warning, so pieces that
+predate the rule keep loading. It reaches the root of a **result** schema and
 nothing else, which leaves two shapes legal and needed. Below the root, a
 reserved key names a field of another piece, where `unknown` is what keeps the
 field a reference to that piece's own screen rather than a copy, so the

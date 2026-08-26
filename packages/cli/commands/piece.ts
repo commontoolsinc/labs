@@ -2,11 +2,17 @@ import { Command, ValidationError } from "@cliffy/command";
 import { Table } from "@cliffy/table";
 import type { CellScope } from "@commonfabric/api";
 import {
+  decodePlan,
+  diffPlan,
   encodePlan,
   type PatternCompatibilityReport,
+  type PatternRef,
+  type PieceDiffStatus,
   type PiecePatternRef,
   type PieceSelector,
+  type PlanDiff,
 } from "@commonfabric/piece/ops";
+import type { RetargetRow } from "@commonfabric/piece/ops/bulk-retarget";
 import ports from "@commonfabric/ports" with { type: "json" };
 import { parseCellPath, UI } from "@commonfabric/runner";
 import {
@@ -20,9 +26,11 @@ import {
   readSourcePin,
   type RepairRunRequest,
   runRepair,
+  runRetarget,
   runSurvey,
 } from "../lib/bulk.ts";
 import { addressArgument, VerbInputValidationError } from "../lib/callable.ts";
+import { refuseSectionMarker } from "../lib/section-marker.ts";
 import type {
   InvocationIdentity,
   InvocationOutcome,
@@ -1188,6 +1196,7 @@ export function invocationJson(
  * only the receipt readback. */
 export interface PieceCallWaitControl {
   mode: "settle" | "commit";
+
   /** Caller-chosen patience bound in seconds (`--wait`). Never set for
    * `commit` — the readback the bound would cover is already skipped. */
   boundSeconds?: number;
@@ -1532,6 +1541,27 @@ export function dataCommandAction<
 }
 
 /**
+ * An action that refuses a `--` before it runs.
+ *
+ * `get` and `set` have no callable section, so a marker on their line closes
+ * nothing and sets aside whatever follows it. The raw arguments are what carry
+ * the marker: a trailing one sets nothing aside, so the literal arguments
+ * cannot tell it from a line that wrote none. `call` is not wrapped — it
+ * declares `stopEarly()` and its action reads what the marker set aside, which
+ * is the boundary the marker is for.
+ */
+export function withNoSectionMarker<
+  // deno-lint-ignore no-explicit-any
+  F extends (this: any, ...args: any[]) => unknown,
+>(spelling: string, action: F): F {
+  // deno-lint-ignore no-explicit-any
+  return function (this: any, ...args: any[]) {
+    refuseSectionMarker(spelling, this.getRawArgs());
+    return action.apply(this, args);
+  } as F;
+}
+
+/**
  * The one definition of `get`, mounted under `cf piece` and, through
  * {@link pieceDataCommand}, at top level as `cf get`. `spelling` is only
  * how the command names itself in its own help — and, since 6a, whether
@@ -1647,7 +1677,12 @@ the way --input does.`,
       { conflicts: ["select"] },
     )
     .arguments("[addressOrPath:string] [path:string]")
-    .action(dataCommandAction(spelling, getCellValueFromCommand));
+    .action(
+      dataCommandAction(
+        spelling,
+        withNoSectionMarker(spelling, getCellValueFromCommand),
+      ),
+    );
 }
 
 /**
@@ -1697,7 +1732,12 @@ counts, so cf ${spelling} /of:fid1:.../title needs no path argument. A trailing
         '"#argument" reference suffix spells the same selection)',
     )
     .arguments("[addressOrPath:string] [path:string]")
-    .action(dataCommandAction(spelling, setCellValueFromCommand));
+    .action(
+      dataCommandAction(
+        spelling,
+        withNoSectionMarker(spelling, setCellValueFromCommand),
+      ),
+    );
 }
 
 /**
@@ -2343,10 +2383,14 @@ export const piece = targetOptions(
     "--validator <path:string>",
     "A JSON-schema file each piece's result is read under; pieces that fail it are named on stderr.",
   )
+  .option(
+    "--diff <plan:string>",
+    "Report this survey against the plan it verifies instead of emitting it: every planned piece as moved as planned, still outstanding, or moved to something the plan did not ask for. Exits nonzero unless every planned row converged.",
+  )
   .option("--out <file:string>", "Write the plan to a file instead of stdout.")
   .option(
     "--json",
-    "Write the full survey result as JSON to stdout instead of the plan.",
+    "Write the full survey result as JSON to stdout instead of the plan, or the diff when --diff names a plan.",
     { conflicts: ["out"] },
   )
   .action(surveyFromCommand)
@@ -2402,6 +2446,39 @@ export const piece = targetOptions(
     { conflicts: ["out"] },
   )
   .action(repairFromCommand)
+  /* piece retarget */
+  .command(
+    "retarget",
+    "Apply a plan's retarget rows: serial, in plan order, each row's precondition proved before its write, stopping at the first failure with every unattempted piece named. Dry by default.",
+  )
+  .usage(spaceUsage)
+  .example(
+    cliText(`cf piece retarget ${EX_ID} ${EX_COMP} --plan plan.jsonl --apply`),
+    "Move every piece the plan names onto the source its row resolves.",
+  )
+  .option(
+    "--plan <file:string>",
+    "The plan this run applies. It is the whole input: it names the pieces, the reference each must still be on, and the source each moves to.",
+    { required: true },
+  )
+  .option(
+    "--apply",
+    "Write each row's source. Without it the run is the classification alone: where every piece stands against its own row, and no write at all.",
+  )
+  .option(
+    "--group-size <count:integer>",
+    "Pieces one session serves before it is replaced, so the warm-up amortizes while the pieces live at once stay bounded. A group boundary is a resume point.",
+  )
+  .option(
+    "--out <file:string>",
+    "Write the report to a file instead of streaming it to stdout, in the canonical FabricValue JSON encoding.",
+  )
+  .option(
+    "--json",
+    "Write the whole report to stdout as one document in the canonical FabricValue JSON encoding, instead of streaming a line per row.",
+    { conflicts: ["out"] },
+  )
+  .action(retargetFromCommand)
   /* piece view */
   .command("view", "Display the rendered view for a piece")
   .usage(pieceUsage)
@@ -3214,16 +3291,86 @@ export function parseRetargetFlag(spec: string): PhaseRetarget {
 export interface SurveyCLIOptions extends BulkSelectionOptions {
   retarget?: string[];
   validator?: string;
+
+  /** A plan this survey is reported against rather than emitted beside. */
+  diff?: string;
   out?: string;
 }
 
 export interface SurveyCommandDependencies {
   runSurvey?: typeof runSurvey;
   render?: typeof render;
+  readTextFile?: (path: string) => Promise<string>;
   writeTextFile?: typeof Deno.writeTextFile;
   printError?: (message: string) => void;
   printHint?: (message: string) => void;
   exit?: (code: number) => never;
+}
+
+/**
+ * Each diff verdict in the words the design names it in. The three a planned
+ * row can carry lead; the rest belong to a row the plan recorded without an
+ * operation, or to a piece the after-survey no longer holds.
+ */
+const PLAN_DIFF_LABELS: Readonly<Record<PieceDiffStatus, string>> = {
+  landed: "moved as planned",
+  outstanding: "still outstanding",
+  "moved-elsewhere": "moved to something the plan did not ask for",
+  unchanged: "unchanged, with no operation planned",
+  changed: "changed, with no operation planned",
+  missing: "gone from the selection",
+};
+
+/** The verdicts a converged after-survey holds, and only those. */
+const CONVERGED_DIFF_STATUSES: readonly PieceDiffStatus[] = [
+  "landed",
+  "unchanged",
+];
+
+function formatDiffRef(ref: PatternRef | undefined): string {
+  return ref === undefined ? "nothing" : `${ref.patternIdentity}#${ref.symbol}`;
+}
+
+/**
+ * The diff as a person reads it. All three planned verdicts print, whatever
+ * their counts: "still outstanding: 0" is a fact the reader is owed, and an
+ * absent line is one they would have to infer. The remaining classes print
+ * only when a run produced one.
+ */
+export function planDiffLines(diff: PlanDiff): string[] {
+  const lines = (["landed", "outstanding", "moved-elsewhere"] as const).map(
+    (status) => `${PLAN_DIFF_LABELS[status]}: ${diff.counts[status]}`,
+  );
+  for (const status of ["unchanged", "changed", "missing"] as const) {
+    if (diff.counts[status] > 0) {
+      lines.push(`${PLAN_DIFF_LABELS[status]}: ${diff.counts[status]}`);
+    }
+  }
+  if (diff.unplanned.length > 0) {
+    lines.push(
+      `held by the space but not by the plan: ${diff.unplanned.length}`,
+    );
+  }
+  return lines;
+}
+
+/**
+ * Every piece whose verdict is not the converged one, named with the
+ * references behind it — a count of them is not something an operator can
+ * act on.
+ */
+export function planDiffFindings(diff: PlanDiff): string[] {
+  return diff.rows.filter((row) =>
+    !CONVERGED_DIFF_STATUSES.includes(row.status)
+  ).map((row) =>
+    `${PLAN_DIFF_LABELS[row.status]}: ${row.piece} ` +
+    `${formatDiffRef(row.before)} -> ${formatDiffRef(row.after)}`
+  );
+}
+
+/** Whether every planned row reached what its plan asked of it. */
+export function planDiffConverged(diff: PlanDiff): boolean {
+  return diff.rows.every((row) => CONVERGED_DIFF_STATUSES.includes(row.status));
 }
 
 /** The selection surface the bulk piece commands share. */
@@ -3381,16 +3528,33 @@ export async function surveyFromCommand(
 
   const print = deps.render ?? render;
   const printHint = deps.printHint ?? hint;
-  if (options.json) {
-    print(result, { json: true });
-  } else {
+  // A diff needs an after-survey that accounts for everything, so an
+  // incomplete one takes the refusal below instead of being compared: a
+  // verdict from a survey that dropped a piece is not a verdict.
+  const diff = options.diff === undefined || !result.complete
+    ? undefined
+    : diffPlan(
+      decodePlan(
+        await (deps.readTextFile ?? Deno.readTextFile)(absPath(options.diff)),
+      ),
+      result.plan,
+    );
+  if (options.out !== undefined) {
+    // The after-survey's own plan, whatever this run reports: it is the
+    // artifact the next run's diff is taken against.
     const plan = encodePlan(result.plan);
-    if (options.out !== undefined) {
-      await (deps.writeTextFile ?? Deno.writeTextFile)(options.out, plan);
-      printHint(`Wrote ${result.plan.rows.length} plan rows to ${options.out}`);
-    } else {
-      print(plan.trimEnd());
-    }
+    await (deps.writeTextFile ?? Deno.writeTextFile)(options.out, plan);
+    printHint(`Wrote ${result.plan.rows.length} plan rows to ${options.out}`);
+  }
+  if (options.json) {
+    print(diff ?? result, { json: true });
+  } else if (diff !== undefined) {
+    for (const line of planDiffLines(diff)) print(line);
+  } else if (options.out === undefined) {
+    print(encodePlan(result.plan).trimEnd());
+  }
+  for (const address of diff?.unplanned ?? []) {
+    printHint(`held by the space but not by the plan: ${address}`);
   }
   for (const entry of result.tally) {
     printHint(
@@ -3414,6 +3578,20 @@ export async function surveyFromCommand(
               `  registered outside the selection: ${outside.piece} on ` +
               `${outside.patternIdentity}#${outside.symbol}`,
           ),
+        ].join("\n"),
+      },
+      deps,
+    );
+  }
+  if (diff !== undefined && !planDiffConverged(diff)) {
+    // A verification that finds work left is not a verification, so it does
+    // not exit zero. The findings ride the message rather than a hint: a
+    // quiet script is the caller most in need of which pieces they are.
+    exitWithDataError(
+      {
+        message: [
+          "The after-survey is not what the plan asked for.",
+          ...planDiffFindings(diff).map((finding) => `  ${finding}`),
         ].join("\n"),
       },
       deps,
@@ -3529,6 +3707,129 @@ export async function repairFromCommand(
   }
 }
 
+export interface RetargetCLIOptions extends PieceCLIOptions {
+  /** Inherited from the `piece` mount's global target options. */
+  quiet?: boolean;
+  plan: string;
+  apply?: boolean;
+  groupSize?: number;
+  out?: string;
+}
+
+export interface RetargetCommandDependencies {
+  runRetarget?: typeof runRetarget;
+  render?: typeof render;
+  writeTextFile?: typeof Deno.writeTextFile;
+  printError?: (message: string) => void;
+  printHint?: (message: string) => void;
+  exit?: (code: number) => never;
+}
+
+/**
+ * One report row as a line: the verdict, the piece, its phase, what the row
+ * cost, and what it broke. The cost is on the line rather than in a summary
+ * because a run whose cost per piece is unknown cannot be improved, and the
+ * number has to arrive while there is still a run to reason about.
+ */
+export function formatRetargetRow(row: RetargetRow): string {
+  return [
+    row.verdict,
+    row.piece,
+    ...(row.phase === undefined ? [] : [row.phase]),
+    ...(row.elapsedMs === undefined ? [] : [`${row.elapsedMs}ms`]),
+    ...(row.problem === undefined ? [] : [`- ${row.problem}`]),
+  ].join(" ");
+}
+
+/**
+ * `cf piece retarget`: the plan consumer. The plan is the whole input — it
+ * names the pieces, the reference each must still be on, and the source each
+ * moves to — so this command carries no selection of its own. Dry by
+ * default: without `--apply` the run is the classification alone.
+ *
+ * The report has exactly one destination. Streamed to stdout it arrives a
+ * row at a time, as each row settles; written to a file or emitted as one
+ * JSON document it cannot stream, and each row carries its own cost there
+ * instead. Applying implies no verdict either way: the verification is
+ * `cf piece survey --diff`, a separate invocation by design.
+ */
+export async function retargetFromCommand(
+  options: RetargetCLIOptions,
+  deps: RetargetCommandDependencies = {},
+): Promise<void> {
+  setQuietMode(!!options.quiet);
+  // Every mode reserves stdout for the report — streamed rows, one JSON
+  // document, or nothing at all beside `--out` — and this run starts the
+  // pieces it writes, so the runtime's console goes to stderr whether or not
+  // `--json` is on the line. A pattern's own logging would otherwise land
+  // between two rows of a machine-readable stream.
+  const spaceConfig = { ...parseSpaceOptions(options), jsonOutput: true };
+  const print = deps.render ?? render;
+  const printHint = deps.printHint ?? hint;
+  const streaming = options.json !== true && options.out === undefined;
+  const report = await (deps.runRetarget ?? runRetarget)(spaceConfig, {
+    planPath: absPath(options.plan),
+    ...(options.apply === true ? { apply: true } : {}),
+    ...(options.groupSize === undefined
+      ? {}
+      : { groupSize: options.groupSize }),
+    ...(streaming
+      ? { onRow: (row: RetargetRow) => print(formatRetargetRow(row)) }
+      : {}),
+  });
+  // The canonical FabricValue encoding, as the repair's report uses: one
+  // encoding for one document, whichever destination it goes to.
+  const encoded = jsonFromFabricValue(report as unknown as FabricValue);
+  if (options.out !== undefined) {
+    await (deps.writeTextFile ?? Deno.writeTextFile)(
+      options.out,
+      `${encoded}\n`,
+    );
+    printHint(`Wrote ${report.rows.length} report rows to ${options.out}`);
+  } else if (options.json) {
+    print(encoded);
+  }
+  const tally = new Map<string, number>();
+  for (const row of report.rows) {
+    tally.set(row.verdict, (tally.get(row.verdict) ?? 0) + 1);
+  }
+  printHint(
+    [
+      ...[...tally.entries()].map(([verdict, count]) => `${verdict}: ${count}`),
+      `written: ${report.applied}`,
+    ].join(" · "),
+  );
+  if (!report.complete) {
+    const settled = (row: RetargetRow) =>
+      row.verdict === "landed" || row.verdict === "applied" ||
+      (options.apply !== true && row.verdict === "outstanding");
+    exitWithDataError(
+      {
+        message: [
+          options.apply === true
+            ? "Retarget did not complete; re-running resumes it."
+            : "Retarget found rows an apply would refuse.",
+          // The run's own trouble, as opposed to any piece's: a session that
+          // would not open, would not release, or answered for another space.
+          ...(report.stopReason === undefined
+            ? []
+            : [`  stopped: ${report.stopReason}`]),
+          // Every unattempted piece by name, never a count of them: a count
+          // is not something the operator of a stopped migration can act on.
+          // On the message rather than a hint, for the same reason the
+          // repair puts its problems there — a quiet script is the caller
+          // most in need of them.
+          ...report.rows.filter((row) => !settled(row)).map((row) =>
+            `  ${row.verdict}: ${row.piece}` +
+            (row.problem === undefined ? "" : ` ${row.problem}`)
+          ),
+        ].join("\n"),
+      },
+      deps,
+    );
+  }
+}
+
 export interface SlugListCommandDependencies {
   listSpaceSlugs?: typeof listSpaceSlugs;
   renderSlugSummaries?: typeof renderSlugSummaries;
@@ -3600,6 +3901,7 @@ export interface SetPieceSourceCommandDependencies {
 /** Injectable dependencies for testing `piece setsrc --check`. */
 export interface CheckPieceSourceCommandDependencies {
   checkPiecePattern?: typeof checkPiecePattern;
+
   /** `exitWithDataError`'s seam, so a test can observe the refusal. */
   exit?: Parameters<typeof exitWithDataError>[1];
 }

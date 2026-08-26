@@ -54,6 +54,7 @@ export class CommonIframeSandboxElement extends LitElement {
   /** The host's end of the channel to the current guest, while there is one. */
   private guestPort: MessagePort | undefined;
   private iframeRef: Ref<HTMLIFrameElement> = createRef();
+
   /**
    * The outer-frame window whose `ready` this element last acted on, once one
    * has. Its identity is what tells a frame that has been replaced from the
@@ -61,6 +62,7 @@ export class CommonIframeSandboxElement extends LitElement {
    * context, so the frame reattaching brings is a different window.
    */
   private readyWindow: Window | undefined;
+
   /**
    * The guest's live subscriptions by key, each held with the context it was
    * taken out against. A receipt is only good to the context that issued it,

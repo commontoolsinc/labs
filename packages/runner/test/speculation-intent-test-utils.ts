@@ -40,20 +40,27 @@ export type ScriptedIntentManager = {
       sync(id: string, selector: unknown, scope?: string): Promise<unknown>;
     };
   };
+
   /** Live subscribers (the relay's set). */
   readonly subscribers: Set<IStorageNotification>;
+
   /** `sync` calls seen: `${space}\0${id}\0${scope}`. */
   readonly syncs: string[];
+
   /** Make the NEXT `sync` resolve `{ error }` (a transient pull failure);
    * later calls succeed again. */
   failNextSync(error?: unknown): void;
+
   /** Raw doc reads seen. */
   readonly reads: string[];
+
   /** Whether a notification dispatch is currently on the stack (a
    * consumer that runs INSIDE `next` sees `true`). */
   readonly dispatching: () => boolean;
+
   /** Set (or replace) a sidecar doc's value without notifying. */
   seed(space: MemorySpace, id: string, value: StreamEventsDocValue): void;
+
   /** Mutate the doc and dispatch ONE notification with the given change
    * paths (default: one whole-doc change at `[]`). Returns synchronously
    * — the overlay's check runs in a MICROTASK. */
@@ -64,6 +71,7 @@ export type ScriptedIntentManager = {
     paths?: string[][],
     type?: "commit" | "integrate" | "pull" | "load",
   ): void;
+
   /** Mutate SEVERAL docs and dispatch ONE notification whose merged
    * changes span them — one frame carrying a wave commit that marks two
    * of this client's sidecars (two streams fired by one client in one
@@ -77,6 +85,7 @@ export type ScriptedIntentManager = {
     }>,
     type?: "commit" | "integrate" | "pull" | "load",
   ): void;
+
   /** Dispatch a storage RESET for the space. */
   reset(space: MemorySpace): void;
 };

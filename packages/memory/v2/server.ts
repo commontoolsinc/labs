@@ -398,12 +398,14 @@ export type AdmittedCommitNotice = {
   holder?: string;
   sessionId: string;
   writes: Array<{ id: string; scopeKey: ScopeKey }>;
+
   /** Phase 3 (events-down): the commit's admitted event appends —
    * serving-loop.md §3's "if c.class == event-append: enqueue for
    * handler processing" classification input. Ids only (the sidecar
    * doc instance + the eventId); the SpaceServer's drain reads the
    * stamped entries from the store, never from this record. */
   eventAppends?: Array<{ id: string; scopeKey: ScopeKey; eventId: string }>;
+
   /** The EXPLICIT WARM REQUEST (serving-loop.md §1's third activation
    * trigger; RULED 2026-08-21): set only by the serving-side
    * provisioning path — a wave's foreign provisioning batch reported
@@ -429,6 +431,7 @@ export type AdmittedCommitNotice = {
 export type ServerExecutionObserver = {
   commitAdmitted?: (notice: AdmittedCommitNotice) => void;
   sessionOpened?: (space: string) => void;
+
   /** A session's WATCH SET changed (`session.watch.set` / `.add`) —
    * demand may have changed (server-execution v2 fan-out stage B, design
    * §A's arrival re-arm: a demander's FIRST watch of a root whose nodes
@@ -462,6 +465,7 @@ export type DemandedInstanceRow = {
   scope: CellScope;
   scopeKey: ScopeKey;
   identity?: { principal?: string; sessionId?: string };
+
   /** True when the row is a watch ROOT of its session (the structure
    * load's input, unchanged in scope — design §2.8 flag 4). */
   root: boolean;
@@ -1139,6 +1143,7 @@ export class Server {
     readonly options: {
       sessions?: SessionRegistry;
       store?: URL;
+
       /**
        * Coalescing delay for the batched subscription fan-out, in
        * milliseconds. `"manual"` never arms the refresh timer: dirty spaces
@@ -1155,6 +1160,7 @@ export class Server {
         message: SessionOpenRequest,
         context: SessionOpenAuthContext,
       ) => Promise<string | undefined> | string | undefined;
+
       /**
        * Authentication data advertised in `hello.ok` and enforced for
        * `session.open` on this server.
@@ -1162,11 +1168,14 @@ export class Server {
       sessionOpenAuth: {
         /** Audience value clients must sign into `session.open` as `aud`. */
         audience: string;
+
         /** How long a connection challenge may be used, in seconds. */
         challengeTtlSeconds?: number;
+
         /** Current unix time in seconds. Tests may inject this. */
         nowSeconds?: () => number;
       };
+
       /**
        * Space access control. `off` (default) preserves the historical
        * any-authenticated-session-may-do-anything behavior. `observe`
@@ -1193,6 +1202,7 @@ export class Server {
       acl?: {
         mode: MemoryAclMode;
         serviceDids?: readonly string[];
+
         /**
          * Principals whose `session.open` may carry the delegated READ
          * binding `actingAs: "space-owner"` (OW31, READ side RULED
@@ -2201,8 +2211,10 @@ export class Server {
    */
   async commitDelegatedAppend(entry: {
     targetSpace: string;
+
     /** The stream SIDECAR doc id (`streamEntriesDocId`). */
     targetStream: string;
+
     /** The stream link for the delivered entry's self-describing
      * `stream` field; stage-G-era rows fall back to a path-less link
      * at the sidecar id. */
@@ -2211,14 +2223,17 @@ export class Server {
     payload: unknown;
     actingPrincipal?: string;
     actingSession?: string;
+
     /** The OW15 sessionless-space-scope declaration (protocol.md §2's
      * Phase-3 floor carve-out): admits an ABSENT acting principal;
      * the entry stamps `firedAt = { session: "server" }`. */
     sessionlessSpaceScope?: boolean;
     capabilityRef: string;
+
     /** The delivering SpaceServer's service session — the commit's
      * envelope identity (LT5). */
     sessionId: string;
+
     /** From the delivering host's process-lifetime counter (the same
      * replay-keying discipline as the wave sink — engine-wave-sink.ts):
      * unique per (sessionId, localSeq) on the target engine. NOTE: a
@@ -4510,6 +4525,7 @@ export class Server {
   ): Array<{
     id: string;
     scope?: CellScope;
+
     /** The DEMANDING session's identity (server-execution v2 Phase 2,
      * scopes.md §5: a derivation runs per demanded instance and the
      * DEMAND supplies the identity; fan-out stage B, RULED 2026-08-16 —

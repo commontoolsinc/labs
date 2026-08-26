@@ -46,6 +46,7 @@ export type EntityDocument =
 export interface PathSelection {
   /** Whether every segment selected an own property. */
   found: boolean;
+
   /** The selected value. This can be `undefined` when `found` is true. */
   value: unknown;
 }
@@ -109,6 +110,7 @@ function hasTable(space: SpaceDb, name: string): boolean {
 /** One branch a read consults, and the seq its rows are visible up to. */
 export interface BranchReadLink {
   branch: string;
+
   /** Rows with `seq <= atSeq` on this branch are visible from the read. */
   atSeq: number;
 }
@@ -169,8 +171,10 @@ export function branchReadChain(
 export interface VisibleRevisionRow {
   scope: string;
   id: string;
+
   /** Revisions on the branch that OWNS it — the history a read can reach. */
   revisions: number;
+
   /** The chain link that owns it. */
   link: BranchReadLink;
 }
@@ -367,8 +371,10 @@ export function reconstructDocument(
 
 export interface ValueAtResult {
   exists: boolean;
+
   /** The full reconstructed document (`{ value, source, … }`). */
   document?: EntityDocument;
+
   /** The value navigated to `path` within `document.value`. */
   value?: unknown;
 }

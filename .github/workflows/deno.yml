@@ -189,6 +189,12 @@ jobs:
           deno task run-recorded gate repo check-local-program --
           deno task check-local-program
 
+      - name: 🚧 Guard against a CLI slot nobody decided about completing
+        timeout-minutes: *work-timeout
+        run: >-
+          deno task run-recorded gate repo check-completion-slots --
+          deno task check-completion-slots
+
       - name: 🔎 Check generated commonfabric/cfc types are up to date
         timeout-minutes: *work-timeout
         working-directory: packages/static

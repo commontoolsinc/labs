@@ -91,8 +91,10 @@ interface SessionState {
   sessionId: string;
   principal: string;
   nextLocalSeq: number;
+
   /** Simulated integration watermark: the read basis this client would use. */
   integratedSeq: number;
+
   /** Own prior localSeqs per entity, newest last (for pending-read stacks). */
   stacks: Map<string, number[]>;
 }
@@ -111,6 +113,7 @@ interface ScheduleStats {
   accepted: number;
   rejected: number;
   pendingReadAccepts: number;
+
   /** Commits whose pending read was sparsely mutated, split by verdict —
    * both sides must stay exercised for the declared-set exclusion to keep
    * differential coverage (see the vacuity guard). */
