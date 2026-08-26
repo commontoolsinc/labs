@@ -341,9 +341,16 @@ export function findViolations(
   return violations;
 }
 
-/** Runs the check and returns the process exit code. The file paths and the
- * printers are injectable so a test can drive both verdicts; the defaults are
- * the repository's own files and the console. */
+/**
+ * Runs the check and returns the process exit code.
+ *
+ * The printers are injectable so a test can drive both verdicts, and so is
+ * the pairing: `mdPath` names the document to check and `shPath` the demo to
+ * hold it to, defaulting to the verb demo. A demo alone names no document, so
+ * it is refused rather than quietly dropped — the caller that passes one means
+ * to check something against it. The default is every pairing in
+ * {@link DOC_DEMOS} and the console.
+ */
 export async function main(deps: {
   shPath?: string;
   mdPath?: string;
@@ -352,6 +359,11 @@ export async function main(deps: {
 } = {}): Promise<number> {
   const log = deps.log ?? console.log;
   const error = deps.error ?? console.error;
+  if (deps.shPath !== undefined && deps.mdPath === undefined) {
+    throw new Error(
+      "shPath names the demo to hold mdPath's document to; pass both.",
+    );
+  }
   // An override names one pairing; otherwise every document is read against
   // the demo it was written from.
   const pairs = deps.mdPath === undefined

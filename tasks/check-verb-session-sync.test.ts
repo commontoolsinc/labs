@@ -211,6 +211,38 @@ describe("check-verb-session-sync", () => {
       }
     });
 
+    it("holds a document to the demo shPath names", async () => {
+      // The pairing is the injectable unit: the same document is a violation
+      // against the default demo and clean against the demo that runs it.
+      const dir = await Deno.makeTempDir();
+      try {
+        const mdPath = `${dir}/tour.md`;
+        const shPath = `${dir}/demo.sh`;
+        await Deno.writeTextFile(
+          mdPath,
+          "```bash\ncf frobnicate --nothing-like-this\n```\n",
+        );
+        await Deno.writeTextFile(
+          shPath,
+          "#!/usr/bin/env bash\nrun cf frobnicate --nothing-like-this\n",
+        );
+        const lines: string[] = [];
+        expect(await main({ mdPath, shPath, log: (l) => lines.push(l) }))
+          .toBe(0);
+        expect(await main({ mdPath, error: () => {} })).toBe(1);
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
+    it("refuses a demo that names no document to check against it", async () => {
+      // Silently ignoring it would leave the caller believing the run used
+      // the demo they passed.
+      await expect(main({ shPath: "/nowhere/demo.sh" })).rejects.toThrow(
+        /pass both/,
+      );
+    });
+
     it("does not let a reasonless marker exempt anything", () => {
       const block = [
         "```bash",

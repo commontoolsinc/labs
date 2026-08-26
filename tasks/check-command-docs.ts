@@ -25,7 +25,8 @@
 import type { Command } from "@cliffy/command";
 import { main as cliRoot } from "../packages/cli/commands/main.ts";
 import { walk } from "@std/fs/walk";
-import { relative } from "@std/path";
+import { parse as parseJsonc } from "@std/jsonc";
+import { join, relative } from "@std/path";
 
 /**
  * Commands deliberately left without prose, each with the reason.
@@ -61,8 +62,40 @@ export const DOC_ROOTS: readonly string[] = [
   "packages",
 ];
 
-/** Documents that record a moment rather than describing the system. */
-export function isLiveDoc(path: string): boolean {
+/**
+ * The README of each workspace package, as a repository-relative path.
+ *
+ * A package is what the root config says it is, rather than what the shape of
+ * a path suggests: `packages/connectors/agents` is a package and
+ * `packages/ts-transformers/test/fixtures` is not, and only the member list
+ * tells the two apart. The path a member yields need not exist — one that
+ * does not simply never turns up in the walk.
+ */
+export async function readPackageDocs(root: string): Promise<Set<string>> {
+  const config = parseJsonc(
+    await Deno.readTextFile(join(root, "deno.jsonc")),
+  ) as { workspace?: unknown } | null;
+  const members = Array.isArray(config?.workspace) ? config.workspace : [];
+  const docs = new Set<string>();
+  for (const member of members) {
+    if (typeof member !== "string") continue;
+    docs.add(`${member.replace(/^\.\//, "").replace(/\/+$/, "")}/README.md`);
+  }
+  return docs;
+}
+
+/**
+ * Documents that record a moment rather than describing the system.
+ *
+ * `packageDocs` is {@link readPackageDocs}: under `packages/` the
+ * documentation is a package's own README, and an internal one — a fixture
+ * corpus, a test directory, a sub-example — is no more somewhere a caller is
+ * sent to read than the source beside it.
+ */
+export function isLiveDoc(
+  path: string,
+  packageDocs: ReadonlySet<string>,
+): boolean {
   // A repository-relative path arrives spelled with the host's separator and
   // every rule below is written in slashes, so the path is read in slashes
   // whichever it arrives in. Untranslated, a Windows `docs\history\report.md`
@@ -74,9 +107,7 @@ export function isLiveDoc(path: string): boolean {
   // today, so naming a command there is not documenting it.
   if (doc.startsWith("docs/plans/")) return false;
   if (doc.includes("/node_modules/")) return false;
-  // Under `packages/`, only the package's own README is documentation; the
-  // rest is source, fixtures and generated output.
-  if (doc.startsWith("packages/") && !doc.endsWith("README.md")) return false;
+  if (doc.startsWith("packages/") && !packageDocs.has(doc)) return false;
   return true;
 }
 
@@ -100,23 +131,53 @@ export function declaredCommands(
   return paths;
 }
 
+/** Nothing in a pattern's own text may be read as regex syntax. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /**
- * The command paths some live document names.
+ * The expression that decides whether a document names one command.
  *
- * A document names a command by writing it the way a caller types it, so the
- * search is for `cf <path>` followed by a boundary. `cf piece set` must not be
- * satisfied by `cf piece setsrc`, which is a different command with its own
- * prose obligation.
+ * A document names a command by writing it the way a caller types it, which
+ * is the whole command path between boundaries. Three things look like that
+ * and are not it. `cf piece setsrc` is a different command with its own prose
+ * obligation, so it cannot stand in for `cf piece set`. `scf brew` is a word
+ * that happens to end in the command's letters. And `cf piece ls` names the
+ * child: a reader looking up `cf piece` finds nothing about `cf piece` there,
+ * so the parent still owes prose of its own — which is why the next segment
+ * of every command this one is a prefix of ends the match.
  */
+export function commandPattern(
+  command: string,
+  commands: readonly string[],
+): RegExp {
+  const path = command.split(" ");
+  const children = new Set<string>();
+  for (const other of commands) {
+    const parts = other.split(" ");
+    if (parts.length === path.length + 1 && other.startsWith(`${command} `)) {
+      children.add(parts.at(-1)!);
+    }
+  }
+  const child = children.size === 0
+    ? ""
+    : `(?!\\s+(?:${[...children].map(escapeRegExp).join("|")})(?![\\w-]))`;
+  return new RegExp(
+    `(?<![\\w-])cf\\s+${path.map(escapeRegExp).join("\\s+")}${child}(?![\\w-])`,
+  );
+}
+
+/** The command paths some live document names. */
 export async function documentedCommands(
   root: string,
   commands: readonly string[],
 ): Promise<Set<string>> {
   const found = new Set<string>();
+  const packageDocs = await readPackageDocs(root);
   const patterns = commands.map((command) => ({
     command,
-    // A boundary is anything that cannot continue the command's last word.
-    pattern: new RegExp(`cf ${command.replace(/ /g, "\\s+")}(?![\\w-])`),
+    pattern: commandPattern(command, commands),
   }));
   for (const dir of DOC_ROOTS) {
     // `walk` reports a missing directory when it is iterated rather than when
@@ -129,7 +190,7 @@ export async function documentedCommands(
       });
       for await (const entry of entries) {
         const path = relative(root, entry.path);
-        if (!isLiveDoc(path)) continue;
+        if (!isLiveDoc(path, packageDocs)) continue;
         const text = await Deno.readTextFile(entry.path);
         for (const { command, pattern } of patterns) {
           if (!found.has(command) && pattern.test(text)) found.add(command);

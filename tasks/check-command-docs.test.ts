@@ -2,12 +2,14 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Command } from "@cliffy/command";
 import {
+  commandPattern,
   declaredCommands,
   describeCommandDocFailures,
   documentedCommands,
   isLiveDoc,
   main,
   NO_PROSE,
+  readPackageDocs,
   reportCommandDocs,
 } from "./check-command-docs.ts";
 
@@ -48,17 +50,88 @@ describe("check-command-docs", () => {
   });
 
   describe("isLiveDoc()", () => {
+    /** One package, the way the root config names its members. */
+    const packageDocs = new Set(["packages/oven/README.md"]);
+
     it("reads a path spelled with either separator", () => {
       // The rules are written in slashes and the path arrives in the host's
       // separator, so a Windows spelling has to reach the same verdict.
-      expect(isLiveDoc("docs/guide.md")).toBe(true);
-      expect(isLiveDoc("docs\\guide.md")).toBe(true);
-      expect(isLiveDoc("docs/history/report.md")).toBe(false);
-      expect(isLiveDoc("docs\\history\\report.md")).toBe(false);
-      expect(isLiveDoc("docs\\plans\\later.md")).toBe(false);
-      expect(isLiveDoc("packages\\oven\\brew.ts")).toBe(false);
-      expect(isLiveDoc("packages\\oven\\docs\\guide.md")).toBe(false);
-      expect(isLiveDoc("packages\\oven\\README.md")).toBe(true);
+      expect(isLiveDoc("docs/guide.md", packageDocs)).toBe(true);
+      expect(isLiveDoc("docs\\guide.md", packageDocs)).toBe(true);
+      expect(isLiveDoc("docs/history/report.md", packageDocs)).toBe(false);
+      expect(isLiveDoc("docs\\history\\report.md", packageDocs)).toBe(false);
+      expect(isLiveDoc("docs\\plans\\later.md", packageDocs)).toBe(false);
+      expect(isLiveDoc("packages\\oven\\brew.ts", packageDocs)).toBe(false);
+      expect(isLiveDoc("packages\\oven\\README.md", packageDocs)).toBe(true);
+    });
+
+    it("takes a README under a package to be the package's own or nothing", () => {
+      // A fixture corpus and a test directory keep READMEs of their own, and
+      // neither is somewhere a caller is sent to read.
+      expect(isLiveDoc("packages/oven/README.md", packageDocs)).toBe(true);
+      expect(isLiveDoc("packages/oven/test/README.md", packageDocs))
+        .toBe(false);
+      expect(isLiveDoc("packages/oven/test/fixtures/README.md", packageDocs))
+        .toBe(false);
+      // A member the config names below the first level is still a package.
+      expect(
+        isLiveDoc("packages/mixers/whisk/README.md", packageDocs),
+      ).toBe(false);
+      expect(
+        isLiveDoc(
+          "packages/mixers/whisk/README.md",
+          new Set(["packages/mixers/whisk/README.md"]),
+        ),
+      ).toBe(true);
+    });
+  });
+
+  describe("readPackageDocs()", () => {
+    it("names one README per workspace member, however deep", async () => {
+      const root = await Deno.makeTempDir();
+      try {
+        await Deno.writeTextFile(
+          `${root}/deno.jsonc`,
+          `{
+  // The member list is what says a directory is a package.
+  "workspace": ["./packages/oven", "./packages/mixers/whisk"]
+}`,
+        );
+        expect([...await readPackageDocs(root)].sort()).toEqual([
+          "packages/mixers/whisk/README.md",
+          "packages/oven/README.md",
+        ]);
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
+    });
+  });
+
+  describe("commandPattern()", () => {
+    const commands = ["brew", "glaze", "glaze set", "glaze setsrc"];
+
+    it("needs a boundary before the command as well as after it", () => {
+      // Otherwise a word ending in the command's letters names it.
+      expect(commandPattern("brew", commands).test("Run `cf brew`.")).toBe(
+        true,
+      );
+      expect(commandPattern("brew", commands).test("Run scf brew.")).toBe(
+        false,
+      );
+      expect(commandPattern("brew", commands).test("Run my-cf brew.")).toBe(
+        false,
+      );
+    });
+
+    it("does not let a child stand in for the parent it hangs under", () => {
+      // A reader looking up `cf glaze` finds nothing about it in a document
+      // that only ever writes `cf glaze set`.
+      const glaze = commandPattern("glaze", commands);
+      expect(glaze.test("Run `cf glaze set` first.")).toBe(false);
+      expect(glaze.test("Run `cf glaze setsrc` first.")).toBe(false);
+      expect(glaze.test("`cf glaze` applies one.")).toBe(true);
+      // An argument is not a child, so it still reads as naming the parent.
+      expect(glaze.test("Run `cf glaze cherry`.")).toBe(true);
     });
   });
 
@@ -70,6 +143,12 @@ describe("check-command-docs", () => {
     ): Promise<void> {
       const root = await Deno.makeTempDir();
       try {
+        // The package rule reads its member list from the root config, so a
+        // throwaway tree needs one the way the repository has one.
+        await Deno.writeTextFile(
+          `${root}/deno.jsonc`,
+          `{ "workspace": ["./packages/oven"] }`,
+        );
         for (const [path, text] of Object.entries(files)) {
           const full = `${root}/${path}`;
           await Deno.mkdir(full.slice(0, full.lastIndexOf("/")), {
@@ -138,6 +217,17 @@ describe("check-command-docs", () => {
       await withDocs({
         "packages/oven/README.md": "`cf brew` heats the glaze.",
         "packages/oven/brew.ts": "// `cf glaze set` in a comment",
+      }, async (root) => {
+        const found = await documentedCommands(root, ["brew", "glaze set"]);
+        expect([...found]).toEqual(["brew"]);
+      });
+    });
+
+    it("reads the package's own README and not an internal one", async () => {
+      // A fixture corpus documents the fixtures, for whoever maintains them.
+      await withDocs({
+        "packages/oven/README.md": "`cf brew` heats the glaze.",
+        "packages/oven/test/fixtures/README.md": "`cf glaze set` here too.",
       }, async (root) => {
         const found = await documentedCommands(root, ["brew", "glaze set"]);
         expect([...found]).toEqual(["brew"]);

@@ -85,9 +85,12 @@ cheap read per member rather than one execution per member.
 
 ### Acts 5–6 · A plan that carries the operation, from a live read
 
-A survey can carry the work as well as the record. A retarget stamped onto every
-row whose phase matches is pinned to the identity the on-disk source produces —
-not to a path, which could drift between the plan and the apply.
+A survey can carry the work as well as the record. A retarget stamps an `op`
+onto the rows whose phase matches it, and pins that op to the identity the
+on-disk source produces — not to a path, which could drift between the plan and
+the apply. A row is exempt when its piece already stands on the reference the op
+names: there is nothing to do for that piece, and a row claiming otherwise could
+not be verified afterward, landed and never-ran reading alike.
 
 ```bash
 cf piece survey -s "$SPACE" --piece board --path items \
@@ -95,8 +98,8 @@ cf piece survey -s "$SPACE" --piece board --path items \
   --out "$WORK/retarget.jsonl"
 ```
 
-Each row then carries both halves: `expect` is where the piece stands, `op` is
-where this plan will take it.
+A row that carries an op carries both halves: `expect` is where the piece
+stands, `op` is where this plan will take it.
 
 The survey is a live read, so filing one more member and surveying again moves
 the count. There is no cache to invalidate and nothing to refresh.
@@ -153,8 +156,9 @@ cf piece retarget -s "$SPACE" --plan "$WORK/retarget.jsonl" \
 
 Sessions are grouped rather than opened per piece or held open for the whole
 run. The warm-up amortizes across a group while the pieces live at once stay
-bounded by it, and a group boundary is a resume point. Every row carries what it
-cost, because a run whose cost per piece is unknown cannot be improved.
+bounded by it, and a group boundary is a resume point. Every row an apply
+session worked on carries what it cost, because a run whose cost per piece is
+unknown cannot be improved.
 
 Re-invoking is the resume, on the same principle the repair uses: a piece
 already on its row's target reads as landed and is not rewritten.
@@ -182,10 +186,13 @@ over the pieces it knew about, and the ones it never enumerated stay behind at
 the old shape with nothing recording that they were missed.
 
 So when the registry knows a piece on an in-scope identity that the collection
-does not hold, the survey stops and names it rather than emitting a plan that
-quietly misses it. The plan the later stages consume is therefore complete by
-construction: an incomplete survey refuses to produce one, and a serialized plan
-carries the incompleteness so no write stage can consume it either.
+does not hold, the survey names it and exits nonzero. The plan is still emitted
+— to `--out`, or to stdout — because what was read is worth keeping; what it is
+not is consumable. Its header carries the pieces the survey could not account
+for, encoding and decoding preserve them, and every write stage refuses a plan
+whose header names any. The incompleteness therefore rides the artifact rather
+than the exit code: a plan that reached a write stage by another route, or was
+kept and supplied later, refuses there just the same.
 
 ### Act 11 · A list survey claims only what it read
 

@@ -273,6 +273,26 @@ value. An `observes` update is rejected when it would combine with an existing
 observation class instead of preserving the requested class. Omitting `observes`
 from a later update preserves an existing unambiguous class.
 
+## Invocation sessions
+
+An invocation id is the caller's own word for one call, and another caller can
+choose the same one. What separates them is the session it was chosen within:
+the pair decides which outcome a replay reads, and it is what keeps an outcome's
+address unguessable. `cf invocation-session` is where a session comes from.
+
+```bash
+export CF_INVOCATION_SESSION=$(cf invocation-session new)
+```
+
+`new` prints one id on stdout and nothing else, so a command substitution
+captures exactly it. Mint one per agent run and carry it in the environment
+rather than in `--invocation-session <id>`, which every `cf call` also accepts:
+an environment variable stays out of the process listing an argument shows up
+in. A call naming an invocation id with no session in scope is refused: an id is
+replayable only within the session it was chosen in, and a session minted on the
+spot would make the replay name a different invocation. A call naming neither
+gets both, minted for that one call.
+
 ## Output Conventions
 
 - stdout carries command output only; hints and diagnostics go to stderr.
@@ -916,8 +936,20 @@ never typed at a prompt.
 `cf init` writes a TypeScript environment an external tool can evaluate patterns
 in: the configuration and type declarations an editor, a scratch checkout, or a
 generated workspace needs to resolve `commonfabric` the way this repository
-does. It touches nothing in a space, so it is safe to run anywhere and to run
-again.
+does. It reaches no space — everything it does is to the current directory,
+where it writes three things:
+
+- `.cf-types/`, holding the declarations for `commonfabric`, `turndown`,
+  `cf-env` and the JSX runtime, one `index.d.ts` each.
+- `.cf-docs/`, holding a copy of the top-level pattern documentation.
+- `tsconfig.json` — **written whole, over whatever was already there.**
+
+The configuration is generated from the runtime's own compiler options and is
+not merged with the file it replaces, so a directory that is already a
+TypeScript project loses its `compilerOptions`, its `include`, and everything
+else it had, without a prompt and without a backup. A second run replaces the
+generated one in turn, discarding any edit made to it. Run it in a directory
+that exists for patterns, or in a copy.
 
 ## Installing `cf` on PATH
 
