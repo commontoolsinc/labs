@@ -450,6 +450,7 @@ export type IPCClientMessage = {
    * Identifies this request, and the response that will answer it.
    */
   msgId: MessageId;
+
   /**
    * The request itself.
    */
@@ -480,6 +481,7 @@ export type IPCRemoteResponse = {
    * The request this answers.
    */
   msgId: MessageId;
+
   /**
    * What the handler returned, absent where it returned nothing.
    */
@@ -489,11 +491,13 @@ export type IPCRemoteResponse = {
    * The request this answers.
    */
   msgId: MessageId;
+
   /**
    * What went wrong, as text. Its presence is what makes this the
    * failure arm.
    */
   error: string;
+
   /**
    * Names the kind of failure where one is named; an ordinary failure
    * carries no code.
@@ -550,6 +554,7 @@ export type InitializationData = {
    * does not list.
    */
   apiUrl: string;
+
   /**
    * Per-space storage hosts, by space DID, as HTTP or HTTPS origins. A listed
    * space resolves against its own host instead of `apiUrl`; an absent map or
@@ -558,6 +563,7 @@ export type InitializationData = {
    * Fixed for the connection's lifetime.
    */
   spaceHostMap?: Record<string, string>;
+
   /**
    * Signer, as a `codec-realm` encoding of the `FabricKeyPair` it signs with.
    * Encoded rather than plain because that is the one format which carries
@@ -565,20 +571,24 @@ export type InitializationData = {
    * boundary whole.
    */
   identity: RealmEncodedValue;
+
   /**
    * The space this connection opens on.
    */
   spaceDid: DID;
+
   /**
    * The space's name, where the client knows it. Temporary.
    */
   spaceName?: string;
   /** Temporary identity of space, encoded as `identity` above is. */
   spaceIdentity?: RealmEncodedValue;
+
   /**
    * How long a request may go unanswered before the client gives up on it.
    */
   timeoutMs?: number;
+
   /**
    * Experimental space-model feature flags, declared by the host. The worker
    * runs the arm named here rather than resolving its own, so that the two
@@ -608,6 +618,7 @@ export type InitializationData = {
     | "observe"
     | "enforce-explicit"
     | "enforce-strict";
+
   /**
    * The flow-label propagation dial. `off` derives nothing; `observe`
    * computes the per-transaction conservative join and emits diagnostics
@@ -616,6 +627,7 @@ export type InitializationData = {
    * default, which is `off`.
    */
   cfcFlowLabels?: "off" | "observe" | "persist";
+
   /**
    * Whether author-supplied render-boundary declassification is honored.
    * `allow` is the default. `deny` ignores an author's
@@ -623,6 +635,7 @@ export type InitializationData = {
    * upward through a render boundary.
    */
   renderDeclassificationPolicy?: "allow" | "deny";
+
   /**
    * The confidentiality a display surface admits by default: exact `atoms`,
    * which is where an acting user's identity atoms go, plus the Caveat
@@ -632,6 +645,7 @@ export type InitializationData = {
     atoms?: readonly CfcConfClause[];
     caveatKinds?: readonly string[];
   };
+
   /**
    * A static trust snapshot applied to worker-owned transactions, declared by
    * the host so the worker runs against the same one rather than resolving
@@ -642,6 +656,7 @@ export type InitializationData = {
     actingPrincipal?: string;
     revision?: string;
   };
+
   /**
    * Mirror the worker's own console output to the main thread, which re-emits
    * it on the page console prefixed with `[worker]`, so runtime-internal logs
@@ -650,6 +665,7 @@ export type InitializationData = {
    * {@link RequestType.SetForwardWorkerConsole} changes it later.
    */
   forwardWorkerConsole?: boolean;
+
   /**
    * Instrument every pattern compile for statement coverage and accumulate
    * hits, which the integration harness pulls at teardown through
@@ -657,6 +673,7 @@ export type InitializationData = {
    * shell build sets it -- and off by default.
    */
   patternCoverage?: boolean;
+
   /**
    * Let the worker's remote storage overlap watch-refresh round trips up to a
    * bounded window, rather than the default strict single-flight. Fixed at
@@ -672,6 +689,7 @@ export type InitializationData = {
  */
 export type InitializeRequest = BaseRequest & {
   type: RequestType.Initialize;
+
   /**
    * What the runtime is stood up from.
    */
@@ -690,20 +708,24 @@ export type DisposeRequest = BaseRequest & {
  */
 export type CellGetRequest = BaseRequest & {
   type: RequestType.CellGet;
+
   /**
    * The cell to read.
    */
   cell: CellRef;
+
   /**
    * Reads this metadata field instead of the cell's value.
    */
   meta?: MetaField;
+
   /**
    * Have the cell's display label returned alongside the value, so a caller
    * needing both pays one round trip instead of a separate
    * {@link RequestType.CellGetCfcLabel}.
    */
   includeCfcLabel?: boolean;
+
   /**
    * Have the read cell's own schema-bearing ref returned. Useful where `meta`
    * names a link field -- pattern, argument, result -- since the resolved
@@ -750,10 +772,12 @@ export type WireCellValue =
  */
 export type CellSetRequest = BaseRequest & {
   type: RequestType.CellSet;
+
   /**
    * The cell to overwrite.
    */
   cell: CellRef;
+
   /**
    * The value to store, whole and already resolved.
    */
@@ -769,10 +793,12 @@ export type CellSetRequest = BaseRequest & {
  */
 export type CellPushRequest = BaseRequest & {
   type: RequestType.CellPush;
+
   /**
    * The cell to apply to.
    */
   cell: CellRef;
+
   /**
    * The value to apply, whole and already resolved.
    */
@@ -785,10 +811,12 @@ export type CellPushRequest = BaseRequest & {
  */
 export type CellSendRequest = BaseRequest & {
   type: RequestType.CellSend;
+
   /**
    * The cell to send to.
    */
   cell: CellRef;
+
   /**
    * The event to deliver.
    */
@@ -801,10 +829,12 @@ export type CellSendRequest = BaseRequest & {
  */
 export type CellSubscribeRequest = BaseRequest & {
   type: RequestType.CellSubscribe;
+
   /**
    * The cell to watch.
    */
   cell: CellRef;
+
   /**
    * Opt in to reactive label delivery: every update then carries the cell's
    * current display label, and the worker reads that label as a tracked
@@ -818,6 +848,7 @@ export type CellSubscribeRequest = BaseRequest & {
 /** The {@link RequestType.CellUnsubscribe} request. */
 export type CellUnsubscribeRequest = BaseRequest & {
   type: RequestType.CellUnsubscribe;
+
   /**
    * The cell to stop watching.
    */
@@ -827,6 +858,7 @@ export type CellUnsubscribeRequest = BaseRequest & {
 /** The {@link RequestType.CellResolveAsCell} request. */
 export type CellResolveAsCellRequest = BaseRequest & {
   type: RequestType.CellResolveAsCell;
+
   /**
    * The cell whose aliases to follow.
    */
@@ -836,6 +868,7 @@ export type CellResolveAsCellRequest = BaseRequest & {
 /** The {@link RequestType.CellGetCfcLabel} request. */
 export type CellGetCfcLabelRequest = BaseRequest & {
   type: RequestType.CellGetCfcLabel;
+
   /**
    * The cell whose label to read.
    */
@@ -848,15 +881,18 @@ export type CellGetCfcLabelRequest = BaseRequest & {
  */
 export type GetCellRequest = BaseRequest & {
   type: RequestType.GetCell;
+
   /**
    * The space to derive the cell in.
    */
   space: DID;
+
   /**
    * What derives the cell. The same space and cause always name the same
    * cell, which is what makes this a derivation rather than an allocation.
    */
   cause: FabricValue;
+
   /**
    * The schema to read the cell under, where one is wanted.
    */
@@ -896,6 +932,7 @@ export type RuntimeSyncedRequest = BaseRequest & {
  * be retained as fresh-space ACL bootstrap authority. */
 export type ResolveSpaceNameRequest = BaseRequest & {
   type: RequestType.ResolveSpaceName;
+
   /**
    * The name to resolve.
    */
@@ -919,10 +956,12 @@ export type ResolveSpaceNameRequest = BaseRequest & {
  */
 export type RegisterSpaceHostRequest = BaseRequest & {
   type: RequestType.RegisterSpaceHost;
+
   /**
    * The space to route.
    */
   space: DID;
+
   /**
    * The origin its storage should resolve against.
    */
@@ -971,6 +1010,7 @@ export type SetLoggerLevelRequest = BaseRequest & {
   type: RequestType.SetLoggerLevel;
   /** Logger name. If not provided, sets level for all loggers. */
   loggerName?: string;
+
   /**
    * The level to record at.
    */
@@ -985,6 +1025,7 @@ export type SetLoggerEnabledRequest = BaseRequest & {
   type: RequestType.SetLoggerEnabled;
   /** Logger name. If not provided, sets enabled for all loggers. */
   loggerName?: string;
+
   /**
    * Whether the addressed loggers record at all.
    */
@@ -994,6 +1035,7 @@ export type SetLoggerEnabledRequest = BaseRequest & {
 /** The {@link RequestType.SetTelemetryEnabled} request. */
 export type SetTelemetryEnabledRequest = BaseRequest & {
   type: RequestType.SetTelemetryEnabled;
+
   /**
    * Whether telemetry notifications are sent.
    */
@@ -1003,6 +1045,7 @@ export type SetTelemetryEnabledRequest = BaseRequest & {
 /** The {@link RequestType.SetForwardWorkerConsole} request. */
 export type SetForwardWorkerConsoleRequest = BaseRequest & {
   type: RequestType.SetForwardWorkerConsole;
+
   /**
    * Whether the worker's console bridge is installed.
    */
@@ -1025,6 +1068,7 @@ export type GetSettleStatsRequest = BaseRequest & {
 /** The {@link RequestType.SetSettleStatsEnabled} request. */
 export type SetSettleStatsEnabledRequest = BaseRequest & {
   type: RequestType.SetSettleStatsEnabled;
+
   /**
    * Whether settle statistics are recorded. Setting it false also discards
    * what has been collected.
@@ -1050,6 +1094,7 @@ export type GetActionRunTraceRequest = BaseRequest & {
 /** The {@link RequestType.SetActionRunTraceEnabled} request. */
 export type SetActionRunTraceEnabledRequest = BaseRequest & {
   type: RequestType.SetActionRunTraceEnabled;
+
   /**
    * Whether action runs are traced. Setting it false also discards the trace
    * already collected.
@@ -1067,6 +1112,7 @@ export type GetTriggerTraceRequest = BaseRequest & {
 /** The {@link RequestType.SetTriggerTraceEnabled} request. */
 export type SetTriggerTraceEnabledRequest = BaseRequest & {
   type: RequestType.SetTriggerTraceEnabled;
+
   /**
    * Whether triggers are traced. Setting it false also discards the trace
    * already collected.
@@ -1087,6 +1133,7 @@ export type GetWriteStackTraceRequest = BaseRequest & {
  */
 export type SetWriteStackTraceMatchersRequest = BaseRequest & {
   type: RequestType.SetWriteStackTraceMatchers;
+
   /**
    * The writes whose stack to record. Replaces the current set rather than
    * adding to it.
@@ -1100,6 +1147,7 @@ export type SetWriteStackTraceMatchersRequest = BaseRequest & {
  */
 export type DetectNonIdempotentRequest = BaseRequest & {
   type: RequestType.DetectNonIdempotent;
+
   /**
    * How long to run the diagnosis.
    */
@@ -1171,6 +1219,7 @@ export type PatternSourceFile = {
    * The file's name, as the pattern refers to it.
    */
   name: string;
+
   /**
    * The file's text.
    */
@@ -1184,6 +1233,7 @@ export type PatternSourceFile = {
 export type PatternSourceInfo = {
   /** Content identity of the pattern's entry module (`cf:module/<hash>`). */
   identity: string;
+
   /**
    * Every file of the pattern, code and data alike.
    */
@@ -1206,6 +1256,7 @@ export type PatternSourcesResponse = {
  */
 export type SetBreakpointsRequest = BaseRequest & {
   type: RequestType.SetBreakpoints;
+
   /**
    * The actions to break on. Replaces the current set.
    */
@@ -1221,10 +1272,12 @@ export type UploadBlobRequest = BaseRequest & {
   type: RequestType.UploadBlob;
   /** The space the blob belongs to — uploads target ITS host. */
   space: DID;
+
   /**
    * The media type the blob is served as.
    */
   contentType: string;
+
   /**
    * The blob's bytes: a `FabricBytes` in the realm-crossing form, which
    * carries it as a bare `ArrayBuffer` that structured cloning delivers whole
@@ -1233,6 +1286,7 @@ export type UploadBlobRequest = BaseRequest & {
    * still holds.
    */
   body: RealmEncodedValue;
+
   /**
    * The extension the stored blob is served under, defaulting to `bin`.
    * A leading dot is stripped.
@@ -1246,6 +1300,7 @@ export type UploadBlobResponse = {
    * The stored blob's id.
    */
   id: string;
+
   /**
    * Where the blob is served from.
    */
@@ -1262,18 +1317,22 @@ export type LogCounts = {
    * Messages recorded at `debug`.
    */
   debug: number;
+
   /**
    * Messages recorded at `info`.
    */
   info: number;
+
   /**
    * Messages recorded at `warn`.
    */
   warn: number;
+
   /**
    * Messages recorded at `error`.
    */
   error: number;
+
   /**
    * All four levels together.
    */
@@ -1312,6 +1371,7 @@ export type LoggerInfo = {
    * Whether the logger records at all.
    */
   enabled: boolean;
+
   /**
    * The lowest severity it records.
    */
@@ -1331,6 +1391,7 @@ export type CDFPoint = {
    * Latency, in milliseconds.
    */
   x: number;
+
   /**
    * The fraction of samples at or below `x`, from 0 to 1.
    */
@@ -1348,42 +1409,52 @@ export type TimingStats = {
    * How many measurements have been taken.
    */
   count: number;
+
   /**
    * The fastest measurement, in milliseconds.
    */
   min: number;
+
   /**
    * The slowest measurement, in milliseconds.
    */
   max: number;
+
   /**
    * Every measurement summed, which is what `average` divides.
    */
   totalTime: number;
+
   /**
    * `totalTime` over `count`.
    */
   average: number;
+
   /**
    * The median measurement.
    */
   p50: number;
+
   /**
    * The 95th percentile measurement.
    */
   p95: number;
+
   /**
    * The most recent measurement, in milliseconds.
    */
   lastTime: number;
+
   /**
    * When that measurement was taken.
    */
   lastTimestamp: number;
+
   /**
    * The distribution over every sample since the worker started.
    */
   cdf: CDFPoint[];
+
   /**
    * The distribution over samples since the last baseline reset, `null`
    * until one has happened.
@@ -1417,6 +1488,7 @@ export type PageCreateRequest = BaseRequest & {
   type: RequestType.PageCreate;
   /** The space the piece is created in — part of its address. */
   space: DID;
+
   /**
    * Where the piece's program comes from: a URL to fetch, or a program
    * given directly. Never both.
@@ -1426,6 +1498,7 @@ export type PageCreateRequest = BaseRequest & {
   } | {
     program: Program;
   };
+
   /**
    * The argument the piece is created with.
    *
@@ -1436,11 +1509,13 @@ export type PageCreateRequest = BaseRequest & {
    * (`codec-realm`).
    */
   argument?: JSONValue;
+
   /**
    * What derives the piece's identity, so that the same cause names the
    * same piece.
    */
   cause?: string;
+
   /**
    * Start the piece once created.
    */
@@ -1455,6 +1530,7 @@ export type PageCreateRequest = BaseRequest & {
  */
 export type PageGetSpaceDefault = BaseRequest & {
   type: RequestType.GetSpaceRootPattern;
+
   /**
    * The space whose root pattern to read.
    */
@@ -1464,6 +1540,7 @@ export type PageGetSpaceDefault = BaseRequest & {
 /** The {@link RequestType.RecreateSpaceRootPattern} request. */
 export type RecreateSpaceRootPatternRequest = BaseRequest & {
   type: RequestType.RecreateSpaceRootPattern;
+
   /**
    * The space whose root pattern to replace.
    */
@@ -1476,14 +1553,17 @@ export type RecreateSpaceRootPatternRequest = BaseRequest & {
  */
 export type PageGetRequest = BaseRequest & {
   type: RequestType.PageGet;
+
   /**
    * The piece to read.
    */
   pageId: string;
+
   /**
    * Start the piece as part of the read.
    */
   runIt?: boolean;
+
   /**
    * The space the piece lives in.
    */
@@ -1493,10 +1573,12 @@ export type PageGetRequest = BaseRequest & {
 /** The {@link RequestType.PageGetSlug} request. */
 export type PageGetSlugRequest = BaseRequest & {
   type: RequestType.PageGetSlug;
+
   /**
    * The piece whose slug to read.
    */
   pageId: string;
+
   /**
    * The space the piece lives in.
    */
@@ -1506,10 +1588,12 @@ export type PageGetSlugRequest = BaseRequest & {
 /** The {@link RequestType.PageRemove} request. */
 export type PageRemoveRequest = BaseRequest & {
   type: RequestType.PageRemove;
+
   /**
    * The piece to remove.
    */
   pageId: string;
+
   /**
    * The space to remove it from.
    */
@@ -1519,10 +1603,12 @@ export type PageRemoveRequest = BaseRequest & {
 /** The {@link RequestType.PageStart} request. */
 export type PageStartRequest = BaseRequest & {
   type: RequestType.PageStart;
+
   /**
    * The piece to start.
    */
   pageId: string;
+
   /**
    * The space the piece lives in.
    */
@@ -1532,10 +1618,12 @@ export type PageStartRequest = BaseRequest & {
 /** The {@link RequestType.PageStop} request. */
 export type PageStopRequest = BaseRequest & {
   type: RequestType.PageStop;
+
   /**
    * The piece to stop.
    */
   pageId: string;
+
   /**
    * The space the piece lives in.
    */
@@ -1545,6 +1633,7 @@ export type PageStopRequest = BaseRequest & {
 /** The {@link RequestType.PageGetAll} request. */
 export type PageGetAllRequest = BaseRequest & {
   type: RequestType.PageGetAll;
+
   /**
    * The space whose pieces to list.
    */
@@ -1554,6 +1643,7 @@ export type PageGetAllRequest = BaseRequest & {
 /** The {@link RequestType.PageSynced} request. */
 export type PageSyncedRequest = BaseRequest & {
   type: RequestType.PageSynced;
+
   /**
    * The space whose pieces to wait for.
    */
@@ -1567,10 +1657,12 @@ export type PageSyncedRequest = BaseRequest & {
  */
 export type PieceGetSourceRequest = BaseRequest & {
   type: RequestType.PieceGetSource;
+
   /**
    * The space the piece lives in.
    */
   space: DID;
+
   /**
    * The piece whose source to read.
    */
@@ -1580,14 +1672,17 @@ export type PieceGetSourceRequest = BaseRequest & {
 /** Read the authored files retained for one recorded source revision. */
 export type PieceGetSourceRevisionRequest = BaseRequest & {
   type: RequestType.PieceGetSourceRevision;
+
   /**
    * The space the piece lives in.
    */
   space: DID;
+
   /**
    * The piece whose history to read from.
    */
   pieceId: string;
+
   /**
    * The revision to read.
    */
@@ -1597,14 +1692,17 @@ export type PieceGetSourceRevisionRequest = BaseRequest & {
 /** Create a copy of a piece in another space. */
 export type PieceCloneRequest = BaseRequest & {
   type: RequestType.PieceClone;
+
   /**
    * The space to copy from.
    */
   sourceSpace: DID;
+
   /**
    * The piece to copy.
    */
   pieceId: string;
+
   /**
    * The space to copy into.
    */
@@ -1626,6 +1724,7 @@ export type PieceOriginView = {
    * Where the source came from, resolved.
    */
   url: string;
+
   /**
    * How that URL resolves.
    */
@@ -1640,6 +1739,7 @@ export type PiecePatternRefView = {
    * The pattern's content identity.
    */
   identity: string;
+
   /**
    * The export within it that is the pattern.
    */
@@ -1666,22 +1766,27 @@ export type PieceSourceRevisionView = {
    * This revision's id.
    */
   revisionId: string;
+
   /**
    * When it was made.
    */
   timestamp: number;
+
   /**
    * What the piece pointed at afterwards.
    */
   pattern: PiecePatternRefView;
+
   /**
    * Where that pattern came from, for a pattern that came from anywhere.
    */
   origin?: PieceOriginView;
+
   /**
    * What produced this revision.
    */
   operation: PieceSourceRevisionOperation;
+
   /**
    * The revision this operation acted on, for the operations that name
    * one -- a revert or a follow.
@@ -1700,50 +1805,61 @@ export type PieceSourceView = {
    * The space the piece lives in.
    */
   space: DID;
+
   /**
    * The piece this describes.
    */
   pieceId: string;
+
   /**
    * The piece's name, where it has one.
    */
   name?: string;
+
   /**
    * The pattern the piece currently runs.
    */
   pattern?: PiecePatternRefView;
+
   /**
    * The pattern that set the piece up, where that differs from the one
    * it runs.
    */
   setupPattern?: PiecePatternRefView;
+
   /**
    * A pattern an update moved aside, with when it happened. Recorded so
    * the displacement stays visible; this is not a pattern in use.
    */
   displacedPattern?: PiecePatternRefView & { displacedAt?: number };
+
   /**
    * Where the source came from.
    */
   origin?: PieceOriginView;
+
   /**
    * The repository the source is tracked in, where it is.
    */
   repository?: string;
+
   /**
    * The entry file among `files`.
    */
   entry?: string;
+
   /**
    * Every file of the source, code and data alike.
    */
   files: PatternSourceFile[];
   /** Names among `files` that carry data rather than code. */
   dataFiles?: string[];
+
   /**
    * Every revision, which is what the current one is chosen from.
    */
   history: PieceSourceRevisionView[];
+
   /**
    * Which of `history` the piece is on.
    */
@@ -1767,6 +1883,7 @@ export type PieceSourceRevisionSourceView = {
    * The pattern as of that revision.
    */
   pattern: PiecePatternRefView;
+
   /**
    * The files as of that revision.
    */
@@ -1796,14 +1913,17 @@ export type PieceSourceAction =
  */
 export type PieceUpdateSourceRequest = BaseRequest & {
   type: RequestType.PieceUpdateSource;
+
   /**
    * The space the piece lives in.
    */
   space: DID;
+
   /**
    * The piece to update.
    */
   pieceId: string;
+
   /**
    * What to change about which source the piece follows.
    */
@@ -1824,10 +1944,12 @@ export type PieceUpdateSourceResponse = PieceSourceResponse & {
    * incompatible. Comes with a `confirmationToken`.
    */
   compatibilityWarning?: string;
+
   /**
    * Sent back on a repeat request to apply the update anyway.
    */
   confirmationToken?: string;
+
   /**
    * Reports an update that landed but whose pattern then misbehaved --
    * which is a different outcome from a refusal.
@@ -1844,15 +1966,18 @@ export type SpaceAclView = {
    * The space this describes.
    */
   space: DID;
+
   /**
    * Whose view this is, capabilities being reported as they stand for
    * one reader.
    */
   principal: DID;
+
   /**
    * What each user may do, by user.
    */
   acl: Record<string, SpaceAclCapability>;
+
   /**
    * Whether `principal` may change the list at all.
    */
@@ -1870,6 +1995,7 @@ export type SpaceAclResponse = {
 /** Reads the ACL for one space. */
 export type SpaceGetAclRequest = BaseRequest & {
   type: RequestType.SpaceGetAcl;
+
   /**
    * The space whose access list to read.
    */
@@ -1879,14 +2005,17 @@ export type SpaceGetAclRequest = BaseRequest & {
 /** Adds or replaces one explicit ACL entry in a space. */
 export type SpaceSetAclEntryRequest = BaseRequest & {
   type: RequestType.SpaceSetAclEntry;
+
   /**
    * The space to grant on.
    */
   space: DID;
+
   /**
    * Who to grant to.
    */
   user: string;
+
   /**
    * What to grant, replacing whatever the user held.
    */
@@ -1896,10 +2025,12 @@ export type SpaceSetAclEntryRequest = BaseRequest & {
 /** Removes one explicit ACL entry from a space. */
 export type SpaceRemoveAclEntryRequest = BaseRequest & {
   type: RequestType.SpaceRemoveAclEntry;
+
   /**
    * The space to remove from.
    */
   space: DID;
+
   /**
    * Whose entry to remove.
    */
@@ -1937,6 +2068,7 @@ export type SerializedDomEvent = {
    * The DOM event's type, as `click` or `input`.
    */
   type: string;
+
   /**
    * Where the event came from, so a handler can tell a real user
    * gesture from a synthesized one.
@@ -1950,54 +2082,67 @@ export type SerializedDomEvent = {
       uiContractDataset?: Record<string, string>;
     };
   };
+
   /**
    * The key pressed, for a keyboard event.
    */
   key?: string;
+
   /**
    * The physical key, which `key` does not identify across layouts.
    */
   code?: string;
+
   /**
    * Whether the key was being held.
    */
   repeat?: boolean;
+
   /**
    * Whether Alt was held.
    */
   altKey?: boolean;
+
   /**
    * Whether Control was held.
    */
   ctrlKey?: boolean;
+
   /**
    * Whether Meta was held.
    */
   metaKey?: boolean;
+
   /**
    * Whether Shift was held.
    */
   shiftKey?: boolean;
+
   /**
    * What kind of edit an input event was.
    */
   inputType?: string;
+
   /**
    * The text an input event inserted, `null` where it inserted none.
    */
   data?: string | null;
+
   /**
    * Which button a pointer event used.
    */
   button?: number;
+
   /**
    * Which buttons were held during a pointer event.
    */
   buttons?: number;
+
   /**
    * What the event fired on, reduced to the fields a handler reads.
    */
   target?: SerializedEventTarget;
+
   /**
    * A custom event's payload.
    */
@@ -2012,6 +2157,7 @@ export type SerializedEventTarget = {
    * The element's name, or its tag where it has none.
    */
   name?: string;
+
   /**
    * The element's current value. A `FabricValue` rather than a string: a custom
    * element chooses what its `value` is, and a `cf-input`, a `cf-tabs` and a
@@ -2019,24 +2165,29 @@ export type SerializedEventTarget = {
    * arrives here as the sigil link the main thread resolved it to.
    */
   value?: FabricValue;
+
   /**
    * Whether a checkbox or radio is checked -- or, where the element chose to
    * expose something else, what it chose. `cf-checkbox` and `cf-switch` each
    * declare theirs as `CellHandle<boolean> | boolean`.
    */
   checked?: FabricValue;
+
   /**
    * Whether an option is selected.
    */
   selected?: boolean;
+
   /**
    * Which option a select is on.
    */
   selectedIndex?: number;
+
   /**
    * Every selected option's value, for a multiple select.
    */
   selectedOptions?: { value: string }[];
+
   /**
    * The element's `data-` attributes.
    */
@@ -2183,20 +2334,23 @@ export type BooleanResponse = {
  * A cell's value on its way _out_ of the worker, which `WireCellValue` is on
  * its way in.
  *
- * TODO(danfuzz): the two directions want the same type and do not have it.
- * `JSONValue` cannot carry the whole `FabricValue` domain either, and this
- * direction loses where the inbound one throws: the producer hands over a
- * value with its `FabricPrimitive`s intact and structured clone strips each to
- * `{}` (see `handleCellGet` in `backends/runtime-processor.ts`).
- * `codec-realm` is the mechanism, and closing this gap and `WireCellValue`'s
- * is one change.
+ * A `FabricValue`, because that is what the producer hands over:
+ * `convertCellsToLinks()` preserves a `FabricPrimitive` by identity, so
+ * `handleCellGet()` in `backends/runtime-processor.ts` can return one.
+ *
+ * TODO(danfuzz): the crossing does not yet carry what this declares.
+ * Structured clone strips a `FabricPrimitive` to `{}` on the way to the main
+ * thread, silently, where the inbound direction throws instead (see the marker
+ * on `WireCellValue`). `codec-realm` is the mechanism, and closing this gap
+ * and `WireCellValue`'s is one change.
  */
-export type JSONValueResponse = {
+export type CellValueResponse = {
   /**
-   * The value read. `undefined` is a value a cell can hold, so it is not
-   * the same as the read having found nothing.
+   * The value read. A read that finds nothing is not distinguishable here:
+   * `undefined` is a `FabricValue` and a value a cell can hold, so it is what
+   * both answers look like.
    */
-  value: JSONValue | undefined;
+  value: FabricValue;
 };
 
 /**
@@ -2204,13 +2358,14 @@ export type JSONValueResponse = {
  * it, and `cell` only when it asked and the read resolved to a cell -- a raw
  * metadata read has none to name.
  */
-export type CellGetResponse = JSONValueResponse & {
+export type CellGetResponse = CellValueResponse & {
   /**
    * The cell's display label, present only where the request set
    * `includeCfcLabel`. `undefined` is a valid value, the cell carrying no
    * label; the field is omitted rather than undefined when not requested.
    */
   cfcLabel?: CfcLabelView | undefined;
+
   /**
    * A ref to the cell the read resolved to, present only where the request
    * set `includeRef` and the read reached a cell -- a raw metadata read has
@@ -2280,14 +2435,17 @@ export type LoggerCountsResponse = {
    * How many messages each logger recorded.
    */
   counts: LoggerCountsData;
+
   /**
    * Each logger's enabled state and level.
    */
   metadata: LoggerMetadata;
+
   /**
    * Each timed operation's statistics.
    */
   timing: LoggerTimingData;
+
   /**
    * The flags currently set, by logger.
    */
@@ -2313,17 +2471,20 @@ export type PatternCoverageResponse = {
  */
 export type CellUpdateNotification = {
   type: NotificationType.CellUpdate;
+
   /**
    * The cell that changed.
    */
   cell: CellRef;
+
   /**
-   * Its new value.
+   * Its new value. The push form of the same read `CellValueResponse` carries,
+   * produced by the same conversion, and so the same type.
    *
-   * TODO(danfuzz): the same gap `JSONValueResponse` is marked with. This is
-   * the push form of the same read, produced by the same conversion.
+   * TODO(danfuzz): the same gap `CellValueResponse` is marked with.
    */
-  value: JSONValue;
+  value: FabricValue;
+
   /**
    * The cell's current display label, present only for a subscription that
    * opted in through `includeCfcLabel`, so the client re-renders on a label
@@ -2339,14 +2500,17 @@ export type CellUpdateNotification = {
  */
 export type ConsoleNotification = {
   type: NotificationType.ConsoleMessage;
+
   /**
    * Where the call came from, for the parts of that the worker knows.
    */
   metadata?: { pieceId?: string; patternId?: string; space?: string };
+
   /**
    * Which `console` method was called.
    */
   method: string;
+
   /**
    * The arguments, each encoded on its own. `ConsoleMessage` is this same
    * notification with them decoded, which is what the client emits.
@@ -2375,6 +2539,7 @@ export type ConsoleMessage = Omit<ConsoleNotification, "args"> & {
  */
 export type NavigateRequestNotification = {
   type: NotificationType.NavigateRequest;
+
   /**
    * The cell to navigate to.
    */
@@ -2388,30 +2553,37 @@ export type NavigateRequestNotification = {
  */
 export type ErrorNotification = {
   type: NotificationType.ErrorReport;
+
   /**
    * What went wrong.
    */
   message: string;
+
   /**
    * Names the kind of failure where one is named.
    */
   code?: RuntimeErrorCode;
+
   /**
    * The piece it happened in, where that is known.
    */
   pieceId?: string;
+
   /**
    * The space it happened in, where that is known.
    */
   space?: string;
+
   /**
    * The pattern it happened in, where that is known.
    */
   patternId?: string;
+
   /**
    * The spell it happened in, where that is known.
    */
   spellId?: string;
+
   /**
    * The stack as raised, where one survived.
    */
@@ -2421,6 +2593,7 @@ export type ErrorNotification = {
 /** One telemetry marker. Sent only while telemetry is enabled. */
 export type TelemetryNotification = {
   type: NotificationType.Telemetry;
+
   /**
    * The marker, with the timestamp the runtime stamped it at.
    */
@@ -2435,6 +2608,7 @@ export type TelemetryNotification = {
  */
 export type PendingWritesNotification = {
   type: NotificationType.PendingWritesChanged;
+
   /**
    * Whether any issued commit is still unconfirmed.
    */
@@ -2466,10 +2640,12 @@ export type WorkerConsoleLevel = (typeof WORKER_CONSOLE_LEVELS)[number];
  */
 export type WorkerConsoleNotification = {
   type: TransportNotificationType.WorkerConsole;
+
   /**
    * Which `console` method the worker called.
    */
   level: WorkerConsoleLevel;
+
   /**
    * The call's arguments, already rendered to text.
    */
@@ -2495,6 +2671,7 @@ export type VDomBatchNotification = {
   batchId: number;
   /** The operations to apply, in order */
   ops: VDomOp[];
+
   /**
    * The root node ID for this render tree; `null` while the tree has no root
    * child, which the reconciler reports as a value rather than by omission.
@@ -2513,7 +2690,7 @@ export type RemoteResponse =
   | EmptyResponse
   | NullResponse
   | BooleanResponse
-  | JSONValueResponse
+  | CellValueResponse
   | CellGetResponse
   | CellResponse
   | CfcLabelViewResponse

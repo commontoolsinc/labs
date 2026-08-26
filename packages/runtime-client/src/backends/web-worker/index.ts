@@ -24,6 +24,7 @@ import {
 } from "@/protocol/mod.ts";
 import { RuntimeProcessor } from "@/backends/mod.ts";
 import { postToClient } from "@/backends/post-to-client.ts";
+import { describeFailure } from "@/shared/utils.ts";
 
 // Count-only ledger of request traffic as seen by the worker: one
 // `received/<type>` per request that reached this message handler and one
@@ -247,7 +248,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
       : undefined;
     postToClient({
       msgId: message.msgId,
-      error: error instanceof Error ? error.message : String(error),
+      error: describeFailure(error),
       ...(code ? { code } : {}),
     });
   }
