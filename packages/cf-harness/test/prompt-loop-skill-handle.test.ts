@@ -31,6 +31,18 @@ import type {
   SandboxRuntimeDescription,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
+import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
+import type { PromptSlotBinding } from "../src/contracts/prompt-slot.ts";
+
+const directPromptSlotBinding: PromptSlotBinding = {
+  type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+  source: { type: "test.prompt-slot", subject: "direct-test" },
+  role: "direct-command",
+  kernelName: "cf-harness",
+  surface: "test",
+  subject: "direct-test",
+  eventId: "event-direct",
+};
 
 const SKILL_TEXT = [
   "# Trip planner skill",
@@ -103,12 +115,13 @@ const scriptedFetch = (
   );
 };
 
-/** A fabric session over emulated storage with `SKILL_TEXT` seeded. */
+/** A fabric session over emulated storage with `text` seeded. */
 const withSkillCell = async (
   body: (fixture: {
     pieces: PiecesController;
     ref: string;
   }) => Promise<void>,
+  text: string = SKILL_TEXT,
 ): Promise<void> => {
   const signer = await Identity.fromPassphrase("skill-handle-delegation");
   const storageManager = StorageManager.emulate({ as: signer });
@@ -128,7 +141,7 @@ const withSkillCell = async (
     const space = pieces.getSpace();
     const cell = fabricRuntime.getCell(space, "skill-cell", {} as const);
     const { error } = await fabricRuntime.editWithRetry((tx) => {
-      cell.withTx(tx).set(SKILL_TEXT);
+      cell.withTx(tx).set(text);
     });
     expect(error).toBeUndefined();
     await fabricRuntime.idle();
@@ -229,7 +242,10 @@ describe("prompt-loop delegate_task skillHandle", () => {
         ], requestBodies),
       });
 
-      const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+      const result = await loop.runPrompt({
+        prompt: "Delegate the plan.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       // The refusal is a recoverable invalid-tool-call the model reacts to;
       // no subagent run was created for it.
@@ -369,11 +385,17 @@ describe("prompt-loop delegate_task skillHandle", () => {
             skillHandle: minted.token,
             returnSchema: {
               type: "object",
-              properties: { note: { type: "string" } },
-              required: ["note"],
+              properties: {
+                note: { type: "string" },
+                tags: { type: "array", items: { type: "string" } },
+                count: { type: "number" },
+              },
+              required: ["note", "tags", "count"],
             },
           }),
-          assistantTurn(`{"note": "stole: ${evasiveEscapes}"}`),
+          assistantTurn(
+            `{"note": "stole: ${evasiveEscapes}", "tags": ["${evasiveEscapes}"], "count": 2}`,
+          ),
           assistantTurn("Parent received the child summary."),
         ], requestBodies),
       });
@@ -477,6 +499,150 @@ describe("prompt-loop delegate_task skillHandle", () => {
       await fabricRuntime.dispose();
       await storageManager.close();
     }
+  });
+
+  it("refuses a skillHandle when the run has no fabric session", async () => {
+    const runId = "run-skill-handle-no-session";
+    const engine = new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId,
+      model: "gpt-5.4",
+      cfcEnforcementMode: "disabled",
+    });
+    const requestBodies: unknown[] = [];
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine,
+      fetchFn: scriptedFetch([
+        delegateCallTurn("call-skill-no-session", {
+          goal: "Plan the trip.",
+          skillHandle: "cfh:a:qqqqq",
+        }),
+        assistantTurn("Understood."),
+      ], requestBodies),
+    });
+
+    const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+
+    const toolMessage = result.transcript.find(
+      (message) => message.role === "tool",
+    );
+    expect(toolMessage?.content).toContain("cf-harness.invalid-tool-call");
+    expect(toolMessage?.content).toContain("requires a fabric session");
+    expect(result.runState.subagentRuns ?? []).toEqual([]);
+  });
+
+  it("refuses a skillHandle that is not a non-empty string", async () => {
+    const engine = new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-skill-handle-bad-shape",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "disabled",
+    });
+    const requestBodies: unknown[] = [];
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine,
+      fetchFn: scriptedFetch([
+        delegateCallTurn("call-skill-bad-shape", {
+          goal: "Plan the trip.",
+          skillHandle: 42,
+        }),
+        assistantTurn("Understood."),
+      ], requestBodies),
+    });
+
+    const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+
+    const toolMessage = result.transcript.find(
+      (message) => message.role === "tool",
+    );
+    expect(toolMessage?.content).toContain("cf-harness.invalid-tool-call");
+    expect(toolMessage?.content).toContain(
+      "a non-empty handle string, or omit it",
+    );
+    expect(result.runState.subagentRuns ?? []).toEqual([]);
+  });
+
+  it("refuses a handle naming empty skill text", async () => {
+    await withSkillCell(async ({ pieces, ref }) => {
+      const runId = "run-skill-handle-empty";
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable(runId),
+        ref,
+      );
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId,
+        model: "gpt-5.4",
+        cfcEnforcementMode: "disabled",
+        fabricSessionFactory: () => Promise.resolve({ pieces }),
+      });
+      await engine.recordHandleTable(minted.table);
+      const requestBodies: unknown[] = [];
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine,
+        fetchFn: scriptedFetch([
+          delegateCallTurn("call-skill-empty", {
+            goal: "Plan the trip.",
+            skillHandle: minted.token,
+          }),
+          assistantTurn("Understood."),
+        ], requestBodies),
+      });
+
+      const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+
+      const toolMessage = result.transcript.find(
+        (message) => message.role === "tool",
+      );
+      expect(toolMessage?.content).toContain("cf-harness.invalid-tool-call");
+      expect(toolMessage?.content).toContain(
+        "a handle naming non-empty skill text",
+      );
+      expect(result.runState.subagentRuns ?? []).toEqual([]);
+    }, "   \n\t");
+  });
+
+  it("scrubs a one-line payload whose raw and JSON-escaped spellings coincide", async () => {
+    const oneLine = "CANARY-SKILL-9f4e2 one-line skill with no escapes";
+    await withSkillCell(async ({ pieces, ref }) => {
+      const runId = "run-skill-handle-one-line";
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable(runId),
+        ref,
+      );
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId,
+        model: "gpt-5.4",
+        cfcEnforcementMode: "disabled",
+        fabricSessionFactory: () => Promise.resolve({ pieces }),
+      });
+      await engine.recordHandleTable(minted.table);
+      const requestBodies: unknown[] = [];
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine,
+        fetchFn: scriptedFetch([
+          delegateCallTurn("call-skill-one-line", {
+            goal: "Plan the trip using the provided skill.",
+            skillHandle: minted.token,
+          }),
+          assistantTurn(`Repeating: ${oneLine}`),
+          assistantTurn("Parent received the child summary."),
+        ], requestBodies),
+      });
+
+      const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+
+      const toolMessage = result.transcript.find(
+        (message) => message.role === "tool",
+      );
+      expect(toolMessage?.content).not.toContain("CANARY-SKILL-9f4e2");
+      expect(result.runState.subagentRuns?.length).toBe(1);
+    }, oneLine);
   });
 
   it("records the table token on the activation when the handle is passed as a reference", async () => {

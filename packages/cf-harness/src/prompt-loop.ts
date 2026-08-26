@@ -939,12 +939,13 @@ const HANDLE_SKILL_TEXT_SCRUBBED = "[handle-delivered skill text withheld]";
  * policy-mediated output, not a leak of the payload.
  */
 const scrubHandleSkillText = (text: string, skillText: string): string => {
+  // The payload is never empty here: an empty resolution refuses before any
+  // scrub runs, and the escape of a non-empty string is non-empty.
   let scrubbed = text;
   const escaped = JSON.stringify(skillText).slice(1, -1);
   for (
     const needle of skillText === escaped ? [skillText] : [skillText, escaped]
   ) {
-    if (needle.length === 0) continue;
     scrubbed = scrubbed.split(needle).join(HANDLE_SKILL_TEXT_SCRUBBED);
   }
   return scrubbed;
@@ -3129,6 +3130,26 @@ export class CfHarnessPromptLoop {
               toolId: "delegate_task",
               field: "skillHandle",
               expected: resolution.error,
+            },
+            sequence,
+            startedAt: activityStartedAt,
+            effectClass: tool.descriptor.effectClass,
+            ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
+            toolInputSummary,
+            policyEventIndexes,
+            recordActivity,
+          });
+        }
+        if (resolution.value.trimEnd() === "") {
+          // An empty skill is a call mistake, not a delegation: refusing it
+          // here also means the scrub below never sees an empty needle.
+          return await this.#rejectInvalidToolCall({
+            toolCall,
+            invalid: {
+              reason: "invalid-argument",
+              toolId: "delegate_task",
+              field: "skillHandle",
+              expected: "a handle naming non-empty skill text",
             },
             sequence,
             startedAt: activityStartedAt,
