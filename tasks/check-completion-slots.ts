@@ -97,6 +97,7 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
   ["attrcache-timeout", "a timeout in seconds, passed to the FUSE child"],
   ["stats-action-limit", "a count"],
   ["stats-threshold", "a threshold"],
+  ["group-size", "a session count per retarget group"],
   ["storage-stats-limit", "a count"],
   ["wait", "a patience in seconds"],
   // Identifiers the caller brings from outside, or coins.
