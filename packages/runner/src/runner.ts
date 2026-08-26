@@ -2861,6 +2861,21 @@ export class Runner {
         newRef: { identity: string; symbol: string },
       ) => {
         const pattern = this.resolveToPattern(loaded as Pattern);
+        // Whoever moved the pointer may have staged the incoming pattern in
+        // the same transaction, which is how a transition makes staging and
+        // the pointer succeed or fail together. Its completion marker says
+        // so, and staging what is already staged would restage the argument a
+        // second time for no gain: re-instantiate and stop.
+        const setupMarker = getPatternSetupIdentityRef(resultCell);
+        if (
+          setupMarker?.identity === newRef.identity &&
+          setupMarker.symbol === newRef.symbol
+        ) {
+          cancelNodes?.();
+          instantiatePattern(pattern);
+          runningRef = newRef;
+          return;
+        }
         const setupTx = this.runtime.edit();
         // Server-execution v2 stage F (serving-loop.md §3d): under an
         // installed seal destination every commit path declares its run
@@ -5069,17 +5084,6 @@ export class Runner {
       }
     }
     this.stopResult(resultCell);
-  }
-
-  /**
-   * Whether this runner currently holds a running graph for `resultCell`.
-   *
-   * The source reconciler asks: a running piece is re-instantiated in place by
-   * the pattern watcher when its identity moves, while one that is not running
-   * needs the swap to stage the new pattern over its document itself.
-   */
-  isRunning<T>(resultCell: Cell<T>): boolean {
-    return this.cancels.has(this.getDocKey(resultCell));
   }
 
   private stopResult<T>(resultCell: Cell<T>): void {

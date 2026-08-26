@@ -43,26 +43,27 @@ during that implementation are archived at
 ## Motivation
 
 - **System patterns must self-heal and roll forward.** `home.tsx` /
-  `default-app.tsx` are the most critical patterns to keep current. Existing
-  roots are resolved without starting, reconciled against their tracked system
-  source, and only then bootstrapped. The manual `recreateDefaultPattern`
+  `default-app.tsx` are the most critical patterns to keep current. A root is
+  resolved without starting, follows its source, and is only then
+  bootstrapped — the same sequence every piece takes when it is opened. The manual `recreateDefaultPattern`
   (shell Debugger button / CLI) remains a state-losing escape hatch: it mints a
   new piece and relinks it. URL-based recreation stamps the new root's source so
   the replacement remains eligible for future automatic repair.
 - **The rest of the system source tree must move too.** A non-root pattern may
-  have been compiled from any file served by the toolshed pattern route. Once
-  its current graph is instantiated, the runtime checks that source in the
-  background and lets the existing pattern watcher apply a verified move. The
-  current instantiation never waits for network or compilation.
+  have been compiled from any file served by the toolshed pattern route, and it
+  follows that source on the same trigger and through the same path as a root.
+  A piece nobody opens is never checked, so nothing pays for a source it is not
+  looking at.
 - **Two hazard cases to handle explicitly.** (1) We shipped a broken system
   pattern — once a fix ships, recovery must be automatic. (2) A
   schema-incompatible update slips through — the damage must be *bounded*
   (fast rollback), because the schema-valid-but-semantically-wrong case is not
   reliably detectable.
-- **A reusable mechanism.** The existing "resolve a source pointer to a current
-  identity, then swap in place" loop is a foundation for general piece origins.
-  Roots and other pieces need the same history, detach, compatibility,
-  authorization, and concurrency guarantees before they can share one path.
+- **One mechanism.** "Resolve a source pointer to a current identity, then
+  swap in place" is what every piece origin does, and a `system:` ref is one
+  kind of pointer rather than a path of its own. What it still adds is the
+  release gate below, which is why a candidate from it needs no comparison
+  with what the piece runs.
 
 ## Non-goals (this doc / v1)
 

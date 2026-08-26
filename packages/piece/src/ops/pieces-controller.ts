@@ -1354,11 +1354,17 @@ export class PiecesController<T = unknown> {
       )
       : pieceOrId;
     if (!piece) throw new Error("Piece not found");
-    await timePiecePhase(
+    const outcome = await timePiecePhase(
       "openPiece.reconcileSource",
       () => reconcilePieceSource(this.runtime, piece),
     );
-    await this.startPiece(piece);
+    // The transition committed through a transaction view, and the caller may
+    // have handed us a cell bound to a read transaction older than it. Detach
+    // and resync, or the start below loads the identity the origin just
+    // replaced.
+    await this.startPiece(
+      outcome === "updated" ? await piece.withTx().sync() : piece,
+    );
   }
 
   /** Start scheduling and running a prepared piece. */

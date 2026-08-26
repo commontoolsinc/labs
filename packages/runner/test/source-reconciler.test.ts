@@ -365,6 +365,29 @@ describe("piece source reconciliation", () => {
       expect(getPatternIdentityRef(piece)?.identity).toBe(changedIdentity);
     });
 
+    it("keeps a RUNNING piece's pointer when the candidate refuses its data", async () => {
+      // Staging the candidate is part of the transition for a running piece
+      // too. Were it left to the pattern watcher, the pointer would commit,
+      // the watcher's setup would fail, and the next open would find the
+      // pointer matching what the origin offers and call the piece current —
+      // with the old graph still running and nothing able to undo it.
+      const demanding = sourceWithRequiredInput("v2");
+      const demandingIdentity = await identityFor(demanding);
+      const piece = await preparePiece(
+        servingFetch(() => demandingIdentity, () => demanding),
+      );
+      const originalRef = getPatternIdentityRef(piece);
+      await stampSource(piece, PARENT_SOURCE);
+      expect(await runtime.start(piece)).toBe(true);
+      await runtime.idle();
+
+      expect(await reconcile(piece)).toBe("unavailable");
+      await runtime.idle();
+      expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+      expect((await piece.pull())?.marker).toBe("v1");
+      expect(getPieceSourceRevisions(piece)).toEqual([]);
+    });
+
     it("keeps the running source when the candidate refuses this piece's data", async () => {
       // Nothing compares the contracts for this origin, so what discovers the
       // problem is staging the candidate over the document: its setup rejects

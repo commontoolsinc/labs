@@ -538,22 +538,8 @@ export class SourceReconciler {
       origin: state.storedSource,
       expected: state.snapshot,
     };
-    // A piece that is not running has nothing to re-instantiate the new
-    // pattern over its document, so the swap runs setup itself. A running one
-    // is re-instantiated in place by the pattern watcher, and running setup
-    // here as well would stage the same pattern twice.
-    //
-    // TODO(hixie): stage the candidate here for a running piece too. Only the
-    // stopped case is atomic today: a refusal there fails the transaction and
-    // nothing moves, while a running piece keeps a pointer the watcher then
-    // fails to stage — and the next open finds that pointer matching what the
-    // origin offers and reports the piece current, so nothing undoes it. This
-    // is reachable for a `system:` origin, whose candidates are not compared
-    // with what the piece runs.
-    const running = runtime.runner.isRunning(resultCell);
     // Setting up the candidate restages the piece's stored argument against
-    // its schema — here for a stopped piece, or in the pattern watcher for a
-    // running one — so that document has to be local before the transaction
+    // its schema, so that document has to be local before the transaction
     // opens, and still what it was when the transaction commits. A concurrent
     // argument change means the setup would stage a value nobody asked for.
     const argumentUnchanged = await runtime.syncStoredSetupArgument(resultCell);
@@ -573,13 +559,15 @@ export class SourceReconciler {
           displacedAt: transition.timestamp,
         });
       }
-      if (running) {
-        resultCell.withTx(tx).setMetaRaw("patternIdentity", candidateRef);
-      } else {
-        void runtime.setup(tx, candidate, undefined, resultCell.withTx(tx), {
-          prepareForResume: true,
-        });
-      }
+      // Staging the candidate belongs to this transaction whether or not the
+      // piece is running, so a refusal costs nothing either way: setup that
+      // cannot take the piece's data fails the transaction and the piece keeps
+      // what it has. A running piece is then re-instantiated by the pattern
+      // watcher, which sees its own completion marker and does not stage it a
+      // second time.
+      void runtime.setup(tx, candidate, undefined, resultCell.withTx(tx), {
+        prepareForResume: true,
+      });
       return true;
     });
     return committed ? "updated" : "unavailable";

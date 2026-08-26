@@ -1,16 +1,17 @@
 // The SpaceServer's space-root ensure seat (OW45 arm-B server-ensure
 // STAGE 1; design PR #6209 §1/§9): at activation the tenure owes the
-// space one lease-guarded, single-flight root ensure — existence +
-// freshness, no start — run as the first serialized step of the wave
-// loop's first cycle. The pins are the design's §9 stage-1 subset:
+// space one lease-guarded, single-flight root ensure — existence, no
+// start — run as the first serialized step of the wave loop's first
+// cycle. Following a root's source origin is not part of that debt: it
+// belongs to whoever OPENS the piece, and a tenure opens none. The pins
+// are the design's §9 stage-1 subset:
 //
 // - a fresh OWNED space's activation materializes `defaultPattern` and
 //   the root, provenance-stamped from the space-type source (watched
 //   RED before the seat existed: the root never appeared);
 // - park/re-activate converges on ONE root (the OCC/address invariant)
-//   and an aged root's re-activation reconciles the obsolete
-//   patternIdentity before anything loads it (the updater-ordering
-//   half, at the seat);
+//   and leaves its source alone, even when the served source has moved
+//   while the space was parked;
 // - the ensure's creation transaction carries the resolved OWNER's CFC
 //   trust snapshot — never the ambient service snapshot (the OW59 Q3
 //   caveat's named follow-up, design §4(b)); asserted on the LIVE

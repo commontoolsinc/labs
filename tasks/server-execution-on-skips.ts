@@ -89,8 +89,9 @@ const SUITE_PACKAGE_DIR: Record<ServerExecutionSuite, string> = {
  * the demand-cycle terminal state with commit-triggered re-arm closed
  * the fork (never-loadable roots park instead of churning per cycle;
  * the load pass runs under the flush deadline), so the surface runs —
- * carrying the in-CI amplification-ratio gate and the pattern-updater
- * CHECK-half witness (verification-coverage.md's closed OW19 row).
+ * carrying the in-CI amplification-ratio gate and the witness that a
+ * serving tenure settles without following any piece's source origin
+ * (verification-coverage.md's closed OW19 row).
  * The OW33-family entries this paragraph tracked have moved (OW33
  * triage, 2026-08-22): the two STEP-level `runtime-client` entries and
  * the `patterns` topics-navigation entry are LIFTED (12/12 and 10/10

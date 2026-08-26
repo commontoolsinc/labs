@@ -1093,8 +1093,10 @@ commit, the swap replaces the running graph only after DURABLE
 acceptance — on withdrawal the old graph stays (old-graph-plus-new-
 pointer is a coherent not-yet-swapped state; the reverse is the
 broken-setup class). The pointer write itself stays authored-class
-under the writing principal. The residual recorded here (verified
-in the integration environment, not the unit fixture).
+under the writing principal. Nothing server-side probes a pattern
+route any more, so the network source probe against a fully-local
+store that this section used to record as a residual is gone with the
+half that made it.
 
 ## 4. Effectful nodes: memoization contract
 
