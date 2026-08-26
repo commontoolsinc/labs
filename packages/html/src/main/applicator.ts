@@ -78,8 +78,10 @@ export class DomApplicator {
     number,
     Map<string, EventListener>
   >();
+
   /** Parent tracking: childId → parentId for O(1) descendant lookup */
   private readonly nodeParents = new Map<number, number>();
+
   /** Children tracking: parentId → Set<childId> for O(n) descendant cleanup */
   private readonly nodeChildren = new Map<number, Set<number>>();
   private readonly document: Document;

@@ -286,6 +286,7 @@ export type BeforeTransformersResult =
 export interface TypeScriptCompilerOptions {
   // Skip type checking.
   noCheck?: boolean;
+
   /**
    * The program is DURABLE STORED pattern source being reloaded — bytes
    * nobody can re-author, recompiled by a toolchain newer than the one that
@@ -301,6 +302,7 @@ export interface TypeScriptCompilerOptions {
   // Optional mapping of runtime module name e.g. `"@commonfabric/framework"`,
   // and its corresponding type definitions.
   runtimeModules?: string[];
+
   /**
    * Maps an import specifier (verbatim text) to a program file name. Used for
    * scheme-prefixed specifiers that the path-join and runtime-module rules

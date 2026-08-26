@@ -19,6 +19,7 @@ import {
 export interface SerializedEvent {
   /** Event type (e.g., "click", "input", "change") */
   type: string;
+
   /** Internal provenance hint from the renderer */
   provenance?: EventProvenance;
 
@@ -56,6 +57,7 @@ export type { EventProvenance };
  */
 export interface SerializedEventTarget {
   name?: string;
+
   /**
    * The element's current value. A `FabricValue` rather than a string: a custom
    * element chooses what its `value` is, and a `cf-input`, a `cf-tabs` and a
@@ -63,6 +65,7 @@ export interface SerializedEventTarget {
    * arrives here as the sigil link the conversion resolved it to.
    */
   value?: FabricValue;
+
   /**
    * Whether the element is checked -- or, where the element chose to expose
    * something else, what it chose. `cf-checkbox` and `cf-switch` each declare

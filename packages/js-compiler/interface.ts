@@ -10,6 +10,7 @@ export type Source = {
 export type ProgramResolver = {
   main(): Promise<Source>;
   resolveSource(identifier: string): Promise<Source | undefined>;
+
   /**
    * Reads a data file the program's source declares, by the root-relative name
    * a `dataFile()` call gives it. Undefined when this resolver holds no such
@@ -28,6 +29,7 @@ export type ProgramResolver = {
 export type Program = {
   main: string;
   files: Source[];
+
   /**
    * Names of entries in `files` that carry data rather than code. A data file
    * travels with the source package and is never transformed, compiled, or

@@ -80,8 +80,10 @@ export function isWorkerVNode(value: unknown): value is WorkerVNode {
 export interface PropState {
   /** The Cell being subscribed to (if reactive), or undefined for static props */
   cell: Cell<unknown> | undefined;
+
   /** Cancel function for this prop's subscription */
   cancel: Cancel;
+
   /** The specific value bound (for equality checking of static props/handlers) */
   currentValue?: unknown;
 }
@@ -92,6 +94,7 @@ export interface PropState {
 export interface ChildrenState {
   /** The Cell being subscribed to (if reactive), or undefined for static children */
   cell: Cell<unknown> | undefined;
+
   /** Cancel function for the children subscription */
   cancel: Cancel;
 }
@@ -128,6 +131,7 @@ export interface RenderPolicy {
   textIntegrity?: {
     requiredIntegrity: readonly CfcAtom[];
     allowLiteralText: boolean;
+
     /**
      * The enclosing text-integrity boundaries this policy applies to, innermost
      * included. A block under this policy is attributed to every id in the set

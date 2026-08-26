@@ -31,14 +31,19 @@ export interface ReverseInvalidationDeps {
     nameBuf: Uint8Array<ArrayBuffer>,
     nameLen: bigint,
   ): NotifyResult;
+
   /** Issue notify_inval_inode off the isolate thread (whole inode). */
   invalidateInode(ino: bigint): NotifyResult;
+
   /** Whether the mount is tearing down; queued work is dropped once true. */
   isUnmounting(): boolean;
+
   /** Emit per-call diagnostics when set. */
   debug: boolean;
+
   /** Diagnostic sink; defaults to console.log. */
   log?: (message: string) => void;
+
   /** Failure sink; defaults to console.warn. */
   warn?: (message: string) => void;
 }

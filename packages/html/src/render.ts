@@ -25,6 +25,7 @@ export function getActiveRenders(): ReadonlyMap<HTMLElement, ActiveRender> {
 export interface RenderOptions {
   setProp?: SetPropHandler;
   document?: Document;
+
   /** Optional error handler */
   onError?: (error: Error) => void;
 }

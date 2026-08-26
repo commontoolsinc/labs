@@ -6,8 +6,10 @@
 interface SchemaRoot {
   /** @deprecated Compatibility mutation for callers of the previous board. */
   setLegacyName: Stream<string>;
+
   /** Current verb beside it, unmarked. */
   rename: Stream<string>;
+
   /** @deprecated Compatibility shadow, mirrored for old consumers — but data,
    * so no mark. */
   legacyName: string;

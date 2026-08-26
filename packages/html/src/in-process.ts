@@ -18,10 +18,13 @@ import { WorkerReconciler } from "./worker/reconciler.ts";
 export interface InProcessRenderOptions {
   /** The document to create nodes in. Defaults to the ambient document. */
   document?: Document;
+
   /** Custom property setter, as for a browser render. */
   setProp?: SetPropHandler;
+
   /** Called for reconciliation and application errors. */
   onError?: (error: Error) => void;
+
   /**
    * Called after each batch of operations has been applied, so a host that
    * watches the rendered result learns when the container changed. Several
@@ -39,6 +42,7 @@ export interface InProcessRender {
    * container calls this to fix the point it is reading.
    */
   flush(): void;
+
   /** Unmount the tree and drop the applicator's nodes and listeners. */
   cancel: Cancel;
 }
