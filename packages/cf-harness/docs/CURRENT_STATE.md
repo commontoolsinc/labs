@@ -1,7 +1,7 @@
 # cf-harness Current State
 
 Status: current implementation reference\
-Last verified: 2026-08-18
+Last verified: 2026-08-26
 
 `cf-harness` is an experimental but product-integrated Common Fabric agent
 runtime. Loom is its first product adapter and Pattern Factory is its first
