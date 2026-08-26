@@ -5,6 +5,11 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { firstResolvedOutputRedirect } from "../src/runner.ts";
+import {
+  createSigilLinkFromParsedLink,
+  getDerivedInternalCellLink,
+} from "../src/link-utils.ts";
+import { missingLinkTargetsTx } from "../src/storage/reactivity-log.ts";
 
 // Seen live on estuary home spaces (2026-07-29): a sub-pattern node whose
 // stored outputs carry a DEFERRED partialCause alias unwraps to a bare
@@ -67,6 +72,43 @@ describe("firstResolvedOutputRedirect vs partialCause aliases", () => {
     const found = firstResolvedOutputRedirect(rt, tx, outputs, base);
     tx.abort("test: read-only");
     expect(found?.id).toBe(spot.getAsNormalizedFullLink().id);
+  });
+
+  it("returns a cause-only spot link parsed, with no read of its doc", () => {
+    // The identity bind (CT-1943) renders a partialCause alias as its
+    // derived cell's kind-free id — a cause-only coordinate whose data,
+    // for a computed-kind descriptor, lives at the KINDED entity.
+    // Resolving it reads a doc that is never there and records a
+    // provisional miss on the transaction, which the child's argument
+    // validation then inherits as a postponement (the vintage gate's
+    // home pendings). Given the id in `causeOnlyIds`, the scan returns
+    // the parsed coordinates and the transaction stays free of
+    // missing-link notes.
+    const tx = rt.edit();
+    const base = rt.getCell<Record<string, unknown>>(
+      space,
+      "cause-only-spot-base",
+      undefined,
+      tx,
+    );
+    const twin = getDerivedInternalCellLink(base, {
+      partialCause: { "$generated": 0 },
+      scope: "space",
+    });
+    const binding = createSigilLinkFromParsedLink(twin, {
+      overwrite: "redirect",
+    });
+
+    const found = firstResolvedOutputRedirect(
+      rt,
+      tx,
+      { generated: binding },
+      base,
+      new Set([twin.id]),
+    );
+    expect(found?.id).toBe(twin.id);
+    expect(missingLinkTargetsTx(tx)).toEqual([]);
+    tx.abort("test: read-only");
   });
 
   it("returns undefined (not a throw) when outputs hold ONLY such aliases", () => {
