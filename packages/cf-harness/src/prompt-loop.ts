@@ -938,7 +938,10 @@ const HANDLE_SKILL_TEXT_SCRUBBED = "[handle-delivered skill text withheld]";
  * what it DID because of the text (including describing it) is its ordinary,
  * policy-mediated output, not a leak of the payload.
  */
-const scrubHandleSkillText = (text: string, skillText: string): string => {
+export const scrubHandleSkillText = (
+  text: string,
+  skillText: string,
+): string => {
   // The payload is never empty here: an empty resolution refuses before any
   // scrub runs, and the escape of a non-empty string is non-empty.
   let scrubbed = text;
@@ -959,7 +962,7 @@ const scrubHandleSkillText = (text: string, skillText: string): string => {
  * back to it at `JSON.parse` — the payload has to be scrubbed again where it
  * would actually reappear, in the parsed strings.
  */
-const scrubHandleSkillTextDeep = (
+export const scrubHandleSkillTextDeep = (
   value: unknown,
   skillText: string,
 ): unknown => {
@@ -970,10 +973,14 @@ const scrubHandleSkillTextDeep = (
     return value.map((entry) => scrubHandleSkillTextDeep(entry, skillText));
   }
   if (value !== null && typeof value === "object") {
+    // Keys as well as values: a decoded payload can stand in key position.
     return Object.fromEntries(
       Object.entries(value).map((
         [key, entry],
-      ) => [key, scrubHandleSkillTextDeep(entry, skillText)]),
+      ) => [
+        scrubHandleSkillText(key, skillText),
+        scrubHandleSkillTextDeep(entry, skillText),
+      ]),
     );
   }
   return value;

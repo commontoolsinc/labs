@@ -393,6 +393,8 @@ describe("prompt-loop delegate_task skillHandle", () => {
               required: ["note", "tags", "count"],
             },
           }),
+          // The payload rides a string value and an array entry — the
+          // schema-preserved positions JSON.parse decodes it back into.
           assistantTurn(
             `{"note": "stole: ${evasiveEscapes}", "tags": ["${evasiveEscapes}"], "count": 2}`,
           ),
@@ -402,9 +404,16 @@ describe("prompt-loop delegate_task skillHandle", () => {
 
       const result = await loop.runPrompt({ prompt: "Delegate the plan." });
 
-      const parentText = chatViewOfRequest(requestBodies[2]).messages
-        .map((message) => message.content).join("\n");
-      expect(parentText).not.toContain("CANARY-SKILL-9f4e2");
+      // The decoded structured value is what the parent actually consumes.
+      // A re-escaped payload sitting in a key, a value, or an array entry
+      // would pass a literal substring check on the serialized request but
+      // still decode back to the canary here — so this asserts on the
+      // JSON-stringified DECODED value, where every position is literal.
+      const returned = (result.runState.subagentRuns?.[0] as
+        | { structuredReturn?: { value?: unknown } }
+        | undefined)?.structuredReturn?.value;
+      expect(returned).toBeDefined();
+      expect(JSON.stringify(returned)).not.toContain("CANARY-SKILL-9f4e2");
       const toolMessage = result.transcript.find(
         (message) => message.role === "tool",
       );
