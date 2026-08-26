@@ -7,6 +7,7 @@ import {
 } from "@commonfabric/runtime-client";
 import { CFCodeEditor } from "./cf-code-editor.ts";
 import { backlinkField } from "./features/backlinks.ts";
+import { mentionRefField } from "./features/mention-refs.ts";
 
 const operationPath = [] as never[];
 
@@ -162,6 +163,7 @@ describe("CFCodeEditor collaboration", () => {
         subscriber = callback;
         return Promise.resolve(() => {});
       },
+      closeOperationSession: () => Promise.resolve(),
     };
     const element = new CFCodeEditor();
     const readonly = (element as any)._readonly as Compartment;
@@ -196,6 +198,7 @@ describe("CFCodeEditor collaboration", () => {
       operationCodecs: () => Promise.resolve([CODEMIRROR_CHANGESET_CODEC]),
       queryOperationField: () =>
         Promise.resolve({ ...inactiveSnapshot(), materialized: 42 }),
+      closeOperationSession: () => Promise.resolve(),
     });
     invalid.collaborative = true;
     await (invalid as any)._setupCollaboration();
@@ -203,7 +206,7 @@ describe("CFCodeEditor collaboration", () => {
     expect(errors.at(-1)?.[0]).toBe("cf-error");
   });
 
-  it("submits external backlink title rewrites through collaboration", () => {
+  it("submits external backlink title rewrites through collaboration", async () => {
     let state = EditorState.create({
       doc: "[[Old (piece:1)]]",
       extensions: [backlinkField],
@@ -223,6 +226,7 @@ describe("CFCodeEditor collaboration", () => {
       },
       _collaboration: {
         active: true,
+        prepareExternalChange: () => Promise.resolve(true),
         localDocChanged: () => localChanges++,
       },
       _previousBacklinkNames: new Map(),
@@ -238,7 +242,7 @@ describe("CFCodeEditor collaboration", () => {
       }),
     };
 
-    (CFCodeEditor.prototype as any)._handleExternalTitleChange.call(
+    await (CFCodeEditor.prototype as any)._handleExternalTitleChange.call(
       self,
       "piece:1",
       piece,
@@ -247,6 +251,107 @@ describe("CFCodeEditor collaboration", () => {
     expect(state.doc.toString()).toBe("[[📝 New (piece:1)]]");
     expect(localChanges).toBe(1);
     expect(events[0][0]).toBe("cf-change");
+  });
+
+  it("submits external reference title rewrites through collaboration", async () => {
+    let state = EditorState.create({
+      doc: "[Old][ref-1]",
+      extensions: [mentionRefField],
+    });
+    const events: Array<[string, unknown]> = [];
+    let localChanges = 0;
+    const self = {
+      language: "text/markdown",
+      _editorView: {
+        get state() {
+          return state;
+        },
+        dispatch(spec: never) {
+          state = state.update(spec).state;
+        },
+      },
+      _refMap: () => ({ "ref-1": { modifiedTitle: false } }),
+      _documentRefs: () => [{
+        key: "ref-1",
+        label: "Old",
+        labelFrom: 1,
+        labelTo: 4,
+      }],
+      _collaboration: {
+        active: true,
+        prepareExternalChange: () => Promise.resolve(true),
+        localDocChanged: () => localChanges++,
+      },
+      _previousRefLabels: new Map(),
+      emit: (name: string, detail: unknown) => events.push([name, detail]),
+      _updateMentionedFromContent: () => {},
+      setValue: () => {
+        throw new Error("ordinary value path used");
+      },
+    };
+
+    await (CFCodeEditor.prototype as any)._handleExternalRefTitleChange.call(
+      self,
+      "ref-1",
+      "New",
+    );
+
+    expect(state.doc.toString()).toBe("[New][ref-1]");
+    expect(localChanges).toBe(1);
+    expect(events[0][0]).toBe("cf-change");
+  });
+
+  it("confirms ordinary local edits before an external rewrite", async () => {
+    let state = EditorState.create({
+      doc: "draft [[Old (piece:1)]]",
+      extensions: [backlinkField],
+    });
+    const firstFlush = Promise.withResolvers<void>();
+    let flushes = 0;
+    const collaboration = {
+      active: true,
+      prepareExternalChange: () => {
+        flushes++;
+        return firstFlush.promise.then(() => true);
+      },
+      localDocChanged: () => {
+        flushes++;
+        return Promise.resolve();
+      },
+    };
+    const self = {
+      language: "text/markdown",
+      _editorView: {
+        get state() {
+          return state;
+        },
+        dispatch(spec: never) {
+          state = state.update(spec).state;
+        },
+      },
+      _collaboration: collaboration,
+      _previousBacklinkNames: new Map(),
+      emit: () => {},
+      _updateMentionedFromContent: () => {},
+      setValue: () => {
+        throw new Error("ordinary value path used");
+      },
+    };
+    const piece = {
+      key: (key: string) => ({
+        get: () => key === "title" ? "New" : "📝 New",
+      }),
+    };
+
+    const rewriting = (CFCodeEditor.prototype as any)
+      ._handleExternalTitleChange.call(self, "piece:1", piece);
+    await Promise.resolve();
+    expect(state.doc.toString()).toBe("draft [[Old (piece:1)]]");
+
+    firstFlush.resolve();
+    await rewriting;
+    expect(state.doc.toString()).toBe("draft [[📝 New (piece:1)]]");
+    expect(flushes).toBe(2);
   });
 
   it("detaches without releasing and explicitly releases active collaboration", async () => {
@@ -283,6 +388,75 @@ describe("CFCodeEditor collaboration", () => {
     (element as any)._collaboration = undefined;
     await element.releaseCollaboration();
     (element as any)._cleanupCollaboration();
+  });
+
+  it("makes the editor read-only before release settles", async () => {
+    const release = Promise.withResolvers<void>();
+    const element = new CFCodeEditor();
+    const readonly = (element as any)._readonly as Compartment;
+    const collaboration = (element as any)._collaborationComp as Compartment;
+    const view = statefulView([
+      readonly.of(EditorState.readOnly.of(false)),
+      collaboration.of([]),
+    ]);
+    (element as any)._editorView = view;
+    (element as any)._collaboration = {
+      active: true,
+      release: () => release.promise,
+    };
+
+    const releasing = element.releaseCollaboration();
+    expect(view.state.facet(EditorState.readOnly)).toBe(true);
+    release.resolve();
+    await releasing;
+  });
+
+  it("defers a programmatic title rewrite until release settles", async () => {
+    const release = Promise.withResolvers<void>();
+    const element = new CFCodeEditor();
+    const readonly = (element as any)._readonly as Compartment;
+    const collaborationComp = (element as any)
+      ._collaborationComp as Compartment;
+    const view = {
+      state: EditorState.create({
+        doc: "[[Old (piece:1)]]",
+        extensions: [
+          readonly.of(EditorState.readOnly.of(false)),
+          collaborationComp.of([]),
+          backlinkField,
+        ],
+      }),
+      dispatch(spec: never) {
+        this.state = this.state.update(spec).state;
+      },
+    };
+    (element as any)._editorView = view;
+    (element as any)._collaboration = {
+      active: true,
+      release: () => release.promise,
+    };
+    (element as any)._updateMentionedFromContent = () => {};
+    let persisted: string | undefined;
+    (element as any).setValue = (value: string) => persisted = value;
+    (element as any)._cellController = { flush: () => {} };
+    const piece = {
+      key: (key: string) => ({
+        get: () => key === "title" ? "New" : "📝 New",
+      }),
+    };
+
+    const releasing = element.releaseCollaboration();
+    const rewriting = (element as any)._handleExternalTitleChange(
+      "piece:1",
+      piece,
+    );
+    await Promise.resolve();
+    expect(view.state.doc.toString()).toBe("[[Old (piece:1)]]");
+
+    release.resolve();
+    await Promise.all([releasing, rewriting]);
+    expect(view.state.doc.toString()).toBe("[[📝 New (piece:1)]]");
+    expect(persisted).toBe("[[📝 New (piece:1)]]");
   });
 
   it("handles superseded setup and reactive collaboration lifecycle hooks", async () => {

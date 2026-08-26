@@ -111,6 +111,7 @@ import { styles } from "./styles.ts";
 import {
   CodeMirrorCollaborationController,
   CodeMirrorReconciliationError,
+  codeMirrorRewriteDedupeEffect,
 } from "./codemirror-collaboration.ts";
 
 /** A unique noteId, so notes created from a mention do not collide. */
@@ -316,6 +317,7 @@ export class CFCodeEditor extends BaseElement {
   private _proseMarkdownComp = new Compartment();
   private _collaborationComp = new Compartment();
   private _collaboration: CodeMirrorCollaborationController | undefined;
+  private _collaborationTransition: Promise<void> | undefined;
   private _collaborationGeneration = 0;
   private _collaborationFailed = false;
   private _cleanupFns: Array<() => void> = [];
@@ -1414,6 +1416,7 @@ export class CFCodeEditor extends BaseElement {
         generation !== this._collaborationGeneration ||
         this._collaboration !== controller
       ) return;
+      controller.dispose();
       const error = cause instanceof Error ? cause : new Error(String(cause));
       this._collaborationFailed = true;
       view.dispatch({
@@ -2252,7 +2255,30 @@ export class CFCodeEditor extends BaseElement {
   async releaseCollaboration(): Promise<void> {
     const collaboration = this._collaboration;
     if (!collaboration?.active) return;
-    await collaboration.release();
+    const view = this._editorView;
+    view?.dispatch({
+      effects: this._readonly.reconfigure(EditorState.readOnly.of(true)),
+    });
+    const transition = collaboration.release();
+    this._collaborationTransition = transition;
+    try {
+      await transition;
+    } catch (error) {
+      if (this._collaboration === collaboration) {
+        view?.dispatch({
+          effects: this._readonly.reconfigure(
+            EditorState.readOnly.of(
+              this.readonly || this._collaborationFailed,
+            ),
+          ),
+        });
+      }
+      throw error;
+    } finally {
+      if (this._collaborationTransition === transition) {
+        this._collaborationTransition = undefined;
+      }
+    }
     if (this._collaboration === collaboration) {
       this._collaboration = undefined;
       this.collaborative = false;
@@ -2465,7 +2491,7 @@ export class CFCodeEditor extends BaseElement {
 
       // Subscribe with changeGroup so our own edits are filtered out
       const unsub = titleCell.subscribe(() => {
-        this._handleExternalTitleChange(pieceId, pieceCell);
+        void this._handleExternalTitleChange(pieceId, pieceCell);
       });
 
       this._pieceNameSubscriptions.set(pieceId, unsub);
@@ -2484,11 +2510,29 @@ export class CFCodeEditor extends BaseElement {
    * Handle external title change from a piece - update the pill text in the document.
    * This is called when a piece's title field changes externally (not from our own edit).
    */
-  private _handleExternalTitleChange(
+  private async _handleExternalTitleChange(
     pieceId: string,
     pieceCell: CellHandle<Mentionable>,
-  ): void {
+  ): Promise<void> {
     if (!this._editorView) return;
+
+    const transition = this._collaborationTransition;
+    if (transition !== undefined) {
+      await transition.catch(() => undefined);
+      return await this._handleExternalTitleChange(pieceId, pieceCell);
+    }
+    const collaboration = this._collaboration;
+    if (collaboration !== undefined) {
+      if (!collaboration.active) return;
+      // A semantic rewrite has to be the first unconfirmed local update for
+      // CodeMirror to acknowledge another client's copy. Confirm ordinary
+      // local edits first, then recompute the rewrite against the latest doc.
+      if (!await collaboration.prepareExternalChange()) return;
+      if (
+        this._collaboration !== collaboration || !collaboration.active ||
+        !this._editorView
+      ) return;
+    }
 
     // Get the piece's title (without emoji prefix)
     const title = pieceCell.key("title").get() as string;
@@ -2521,6 +2565,9 @@ export class CFCodeEditor extends BaseElement {
     this._editorView.dispatch({
       changes: { from: bl.nameFrom, to: bl.nameTo, insert: currentName },
       annotations: CFCodeEditor._cellSyncAnnotation.of(true),
+      effects: codeMirrorRewriteDedupeEffect.of(
+        JSON.stringify(["backlink-title", pieceId, bl.name, currentName]),
+      ),
     });
 
     // Record the rewrite as a local edit through the CellController so it merges
@@ -2531,8 +2578,8 @@ export class CFCodeEditor extends BaseElement {
     // focus/blur cycle, and a rewrite that arrives while the editor is
     // unfocused would never be written.
     const newDocValue = this._editorView.state.doc.toString();
-    if (this._collaboration?.active) {
-      this._collaboration.localDocChanged();
+    if (collaboration !== undefined) {
+      await collaboration.localDocChanged();
       this.emit("cf-change", {
         value: newDocValue,
         oldValue: oldDocValue,
@@ -2715,7 +2762,7 @@ export class CFCodeEditor extends BaseElement {
           const name = (value as Mentionable | undefined)?.[NAME];
           if (typeof name !== "string" || name.length === 0) return;
           this._refNames.set(key, name);
-          this._handleExternalRefTitleChange(key, name);
+          void this._handleExternalRefTitleChange(key, name);
         }),
       });
     }
@@ -2733,8 +2780,26 @@ export class CFCodeEditor extends BaseElement {
    * Rewrite a label after its destination was renamed elsewhere — unless the
    * user has claimed that label, which is the whole point of `modifiedTitle`.
    */
-  private _handleExternalRefTitleChange(key: string, name: string): void {
+  private async _handleExternalRefTitleChange(
+    key: string,
+    name: string,
+  ): Promise<void> {
     if (!this._editorView) return;
+
+    const transition = this._collaborationTransition;
+    if (transition !== undefined) {
+      await transition.catch(() => undefined);
+      return await this._handleExternalRefTitleChange(key, name);
+    }
+    const collaboration = this._collaboration;
+    if (collaboration !== undefined) {
+      if (!collaboration.active) return;
+      if (!await collaboration.prepareExternalChange()) return;
+      if (
+        this._collaboration !== collaboration || !collaboration.active ||
+        !this._editorView
+      ) return;
+    }
     if (this._refMap()[key]?.modifiedTitle) return;
 
     const ref = this._documentRefs().find((candidate) => candidate.key === key);
@@ -2745,16 +2810,31 @@ export class CFCodeEditor extends BaseElement {
     const safe = labelForToken(name);
     this._previousRefLabels.set(key, safe);
 
+    const oldDocValue = this._editorView.state.doc.toString();
     this._editorView.dispatch({
       changes: { from: ref.labelFrom, to: ref.labelTo, insert: safe },
       annotations: CFCodeEditor._cellSyncAnnotation.of(true),
+      effects: codeMirrorRewriteDedupeEffect.of(
+        JSON.stringify(["reference-title", key, ref.label, safe]),
+      ),
     });
 
     // Record the rewrite through the CellController so it merges with any
     // pending debounced edit, then flush: this is a remote change rather than
     // user input, and the blur strategy would otherwise hold it until the next
     // focus/blur cycle.
-    this.setValue(this._editorView.state.doc.toString());
+    const newDocValue = this._editorView.state.doc.toString();
+    if (collaboration !== undefined) {
+      await collaboration.localDocChanged();
+      this.emit("cf-change", {
+        value: newDocValue,
+        oldValue: oldDocValue,
+        language: this.language,
+      });
+      this._updateMentionedFromContent();
+      return;
+    }
+    this.setValue(newDocValue);
     this._cellController.flush();
   }
 

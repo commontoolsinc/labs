@@ -34,6 +34,10 @@ type EditorHost = Element & {
     };
     dispatch(spec: unknown): void;
   };
+  _handleExternalTitleChange?: (
+    pieceId: string,
+    piece: { key(key: unknown): { get(): string } },
+  ) => void;
   releaseCollaboration?: () => Promise<void>;
 };
 
@@ -115,6 +119,33 @@ async function dispatchEdit(
     if (!view) throw new Error("collaborative editor is not ready");
     view.dispatch({ changes: { from, to, insert } });
   }, { args: [from, to, insert] });
+}
+
+async function dispatchExternalBacklinkRename(
+  page: Page,
+  pieceId: string,
+  title: string,
+  name: string,
+): Promise<void> {
+  await page.evaluate((pieceId, title, name) => {
+    const collect = (root: Document | ShadowRoot): Element[] => {
+      const result: Element[] = [];
+      for (const element of root.querySelectorAll("*")) {
+        result.push(element);
+        if (element.shadowRoot) result.push(...collect(element.shadowRoot));
+      }
+      return result;
+    };
+    const editor = collect(document).find((element) =>
+      element.localName === "cf-code-editor"
+    ) as EditorHost | undefined;
+    if (!editor?._handleExternalTitleChange) {
+      throw new Error("collaborative editor title handler is not ready");
+    }
+    editor._handleExternalTitleChange(pieceId, {
+      key: (key) => ({ get: () => key === "title" ? title : name }),
+    });
+  }, { args: [pieceId, title, name] });
 }
 
 async function installNextApplyGate(page: Page): Promise<void> {
@@ -452,6 +483,12 @@ describe("cf-code-editor collaboration", () => {
         input: { content: "reset" },
         start: true,
       }),
+      rename: await cc.create(source, {
+        input: {
+          content: "[[📝 Target (backlink-collaboration-piece)]]",
+        },
+        start: true,
+      }),
     };
 
     await new ACLManager(cc.runtime, cc.getSpace()).set(ANYONE_USER, "WRITE");
@@ -581,6 +618,59 @@ describe("cf-code-editor collaboration", () => {
     ]);
     assertEquals(aliceContent, bobContent);
     assertEquals(materialized, aliceContent);
+    assertEquals(await collaborationErrors(alicePage), []);
+    assertEquals(await collaborationErrors(bobPage), []);
+  });
+
+  it("dedupes a shared external title rewrite from both browsers", async () => {
+    await navigateBoth(pieces.rename);
+    const alicePage = aliceShell.page();
+    const bobPage = bobShell.page();
+    const renamed = "[[📝 New Target (backlink-collaboration-piece)]]";
+
+    await Promise.all([
+      installNextApplyGate(alicePage),
+      installNextApplyGate(bobPage),
+    ]);
+    await Promise.all([
+      dispatchExternalBacklinkRename(
+        alicePage,
+        "backlink-collaboration-piece",
+        "New Target",
+        "📝 New Target",
+      ),
+      dispatchExternalBacklinkRename(
+        bobPage,
+        "backlink-collaboration-piece",
+        "New Target",
+        "📝 New Target",
+      ),
+    ]);
+    await Promise.all([
+      awaitApplyCaptured(alicePage),
+      awaitApplyCaptured(bobPage),
+    ]);
+    await Promise.all([
+      releaseApplyGate(alicePage),
+      releaseApplyGate(bobPage),
+    ]);
+    await Promise.all([
+      awaitApplyCompleted(alicePage),
+      awaitApplyCompleted(bobPage),
+    ]);
+
+    const [aliceContent, bobContent, materialized] = await Promise.all([
+      waitForCondition(alicePage, editorContainsTokens, {
+        args: [[renamed]],
+      }).then(() => editorContent(alicePage)),
+      waitForCondition(bobPage, editorContainsTokens, {
+        args: [[renamed]],
+      }).then(() => editorContent(bobPage)),
+      awaitMaterialized("rename", (value) => value === renamed),
+    ]);
+    assertEquals(aliceContent, renamed);
+    assertEquals(bobContent, renamed);
+    assertEquals(materialized, renamed);
     assertEquals(await collaborationErrors(alicePage), []);
     assertEquals(await collaborationErrors(bobPage), []);
   });

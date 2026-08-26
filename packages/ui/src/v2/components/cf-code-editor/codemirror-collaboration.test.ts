@@ -1,6 +1,10 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
-import { receiveUpdates, sendableUpdates } from "@codemirror/collab";
+import {
+  receiveUpdates,
+  sendableUpdates,
+  type Update,
+} from "@codemirror/collab";
 import {
   ChangeSet,
   Compartment,
@@ -18,8 +22,10 @@ import type {
 import {
   codeMirrorCollaboration,
   CodeMirrorCollaborationController,
+  codeMirrorDedupeUpdates,
   codeMirrorIntegratedUpdates,
   CodeMirrorReconciliationError,
+  codeMirrorRewriteDedupeEffect,
   codeMirrorSubmission,
 } from "./codemirror-collaboration.ts";
 
@@ -98,6 +104,94 @@ describe("CodeMirror operation collaboration", () => {
     );
     expect(final.doc.toString()).toBe(materialized);
     expect(sendableUpdates(final)).toHaveLength(0);
+  });
+
+  it("serializes deterministic rewrite dedupe metadata", () => {
+    const initial = EditorState.create({
+      doc: "old",
+      extensions: [codeMirrorCollaboration(0, "alice")],
+    });
+    const local = initial.update({
+      changes: { from: 0, to: 3, insert: "new" },
+      effects: codeMirrorRewriteDedupeEffect.of("title:old:new"),
+    }).state;
+
+    expect(codeMirrorSubmission(local)?.payload.updates[0]).toEqual({
+      clientId: "alice",
+      changes: ChangeSet.of({ from: 0, to: 3, insert: "new" }, 3).toJSON(),
+      dedupeId: "title:old:new",
+    });
+  });
+
+  it("confirms a local rewrite integrated by another client", () => {
+    const initial = EditorState.create({
+      doc: "old",
+      extensions: [codeMirrorCollaboration(0, "bob")],
+    });
+    const local = initial.update({
+      changes: { from: 0, to: 3, insert: "new" },
+      effects: codeMirrorRewriteDedupeEffect.of("title:old:new"),
+    }).state;
+    const snapshot: OperationFieldSnapshot = {
+      branch: "",
+      id: "of:editor",
+      scopeKey: "space",
+      path,
+      active: true,
+      codec: "codemirror-changeset@1",
+      cursor: { epoch: 1, version: 1 },
+      baselineHash: "baseline:old",
+      materialized: "new",
+      operations: [{
+        opId: "op:alice:1",
+        cursor: { epoch: 1, version: 1 },
+        submissionId: "alice:1",
+        payload: {
+          updates: [{
+            clientId: "alice",
+            changes: ChangeSet.of(
+              { from: 0, to: 3, insert: "new" },
+              3,
+            ).toJSON(),
+            dedupeId: "title:old:new",
+          }],
+        },
+      }],
+    };
+    const updates = codeMirrorIntegratedUpdates(snapshot, {
+      epoch: 1,
+      version: 0,
+    });
+    const confirmed = receiveUpdates(
+      local,
+      codeMirrorDedupeUpdates(local, updates, "bob"),
+    ).state;
+
+    expect(confirmed.doc.toString()).toBe("new");
+    expect(sendableUpdates(confirmed)).toEqual([]);
+  });
+
+  it("fails closed when a rewrite follows an unconfirmed ordinary edit", () => {
+    const initial = EditorState.create({
+      doc: "old",
+      extensions: [codeMirrorCollaboration(0, "bob")],
+    });
+    const ordinary = initial.update({
+      changes: { from: 0, insert: "draft:" },
+    }).state;
+    const local = ordinary.update({
+      changes: { from: 6, to: 9, insert: "new" },
+      effects: codeMirrorRewriteDedupeEffect.of("title:old:new"),
+    }).state;
+    const foreign: Update[] = [{
+      clientID: "alice",
+      changes: ChangeSet.of({ from: 0, to: 3, insert: "new" }, 3),
+      effects: [codeMirrorRewriteDedupeEffect.of("title:old:new")],
+    }];
+
+    expect(() => codeMirrorDedupeUpdates(local, foreign, "bob")).toThrow(
+      "followed an unconfirmed local edit",
+    );
   });
 
   it("rejects a non-contiguous operation suffix", () => {
@@ -234,11 +328,13 @@ describe("CodeMirror operation collaboration", () => {
 
   it("cancels superseded setup before collaboration state is installed", async () => {
     let subscriptions = 0;
+    let closes = 0;
     const { controller } = controllerHarness({
       initial: inactiveSnapshot("abc"),
       followup: inactiveSnapshot("abc"),
       apply: () => acceptedResolution("abc", 1, "X"),
       subscribe: () => subscriptions++,
+      close: () => closes++,
     });
 
     const starting = controller.start();
@@ -247,6 +343,7 @@ describe("CodeMirror operation collaboration", () => {
 
     expect(controller.active).toBe(false);
     expect(subscriptions).toBe(0);
+    expect(closes).toBeGreaterThanOrEqual(1);
   });
 
   it("unsubscribes when a remote snapshot fails", async () => {
@@ -305,9 +402,9 @@ describe("CodeMirror operation collaboration", () => {
     expect(() =>
       codeMirrorIntegratedUpdates(snapshot, { epoch: 2, version: 0 })
     ).toThrow("epoch changed");
-    expect(() =>
-      codeMirrorIntegratedUpdates(snapshot, { epoch: 1, version: 2 })
-    ).toThrow("older version 1");
+    expect(
+      codeMirrorIntegratedUpdates(snapshot, { epoch: 1, version: 2 }),
+    ).toEqual([]);
 
     const operation = {
       opId: "op:bad",
@@ -541,9 +638,10 @@ describe("CodeMirror operation collaboration", () => {
       operations: accepted.operations,
     });
     expect(view.state.doc.toString()).toBe("aXbc");
+    const next = acceptedResolutionAt("aXbc", 1, 2, "Y", "bob:2");
     subscriber?.({
-      ...activeSnapshot("wrong", accepted),
-      operations: [],
+      ...activeSnapshot("wrong", next),
+      operations: next.operations,
     });
     expect(errors[0]?.message).toContain("do not reproduce");
   });
@@ -590,11 +688,13 @@ describe("CodeMirror operation collaboration", () => {
   it("releases an active controller whose field has no cursor", async () => {
     let releases = 0;
     let cancellations = 0;
+    let closes = 0;
     const { controller } = controllerHarness({
       initial: inactiveSnapshot("abc"),
       followup: inactiveSnapshot("abc"),
       apply: () => acceptedResolution("abc", 1, "X"),
       cancel: () => cancellations++,
+      close: () => closes++,
       release: () => {
         releases++;
       },
@@ -605,6 +705,7 @@ describe("CodeMirror operation collaboration", () => {
 
     expect(releases).toBe(0);
     expect(cancellations).toBe(1);
+    expect(closes).toBe(1);
     expect(controller.active).toBe(false);
   });
 
@@ -635,7 +736,73 @@ describe("CodeMirror operation collaboration", () => {
     await expect(controller.release()).rejects.toThrow("is not active");
   });
 
-  it("flushes an edit that arrives while the preceding apply is in flight", async () => {
+  it("stops accepting local edits before an active field release settles", async () => {
+    const releasing = Promise.withResolvers<void>();
+    const releaseStarted = Promise.withResolvers<void>();
+    const accepted = acceptedResolution("abc", 1, "X");
+    const initial = activeSnapshot("aXbc", accepted);
+    const { controller } = controllerHarness({
+      initial,
+      followup: initial,
+      apply: () => accepted,
+      release: () => {
+        releaseStarted.resolve();
+        return releasing.promise;
+      },
+    });
+
+    await controller.start();
+    const released = controller.release();
+    await releaseStarted.promise;
+    expect(controller.active).toBe(false);
+    releasing.resolve();
+    await released;
+  });
+
+  it("ignores a same-epoch query older than an installed watch update", async () => {
+    let subscriber: ((snapshot: OperationFieldSnapshot) => void) | undefined;
+    const first = acceptedResolution("abc", 1, "X");
+    const second = acceptedResolutionAt("aXbc", 1, 2, "Y", "bob:2");
+    const firstSnapshot = activeSnapshot("aXbc", first);
+    const secondSnapshot = {
+      ...activeSnapshot("aXYbc", second),
+      operations: second.operations,
+    };
+    const { controller, view, errors } = controllerHarness({
+      initial: firstSnapshot,
+      followup: firstSnapshot,
+      apply: () => second,
+      subscribe: (callback) => subscriber = callback,
+    });
+
+    await controller.start();
+    subscriber?.(secondSnapshot);
+    subscriber?.(firstSnapshot);
+
+    expect(errors).toEqual([]);
+    expect(view.state.doc.toString()).toBe("aXYbc");
+    expect(controller.active).toBe(true);
+  });
+
+  it("rejects a divergent snapshot at the current cursor", async () => {
+    let subscriber: ((snapshot: OperationFieldSnapshot) => void) | undefined;
+    const accepted = acceptedResolution("abc", 1, "X");
+    const initial = activeSnapshot("aXbc", accepted);
+    const { controller, errors } = controllerHarness({
+      initial,
+      followup: initial,
+      apply: () => accepted,
+      subscribe: (callback) => subscriber = callback,
+    });
+
+    await controller.start();
+    subscriber?.({ ...initial, materialized: "different" });
+
+    expect(errors[0]?.message).toContain("disagrees at the current");
+    expect(controller.active).toBe(false);
+  });
+
+  it("prepares an external rewrite by flushing every pending edit", async () => {
     const first = Promise.withResolvers<ApplyOpResolution>();
     const second = Promise.withResolvers<ApplyOpResolution>();
     const firstCalled = Promise.withResolvers<void>();
@@ -671,15 +838,17 @@ describe("CodeMirror operation collaboration", () => {
     const sending = controller.localDocChanged();
     await firstCalled.promise;
     view.dispatch({ changes: { from: 2, insert: "Y" } });
-    const stopping = controller.stop();
+    const prepared = controller.prepareExternalChange();
     first.resolve(firstResolution);
     await secondCalled.promise;
     second.resolve(secondResolution);
-    await Promise.all([sending, stopping]);
+    expect(await prepared).toBe(true);
+    await sending;
 
     expect(errors).toEqual([]);
     expect(view.state.doc.toString()).toBe("aXYbc");
     expect(sendableUpdates(view.state)).toHaveLength(0);
+    await controller.stop();
   });
 });
 
@@ -778,6 +947,7 @@ function controllerHarness(options: {
   subscription?: Promise<() => void>;
   cancel?: () => void;
   release?: () => void | Promise<void>;
+  close?: () => void;
 }) {
   const compartment = new Compartment();
   let state = EditorState.create({
@@ -815,6 +985,10 @@ function controllerHarness(options: {
     },
     applyOperation: () => Promise.resolve(options.apply()),
     releaseOperationField: () => Promise.resolve(options.release?.()),
+    closeOperationSession: () => {
+      options.close?.();
+      return Promise.resolve();
+    },
   } as unknown as RuntimeClient;
   const errors: Error[] = [];
   const controller = new CodeMirrorCollaborationController({

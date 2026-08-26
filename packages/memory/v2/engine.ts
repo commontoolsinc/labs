@@ -3774,6 +3774,8 @@ const decodedIntegratedOperations = (
 
 const MAX_OPERATION_PAYLOAD_BYTES = 1_000_000;
 const MAX_OPERATION_BATCH_UPDATES = 256;
+const operationValueByteLength = (value: FabricValue): number =>
+  new TextEncoder().encode(encodeMemoryBoundary(value)).byteLength;
 
 function validateOperationPath(path: unknown): asserts path is ValuePath {
   if (
@@ -3815,8 +3817,9 @@ const validateApplyOperation = (operation: ApplyOpOperation): void => {
       "baselineHash is required exactly when apply-op base is null",
     );
   }
-  const encoded = encodeMemoryBoundary(operation.payload);
-  if (encoded.length > MAX_OPERATION_PAYLOAD_BYTES) {
+  if (
+    operationValueByteLength(operation.payload) > MAX_OPERATION_PAYLOAD_BYTES
+  ) {
     throw new OpCodecError("operation payload exceeds the byte limit");
   }
   const updates = operation.payload !== null &&
@@ -4055,7 +4058,7 @@ const applyOperation = (
   }
   try {
     if (
-      encodeMemoryBoundary(result.materialized).length >
+      operationValueByteLength(result.materialized) >
         MAX_OPERATION_PAYLOAD_BYTES
     ) {
       throw new OpCodecError(
@@ -4063,7 +4066,7 @@ const applyOperation = (
       );
     }
     for (const payload of result.operations) {
-      if (encodeMemoryBoundary(payload).length > MAX_OPERATION_PAYLOAD_BYTES) {
+      if (operationValueByteLength(payload) > MAX_OPERATION_PAYLOAD_BYTES) {
         throw new OpCodecError(
           "integrated operation exceeds the byte limit",
         );

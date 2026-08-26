@@ -2,7 +2,7 @@
 
 Status: In progress — CodeMirror collaboration and operational hardening implemented
 
-Implementation checkpoint (2026-08-15):
+Implementation checkpoint:
 
 - Implemented: versioned codec registry and CodeMirror codec; negotiated wire
   types; atomic Memory persistence, integration, deduplication,
@@ -13,13 +13,9 @@ Implementation checkpoint (2026-08-15):
   deduplication, ordinary-write exclusion, entity deletion, migration, Memory
   session delivery, runner capability propagation, runtime-client IPC, and the
   pure CodeMirror adapter.
-- Complete Memory, runner, runtime-client, and UI package suites pass, as does
-  the full seven-group integration run. Lint, type checking, documentation, and
-  the other policy checks pass. All files changed by this implementation pass
-  formatting; the repository-wide format gate still reports unrelated
-  pre-existing UI drift. The unused-dependency checker cannot see the new
-  CodeMirror importers until those currently untracked files enter Git's
-  tracked file set.
+- Complete Memory, runner, runtime-client, patterns, and UI package suites pass,
+  as does the focused two-browser collaboration integration suite. Formatting,
+  lint, type checking, documentation, and policy checks pass.
 - Exhaustive malformed/rollback, reconnect/watch-race, two-browser convergence,
   checkpoint/reset/retention, default-branch policy, metrics, benchmarks, and
   state-inspector coverage are implemented. A synthetic structured codec is
@@ -150,8 +146,8 @@ wire protocol.
       `@codemirror/state` and `@codemirror/collab`.
 - [x] Decode all JSON into fresh trusted values; do not retain mutable request
       objects inside a codec result.
-- [x] Reject CodeMirror effects/selections in v1 and accept only client id plus
-      `ChangeSet` JSON.
+- [x] Reject CodeMirror effects/selections in v1 and accept client id,
+      `ChangeSet` JSON, and an optional deterministic rewrite dedupe id.
 - [x] Return canonical logical operations separately from the materialized
       string so version counting never depends on submission count.
 - [x] Add dependency pins according to
@@ -421,8 +417,12 @@ integration authority out of Memory.
       and close messages to `packages/runtime-client/src/protocol/`.
 - [x] Resolve a `CellHandle` to its canonical `(space, id, scope, path)` once in
       the worker and open the runner operation-storage capability.
-- [x] Add a generic `OperationSession<TPayload>` main-thread class that exposes
-      snapshot/delta subscription, submit, release, close, and abort behavior.
+- [x] Add codec-neutral runtime-client methods for capability discovery,
+      snapshot query, subscription, submit, release, and session close.
+- [x] Give each opened editor an explicit operation-session id. The worker pins
+      that session to one canonical resolved target while overlapping or later
+      sessions resolve independently, and close abandons pins created before a
+      subscription installs.
 - [x] Register listeners before opening so an update cannot land between the
       initial response and subscription setup.
 - [x] Filter duplicate or older cursors but reject gaps; gaps trigger a Memory
@@ -438,14 +438,11 @@ Required tests:
 - [x] Cursor gap and epoch reset behavior request/accept a canonical snapshot.
 - [x] A synthetic JSON codec session uses the same runtime-client surface.
 
-Likely files:
+Files:
 
 - `packages/runtime-client/src/protocol/types.ts`
-- `packages/runtime-client/src/protocol/guards.ts`
 - `packages/runtime-client/src/backends/runtime-processor.ts`
-- `packages/runtime-client/src/client/connection.ts`
-- `packages/runtime-client/src/operation-session.ts`
-- `packages/runtime-client/src/mod.ts`
+- `packages/runtime-client/src/runtime-client.ts`
 
 Completion gate:
 

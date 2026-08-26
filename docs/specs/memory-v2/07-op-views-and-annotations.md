@@ -157,10 +157,16 @@ The first codec uses CodeMirror `ChangeSet` JSON and the central-authority
 rebasing semantics from `@codemirror/collab`.
 
 - The materialized value is a string.
-- A submitted payload is an ordered batch of `{ clientId, changes }` records.
+- A submitted payload is an ordered batch of
+  `{ clientId, changes, dedupeId? }` records. `dedupeId` marks a deterministic
+  editor-generated rewrite as idempotent across the operations integrated
+  after its base; ordinary user edits omit it.
 - Selection/effect data is not accepted as durable content in the first codec.
 - The server rebases the batch over integrated changes after the submitted base
   cursor and applies the rebased changes to the current string.
+- A matching `dedupeId` in that intervening suffix suppresses only the repeated
+  rewrite. Ordinary edits before or after it remain in order and are remapped
+  across the suppressed change.
 - Empty canonical changes may be omitted; only stored integrated operations
   advance the field version.
 
@@ -448,6 +454,22 @@ turning ordinary entity sync into inferred operation history.
 An editor should initialize from one field response, track unconfirmed local
 edits in its codec implementation, and consume canonical suffixes thereafter.
 It should not infer operation history from ordinary entity sync frames.
+
+The runtime-client assigns an ephemeral operation-session id to each editor
+open. The worker resolves the supplied `CellHandle` to its canonical target
+once for that id and uses the pinned `(space, id, scope, path)` for capability,
+query, apply, subscribe, and release requests. Another operation session for
+the same source handle resolves independently, so retargeting an alias cannot
+move an existing editor or trap a later editor on the earlier target. Close and
+abandon messages discard the pin even when opening ended before a watch was
+installed. These ids are transport-lifecycle identities, not Memory session
+ids or durable field identities.
+
+An editor-generated idempotent rewrite first confirms its earlier ordinary
+local updates. The rewrite is then the first unconfirmed update, allowing a
+canonical copy from another client to acknowledge rather than duplicate it.
+Programmatic rewrites wait for an in-progress close or release transition and
+resume only against the resulting authority.
 
 If a mismatched-epoch response arrives while an editor has unconfirmed local
 operations, the client must preserve those local contents and surface an

@@ -10,6 +10,7 @@ import {
   type Compartment,
   type EditorState,
   type Extension,
+  StateEffect,
   Transaction,
 } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
@@ -27,6 +28,7 @@ export type CodeMirrorOperationPayload = {
   updates: Array<{
     clientId: string;
     changes: JSONValue;
+    dedupeId?: string;
   }>;
 };
 
@@ -49,12 +51,22 @@ export class CodeMirrorReconciliationError extends Error {
   }
 }
 
+/** Marks a deterministic editor rewrite that concurrent clients may dedupe. */
+export const codeMirrorRewriteDedupeEffect = StateEffect.define<string>();
+
 /** Creates CodeMirror's local OT state at one canonical Memory version. */
 export function codeMirrorCollaboration(
   startVersion: number,
   clientId: string,
 ): Extension {
-  return collab({ startVersion, clientID: clientId });
+  return collab({
+    startVersion,
+    clientID: clientId,
+    sharedEffects: (transaction) =>
+      transaction.effects.filter((effect) =>
+        effect.is(codeMirrorRewriteDedupeEffect)
+      ),
+  });
 }
 
 /** Serializes every local CodeMirror update not yet confirmed by Memory. */
@@ -69,6 +81,12 @@ export function codeMirrorSubmission(
       updates: pending.map((update) => ({
         clientId: update.clientID,
         changes: update.changes.toJSON() as JSONValue,
+        ...(() => {
+          const dedupeId = update.effects?.find((effect) =>
+            effect.is(codeMirrorRewriteDedupeEffect)
+          )?.value;
+          return typeof dedupeId === "string" ? { dedupeId } : {};
+        })(),
       })),
     },
   };
@@ -88,15 +106,65 @@ const decodePayload = (payload: unknown): Update[] => {
     ) {
       throw new Error("CodeMirror operation update requires a clientId");
     }
+    const dedupeId = (value as { dedupeId?: unknown }).dedupeId;
+    if (dedupeId !== undefined && typeof dedupeId !== "string") {
+      throw new Error("CodeMirror operation update requires a string dedupeId");
+    }
     return {
       clientID: (value as { clientId: string }).clientId,
       changes: ChangeSet.fromJSON(
         (value as { changes: Parameters<typeof ChangeSet.fromJSON>[0] })
           .changes,
       ),
+      ...(dedupeId === undefined
+        ? {}
+        : { effects: [codeMirrorRewriteDedupeEffect.of(dedupeId)] }),
     };
   });
 };
+
+const rewriteDedupeId = (update: Update): string | undefined => {
+  const value = update.effects?.find((effect) =>
+    effect.is(codeMirrorRewriteDedupeEffect)
+  )?.value;
+  return typeof value === "string" ? value : undefined;
+};
+
+/** Confirms a local rewrite when another client integrated the same intent. */
+export function codeMirrorDedupeUpdates(
+  state: EditorState,
+  updates: readonly Update[],
+  clientId: string,
+): Update[] {
+  const pending = sendableUpdates(state);
+  let pendingIndex = 0;
+  return updates.map((update) => {
+    const local = pending[pendingIndex];
+    if (local === undefined) return update;
+    if (update.clientID === clientId) {
+      pendingIndex++;
+      return update;
+    }
+    const dedupeId = rewriteDedupeId(update);
+    const matchingIndex = dedupeId === undefined
+      ? -1
+      : pending.findIndex((candidate, index) =>
+        index >= pendingIndex && dedupeId === rewriteDedupeId(candidate)
+      );
+    if (matchingIndex > pendingIndex) {
+      throw new Error(
+        "CodeMirror semantic rewrite followed an unconfirmed local edit",
+      );
+    }
+    if (
+      dedupeId !== undefined && dedupeId === rewriteDedupeId(local)
+    ) {
+      pendingIndex++;
+      return { ...update, clientID: clientId };
+    }
+    return update;
+  });
+}
 
 /**
  * Decodes the contiguous suffix needed to move CodeMirror from `current` to
@@ -125,12 +193,7 @@ export function codeMirrorIntegratedUpdates(
         snapshot.cursor.epoch,
     );
   }
-  if (snapshot.cursor.version < current.version) {
-    throw new Error(
-      `CodeMirror is at operation version ${current.version}, but received ` +
-        `older version ${snapshot.cursor.version}`,
-    );
-  }
+  if (snapshot.cursor.version < current.version) return [];
 
   const operations = snapshot.operations.filter((operation) =>
     operation.cursor.epoch === current.epoch &&
@@ -173,6 +236,7 @@ export class CodeMirrorCollaborationController {
   readonly #view: EditorView;
   readonly #compartment: Compartment;
   readonly #clientId: string;
+  readonly #operationSessionId = crypto.randomUUID();
   readonly #onError: (error: Error) => void;
   #cursor: OpCursor | null = null;
   #baselineHash = "";
@@ -180,6 +244,7 @@ export class CodeMirrorCollaborationController {
   #flushPromise: Promise<void> | undefined;
   #ready = false;
   #sending = false;
+  #closing = false;
   #releasing = false;
   #failed = false;
   #disposed = false;
@@ -194,26 +259,55 @@ export class CodeMirrorCollaborationController {
   }
 
   get active(): boolean {
+    return this.#canProcess() && !this.#closing;
+  }
+
+  #canProcess(): boolean {
     return this.#ready && !this.#failed && !this.#disposed;
   }
 
   async start(): Promise<void> {
-    const codecs = await this.#runtime.operationCodecs(this.#cell);
+    try {
+      await this.#start();
+    } catch (error) {
+      this.dispose();
+      throw error;
+    }
+  }
+
+  async #start(): Promise<void> {
+    const codecs = await this.#runtime.operationCodecs(
+      this.#cell,
+      this.#operationSessionId,
+    );
+    if (this.#disposed) {
+      this.#closeOperationSession();
+      return;
+    }
     if (!codecs.includes(CODEMIRROR_CHANGESET_CODEC)) {
       throw new Error(
         `Memory server does not advertise ${CODEMIRROR_CHANGESET_CODEC}`,
       );
     }
-    const snapshot = await this.#runtime.queryOperationField(this.#cell);
-    if (this.#disposed) return;
+    const snapshot = await this.#runtime.queryOperationField(
+      this.#cell,
+      undefined,
+      this.#operationSessionId,
+    );
+    if (this.#disposed) {
+      this.#closeOperationSession();
+      return;
+    }
     this.#install(snapshot);
     const unsubscribe = await this.#runtime.subscribeOperationField(
       this.#cell,
       (next) => this.#receive(next),
       snapshot.cursor ?? undefined,
+      this.#operationSessionId,
     );
     if (this.#disposed) {
       unsubscribe();
+      this.#closeOperationSession();
       return;
     }
     this.#unsubscribe = unsubscribe;
@@ -224,12 +318,26 @@ export class CodeMirrorCollaborationController {
     await this.#flush();
   }
 
+  /** Confirms every pending edit before a semantic external rewrite. */
+  async prepareExternalChange(): Promise<boolean> {
+    if (!this.active || this.#failed) return false;
+    await this.#flushAll();
+    return this.active && sendableUpdates(this.#view.state).length === 0;
+  }
+
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
     this.#ready = false;
     this.#unsubscribe?.();
     this.#unsubscribe = undefined;
+    this.#closeOperationSession();
+  }
+
+  #closeOperationSession(): void {
+    void this.#runtime.closeOperationSession(this.#operationSessionId).catch(
+      () => undefined,
+    );
   }
 
   /** Flushes local updates before detaching without releasing durable state. */
@@ -243,39 +351,50 @@ export class CodeMirrorCollaborationController {
       this.dispose();
       return;
     }
-    await this.#flushAll();
-    if (sendableUpdates(this.#view.state).length !== 0) {
-      throw new Error(
-        "CodeMirror collaboration cannot stop with local edits pending",
-      );
+    this.#closing = true;
+    try {
+      await this.#flushAll();
+      if (sendableUpdates(this.#view.state).length !== 0) {
+        throw new Error(
+          "CodeMirror collaboration cannot stop with local edits pending",
+        );
+      }
+      this.dispose();
+    } catch (error) {
+      this.#closing = false;
+      throw error;
     }
-    this.dispose();
   }
 
   async release(): Promise<void> {
     if (!this.active) {
       throw new Error("CodeMirror collaboration is not active");
     }
-    await this.#flushAll();
-    if (sendableUpdates(this.#view.state).length !== 0) {
-      throw new Error(
-        "CodeMirror collaboration cannot be released with local edits pending",
-      );
-    }
-    const cursor = this.#cursor;
-    if (cursor !== null) {
-      this.#releasing = true;
-      try {
+    this.#closing = true;
+    try {
+      await this.#flushAll();
+      if (sendableUpdates(this.#view.state).length !== 0) {
+        throw new Error(
+          "CodeMirror collaboration cannot be released with local edits pending",
+        );
+      }
+      const cursor = this.#cursor;
+      if (cursor !== null) {
+        this.#releasing = true;
         await this.#runtime.releaseOperationField(
           this.#cell,
           CODEMIRROR_CHANGESET_CODEC,
           cursor,
+          this.#operationSessionId,
         );
-      } finally {
         this.#releasing = false;
       }
+      this.dispose();
+    } catch (error) {
+      this.#releasing = false;
+      this.#closing = false;
+      throw error;
     }
-    this.dispose();
   }
 
   #install(snapshot: OperationFieldSnapshot): void {
@@ -316,7 +435,7 @@ export class CodeMirrorCollaborationController {
   }
 
   #receive(snapshot: OperationFieldSnapshot): void {
-    if (!this.active || this.#failed) return;
+    if (!this.#canProcess() || this.#failed) return;
     try {
       if (typeof snapshot.materialized !== "string") {
         throw new Error("CodeMirror collaboration requires a string field");
@@ -404,9 +523,29 @@ export class CodeMirrorCollaborationController {
         epoch: this.#cursor.epoch,
         version: getSyncedVersion(this.#view.state),
       };
+      if (snapshot.cursor.version < current.version) return;
+      if (snapshot.cursor.version === current.version) {
+        this.#baselineHash = snapshot.baselineHash;
+        if (
+          sendableUpdates(this.#view.state).length === 0 &&
+          this.#view.state.doc.toString() !== snapshot.materialized
+        ) {
+          throw new Error(
+            "CodeMirror snapshot disagrees at the current operation cursor",
+          );
+        }
+        return;
+      }
       const updates = codeMirrorIntegratedUpdates(snapshot, current);
       if (updates.length !== 0) {
-        this.#view.dispatch(receiveUpdates(this.#view.state, updates));
+        this.#view.dispatch(receiveUpdates(
+          this.#view.state,
+          codeMirrorDedupeUpdates(
+            this.#view.state,
+            updates,
+            this.#clientId,
+          ),
+        ));
       }
       this.#cursor = {
         epoch: snapshot.cursor.epoch,
@@ -430,7 +569,7 @@ export class CodeMirrorCollaborationController {
     if (this.#flushPromise !== undefined) {
       return await this.#flushPromise;
     }
-    if (!this.active || this.#failed) return;
+    if (!this.#canProcess() || this.#failed) return;
     const pending = this.#flushOnce();
     this.#flushPromise = pending;
     try {
@@ -443,7 +582,7 @@ export class CodeMirrorCollaborationController {
   async #flushAll(): Promise<void> {
     await this.#flush();
     while (
-      this.active && sendableUpdates(this.#view.state).length !== 0
+      this.#canProcess() && sendableUpdates(this.#view.state).length !== 0
     ) {
       await this.#flush();
     }
@@ -464,11 +603,12 @@ export class CodeMirrorCollaborationController {
         base,
         ...(base === null ? { baselineHash: this.#baselineHash } : {}),
         payload: submission.payload,
-      });
+      }, this.#operationSessionId);
       this.#receiveResolution(resolution);
       const snapshot = await this.#runtime.queryOperationField(
         this.#cell,
         this.#cursor ?? undefined,
+        this.#operationSessionId,
       );
       this.#receive(snapshot);
       accepted = !this.#failed;
@@ -478,7 +618,7 @@ export class CodeMirrorCollaborationController {
       this.#sending = false;
     }
     if (
-      accepted && this.active &&
+      accepted && this.#canProcess() &&
       codeMirrorSubmission(this.#view.state) !== undefined
     ) {
       queueMicrotask(() => void this.#flush());
@@ -524,7 +664,14 @@ export class CodeMirrorCollaborationController {
     };
     const updates = codeMirrorIntegratedUpdates(snapshot, current);
     if (updates.length !== 0) {
-      this.#view.dispatch(receiveUpdates(this.#view.state, updates));
+      this.#view.dispatch(receiveUpdates(
+        this.#view.state,
+        codeMirrorDedupeUpdates(
+          this.#view.state,
+          updates,
+          this.#clientId,
+        ),
+      ));
     }
     this.#cursor = {
       epoch: resolution.to.epoch,

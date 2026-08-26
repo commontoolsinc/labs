@@ -1339,6 +1339,10 @@ describe("v2-operation-engine", () => {
         ...operation,
         payload: { oversized: "x".repeat(1_000_001) },
       }, OpCodecError);
+      fail({
+        ...operation,
+        payload: { oversized: "é".repeat(600_000) },
+      }, OpCodecError);
       const streamOperation: ApplyOpOperation = {
         ...operation,
         id: streamEntriesDocId({ id: "of:stream", path: ["events"] }),
@@ -1406,6 +1410,18 @@ describe("v2-operation-engine", () => {
           operations: ["x".repeat(1_000_001)],
         }),
       }, {
+        id: "multibyte-materialized@1",
+        integrate: () => ({
+          materialized: "é".repeat(600_000),
+          operations: ["operation"],
+        }),
+      }, {
+        id: "multibyte-operation@1",
+        integrate: ({ materialized }) => ({
+          materialized,
+          operations: ["é".repeat(600_000)],
+        }),
+      }, {
         id: "throw-value@1",
         integrate: () => {
           throw "codec rejection";
@@ -1435,6 +1451,8 @@ describe("v2-operation-engine", () => {
           "invalid-operation@1",
           "large-materialized@1",
           "large-operation@1",
+          "multibyte-materialized@1",
+          "multibyte-operation@1",
           "throw-value@1",
         ]
       ) {
