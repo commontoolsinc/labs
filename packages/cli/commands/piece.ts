@@ -1530,6 +1530,15 @@ export function withDeprecatedSpellingWarning<
  * they are allowed to differ (test/piece-data-spellings.test.ts pins
  * exactly that).
  */
+export function dataCommandAction<
+  // deno-lint-ignore no-explicit-any
+  F extends (this: any, ...args: any[]) => unknown,
+>(spelling: string, action: F): F {
+  return spelling.startsWith("piece ")
+    ? withDeprecatedSpellingWarning(spelling, action)
+    : action;
+}
+
 /**
  * An action that refuses a `--` before it runs.
  *
@@ -1547,15 +1556,6 @@ export function withNoSectionMarker<
     refuseSectionMarker(spelling, this.getLiteralArgs());
     return action.apply(this, args);
   } as F;
-}
-
-export function dataCommandAction<
-  // deno-lint-ignore no-explicit-any
-  F extends (this: any, ...args: any[]) => unknown,
->(spelling: string, action: F): F {
-  return spelling.startsWith("piece ")
-    ? withDeprecatedSpellingWarning(spelling, action)
-    : action;
 }
 
 /**
