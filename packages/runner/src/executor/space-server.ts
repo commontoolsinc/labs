@@ -2518,18 +2518,6 @@ export class SpaceServer implements TransactionSealDestination {
         this.#armDeferredRescan();
         break;
       }
-      // The load-park barrier's OTHER half. The scheduler-side barrier
-      // (failHeadEventLoadPark) can only hold entries already IN the
-      // event queue; an entry this pass has not queued YET would slip
-      // past it and overtake the deferred one. The window is real —
-      // each new sidecar's `sync()` above is an await, so a park failure
-      // can land between one entry's queueing and the next's — so the
-      // pass STOPS here, the same `break` the sidecar-sync arm makes,
-      // and the rescan re-drains from arrival position.
-      if (this.#loadParkDeferredInPass) {
-        this.#armDeferredRescan();
-        break;
-      }
       const stored = sidecar.stored ?? [];
       {
         const index = stored.findIndex((candidate) =>
@@ -2627,6 +2615,23 @@ export class SpaceServer implements TransactionSealDestination {
           }).sync();
         } catch {
           // A cold stream doc defers like a cold piece load below.
+        }
+        // The load-park barrier's OTHER half, and it sits HERE — past
+        // every await in the iteration, immediately before the queue —
+        // on purpose. The scheduler-side barrier
+        // (failHeadEventLoadPark) can only hold entries already IN the
+        // event queue; an entry this pass has not queued YET is out of
+        // its reach, and the gap is real because this loop awaits both
+        // a new sidecar's `sync()` above and the stream doc's `sync()`
+        // just now. A rejection landing in EITHER window sweeps only
+        // what was queued at that instant, so a check placed before
+        // one of them would let the entry queue anyway and commit
+        // ahead of the deferred one (independent review P1). Stopping
+        // the pass is the same `break` the sidecar-sync-failure arm
+        // makes; the rescan re-drains from arrival position.
+        if (this.#loadParkDeferredInPass) {
+          this.#armDeferredRescan();
+          break;
         }
         try {
           // The renderer-trust RE-MARK (fan-out stage B, OW34 — the

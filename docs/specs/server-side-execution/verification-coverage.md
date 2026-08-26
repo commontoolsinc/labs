@@ -6321,7 +6321,22 @@ supply; OW29/OW32/OW34 closed):
     second half (`#loadParkDeferredInPass`) makes the pass STOP there,
     the same `break` the sidecar-sync arm makes; found in this seat's
     own adversarial pass, and its mutation reds `["A","B","A"]` exactly
-    like the in-queue one. Two exclusions, deliberate: cross-space
+    like the in-queue one. Its CHECK POSITION is load-bearing and was
+    got wrong first: the loop awaits TWICE per entry (a new sidecar's
+    `sync()` and then the stream doc's), and a rejection landing in
+    either window sweeps only what was queued at that instant — so the
+    check sits past BOTH, immediately before
+    `#drainInFlight.set`/`queueEvent`. Independent review (Codex P1 on
+    PR #6365) caught it one await too early. **Coverage gap recorded,
+    NOT filled:** the pin discriminates the check's EXISTENCE (delete
+    it → red) but NOT its POSITION — measured, not assumed: with the
+    check moved back to the pre-review position the pin still passes.
+    Discriminating the position needs the park rejection to land inside
+    the stream-doc-sync window specifically, which takes a two-stage
+    drain gate plus a controllable park rejection interleaved in a
+    fixed order; a flaky pin in this arm would be worse than none, so
+    the position rests on the code comment and this record. Two
+    exclusions, deliberate: cross-space
     queue neighbours (§2's order is per-space) and LT1 in-process
     copies (`served` with no `streamEntry` — no durable entry to
     re-drain, and a running event's same-wave cascade children rather

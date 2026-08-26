@@ -3358,8 +3358,21 @@ describe("Phase 3 events-down (serving side)", () => {
       // PIN 4 — exactly-once ((α)) AND arrival order: one consequence per
       // event, A2 before B1. A re-delivery would read ["A","A","A","B"].
       expect(storedLog()).toEqual(["A", "A", "B"]);
-      await clientRuntime.idle();
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // No-residual-re-delivery, proved CAUSALLY rather than by waiting
+      // out a fixed delay (independent review P1: a re-delivery slower
+      // than the timer would pass undetected, and the timer taxes every
+      // green run). Once every entry is consequenced AND the watermark
+      // has advanced past the last of them, the drain's pending-entry
+      // scan can no longer select any of them — a re-delivery is
+      // excluded by construction, not by having failed to show up yet.
+      const lastSeq = Math.max(...allEntries().map((entry) => entry.seq ?? 0));
+      await waitUntil(
+        () =>
+          allEntries().length === 3 &&
+          allEntries().every((entry) => entry.consequenced === true) &&
+          readWatermarkSeq(engine) >= lastSeq,
+        "every entry consequenced and the watermark advanced past them",
+      );
       expect(storedLog(), "no residual re-delivery of the deferred event")
         .toEqual(["A", "A", "B"]);
       expect(
