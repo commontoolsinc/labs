@@ -364,6 +364,12 @@ Deno.test("provider keys report which commands each option provider answers on",
     "test",
     "inspect graph",
   ]);
+  // `--accept-unretained` takes a row of the plan in hand, not a piece of the
+  // registry: the registry omits the holder-created members a bulk operation
+  // moves, and offers slugs the flag rejects outright. So the slot is decided
+  // in NO_OPTION_CANDIDATES rather than provided here, and a provider keyed
+  // for it would be offering a set that is wrong in both directions.
+  assertFalse(options.has("accept-unretained"));
   // A positional entry is keyed by command path already, so it carries no
   // command list of its own.
   assert(positionals.has("piece call:callable"));

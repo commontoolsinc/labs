@@ -27,6 +27,7 @@ import {
   parseFabricRef,
   parseLinkOrThrow,
   type Pattern,
+  PIECE_SOURCE_MOVED,
   type PieceSourceRevision,
   type PieceSourceSnapshot,
   type PieceSourceTransition,
@@ -368,6 +369,48 @@ export interface PiecePatternRef {
   identity: string;
   symbol: string;
   source: PiecePatternSourceRef;
+}
+
+/**
+ * A source change refused because the piece is no longer on the reference
+ * its caller proved it was on.
+ *
+ * Its own class because the callers that pin a reference are the ones that
+ * have to tell this apart from an operational failure: a piece something
+ * else moved is a row to refuse, not a write that broke.
+ */
+export class PieceSourceChangedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PieceSourceChangedError";
+  }
+}
+
+/**
+ * Translate the transition layer's stale-source failure into the refusal a
+ * pinned caller can act on, and leave every other error alone.
+ *
+ * A pinned change is guarded twice: once against the snapshot this call
+ * reads, and again inside the transaction that commits it. Only the first
+ * throws {@link PieceSourceChangedError} on its own; the second is the
+ * runtime's generic error, which a caller would otherwise read as an
+ * operational failure of unknown state rather than as a row to refuse. The
+ * message is matched against the runner's own exported constant, so the two
+ * cannot drift into disagreeing about what this is.
+ *
+ * @internal Exported for a focused contract test; not part of the Piece API.
+ */
+export function pinnedSourceMoved(
+  error: unknown,
+  pinned: { identity: string; symbol: string } | undefined,
+): unknown {
+  if (pinned === undefined) return error;
+  const message = error instanceof Error ? error.message : String(error);
+  if (!message.includes(PIECE_SOURCE_MOVED)) return error;
+  return new PieceSourceChangedError(
+    `The piece moved off ${pinned.identity}#${pinned.symbol} before the ` +
+      `change proved against it could commit.`,
+  );
 }
 
 export type PieceSourceAction =
@@ -3669,10 +3712,22 @@ export class PieceController<T = unknown> {
   /**
    * Detach from the current origin, restore an exact retained source revision,
    * or follow an origin recorded by an earlier revision.
+   *
+   * `expectedPattern` pins the reference this change may run over. The
+   * snapshot read below becomes the transition's precondition, checked
+   * again inside the write transaction by `applyPieceSourceTransition`, so
+   * a change that gets that far is already conditional on the piece not
+   * moving. What the pin adds is the other half of the window: without it
+   * this call adopts whatever it finds as its own expectation, so a writer
+   * landing between a caller's proof and this read would have its change
+   * silently written over. With it, such a piece is refused by name.
    */
   async changeSource(
     action: PieceSourceAction,
-    options: { confirmedChange?: PreparedPieceSourceChange } = {},
+    options: {
+      confirmedChange?: PreparedPieceSourceChange;
+      expectedPattern?: { identity: string; symbol: string };
+    } = {},
   ): Promise<PieceSourceActionResult> {
     if (!isPieceSourceAction(action)) {
       throw new Error("unsupported piece source action");
@@ -3682,6 +3737,18 @@ export class PieceController<T = unknown> {
     const expected = getPieceSourceSnapshot(this.#cell);
     if (expected === undefined) {
       throw new Error("piece missing source state");
+    }
+    const pinned = options.expectedPattern;
+    if (
+      pinned !== undefined &&
+      (expected.pattern.identity !== pinned.identity ||
+        expected.pattern.symbol !== pinned.symbol)
+    ) {
+      throw new PieceSourceChangedError(
+        `The piece is on ${expected.pattern.identity}#` +
+          `${expected.pattern.symbol}, not the ${pinned.identity}#` +
+          `${pinned.symbol} this change was proved against.`,
+      );
     }
 
     const confirmed = options.confirmedChange;
@@ -3944,7 +4011,7 @@ export class PieceController<T = unknown> {
           };
         }
       }
-      throw error;
+      throw pinnedSourceMoved(error, pinned);
     }
   }
 
@@ -3993,11 +4060,32 @@ export class PieceController<T = unknown> {
     };
   }
 
+  /**
+   * Replace the piece's source with `program`.
+   *
+   * `expectedPattern` pins the reference this write may run over, exactly as
+   * {@link changeSource}'s does and for the same window. The snapshot read
+   * below becomes the transition's precondition, checked again inside the
+   * write transaction by `applyPieceSourceTransition`, so a write that gets
+   * that far is already conditional on the piece not moving. What the pin
+   * adds is the other half: without it this call adopts whatever it finds as
+   * its own expectation, so a writer landing between a caller's proof and
+   * this read would have its change silently written over. With it, such a
+   * piece is refused by name with {@link PieceSourceChangedError}.
+   *
+   * The pin is a precondition and nothing else. It does not confirm a
+   * compatibility review, does not stand in for one, and does not change
+   * what this method accepts: the schema assertion below and the
+   * execute-time validators remain the whole of enforcement, and
+   * `dangerouslyAllowIncompatibleSchema` remains the only thing that opens
+   * them.
+   */
   async setPattern(
     program: RuntimeProgram,
     options?: {
       repository?: string;
       dangerouslyAllowIncompatibleSchema?: boolean;
+      expectedPattern?: { identity: string; symbol: string };
     },
   ): Promise<void> {
     const mutationVersion = ++this.#mutationVersion;
@@ -4009,6 +4097,18 @@ export class PieceController<T = unknown> {
         const expected = getPieceSourceSnapshot(this.#cell);
         if (expected === undefined) {
           throw new Error("piece missing source state");
+        }
+        const pinned = options?.expectedPattern;
+        if (
+          pinned !== undefined &&
+          (expected.pattern.identity !== pinned.identity ||
+            expected.pattern.symbol !== pinned.symbol)
+        ) {
+          throw new PieceSourceChangedError(
+            `The piece is on ${expected.pattern.identity}#` +
+              `${expected.pattern.symbol}, not the ${pinned.identity}#` +
+              `${pinned.symbol} this write was proved against.`,
+          );
         }
         const baseline = await preparePieceSourceTransitionBaseline(
           this.#pieces.runtime,
@@ -4089,7 +4189,7 @@ export class PieceController<T = unknown> {
         );
         return;
       }
-      throw error;
+      throw pinnedSourceMoved(error, options?.expectedPattern);
     }
   }
 

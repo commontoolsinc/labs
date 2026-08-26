@@ -6,8 +6,12 @@
 # fixer refused by name — and retarget it: the stamped plan applied to
 # completion, a run killed midway and finished by re-invocation, an edited
 # source refused with every unattempted piece named, a piece moved elsewhere
-# stopping the run, and the after-survey diffed against the plan it verifies.
-# Stages 1 through 3 of docs/plans/piece-bulk-operations.md, which finishes
+# stopping the run, and the after-survey diffed against the plan it verifies
+# — and reverse it: the completed retarget rolled back from its own plan with
+# every row restored, a reversal killed midway and finished by re-invocation,
+# a row whose prior source is not retained refused by name and accepted by
+# name, and one piece returned on its own through `cf piece restore`.
+# Stages 1 through 4 of docs/plans/piece-bulk-operations.md, which finishes
 # each stage with a CI drill so "does the migration tooling still work?"
 # stays a CI result.
 #
@@ -346,6 +350,81 @@ else
 fi
 cp "$RETARGET_FIXTURE" "$NEXT_SOURCE"
 
+step "14b. A move whose prior source is not retained needs naming first"
+# The gate on the forward run, and the moment it matters: a piece whose
+# prior source is not retained cannot be returned once it moves, so the
+# acceptance is asked while it is still a decision rather than at the
+# reversal, which is past the point of no return. Every source this drill
+# deploys is retained, so the row's recorded fact is rewritten to exercise
+# the refusal — derived from the live survey as every other plan here is.
+#
+# One row, so the board the steps below need is not rewritten wholesale:
+# the gate is a property of the plan's rows, not of how many there are.
+GATE_PIECE=$(tail -n +2 "$RETARGET_PLAN" |
+  jq -r 'select(has("op")) | .piece' | head -1)
+OTHER_PIECE=$(tail -n +2 "$RETARGET_PLAN" |
+  jq -r 'select(has("op")) | .piece' | sed -n 2p)
+GATE_PLAN="$WORK/forward-unretained.jsonl"
+{
+  head -1 "$RETARGET_PLAN"
+  tail -n +2 "$RETARGET_PLAN" |
+    jq -c --arg piece "$GATE_PIECE" \
+      'select(.piece == $piece) | .expect.retained = false'
+} > "$GATE_PLAN"
+check "2" "$(grep -c . "$GATE_PLAN")" "a one-row plan, its prior source \
+recorded unretained"
+if $CF piece retarget -q $ARGS --plan "$GATE_PLAN" \
+  >/dev/null 2>"$WORK/forward-dry.err"; then
+  ok "a dry run reports over an unretained row, asking for no acceptance"
+else
+  bad "a dry run over an unretained row was refused"
+  sed 's/^/  | /' "$WORK/forward-dry.err"
+fi
+if $CF piece retarget -q $ARGS --plan "$GATE_PLAN" --apply \
+  >/dev/null 2>"$WORK/forward-apply.err"; then
+  bad "a live move over an unretained row started without acceptance"
+else
+  ok "a live move over an unretained row exited nonzero"
+fi
+if grep -q "not retained for $GATE_PIECE" "$WORK/forward-apply.err"; then
+  ok "the refusal names the piece and what could not be reversed"
+else
+  bad "the refusal does not name the piece"
+  sed 's/^/  | /' "$WORK/forward-apply.err"
+fi
+if $CF piece retarget -q $ARGS --plan "$GATE_PLAN" --apply \
+  --accept-unretained "$OTHER_PIECE" \
+  >/dev/null 2>"$WORK/forward-idle.err"; then
+  bad "an acceptance covering no unretained row was taken"
+else
+  ok "an acceptance covering no unretained row exited nonzero"
+fi
+if grep -q "nothing accepts as unrollbackable for $OTHER_PIECE" \
+  "$WORK/forward-idle.err"; then
+  ok "the refusal names the acceptance that covers nothing"
+else
+  bad "the refusal does not name the idle acceptance"
+  sed 's/^/  | /' "$WORK/forward-idle.err"
+fi
+ACCEPTED_FORWARD=$($CF piece retarget -q $ARGS --plan "$GATE_PLAN" \
+  --apply --accept-unretained "$GATE_PIECE" --json \
+  2>"$WORK/forward-accepted.err" | sed 's/^fvj1://' |
+  jq -r '[(.complete|tostring), (.applied|tostring)] | @tsv')
+check "$(printf 'true\t1')" "$ACCEPTED_FORWARD" \
+  "the accepted move runs, and its row lands"
+if grep -q "accepted as unrollbackable: $GATE_PIECE" \
+  "$WORK/forward-accepted.err"; then
+  ok "the accepted piece is named on the run that moved it"
+else
+  bad "the accepted piece is not named"
+  sed 's/^/  | /' "$WORK/forward-accepted.err"
+fi
+# Put that one piece back on the prior generation, so the steps below meet
+# the board they expect: every member outstanding against the plan.
+$CF piece setsrc -q --piece "$GATE_PIECE" --main-export Member \
+  "$MEMBER_FIXTURE" $ARGS >/dev/null 2>"$WORK/forward-reset.err" ||
+  bad "returning the accepted piece to the prior generation failed"
+
 step "15. A run killed midway is completed by re-invoking the same command"
 # The report streams a row at a time to stdout, so the drill reads rows as
 # they land and kills the run on the sixth — inside the second group, past
@@ -445,9 +524,13 @@ SECOND_MEMBER=$(tail -n +2 "$RETARGET_PLAN" |
   jq -r 'select(has("op")) | .piece' | sed -n 2p)
 # MemberAlias is the same module under a second symbol, so this piece now
 # carries the target row's identity and not its symbol: a check comparing the
-# identity alone would call it landed.
+# identity alone would call it landed. The source is the plan's own
+# $NEXT_SOURCE and not the fixture it was copied from — a closure's identity
+# covers its entry filename, so the two are different identities, and moving
+# the piece to the fixture would leave it on a third reference rather than on
+# the target identity under another symbol.
 if $CF piece setsrc -q --piece "$FIRST_MEMBER" --main-export MemberAlias \
-  "$RETARGET_FIXTURE" $ARGS >/dev/null 2>"$WORK/alias.err"; then
+  "$NEXT_SOURCE" $ARGS >/dev/null 2>"$WORK/alias.err"; then
   ok "moved a member to the target identity under another symbol"
 else
   bad "moving a member to the alias export failed"
@@ -516,6 +599,342 @@ LIST_FACTS=$($CF piece survey -q --list "$BOARD" $ARGS 2>/dev/null |
     (.enumerated.registeredOutside|tostring)] | @tsv')
 check "$(printf 'list\t1\t0')" "$LIST_FACTS" \
   "list of one row, complete despite the orphan"
+
+step "21. The rollback derives from the retarget's own plan, no second artifact"
+# The board stands where steps 17 and 18 left it: one member moved to the
+# target identity under another symbol, one member put back on the prior
+# generation, and every other member on the target. A rollback derived from
+# the retarget plan therefore reads all three standings at once — which is
+# also the whole of "preconditions are checked the same way": the moved piece
+# stops the reversal, and the piece already back is landed.
+if $CF piece rollback -q $ARGS --plan "$RETARGET_PLAN" --json \
+  >"$WORK/rollback-dry.json" 2>"$WORK/rollback-dry.err"; then
+  bad "a piece on neither reference did not stop the reversal"
+else
+  ok "the dry rollback exited nonzero with a piece on neither reference"
+fi
+ROLLBACK_DRY=$(sed 's/^fvj1://' "$WORK/rollback-dry.json" |
+  jq -r '[(.applied|tostring), (.complete|tostring), (.rows | length | tostring),
+    (.rows | map(select(.verdict == "moved-elsewhere") | .piece) | join(",")),
+    (.rows | map(select(.verdict == "landed")) | length | tostring),
+    (.rows | map(select(.verdict == "outstanding")) | length | tostring)]
+    | @tsv')
+check "$(printf '0\tfalse\t%s\t%s\t1\t%s' "$MEMBERS_NOW" "$FIRST_MEMBER" \
+  "$((MEMBERS_NOW - 2))")" "$ROLLBACK_DRY" \
+  "one rollback row per retarget row: the moved piece named, the piece \
+already back landed, the rest outstanding"
+if grep -q "$FIRST_MEMBER" "$WORK/rollback-dry.err"; then
+  ok "the stop names the moved piece rather than counting it"
+else
+  bad "the stop does not name the moved piece"
+  sed 's/^/  | /' "$WORK/rollback-dry.err"
+fi
+
+step "22. A rollback killed midway is completed by re-invoking the same command"
+# Put BOTH moved members back on the target, so the board is a completed
+# retarget again and the reversal below has every row to restore: step 17 left
+# one on the target identity under another symbol, and step 18 left the other
+# on the prior generation. A row that is already back before the reversal
+# starts is a row the reversal never has to restore, and step 23's "a
+# completed retarget is fully reversed" would then be a claim about the rest
+# of the board rather than about all of it. The plan's own source again, for
+# the reason step 17 gives.
+#
+# Each re-stage is proved rather than assumed: one that silently did not
+# happen would leave the reversal blocked and every assertion below about the
+# cut vacuous.
+restage_to_target() {
+  $CF piece setsrc -q --piece "$1" --main-export Member \
+    "$NEXT_SOURCE" $ARGS >/dev/null 2>"$WORK/rollback-restage.err" ||
+    bad "moving $2 back to the target failed"
+  local now target
+  now=$($CF piece inspect --pattern-identity --json --piece "$1" $ARGS \
+    2>/dev/null | jq -r '[.patternIdentity, .symbol] | @tsv')
+  target=$(tail -n +2 "$RETARGET_PLAN" | jq -rs --arg p "$1" \
+    'map(select(.piece == $p)) | first | [.op.patternIdentity, .op.symbol]
+     | @tsv')
+  check "$target" "$now" \
+    "$2 is back on its row's target reference, both halves"
+}
+restage_to_target "$FIRST_MEMBER" "the aliased member"
+restage_to_target "$SECOND_MEMBER" "the member left on the prior generation"
+# Every row outstanding, none landed: the reversal below therefore restores
+# the whole board and not the part of it that happened to be forward. This
+# reds if any row was already back before the rollback started.
+STAGED=$($CF piece rollback -q $ARGS --plan "$RETARGET_PLAN" --json \
+  2>"$WORK/rollback-staged.err" | sed 's/^fvj1://' |
+  jq -r '[(.rows | length | tostring), (.complete|tostring),
+    (.rows | map(.verdict) | unique | join(","))] | @tsv')
+check "$(printf '%s\ttrue\toutstanding' "$MEMBERS_NOW")" "$STAGED" \
+  "the retarget is complete again: every row has a restore ahead of it"
+# The same idiom step 15 uses, and for the same reason: an interrupted run is
+# what rots silently, and a run that finished on its own would satisfy every
+# assertion about the second invocation while exercising none of what this
+# step exists for. Both proofs are required — a signal death, and real work
+# on both sides of the cut.
+mkfifo "$WORK/rollback-progress"
+$CF piece rollback -q $ARGS --plan "$RETARGET_PLAN" --apply --group-size 5 \
+  >"$WORK/rollback-progress" 2>"$WORK/rollback-killed.err" &
+ROLLBACK_PID=$!
+exec 4<"$WORK/rollback-progress"
+ROLLBACK_WATCHED=0
+while IFS= read -r _row <&4; do
+  ROLLBACK_WATCHED=$((ROLLBACK_WATCHED + 1))
+  [ "$ROLLBACK_WATCHED" -ge 6 ] && break
+done
+if [ "$ROLLBACK_WATCHED" -ge 6 ]; then
+  ok "watched $ROLLBACK_WATCHED rollback rows land"
+else
+  bad "the reversal ended before six rows landed (saw $ROLLBACK_WATCHED)"
+  sed 's/^/  | /' "$WORK/rollback-killed.err"
+fi
+if kill "$ROLLBACK_PID" 2>/dev/null; then
+  ok "signalled the reversal partway through its second group"
+else
+  bad "the reversal was already gone when the drill signalled it, so nothing \
+was interrupted and this step proves nothing"
+fi
+wait "$ROLLBACK_PID"
+ROLLBACK_STATUS=$?
+exec 4<&-
+if [ "$ROLLBACK_STATUS" = "143" ] || [ "$ROLLBACK_STATUS" = "137" ]; then
+  ok "the first reversal died on the signal (exit $ROLLBACK_STATUS)"
+else
+  bad "the first reversal exited $ROLLBACK_STATUS rather than on the signal: \
+it ran to its own end before the drill could stop it"
+fi
+ROLLBACK_MIDWAY=$($CF piece rollback -q $ARGS --plan "$RETARGET_PLAN" --json \
+  2>"$WORK/rollback-midway.err" | sed 's/^fvj1://' |
+  jq -r '[(.rows | map(select(.verdict == "landed")) | length | tostring),
+    (.rows | map(select(.verdict == "outstanding")) | length | tostring)]
+    | @tsv')
+ROLLBACK_LANDED=$(printf '%s' "$ROLLBACK_MIDWAY" | cut -f1)
+ROLLBACK_OUTSTANDING=$(printf '%s' "$ROLLBACK_MIDWAY" | cut -f2)
+if [ "${ROLLBACK_LANDED:-0}" -ge "$ROLLBACK_WATCHED" ] &&
+  [ "${ROLLBACK_OUTSTANDING:-0}" -gt 0 ]; then
+  ok "the cut left $ROLLBACK_LANDED restored and $ROLLBACK_OUTSTANDING \
+outstanding"
+else
+  bad "the cut left $ROLLBACK_LANDED restored and $ROLLBACK_OUTSTANDING \
+outstanding, of $ROLLBACK_WATCHED rows watched: the reversal was not stopped \
+midway"
+fi
+check "$MEMBERS_NOW" \
+  "$((${ROLLBACK_LANDED:-0} + ${ROLLBACK_OUTSTANDING:-0}))" \
+  "between the invocations every row is landed or outstanding, nothing else"
+ROLLBACK_RESUME=$($CF piece rollback -q $ARGS --plan "$RETARGET_PLAN" --apply \
+  --json 2>"$WORK/rollback-resume.err" | sed 's/^fvj1://' |
+  jq -r '[(.complete|tostring),
+    (.rows | map(select(.verdict == "landed")) | length | tostring),
+    (.rows | map(select(.verdict == "applied")) | length | tostring)] | @tsv')
+RESUME_COMPLETE=$(printf '%s' "$ROLLBACK_RESUME" | cut -f1)
+RESUME_LANDED=$(printf '%s' "$ROLLBACK_RESUME" | cut -f2)
+RESUME_APPLIED=$(printf '%s' "$ROLLBACK_RESUME" | cut -f3)
+check "true" "$RESUME_COMPLETE" "the re-invocation completed the reversal"
+check "$ROLLBACK_LANDED" "$RESUME_LANDED" \
+  "the rows the killed reversal restored were read as landed, not rewritten"
+check "$ROLLBACK_OUTSTANDING" "$RESUME_APPLIED" \
+  "the re-invocation restored the remainder, and only the remainder"
+check "$MEMBERS_NOW" "$((${RESUME_LANDED:-0} + ${RESUME_APPLIED:-0}))" \
+  "every member row is accounted for across the two invocations"
+
+step "23. The reversal put the board back where the plan found it"
+# The retarget plan's own precondition, checked against the space: every row
+# reads outstanding again, which is the same reading the plan got before the
+# retarget ran. A completed retarget is fully reversed — every row of it,
+# step 22 having proved that none was already back before the reversal began.
+REVERSED=$($CF piece retarget -q $ARGS --plan "$RETARGET_PLAN" --json \
+  2>/dev/null | sed 's/^fvj1://' | jq -r '[(.applied|tostring),
+    (.complete|tostring), (.rows | map(.verdict) | unique | join(","))]
+    | @tsv')
+check "$(printf '0\ttrue\toutstanding')" "$REVERSED" \
+  "every member is back on the reference its retarget row recorded"
+SETTLED_ROLLBACK=$($CF piece rollback -q $ARGS --plan "$RETARGET_PLAN" \
+  --apply --json 2>/dev/null | sed 's/^fvj1://' | jq -r '[(.applied|tostring),
+    (.complete|tostring), (.rows | map(.verdict) | unique | join(","))]
+    | @tsv')
+check "$(printf '0\ttrue\tlanded')" "$SETTLED_ROLLBACK" \
+  "a settled reversal re-runs as all-landed and writes nothing"
+
+step "24. A row whose prior source is not retained is refused by name"
+# Every source this drill deploys is retained, so an unretained row cannot be
+# produced by deploying one. The row's `retained` field is the recorded fact
+# the derivation honors, and the honest way to exercise the refusal is a plan
+# that records it — derived from the live survey as every other plan here is,
+# with one row's recorded fact rewritten.
+UNRETAINED_PLAN="$WORK/unretained.jsonl"
+jq -c --arg piece "$SECOND_MEMBER" \
+  'if .piece == $piece then .expect.retained = false else . end' \
+  "$RETARGET_PLAN" > "$UNRETAINED_PLAN"
+UNRETAINED_ROWS=$(tail -n +2 "$UNRETAINED_PLAN" |
+  jq -rs 'map(select(.expect.retained == false)) | length')
+check "1" "$UNRETAINED_ROWS" "the plan records one unretained prior source"
+if $CF piece rollback -q $ARGS --plan "$UNRETAINED_PLAN" \
+  >/dev/null 2>"$WORK/rollback-unretained.err"; then
+  bad "a row with no retained prior source did not stop the derivation"
+else
+  ok "an unretained prior source exited nonzero"
+fi
+if grep -q "not retained for $SECOND_MEMBER" "$WORK/rollback-unretained.err"
+then
+  ok "the refusal names the piece and the reason"
+else
+  bad "the refusal does not name the piece and the reason"
+  sed 's/^/  | /' "$WORK/rollback-unretained.err"
+fi
+# Accepting is per piece. Naming a piece whose prior source IS retained
+# accepts nothing, and is refused rather than ignored: an operator who
+# believes they dropped a piece must not be dropping none.
+if $CF piece rollback -q $ARGS --plan "$UNRETAINED_PLAN" \
+  --accept-unretained "$FIRST_MEMBER" \
+  >/dev/null 2>"$WORK/rollback-idle-accept.err"; then
+  bad "an acceptance covering no unretained row was taken"
+else
+  ok "an acceptance covering no unretained row exited nonzero"
+fi
+if grep -q "nothing accepts as unrollbackable for $FIRST_MEMBER" \
+  "$WORK/rollback-idle-accept.err"; then
+  ok "the refusal names the acceptance that covers nothing"
+else
+  bad "the refusal does not name the idle acceptance"
+  sed 's/^/  | /' "$WORK/rollback-idle-accept.err"
+fi
+# What acceptance actually does is leave one piece behind while the rest are
+# returned, and only a run that writes can show it. Step 23 left the whole
+# board reversed, so the rows are re-staged first: without this the assertion
+# below would be about a derived row count and nothing else.
+if $CF piece retarget -q $ARGS --plan "$RETARGET_PLAN" --apply >/dev/null \
+  2>"$WORK/accepted-restage.err"; then
+  ok "re-staged the board so the acceptance has something to leave behind"
+else
+  bad "re-staging the board before the accepted reversal failed"
+  sed 's/^/  | /' "$WORK/accepted-restage.err"
+fi
+# Both halves of the reference, the way the apply engine compares one: two
+# patterns a module exports share an identity and differ only in symbol, so
+# an identity-only check would call the MemberAlias state of step 17 a match.
+TARGET_REFERENCE=$(tail -n +2 "$RETARGET_PLAN" | jq -rs \
+  'map(select(has("op"))) | first | [.op.patternIdentity, .op.symbol] | @tsv')
+PRIOR_REFERENCE=$(tail -n +2 "$RETARGET_PLAN" | jq -rs \
+  'map(select(has("op"))) | first
+   | [.expect.patternIdentity, .expect.symbol] | @tsv')
+ACCEPTED=$($CF piece rollback -q $ARGS --plan "$UNRETAINED_PLAN" \
+  --accept-unretained "$SECOND_MEMBER" --apply --json \
+  2>"$WORK/rollback-accepted.err" | sed 's/^fvj1://' |
+  jq -r '[(.rows | length | tostring), (.applied|tostring), (.complete|tostring),
+    (.rows | map(.verdict) | unique | join(","))] | @tsv')
+check "$(printf '%s\t%s\ttrue\tapplied' "$((MEMBERS_NOW - 1))" \
+  "$((MEMBERS_NOW - 1))")" "$ACCEPTED" \
+  "every row but the accepted one was reversed, and all of them wrote"
+# The point of the acceptance, asserted by reference rather than by a count:
+# the accepted piece stayed where the move left it.
+ACCEPTED_NOW=$($CF piece inspect --pattern-identity --json \
+  --piece "$SECOND_MEMBER" $ARGS 2>/dev/null |
+  jq -r '[.patternIdentity, .symbol] | @tsv')
+check "$TARGET_REFERENCE" "$ACCEPTED_NOW" \
+  "the accepted piece was left on the exact target reference, not restored"
+OTHER_NOW=$($CF piece inspect --pattern-identity --json \
+  --piece "$FIRST_MEMBER" $ARGS 2>/dev/null |
+  jq -r '[.patternIdentity, .symbol] | @tsv')
+check "$PRIOR_REFERENCE" "$OTHER_NOW" \
+  "every other piece returned to the exact reference its row recorded"
+if grep -q "accepted as unrollbackable: $SECOND_MEMBER" \
+  "$WORK/rollback-accepted.err"; then
+  ok "the accepted piece is named on the run that carried it"
+else
+  bad "the accepted piece is not named"
+  sed 's/^/  | /' "$WORK/rollback-accepted.err"
+fi
+# Return the one piece the acceptance left behind, so the steps below meet a
+# fully reversed board again.
+$CF piece setsrc -q --piece "$SECOND_MEMBER" --main-export Member \
+  "$MEMBER_FIXTURE" $ARGS >/dev/null 2>"$WORK/accepted-reset.err" ||
+  bad "returning the accepted piece after the reversal failed"
+
+step "25. cf piece restore returns one piece to a revision of its own log"
+# The single-piece seam the bulk rollback is built on, useful on its own.
+RESTORE_TARGET="$FIRST_MEMBER"
+REVISIONS=$($CF piece restore -q --piece "$RESTORE_TARGET" $ARGS \
+  2>"$WORK/restore-list.err")
+REVISION_COUNT=$(printf '%s\n' "$REVISIONS" | grep -c .)
+if [ "${REVISION_COUNT:-0}" -ge 2 ]; then
+  ok "the listing shows $REVISION_COUNT revisions this piece could return to"
+else
+  bad "the listing shows $REVISION_COUNT revisions, expected at least 2"
+  sed 's/^/  | /' "$WORK/restore-list.err"
+fi
+# "current" is a fact about the reference, not about position: every
+# revision on the reference the piece runs reads current, which is what makes
+# restoring any of them a no-op. The newest one always does.
+LAST_CURRENT=$(printf '%s\n' "$REVISIONS" | tail -1 | grep -c ' current$' ||
+  true)
+check "1" "$LAST_CURRENT" "the newest revision reads as one the piece runs"
+RETAINED_LINES=$(printf '%s\n' "$REVISIONS" | grep -c ' not-retained' || true)
+check "0" "$RETAINED_LINES" "every revision's source is still there to load"
+# The oldest revision is the generation the piece was created on, which the
+# rollback above already returned it to — so a revision it is NOT on is the
+# one the retarget recorded.
+TARGET_REVISION=$($CF piece restore -q --piece "$RESTORE_TARGET" $ARGS \
+  --json 2>/dev/null |
+  jq -r '.revisions | map(select(.current == false)) | last | .revisionId')
+if [ -n "$TARGET_REVISION" ] && [ "$TARGET_REVISION" != "null" ]; then
+  ok "picked a revision the piece is not on: $TARGET_REVISION"
+else
+  bad "no non-current revision to restore"
+fi
+BEFORE_RESTORE=$($CF piece inspect --pattern-identity --json \
+  --piece "$RESTORE_TARGET" $ARGS 2>/dev/null | jq -r '.patternIdentity')
+if $CF piece restore -q --piece "$RESTORE_TARGET" $ARGS \
+  --revision "$TARGET_REVISION" >/dev/null 2>"$WORK/restore-dry.err"; then
+  ok "the dry restore exited 0"
+else
+  bad "the dry restore exited nonzero"
+  sed 's/^/  | /' "$WORK/restore-dry.err"
+fi
+DRY_IDENTITY=$($CF piece inspect --pattern-identity --json \
+  --piece "$RESTORE_TARGET" $ARGS 2>/dev/null | jq -r '.patternIdentity')
+check "$BEFORE_RESTORE" "$DRY_IDENTITY" "the dry restore wrote nothing"
+if $CF piece restore -q --piece "$RESTORE_TARGET" $ARGS \
+  --revision "$TARGET_REVISION" --apply >/dev/null \
+  2>"$WORK/restore-apply.err"; then
+  ok "the restore exited 0"
+else
+  bad "the restore exited nonzero"
+  sed 's/^/  | /' "$WORK/restore-apply.err"
+fi
+AFTER_RESTORE=$($CF piece restore -q --piece "$RESTORE_TARGET" $ARGS --json \
+  2>/dev/null |
+  jq -r --arg id "$TARGET_REVISION" \
+    '.revisions | map(select(.revisionId == $id)) | first | .current
+     | tostring')
+check "true" "$AFTER_RESTORE" "the piece now runs the revision it was given"
+# Through the real serializer: the named revision has to survive --json as
+# itself. It is also an entry of the listing, and a serializer that reports a
+# second reference to one object as a circular one would render it as that
+# string here rather than as the revision.
+SELECTED_JSON=$($CF piece restore -q --piece "$RESTORE_TARGET" $ARGS \
+  --revision "$TARGET_REVISION" --json 2>/dev/null |
+  jq -r '.selected.revisionId // "missing"')
+check "$TARGET_REVISION" "$SELECTED_JSON" \
+  "--json carries the named revision itself, not a reference to it"
+RESUMED_RESTORE=$($CF piece restore -q --piece "$RESTORE_TARGET" $ARGS \
+  --revision "$TARGET_REVISION" --apply --json 2>/dev/null |
+  jq -r '.restored | tostring')
+check "false" "$RESUMED_RESTORE" \
+  "restoring the revision it already runs writes nothing and does not fail"
+if $CF piece restore -q --piece "$RESTORE_TARGET" $ARGS \
+  --revision not-a-revision --apply >/dev/null 2>"$WORK/restore-bogus.err"
+then
+  bad "a revision the log does not hold was accepted"
+else
+  ok "a revision the log does not hold exited nonzero"
+fi
+if grep -q "$TARGET_REVISION" "$WORK/restore-bogus.err"; then
+  ok "the refusal names the revisions the log does hold"
+else
+  bad "the refusal does not name what is available"
+  sed 's/^/  | /' "$WORK/restore-bogus.err"
+fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

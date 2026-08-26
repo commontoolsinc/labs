@@ -422,7 +422,7 @@ const MEMBER_LIST_SCHEMA = {
  * per piece. Bare document existence would be cheaper and would lie: a
  * malformed entry document exists while nothing can restore from it.
  */
-async function isSourceRetained(
+export async function isSourceRetained(
   pieces: PiecesController,
   identity: string,
   cache: Map<string, boolean>,

@@ -8480,6 +8480,18 @@ function normalizePieceSourceOrigin(
 }
 
 /**
+ * What a source transition throws when the piece is no longer on the state
+ * the transition was prepared against — checked before the write and again
+ * inside the transaction that commits it.
+ *
+ * Exported because a caller that pinned an expected reference has to tell
+ * this apart from an operational failure, and matching on a copy of the text
+ * is how the two silently drift.
+ */
+export const PIECE_SOURCE_MOVED =
+  "piece source changed while the source transition was being prepared";
+
+/**
  * Verify that a source transition can restore the current source. Recovery
  * paths may omit an unavailable legacy baseline and retain the displaced
  * executable identity outside the restorable history instead.
@@ -8496,9 +8508,7 @@ export async function preparePieceSourceTransitionBaseline(
     current === undefined ||
     !samePieceSourceSnapshot(current, expected)
   ) {
-    throw new Error(
-      "piece source changed while the source transition was being prepared",
-    );
+    throw new Error(PIECE_SOURCE_MOVED);
   }
   const baseline = {
     kind: "retain" as const,
@@ -8535,9 +8545,7 @@ export function applyPieceSourceTransition(
     current === undefined ||
     !samePieceSourceSnapshot(current, transition.expected)
   ) {
-    throw new Error(
-      "piece source changed while the source transition was being prepared",
-    );
+    throw new Error(PIECE_SOURCE_MOVED);
   }
 
   const verifyRetainedPattern = (
