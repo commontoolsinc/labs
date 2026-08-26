@@ -161,17 +161,15 @@ the count. There is no cache to invalidate and nothing to refresh.
 
 ### Act 7 · A repair, where the fixer is the work
 
-A **fixer** is a TypeScript module whose default export is a pure transform from
-a piece's stored input document to the document it should hold. That is the
-whole of what a caller writes. Selection, ordering, the write, the stop and the
-resume belong to the tooling.
+The work here is a **fixer**, and it is the only part a caller writes:
+selection, ordering, the write, the stop and the resume all belong to the
+tooling. What a fixer must be, and every answer it is refused for, is the
+[bulk operations contract](../../features/piece-bulk-operations.md)'s to say.
 
-Purity is checked rather than assumed: the run evaluates the fixer twice over
-one document and refuses it by name if the two answers differ. Four more
-answers are refused the same way, before anything is written: one that is not a
-document, one holding a value the store cannot keep, one that drops a field the
-write would then zero — the write replaces the document whole — and one that
-rewrote or dropped a link.
+What matters at this act is that the requirement is probed rather than trusted.
+A fixer is asked the same question twice and refused by name if it answers
+differently, so a transform that is not the function it claims to be is caught
+before a single document is written rather than after a hundred are.
 
 ```bash
 cf piece repair -s "$SPACE" --piece board --path items \
@@ -237,17 +235,16 @@ cf piece survey -s "$SPACE" --piece board --path items \
   --diff "$WORK/retarget.jsonl"
 ```
 
-A row that carried an op lands in one of three outcomes — moved as planned,
-still outstanding, or moved to something the plan did not ask for — and the
-third is what an upgrade that half-converged looks like. A row the plan recorded
-without one is not measured against a target it never had: it reads as unchanged
-or as changed, the holder's row among them. A row whose piece the after-survey
-no longer holds reads as gone from the selection. The command exits nonzero
-unless every row is landed or unchanged, which is what "converged" means here.
+Each row comes back with a verdict, and the
+[bulk operations contract](../../features/piece-bulk-operations.md) is where
+those verdicts are defined. What the act is for is the shape of the question:
+a row the plan gave no operation is not measured against a target it never had,
+a row whose piece the after-survey no longer holds is reported gone rather than
+outstanding, and the command exits nonzero unless every row converged.
 
-A member filed after the plan was taken is none of those. It is named as held by
-the space and not by the plan, rather than counted as though the plan had asked
-for it.
+A member filed after the plan was taken gets no verdict at all, because the plan
+never carried a row for it. It is named as held by the space and not by the
+plan, rather than counted as though the plan had asked for it.
 
 ### Act 10 · The refusal the survey exists to make
 
