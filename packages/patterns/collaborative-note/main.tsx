@@ -50,26 +50,22 @@ export function normalizePresenceParticipantName(value: string): string {
 export interface CollaborativeNoteInput {
   /** Note body shared by every viewer of this piece. */
   note?: PerSpace<string | Default<typeof DEFAULT_NOTE>>;
-
-  /** Opaque high-entropy room shared by this piece's co-presence sessions. */
-  presenceRoom: PerSpace<string>;
 }
 
 export interface CollaborativeNoteOutput {
   [NAME]: string;
   [UI]: VNode;
   note: PerSpace<string | Default<typeof DEFAULT_NOTE>>;
-  presenceRoom: PerSpace<string>;
   participantName: string;
 }
 
 /**
  * A minimal shared note that pairs Memory-backed text with ephemeral cursors.
- * The host supplies the co-presence service URL; this pattern supplies the
- * shared room and derives each viewer's label from their Fabric profile.
+ * The editor derives its room from the shared field, the host supplies the
+ * service URL, and the pattern derives each viewer's label from their profile.
  */
 export default pattern<CollaborativeNoteInput, CollaborativeNoteOutput>(
-  ({ note, presenceRoom }) => {
+  ({ note }) => {
     // `#profile` owns the create/pick UI and live profile identity. The field
     // wish is the profile-backed plain-text label expected by cf-code-editor.
     const profileWish = wish<{ name?: string; avatar?: string }>({
@@ -114,7 +110,6 @@ export default pattern<CollaborativeNoteInput, CollaborativeNoteOutput>(
             <cf-code-editor
               $value={note}
               collaborative
-              presenceRoom={presenceRoom}
               participantName={participantName}
               language="text/markdown"
               mode="prose"
@@ -126,7 +121,6 @@ export default pattern<CollaborativeNoteInput, CollaborativeNoteOutput>(
         </cf-screen>
       ),
       note,
-      presenceRoom,
       participantName,
     };
   },

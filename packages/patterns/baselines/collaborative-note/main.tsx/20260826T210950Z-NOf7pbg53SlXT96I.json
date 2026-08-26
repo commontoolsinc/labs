@@ -6,16 +6,8 @@
         "description": "Note body shared by every viewer of this piece.",
         "scope": "space",
         "type": "string"
-      },
-      "presenceRoom": {
-        "description": "Opaque high-entropy room shared by this piece's co-presence sessions.",
-        "scope": "space",
-        "type": "string"
       }
     },
-    "required": [
-      "presenceRoom"
-    ],
     "type": "object"
   },
   "pattern": "collaborative-note/main.tsx",
@@ -34,15 +26,10 @@
       },
       "participantName": {
         "type": "string"
-      },
-      "presenceRoom": {
-        "scope": "space",
-        "type": "string"
       }
     },
     "required": [
       "note",
-      "presenceRoom",
       "participantName",
       "$NAME",
       "$UI"

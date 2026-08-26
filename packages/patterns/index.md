@@ -889,8 +889,8 @@ per-space state synchronized through Memory's operation protocol. Names, carets,
 and selections travel separately as ephemeral co-presence data. Each viewer
 selects or creates a Fabric profile with `wish({ query: "#profile" })`; the
 editor uses that profile's `#profileName` field as its participant label. The
-host provides the WebSocket endpoint, while the caller supplies an opaque,
-high-entropy room identifier unique to the note.
+host provides the WebSocket endpoint, while `cf-code-editor` derives an opaque
+room identifier from the shared note field.
 
 **Keywords:** multiplayer, collaborative editor, note, profile, wish,
 co-presence, CodeMirror
@@ -902,7 +902,6 @@ interface CollaborativeNoteInput {
   note?: PerSpace<
     string | Default<"# Collaborative note\n\nStart writing together.">
   >;
-  presenceRoom: PerSpace<string>;
 }
 ```
 
@@ -913,7 +912,6 @@ interface CollaborativeNoteOutput {
   note: PerSpace<
     string | Default<"# Collaborative note\n\nStart writing together.">
   >;
-  presenceRoom: PerSpace<string>;
   participantName: string;
 }
 ```
