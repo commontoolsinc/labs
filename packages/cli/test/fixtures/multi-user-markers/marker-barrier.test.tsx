@@ -1,4 +1,5 @@
 /// <cts-enable />
+
 /**
  * Crossing `{ await }` delivers what the announcing participant wrote before
  * `{ label }`. Bob's assertion is read once, so it passes only when the

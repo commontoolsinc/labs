@@ -1441,6 +1441,7 @@ function createPieceCallableHarness(options: {
   extraParams?: Record<string, unknown>;
   toolResult?: unknown;
   handlerFailureMessage?: string;
+
   /** Commit settles as an aborted transaction whose error wraps the drop
    * reason (`StorageTransactionAborted.reason`) — the shape a pre-dispatch
    * drop hands the commit callback (a send refused at the event-backlog
@@ -1449,27 +1450,33 @@ function createPieceCallableHarness(options: {
    * the whole signal. */
   abortedWithReason?: string;
   callableScope?: "space" | "user" | "session";
+
   /** Value the handling's receipt cell reads back ({} = value-less verb). */
   receiptValue?: unknown;
+
   /** The receipt's STORED form, when it differs from the materialized
    * `receiptValue` — a proxied instance's codec shape, most usefully.
    * Presence is decided on this, mirroring the production readback. */
   receiptRaw?: unknown;
+
   /** Simulate the create-only receipt collision: commit fails with
    * precondition "receipt-exists" while the link addresses the winner's
    * original receipt. */
   receiptExists?: boolean;
+
   /** Hold settlement open: `send` records the dispatch but never invokes the
    * commit callback, so anything awaiting acknowledgment waits forever.
    * This is how a test proves a path does NOT await the commit — the path
    * completes anyway — or exercises a wait bound against a call that can
    * never beat it. */
   neverCommit?: boolean;
+
   /** Commit with no `handlingReceiptLink` on the transaction, which is what
    * the runner leaves behind when receipts are not being written
    * (`commitPreconditions` off): it stashes the link only when it will
    * create the cell. */
   noReceiptLink?: boolean;
+
   /** Replace the readback receipt cell wholesale — for --show-links tests,
    * whose receipt must support key()/resolveAsCell link traversal. */
   receiptCell?: Cell<any>;
@@ -2993,6 +3000,7 @@ interface MockLinkedDoc {
   id: string;
   space: string;
   scope?: "space" | "user" | "session";
+
   /** Where inside the backing doc the link points (a link below its root). */
   path?: string[];
 }
@@ -3126,6 +3134,7 @@ function recordingReceiptCell(
 describe("collectInvocationResultLinks", () => {
   const receiptDoc = { id: "of:receipt-1", space: "did:key:test-home" };
   const receiptLink = mockLink(receiptDoc);
+
   /** The space the call targeted: an address in it carries no `@did`. */
   const contextSpace = "did:key:test-home" as MemorySpace;
   const receiptRef = "/of:receipt-1";

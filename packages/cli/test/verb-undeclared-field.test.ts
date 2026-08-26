@@ -198,6 +198,7 @@ interface Tracker {
     payload: unknown,
     invocationId?: string,
   ) => Promise<{ id: string; status: string; deduplicated?: boolean }>;
+
   /** What the handlers recorded, read off the cell rather than through any
    * rendering, so it says what the handler actually received. */
   entries: () => string[];

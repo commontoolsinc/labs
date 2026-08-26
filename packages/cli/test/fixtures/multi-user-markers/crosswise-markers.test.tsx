@@ -1,4 +1,5 @@
 /// <cts-enable />
+
 /**
  * Both participants announce before either crosses the other's marker, so
  * each announces from a replica that predates the other's announcement. Each
