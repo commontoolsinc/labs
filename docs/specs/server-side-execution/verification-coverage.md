@@ -5282,8 +5282,10 @@ supply; OW29/OW32/OW34 closed):
   (2026-08-22): the test-side pass closed the step's own interim-race
   half and ISOLATED the residue as the OW45 row's real arm-B client
   starvation, so the entry now names that product charge, not a test
-  flake); they gate the
-  FLIP — whose bar is the list EMPTY — not the land. Rows, one per
+  flake). The current census (2026-08-26) is THREE patterns entries:
+  default-app's reload STEP, lunch-poll-vote's FILE entry, and the
+  topic-board pivot-baseline STEP. They gate the FLIP — whose bar is
+  the list EMPTY — not the land. Rows, one per
   mechanism cluster; each row's trigger names the skip entry it
   lifts:
   - **OW45 — the profile piece's PROGRAM-materialization write path
@@ -5948,6 +5950,54 @@ supply; OW29/OW32/OW34 closed):
     quiet-and-loaded — and its class half is now the named read-side
     residue (the START class the bar originally named is closed by
     this build); the step entry's reason names the narrowed charge.
+    **POST-#6292 RE-MEASURE, 2026-08-26: 9/10 — NO LIFT. The earlier
+    read-side residues are likely closed; the sole red is a NEW
+    store-incomplete setup-error shape.** Method: one ON binary at
+    `37b45336a6b17ad27039cc525e4ba2e89f517449` (contains #6292 as
+    `9c9073995`), sha256
+    `747c162b30bd18e144ebbf9ef1c03b7a84d44d005949bcbd4a919e17d1970ebd`;
+    the STEP guard neutralized for every run while its registry entry
+    stayed present; ensure-off, matching the CI ON lanes; fresh store,
+    independent 97xx port, ON posture probe, and LLM environment masked
+    per run; five quiet plus five loaded; PID-only teardown and a
+    port-free check. Quiet was 4/5 green and loaded 5/5. The nine greens
+    completed the step in 7–24 s. Across ten runs: 12
+    `deferred-start-catchup`, zero catch-up failures, zero
+    `pattern-load-error`, 12 stale-read lines, zero terminal deferred
+    deaths, and zero skip prints.
+
+    The sole red, quiet r01, reached the target step and remained there
+    until the unchanged 600 s harness bound returned rc 124. Its durable
+    notebook space held 89 commits, 808 entities, and 1,220 revisions;
+    the root carried a real pattern identity. The notebook argument held
+    exactly SIX note links, with post-creation patches at seqs 37, 45,
+    55, 63, 71, and 83 and no seventh append. The log held one
+    `pattern-swap-setup-error` whose server detail was “updated arguments
+    do not match the candidate schema: parentNotebook: notes: 0:
+    parentNotebook: recursive schema validation made no progress,” plus
+    seven `event-view-lag` deferrals reaching index 5. It held zero
+    `pattern-load-error`.
+
+    Discriminators: NOT the earlier r01, whose store was complete with
+    all seven appends and whose live context silently starved only the
+    read; this store was incomplete, had an explicit setup error, and
+    never reached the final authority read. NOT r06/r09, which each had
+    one keyless-identity `pattern-load-error` followed by whole-piece
+    unreadability while durable pointers remained real; this run had
+    zero load errors and a real root pattern identity. The previous
+    read-side residues are likely closed by intervening fixes, but the
+    evidence remains split: r01 has #6292's matching client-absorb
+    mechanism plus the signature's absence here; r06/r09 have
+    absence-of-observation only, since their keyless-identity mechanism
+    was never root-caused. The campaign does NOT determine whether the
+    seventh append was refused, dropped, or never issued, and assigns no
+    root cause to the recursive-schema error.
+
+    **DISPOSITION: NO LIFT.** The STEP entry and its bound guard stay,
+    reworded to this store-incomplete `pattern-swap-setup-error` charge.
+    The lift bar remains 10/10 quiet-and-loaded ON. Full ledger and
+    per-run evidence paths:
+    [`ow45-default-app-reload-post-6292-remeasure-2026-08-26.md`](../../history/plans/server-execution-v2/optimize/ow45-default-app-reload-post-6292-remeasure-2026-08-26.md).
     Sibling entry, landed mid-review: #5744 (lunch-poll profile-first
     join) re-skipped `integration/lunch-poll-vote.test.ts` as a FILE
     entry on this row's b04 signature — its recorded reds PREDATE the
