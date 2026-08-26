@@ -115,6 +115,7 @@ export type BridgeError = {
 };
 
 export type BridgeResourceDescriptor = {
+  name: string;
   kind: "cell" | "stream" | "sqlite" | "service";
   methods: string[];
   schema?: FabricValue;
@@ -124,7 +125,7 @@ export type BridgeResourceDescriptor = {
 export type BridgeManifest = {
   protocol: typeof BRIDGE_PROTOCOL;
   version: typeof BRIDGE_VERSION;
-  resources: Record<string, BridgeResourceDescriptor>;
+  resources: BridgeResourceDescriptor[];
 };
 
 export type BridgeOperation =

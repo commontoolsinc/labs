@@ -48,19 +48,12 @@ export type QuerySnapshot<Row> =
   | { status: "ready"; rows: Row[]; error: undefined }
   | { status: "error"; rows: undefined; error: Error };
 
-type KeyedQuerySnapshot<Row> = {
-  key: string;
-  snapshot: QuerySnapshot<Row>;
-};
-
 function loadingQuery<Row>(): QuerySnapshot<Row> {
   return { status: "loading", rows: undefined, error: undefined };
 }
 
 /** Builds hooks against the React instance already used by the guest app. */
 export function createFabricReact(react: ReactHooks, client: FabricClient) {
-  const writeTails = new WeakMap<object, Promise<void>>();
-
   function useCell<T = FabricValue>(
     name: string,
   ): CellHookResult<T> {
@@ -77,27 +70,10 @@ export function createFabricReact(react: ReactHooks, client: FabricClient) {
     }, [cell]);
 
     const set = react.useCallback(
-      (next: T | ((current: T) => T)) => {
-        const write = async () => {
-          const current = cell.getSnapshot();
-          const value = typeof next === "function"
-            ? (next as (current: T) => T)(
-              current.status === "ready" ? current.value : await cell.read(),
-            )
-            : next;
-          await cell.write(value);
-        };
-        const previous = writeTails.get(cell);
-        const writing = previous ? previous.then(write) : write();
-        const tail = writing.catch(() => {});
-        writeTails.set(cell, tail);
-        void tail.then(() => {
-          if (writeTails.get(cell) === tail) {
-            writeTails.delete(cell);
-          }
-        });
-        return writing;
-      },
+      (next: T | ((current: T) => T)) =>
+        typeof next === "function"
+          ? cell.update(next as (current: T) => T)
+          : cell.write(next),
       [cell],
     );
 
@@ -116,50 +92,61 @@ export function createFabricReact(react: ReactHooks, client: FabricClient) {
     const database = react.useMemo(() => client.sqlite(name), [name]);
     const paramsKey = hashStringOf(params ?? null);
     const queryKey = hashStringOf({ name, sql, params: params ?? null });
-    const generation = react.useRef(0);
-    const [state, setState] = react.useState<KeyedQuerySnapshot<Row>>({
-      key: queryKey,
-      snapshot: loadingQuery(),
-    });
-    const snapshot = state.key === queryKey
-      ? state.snapshot
-      : loadingQuery<Row>();
+    const activeQuery = react.useRef<string | undefined>(undefined);
+    const generations = react.useRef(new Map<string, number>());
+    const [states, setStates] = react.useState<Map<string, QuerySnapshot<Row>>>(
+      () => new Map([[queryKey, loadingQuery()]]),
+    );
+    const snapshot = states.get(queryKey) ?? loadingQuery<Row>();
 
     const refresh = react.useCallback(async () => {
-      const request = ++generation.current;
-      setState({ key: queryKey, snapshot: loadingQuery() });
+      if (activeQuery.current !== queryKey) return;
+      const request = (generations.current.get(queryKey) ?? 0) + 1;
+      generations.current.set(queryKey, request);
+      setStates((current) => {
+        const next = new Map(current);
+        next.set(queryKey, loadingQuery());
+        return next;
+      });
       try {
         const result = await database.query<Row>(sql, params);
-        if (request !== generation.current) return;
-        setState({
-          key: queryKey,
-          snapshot: {
+        if (request !== generations.current.get(queryKey)) return;
+        setStates((current) => {
+          const next = new Map(current);
+          next.set(queryKey, {
             status: "ready",
             rows: result.rows,
             error: undefined,
-          },
+          });
+          return next;
         });
       } catch (cause) {
-        if (request !== generation.current) return;
-        setState({
-          key: queryKey,
-          snapshot: {
+        if (request !== generations.current.get(queryKey)) return;
+        setStates((current) => {
+          const next = new Map(current);
+          next.set(queryKey, {
             status: "error",
             rows: undefined,
             error: cause instanceof Error ? cause : new Error(String(cause)),
-          },
+          });
+          return next;
         });
       }
     }, [database, sql, paramsKey, queryKey]);
 
     react.useEffect(() => {
+      activeQuery.current = queryKey;
       const unsubscribe = database.subscribeInvalidation(() => void refresh());
       void refresh();
       return () => {
-        generation.current++;
+        if (activeQuery.current === queryKey) activeQuery.current = undefined;
+        generations.current.set(
+          queryKey,
+          (generations.current.get(queryKey) ?? 0) + 1,
+        );
         unsubscribe();
       };
-    }, [database, refresh]);
+    }, [database, queryKey, refresh]);
 
     return { ...snapshot, refresh };
   }

@@ -62,18 +62,36 @@ function sqliteInput(value: FabricValue | undefined): {
     throw new TypeError("SQLite operations require a string `sql` field.");
   }
   const params = input.params;
+  const namedParams = input.namedParams;
+  if (params !== undefined && namedParams !== undefined) {
+    throw new TypeError(
+      "SQLite operations cannot carry both positional and named params.",
+    );
+  }
   if (
     params !== undefined && !Array.isArray(params) &&
     (!params || typeof params !== "object")
   ) {
     throw new TypeError("SQLite `params` must be an array or object.");
   }
+  if (
+    namedParams !== undefined &&
+    (!Array.isArray(namedParams) ||
+      namedParams.some((entry) =>
+        !Array.isArray(entry) || entry.length !== 2 ||
+        typeof entry[0] !== "string"
+      ))
+  ) {
+    throw new TypeError("SQLite `namedParams` must be key-value entries.");
+  }
   return {
     sql: input.sql,
-    ...(params !== undefined && {
-      params: params as
-        | ReadonlyArray<ClientCellValue>
-        | Record<string, ClientCellValue>,
+    ...((params !== undefined || namedParams !== undefined) && {
+      params: (namedParams === undefined
+        ? params
+        : Object.fromEntries(namedParams as Array<[string, FabricValue]>)) as
+          | ReadonlyArray<ClientCellValue>
+          | Record<string, ClientCellValue>,
     }),
   };
 }

@@ -56,7 +56,19 @@ export function createFabricBridge(
   return { resources };
 }
 
-function descriptor(resource: BridgeResource): BridgeResourceDescriptor {
+function descriptor(
+  name: string,
+  resource: BridgeResource,
+): BridgeResourceDescriptor {
+  if (
+    !Object.hasOwn(resource, "kind") ||
+    resource.kind !== "cell" && resource.kind !== "stream" &&
+      resource.kind !== "sqlite" && resource.kind !== "service"
+  ) {
+    throw new TypeError(
+      `Bridge resource \`${name}\` must declare its own valid kind.`,
+    );
+  }
   const methods: string[] = [];
   if (Object.hasOwn(resource, "read") && typeof resource.read === "function") {
     methods.push("read");
@@ -76,10 +88,14 @@ function descriptor(resource: BridgeResource): BridgeResourceDescriptor {
     methods.push(...Object.keys(resource.methods).sort());
   }
   return {
+    name,
     kind: resource.kind,
     methods,
-    ...(resource.schema !== undefined && { schema: resource.schema }),
-    ...(resource.description !== undefined && {
+    ...(Object.hasOwn(resource, "schema") && resource.schema !== undefined && {
+      schema: resource.schema,
+    }),
+    ...(Object.hasOwn(resource, "description") &&
+      resource.description !== undefined && {
       description: resource.description,
     }),
   };
@@ -155,11 +171,8 @@ export class FabricBridgeHost {
     return {
       protocol: BRIDGE_PROTOCOL,
       version: BRIDGE_VERSION,
-      resources: Object.fromEntries(
-        Object.entries(this.#bridge.resources).map(([name, resource]) => [
-          name,
-          descriptor(resource),
-        ]),
+      resources: Object.entries(this.#bridge.resources).map(
+        ([name, resource]) => descriptor(name, resource),
       ),
     };
   }

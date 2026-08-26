@@ -89,7 +89,10 @@ describe("cell-handle", () => {
         type: RequestType.SqliteQuery,
         cell: ref,
         sql: "SELECT title, source FROM notes WHERE id = ?",
-        params: [realmFromFabricValue(1)],
+        params: {
+          kind: "positional",
+          values: [realmFromFabricValue(1)],
+        },
       }]);
       expect(rows[0]?.title).toBe("One");
       expect(rows[0]?.source).toBeInstanceOf(CellHandle);
@@ -117,7 +120,10 @@ describe("cell-handle", () => {
         type: RequestType.SqliteExec,
         cell: ref,
         sql: "INSERT INTO notes (title) VALUES (:title)",
-        params: { title: realmFromFabricValue("New") },
+        params: {
+          kind: "named",
+          entries: [["title", realmFromFabricValue("New")]],
+        },
       }]);
     });
 
@@ -151,9 +157,11 @@ describe("cell-handle", () => {
 
       expect(rows[0]?.payload).toBeInstanceOf(FabricBytes);
       expect(rows[0]?.payload.slice()).toEqual(new Uint8Array([1, 2, 3]));
-      const request = requests[1] as { params: [unknown] };
+      const request = requests[1] as {
+        params: { kind: "positional"; values: [unknown] };
+      };
       const parameter = fabricFromRealmValue(
-        request.params[0] as RealmEncodedValue,
+        request.params.values[0] as RealmEncodedValue,
       );
       expect(parameter).toBeInstanceOf(FabricBytes);
       expect((parameter as FabricBytes).slice()).toEqual(
@@ -184,9 +192,14 @@ describe("cell-handle", () => {
         },
       );
 
-      const params = (requests[0] as {
-        params: Record<string, RealmEncodedValue>;
-      }).params;
+      const params = Object.fromEntries(
+        (requests[0] as {
+          params: {
+            kind: "named";
+            entries: Array<[string, RealmEncodedValue]>;
+          };
+        }).params.entries,
+      );
       expect(fabricFromRealmValue(params.linked!)).toEqual(linkedRef);
       const nested = fabricFromRealmValue(params.nested!) as {
         bytes: FabricBytes;
@@ -1027,6 +1040,26 @@ describe("cell-handle", () => {
       expect(cell.get()).toEqual({ n: 1 });
       expect(updates).toEqual([{ n: 1 }]);
       unsubscribe();
+    });
+
+    it("preserves an equal authoritative update over a strict response", async () => {
+      const response = Promise.withResolvers<unknown>();
+      const runtime = {
+        [$conn]: () => ({
+          request: () => response.promise,
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle(runtime, ref, { n: 1 });
+
+      const writing = cell.setStrict({ n: 2 });
+      cell[$onCellUpdate]({ n: 1 });
+      response.resolve({});
+      await writing;
+
+      expect(cell.get()).toEqual({ n: 1 });
     });
 
     it("starts the first strict write before a later read", async () => {

@@ -87,6 +87,11 @@ export class RemoteCell<T = FabricValue> {
   };
 
   async read(): Promise<T> {
+    const writes = this.#writeTail;
+    return writes ? await writes.then(() => this.#read()) : await this.#read();
+  }
+
+  async #read(): Promise<T> {
     const before = this.#snapshot;
     const generation = ++this.#readGeneration;
     const eventGeneration = this.#eventGeneration;
@@ -115,9 +120,23 @@ export class RemoteCell<T = FabricValue> {
   }
 
   write(value: T): Promise<void> {
+    return this.#enqueueWrite(() => this.#write(value));
+  }
+
+  update(updater: (current: T) => T): Promise<void> {
+    return this.#enqueueWrite(async () => {
+      const snapshot = this.#snapshot;
+      const current = snapshot.status === "ready"
+        ? snapshot.value
+        : await this.#read();
+      await this.#write(updater(current));
+    });
+  }
+
+  #enqueueWrite(operation: () => Promise<void>): Promise<void> {
     const writing = this.#writeTail
-      ? this.#writeTail.then(() => this.#write(value))
-      : this.#write(value);
+      ? this.#writeTail.then(operation)
+      : operation();
     const tail = writing.catch(() => {});
     this.#writeTail = tail;
     void tail.then(() => {
@@ -127,15 +146,26 @@ export class RemoteCell<T = FabricValue> {
   }
 
   async #write(value: T): Promise<void> {
+    const before = this.#snapshot;
+    const eventGeneration = this.#eventGeneration;
     try {
-      const before = this.#snapshot;
       await this.#client.request("write", {
         resource: this.#name,
         value: value as FabricValue,
       });
-      if (this.#snapshot === before) this.#setReady(value);
+      if (
+        eventGeneration === this.#eventGeneration &&
+        this.#snapshot === before
+      ) {
+        this.#setReady(value);
+      }
     } catch (error) {
-      this.#setError(error);
+      if (
+        eventGeneration === this.#eventGeneration &&
+        this.#snapshot === before
+      ) {
+        this.#setError(error);
+      }
       throw error;
     }
   }
@@ -178,6 +208,16 @@ export type SqliteQueryWireResult = {
   rows: Array<Array<[string, FabricValue]>>;
 };
 
+function sqliteOperationInput(
+  sql: string,
+  params?: SqliteQueryInput["params"],
+): FabricValue {
+  if (params === undefined) return { sql };
+  return Array.isArray(params)
+    ? { sql, params }
+    : { sql, namedParams: Object.entries(params) };
+}
+
 /** Guest-side query and mutation interface for one SQLite resource. */
 export class RemoteSqlite {
   readonly #client: FabricClient;
@@ -192,10 +232,11 @@ export class RemoteSqlite {
     sql: string,
     params?: SqliteQueryInput["params"],
   ): Promise<{ rows: Row[] }> {
-    const result = await this.#client.call(this.#name, "query", {
-      sql,
-      ...(params !== undefined && { params }),
-    }) as SqliteQueryWireResult;
+    const result = await this.#client.call(
+      this.#name,
+      "query",
+      sqliteOperationInput(sql, params),
+    ) as SqliteQueryWireResult;
     return {
       rows: result.rows.map((entries) => Object.fromEntries(entries) as Row),
     };
@@ -205,10 +246,11 @@ export class RemoteSqlite {
     sql: string,
     params?: SqliteQueryInput["params"],
   ): Promise<void> {
-    await this.#client.call(this.#name, "exec", {
-      sql,
-      ...(params !== undefined && { params }),
-    });
+    await this.#client.call(
+      this.#name,
+      "exec",
+      sqliteOperationInput(sql, params),
+    );
   }
 
   subscribeInvalidation(listener: () => void): () => void {
@@ -292,12 +334,12 @@ export class FabricClient {
       operation,
       ...fields,
     };
-    const result = new Promise<FabricValue | undefined>((resolve, reject) => {
-      this.#pending.set(id, { resolve, reject });
-    });
-    if (this.#port) this.#send(request);
+    const result = Promise.withResolvers<FabricValue | undefined>();
+    result.promise.catch(() => {});
+    this.#pending.set(id, result);
+    if (this.#port) this.#sendPending(request);
     else this.#queued.push(request);
-    return result;
+    return result.promise;
   }
 
   subscribeResource(
@@ -350,6 +392,17 @@ export class FabricClient {
     this.#port?.postMessage(realmFromFabricValue(request));
   }
 
+  #sendPending(request: BridgeRequest): void {
+    try {
+      this.#send(request);
+    } catch (cause) {
+      const pending = this.#pending.get(request.id);
+      if (!pending) return;
+      this.#pending.delete(request.id);
+      pending.reject(cause);
+    }
+  }
+
   #onHandoff = (event: MessageEvent): void => {
     // The host owns the outer frame and posts directly to this inner guest, so
     // it is two parent hops away. The guest has an opaque origin and cannot
@@ -363,7 +416,7 @@ export class FabricClient {
     this.#port = event.ports[0];
     this.#port.onmessage = this.#onPortMessage;
     this.#port.start();
-    for (const request of this.#queued) this.#send(request);
+    for (const request of this.#queued) this.#sendPending(request);
     this.#queued = [];
   };
 

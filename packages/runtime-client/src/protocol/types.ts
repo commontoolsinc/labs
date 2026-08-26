@@ -1030,8 +1030,11 @@ export type SqliteWireValue = RealmEncodedValue;
 
 /** SQLite bind values as the main-thread connection carries them. */
 export type SqliteParams =
-  | readonly SqliteWireValue[]
-  | { readonly [key: string]: SqliteWireValue };
+  | { kind: "positional"; values: readonly SqliteWireValue[] }
+  | {
+    kind: "named";
+    entries: readonly (readonly [string, SqliteWireValue])[];
+  };
 
 /** The {@link RequestType.SqliteQuery} request. */
 export type SqliteQueryRequest = BaseRequest & {

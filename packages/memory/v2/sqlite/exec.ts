@@ -7,6 +7,7 @@ import { type BindValue, Database } from "@db/sqlite";
 import type { FabricPlainObject } from "@commonfabric/api";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
+import { isPlainObject } from "@commonfabric/utils/types";
 import { assertReadOnly, assertWriteSafe } from "./guard.ts";
 import { columnOrigins } from "./column-origin.ts";
 import { createTableSQL, type TableSchema } from "./schema.ts";
@@ -73,26 +74,46 @@ export type WriteResult = {
 };
 
 // @db/sqlite binds positional values as a rest list and named values as a single
-// record argument. Binary values stay as FabricBytes over the memory protocol
-// and become Uint8Array only at this native database edge.
+// record argument. Top-level binary values stay as FabricBytes over the memory
+// protocol and become Uint8Array only at this native database edge. Binary
+// values nested in JSON structures become byte arrays before SQLite encodes
+// the surrounding value.
 // (Exported for the commit-time row-label evaluator, which prepares the same
 // wire params against its RETURNING-instrumented statement.)
 export function bindArgs(params?: SqliteParams): BindValue[] {
   if (params === undefined) return [];
-  const bindValue = (value: unknown): unknown =>
-    value instanceof FabricBytes ? value.slice() : value;
-  return (Array.isArray(params) ? params.map(bindValue) : [Object.fromEntries(
-    Object.entries(params).map(([key, value]) => [key, bindValue(value)]),
-  )]) as BindValue[];
+  const bindValue = (value: unknown, nested = false): unknown => {
+    if (value instanceof FabricBytes) {
+      return nested ? [...value.slice()] : value.slice();
+    }
+    if (Array.isArray(value)) {
+      return value.map((member) => bindValue(member, true));
+    }
+    if (isPlainObject(value)) {
+      return Object.fromEntries(
+        Object.entries(value).map(([key, member]) => [
+          key,
+          bindValue(member, true),
+        ]),
+      );
+    }
+    return value;
+  };
+  return (Array.isArray(params)
+    ? params.map((value) => bindValue(value))
+    : [Object.fromEntries(
+      Object.entries(params).map(([key, value]) => [key, bindValue(value)]),
+    )]) as BindValue[];
 }
 
 function rowFromNative<Row extends FabricPlainObject>(
-  row: Record<string, unknown>,
+  names: string[],
+  values: unknown[],
 ): Row {
   return Object.fromEntries(
-    Object.entries(row).map(([key, value]) => [
+    names.map((key, index) => [
       key,
-      fabricFromNativeValue(value),
+      fabricFromNativeValue(values[index]),
     ]),
   ) as Row;
 }
@@ -104,8 +125,14 @@ export function runQuery<Row extends FabricPlainObject = FabricPlainObject>(
   params?: SqliteParams,
 ): Row[] {
   assertReadOnly(sql);
-  return (db.prepare(sql).all(...bindArgs(params)) as Record<string, unknown>[])
-    .map(rowFromNative<Row>);
+  const stmt = db.prepare(sql);
+  try {
+    const names = stmt.columnNames();
+    return stmt.values<unknown[]>(...bindArgs(params))
+      .map((values) => rowFromNative<Row>(names, values));
+  } finally {
+    stmt.finalize();
+  }
 }
 
 /** A result column's output name plus its TRUE source `(table, column)` origin
@@ -135,8 +162,8 @@ export function runQueryWithOrigins<
   try {
     const names = stmt.columnNames();
     const origins = columnOrigins(stmt.unsafeHandle, names.length);
-    const rows = (stmt.all(...bindArgs(params)) as Record<string, unknown>[])
-      .map(rowFromNative<Row>);
+    const rows = stmt.values<unknown[]>(...bindArgs(params))
+      .map((values) => rowFromNative<Row>(names, values));
     return {
       rows,
       columns: names.map((output, i) => ({

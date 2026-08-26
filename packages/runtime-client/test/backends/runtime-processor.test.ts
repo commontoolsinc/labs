@@ -4390,7 +4390,10 @@ describe("runtime-processor", () => {
         type: RequestType.SqliteQuery,
         cell: ref,
         sql: "SELECT title FROM notes WHERE id = ?",
-        params: [realmFromFabricValue(1)],
+        params: {
+          kind: "positional",
+          values: [realmFromFabricValue(1)],
+        },
       })).resolves.toEqual({
         rows: [{ title: realmFromFabricValue("One") }],
       });
@@ -4459,7 +4462,10 @@ describe("runtime-processor", () => {
         type: RequestType.SqliteQuery,
         cell: ref,
         sql: "SELECT payload FROM blobs WHERE payload = ?",
-        params: [realmFromFabricValue(input)],
+        params: {
+          kind: "positional",
+          values: [realmFromFabricValue(input)],
+        },
       });
 
       const output = fabricFromRealmValue(result.rows[0]!.payload);
@@ -4491,11 +4497,17 @@ describe("runtime-processor", () => {
         cell: ref,
         sql: "SELECT :linked, :nested",
         params: {
-          linked: realmFromFabricValue(linked),
-          nested: realmFromFabricValue({
-            bytes,
-            links: [linked],
-          }),
+          kind: "named",
+          entries: [
+            ["linked", realmFromFabricValue(linked)],
+            [
+              "nested",
+              realmFromFabricValue({
+                bytes,
+                links: [linked],
+              }),
+            ],
+          ],
         },
       });
 
@@ -4679,7 +4691,10 @@ describe("runtime-processor", () => {
         type: RequestType.SqliteExec,
         cell: ref,
         sql: "INSERT INTO notes (title) VALUES (:title)",
-        params: { title: realmFromFabricValue("New") },
+        params: {
+          kind: "named",
+          entries: [["title", realmFromFabricValue("New")]],
+        },
       });
 
       expect(calls).toEqual([[
@@ -4735,7 +4750,10 @@ describe("runtime-processor", () => {
         type: RequestType.SqliteExec,
         cell: ref,
         sql: "INSERT INTO notes (title) VALUES (?)",
-        params: [realmFromFabricValue("First")],
+        params: {
+          kind: "positional",
+          values: [realmFromFabricValue("First")],
+        },
       });
 
       expect(calls).toEqual([

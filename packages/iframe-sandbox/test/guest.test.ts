@@ -141,11 +141,11 @@ describe("guest", () => {
           response(request.id, {
             protocol: BRIDGE_PROTOCOL,
             version: BRIDGE_VERSION,
-            resources: {},
+            resources: [],
           }),
         );
 
-        await expect(pending).resolves.toMatchObject({ resources: {} });
+        await expect(pending).resolves.toMatchObject({ resources: [] });
       } finally {
         fabric.disconnect();
         await pending?.catch(() => {});
@@ -275,6 +275,46 @@ describe("guest", () => {
       }
     });
 
+    it("preserves an equal authoritative update over a write response", async () => {
+      const fabric = connectFabric();
+      try {
+        const host = handOffPort();
+        const cell = fabric.cell<number>("count");
+        const ready = Promise.withResolvers<void>();
+        cell.subscribe((snapshot) => {
+          if (snapshot.status === "ready" && snapshot.value === 1) {
+            ready.resolve();
+          }
+        });
+        const subscribe = await receive(host);
+        send(host, response(subscribe.id));
+        send(host, {
+          protocol: BRIDGE_PROTOCOL,
+          version: BRIDGE_VERSION,
+          type: "event",
+          subscription: subscribe.subscription!,
+          value: 1,
+        });
+        await ready.promise;
+
+        const writing = cell.write(2);
+        const write = await receive(host);
+        send(host, {
+          protocol: BRIDGE_PROTOCOL,
+          version: BRIDGE_VERSION,
+          type: "event",
+          subscription: subscribe.subscription!,
+          value: 1,
+        });
+        send(host, response(write.id));
+        await writing;
+
+        expect(cell.getSnapshot()).toEqual({ status: "ready", value: 1 });
+      } finally {
+        fabric.disconnect();
+      }
+    });
+
     it("publishes the later of two overlapping reads", async () => {
       const responses = [
         Promise.withResolvers<FabricValue | undefined>(),
@@ -324,21 +364,74 @@ describe("guest", () => {
       expect(cell.getSnapshot()).toEqual({ status: "ready", value: 2 });
     });
 
-    it("starts the first write before a later bridge operation", async () => {
-      const operations: string[] = [];
+    it("orders a read after every previously queued write", async () => {
+      const firstResponse = Promise.withResolvers<FabricValue | undefined>();
+      const operations: Array<[string, FabricValue | undefined]> = [];
       const client = {
-        request: (operation: string) => {
-          operations.push(operation);
-          return Promise.resolve(operation === "read" ? 0 : undefined);
+        request: (operation: string, fields: { value?: FabricValue }) => {
+          operations.push([operation, fields.value]);
+          if (operation === "read") return Promise.resolve(2);
+          return fields.value === 1
+            ? firstResponse.promise
+            : Promise.resolve(undefined);
         },
       } as unknown as FabricClient;
       const cell = new RemoteCell<number>(client, "count");
 
-      const writing = cell.write(1);
+      const first = cell.write(1);
+      const second = cell.write(2);
       const reading = cell.read();
-      expect(operations).toEqual(["write", "read"]);
+      expect(operations).toEqual([["write", 1]]);
 
-      await Promise.all([writing, reading]);
+      firstResponse.resolve(undefined);
+      await Promise.all([first, second, reading]);
+      expect(operations).toEqual([
+        ["write", 1],
+        ["write", 2],
+        ["read", undefined],
+      ]);
+    });
+
+    it("serializes updater writes on the shared remote cell", async () => {
+      const firstStarted = Promise.withResolvers<void>();
+      const firstResponse = Promise.withResolvers<FabricValue | undefined>();
+      const writes: number[] = [];
+      const client = {
+        request: (operation: string, fields: { value?: FabricValue }) => {
+          if (operation === "read") return Promise.resolve(1);
+          writes.push(fields.value as number);
+          if (writes.length === 1) firstStarted.resolve();
+          return writes.length === 1
+            ? firstResponse.promise
+            : Promise.resolve(undefined);
+        },
+      } as unknown as FabricClient;
+      const cell = new RemoteCell<number>(client, "count");
+
+      const first = cell.update((value) => value + 1);
+      const second = cell.update((value) => value + 1);
+      await firstStarted.promise;
+      expect(writes).toEqual([2]);
+
+      firstResponse.resolve(undefined);
+      await Promise.all([first, second]);
+      expect(writes).toEqual([2, 3]);
+    });
+
+    it("cleans up a request when sending it fails synchronously", async () => {
+      const fabric = connectFabric();
+      try {
+        handOffPort();
+        const value = Object.fromEntries([
+          ["constructor", 1],
+        ]) as FabricValue;
+
+        await expect(fabric.call("service", "method", value)).rejects.toThrow(
+          "Cannot encode an object with a key this runtime reserves",
+        );
+      } finally {
+        fabric.disconnect();
+      }
     });
 
     it("rejects pending work when disconnected", async () => {

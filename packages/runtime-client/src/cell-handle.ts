@@ -90,6 +90,7 @@ export class CellHandle<T = unknown> {
   #nextCallbackId = 0;
   #schemaWarned = false;
   #strictWriteTail: Promise<void> | undefined;
+  #updateGeneration = 0;
 
   constructor(worker: RuntimeClient, cellRef: CellRef, value?: T) {
     this.#rt = worker;
@@ -206,13 +207,19 @@ export class CellHandle<T = unknown> {
 
     if (propagateFailure) {
       const before = this.#value;
+      const updateGeneration = this.#updateGeneration;
       return this.#conn.request<RequestType.CellSet>({
         type: RequestType.CellSet,
         cell,
         value: serialized,
         awaitCommit: true,
       }).then(() => {
-        if (this.#value === before) this.#publishValue(value);
+        if (
+          updateGeneration === this.#updateGeneration &&
+          this.#value === before
+        ) {
+          this.#publishValue(value);
+        }
       });
     }
 
@@ -565,6 +572,7 @@ export class CellHandle<T = unknown> {
     value: unknown,
     labelUpdate?: { cfcLabel: CfcLabelView | undefined },
   ): void {
+    this.#updateGeneration++;
     const applied = applyValue(
       value,
       this.#value,
@@ -653,9 +661,15 @@ export class CellHandle<T = unknown> {
   ): SqliteParams {
     const serialize = (value: ClientCellValue) =>
       realmFromFabricValue(CellHandle.sqliteFabricValue(value));
-    return Array.isArray(params) ? params.map(serialize) : Object.fromEntries(
-      Object.entries(params).map(([key, value]) => [key, serialize(value)]),
-    );
+    return Array.isArray(params)
+      ? { kind: "positional", values: params.map(serialize) }
+      : {
+        kind: "named",
+        entries: Object.entries(params).map(([key, value]) => [
+          key,
+          serialize(value),
+        ]),
+      };
   }
 
   private static sqliteFabricValue(value: ClientCellValue): FabricValue {

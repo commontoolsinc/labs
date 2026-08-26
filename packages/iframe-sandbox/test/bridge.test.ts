@@ -3,6 +3,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 
 import { createFabricBridge, FabricBridgeHost } from "../src/bridge.ts";
 import { connectFabric } from "../src/guest.ts";
@@ -58,13 +59,12 @@ describe("Fabric iframe bridge", () => {
       await expect(client.describe()).resolves.toEqual({
         protocol: "common-fabric-bridge",
         version: 1,
-        resources: {
-          count: {
-            kind: "cell",
-            methods: ["read", "write", "subscribe"],
-            schema: { type: "number", description: "Visible counter" },
-          },
-        },
+        resources: [{
+          name: "count",
+          kind: "cell",
+          methods: ["read", "write", "subscribe"],
+          schema: { type: "number", description: "Visible counter" },
+        }],
       });
 
       const remote = client.cell<number>("count");
@@ -150,6 +150,45 @@ describe("Fabric iframe bridge", () => {
       expect((params[1] as FabricBytes).slice()).toEqual(
         new Uint8Array([4, 5, 6]),
       );
+    } finally {
+      client.disconnect();
+      host.disconnect();
+    }
+  });
+
+  it("carries reserved SQLite parameter names as entries", async () => {
+    let input: FabricValue | undefined;
+    const bridge = createFabricBridge({
+      database: {
+        kind: "sqlite",
+        methods: {
+          query: (value) => {
+            input = value;
+            return { rows: [] };
+          },
+        },
+      },
+    });
+    const channel = new MessageChannel();
+    const host = new FabricBridgeHost(bridge, channel.port1);
+    const client = connectFabric();
+    handOff(channel.port2);
+
+    try {
+      const params = Object.fromEntries([
+        ["constructor", 1],
+        ["__proto__", 2],
+      ]);
+      await expect(
+        client.sqlite("database").query(
+          "SELECT :constructor, :__proto__",
+          params,
+        ),
+      ).resolves.toEqual({ rows: [] });
+      expect(input).toEqual({
+        sql: "SELECT :constructor, :__proto__",
+        namedParams: [["constructor", 1], ["__proto__", 2]],
+      });
     } finally {
       client.disconnect();
       host.disconnect();
@@ -295,7 +334,7 @@ describe("Fabric iframe bridge", () => {
 
     try {
       await expect(client.describe()).resolves.toMatchObject({
-        resources: { count: { methods: ["read"] } },
+        resources: [{ name: "count", methods: ["read"] }],
       });
       await expect(client.cell("count").write(2)).rejects.toMatchObject({
         code: "method-not-supported",
@@ -304,6 +343,69 @@ describe("Fabric iframe bridge", () => {
         code: "method-not-supported",
       });
       expect(inheritedWrites).toBe(0);
+    } finally {
+      client.disconnect();
+      host.disconnect();
+    }
+  });
+
+  it("describes reserved resource names without inherited metadata", async () => {
+    const resource = Object.create({
+      schema: { secret: "inherited" },
+      description: "inherited",
+    }) as {
+      kind: "service";
+      methods: Record<string, () => string>;
+    };
+    resource.kind = "service";
+    resource.methods = { ping: () => "pong" };
+    const resources = Object.fromEntries([
+      ["constructor", resource],
+    ]);
+    const channel = new MessageChannel();
+    const host = new FabricBridgeHost(
+      createFabricBridge(resources),
+      channel.port1,
+    );
+    const client = connectFabric();
+    handOff(channel.port2);
+
+    try {
+      await expect(client.describe()).resolves.toEqual({
+        protocol: "common-fabric-bridge",
+        version: 1,
+        resources: [{
+          name: "constructor",
+          kind: "service",
+          methods: ["ping"],
+        }],
+      });
+      await expect(client.call("constructor", "ping")).resolves.toBe("pong");
+    } finally {
+      client.disconnect();
+      host.disconnect();
+    }
+  });
+
+  it("refuses an inherited resource kind in the manifest", async () => {
+    const resource = Object.create({ kind: "service" }) as {
+      kind: "service";
+      methods: Record<string, () => string>;
+    };
+    resource.methods = { ping: () => "pong" };
+    const channel = new MessageChannel();
+    const host = new FabricBridgeHost(
+      createFabricBridge({ service: resource }),
+      channel.port1,
+    );
+    const client = connectFabric();
+    handOff(channel.port2);
+
+    try {
+      await expect(client.describe()).rejects.toMatchObject({
+        code: "operation-failed",
+        message: "Bridge resource `service` must declare its own valid kind.",
+      });
     } finally {
       client.disconnect();
       host.disconnect();

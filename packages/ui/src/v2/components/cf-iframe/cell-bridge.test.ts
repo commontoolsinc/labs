@@ -467,8 +467,8 @@ describe("cf-iframe cell bridge", () => {
       ]],
     });
     await database.methods!.exec({
-      sql: "INSERT INTO notes (title) VALUES (:title)",
-      params: { title: "New" },
+      sql: "SELECT :constructor, :__proto__",
+      namedParams: [["constructor", "New"], ["__proto__", "Prototype"]],
     });
 
     const databaseRef = {
@@ -484,12 +484,21 @@ describe("cf-iframe cell bridge", () => {
       type: RequestType.SqliteQuery,
       cell: databaseRef,
       sql: "SELECT title FROM notes WHERE id = ?",
-      params: [realmFromFabricValue(1)],
+      params: {
+        kind: "positional",
+        values: [realmFromFabricValue(1)],
+      },
     }, {
       type: RequestType.SqliteExec,
       cell: databaseRef,
-      sql: "INSERT INTO notes (title) VALUES (:title)",
-      params: { title: realmFromFabricValue("New") },
+      sql: "SELECT :constructor, :__proto__",
+      params: {
+        kind: "named",
+        entries: [
+          ["constructor", realmFromFabricValue("New")],
+          ["__proto__", realmFromFabricValue("Prototype")],
+        ],
+      },
     }]);
   });
 
@@ -515,5 +524,8 @@ describe("cf-iframe cell bridge", () => {
     await expect(query({ sql: "SELECT 1", params: 1 })).rejects.toThrow(
       "array or object",
     );
+    await expect(
+      query({ sql: "SELECT 1", namedParams: [[1, "bad"]] }),
+    ).rejects.toThrow("key-value entries");
   });
 });

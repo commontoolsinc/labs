@@ -14,7 +14,7 @@ import {
 } from "@commonfabric/data-model/codecs";
 import { internPathSelector } from "@commonfabric/data-model-schema";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import { isObjectNotArray } from "@commonfabric/utils/types";
+import { isObjectNotArray, unsafeObjectKeyIn } from "@commonfabric/utils/types";
 
 export const MEMORY_PROTOCOL = "memory" as const;
 export const DEFAULT_BRANCH = "" as const;
@@ -1324,6 +1324,10 @@ export type SqliteParamsWire =
   | ReadonlyArray<FabricValue>
   | Record<string, FabricValue>;
 
+/** Key-safe transport for named SQLite parameters whose names are reserved by
+ * the Fabric object codec. Mutually exclusive with `params` on a query. */
+export type SqliteNamedParamsWire = Array<[string, FabricValue]>;
+
 /** Reference to a cell-derived SQLite database: an opaque id (the handle cell's
  *  entity id) plus the declared table schemas (for additive create/migrate).
  *
@@ -1350,6 +1354,7 @@ export type SqliteQueryRequest = {
   db: SqliteDbRef;
   sql: string;
   params?: SqliteParamsWire;
+  namedParams?: SqliteNamedParamsWire;
 };
 
 /** A result column's output name plus its TRUE source `(table, column)` origin
@@ -1407,6 +1412,32 @@ export type SqliteQueryResult = {
    *  otherwise, so unlabeled queries pay nothing. */
   columns?: SqliteResultColumn[];
 };
+
+/** A SQLite row as carried by the memory protocol. Ordinary rows retain the
+ * object representation accepted by older clients. Rows whose column names
+ * are unsafe object keys use entries so the JSON codec can carry them without
+ * losing or rejecting a legal SQLite alias. */
+export type SqliteRowWire =
+  | FabricPlainObject
+  | Array<[string, FabricValue]>;
+
+/** The transport form of a SQLite query result. */
+export type SqliteQueryWireResult = {
+  rows: SqliteRowWire[];
+  columns?: SqliteResultColumn[];
+};
+
+/** Convert a native query row to the backward-compatible memory wire form. */
+export function sqliteRowToWire(row: FabricPlainObject): SqliteRowWire {
+  return unsafeObjectKeyIn(row) === undefined ? row : Object.entries(row);
+}
+
+/** Reconstruct a query row after it crosses the memory protocol. */
+export function sqliteRowFromWire(row: SqliteRowWire): FabricPlainObject {
+  return Array.isArray(row)
+    ? Object.fromEntries(row) as FabricPlainObject
+    : row;
+}
 
 // NOTE: there is no `sqlite.execute` write verb. Writes go through the commit
 // fold (a `sqlite` op inside `transact`, applied atomically with cell ops by the

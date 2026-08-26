@@ -813,11 +813,12 @@ export function encodeSqliteParams(
       return v;
     }) as SqliteParamsWire;
   }
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(params)) {
-    out[k] = encodeOne(v, isCfLinkColumn(k));
-  }
-  return out as SqliteParamsWire;
+  return Object.fromEntries(
+    Object.entries(params).map(([key, value]) => [
+      key,
+      encodeOne(value, isCfLinkColumn(key)),
+    ]),
+  ) as SqliteParamsWire;
 }
 
 export function createCell<T>(

@@ -344,9 +344,11 @@ function sqliteParamsForRuntime(
 ): ReadonlyArray<unknown> | Record<string, unknown> {
   const decode = (value: SqliteWireValue) =>
     sqliteParamForRuntime(runtime, fabricFromRealmValue(value));
-  return Array.isArray(params) ? params.map(decode) : Object.fromEntries(
-    Object.entries(params).map(([key, value]) => [key, decode(value)]),
-  );
+  return params.kind === "positional"
+    ? params.values.map(decode)
+    : Object.fromEntries(
+      params.entries.map(([key, value]) => [key, decode(value)]),
+    );
 }
 
 function sqliteValueForClient(value: unknown): SqliteWireValue {

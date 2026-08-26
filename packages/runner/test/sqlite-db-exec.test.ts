@@ -67,6 +67,25 @@ describe("SqliteDb .exec (commit-folded write)", () => {
     });
   });
 
+  it("preserves reserved names in named SQLite parameters", () => {
+    const params = Object.fromEntries([
+      ["constructor", 1],
+      ["__proto__", 2],
+    ]);
+
+    const encoded = encodeSqliteParams(
+      "SELECT :constructor, :__proto__",
+      params,
+    ) as Record<string, unknown>;
+
+    expect(Object.hasOwn(encoded, "constructor")).toBe(true);
+    expect(Object.hasOwn(encoded, "__proto__")).toBe(true);
+    expect(Object.getOwnPropertyDescriptor(encoded, "constructor")?.value)
+      .toBe(1);
+    expect(Object.getOwnPropertyDescriptor(encoded, "__proto__")?.value)
+      .toBe(2);
+  });
+
   it("folds a write atomically with a sibling cell write", async () => {
     const dbRef: SqliteDbRef = {
       id: `of:exec-${crypto.randomUUID()}`,

@@ -1,5 +1,6 @@
 import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { unsafeObjectKeyIn } from "@commonfabric/utils/types";
 
 import {
   type ClientCommit,
@@ -30,7 +31,9 @@ import {
   type SqliteDbRef,
   type SqliteParamsWire,
   type SqliteQueryResult,
+  type SqliteQueryWireResult,
   type SqliteRegisterDiskSourceResult,
+  sqliteRowFromWire,
   type WatchAddResult,
   type WatchSetResult,
   type WatchSpec,
@@ -817,15 +820,24 @@ export class SpaceSession {
     params?: SqliteParamsWire,
   ): Promise<SqliteQueryResult> {
     this.#assertOpen();
-    return await this.client.request<SqliteQueryResult>({
+    const paramFields = params === undefined
+      ? {}
+      : !Array.isArray(params) && unsafeObjectKeyIn(params) !== undefined
+      ? { namedParams: Object.entries(params) }
+      : { params };
+    const result = await this.client.request<SqliteQueryWireResult>({
       type: "sqlite.query",
       requestId: crypto.randomUUID(),
       space: this.space,
       sessionId: this.#sessionId,
       db,
       sql,
-      params,
+      ...paramFields,
     });
+    return {
+      rows: result.rows.map(sqliteRowFromWire),
+      columns: result.columns,
+    };
   }
 
   // No `sqliteExecute` write RPC: writes go through the commit fold (a `sqlite`
