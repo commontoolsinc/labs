@@ -23,6 +23,7 @@ import {
   findInternedSchema,
   internSchema,
   internSchemaAsTaggedHashString,
+  internSchemaPairAsKey,
   isInternedSchema,
 } from "@/schema-intern.ts";
 import { SchemaAndHash } from "@/SchemaAndHash.ts";
@@ -30,7 +31,7 @@ import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
-import { toDeepFrozenSchema } from "@/schema-utils.ts";
+import { toDeepFrozenSchema } from "@/schema-copy.ts";
 
 describe("schema-intern", () => {
   describe("internSchema()", () => {
@@ -400,6 +401,72 @@ describe("schema-intern", () => {
       const first = internSchemaAsTaggedHashString(schema);
       const second = internSchemaAsTaggedHashString(schema);
       expect(first).toBe(second);
+    });
+  });
+
+  describe("internSchemaPairAsKey()", () => {
+    it("composes the two interned `.taggedHashString`s with `|`", () => {
+      const a: JSONSchema = { type: "number" };
+      const b: JSONSchema = { type: "string" };
+      const aHash = internSchema(a, true).taggedHashString;
+      const bHash = internSchema(b, true).taggedHashString;
+      expect(internSchemaPairAsKey(a, b)).toBe(`${aHash}|${bHash}`);
+    });
+
+    it("builds the pair key from either side's boolean schema", () => {
+      const obj: JSONSchema = { type: "number" };
+      const objHash = internSchema(obj, true).taggedHashString;
+      const trueHash = internSchema(true, true).taggedHashString;
+      const falseHash = internSchema(false, true).taggedHashString;
+      expect(internSchemaPairAsKey(true, obj)).toBe(`${trueHash}|${objHash}`);
+      expect(internSchemaPairAsKey(obj, false)).toBe(`${objHash}|${falseHash}`);
+      expect(internSchemaPairAsKey(true, false)).toBe(
+        `${trueHash}|${falseHash}`,
+      );
+    });
+
+    it("is order-sensitive", () => {
+      const a: JSONSchema = { type: "number" };
+      const b: JSONSchema = { type: "string" };
+      expect(internSchemaPairAsKey(a, b)).not.toEqual(
+        internSchemaPairAsKey(b, a),
+      );
+    });
+
+    it("matches for structurally-equal inputs", () => {
+      const a1: JSONSchema = {
+        type: "object",
+        properties: { x: { type: "string" } },
+      };
+      const a2: JSONSchema = {
+        type: "object",
+        properties: { x: { type: "string" } },
+      };
+      const b1: JSONSchema = { type: "array", items: { type: "number" } };
+      const b2: JSONSchema = { type: "array", items: { type: "number" } };
+      expect(internSchemaPairAsKey(a1, b1)).toBe(internSchemaPairAsKey(a2, b2));
+    });
+
+    it("interns both inputs as a side effect", () => {
+      // Content-unique keys guarantee no prior interning has seen
+      // these exact schemas, so `isInternedSchema` reflects what
+      // THIS call did.
+      const stamp = `${Date.now()}-${Math.random()}`;
+      const a: JSONSchemaObj = {
+        type: "number",
+        title: `schemaHashTestAt${stamp}-a`,
+      };
+      const b: JSONSchemaObj = {
+        type: "string",
+        title: `schemaHashTestAt${stamp}-b`,
+      };
+      expect(isInternedSchema(a)).toBe(false);
+      expect(isInternedSchema(b)).toBe(false);
+      internSchemaPairAsKey(a, b);
+      expect(isInternedSchema(a)).toBe(true);
+      expect(isInternedSchema(b)).toBe(true);
+      expect(isDeepFrozen(a)).toBe(true);
+      expect(isDeepFrozen(b)).toBe(true);
     });
   });
 });

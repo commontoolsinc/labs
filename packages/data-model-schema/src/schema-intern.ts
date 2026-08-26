@@ -8,7 +8,7 @@ import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { SchemaAndHash } from "./SchemaAndHash.ts";
-import { toDeepFrozenSchema } from "./schema-utils.ts";
+import { toDeepFrozenSchema } from "./schema-copy.ts";
 
 /**
  * Bidirectional intern cache for schemas.
@@ -277,4 +277,16 @@ export function internSchemaAsTaggedHashString(
   schema: JSONSchema | undefined,
 ): string {
   return internSchema(schema, true).taggedHashString;
+}
+
+/**
+ * Returns a cache-key string for an ordered pair of schemas, each interned
+ * (and thus deep-frozen) via `internSchema()`. The `|` delimiter is outside
+ * the base64url alphabet used by hash strings, so the two halves cannot
+ * merge ambiguously.
+ */
+export function internSchemaPairAsKey(a: JSONSchema, b: JSONSchema): string {
+  return `${internSchemaAsTaggedHashString(a)}|${
+    internSchemaAsTaggedHashString(b)
+  }`;
 }

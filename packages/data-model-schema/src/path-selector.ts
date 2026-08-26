@@ -1,4 +1,11 @@
-/** Interning and canonicalization of `SchemaPathSelector`s. */
+/**
+ * Interning and canonicalization of `SchemaPathSelector`s.
+ *
+ * The two canonical selectors below are interned at this module's load, which
+ * needs `schema-intern.ts` to be initialized by then. This package's modules
+ * import acyclically, so each one is fully evaluated before any module that
+ * names it; an import cycle reaching back here would forfeit that.
+ */
 
 import type { JSONSchema, SchemaPathSelector } from "@commonfabric/api";
 
@@ -180,14 +187,13 @@ export function internPathSelector(
  * want to record a doc dependency (or normalize a `{ schema: false, ... }`
  * input) without actually traversing into it.
  *
- * Frozen at module load, with its `schema: false` member left as a raw
- * boolean rather than routed through `internSchema()`. The boolean-schema
- * intern path serves prefab singletons, so the first real selector use
- * canonicalizes it to the same instance interning here would have produced.
+ * Interned at load, so this is the canonical instance for its content:
+ * `internPathSelector({ path: [], schema: false })` returns this object rather
+ * than a second wrapper for the same selector.
  */
-export const REJECTING_SELECTOR: SchemaPathSelector = Object.freeze({
-  path: Object.freeze([]) as readonly string[],
-  schema: false as const,
+export const REJECTING_SELECTOR: SchemaPathSelector = internPathSelector({
+  path: [],
+  schema: false,
 });
 
 /**
@@ -195,11 +201,10 @@ export const REJECTING_SELECTOR: SchemaPathSelector = Object.freeze({
  * relative to the doc root, so to look at the value of the doc the path needs
  * to have `"value"` in it.
  *
- * Frozen at module load; like `REJECTING_SELECTOR`, the boolean `schema: true`
- * member is left as a raw boolean rather than routed through
- * `internSchema()`.
+ * Interned at load, like `REJECTING_SELECTOR`, so this is the canonical
+ * instance for its content.
  */
-export const DEFAULT_SELECTOR: SchemaPathSelector = Object.freeze({
-  path: Object.freeze(["value"]) as readonly string[],
-  schema: true as const,
+export const DEFAULT_SELECTOR: SchemaPathSelector = internPathSelector({
+  path: ["value"],
+  schema: true,
 });
