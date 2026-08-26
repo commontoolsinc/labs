@@ -6136,11 +6136,6 @@ export class Runner {
     }
     if (childSpace !== parentSpace && !childSpaces.includes(childSpace)) {
       childSpaces.push(childSpace);
-      logger.warn("cross-space-child-commit-armed", () => [
-        `source=${getTxDebugActionId(tx) ?? "none"}`,
-        `child=${childSpace}`,
-        `parent=${parentSpace}`,
-      ]);
     }
     // All accumulated child spaces first, parent last.
     tx.enableMultiSpaceWrites?.([...childSpaces, parentSpace]);
@@ -8131,13 +8126,6 @@ export class Runner {
       // without it the wave's accept gate refuses the crossing and the
       // child space's program never materializes (the render-stall class).
       const runContext = waveRunContextOf(tx);
-      logger.warn("cross-space-child-materialization-started", () => [
-        `source=${sourceKey}`,
-        `child=${childResultCell.space}`,
-        `parent=${parentResultCell.space}`,
-        `result=${childResultCell.getAsNormalizedFullLink().id}`,
-        `pattern=${describePatternOrModule(patternImpl)}`,
-      ]);
       this.runtime.patternManager.replicatePatternToSpace(
         patternImpl,
         childResultCell.space,

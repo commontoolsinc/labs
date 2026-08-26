@@ -525,15 +525,6 @@ export class SpeculationOverlayDestination
       return { ok: {} };
     }
     const context = speculationRunContextOf(tx);
-    const traceProfileCreate = context?.actionId.includes(
-      "/profile-create.tsx:",
-    ) === true;
-    if (traceProfileCreate) {
-      logger.warn("profile-create-speculative-seal-started", () => [
-        `event=${context?.eventId ?? "none"}`,
-        `parent=${context?.parentEventId ?? "none"}`,
-      ]);
-    }
     // An event-handler-kind seal WITHOUT an eventId is refused LOUDLY
     // (review 2026-08-11 m5): such an entry has no intent to retire
     // against — no consequence signal will ever arrive for it — so the
@@ -609,13 +600,6 @@ export class SpeculationOverlayDestination
       context?.kind === "event-handler" && context.eventId !== undefined &&
       this.#joblessByAncestry(context.eventId, context.parentEventId)
     ) {
-      if (traceProfileCreate) {
-        logger.warn("profile-create-speculative-seal-dropped", () => [
-          `event=${context.eventId}`,
-          "phase=before-handoff",
-          "reason=terminal-intent",
-        ]);
-      }
       this.#noteJoblessIntent(context.eventId);
       this.#droppedLateEchoTxs.add(tx);
       this.#lateEchoDrops += 1;
@@ -653,13 +637,6 @@ export class SpeculationOverlayDestination
         native: NativeStorageCommit,
         source: IStorageTransaction,
       ): Promise<Result<Unit, CommitError>> => {
-        if (traceProfileCreate) {
-          logger.warn("profile-create-speculative-space-sealed", () => [
-            `event=${context?.eventId ?? "none"}`,
-            `space=${space}`,
-            `operations=${native.operations.length}`,
-          ]);
-        }
         const replica = this.#runtime.storageManager.open(space).replica;
         if (replica.sealNative === undefined) {
           return Promise.resolve({
@@ -778,15 +755,6 @@ export class SpeculationOverlayDestination
         },
       };
     }
-    if (traceProfileCreate) {
-      logger.warn("profile-create-speculative-handoff-settled", () => [
-        `event=${context?.eventId ?? "none"}`,
-        `sealedSpaces=${sealedSpaces.length}`,
-        result.error === undefined
-          ? "success"
-          : `error=${result.error.message}`,
-      ]);
-    }
     if (result.error) {
       for (const { entry } of sealedSpaces) {
         entry.resolveVerdict({
@@ -818,13 +786,6 @@ export class SpeculationOverlayDestination
       context?.kind === "event-handler" && context.eventId !== undefined &&
       this.#joblessByAncestry(context.eventId, context.parentEventId)
     ) {
-      if (traceProfileCreate) {
-        logger.warn("profile-create-speculative-seal-dropped", () => [
-          `event=${context.eventId}`,
-          "phase=after-handoff",
-          "reason=terminal-intent",
-        ]);
-      }
       // The late-echo rule's post-await re-check (self-review finding 5,
       // the closed arm's shape): the terminal signal landed while
       // `sealInto` was in flight — `retireIntent` ran before this entry
@@ -857,12 +818,6 @@ export class SpeculationOverlayDestination
       this.#supersedeOlderEntries(entries, entry);
       entries.set(entry.localSeq, entry);
       this.#ensureWatermarkSink(space);
-    }
-    if (traceProfileCreate) {
-      logger.warn("profile-create-speculative-seal-registered", () => [
-        `event=${context?.eventId ?? "none"}`,
-        `spaces=${sealedSpaces.map(({ space }) => space).join(",")}`,
-      ]);
     }
     if (sealedSpaces.length > 0) {
       // A fresh entry may already be covered (a re-speculation after
