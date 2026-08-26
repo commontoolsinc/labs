@@ -34,17 +34,22 @@ import {
 export interface CardTarget {
   /** Index into the card's `info` lines (for highlight + reveal). */
   readonly cardLine: number;
+
   /** Destination line/column in the main document. */
   readonly destLine: number;
   readonly destCol: number;
+
   /** Char offset of the declaration to select, when the target is a definition. */
   readonly defOffset?: number;
+
   /** End offset of that declaration. Diff views clamp nested nodes to the same
    * start offset, so the end disambiguates which node to select. */
   readonly defEndOffset?: number;
+
   /** External file to open, when the definition lives outside the blob; with
    * `destLine` the line within that file. */
   readonly filePath?: string;
+
   /** A "… N more" line: selecting it and pressing Enter rebuilds the card with
    * every truncated list shown in full, rather than navigating anywhere. */
   readonly expand?: boolean;

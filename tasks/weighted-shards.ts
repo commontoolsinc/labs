@@ -2,8 +2,10 @@
 export interface WeightedShardItem {
   /** Stable identifier used for assignment and tie-breaking. */
   name: string;
+
   /** Relative processing cost. */
   weight: number;
+
   /** Items in one group prefer different shards. */
   group?: string;
 }

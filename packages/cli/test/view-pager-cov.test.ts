@@ -266,6 +266,7 @@ function editableDoc(): {
   doc: typeof DOC;
   source: ReturnType<typeof fileSource>;
   dir: string;
+
   /** How many times the source has been re-parsed — the deferred reparse calls
    * `source.parse`, so this stays 0 unless an edit actually scheduled and ran
    * one. */

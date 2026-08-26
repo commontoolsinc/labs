@@ -58,6 +58,7 @@ export interface TopicsInput {
    * are legitimate but unattributed, and a whole-array write forfeits the
    * mergeability the verb's append keeps. */
   topics?: Writable<TopicPiece[] | Default<[]>>;
+
   /** @deprecated Retained while pre-Profile callers still use the old
    * `setMyName` + unsigned-event contract. New callers use `agentName`. */
   myName?: PerUser<Writable<string | Default<"">>>;
@@ -66,11 +67,13 @@ export interface TopicsInput {
 export interface AddTopicEvent {
   /** The topic's title, trimmed before it is stored. Must be non-empty. */
   title: string;
+
   /** The topic's initial living-document body. A topic born with a body
    * appears with it atomically — no reader observes the title-only halfway
    * state, and no follow-up `setBody` call is needed to finish a create
    * (verb contract: the atomic-unit rule). */
   body?: string;
+
   /** The agent making this mutation. The authenticated principal remains the
    * human whose identity key invoked the stream; this is the agent's explicit
    * content-level signature under that shared principal. Optional only so
@@ -105,11 +108,13 @@ export interface AddTopicResult {
 export interface TopicIndexRow {
   title: string;
   createdAt: number;
+
   /** Who filed the topic. A topic written without structured authorship
    * materializes the declared default — the inert legacy sentinel
    * `{ kind: "person", name: "" }` — so a blank name here means "unsigned";
    * the display string then comes from the topic's own `createdByName`. */
   createdBy?: TopicAuthor | Default<{ kind: "person"; name: "" }> | undefined;
+
   /** Coalesced to 0 for a cold or older topic whose derived path is absent,
    * so the row itself never carries the mixed-version undefined. */
   commentCount: number | Default<0> | undefined;
@@ -264,37 +269,47 @@ const cardsByActivity = lift(
 export interface TopicsOutput {
   [NAME]: string;
   [UI]: VNode;
+
   /** The board's topics, in filing order, as complete pieces — bodies,
    * threads, and verbs included. Survey through `index` instead; read this
    * when you already know which topic you are expanding. */
   topics: TopicPiece[];
+
   /** The same list, under the name the topic pattern's editor autocompletes
    * over — what `addTopic` wires into each child as its mention universe. */
   mentionable: TopicPiece[] | Default<[]>;
+
   /** How many topics the board holds, nulls included. */
   topicCount: number;
+
   /** The board's mention pivot, one row per topic: the topic, and the topics
    * that mention it. Published so a topic composed outside `addTopic` can be
    * wired to the same table the board's own children read — the graph is
    * derived once, here, and never per topic. */
   crossrefs: TopicCrossrefRow[] | Default<[]>;
+
   /** The full-board survey surface: one bounded row per topic, carrying the
    * scalars a survey reads. A row IS its topic, so a row's own address is the
    * topic's — `--select index[].@` reads it, and an index into this array is
    * not a stable address. */
   index: TopicIndexRow[] | Default<[]>;
+
   /** Session-local draft for the footer composer (exposed for embedding and
    * headless driving, like the chat exemplar's drafts). */
   newTitle?: PerSession<Writable<string>>;
+
   /** File a topic. The atomic unit takes the initial body with the title, so
    * no reader observes a title-only halfway state and no follow-up `setBody`
    * finishes a create. Returns the created topic as its survey row — the
    * reference plus the write-time facts the pattern resolved. */
   addTopic: Stream<AddTopicEvent, AddTopicResult>;
+
   /** @deprecated Compatibility view for callers of the previous board. */
   myName: string;
+
   /** @deprecated Compatibility mutation for callers of the previous board. */
   setMyName: Stream<{ name: string }>;
+
   /** Submit the footer composer as the current viewer's canonical Profile. */
   submitTopic: Stream<void>;
 }
@@ -305,6 +320,7 @@ export interface TopicsOutput {
 export const submitProfileTopic = handler<void, {
   topics: Writable<TopicPiece[] | Default<[]>>;
   mentionable: Writable<TopicPiece[] | Default<[]>>;
+
   /** `Writable` only because that is what the factory boundary accepts: the
    * input this is handed straight to declares `ReadonlyCell`, and a
    * `ReadonlyCell` held in handler state is not assignable to it — handler

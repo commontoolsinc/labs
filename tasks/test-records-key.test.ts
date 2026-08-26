@@ -164,11 +164,14 @@ function mintRun(
 interface StubOptions {
   login?: string;
   loginStatus?: number;
+
   /** What the token endpoint says about the installed key. */
   keyStatus?: number;
+
   /** One page of runs per listing call; the last repeats. */
   runPages?: Record<string, unknown>[][];
   runsStatus?: number;
+
   /** GitHub's clock, as the runs listing reports it. */
   listDate?: string;
   artifacts?: { id: number; name: string; expired?: boolean }[];

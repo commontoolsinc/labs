@@ -29,6 +29,7 @@ export function buildCapturedHandlerClosureCall(
   options?: {
     readonly eventParamName?: string;
     readonly paramsParamName?: string;
+
     /**
      * The verb's declared result type, carried into `handler`'s third
      * type-argument slot so SchemaInjection can lower it to the module's

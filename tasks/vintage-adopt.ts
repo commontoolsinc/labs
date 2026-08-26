@@ -59,16 +59,21 @@ export interface AdoptRoots {
 
 export interface AdoptOptions {
   snapshotPath: string;
+
   /** The pattern identity the capture reported for the root. */
   expectedIdentity: string;
+
   /** Fixture directory key, e.g. `system/home.test.tsx`. */
   testKey: string;
+
   /** Repo path replay resolves today's source from,
    * e.g. `/packages/patterns/system/home.tsx`. */
   main: string;
+
   /** Capture cause of the root cell. Defaults to `"home-pattern"`, the cause
    * `ensureDefaultPattern` mints the home root with. */
   cause?: string;
+
   /**
    * Sub-pattern roots to record alongside the entry root, addressed by the
    * entity id the capture minted them at (a child's id is position-derived,
@@ -82,6 +87,7 @@ export interface AdoptOptions {
    */
   children?: readonly { cellId: string; main: string }[];
   roots: AdoptRoots;
+
   /** Capture stamp; injectable so a test is deterministic. */
   now?: Date;
   log?: (line: string) => void;

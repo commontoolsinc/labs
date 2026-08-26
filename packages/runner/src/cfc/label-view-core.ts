@@ -42,6 +42,7 @@ export type LabelMetadataObservationClass = "labelMetadata";
 export type CfcLabelViewEntry = {
   path: readonly string[];
   label: IFCLabel;
+
   /**
    * EFFECTIVE consumption class (C4): unlike the persisted
    * `LabelMapEntry.observes`, view entries resolve the implicit

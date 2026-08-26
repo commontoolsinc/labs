@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-env --allow-sys --allow-ffi
+
 /**
  * Fails when a slot the CLI accepts has not been decided about for completion.
  *
@@ -110,6 +111,18 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
   ["cause-prefix", "a prefix the caller chooses"],
   ["name", "a name the caller chooses"],
   ["session", "a session id, read out of the data being inspected"],
+  [
+    "revision",
+    "a revision id from one piece's own source log, read off the listing " +
+    "`cf piece restore` prints for it",
+  ],
+  [
+    "accept-unretained",
+    "a piece address out of the run's own unretained refusal — the rows of " +
+    "the plan in hand whose prior source is not retained, which the piece " +
+    "registry neither holds nor bounds: it omits the holder-created members " +
+    "a bulk operation moves, and its slugs are not addresses this flag takes",
+  ],
   ["branch", "a branch name; the default is the empty one"],
   ["cfc-xattr-namespace", "a namespace the caller chooses"],
   // Expressions and lists with their own grammar.
@@ -173,10 +186,13 @@ export interface SlotReport {
    * enumerated set, and no allowlist entry.
    */
   readonly undecidedOptions: string[];
+
   /** Positionals with no provider and no allowlist entry. */
   readonly undecidedPositionals: string[];
+
   /** Provider entries matching no slot on the tree. */
   readonly unreachableProviders: string[];
+
   /** Allowlist entries that decide no slot on the tree. */
   readonly staleAllowlist: string[];
 }

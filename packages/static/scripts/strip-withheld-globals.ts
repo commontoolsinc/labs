@@ -169,6 +169,7 @@ function namespaceHasValueMember(
 
 export interface StripResult {
   text: string;
+
   /** Names whose declaration was found and removed. */
   removed: string[];
 }
@@ -275,8 +276,10 @@ function typeLibPath(file: string): string {
 export interface RunCliOptions {
   /** Type-library file names to process; defaults to the checked-in set. */
   files?: readonly string[];
+
   /** Reads a file's text; defaults to the filesystem. */
   readFile?: (path: string) => Promise<string>;
+
   /** Writes a file's text; defaults to the filesystem. */
   writeFile?: (path: string, text: string) => Promise<void>;
 }

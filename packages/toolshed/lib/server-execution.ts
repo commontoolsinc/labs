@@ -84,6 +84,7 @@ export function serverExecutionPolicyFromEnv(
     const raw = envGet(name);
     return raw === undefined || raw === "" ? undefined : raw;
   };
+
   /** Positive-int knobs whose absence means the built-in default. */
   const positiveOrDefault = (name: string): number | undefined => {
     const raw = readRaw(name);
@@ -166,6 +167,7 @@ export function ensureSpaceRootsFromEnv(
 export function startServerExecutionHost(options: {
   server: MemoryServer;
   identity: Identity;
+
   /** The patterns/compile base — the serving runtimes' `apiUrl`. */
   apiUrl: URL;
   envGet?: EnvReader;

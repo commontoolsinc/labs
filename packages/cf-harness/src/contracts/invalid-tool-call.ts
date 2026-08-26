@@ -30,12 +30,16 @@ export type HarnessInvalidToolCallReason =
 export interface HarnessInvalidToolCall {
   type: "cf-harness.invalid-tool-call";
   reason: HarnessInvalidToolCallReason;
+
   /** Present when the call named a tool the run offers. */
   toolId?: BuiltinToolId;
+
   /** The argument at fault, when a single one carries the fault. */
   field?: string;
+
   /** What a well-formed call puts there. */
   expected: string;
+
   /** One sentence joining the two above, for a model that reads prose. */
   detail: string;
 }

@@ -107,8 +107,10 @@ function calledName(node: BenchNode): string | undefined {
 interface Scope {
   /** Names this body calls as plain `name(...)` calls. */
   readonly calls: Set<string>;
+
   /** The `console` calls written directly in this body. */
   readonly consoleCalls: { node: Deno.lint.Node; method: string }[];
+
   /** True when this function was written inside a `Deno.bench(...)` call. */
   readonly inBench: boolean;
 }

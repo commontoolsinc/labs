@@ -79,8 +79,10 @@ export type SpaceAuthority =
   | {
     ok: false;
     kind: SpaceDenialKind;
+
     /** Safe to return to the caller. */
     message: string;
+
     /** Never returned to the caller — server-side diagnosis only. */
     logDetail: string;
   };
@@ -90,6 +92,7 @@ export interface SpaceAuthorityDeps {
   runtime: Runtime;
   operatorDid: string;
   serviceDids: readonly string[];
+
   /**
    * The deployment's `MEMORY_ACL_MODE`. Load-bearing for the operator-write
    * PREDICTION only: the memory server short-circuits authorization entirely
@@ -101,6 +104,7 @@ export interface SpaceAuthorityDeps {
    * durable write capabilities to non-owners.
    */
   aclMode?: "off" | "observe" | "enforce";
+
   /** True when this deployment hosts `space`. Defaults to the on-disk store. */
   hostsSpace?: (space: string) => boolean;
 }

@@ -48,8 +48,10 @@ import type { PiecesController } from "./pieces-controller.ts";
 export type PieceSelector =
   | {
     kind: "collection";
+
     /** The holder piece's address. */
     holder: string;
+
     /** The path to the collection within the chosen document. */
     path: readonly (string | number)[];
     side?: "input" | "result";
@@ -74,6 +76,7 @@ export type PlannedRetarget = Omit<RetargetOp, "kind">;
 /** What {@link surveyPieces} takes beyond the controller. */
 export interface SurveyOptions {
   selector: PieceSelector;
+
   /**
    * Retargets to stamp onto rows, keyed by phase — a collection selector
    * labels members with the collection path and the holder with
@@ -82,6 +85,7 @@ export interface SurveyOptions {
    * unverifiable — so the plan stays a pre-state record for both.
    */
   operations?: Readonly<Record<string, PlannedRetarget>>;
+
   /**
    * A schema to read each piece's result under — a holder's demanded schema
    * is the canonical one. Pieces whose result cannot materialize under it
@@ -91,6 +95,7 @@ export interface SurveyOptions {
    * here exactly as it would for the holder.
    */
   validator?: JSONSchema;
+
   /** The header's `takenAt`; defaults to now. A parameter so tests can pin it. */
   takenAt?: string;
 }
@@ -106,14 +111,19 @@ export interface TallyEntry {
 /** Everything a survey reports beyond the plan itself. */
 export interface SurveyResult {
   plan: PiecePlan;
+
   /** Identity counts by phase — "do these pieces all agree?" at a glance. */
   tally: readonly TallyEntry[];
+
   /** Registered in-scope pieces the selection lacks. Any entry is a stop. */
   outside: readonly RegisteredOutside[];
+
   /** Selected pieces that could not be read into a row. Any entry is a stop. */
   problems: readonly SurveyProblem[];
+
   /** Pieces whose result fails the supplied validator, with the failure. */
   validatorFailures: readonly SurveyProblem[];
+
   /**
    * Whether the plan accounts for everything: no unreadable piece and no
    * registered in-scope piece outside the selection. A write stage must
@@ -356,10 +366,13 @@ export interface PiecePin {
   /** The piece's canonical address. */
   piece: string;
   patternIdentity: string;
+
   /** The entry export the identity runs. */
   symbol: string;
+
   /** The current source revision, when the piece keeps a log. */
   revisionId?: string;
+
   /** Whether the identity's source is retained in the space. */
   retained: boolean;
 }
@@ -409,7 +422,7 @@ const MEMBER_LIST_SCHEMA = {
  * per piece. Bare document existence would be cheaper and would lie: a
  * malformed entry document exists while nothing can restore from it.
  */
-async function isSourceRetained(
+export async function isSourceRetained(
   pieces: PiecesController,
   identity: string,
   cache: Map<string, boolean>,

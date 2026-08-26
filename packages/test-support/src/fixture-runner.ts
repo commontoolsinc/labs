@@ -29,15 +29,18 @@ type MaybePromise<T> = T | Promise<T>;
 
 export interface FixtureSuiteConfig<Actual, Expected, Warmup = void> {
   suiteName: string;
+
   /**
    * Root directory containing fixture files. Resolved relative to the current
    * working directory of the test process.
    */
   rootDir: string;
+
   /**
    * Pattern for identifying input fixtures. Defaults to `/\.input\.(ts|tsx)$/i`.
    */
   inputPattern?: RegExp;
+
   /**
    * Computes the path to the expected output relative to the fixture root.
    */
@@ -46,26 +49,32 @@ export interface FixtureSuiteConfig<Actual, Expected, Warmup = void> {
     extension: string;
     relativeInputPath: string;
   }) => string;
+
   /**
    * Optional filter to skip fixtures.
    */
   skip?: (fixture: Fixture) => boolean;
+
   /**
    * Optional grouping for nested describe blocks.
    */
   groupBy?: (fixture: Fixture) => string | undefined;
+
   /**
    * Custom comparator for fixture ordering.
    */
   sortFixtures?: (a: Fixture, b: Fixture) => number;
+
   /**
    * Friendly test name formatter. Defaults to the fixture stem.
    */
   formatTestName?: (fixture: Fixture) => string;
+
   /**
    * Optional warmup hook executed once before tests run.
    */
   warmup?: () => MaybePromise<Warmup>;
+
   /**
    * Optional hook executed before each fixture test.
    */
@@ -73,6 +82,7 @@ export interface FixtureSuiteConfig<Actual, Expected, Warmup = void> {
     fixture: Fixture,
     ctx: FixtureContext<Warmup>,
   ) => MaybePromise<void>;
+
   /**
    * Produce the actual output for a fixture.
    */
@@ -80,6 +90,7 @@ export interface FixtureSuiteConfig<Actual, Expected, Warmup = void> {
     fixture: Fixture,
     ctx: FixtureContext<Warmup>,
   ) => MaybePromise<Actual>;
+
   /**
    * Load the expected output for a fixture.
    */
@@ -87,6 +98,7 @@ export interface FixtureSuiteConfig<Actual, Expected, Warmup = void> {
     fixture: Fixture,
     ctx: FixtureContext<Warmup>,
   ) => MaybePromise<Expected>;
+
   /**
    * Compare actual vs expected values.
    */
@@ -96,6 +108,7 @@ export interface FixtureSuiteConfig<Actual, Expected, Warmup = void> {
     fixture: Fixture,
     ctx: FixtureContext<Warmup>,
   ) => MaybePromise<void>;
+
   /**
    * Optional determinism check for executions that should be stable across
    * multiple invocations (e.g., schema generation).
@@ -105,6 +118,7 @@ export interface FixtureSuiteConfig<Actual, Expected, Warmup = void> {
     fixture: Fixture,
     ctx: FixtureContext<Warmup>,
   ) => MaybePromise<void>;
+
   /**
    * Handle golden updates when `UPDATE_GOLDENS=1`.
    */

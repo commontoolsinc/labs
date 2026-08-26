@@ -11,6 +11,7 @@
 
 type MapBacking<K, V> = Map<K, V>;
 type SetBacking<T> = Set<T>;
+
 /** Builder for a `FrozenMap`, which fills it before it is handed out. */
 type MapBuilder<K, V> = {
   /** The map being built. */

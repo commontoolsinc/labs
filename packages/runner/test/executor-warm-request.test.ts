@@ -93,6 +93,7 @@ describe("executor-warm-request", () => {
   let clientManager: SharedServerStorageManager;
   let clientRuntime: Runtime;
   let servingRuntime: Runtime | undefined;
+
   /** One-shot activation-failure stub (the post-drain failure pin): the
    * next runtime construction for this space THROWS — the activation
    * dies inside `server.activate()` and lands in the host's

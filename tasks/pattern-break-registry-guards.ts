@@ -55,8 +55,10 @@ const REPO_ROOT = fromFileUrl(new URL("..", import.meta.url)).replace(
 export interface BreakRegistryEntry {
   /** Which registry the entry sits in, for reporting. */
   registry: string;
+
   /** Pattern key: the path relative to `packages/patterns`. */
   pattern: string;
+
   /** Repo-relative path of the entry's decision record. */
   record: string;
 }
@@ -230,6 +232,7 @@ export function guardUnevaluableExemptions(options: {
 export function reportBreakRegistryFindings(options: {
   requiredPatternKeys: ReadonlySet<string>;
   recordExists: (repoRelativePath: string) => boolean;
+
   /**
    * Tier 1's unevaluable list, when the caller is the gate it exempts from.
    * Omitted by Tier 2, which does not consult it.

@@ -70,6 +70,7 @@ describe("stage G outbox + sqlite discharge", () => {
   let storageManager: EmulatedStorageManager;
   let runtime: Runtime;
   let engine: Engine.Engine;
+
   /** One process-lifetime counter per test, shared by every sink and
    * outbox (the replay-keying discipline — engine-wave-sink.ts). */
   let localSeqRef: { value: number };

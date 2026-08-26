@@ -296,6 +296,7 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
     names: { arg: string; result: string };
     pattern?: string;
     clients: Identity[];
+
     /** Extra ARGUMENT fields seeded beside `{ n: 1 }` (a pin that needs
      * a holder cell or a cross-piece link in the outer piece's arg). */
     argExtras?: (alice: Runtime) => Promise<Record<string, unknown>>;

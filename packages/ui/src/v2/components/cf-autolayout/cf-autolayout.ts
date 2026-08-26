@@ -35,15 +35,18 @@ export class CFAutoLayout extends BaseElement {
     tabNames: { type: Array, attribute: false },
     leftTabName: { type: String, attribute: false },
     rightTabName: { type: String, attribute: false },
+
     /**
      * Position of tabs on mobile: "top" | "bottom".
      * Default is "bottom".
      */
     tabsPosition: { type: String, reflect: true },
+
     /**
      * Whether the left sidebar is open. Reflected to attribute.
      */
     leftOpen: { type: Boolean, reflect: true },
+
     /**
      * Whether the right sidebar is open. Reflected to attribute.
      */

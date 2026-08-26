@@ -149,8 +149,10 @@ export abstract class ScriptedSessionTransport
     private readonly script: {
       /** Challenge-id prefix; keep unique per transport class. */
       name: string;
+
       /** sessionId confirmed on session.open and stamped on effect frames. */
       sessionId: string;
+
       /** The space effect frames (emitSync) are addressed to. */
       space: MemorySpace;
     },

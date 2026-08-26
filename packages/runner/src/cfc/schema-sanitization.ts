@@ -812,6 +812,7 @@ const strictConstraintDefinitionIssue = (
 interface SchemaDefinitionContext {
   activeByRoot: WeakMap<object, WeakSet<object>>;
   activeRefsByRoot: WeakMap<object, Set<string>>;
+
   /**
    * Definition maps whose bodies this call already walks under a given root.
    * `resolveCfcSchemaRef()` re-attaches the owning `$defs` object to every
@@ -820,12 +821,14 @@ interface SchemaDefinitionContext {
    * instead of a DAG and node visits grow as (definition count)^(ref depth).
    */
   walkedDefinitionsByRoot: WeakMap<object, WeakSet<object>>;
+
   /**
    * Schemas that proved out completely under a given root, so a schema reached
    * again through another path costs a lookup instead of a full re-walk. Only
    * recorded for subtrees that no recursion guard cut short (see `cuts`).
    */
   provenByRoot: WeakMap<object, WeakSet<object>>;
+
   /**
    * How many times a recursion guard returned "no issue" for a subtree it did
    * not actually walk. A cut result is only sound while the schema that caused
@@ -833,6 +836,7 @@ interface SchemaDefinitionContext {
    * count moved must not be memoized as proven.
    */
   cuts: number;
+
   /**
    * Every `provenByRoot` record, in the order it was made. A schema proven
    * while a definition map was merely claimed may have skipped that map on the
@@ -1244,6 +1248,7 @@ interface SchemaValidationOptions {
     fullSchema: JSONSchema,
   ) => boolean;
   optionalUndefinedIsAbsent?: boolean;
+
   /**
    * Property names an object may carry without the schema modelling them —
    * the reserved keys of whatever produced the value, whose NAMES are fixed by
@@ -1294,6 +1299,7 @@ export interface SchemaValueValidationOptions {
     schema: JSONSchema,
     fullSchema: JSONSchema,
   ) => boolean;
+
   /**
    * Read an OPTIONAL property whose value is `undefined` as absent instead of
    * measuring it against the property's declared type.

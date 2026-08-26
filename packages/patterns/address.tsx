@@ -37,12 +37,16 @@ export const MODULE_METADATA: ModuleMetadata = {
 export interface AddressModuleInput {
   /** Label for this address (Home, Work, Billing, etc.) */
   label: string | Default<"Home">;
+
   /** Street address */
   street: string | Default<"">;
+
   /** City */
   city: string | Default<"">;
+
   /** State/Province */
   state: string | Default<"">;
+
   /** ZIP/Postal code */
   zip: string | Default<"">;
 }

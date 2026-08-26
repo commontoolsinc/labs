@@ -24,13 +24,16 @@ export async function gunzipToText(bytes: Uint8Array): Promise<string> {
 
 export interface CreateObjectOptions {
   bucket: string;
+
   /** Full object name, prefix included. */
   name: string;
   body: Uint8Array;
   token: string;
   contentType?: string;
+
   /** Set to "gzip" so plain HTTPS readers receive NDJSON via transcoding. */
   contentEncoding?: string;
+
   /** Injectable for tests. */
   fetch?: typeof fetch;
 }

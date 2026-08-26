@@ -511,6 +511,7 @@ export async function runSchedulerAction(
   ): Promise<{
     result: unknown;
     log: ReactivityLog | undefined;
+
     /** The run ended in `RetryImmediately` (an unresolved inSpace name):
      * its retry — if any budget is left — is QUEUED, never re-run in the
      * calling pass (see the fan-out loop's deferred set). */
@@ -727,6 +728,7 @@ interface FanOutRunArgs {
   readonly instance: FanOutInstance;
   readonly startGen: number;
   readonly collectLog: (log: ReactivityLog) => void;
+
   /** The run ended in `RetryImmediately`: tell the loop not to offer this
    * instance again in the current pass (its retry, if any budget is
    * left, is queued — never re-run in-loop). */

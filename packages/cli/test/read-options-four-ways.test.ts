@@ -226,6 +226,7 @@ describe("read options, four ways", () => {
   /** `cf exec <mountedFile>` — the read that arrives through a filesystem
    * mount. A real mount-state file and a real mounted callable path; the
    * runtime under it is the same one the other three read through. */
+
   /** `cf exec`'s whole outcome, so both the selected value and the envelope
    * written around it can be read from one drive of the command. */
   async function execOutcome(

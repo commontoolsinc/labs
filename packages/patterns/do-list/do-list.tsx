@@ -56,8 +56,10 @@ export interface DoListOutput {
     }>
   >;
   // LLM-friendly handlers (use title matching)
+
   /** Remove a task and its subtasks by title */
   removeItemByTitle: Reactive<Stream<{ title: string }>>;
+
   /** Update a task by title. Set done to mark complete, newTitle to rename, attachments to add references. */
   updateItemByTitle: Reactive<
     Stream<{

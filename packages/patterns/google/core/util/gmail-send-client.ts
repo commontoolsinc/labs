@@ -120,16 +120,22 @@ export interface GmailSendClientConfig {
 export interface SendEmailParams {
   /** Recipient email address (required) */
   to: string;
+
   /** Email subject line (required) */
   subject: string;
+
   /** Plain text body (required) */
   body: string;
+
   /** CC recipients (optional, comma-separated) */
   cc?: string;
+
   /** BCC recipients (optional, comma-separated) */
   bcc?: string;
+
   /** Message ID to reply to (for threading) */
   replyToMessageId?: string;
+
   /** Thread ID to reply to (for threading) */
   replyToThreadId?: string;
 }
@@ -137,8 +143,10 @@ export interface SendEmailParams {
 export interface SendEmailResult {
   /** Gmail message ID */
   id: string;
+
   /** Gmail thread ID */
   threadId: string;
+
   /** Labels applied to the message */
   labelIds: string[];
 }
@@ -146,6 +154,7 @@ export interface SendEmailResult {
 export interface ModifyLabelsParams {
   /** Label IDs to add (max 100 per request) */
   addLabelIds?: string[];
+
   /** Label IDs to remove (max 100 per request) */
   removeLabelIds?: string[];
 }
@@ -153,8 +162,10 @@ export interface ModifyLabelsParams {
 export interface ModifyLabelsResult {
   /** Gmail message ID */
   id: string;
+
   /** Gmail thread ID */
   threadId: string;
+
   /** Labels now on the message */
   labelIds: string[];
 }
@@ -162,12 +173,16 @@ export interface ModifyLabelsResult {
 export interface GmailLabel {
   /** Label ID (use this for API calls) */
   id: string;
+
   /** Label name (human readable) */
   name: string;
+
   /** Label type: system, user */
   type: "system" | "user";
+
   /** Message list visibility */
   messageListVisibility?: "show" | "hide";
+
   /** Label list visibility */
   labelListVisibility?: "labelShow" | "labelShowIfUnread" | "labelHide";
 }

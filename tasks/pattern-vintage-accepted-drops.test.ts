@@ -17,6 +17,7 @@ describe("pattern-vintage-accepted-drops", () => {
       record: "docs/history/topics-crossref-identity-break.md",
     },
   ];
+
   /** A capture from inside the window the entry was granted over. */
   const within = "2026-07-30T21-43-16.977Z";
 

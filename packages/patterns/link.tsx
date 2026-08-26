@@ -24,8 +24,10 @@ export const MODULE_METADATA: ModuleMetadata = {
 export interface LinkModuleInput {
   /** URL */
   url: string | Default<"">;
+
   /** Link title */
   linkTitle: string | Default<"">;
+
   /** Description */
   description: string | Default<"">;
 }

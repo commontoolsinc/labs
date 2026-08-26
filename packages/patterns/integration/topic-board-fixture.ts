@@ -33,8 +33,10 @@ export interface SeededTopic {
 export interface TopicBoardFixture {
   /** The space the board lives in. */
   spaceName: string;
+
   /** The board piece, for the shell's `/spaceName/pieceId` route. */
   boardId: string;
+
   /** Seeded topics in creation order. */
   topics: SeededTopic[];
 }
@@ -43,20 +45,25 @@ export interface SeedTopicBoardOptions {
   apiUrl: URL;
   spaceName: string;
   identity: Identity;
+
   /** How many topics the board carries. */
   topicCount: number;
+
   /**
    * How many earlier topics a citing body cites. Every citation is an edge the
    * board's crossref join has to find, and a link its cards render.
    */
   crossrefsPerTopic?: number;
+
   /**
    * How many of the topics cite anything, counted back from the newest. See
    * {@link DEFAULT_CITING_TOPICS} for why this is not every topic.
    */
   citingTopics?: number;
+
   /** Words of prose in each topic body. */
   bodyWords?: number;
+
   /** Called after each topic lands, with its index. */
   onTopic?: (index: number) => void;
 }
@@ -279,12 +286,14 @@ export async function seedTopicBoard(
 export interface SeedTopicBoardOutOfProcessOptions {
   apiUrl: URL;
   spaceName: string;
+
   /** Passphrase the child derives the seeding identity from. */
   passphrase: string;
   topicCount: number;
   crossrefsPerTopic?: number;
   citingTopics?: number;
   bodyWords?: number;
+
   /** Heap ceiling for the child, in megabytes. */
   heapMegabytes?: number;
 }

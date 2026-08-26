@@ -97,10 +97,13 @@ export interface NoteInput {
   title?: Writable<string | Default<"Untitled Note">>;
   content?: Writable<string | Default<"">>;
   isHidden?: boolean | Default<false>;
+
   /** Pattern JSON for [[wiki-links]]. Defaults to creating new Notes. */
   linkPattern?: Writable<string | Default<"">>;
+
   /** Parent notebook reference. Set at creation, can be updated for moves. */
   parentNotebook?: Writable<NotebookPiece | null | Default<null>>;
+
   /**
    * The note's mentions in reference form. Stored beside `content` because it
    * has to stay in lockstep with it: the text carries keys, and this is what
@@ -125,6 +128,7 @@ export interface NotebookInput {
   notes?: Writable<NotePiece[] | Default<[]>>;
   isNotebook?: boolean | Default<true>;
   isHidden?: boolean | Default<false>;
+
   /** Parent notebook reference. Set at creation, can be updated for moves. */
   parentNotebook?: Writable<NotebookPiece | null | Default<null>>;
 }
@@ -156,10 +160,13 @@ export type MentionRefMap = Record<string, MentionRef>;
 export interface NoteMdInput {
   /** Cell reference to note data (title + content + backlinks) */
   note?: NotePiece | Default<{ title: ""; content: ""; backlinks: [] }>;
+
   /** Direct reference to source note for Edit navigation */
   sourceNoteRef?: NotePiece;
+
   /** Writable content cell for checkbox updates */
   content?: Writable<string>;
+
   /** The note's mentions, for resolving `[Label][key]` in its content */
   references?: Writable<MentionRefMap>;
 }

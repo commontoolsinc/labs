@@ -435,16 +435,21 @@ describe("verb-emitted-address", () => {
       /** Dispatch `verb` as `cf piece call` does, `payload` spelled as the
        * one positional JSON argument a caller writes by hand. */
       call: (verb: string, payload: unknown) => Promise<unknown>;
+
       /** The piece's own address, exactly as a read emits it. */
       address: string;
+
       /** How many entries `links` holds. */
       linkCount: () => number;
+
       /** `links[0]` RAW — the sigil link itself where a reference was
        * stored, and the object itself where a copy was. */
       storedRaw: () => unknown;
+
       /** `links[0]` read THROUGH, so it says where the edge landed. */
       linkedLabel: () => string | undefined;
       notes: () => string[];
+
       /** How many times the dispatch path loaded the compiled pattern. */
       patternLoads: () => number;
     }

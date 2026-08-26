@@ -42,6 +42,7 @@ export interface FanOutInstance {
    * REPRESENTATIVE one (the smallest demanded session of that principal)
    * — resolution scaffolding, never attribution. */
   readonly identity: ScopeKeyIdentity;
+
   /** The instance key the run is stamped with: `space` for the probe,
    * `user:<p>` / `session:<p>:<s>` at the ratchet's depth for `p`. */
   readonly key: ScopeKey;
@@ -56,19 +57,23 @@ export interface FanOutNodeState {
   /** The top hop: some run discovered a scope narrower than `space`.
    * Structural (the shared redirect), so node-level. */
   narrowed: boolean;
+
   /** Principals whose discovered depth is SESSION (ragged; per principal;
    * only ever grows). A principal outside it runs once, as its user
    * instance, while `narrowed`. */
   readonly sessionPrincipals: Set<string>;
+
   /** Every instance key this node has run (or is running) at the current
    * ratchet, with its resolution identity and its LAST COMMITTED
    * reactivity log — the union of the logs is the node's subscription
    * (B7: skipped instances keep their reads registered). */
   readonly instances: Map<ScopeKey, InstanceRecord>;
+
   /** Instance keys whose last run is CURRENT (B7): a change dirties only
    * the instances whose reads covered it; everything not in here runs on
    * the next pass. Emptied by an untargeted invalidation. */
   readonly clean: Set<ScopeKey>;
+
   /** Per-key dirtiness generation: a run marks its key clean at finalize
    * only if no cause dirtied it since the run started (a change that
    * lands mid-run must not be absorbed by the run that predates it). */

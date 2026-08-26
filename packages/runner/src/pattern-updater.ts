@@ -65,6 +65,7 @@ type CheckMode =
   | {
     kind: "default-root";
     officialSource: string;
+
     /** Per-attempt transaction hook for the default-root check's TWO
      * write arms (the provenance repair and the transition — the
      * fabric arm returns "current" for this mode before any write).

@@ -446,8 +446,10 @@ function getListMarker(
 export interface ConversionOptions {
   /** Include comments as blockquotes (default: true) */
   includeComments?: boolean;
+
   /** Download and embed images as base64 (default: true) */
   embedImages?: boolean;
+
   /** OAuth token for image downloads */
   token?: string;
 }

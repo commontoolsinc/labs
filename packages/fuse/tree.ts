@@ -64,12 +64,15 @@ export class FsTree {
   inodes: Map<bigint, FsNode> = new Map();
   parents: Map<bigint, bigint> = new Map();
   paths: Map<string, bigint> = new Map();
+
   /** Reverse map: inode → path string (O(1) lookup). */
   private inoPaths: Map<bigint, string> = new Map();
+
   /**
    * Reverse map from inode to registered child name for constant-time lookup.
    */
   private inoNames: Map<bigint, string> = new Map();
+
   /** Renderers for inodes added by `addGeneratedFile`. */
   private generated: Map<bigint, () => Uint8Array | string> = new Map();
   private cfcEntryIndexes = new Map<bigint, Map<string, number>>();

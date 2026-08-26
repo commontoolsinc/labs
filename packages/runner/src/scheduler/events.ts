@@ -184,7 +184,7 @@ function notifyEventDropped(
   },
   reason: string,
   servedKind: "dropped" | "deferred" = "dropped",
-  options: { quiet?: boolean } = {},
+  options: { quiet?: boolean; cause?: "load-park" } = {},
 ): void {
   if (options.quiet === true) {
     // A routine, counted pre-dispatch removal (the serving loop's LT1
@@ -196,10 +196,17 @@ function notifyEventDropped(
   // The serving drain's terminal arms (events.md §5): `dropped` — no
   // runnable handler, the drain writes the dropped-event notice as the
   // event's consequence and advances the stream past it (non-wedging);
-  // `deferred` — the handler was UNREACHABLE (a cold-view load), no
-  // consequence is written and a later wave re-drains the entry.
+  // `deferred` — the handler was UNREACHABLE (a cold-view load, or a
+  // required replica load that failed at the dispatch preflight's
+  // park), no consequence is written and a later wave re-drains the
+  // entry. `cause` tells the two deferrals apart for the drain's retry
+  // budget (see ServedEventDispatch.onFailure).
   try {
-    args.served?.onFailure?.({ kind: servedKind, message: reason });
+    args.served?.onFailure?.({
+      kind: servedKind,
+      message: reason,
+      ...(options.cause !== undefined ? { cause: options.cause } : {}),
+    });
   } catch (callbackError) {
     logger.error(
       "schedule-error",
@@ -234,7 +241,7 @@ export function dropQueuedEvent(
   event: QueuedEvent,
   reason: string,
   servedKind: "dropped" | "deferred" = "dropped",
-  options: { quiet?: boolean } = {},
+  options: { quiet?: boolean; cause?: "load-park" } = {},
 ): void {
   const index = state.eventQueue.indexOf(event);
   if (index >= 0) state.eventQueue.splice(index, 1);
@@ -650,6 +657,7 @@ export interface SchedulerEventExecutionState {
     deps: ReactivityLog,
     invalidDeps: Set<Action>,
   ) => boolean;
+
   /** The transient-demander preflight (fan-out stage B, review F2):
    * re-arm the fanned-out nodes in a served handler's closure whose
    * instance for the actor is not current. Undefined off the serving
@@ -701,6 +709,7 @@ export function preflightQueuedEventDependencies(state: {
     deps: ReactivityLog,
     invalidDeps: Set<Action>,
   ) => boolean;
+
   /** The transient-demander preflight (server-execution v2 fan-out
    * stage B, review F2): re-arm the fanned-out nodes in a served
    * handler's closure whose instance for the ACTOR is not current, so
@@ -1836,6 +1845,7 @@ type CommitDisposition =
  * way — a stale basis is bounded by the retry window, and a non-stale-basis
  * rejection drops on the first attempt.
  */
+
 /** Whether a served event's commit error is the serving loop's
  * LT1-late-seal refusal (stage C build W3, (α)) — carried as the
  * `reason` Error's message, the sentinel `LT1_LATE_SEAL_REFUSED`. */

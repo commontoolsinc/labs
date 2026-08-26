@@ -81,8 +81,10 @@ export const createGraphQueryWalkStats = (): GraphQueryWalkStats => ({
 export type GraphQueryWalkOptions = {
   /** Supplies documents by address. */
   manager: ObjectStorageManager;
+
   /** Space the visited documents belong to. */
   space: MemorySpace;
+
   /**
    * Receives one entry per document the walk reached, keyed by
    * `schemaTrackerKey`. Share it across walks to accumulate the reach of a
@@ -90,6 +92,7 @@ export type GraphQueryWalkOptions = {
    * it already covers.
    */
   schemaTracker: MapSetStringToPathSelectors;
+
   /**
    * The acting identity the walk's tracker keys resolve scoped addresses
    * against (key-vocabulary.md §1 sites 5–6): coverage proven for one scope
@@ -98,6 +101,7 @@ export type GraphQueryWalkOptions = {
    * never from ambient state (key-vocabulary.md §3).
    */
   identity: ScopeKeyIdentity;
+
   /**
    * Receives one call per SAME-SPACE document a value-link hop tried to
    * read and found ABSENT: the miss's tracker-style key, the
@@ -124,8 +128,10 @@ export type GraphQueryWalkOptions = {
     selector: SchemaPathSelector,
     referrerKey: string | undefined,
   ) => void;
+
   /** Schema-traversal results reused across walks that share it. */
   memo?: SchemaMemo;
+
   /** Counters to add into. */
   stats?: GraphQueryWalkStats;
 };
@@ -146,6 +152,7 @@ export class GraphQueryWalk {
   readonly #context: TraversalContext;
   readonly #memo: SchemaMemo;
   readonly stats: GraphQueryWalkStats;
+
   /** identity-derived key → the caller-supplied key a visit recorded
    * under (a query root naming an explicit scope INSTANCE — protocol.md
    * §2's read row). Miss attribution consults this so a miss recorded

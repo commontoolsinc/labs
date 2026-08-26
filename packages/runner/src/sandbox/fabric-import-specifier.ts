@@ -9,13 +9,16 @@ const DID_RE = /^did:[a-z0-9]+:.+$/;
 export interface FabricRef {
   /** Toolshed host (authority); only present in the cf://host/... form. */
   host?: string;
+
   /** Space name or DID; absent = the compiling space. */
   space?: string;
   ref:
     | { kind: "slug"; slug: string }
     | { kind: "uri"; scheme: EntityUriScheme | "pattern"; hash: string };
+
   /** Path inside the target program. */
   subpath?: string;
+
   /** Trailing @<hash> pin. */
   pin?: string;
 }

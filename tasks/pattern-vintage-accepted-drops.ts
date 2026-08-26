@@ -41,11 +41,13 @@
 export interface AcceptedStateDrop {
   /** Pattern key: the path relative to `packages/patterns`. */
   pattern: string;
+
   /**
    * Dotted paths into the pattern's result state that it no longer holds.
    * A segment ending in `[]` steps through every element of that list.
    */
   paths: readonly string[];
+
   /**
    * Capture stamp of the newest vintage this entry forgives, as
    * `VintageRef.stamp` spells one (ISO-8601 with `:` replaced, so it sorts as
@@ -60,8 +62,10 @@ export interface AcceptedStateDrop {
    * exemption covers the removal it was granted for and stops there.
    */
   capturedThrough: string;
+
   /** Why the removal was accepted. */
   reason: string;
+
   /**
    * Repo-relative path of the decision record under `docs/history/` — shared
    * with the matching Tier 1 entry where there is one. Existence is enforced

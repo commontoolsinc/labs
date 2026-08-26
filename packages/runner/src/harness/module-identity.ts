@@ -59,11 +59,13 @@ export interface ModuleIdentityOptions {
    * identity. Defaults to the empty string.
    */
   runtimeFingerprint?: string;
+
   /** Internal dependency edges that participate in identity without executing. */
   additionalInternalDeps?: ReadonlyMap<
     string,
     readonly { specifier: string; target: string }[]
   >;
+
   /**
    * Paths carrying data rather than code. A data file hashes as a leaf over its
    * own bytes and path: it is never scanned for imports, and never the target of
@@ -75,8 +77,10 @@ export interface ModuleIdentityOptions {
 interface ModuleNode {
   path: string;
   src: string;
+
   /** Imports resolved to another file within the program. */
   internalDeps: { specifier: string; target: string }[];
+
   /** Imports that do not resolve to a program file (bare/runtime modules). */
   externalDeps: string[];
 }
@@ -85,6 +89,7 @@ interface ModuleNode {
 export interface ModuleImportEdges {
   /** Imports resolving to another file in the program (specifier → target path). */
   internalDeps: { specifier: string; target: string }[];
+
   /** Imports that do not resolve to a program file (bare/runtime specifiers). */
   externalDeps: string[];
 }
@@ -279,6 +284,7 @@ function compareIntraDep(
 interface SccResult {
   /** Components in reverse-topological order (dependencies first). */
   components: string[][];
+
   /** Map from each module path to an opaque component id. */
   componentOf: Map<string, number>;
 }

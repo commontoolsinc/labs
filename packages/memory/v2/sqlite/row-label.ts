@@ -30,6 +30,7 @@ export type FieldRef = {
 export type MatchOpts = {
   /** Capture group to extract instead of the whole match. */
   group?: number;
+
   /** Minimum number of matches; fewer fails closed (required anchor). */
   min?: number;
 };

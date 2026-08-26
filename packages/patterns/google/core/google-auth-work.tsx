@@ -48,6 +48,7 @@ export interface Output {
   [UI]: VNode;
   auth: Writable<Auth>;
   accountType: "work";
+
   /** Minimal preview for picker display with WORK badge */
   [TILE_UI]: VNode;
 }

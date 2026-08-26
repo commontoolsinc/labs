@@ -252,17 +252,20 @@ export class CFCodeEditor extends BaseElement {
   declare placeholder: string;
   declare timingStrategy: InputTimingOptions["strategy"];
   declare timingDelay: number;
+
   /**
    * Mentionable items for @ completion.
    */
   declare mentionable?: CellHandle<MentionableArray> | null;
   declare mentioned?: CellHandle<MentionableArray>;
+
   /**
    * The document's mention references. Its presence selects the reference
    * form for newly minted mentions; wiki-links already in the document keep
    * working either way.
    */
   declare references?: CellHandle<MentionRefMap> | null;
+
   /**
    * Hosts, besides this document's own, whose page URLs name pieces. A pasted
    * URL from anywhere else is a link to a web page.
@@ -868,6 +871,7 @@ export class CFCodeEditor extends BaseElement {
       }
     }
   }
+
   /**
    * The destination behind a reference key, shaped so its name can be read.
    *

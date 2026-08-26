@@ -158,6 +158,7 @@ export function isIntegrationTestFile(relPath: string): boolean {
 export interface ScanResult {
   /** In-scope files importing the polling `waitFor` that are not allowlisted. */
   violations: string[];
+
   /** In-scope files importing the polling `waitFor` that are allowlisted. */
   allowlisted: string[];
 }

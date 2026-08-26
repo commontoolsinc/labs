@@ -21,8 +21,10 @@ import { verifyModuleGraph } from "./module-record-verifier.ts";
 export interface VirtualModuleRecord {
   /** Specifiers this module imports (as written in the module). */
   imports: string[];
+
   /** Names this module exports. */
   exports: string[];
+
   /**
    * Maps each of this module's import specifiers to the absolute
    * (content-addressed) specifier it resolves to. When omitted, an import
@@ -30,6 +32,7 @@ export interface VirtualModuleRecord {
    * are already absolute).
    */
   resolutions?: Record<string, string>;
+
   /**
    * Populate `moduleExports`. Use `compartment.importNow(resolvedImports[spec])`
    * to obtain an imported module's namespace.
@@ -62,10 +65,13 @@ interface SesCompartmentCtor {
 export interface SesModuleLoaderOptions {
   /** Records keyed by absolute (content-addressed) specifier. */
   records: Map<string, VirtualModuleRecord>;
+
   /** Global endowments for the compartment. */
   globals?: Record<string, unknown>;
+
   /** Optional compartment name, for diagnostics. */
   name?: string;
+
   /**
    * Run structural graph verification before loading. Default true. The deep
    * SES classification port is still pending (see module-record-verifier.ts).

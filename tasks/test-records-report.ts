@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-env --allow-net
+
 /**
  * The reader-side reports over the record store: name collisions,
  * high-churn identities, and tests over the sixty-second rule. Reads only

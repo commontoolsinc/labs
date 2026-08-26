@@ -45,12 +45,16 @@ export interface SpaceEntityView {
   revisions: number;
   lastSession: string | null;
   lastWriteAt: string | null;
+
   /** Annotated value at the requested path (links/streams normalized). */
   value?: unknown;
+
   /** Whether the requested path exists within a present entity. */
   pathExists?: boolean;
+
   /** Canonical key used for clustering equal values. */
   valueKey?: string;
+
   /** Set if reconstruction/decode threw for this space (entity still counts as present). */
   error?: string;
 }
@@ -68,6 +72,7 @@ export interface ValueCluster {
   valueKey: string;
   value: unknown;
   labels: string[];
+
   /** Whether this cluster represents values found at the requested path. */
   pathExists?: boolean;
 }
@@ -86,6 +91,7 @@ export interface ConvergenceResult {
   views: SpaceEntityView[];
   clusters: ValueCluster[];
   caveat: string;
+
   /** Set when a link index is supplied — distinguishes drift from instances. */
   relationship?: ConvergenceRelationship;
 }
@@ -105,6 +111,7 @@ export interface CrossSpaceEdge {
 
 export interface CrossSpaceLinkIndex {
   edges: CrossSpaceEdge[];
+
   /** `${toSpace} ${toId}` for every entity referenced cross-space. */
   targets: Set<string>;
   examinedEntities: number;
@@ -388,10 +395,13 @@ export function classifyRelationship(
 export interface ScanOptions {
   scope?: string;
   branch?: string;
+
   /** Max diverged, partial, or unknown findings to return. */
   limit?: number;
+
   /** Max shared entities to reconstruct (cost guard). */
   examineCap?: number;
+
   /** Build the cross-space link index to classify findings (default true). */
   linkIndex?: boolean;
 }
@@ -401,10 +411,13 @@ export interface ScanResult {
   sharedEntities: number;
   examined: number;
   examineCapped: boolean;
+
   /** Cross-space link edges found across all spaces (0 ⇒ no replica relationships). */
   crossSpaceLinkEdges: number;
+
   /** Findings labeled cross-space-linked (real replica drift). */
   linkedFindings: number;
+
   /** Findings labeled no-cross-space-link (likely independent instances). */
   unlinkedFindings: number;
   findings: ConvergenceResult[];

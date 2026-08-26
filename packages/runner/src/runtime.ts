@@ -217,6 +217,7 @@ export type PieceCreatedCallback = (piece: Cell<any>) => void;
 export interface ExperimentalOptions {
   /** Enable the modern "cell representation" classes. */
   modernCellRep?: boolean | undefined;
+
   /**
    * Link writers replace inline schemas with references to
    * content-addressed schema documents
@@ -227,8 +228,10 @@ export interface ExperimentalOptions {
    * unconditionally. Defaults to off.
    */
   contentAddressedSchemas?: boolean | undefined;
+
   /** Enforce scheduler-v2 lineage and event-receipt commit preconditions (default on). */
   commitPreconditions?: boolean | undefined;
+
   /**
    * Project a handler's plain JSON return into its per-event receipt cell
    * instead of the empty `{}` witness, so a caller — or a same-id retry that
@@ -242,6 +245,7 @@ export interface ExperimentalOptions {
    * temporary rollback override while the flag exists.
    */
   plainResultReceipts?: boolean | undefined;
+
   /**
    * Mint computed-scheme entity ids (`computed:fid1:<hash>`) for derived
    * internal cells classified as replayable by the builder. Gates minting
@@ -250,6 +254,7 @@ export interface ExperimentalOptions {
    * `docs/specs/computed-cell-identity.md`.
    */
   computedCellIds?: boolean | undefined;
+
   /**
    * Materialize a lift's argument lazily: the body reads the paths it touches
    * and nothing else, instead of the whole of what its schema selects. A
@@ -259,6 +264,7 @@ export interface ExperimentalOptions {
    * `docs/plans/lazy-cell-materialization.md`.
    */
   lazyMaterialization?: boolean | undefined;
+
   /**
    * Roll toolshed-backed patterns forward in place when their source serves a
    * newer content identity. Persisted default roots reconcile before start;
@@ -267,6 +273,7 @@ export interface ExperimentalOptions {
    * docs/specs/pattern-imports/pattern-updates.md.
    */
   systemPatternAutoUpdate?: boolean | undefined;
+
   /**
    * Server-execution v2 (docs/specs/server-side-execution/): one flag, two
    * states. OFF is today's behavior byte-for-byte. ON is the v2 posture as
@@ -335,6 +342,7 @@ export interface PatternInstantiation {
   identity: string;
   symbol: string;
   main?: string;
+
   /** The result cell the pattern was materialized onto. */
   cell: NormalizedFullLink;
 }
@@ -353,14 +361,17 @@ export type PatternInstantiationObserver = (
  */
 export type ServerRunInfo = {
   actionId: string;
+
   /** `bookkeeping` is the sanctioned internal stamp kind
    * (serving-loop.md §3d, RULED 2026-08-05) for runtime-internal commit
    * paths that are neither derivations nor handler runs — the
    * pattern-swap setup write today; the loop's own watermark write uses
    * it directly. */
   kind: "derivation" | "event-handler" | "bookkeeping";
+
   /** The dispatched event's durable id (event-handler runs). */
   eventId?: string;
+
   /** The emitting run's durable event id for a same-wave cascade
    * (C8d; review 2026-08-11 M2): threaded from the emission's
    * dispatch carriage (ServedEventDispatch.parentEventId) through
@@ -368,6 +379,7 @@ export type ServerRunInfo = {
    * requeue closure folds a cascade child into its requeued
    * parent's rollback. */
   parentEventId?: string;
+
   /**
    * The run's PER-RUN DEMANDED identity (M1, scopes.md §5: a derivation
    * runs per demanded instance and the DEMAND supplies the identity).
@@ -381,10 +393,12 @@ export type ServerRunInfo = {
    * the wave-level identity (Phase 1's cardinality-1 fallback).
    */
   scopeKeyIdentity?: ScopeKeyIdentity;
+
   /** The instance key the demanded run serves (resolved from
    * `scopeKeyIdentity` over the demanded root's scope), for basis-row
    * keying (serving-loop.md §3b's `action_scope_key`). */
   actionScopeKey?: ScopeKey;
+
   /** The ACTING identity of an event-handler run (Phase 3, LD1;
    * events.md §2, protocol.md §2): the server-stamped `firedAt` actor
    * the drain resolved from the stream entry — handlers keep the
@@ -392,6 +406,7 @@ export type ServerRunInfo = {
    * attribution annotations. `session` is absent for a sessionless
    * chain (`firedAt.session = "server"`). */
   acting?: { user: string; session?: string };
+
   /** The durable stream entry a drained event-handler run consequences
    * (Phase 3; events.md §4): the serving stamper writes the entry's
    * `consequenced` mark INTO the run's own transaction, so the mark and
@@ -399,6 +414,7 @@ export type ServerRunInfo = {
    * same-transaction atomicity events.md §4 requires; a requeued
    * contribution takes its mark with it). */
   streamEntry?: { sidecarId: string; index: number; seq: number };
+
   /** The LT1 same-space in-process copy's emitter transaction
    * (ServedEventDispatch.lt1; stage C build W3, (α)): the SpaceServer's
    * stamper resolves it to the copy's APPENDING wave (the wave the
@@ -406,6 +422,7 @@ export type ServerRunInfo = {
    * other wave (events.md §4). Absent on the drain's
    * `streamEntry`-bearing copies and on every client-side event. */
   lt1?: { emitterTx: IExtendedStorageTransaction };
+
   /** An EXPLICIT §2b delegated carriage for a `bookkeeping`-kind
    * internal write sanctioned to cross a space boundary (OW31 seat S-A;
    * protocol.md §2b): the compile-cache / program-materialization
@@ -445,6 +462,7 @@ export type ServerRunDemanderResolver = (
 
 export interface RuntimeOptions {
   apiUrl: URL;
+
   /**
    * Optional map from space DIDs to HTTP or HTTPS origins. Space-bound work
    * (LLM calls, fetches, blob uploads) for a mapped space targets
@@ -461,8 +479,10 @@ export interface RuntimeOptions {
   pieceCreatedCallback?: PieceCreatedCallback;
   debug?: boolean;
   telemetry?: RuntimeTelemetry;
+
   /** Optional feature flags for experimental space-model data-layer changes. */
   experimental?: ExperimentalOptions;
+
   /**
    * Server-execution v2 (serving-loop.md §3): mark THIS runtime as the
    * SERVING posture — the SpaceServer's own runtime, whose seal
@@ -477,8 +497,10 @@ export interface RuntimeOptions {
    * (speculation.md; the Phase 2 posture). Ignored in the OFF arm.
    */
   servingPosture?: boolean;
+
   /** Rollout mode for commit-boundary CFC enforcement. Defaults to `enforce-explicit`. */
   cfcEnforcementMode?: CfcEnforcementMode;
+
   /**
    * Called once for every pattern this runtime materializes onto a result
    * cell, with the content-addressed pointer and where it landed.
@@ -496,12 +518,14 @@ export interface RuntimeOptions {
    * caller's bug and is not caught here.
    */
   onPatternInstantiated?: PatternInstantiationObserver;
+
   /**
    * Flow-label propagation dial (S16 default transition). Defaults to `off`.
    * Propagation requires enforcement mode ≥ `observe` to run at the commit
    * boundary; it derives and persists labels but never rejects by itself.
    */
   cfcFlowLabels?: CfcFlowLabelsMode;
+
   /**
    * Write-side `requiredIntegrity` floor dial (§8.12.4.1 / SC-18, Epic D3).
    * Defaults to `off`. `observe` evaluates the floor and emits diagnostics;
@@ -510,6 +534,7 @@ export interface RuntimeOptions {
    * value's integrity, never the consumed-read set.
    */
   cfcWriteFloor?: CfcWriteFloorMode;
+
   /**
    * Trigger-read gating on the enforcement side (§8.9.2 / SC-3, Epic H5).
    * Defaults to `false`. When true, the addresses whose invalidating writes
@@ -518,6 +543,7 @@ export interface RuntimeOptions {
    * metadata resolution per prepare).
    */
   cfcTriggerReadGating?: CfcTriggerReadGating;
+
   /**
    * Defaults to `false`. When true, the envelope persist path stores the
    * decomposed spelling: the metadata's `schemaHash` names a root document
@@ -528,6 +554,7 @@ export interface RuntimeOptions {
    * setting.
    */
   cfcDecomposedEnvelopes?: CfcDecomposedEnvelopes;
+
   /**
    * Exchange-rule policy evaluation dial (Epic B5, spec §4.4.5). Defaults to
    * `off` (gates decide on raw labels, byte-identical to before the dial).
@@ -536,6 +563,7 @@ export interface RuntimeOptions {
    * rewritten label and fails closed on fuel exhaustion.
    */
   cfcPolicyEvaluation?: CfcPolicyEvaluationMode;
+
   /**
    * Cross-space label-metadata representation dial (inv-12 Stage 1 / SC-25,
    * spec §4.6.4.1; docs/specs/cfc-label-metadata-confidentiality.md §2/§5).
@@ -547,6 +575,7 @@ export interface RuntimeOptions {
    * rejects a commit by itself.
    */
   cfcLabelMetadataProtection?: CfcLabelMetadataProtectionMode;
+
   /**
    * Declared-component monotonicity gate dial (WP5, spec §8.12.1/§8.12.8;
    * docs/specs/cfc-persisted-declassification.md §4 item 3). Defaults to
@@ -559,6 +588,7 @@ export interface RuntimeOptions {
    * derived/link/structure components keep their §8.12.8 disciplines.
    */
   cfcDeclaredMonotonicity?: CfcDeclaredMonotonicityMode;
+
   /**
    * Per-prepare D4 write-prefix precision counters (value-level provenance
    * Stage 0 — docs/specs/cfc-value-level-provenance.md §6, SC-24). Defaults
@@ -570,11 +600,13 @@ export interface RuntimeOptions {
    * byte-identical either way.
    */
   cfcPrefixProvenanceStats?: boolean;
+
   /** Per-sink confidentiality ceilings for the sink-request egress gate. A sink
    *  absent from the map is ungated; a declared ceiling rejects (or, in observe
    *  mode, flags) a request carrying confidentiality outside it. Defaults to
    *  none declared (`DEFAULT_SINK_MAX_CONFIDENTIALITY`). */
   cfcSinkMaxConfidentiality?: SinkMaxConfidentiality;
+
   /**
    * Deployment policy records for the exchange-rule evaluator (Epic B2a,
    * spec §4.3). Validated, digested, and deep-frozen into a `PolicySnapshot`
@@ -583,6 +615,7 @@ export interface RuntimeOptions {
    * configured (evaluation is a no-op).
    */
   cfcPolicyRecords?: readonly CfcPolicyRecordInput[];
+
   /**
    * Deployment trust config for concept-guard satisfaction (Epic B3, spec
    * §4.8): trust statements, verifier delegations, concept edges. Validated,
@@ -594,16 +627,20 @@ export interface RuntimeOptions {
    * guard fails closed).
    */
   cfcTrustConfig?: CfcTrustConfigInput;
+
   /** Deterministic provider for the trust snapshot attached to each new tx. */
   trustSnapshotProvider?: () => TrustSnapshot | undefined;
+
   /** Replace runner-owned frames with `<CF_INTERNAL>` in surfaced stacks. */
   hideInternalStackFrames?: boolean;
+
   /**
    * Tuning for committed-write backpressure under contention. Unset fields fall
    * back to DEFAULT_COMMIT_BACKPRESSURE; tests use this to shrink the backoff
    * and retry window. See scheduler/backpressure.ts.
    */
   commitBackpressure?: Partial<CommitBackpressurePolicy>;
+
   /**
    * Process-level, content-addressed cache of compiled MODULE BYTES, shared
    * across runtimes. When set, the ESM cell-cache compile path consults it before
@@ -614,6 +651,7 @@ export interface RuntimeOptions {
    * {@link ModuleByteCache}.
    */
   moduleByteCache?: ModuleByteCache;
+
   /**
    * Statement-coverage collector for authored patterns. When set, every compile
    * this runtime performs is instrumented — the transformer injects a hit call
@@ -627,6 +665,7 @@ export interface RuntimeOptions {
    * packages/runner/src/pattern-coverage.ts and docs/development/COVERAGE.md.
    */
   patternCoverage?: PatternCoverageCollector;
+
   /**
    * Override for the outbound `fetch` used by network builtins (`fetchJson` et al).
    * Defaults to the host `globalThis.fetch`. Scoped to this runtime instance, so
@@ -638,6 +677,7 @@ export interface RuntimeOptions {
 
 export interface CfcRuntimeStats {
   cfcRelevantTx: number;
+
   /** Stage C tuning T1: flow-label relevance probes actually EVALUATED
    * (`flowLabelWorkExists`) vs answered from the transaction's memoized
    * negative verdict. Measurement only. */
@@ -653,22 +693,31 @@ export interface CfcRuntimeStats {
   // (docs/specs/cfc-value-level-provenance.md §6, SC-24). All zero unless
   // `cfcPrefixProvenanceStats` is enabled. Aggregated over the per-prepare
   // summaries; the per-write detail lists are not retained here.
+
   /** Prepares that measured at least one protected write. */
   prefixProvenanceSummaries: number;
+
   /** Protected writes measured (requiredIntegrity / maxConfidentiality). */
   prefixProtectedWrites: number;
+
   /** Gated reads under the shipped D4 per-write prefix. */
   prefixGatedReads: number;
+
   /** What the pre-D4 transaction-global gate would have counted. */
   prefixTxGlobalGatedReads: number;
+
   /** Writes bounded by a logged overlapping attempt (prefix engaged). */
   prefixBoundReal: number;
+
   /** Writes on the +Infinity fallback (no logged overlapping attempt). */
   prefixBoundInfinityFallback: number;
+
   /** Writes with no ordered write-attempt evidence at all (clock-less). */
   prefixBoundClockLess: number;
+
   /** S7 provenance-only exemption fires within prefixes. */
   prefixS7ExemptionFires: number;
+
   /** Read activities without a clock position (treated at -Infinity). */
   prefixClockLessReads: number;
 }
@@ -799,6 +848,7 @@ export class Runtime {
   readonly navigateCallback?: NavigateCallback;
   readonly pieceCreatedCallback?: PieceCreatedCallback;
   readonly cfcEnforcementMode: CfcEnforcementMode;
+
   /** See `RuntimeOptions.onPatternInstantiated`. */
   readonly onPatternInstantiated?: PatternInstantiationObserver;
   readonly cfcFlowLabels: CfcFlowLabelsMode;
@@ -810,14 +860,18 @@ export class Runtime {
   readonly cfcDeclaredMonotonicity: CfcDeclaredMonotonicityMode;
   readonly cfcPrefixProvenanceStats: boolean;
   readonly cfcSinkMaxConfidentiality: SinkMaxConfidentiality;
+
   /** Frozen deployment policy snapshot; undefined = no policies configured. */
   readonly cfcPolicySnapshot: PolicySnapshot | undefined;
+
   /** Frozen deployment trust config; undefined = no trust configured. */
   readonly cfcTrustConfig: CfcTrustConfig | undefined;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
+
   /** Optional process-level compiled-module-byte cache; see RuntimeOptions. */
   readonly moduleByteCache?: ModuleByteCache;
+
   /** Optional pattern statement-coverage collector; see RuntimeOptions. */
   readonly patternCoverage?: PatternCoverageCollector;
   readonly trustSnapshotProvider: () => TrustSnapshot | undefined;
@@ -828,18 +882,22 @@ export class Runtime {
   // per-run served snapshots exactly as it does ambient client ones.
   readonly #trustRevision: string;
   readonly telemetry: RuntimeTelemetry;
+
   /** Resolved experimental flags (all properties present with built-in defaults). */
   readonly experimental: ExperimentalOptions;
+
   /** Resolved committed-write backpressure policy (all fields present). */
   readonly commitBackpressure: CommitBackpressurePolicy;
   readonly apiUrl: URL;
   readonly spaceHostMap?: Record<string, string>;
+
   /**
    * Outbound `fetch` used by network builtins (e.g. `fetchJson`). Defaults to
    * the host `globalThis.fetch`; a test harness can inject a mock via
    * `RuntimeOptions.fetch`.
    */
   readonly fetch: RuntimeFetch;
+
   /** Runtime-learned host hints (site table); see registerSpaceHost. */
   #dynamicHosts = new Map<string, string>();
   // The transaction seal destination (server-execution v2, serving-loop.md
@@ -869,9 +927,11 @@ export class Runtime {
   // the replica's pending overlay through it — the structural removal of
   // the client derivation-commit path. Never created in the OFF arm.
   #speculationOverlay: SpeculationOverlayDestination | undefined;
+
   /** The client-effect channel (server-execution v2 Phase 4,
    * protocol.md §5) — constructed for flag-ON non-serving runtimes. */
   #effectsChannel: EffectsChannel | undefined;
+
   /** The exact spaceOpenObserver closure THIS runtime installed on the
    * (possibly shared) storage manager — dispose clears the manager
    * hook only on identity match, so a later runtime's own hook
@@ -891,6 +951,7 @@ export class Runtime {
   // `derived` for every other owner's in-flight wave commit (the
   // admission plane reads the ambient value).
   #serverExecutionRelease: (() => void) | undefined;
+
   /** Serving posture (RuntimeOptions.servingPosture): true only for the
    * SpaceServer's own runtime. Gates the Phase-2 speculation-overlay
    * default (a serving runtime never speculates). */
@@ -909,6 +970,7 @@ export class Runtime {
   get scopeKeyIdentity(): ScopeKeyIdentity {
     return this.storageManager.scopeKeyIdentity();
   }
+
   /** Cache of resolved PatternFactory.inSpace("name") space DIDs. */
   private readonly spaceNameToDid = new Map<string, MemorySpace>();
   private defaultFrame?: Frame;
@@ -2041,6 +2103,7 @@ export class Runtime {
         tx: IExtendedStorageTransaction,
         info: ServerRunInfo,
       ) => void;
+
       /** The per-(action × instance) run SUPPLY (server-execution v2
        * stage P2-F; fan-out stage B): resolves an action's demand roots
        * to the DEMANDERS the SpaceServer's registry holds for them. The

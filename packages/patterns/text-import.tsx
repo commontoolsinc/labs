@@ -37,6 +37,7 @@ export const MODULE_METADATA: ModuleMetadata = {
 export interface TextImportModuleInput {
   /** The text content from the uploaded file */
   content: string | Default<"">;
+
   /** The original filename */
   filename: string | Default<"">;
 }

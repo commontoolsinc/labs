@@ -14,6 +14,7 @@ export interface HarnessInputCellSpec {
    * prose by construction — never text read from the fabric.
    */
   name: string;
+
   /**
    * The reference to mint, as an LLM-friendly link string. The cell's shape
    * and labels are not stated here: both live on the cell's declared schema
@@ -25,8 +26,10 @@ export interface HarnessInputCellSpec {
 /** One input cell, as recorded in run state. */
 export interface HarnessInputCell {
   name: string;
+
   /** The token the model holds. */
   token: string;
+
   /** The canonical reference behind it; never model-facing. */
   ref: string;
 }

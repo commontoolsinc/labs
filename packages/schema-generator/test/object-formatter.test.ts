@@ -49,6 +49,7 @@ interface OpenEvent {
 interface SchemaRoot {
   /** Opens the composer panel. */
   openComposer: () => Stream<OpenEvent>;
+
   /** The board's visible title. */
   title: string;
 }

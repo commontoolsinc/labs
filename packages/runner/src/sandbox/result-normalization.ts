@@ -17,6 +17,7 @@ import { isCellLink } from "../link-utils.ts";
 export interface NormalizedSandboxResult {
   /** The host/Fabric graph that may safely leave the sandbox boundary. */
   value: unknown;
+
   /** Whether the result graph contains a Reactive leaf. */
   hasReactive: boolean;
 }

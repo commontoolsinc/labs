@@ -101,12 +101,16 @@ export function clearRuntimeDebugGlobals(global: CommonfabricGlobal): void {
 interface DebugCellOptions {
   /** Space DID — defaults to current shell space */
   space?: string;
+
   /** Piece CID — defaults to piece from URL bar */
   did?: string;
+
   /** Full entity ID — use this when you already have `of:...` from trigger trace */
   id?: string;
+
   /** Path into cell — defaults to [] */
   path?: string[];
+
   /** Metadata link to follow before reading the cell */
   meta?: MetaField;
 }
@@ -114,8 +118,10 @@ interface DebugCellOptions {
 interface ExplainTriggerTraceOptions {
   /** Number of grouped changes to resolve and return. Defaults to 10. */
   limit?: number;
+
   /** When true, only keep root writes (`path.length === 0`). Defaults to false. */
   rootOnly?: boolean;
+
   /** Include the full current value in each returned change. Defaults to false. */
   includeCurrentValue?: boolean;
 }
@@ -123,6 +129,7 @@ interface ExplainTriggerTraceOptions {
 interface WatchWritesOptions extends DebugCellOptions {
   /** Path matching mode. Defaults to "exact". */
   match?: "exact" | "prefix";
+
   /** Optional label shown in recorded write-trace entries. */
   label?: string;
 }

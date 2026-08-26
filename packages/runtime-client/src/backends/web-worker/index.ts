@@ -10,12 +10,14 @@ import "core-js/proposals/async-explicit-resource-management";
 
 import { getLogger } from "@commonfabric/utils/logger";
 import { unrefTimer } from "@commonfabric/utils/sleep";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import { CompilerStackLoadError } from "@commonfabric/runner";
 import {
   IPCRemoteResponse,
   isIPCClientMessage,
   isIPCClientNotification,
+  NotificationType,
   RequestType,
   RuntimeErrorCode,
   TransportNotificationType,
@@ -24,6 +26,7 @@ import {
 } from "@/protocol/mod.ts";
 import { RuntimeProcessor } from "@/backends/mod.ts";
 import { postToClient } from "@/backends/post-to-client.ts";
+import { describeFailure } from "@/shared/utils.ts";
 
 // Count-only ledger of request traffic as seen by the worker: one
 // `received/<type>` per request that reached this message handler and one
@@ -245,9 +248,27 @@ self.addEventListener("message", async (event: MessageEvent) => {
     const code = error instanceof CompilerStackLoadError
       ? RuntimeErrorCode.CompilerStackLoadFailed
       : undefined;
+    // A reply is addressed by `msgId`, and what reaches here need not have
+    // one: `message` is whatever was posted, which is why the line above asks
+    // `isIPCClientMessage()` rather than trusting it, and `Invalid IPC
+    // request` is thrown precisely for what is no message at all. Reading
+    // `msgId` off that throws from inside this `catch`, which is the one place
+    // a throw has nowhere to go -- out of an async listener it surfaces as an
+    // unhandled rejection, taking the report it was making with it.
+    const msgId = isObjectNotArray(message) && typeof message.msgId === "number"
+      ? message.msgId
+      : undefined;
+    if (msgId === undefined) {
+      postToClient({
+        type: NotificationType.ErrorReport,
+        message: `Malformed message from the client: ${describeFailure(error)}`,
+      });
+      return;
+    }
+
     postToClient({
-      msgId: message.msgId,
-      error: error instanceof Error ? error.message : String(error),
+      msgId,
+      error: describeFailure(error),
       ...(code ? { code } : {}),
     });
   }

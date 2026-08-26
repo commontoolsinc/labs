@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read
+
 /**
  * .claude/scripts/pattern-user-post-bash.ts
  *

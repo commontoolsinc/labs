@@ -53,8 +53,10 @@ import { plainRevocations } from "@/routes/ingest-channels/ingest-channels.utils
 export interface RetirePlan {
   /** Channels this run would retire (or did, when `confirm`). */
   retired: { id: string; space: string; installId: string; owner: string }[];
+
   /** Already revoked, so left alone. */
   skipped: number;
+
   /**
    * Changed underneath the sweep and therefore NOT retired. Re-running picks
    * them up; reporting them is what keeps the sweep from claiming completeness

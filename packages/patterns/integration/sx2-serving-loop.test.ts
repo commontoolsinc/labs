@@ -60,6 +60,7 @@ type ServingLoopStats = {
   effectAcks: number;
   derivedCommits: number;
   structureLoadFailures: number;
+
   /** S1 (RULED 2026-08-19): drain-settle quiescence advances — the
    * advance-only waves the budgets below subtract. */
   settleAdvances: { count: number };

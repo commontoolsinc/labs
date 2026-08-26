@@ -106,6 +106,7 @@ const mutationQueue = new KeyedMutationQueue();
 
 export interface FileHarnessProviderSettingsStoreOptions {
   path: string;
+
   /** @internal Observability hook used by lock-contention tests. */
   onLockAcquisitionStarted?: () => void;
 }

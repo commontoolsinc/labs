@@ -203,6 +203,7 @@ const EAGER_RESULT_BUILTIN_REFS = new Set([
 
 type InternalCellDescriptor = {
   partialCause: JSONValue;
+
   /**
    * Entity kind of the materialized cell's id. Part of the manifest match
    * key alongside `partialCause`: a kind flip across pattern versions must
@@ -578,6 +579,37 @@ const recordRawBuiltinResultSchemaPolicyInput = (
 };
 
 /**
+ * The kind-free ids of a pattern's derived internal cells on `resultCell` —
+ * the ids a manifest-blind binding conversion mints for a `partialCause`
+ * alias (pattern-binding's descriptor-miss fallback), which is how the
+ * identity bind (CT-1943) renders such an alias. Cause-only by contract:
+ * the coordinates ARE the position-derived identity, and nothing may read
+ * through them — where the descriptor carries a kind, the data lives at the
+ * KINDED entity, so a read here asks about bytes that are never there and
+ * ties the asking transaction to replication state.
+ * {@link firstResolvedOutputRedirect} takes this set to return such links
+ * parsed rather than resolved. The kind is omitted from the mint on
+ * purpose: the hash preimage is kind-free, so one kindless mint per
+ * descriptor names the id the fallback produces whatever the descriptor's
+ * kind is.
+ */
+function causeOnlySpotIds(
+  resultCell: Cell<any>,
+  descriptors: Pattern["derivedInternalCells"],
+): ReadonlySet<string> | undefined {
+  if (descriptors === undefined || descriptors.length === 0) return undefined;
+  const ids = new Set<string>();
+  for (const descriptor of descriptors) {
+    ids.add(
+      getDerivedInternalCellLink(resultCell, {
+        partialCause: descriptor.partialCause,
+      }).id,
+    );
+  }
+  return ids;
+}
+
+/**
  * Find the first write-redirect link within an output binding and return its
  * FULLY RESOLVED normalized link (`id` and `space` populated). The output spot
  * a pattern node writes through is reserved for that node, so its resolved
@@ -586,6 +618,15 @@ const recordRawBuiltinResultSchemaPolicyInput = (
  * pattern object (which drags in the session-varying `program`). Returns
  * undefined if the binding contains no write redirect.
  *
+ * A link whose id is in `causeOnlyIds` (a derived internal cell's kind-free
+ * id — see {@link causeOnlySpotIds}) is returned PARSED, never resolved:
+ * its coordinates are already the identity the caller wants, resolution of
+ * a loaded spot stops there anyway (a stored plain link is not followed
+ * under `writeRedirect`), and reading an absent one ties the scan to
+ * replication state while kicking a doc pull nothing can satisfy — for a
+ * kinded descriptor, the data lives at the KINDED entity and this id is
+ * never written.
+ *
  * Exported for tests only.
  */
 export function firstResolvedOutputRedirect(
@@ -593,6 +634,7 @@ export function firstResolvedOutputRedirect(
   tx: IExtendedStorageTransaction,
   binding: unknown,
   baseCell: Cell<any>,
+  causeOnlyIds?: ReadonlySet<string>,
 ): NormalizedFullLink | undefined {
   if (isWriteRedirectLink(binding) || isAliasBinding(binding)) {
     // A partialCause alias denotes a DERIVED INTERNAL cell — of the child
@@ -610,18 +652,21 @@ export function firstResolvedOutputRedirect(
       return undefined;
     }
     const bindingBase = baseCell.getAsNormalizedFullLink();
-    return resolveLink(
-      runtime,
-      tx,
-      isAliasBinding(binding)
-        ? parseAliasBinding(binding, bindingBase)
-        : parseLink(binding, bindingBase),
-      "writeRedirect",
-    );
+    const parsed = isAliasBinding(binding)
+      ? parseAliasBinding(binding, bindingBase)
+      : parseLink(binding, bindingBase);
+    if (causeOnlyIds?.has(parsed.id)) return parsed;
+    return resolveLink(runtime, tx, parsed, "writeRedirect");
   }
   if (Array.isArray(binding)) {
     for (const child of binding) {
-      const found = firstResolvedOutputRedirect(runtime, tx, child, baseCell);
+      const found = firstResolvedOutputRedirect(
+        runtime,
+        tx,
+        child,
+        baseCell,
+        causeOnlyIds,
+      );
       if (found) return found;
     }
     return undefined;
@@ -633,7 +678,13 @@ export function firstResolvedOutputRedirect(
   // pre-sync keyed off it.
   if (isObjectOrArray(binding) && !isCellLink(binding)) {
     for (const child of Object.values(binding)) {
-      const found = firstResolvedOutputRedirect(runtime, tx, child, baseCell);
+      const found = firstResolvedOutputRedirect(
+        runtime,
+        tx,
+        child,
+        baseCell,
+        causeOnlyIds,
+      );
       if (found) return found;
     }
   }
@@ -763,21 +814,28 @@ type SetupResult<R> = {
 type SetupValidationOptions = {
   /** Optional invariant over the argument stored before setup changes it. */
   validateCurrentArgument?: (argumentCell: Cell<unknown>) => void;
+
   /** Optional layer-specific invariant checked inside the setup transaction. */
   validateArgumentLinks?: (
     argumentCell: Cell<unknown>,
     argumentSchema: JSONSchema,
   ) => void;
+
   /** Optional repository locator written atomically with pattern setup. */
   patternRepository?: string;
+
   /** Source lifecycle change written atomically with pattern setup. */
   pieceSourceTransition?: PieceSourceTransition;
+
   /** Record a detached creation revision when setting up a new piece. */
   initializePieceSourceHistory?: boolean;
+
   /** Mutable source origin recorded with a new piece's creation revision. */
   initialPieceSourceOrigin?: string;
+
   /** Rebuild stored setup state even when patternIdentity already matches. */
   reapplyStoredSetup?: boolean;
+
   /** Keep the next start on the persisted-result dependency-sync path. */
   prepareForResume?: boolean;
 };
@@ -796,9 +854,11 @@ export interface PieceSourceRevision {
   revisionId: string;
   timestamp: number;
   pattern: { identity: string; symbol: string };
+
   /** Link retaining the exact content-addressed source closure. */
   source: SigilLink;
   origin?: string;
+
   /** The legacy origin string, when normalizing it changed its value. */
   recordedOrigin?: string;
   operation: PieceSourceRevisionOperation;
@@ -820,6 +880,7 @@ export interface PieceSourceTransition {
   baseline: PieceSourceTransitionBaseline;
   timestamp: number;
   operation: Exclude<PieceSourceRevisionOperation, "baseline" | "create">;
+
   /** The active origin after the transition. Null means detached. */
   origin: string | null;
   expected: PieceSourceSnapshot;
@@ -828,8 +889,10 @@ export interface PieceSourceTransition {
 
 type RunResult<R> = {
   resultCell: Cell<R>;
+
   /** The exact local cancel registration installed by this invocation. */
   installedCancel?: Cancel;
+
   /**
    * Cancels a start that this invocation deferred until its transaction
    * commits. Before installation it tombstones the pending start; afterwards
@@ -1314,8 +1377,10 @@ export function isStoredArgumentSchemaRefusal(error: unknown): boolean {
 interface SetupStateReuse {
   /** Same pattern as the last run, so stored setup state is this run's own. */
   sameStoredSetup: boolean;
+
   /** Re-point the stored argument at this schema and validate it. */
   restageStoredArgument: boolean;
+
   /**
    * Same stored setup AND a completion marker that POSITIVELY names this
    * pattern. Distinct from `!restageStoredArgument`, which is also true when the
@@ -4483,6 +4548,7 @@ export class Runner {
   // §2 — the resolver also normalizes the raw `undefined:` form the
   // previous string interpolation produced for scope-less links, which
   // merges with `space:`, the same instance by definition).
+
   /** Stage P2-F (the F1 fold-in, RULED 2026-08-13): a piece-start
    * setup/instantiation commit failure is fire-and-forget by design but
    * NEVER silent — loud in every arm, and handed to the serving
@@ -4934,11 +5000,14 @@ export class Runner {
           argumentLink,
           resultCell,
         );
+        // The same cause-only skip instantiatePatternNode's spot
+        // derivation applies, so the two derive identical coordinates.
         spotLink = firstResolvedOutputRedirect(
           this.runtime,
           tx,
           unwrappedOutputs,
           resultCell,
+          causeOnlySpotIds(resultCell, pattern.derivedInternalCells),
         );
       } catch (error) {
         // A node whose outputs cannot be bound (e.g. they alias the argument
@@ -7986,11 +8055,17 @@ export class Runner {
         argumentCellLink,
         resultCell,
       );
+      // The manifest-blind bind above renders a partialCause alias as its
+      // derived cell's kind-free id, which is cause-only — resolving it
+      // would read an entity the kinded data never lives at (and kick a
+      // doc pull nothing can satisfy), so the scan is told to take those
+      // coordinates as they stand.
       const outputRedirect = firstResolvedOutputRedirect(
         this.runtime,
         tx,
         mappedOutputBindings,
         resultCell,
+        causeOnlySpotIds(resultCell, pattern.derivedInternalCells),
       );
       if (!outputRedirect) {
         throw new Error(
@@ -8405,6 +8480,18 @@ function normalizePieceSourceOrigin(
 }
 
 /**
+ * What a source transition throws when the piece is no longer on the state
+ * the transition was prepared against — checked before the write and again
+ * inside the transaction that commits it.
+ *
+ * Exported because a caller that pinned an expected reference has to tell
+ * this apart from an operational failure, and matching on a copy of the text
+ * is how the two silently drift.
+ */
+export const PIECE_SOURCE_MOVED =
+  "piece source changed while the source transition was being prepared";
+
+/**
  * Verify that a source transition can restore the current source. Recovery
  * paths may omit an unavailable legacy baseline and retain the displaced
  * executable identity outside the restorable history instead.
@@ -8421,9 +8508,7 @@ export async function preparePieceSourceTransitionBaseline(
     current === undefined ||
     !samePieceSourceSnapshot(current, expected)
   ) {
-    throw new Error(
-      "piece source changed while the source transition was being prepared",
-    );
+    throw new Error(PIECE_SOURCE_MOVED);
   }
   const baseline = {
     kind: "retain" as const,
@@ -8460,9 +8545,7 @@ export function applyPieceSourceTransition(
     current === undefined ||
     !samePieceSourceSnapshot(current, transition.expected)
   ) {
-    throw new Error(
-      "piece source changed while the source transition was being prepared",
-    );
+    throw new Error(PIECE_SOURCE_MOVED);
   }
 
   const verifyRetainedPattern = (

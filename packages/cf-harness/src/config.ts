@@ -72,6 +72,7 @@ interface HarnessCommonConfig {
   allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
   browserAccess?: HarnessBrowserAccessLease;
+
   /**
    * Origins where a value materialized from a handle may be sent. Operator
    * configuration, empty or absent by default: a run that names no origin

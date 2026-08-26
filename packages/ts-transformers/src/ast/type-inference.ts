@@ -1066,6 +1066,7 @@ export function inferArrayElementType(
     typeNode: factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
   };
 }
+
 /**
  * Infers the expected type of an expression from its context (e.g., variable assignment).
  */

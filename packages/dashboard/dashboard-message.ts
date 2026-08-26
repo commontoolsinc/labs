@@ -11,11 +11,14 @@ import { dashboardCacheFile } from "./history-files.ts";
 
 /** The period during which a saved message remains fully visible. */
 export const DASHBOARD_MESSAGE_VISIBLE_MS = 2 * 60 * 60 * 1_000;
+
 /** The linear fade period after the fully visible period. */
 export const DASHBOARD_MESSAGE_FADE_MS = 4 * 60 * 60 * 1_000;
+
 /** The total time from saving a message until it expires. */
 export const DASHBOARD_MESSAGE_LIFETIME_MS = DASHBOARD_MESSAGE_VISIBLE_MS +
   DASHBOARD_MESSAGE_FADE_MS;
+
 /** The largest message accepted by the shared editor. */
 export const DASHBOARD_MESSAGE_MAX_LENGTH = 500;
 

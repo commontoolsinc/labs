@@ -1,4 +1,4 @@
-import type { FabricKeyPair as ApiFabricKeyPair } from "@commonfabric/api";
+import type { FabricKeyPair as ApiFabricKeyPair } from "@/api.ts";
 import {
   fromBase64url,
   toUnpaddedBase64url,
@@ -493,7 +493,7 @@ export class FabricKeyPair extends BaseFabricPrimitive {
   }
 }
 
-// Compile-time drift guards against the `@commonfabric/api` declarations, in
+// Compile-time drift guards against the `@/api.ts` declarations, in
 // two halves.
 //
 // The instance surface compares directly. Assignability is covariant on member

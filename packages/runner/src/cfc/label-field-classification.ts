@@ -40,6 +40,7 @@ export type LabelAtomFamily =
 
 export type LabelFieldClassificationEntry = {
   readonly family: LabelAtomFamily;
+
   /**
    * Path of the classified field inside the atom, e.g. `["source"]` or
    * `["identity", "sourceFile"]`. Family-scoped: a Caveat's `source` is

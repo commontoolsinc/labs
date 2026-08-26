@@ -261,6 +261,7 @@ export function extractedCallbackBody(
 export interface AssertCapture {
   /** The authored source text the operand was labeled with. */
   src: string;
+
   /** The printed value expression the recording wraps. */
   value: string;
 }

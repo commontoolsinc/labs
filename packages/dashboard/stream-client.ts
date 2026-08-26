@@ -13,8 +13,10 @@ export interface UpdateStream {
 export interface LiveUpdateStream {
   /** Records that the server was heard from. Called for every stream event. */
   heard(now: number): void;
+
   /** Records the browser reporting the connection failed or dropped. */
   lost(): void;
+
   /**
    * Opens the stream, replaces one that has stopped delivering, and reports
    * whether the page has a stream it is hearing the server on.

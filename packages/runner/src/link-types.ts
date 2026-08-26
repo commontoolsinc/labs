@@ -77,6 +77,7 @@ export type NormalizedLink = {
   scope?: LinkScope;
   schema?: JSONSchema;
   overwrite?: "redirect"; // "this" gets normalized away to undefined
+
   /**
    * Follow caps declared by schemas ABOVE this link's leaf, ascending by
    * depth. `schema` only describes the leaf, so a cap declared mid-path — an
@@ -100,6 +101,7 @@ export type NormalizedLink = {
    * silently lift the caps that boundary is supposed to enforce.
    */
   scopeCaps?: readonly ScopeCapAtDepth[];
+
   /**
    * Link resolution FOLLOWED at least one hop and then dead-ended at a
    * doc the replica cannot serve (the sigil probe reported the DOC
@@ -127,6 +129,7 @@ export type NormalizedLink = {
    * identity; consumers that copy links by spread carry it inertly.
    */
   pendingHopDoc?: true;
+
   /**
    * This link is DATA-DERIVED: parsed from a stored sigil link, or
    * produced by a resolution that followed at least one hop. A handle
@@ -158,6 +161,7 @@ export type ValuePath = readonly ["value", ...string[]];
 export type IMemorySpaceValueAddress = IMemorySpaceAddress & {
   path: ValuePath;
 };
+
 /**
  * Convert a value-relative normalized link into a document-root memory address.
  */

@@ -18,10 +18,13 @@ export type YScaleType = "linear" | "log";
 export interface AxisConfig {
   /** Axis label text */
   label?: string;
+
   /** Tick format: d3-format string (e.g. "$,.0f") or function */
   tickFormat?: string | ((value: unknown) => string);
+
   /** Show grid lines across the plot area */
   grid?: boolean;
+
   /** Number of ticks to display (approximate) */
   tickCount?: number;
 }
