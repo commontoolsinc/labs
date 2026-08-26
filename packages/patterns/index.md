@@ -882,6 +882,42 @@ interface Output {
 }
 ```
 
+## `collaborative-note/main.tsx`
+
+A minimal multiplayer note built on `cf-code-editor`. The note body is durable
+per-space state synchronized through Memory's operation protocol. Names, carets,
+and selections travel separately as ephemeral co-presence data. Each viewer
+selects or creates a Fabric profile with `wish({ query: "#profile" })`; the
+editor uses that profile's `#profileName` field as its participant label. The
+host provides the WebSocket endpoint, while the caller supplies an opaque,
+high-entropy room identifier unique to the note.
+
+**Keywords:** multiplayer, collaborative editor, note, profile, wish,
+co-presence, CodeMirror
+
+### Input Schema
+
+```ts
+interface CollaborativeNoteInput {
+  note?: PerSpace<
+    string | Default<"# Collaborative note\n\nStart writing together.">
+  >;
+  presenceRoom: PerSpace<string>;
+}
+```
+
+### Output Schema
+
+```ts
+interface CollaborativeNoteOutput {
+  note: PerSpace<
+    string | Default<"# Collaborative note\n\nStart writing together.">
+  >;
+  presenceRoom: PerSpace<string>;
+  participantName: string;
+}
+```
+
 ## `cfc-agent-prompt-injection-demo/main.tsx`
 
 Interactive side-by-side chatbot demo for the new observation ceiling and
