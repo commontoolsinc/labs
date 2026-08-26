@@ -865,6 +865,29 @@ describe("piece source reconciliation", () => {
       expect(getPatternIdentityRef(piece)).toEqual(changedRef);
     });
 
+    it("keeps the running source when the target runs no pattern", async () => {
+      // An entity is only a source while it names a pattern. One that holds
+      // ordinary data names nothing to adopt, so the piece keeps what it has
+      // and the entity is not followed.
+      const piece = await preparePiece(refuseEveryFetch);
+      const originalRef = getPatternIdentityRef(piece);
+      const plain = runtime.getCell<{ note: string }>(
+        piece.space,
+        `reconcile-plain-${crypto.randomUUID()}`,
+      );
+      const { error } = await runtime.editWithRetry((tx) => {
+        plain.withTx(tx).set({ note: "not a pattern" });
+      });
+      expect(error).toBeUndefined();
+      await stampSource(
+        piece,
+        `cf:/${piece.space}/${plain.getAsNormalizedFullLink().id}`,
+      );
+
+      expect(await reconcile(piece)).toBe("unavailable");
+      expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+    });
+
     it("keeps the running source when a pinned target is unavailable", async () => {
       const piece = await preparePiece(refuseEveryFetch);
       const originalRef = getPatternIdentityRef(piece);
@@ -1004,6 +1027,47 @@ describe("piece source reconciliation", () => {
       expect(await running).toBe("unavailable");
       expect(getPatternIdentityRef(piece)).toEqual(originalRef);
       expect(getPieceSourceRevisions(piece)).toEqual([]);
+    });
+
+    it("does not apply an update once the piece's pattern has moved", async () => {
+      // The candidate was compared against the pattern the piece was running
+      // when the pass began. A piece that has moved to a different pattern
+      // since is not the piece that comparison was about, so the transition
+      // is dropped rather than applied over it.
+      const v2Identity = await identityFor(source("v2"));
+      const identityRequested = defer<void>();
+      identityGate = defer();
+      const piece = await preparePiece(async (input) => {
+        const url = new URL(
+          input instanceof Request
+            ? input.url
+            : input instanceof URL
+            ? input.href
+            : input,
+        );
+        if (url.searchParams.has("identity")) {
+          identityRequested.resolve();
+          await identityGate!.promise;
+          return new Response(v2Identity);
+        }
+        return new Response(
+          url.pathname === SOURCE_PATH ? source("v2") : parentSource,
+        );
+      });
+      await stampSource(piece, PARENT_SOURCE);
+
+      const pass = reconcile(piece);
+      await identityRequested.promise;
+      const moved = await compileMarkerPattern("v3");
+      const movedRef = runtime.patternManager.getArtifactEntryRef(moved)!;
+      const { error } = await runtime.editWithRetry((tx) => {
+        piece.withTx(tx).setMetaRaw("patternIdentity", movedRef);
+      });
+      expect(error).toBeUndefined();
+      identityGate.resolve();
+
+      expect(await pass).toBe("unavailable");
+      expect(getPatternIdentityRef(piece)).toEqual(movedRef);
     });
 
     it("abandons an in-flight reconciliation on disposal", async () => {
