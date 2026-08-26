@@ -6060,6 +6060,23 @@ supply; OW29/OW32/OW34 closed):
     remains a separate 10/10 quiet-and-loaded campaign under the corrected
     source-authority posture. Full RCA and evidence map:
     [`ow45-default-app-store-incomplete-root-cause-2026-08-26.md`](../../history/plans/server-execution-v2/optimize/ow45-default-app-store-incomplete-root-cause-2026-08-26.md).
+    **DIRECT CI UNSKIP PROBE, 2026-08-26: RED — NO LIFT.** Head
+    `66a969ca02e8962ae44eeb4da264a575da421893`, Actions run
+    [33008274232, ON shard 5](https://github.com/commontoolsinc/labs/actions/runs/33008274232/job/98307864923).
+    The registry had no default-app entry, the job printed that no listed
+    skip was in its file list, and the exact rapid-note step ran. The other
+    nine ON pattern shards passed. Shard 5 failed only this target after
+    5m22s, when `waitForCondition` reached its unchanged 300000 ms bound.
+    The final client trace reported `eventInvocationCount: 7` and
+    `notebookInvocationCount: 7`, but `isNotebook: false`, `notesLength: 0`,
+    `notebookActionCount: 0`, 84 stored UI note chips, and zero rendered note
+    chips. The log had zero `pattern-swap-setup-error`, recursive-schema
+    errors, and `pattern-load-error`. This is therefore a current true-CI ON
+    failure distinct from the split-source off-repository launcher failure;
+    the direct CI artifact does not establish the durable disposition of any
+    note action or assign the new failure's root cause. The STEP entry is
+    restored with this current charge. Its bound guard and separate lift bar
+    remain.
     Sibling entry, landed mid-review: #5744 (lunch-poll profile-first
     join) re-skipped `integration/lunch-poll-vote.test.ts` as a FILE
     entry on this row's b04 signature — its recorded reds PREDATE the

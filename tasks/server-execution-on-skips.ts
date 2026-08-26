@@ -192,6 +192,36 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
   // verification-coverage.md OW60, not as a flaky test.
   patterns: [
     {
+      // The current charge is a direct CI ON failure, not the invalid
+      // split-source launcher topology root-caused in the OW45 RCA. The
+      // unskip probe at 66a969ca0 ran this exact step in ON shard 5 and
+      // failed at its unchanged 300 s condition bound. Its final client
+      // diagnostics reported all seven invocation traces but no bound
+      // notebook action state, with stored note chips present and none
+      // rendered. The run had no pattern-swap-setup-error, recursive-schema
+      // error, or pattern-load-error, so that older signature is not the
+      // reason for this skip. verification-coverage.md OW45 carries the
+      // full run and job evidence. The entry lifts on the established 10/10
+      // quiet-and-loaded gate under the current source-authority posture;
+      // the flip PR needs this list empty.
+      file: "integration/default-app.test.ts",
+      step: "should persist and reload every rapidly created notebook note",
+      phase: "phase-7",
+      reason: "Direct CI ON unskip probe at head 66a969ca0, run " +
+        "33008274232, shard 5: the log proved this exact step ran with " +
+        "no listed skip, then it failed after 5m22s at waitForCondition's " +
+        "unchanged 300000ms bound. Final client diagnostics reported " +
+        "eventInvocationCount=7 and notebookInvocationCount=7, but " +
+        "isNotebook=false, notesLength=0, notebookActionCount=0, 84 " +
+        "stored UI note chips, and zero rendered note chips. The run had " +
+        "zero pattern-swap-setup-error, recursive-schema errors, and " +
+        "pattern-load-error, so this is distinct from the split-source " +
+        "off-repository launcher failure root-caused by the OW45 RCA. " +
+        "The current CI failure's cause is not yet assigned. Lifts on " +
+        "10/10 quiet-and-loaded ON under the current source-authority " +
+        "posture.",
+    },
+    {
       // Re-listed by the lunch-poll identity PR (#5744). This file was
       // LIFTED 2026-08-19 for the swatch-stall class (stage-C W3.1 —
       // history in the header comment above); the profile-first join

@@ -36,8 +36,12 @@ const SERVER_EXECUTION_FROM_ENV = experimentalOptionsFromEnv(Deno.env.get)
 // The ON arm's STEP-level skip guard (tasks/server-execution-on-skips.ts):
 // a step listed there for this file is skipped ONLY under the ON posture,
 // loudly (its reason is printed), and only while the entry exists — the OFF
-// arm and an unlisted step always run. The rapid notebook step currently has
-// no entry, so this guard runs it in both postures.
+// arm and an unlisted step always run. The rapid notebook step remains listed:
+// a direct CI ON unskip probe at 66a969ca0 ran the exact step and reached all
+// seven invocation traces, but finished with no notebook-bound action state or
+// rendered notes before its unchanged condition bound. That run did not carry
+// the off-repository launcher's recursive-schema signature. The skip protects
+// CI from the currently observed ON failure, while the OFF arm still runs.
 function onArmStepSkip(step: string): { ignore: boolean } {
   if (SERVER_EXECUTION_FROM_ENV !== true) return { ignore: false };
   const entry = serverExecutionOnStepSkip(
