@@ -30,6 +30,7 @@ import {
   runSurvey,
 } from "../lib/bulk.ts";
 import { addressArgument, VerbInputValidationError } from "../lib/callable.ts";
+import { refuseSectionMarker } from "../lib/section-marker.ts";
 import type {
   InvocationIdentity,
   InvocationOutcome,
@@ -1529,6 +1530,25 @@ export function withDeprecatedSpellingWarning<
  * they are allowed to differ (test/piece-data-spellings.test.ts pins
  * exactly that).
  */
+/**
+ * An action that refuses a `--` before it runs.
+ *
+ * `get` and `set` have no callable section, so a marker on their line sets
+ * words aside that nothing reads. `call` is not wrapped: it declares
+ * `stopEarly()` and its action reads what the marker set aside, which is the
+ * boundary the marker is for.
+ */
+export function withNoSectionMarker<
+  // deno-lint-ignore no-explicit-any
+  F extends (this: any, ...args: any[]) => unknown,
+>(spelling: string, action: F): F {
+  // deno-lint-ignore no-explicit-any
+  return function (this: any, ...args: any[]) {
+    refuseSectionMarker(spelling, this.getLiteralArgs());
+    return action.apply(this, args);
+  } as F;
+}
+
 export function dataCommandAction<
   // deno-lint-ignore no-explicit-any
   F extends (this: any, ...args: any[]) => unknown,
@@ -1654,7 +1674,12 @@ the way --input does.`,
       { conflicts: ["select"] },
     )
     .arguments("[addressOrPath:string] [path:string]")
-    .action(dataCommandAction(spelling, getCellValueFromCommand));
+    .action(
+      dataCommandAction(
+        spelling,
+        withNoSectionMarker(spelling, getCellValueFromCommand),
+      ),
+    );
 }
 
 /**
@@ -1704,7 +1729,12 @@ counts, so cf ${spelling} /of:fid1:.../title needs no path argument. A trailing
         '"#argument" reference suffix spells the same selection)',
     )
     .arguments("[addressOrPath:string] [path:string]")
-    .action(dataCommandAction(spelling, setCellValueFromCommand));
+    .action(
+      dataCommandAction(
+        spelling,
+        withNoSectionMarker(spelling, setCellValueFromCommand),
+      ),
+    );
 }
 
 /**
