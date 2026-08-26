@@ -214,6 +214,61 @@ Deno.test("CfHarnessEngine records the fabric session's resolved CFC posture in 
   assertEquals(sessionless.getRunState().fabricSessionCfc, undefined);
 });
 
+Deno.test("CfHarnessEngine refuses to resume under a fabric-session posture that contradicts the recorded one", () => {
+  const posturedSession = {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "my-space",
+    cfcPosture: "max-enforcement",
+  } as const;
+  const runState = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSession: posturedSession,
+  }).getRunState();
+
+  // The contradiction: the artifacts claim max-enforcement while the session
+  // the resumed engine would actually build runs the default posture.
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        workspaceHostPath: "/host/project",
+        fabricSession: {
+          apiUrl: posturedSession.apiUrl,
+          identityKeyPath: posturedSession.identityKeyPath,
+          space: posturedSession.space,
+        },
+        runState,
+      }),
+    Error,
+    "fabric session CFC posture mismatch on resume",
+  );
+
+  // The same session configuration resumes cleanly, record unchanged.
+  const resumed = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSession: posturedSession,
+    runState,
+  });
+  assertEquals(resumed.getRunState().fabricSessionCfc, {
+    enforcementMode: "enforce-explicit",
+    enforcementModeSource: "preset-pin",
+    flowLabels: "persist",
+    flowLabelsSource: "posture",
+    posture: "max-enforcement",
+  });
+
+  // A resume with no session at all keeps the record as history: no runtime
+  // exists for it to contradict.
+  const detached = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    runState,
+  });
+  assertEquals(
+    detached.getRunState().fabricSessionCfc?.posture,
+    "max-enforcement",
+  );
+});
+
 Deno.test("CfHarnessEngine grants no well-known handles without a fabric session", async () => {
   const engine = new CfHarnessEngine({
     workspaceHostPath: "/host/project",

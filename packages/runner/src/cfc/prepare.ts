@@ -4943,8 +4943,11 @@ const evaluateGatedConfidentiality = (
     readonly reference: unknown;
     readonly reason: string;
   }[];
+  /** A grant lookup could not be read; see `createTxCfcGrantResolver`. */
+  grantResolutionUnavailable: boolean;
 } => {
   const state = tx.getCfcState();
+  let grantResolutionUnavailable = false;
   const result = evaluateExchangeRules(
     { confidentiality: [...confidentiality] },
     state.policySnapshot,
@@ -4959,7 +4962,11 @@ const evaluateGatedConfidentiality = (
       // consulted address+digest into the prepare state for the B5-style
       // digest binding. Rides the same cfcPolicyEvaluation dial as the rest
       // of this evaluation — this function only runs when the dial is on.
-      grantResolver: createTxCfcGrantResolver(tx),
+      grantResolver: createTxCfcGrantResolver(tx, {
+        onUnavailable: () => {
+          grantResolutionUnavailable = true;
+        },
+      }),
       grantConsumption: consumption,
       modulePolicyResolver: createTxCfcModulePolicyResolver(
         tx,
@@ -4982,6 +4989,7 @@ const evaluateGatedConfidentiality = (
     exhausted: result.exhausted,
     firings: result.firings.length,
     resolutionFailures: result.resolutionFailures,
+    grantResolutionUnavailable,
   };
 };
 
@@ -5035,12 +5043,12 @@ const verifySinkRequestCeilings = (
   for (const [sink, ceiling] of gatedSinks) {
     let effective = consumed.confidentiality;
     // Whether the fits-decision below is a pure function of this
-    // transaction's data — a VERDICT (see verdict-reason.ts). Only one thing
-    // makes it not: an enforce-mode rewrite that could not resolve a module
-    // policy manifest, because the discharge that manifest carries might have
-    // admitted the request on an attempt that resolves it. `off` and
-    // `observe` decide on the raw label every time, so their refusal is
-    // always a verdict.
+    // transaction's data — a VERDICT (see verdict-reason.ts). Two things
+    // make it not, both enforce-mode availability holes in the rewrite: a
+    // module policy manifest that did not resolve, and a grant lookup that
+    // could not be read — either might carry the discharge that admits the
+    // request on an attempt that resolves it. `off` and `observe` decide on
+    // the raw label every time, so their refusal is always a verdict.
     let verdict = true;
     if (mode !== "off") {
       // Boundary context for this release site (spec §8.10.5 / §15.4): the
@@ -5091,7 +5099,8 @@ const verifySinkRequestCeilings = (
           continue;
         }
         effective = outcome.confidentiality;
-        verdict = outcome.resolutionFailures.length === 0;
+        verdict = outcome.resolutionFailures.length === 0 &&
+          !outcome.grantResolutionUnavailable;
       } else {
         // observe: decide exactly as `off` would; diagnose what enforce
         // would have done differently.

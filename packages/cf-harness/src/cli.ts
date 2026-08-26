@@ -1368,6 +1368,9 @@ export const parseCfHarnessCliArgs = async (
       CF_HARNESS_FABRIC_CFC_FLOW_LABELS: Deno.env.get(
         "CF_HARNESS_FABRIC_CFC_FLOW_LABELS",
       ),
+      CF_HARNESS_FABRIC_CFC_POSTURE: Deno.env.get(
+        "CF_HARNESS_FABRIC_CFC_POSTURE",
+      ),
       CF_HARNESS_SANDBOX_IMAGE: Deno.env.get("CF_HARNESS_SANDBOX_IMAGE"),
       CF_HARNESS_SANDBOX_DOCKER_RUNTIME: Deno.env.get(
         "CF_HARNESS_SANDBOX_DOCKER_RUNTIME",

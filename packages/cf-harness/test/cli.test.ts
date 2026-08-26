@@ -602,6 +602,38 @@ Deno.test("parseCfHarnessCliArgs accepts the fabric CFC posture from the environ
   });
 });
 
+Deno.test("parseCfHarnessCliArgs reads the fabric CFC posture from the process environment", async () => {
+  // Through the DEFAULT env projection (no injected `deps.env`), the path a
+  // real invocation takes: a key missing from that projection reads as unset
+  // even when the process environment carries it.
+  const names = [
+    "CF_HARNESS_FABRIC_API_URL",
+    "CF_HARNESS_FABRIC_IDENTITY",
+    "CF_HARNESS_FABRIC_SPACE",
+    "CF_HARNESS_FABRIC_CFC_POSTURE",
+  ] as const;
+  const previous = new Map(names.map((name) => [name, Deno.env.get(name)]));
+  Deno.env.set("CF_HARNESS_FABRIC_API_URL", "https://toolshed.example/");
+  Deno.env.set("CF_HARNESS_FABRIC_IDENTITY", "/keys/agent.pkcs8");
+  Deno.env.set("CF_HARNESS_FABRIC_SPACE", "my-space");
+  Deno.env.set("CF_HARNESS_FABRIC_CFC_POSTURE", "max-enforcement");
+  try {
+    const parsed = await parseCfHarnessCliArgs(
+      ["--prompt", "hi"],
+      { cwd: "/tmp/project" },
+    );
+    if ("help" in parsed) {
+      throw new Error("expected config result");
+    }
+    assertEquals(parsed.fabricSession?.cfcPosture, "max-enforcement");
+  } finally {
+    for (const [name, value] of previous) {
+      if (value === undefined) Deno.env.delete(name);
+      else Deno.env.set(name, value);
+    }
+  }
+});
+
 Deno.test("parseCfHarnessCliArgs rejects an unknown fabric CFC posture", async () => {
   await assertRejects(
     () =>

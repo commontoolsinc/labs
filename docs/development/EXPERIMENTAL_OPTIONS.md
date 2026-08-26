@@ -587,7 +587,11 @@ accepts `cfcPosture: "max-enforcement"`, which spreads
 label-metadata protection at `enforce`, trigger-read gating on, the §10.1
 standard prompt-caveat policy as the deployment's `cfcPolicyRecords`, and
 public-only confidentiality ceilings on the network-fetch sinks
-(`MAX_ENFORCEMENT_SINK_CEILINGS`). The bundle deliberately leaves the
+(`MAX_ENFORCEMENT_SINK_CEILINGS`). The llm sinks carry no ceiling, and a sink
+with no ceiling gets no gate: llm-sink release is ungoverned under this
+posture — pending a boundary-scoped admission mechanism, since an exact-match
+ceiling cannot admit the source-varying material-risk caveats an llm sink
+exists to process. The bundle deliberately leaves the
 enforcement-mode pin at `enforce-explicit` (strict stays a per-session host
 raise), and leaves `cfcDecomposedEnvelopes`, `cfcTrustConfig`, and
 `cfcPrefixProvenanceStats` alone. It is opt-in per runtime, never a fleet

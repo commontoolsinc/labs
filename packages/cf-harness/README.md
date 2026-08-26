@@ -951,8 +951,9 @@ read visible to that refusal. `--fabric-cfc-posture`
 session's runtime into the named CFC posture bundle
 (`MAX_ENFORCEMENT_CFC_OPTIONS` in the runner's presets): every staged
 enforcement dial on, the standard prompt-caveat policy loaded, and public-only
-ceilings on the network-fetch sinks. The two per-dial flags still apply over the
-bundle, so
+ceilings on the network-fetch sinks (the llm sinks carry no ceiling and are
+ungoverned by the posture, pending a boundary-scoped admission mechanism). The
+two per-dial flags still apply over the bundle, so
 `--fabric-cfc-posture max-enforcement
 --fabric-cfc-enforcement-mode enforce-strict`
 is the full-strictness configuration. These dials govern the fabric session's

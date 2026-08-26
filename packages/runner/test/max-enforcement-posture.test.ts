@@ -98,23 +98,23 @@ const seedSource = async (
 };
 
 /**
- * One egress attempt: read the labeled source, enqueue a `fetchText` sink
- * request, prepare, and hand back the prepare refusal reasons (empty when
- * the request fits). Aborts rather than commits — the verdict under test is
- * prepare's.
+ * One egress attempt: read the labeled source, enqueue a sink request,
+ * prepare, and hand back the prepare refusal reasons (empty when the request
+ * fits). Aborts rather than commits — the verdict under test is prepare's.
  */
 const readThenEgress = (
   runtime: Runtime,
   source: Cell<{ secret: string }>,
+  sink = "fetchText",
 ): string[] => {
   const tx = runtime.edit();
   expect(source.withTx(tx).get()?.secret).toBe("rosebud");
   enqueueSinkRequestPostCommitEffect(
     tx,
-    "fetchText",
-    "fetchText:max-enforcement-posture",
+    sink,
+    `${sink}:max-enforcement-posture`,
     createFrozenRequestSnapshot({ url: "https://example.com/exfil" }),
-    "fetchText-start",
+    `${sink}-start`,
     () => {},
   );
   tx.prepareCfc();
@@ -186,6 +186,26 @@ describe("max-enforcement CFC posture as one system (CT-2075)", () => {
         expect(reasons.join("\n")).toContain(
           "exceeds ceiling for fetchText",
         );
+      });
+    });
+  });
+
+  describe("the llm sinks are ungoverned by the posture", () => {
+    it("lets a secret-labeled value reach the llm sink with no gate at all", async () => {
+      // Pins the DOCUMENTED gap, not a desired end state: a sink with no
+      // ceiling gets no gate, so under this posture any confidentiality — a
+      // secret as much as a risk caveat — reaches the llm sinks without a
+      // policy evaluation running for them. Governing llm release needs the
+      // boundary-scoped admission mechanism described on
+      // MAX_ENFORCEMENT_SINK_CEILINGS; when that lands, this test flips to
+      // asserting the refusal.
+      await withPostureRuntime(async (runtime) => {
+        const cell = await seedSource(
+          runtime,
+          "posture-llm-secret",
+          { confidentiality: ["medical"] },
+        );
+        expect(readThenEgress(runtime, cell, "llm")).toEqual([]);
       });
     });
   });

@@ -736,7 +736,17 @@ const resolveSingleUseGrant = (
  */
 export const createTxCfcGrantResolver = (
   tx: IExtendedStorageTransaction,
-  opts: { readonly now?: () => number } = {},
+  opts: {
+    readonly now?: () => number;
+    /**
+     * Invoked when a grant lookup could not be READ (the catch arm below) —
+     * as opposed to resolving to no facts. A boundary decision that consults
+     * this resolver is only a deterministic verdict when no lookup was
+     * unavailable: an unsynced grant might discharge on the attempt that
+     * syncs it, so the caller uses this to withhold the terminal tag.
+     */
+    readonly onUnavailable?: () => void;
+  } = {},
 ): CfcGrantResolver => {
   const now = opts.now ?? Date.now;
   const memo = new Map<string, readonly CfcAtom[]>();
@@ -797,7 +807,12 @@ export const createTxCfcGrantResolver = (
       // unsynced replica, storage failure): the grant does not resolve; the
       // §4.9.3 posture. Nothing is memoized or recorded on this path — a
       // candidate that could not be read never produced a value this
-      // decision could have consumed.
+      // decision could have consumed. Reported as UNAVAILABLE rather than
+      // absent, conservatively covering the deterministic arms too (an
+      // undigestable bound field refuses identically every time): the cost
+      // of over-reporting is a bounded retry, the cost of under-reporting is
+      // a write that never lands.
+      opts.onUnavailable?.();
       return [];
     }
     return facts;

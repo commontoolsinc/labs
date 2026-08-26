@@ -528,15 +528,20 @@ export type CfcPosture = "max-enforcement";
 /**
  * Confidentiality ceilings of the max-enforcement posture: every network-fetch
  * egress sink is public-only (an empty ceiling admits no confidential atom),
- * so labeled data cannot leave over the network at all.
+ * so labeled data cannot leave through the network-fetch sinks.
  *
- * The llm sinks (`llm`, `llmDialog`, `generateText`, `generateObject`) are
- * deliberately NOT ceilinged. Ceiling membership is exact clause subsumption
- * (`atomsOutsideCeiling`) — a ceiling entry cannot admit "any material-risk
- * caveat regardless of `source`" — and risk-caveated ingested content is
- * exactly what an llm sink exists to process. Those flows are governed by the
- * §10.1 caveat policy this posture also carries, and by the llmDialog CFC
- * gates, not by an enumerable atom allowlist.
+ * The llm sinks (`llm`, `llmDialog`, `generateText`, `generateObject`) carry
+ * no ceiling, and a sink with no ceiling gets NO gate: under this posture,
+ * llm-sink release is ungoverned — any confidentiality, a secret as much as a
+ * risk caveat, reaches the llm sinks without a policy evaluation running for
+ * them. Ungated rather than public-only because ceiling membership is exact
+ * clause subsumption (`atomsOutsideCeiling`) — a ceiling entry cannot admit
+ * "any material-risk caveat regardless of `source`" — while risk-caveated
+ * ingested content is exactly what an llm sink exists to process, so a
+ * public-only ceiling would refuse the flows the sink is for. Governing llm
+ * release needs a boundary-scoped admission mechanism (a public-only ceiling
+ * paired with an exchange rule that admits the material-risk family at
+ * llm-class boundaries), which this posture does not yet carry.
  */
 export const MAX_ENFORCEMENT_SINK_CEILINGS: SinkMaxConfidentiality = Object
   .freeze({

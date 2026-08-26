@@ -580,6 +580,30 @@ export class CfHarnessEngine {
           : {}),
       }
       : undefined;
+    // A resumed run keeps its recorded fabric-session posture, so a session
+    // config that resolves to a DIFFERENT posture would put the artifacts in
+    // contradiction with the Runtime that executes: refuse rather than let
+    // either record win silently. A run resumed without a session keeps its
+    // record as history (no runtime exists for it to contradict), and a
+    // legacy record that never captured a posture stays absent rather than
+    // being backfilled.
+    if (
+      options.runState?.fabricSessionCfc !== undefined &&
+      fabricSessionCfc !== undefined
+    ) {
+      const recorded = options.runState.fabricSessionCfc;
+      if (
+        recorded.enforcementMode !== fabricSessionCfc.enforcementMode ||
+        recorded.flowLabels !== fabricSessionCfc.flowLabels ||
+        recorded.posture !== fabricSessionCfc.posture
+      ) {
+        throw new Error(
+          `fabric session CFC posture mismatch on resume: run state records ` +
+            `${JSON.stringify(recorded)} but the session configuration ` +
+            `resolves ${JSON.stringify(fabricSessionCfc)}`,
+        );
+      }
+    }
     this.#runState = options.runState ??
       createHarnessRunState({
         runId,
