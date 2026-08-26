@@ -53,11 +53,13 @@ import {
 export interface CellControllerLike<T> {
   getValue(): T;
   setValue(value: T): void;
+
   /**
    * Optional: run any pending (debounced) write immediately, so a following
    * read or commit sees the latest value.
    */
   flush?(): void;
+
   /**
    * Optional method to get the underlying CellHandle for direct async operations.
    * Used by FormFieldController to await cell.set() during flush.

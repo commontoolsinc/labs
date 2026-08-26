@@ -87,8 +87,10 @@ import { radioGroupStyles } from "./styles.ts";
 export interface RadioItem {
   /** Text shown to the user */
   label: string;
+
   /** Value returned when this option is selected */
   value: unknown;
+
   /** Disabled state for this option */
   disabled?: boolean;
 }

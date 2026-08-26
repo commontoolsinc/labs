@@ -41,6 +41,7 @@ export class TransformationContext {
   readonly factory: ts.NodeFactory;
   readonly sourceFile: ts.SourceFile;
   readonly options: TransformationOptions;
+
   /**
    * The cross-transformer communication registries every stage in this run
    * shares. Either injected through `options.state` or created here; the same

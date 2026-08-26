@@ -40,12 +40,16 @@ const AutocompleteItemArraySchema = {
 export interface AutocompleteItem {
   /** Value returned when selected */
   value: string;
+
   /** Display text (defaults to value if not provided) */
   label?: string;
+
   /** Category for grouping/disambiguation */
   group?: string;
+
   /** Additional search terms that match this item */
   searchAliases?: string[];
+
   /**
    * Arbitrary data to pass through with cf-select event.
    *
@@ -76,6 +80,7 @@ const _validateAutocompleteItem: _ValidateAutocompleteItem = true;
  */
 interface ProcessedItem {
   item: AutocompleteItem;
+
   /** All searchable words from label, value, group, and aliases - lowercased */
   words: string[];
 }

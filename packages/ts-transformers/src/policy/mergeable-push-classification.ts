@@ -42,10 +42,13 @@ export type MergeablePushMisuseKind =
 export interface MergeablePushMisuse {
   /** The `push(...)` call to point the diagnostic at. */
   readonly node: ts.Node;
+
   /** The collection path that is both read and pushed, relative to its root. */
   readonly path: readonly string[];
+
   /** The analyzed parameter/root the collection belongs to. */
   readonly rootName: string;
+
   /** How the explicit read relates to the push. */
   readonly kind: MergeablePushMisuseKind;
 }
@@ -60,8 +63,10 @@ export interface MergeableCollectionSite {
 export interface MergeablePushClassifierInput {
   /** The analyzed function; the ancestor climb and taint pass stop here. */
   readonly fn: ts.Node;
+
   /** Explicit read sites (`.get()` calls and `for..of` iterables). */
   readonly readSites: readonly MergeableCollectionSite[];
+
   /**
    * Resolves a local identifier to the collection it aliases (from the
    * capability walk's alias bindings), if any.
