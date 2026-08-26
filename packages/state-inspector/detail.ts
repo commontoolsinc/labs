@@ -40,14 +40,18 @@ import {
 /** A resolved reference to another entity (or a cross-space target). */
 export interface LinkRef {
   id: string;
+
   /** Resolved label of the target (if in this space). */
   label?: string;
   kind?: EntityKind;
+
   /** Cross-space target space DID. */
   space?: string;
   path?: string[];
+
   /** True when the target is in another space (not resolvable locally). */
   external?: boolean;
+
   /** Where this link sits in the source value (a JSON path), for "links" lists. */
   at?: string;
 }
@@ -75,28 +79,38 @@ export interface EntityDetail {
   kind: EntityKind;
   regime: string;
   owned: boolean;
+
   /** Context-aware label (key-name / import specifier / $NAME / module file). */
   label: string;
+
   /** Short human role, e.g. "input cell", "owned stream", "module import". */
   role: string;
+
   /** The key in the owner piece that names this entity, if any. */
   contextName?: string;
+
   /** Top-level document paths present (the control plane). */
   paths: string[];
   valueShape: string;
+
   /** The annotated value (links/streams normalized; depth-bounded). */
   value: unknown;
   valuePreview: string;
+
   /** The result JSONSchema (annotated), if the entity carries one. Streams and
    * named owned cells get their DECLARED schema resolved from the owner piece. */
   schema?: unknown;
   schemaKeys?: string[];
+
   /** Where `schema` came from when it isn't the entity's own (e.g. owner piece). */
   schemaSource?: string;
+
   /** True when the declared schema is a stream payload (`asCell:["stream"]`). */
   streamPayload?: boolean;
+
   /** IFC labels from a schema-as-value entity, if present. */
   ifc?: unknown;
+
   /** Parsed CFC labels from the `cfc` meta path, if present. */
   cfc?: CfcSummary;
   revisions: number;
@@ -112,11 +126,14 @@ export interface EntityDetail {
     argument?: LinkRef;
     internal?: LinkRef[];
     owner?: LinkRef;
+
     /** Legacy regime: the result cell a process cell produces (`resultRef`). */
     result?: LinkRef;
   };
+
   /** Outgoing data links found in the value, resolved to target labels. */
   outLinks: LinkRef[];
+
   /** Module source (only on module entities). */
   code?: string;
 }
@@ -279,6 +296,7 @@ function linksWithPaths(
 interface DetailContext {
   ownDid: string;
   labelOf: Map<string, { kind: EntityKind; label: string }>;
+
   /** entityId → { ownerId, key } naming it in its owner piece's value. */
   nameOf: Map<string, { owner: string; key: string }>;
   moduleIndex: Map<string, ModuleEntry>;

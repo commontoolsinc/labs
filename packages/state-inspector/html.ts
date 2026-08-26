@@ -35,20 +35,26 @@ import {
 export interface InspectorBundle {
   space: string;
   generatedAt: string;
+
   /** Base origin of the live shell, for deep links (`<base>/<space>/<id>`). */
   liveBase: string;
   summary: SpaceSummary;
   details: EntityDetail[];
+
   /** How far the entity scan behind `details` and `graph` reached. */
   extent: ScanExtent;
   graph: SpaceGraph;
   timeline: SpaceTimelineEntry[];
+
   /** Per-identity scopes present (space / user:<DID> / session:<DID>:*). */
   scopes: Scope[];
+
   /** Per-entity scope overlays — only for cells with non-space/multi-scope state. */
   overlays: ScopeOverlay[];
+
   /** Identities that touched this space (committers + per-user/session owners). */
   participants: Participant[];
+
   /** Contested entities (≥2 writer sessions); multi-user ones carry stale reads. */
   conflicts: ContendedEntity[];
 }

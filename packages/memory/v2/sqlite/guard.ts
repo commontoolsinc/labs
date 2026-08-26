@@ -33,12 +33,16 @@ export type StatementKind = "select" | "write" | "other";
 export type StatementClassification = {
   /** Leading-keyword classification. */
   kind: StatementKind;
+
   /** More than one statement (after dropping a trailing `;`). */
   multiple: boolean;
+
   /** A schema-qualified table reference (`db.table`) in a table position. */
   qualified: boolean;
+
   /** Contains a forbidden verb: PRAGMA / ATTACH / DETACH. */
   forbidden: boolean;
+
   /** References a core engine table name. */
   coreRef: boolean;
 };

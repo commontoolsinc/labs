@@ -90,8 +90,10 @@ function allEntities(
 export interface EntityFingerprint {
   id: string;
   scope: string;
+
   /** Entity classification (`piece`, `cell`, …) as the model reports it. */
   kind: string;
+
   /** `hashOf` the entity's durable `value`, or null when it has no value. */
   hash: string | null;
 }
@@ -99,10 +101,13 @@ export interface EntityFingerprint {
 export interface FingerprintReport {
   /** Hash over every included entity's (id, scope, hash) — the one number. */
   hash: string;
+
   /** Entities included in `hash`. */
   entities: number;
+
   /** Internal cells skipped because a manifest calls them compiler-generated. */
   excludedGenerated: number;
+
   /**
    * Ids some manifest calls generated and another calls named. Counted as
    * generated (rotation-prone wins, so the fingerprint stays stable) but
@@ -110,14 +115,17 @@ export interface FingerprintReport {
    * be silent. Zero on every store observed so far.
    */
   ambiguous: string[];
+
   /** Entities whose value could not be hashed, with the reason. Never silent. */
   unhashable: { id: string; reason: string }[];
+
   /** Per-entity hashes, id-sorted — the input to `diffFingerprints`. */
   perEntity: EntityFingerprint[];
 }
 
 export interface FingerprintOptions {
   branch?: string;
+
   /**
    * Refuse rather than fingerprint a space whose scope enumerates more than
    * this many entities, since the enumeration was truncated. A scope holding
@@ -125,6 +133,7 @@ export interface FingerprintOptions {
    * any real space; raise it only knowingly.
    */
   enumerationCap?: number;
+
   /**
    * Include compiler-generated internal cells. Default false. Turning this on
    * makes the fingerprint change on every pattern update by design; it exists

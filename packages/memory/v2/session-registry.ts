@@ -15,11 +15,13 @@ export type SessionState = {
   trackedIds: Set<string>;
   caughtUpLocalSeq: number;
   pendingCaughtUpLocalSeq: number;
+
   /** Set when delivery-state rollback re-inserted tombstone cache entries
    * for a lost frame's removes: the incremental refresh path never emits
    * removes, so the next sync must run a FULL watch evaluation to re-diff
    * them out (CT-1927 review, round 7). Self-clearing. */
   forceFullResync: boolean;
+
   /** Set once this session was admitted an explicit `entity_scope_key`
    * read (protocol.md §2's read row — lease holders only), and STICKY
    * for the session's life: it selects the session's WIRE VOCABULARY
@@ -33,6 +35,7 @@ export type SessionState = {
    * (`Server.#currentLeaseHolderExemption`); this bit alone never
    * admits one. */
   leaseHolderReads?: boolean;
+
   /** Set by a push pass (or a resume catch-up) that found
    * `leaseHolderReads` armed but no live lease: that pass withheld or
    * retracted the session's foreign instances. The first pass that
@@ -44,6 +47,7 @@ export type SessionState = {
   expiresAt: number | null;
   ownerConnectionId: string | null;
   principal?: string;
+
   /** The delegated READ binding (OW31; `SessionDescriptor.actingAs`):
    * the acting user — the space's ACL owner at open time — this
    * session's READ-class capability decisions resolve as. Never

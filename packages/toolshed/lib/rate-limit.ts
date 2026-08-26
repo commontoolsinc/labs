@@ -6,8 +6,10 @@
 export interface RateLimiterOptions {
   /** Burst size — the most a single key may spend at once. */
   capacity: number;
+
   /** Sustained rate. */
   refillPerSecond: number;
+
   /**
    * Hard cap on tracked keys, so the limiter cannot itself become the memory
    * exhaustion it exists to prevent. When full, the least-recently-used key is
@@ -15,6 +17,7 @@ export interface RateLimiterOptions {
    * number of distinct clients you expect.
    */
   maxKeys?: number;
+
   /**
    * Clock source, injectable so refill behavior can be tested by advancing a
    * counter rather than sleeping. A timing-dependent test of a rate limiter is

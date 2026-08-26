@@ -25,8 +25,10 @@ export interface IdentitySpace {
   empty: boolean;
   commits?: number;
   entities?: number;
+
   /** Scopes in this space OWNED BY this identity (user:<DID>, session:<DID>:*). */
   ownedScopes: Scope[];
+
   /** Total per-user + per-session entities this identity has here. */
   scopedEntities: number;
   evidence: string[];
@@ -34,12 +36,14 @@ export interface IdentitySpace {
 
 export interface IdentityWorld {
   did: string;
+
   /** A non-empty home space exists locally for this identity. */
   homePresent: boolean;
   spaces: IdentitySpace[];
   totals: {
     spaces: number;
     presentSpaces: number;
+
     /** Spaces where this identity has per-user/session state. */
     spacesWithScopedState: number;
     scopedEntities: number;

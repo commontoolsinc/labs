@@ -11,14 +11,19 @@ export interface OAuth2ProviderConfig {
   clientSecret: string;
   authorizationEndpointUri: string;
   tokenUri: string;
+
   /** Endpoint to fetch user profile after token exchange */
   userInfoEndpoint?: string;
+
   /** Map raw user info response to normalized shape */
   userInfoMapper?: (raw: Record<string, unknown>) => UserInfo;
+
   /** Space-separated default scopes */
   defaultScopes: string;
+
   /** Extra query params appended to the authorization URL (e.g. access_type, prompt) */
   extraAuthParams?: Record<string, string>;
+
   /**
    * How to authenticate on the token endpoint.
    * - "body" (default): client_id/secret in POST body
@@ -57,8 +62,10 @@ export interface CallbackResult extends Record<string, unknown> {
 export interface OAuth2HandlerOptions {
   /** Custom function to map OAuth2Tokens to the auth cell data shape */
   tokenMapper?: (token: OAuth2Tokens) => Record<string, unknown>;
+
   /** JSON schema to apply when reading/writing the auth cell */
   authSchema?: JSONSchema;
+
   /** Empty data object used when clearing auth (logout) */
   emptyAuthData?: Record<string, unknown>;
 }

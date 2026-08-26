@@ -192,6 +192,7 @@ export function columnOriginUnavailableReason(): string | undefined {
 export type ColumnOrigin = {
   /** Origin table, or null for an expression/computed/compound column. */
   table: string | null;
+
   /** Origin column, or null when there is no single source column. */
   column: string | null;
 };
