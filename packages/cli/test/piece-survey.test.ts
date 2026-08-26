@@ -17,6 +17,7 @@ import {
   inspectPieceFromCommand,
   parseRetargetFlag,
   piece,
+  planDiffLines,
   setQuietMode,
   surveyFromCommand,
 } from "../commands/piece.ts";
@@ -73,6 +74,95 @@ const COMPLETE: SurveyResult = {
   tally: [
     { phase: "members", patternIdentity: "idA", symbol: "default", count: 1 },
   ],
+  outside: [],
+  problems: [],
+  validatorFailures: [],
+  complete: true,
+};
+
+// Canonical addresses, so the plan file, the after-survey, and the diff's
+// own lines all spell one piece the same way.
+const M1 = "fid1:baedreiabcdefghijklmnopqrstuvwxyz0123456788";
+const M2 = "fid1:baedreibbcdefghijklmnopqrstuvwxyz0123456788";
+const M3 = "fid1:baedreicbcdefghijklmnopqrstuvwxyz0123456788";
+const HOLDER = "fid1:baedreidbcdefghijklmnopqrstuvwxyz0123456788";
+const EXTRA = "fid1:baedreiebcdefghijklmnopqrstuvwxyz0123456788";
+
+/** The plan an after-survey is held against: three members, then the holder. */
+const VERIFIED_PLAN = [
+  JSON.stringify({
+    kind: "piece-plan",
+    v: 1,
+    space: "did:key:test",
+    takenAt: "2026-08-24T00:00:00.000Z",
+    selector: "collection",
+    enumerated: { collection: 4, registry: 1, registeredOutside: 0 },
+  }),
+  ...[M1, M2, M3].map((address) =>
+    JSON.stringify({
+      piece: address,
+      phase: "members",
+      expect: { patternIdentity: "idA", symbol: "Member", retained: true },
+      op: {
+        kind: "retarget",
+        patternIdentity: "idB",
+        symbol: "Member",
+        source: { main: "/sources/member-v2.tsx", mainExport: "Member" },
+      },
+    })
+  ),
+  JSON.stringify({
+    piece: HOLDER,
+    phase: "holder",
+    expect: { patternIdentity: "idH", symbol: "default", retained: true },
+  }),
+  "",
+].join("\n");
+
+/**
+ * The survey taken after a run that half-converged: one member where the
+ * plan sent it, one still where it was, one somewhere the plan never named,
+ * the holder untouched, and a member filed since the plan was taken.
+ */
+const AFTER: SurveyResult = {
+  plan: {
+    header: {
+      kind: "piece-plan",
+      v: 1,
+      space: "did:key:test",
+      takenAt: "2026-08-25T00:00:00.000Z",
+      selector: "collection" as const,
+      enumerated: { collection: 5, registry: 1, registeredOutside: 0 },
+    },
+    rows: [
+      {
+        piece: M1,
+        phase: "members",
+        expect: { patternIdentity: "idB", symbol: "Member", retained: true },
+      },
+      {
+        piece: M2,
+        phase: "members",
+        expect: { patternIdentity: "idA", symbol: "Member", retained: true },
+      },
+      {
+        piece: M3,
+        phase: "members",
+        expect: { patternIdentity: "idC", symbol: "Member", retained: true },
+      },
+      {
+        piece: EXTRA,
+        phase: "members",
+        expect: { patternIdentity: "idA", symbol: "Member", retained: true },
+      },
+      {
+        piece: HOLDER,
+        phase: "holder",
+        expect: { patternIdentity: "idH", symbol: "default", retained: true },
+      },
+    ],
+  },
+  tally: [],
   outside: [],
   problems: [],
   validatorFailures: [],
@@ -453,11 +543,216 @@ describe("piece-survey", () => {
       expect(errors.join("\n")).toContain("of:fid1:orphan");
     });
 
+    it("reports the after-survey against the plan --diff names", async () => {
+      const hints: string[] = [];
+      const errors: string[] = [];
+      const out = await captureStdout(() =>
+        expect(
+          surveyFromCommand(
+            { ...OPTIONS, path: "topics", diff: "before.jsonl" },
+            {
+              runSurvey: () => Promise.resolve(AFTER),
+              readTextFile: (path) => {
+                expect(path.endsWith("/before.jsonl")).toBe(true);
+                return Promise.resolve(VERIFIED_PLAN);
+              },
+              printHint: (message) => {
+                hints.push(message);
+              },
+              printError: (message) => {
+                errors.push(message);
+              },
+              exit: (code) => {
+                expect(code).toBe(1);
+                throw new ExitSentinel();
+              },
+            },
+          ),
+        ).rejects.toThrow(ExitSentinel)
+      );
+      // The three verdicts a planned row can carry, in the words the design
+      // names them in, and all three whatever their counts.
+      expect(out.split("\n")).toEqual([
+        "moved as planned: 1",
+        "still outstanding: 1",
+        "moved to something the plan did not ask for: 1",
+        "unchanged, with no operation planned: 1",
+        "held by the space but not by the plan: 1",
+        "",
+      ]);
+      expect(hints).toEqual([
+        `held by the space but not by the plan: ${EXTRA}`,
+      ]);
+      const message = errors.join("\n");
+      expect(message).toContain("The after-survey is not what the plan asked");
+      expect(message).toContain(
+        `still outstanding: ${M2} idA#Member -> idA#Member`,
+      );
+      expect(message).toContain(
+        `moved to something the plan did not ask for: ${M3} ` +
+          `idA#Member -> idC#Member`,
+      );
+      // A row that reached what its plan asked of it is not a finding.
+      expect(message).not.toContain(M1);
+    });
+
+    it("exits zero when every planned row reached its target", async () => {
+      const landed: SurveyResult = {
+        ...AFTER,
+        plan: {
+          ...AFTER.plan,
+          rows: AFTER.plan.rows.filter((row) => row.piece !== EXTRA).map(
+            (row) =>
+              row.piece === HOLDER ? row : {
+                ...row,
+                expect: { ...row.expect, patternIdentity: "idB" },
+              },
+          ),
+        },
+      };
+      const out = await captureStdout(() =>
+        surveyFromCommand(
+          { ...OPTIONS, path: "topics", diff: "before.jsonl" },
+          {
+            runSurvey: () => Promise.resolve(landed),
+            readTextFile: () => Promise.resolve(VERIFIED_PLAN),
+            printHint: () => {},
+            exit: () => {
+              throw new ExitSentinel();
+            },
+          },
+        )
+      );
+      expect(out).toContain("moved as planned: 3");
+      expect(out).toContain("still outstanding: 0");
+    });
+
+    it("prints the diff rather than the survey result under --diff --json", async () => {
+      const out = await captureStdout(() =>
+        expect(
+          surveyFromCommand(
+            { ...OPTIONS, path: "topics", diff: "before.jsonl", json: true },
+            {
+              runSurvey: () => Promise.resolve(AFTER),
+              readTextFile: () => Promise.resolve(VERIFIED_PLAN),
+              printHint: () => {},
+              printError: () => {},
+              exit: () => {
+                throw new ExitSentinel();
+              },
+            },
+          ),
+        ).rejects.toThrow(ExitSentinel)
+      );
+      const diff = JSON.parse(out) as {
+        counts: Record<string, number>;
+        unplanned: string[];
+      };
+      expect(diff.counts).toEqual({
+        landed: 1,
+        outstanding: 1,
+        "moved-elsewhere": 1,
+        unchanged: 1,
+        changed: 0,
+        missing: 0,
+      });
+      expect(diff.unplanned).toEqual([EXTRA]);
+    });
+
+    it("keeps the after-survey plan going to --out beside the diff", async () => {
+      let written: { path: string; text: string } | undefined;
+      await captureStdout(() =>
+        expect(
+          surveyFromCommand(
+            {
+              ...OPTIONS,
+              path: "topics",
+              diff: "before.jsonl",
+              out: "after.jsonl",
+            },
+            {
+              runSurvey: () => Promise.resolve(AFTER),
+              readTextFile: () => Promise.resolve(VERIFIED_PLAN),
+              writeTextFile: (path, text) => {
+                written = { path: String(path), text: String(text) };
+                return Promise.resolve();
+              },
+              printHint: () => {},
+              printError: () => {},
+              exit: () => {
+                throw new ExitSentinel();
+              },
+            },
+          ),
+        ).rejects.toThrow(ExitSentinel)
+      );
+      expect(written?.path).toBe("after.jsonl");
+      expect(written?.text).toContain(M1);
+    });
+
+    it("leaves an incomplete survey uncompared, refusing it instead", async () => {
+      const errors: string[] = [];
+      await expect(
+        captureStdout(() =>
+          surveyFromCommand(
+            { ...OPTIONS, path: "topics", diff: "before.jsonl" },
+            {
+              runSurvey: () =>
+                Promise.resolve({
+                  ...AFTER,
+                  outside: [{
+                    piece: EXTRA,
+                    patternIdentity: "idA",
+                    symbol: "Member",
+                  }],
+                  complete: false,
+                }),
+              readTextFile: () => {
+                throw new Error("an incomplete survey reads no plan to diff");
+              },
+              printHint: () => {},
+              printError: (message) => {
+                errors.push(message);
+              },
+              exit: () => {
+                throw new ExitSentinel();
+              },
+            },
+          )
+        ),
+      ).rejects.toThrow(ExitSentinel);
+      expect(errors.join("\n")).toContain("Survey is incomplete");
+    });
+
     it("routes cf piece survey to surveyFromCommand", () => {
       const registered = piece.getCommand("survey") as unknown as {
         actionHandler: unknown;
       };
       expect(registered.actionHandler).toBe(surveyFromCommand);
+    });
+  });
+
+  describe("planDiffLines()", () => {
+    it("names the classes only a degraded run produces, when it has any", () => {
+      expect(planDiffLines({
+        rows: [],
+        unplanned: ["fid1:extra"],
+        counts: {
+          landed: 2,
+          outstanding: 0,
+          "moved-elsewhere": 0,
+          unchanged: 0,
+          changed: 1,
+          missing: 3,
+        },
+      })).toEqual([
+        "moved as planned: 2",
+        "still outstanding: 0",
+        "moved to something the plan did not ask for: 0",
+        "changed, with no operation planned: 1",
+        "gone from the selection: 3",
+        "held by the space but not by the plan: 1",
+      ]);
     });
   });
 
