@@ -35,6 +35,7 @@ was last checked against the code.
 | [`systemPatternAutoUpdate`](#systempatternautoupdate)                       | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental`                                             | on in the shell (same-toolshed system sources, including all roots); ALSO on server-side under server-execution (`SERVING_RUNTIME_EXPERIMENTAL` in `toolshed/lib/server-execution.ts` forces it true for every serving runtime, and `/api/meta` publishes it — serving-loop.md §3e; both runtimes then race the update, OCC-guarded and content-addressed — verification-coverage.md OW56 finding 2) | Bernhard Seefeld (#4611; shell default-on #4619)      | graduate to always-on, then delete flag                                                                                                                                                                                           | implemented, on in the shell                                                    |
 | [`computedCellIds`](#computedcellids)                                       | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental`                                                                          | on                                                                                   | Robin McCollum (#4659)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`lazyMaterialization`](#lazymaterialization)                               | `EXPERIMENTAL_LAZY_MATERIALIZATION` env, or `RuntimeOptions.experimental`                                                                       | on                                                                                   | Bernhard Seefeld                                      | fold into base read semantics, then delete flag                                                             | implemented, on by default                                         |
+| [`readerSchemaPrecedence`](#readerschemaprecedence)                         | `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` env, or `RuntimeOptions.experimental`                                                                   | on                                                                                   | Robin McCollum (#6338)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | off (`SERVER_EXECUTION_DEFAULT_ENABLED = false` — the ONE first-party default; Phase 7 landed flip-READY, DARK; explicit `true` = the ON arm) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | the flip is its OWN one-line PR after the plan's Phase-7 ordered gates; then soak on main, then delete the flag and the OFF path (the split-out post-soak PR) | Phases 1–6 landed; Phase 7 flip-READY landed dark (owner ruling 2026-08-16): OFF by default everywhere, the ON arm fully selectable and CI-tested on an ON-built binary |
 | [`cfcEnforcementMode`](#cfcenforcementmode)                                 | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse)                                                                    | `enforce-explicit`                                                                   | Bernhard Seefeld (#3263)                              | tighten default toward `enforce-strict`                                                                                                                                                                                           | active; ladder is permanent                                                     |
 | [`cfcFlowLabels`](#cfcflowlabels)                                           | `RuntimeOptions.cfcFlowLabels`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4011)                              | move toward `persist`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
@@ -67,7 +68,8 @@ These flags make up the `ExperimentalOptions` interface in
 [`packages/runner/src/runtime.ts`](../../packages/runner/src/runtime.ts). They
 are passed as `new Runtime({ experimental: { ... } })`. Each flag defaults to
 `undefined`, which means "take the built-in default". `commitPreconditions`,
-`plainResultReceipts`, `computedCellIds` and `lazyMaterialization` default on;
+`plainResultReceipts`, `computedCellIds`, `lazyMaterialization` and
+`readerSchemaPrecedence` default on;
 `serverExecution` resolves an unset flag to the ONE first-party default
 `SERVER_EXECUTION_DEFAULT_ENABLED` in the deployed-topology presets — `false`
 today, Phase 7 having landed flip-ready DARK (its section); the other flags in
@@ -550,6 +552,42 @@ proxy; unmarked reads are untouched, so the standing handle long-lived consumers
 rely on keeps tracking current state.
 
 Still unbuilt, and recorded in the plan: handlers materialize eagerly.
+
+### `readerSchemaPrecedence`
+
+- **Toggle via.** `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` environment variable
+  (through the canonical env registry) or
+  `RuntimeOptions.experimental.readerSchemaPrecedence`. The ambient control
+  point is `setReaderSchemaPrecedenceConfig` in
+  [`packages/runner/src/reader-schema-precedence-config.ts`](../../packages/runner/src/reader-schema-precedence-config.ts).
+  Runtime-local: the one `"client"`-authority flag in
+  `EXPERIMENTAL_FLAG_AUTHORITY` — it is not published at `/api/meta`, clients
+  do not adopt it from a server, and nothing about it is negotiated or carried
+  on the wire; each process resolves its own link crossings.
+- **Added by.** Robin McCollum, in #6338.
+- **Purpose.** Resolves the schema at a link crossing by reader precedence
+  (`combineSchemaForLink` in
+  [`packages/runner/src/traverse.ts`](../../packages/runner/src/traverse.ts)):
+  the reader's schema is used as it stands, and the link's stored schema is
+  adopted only where the reader is agnostic — a true or empty reader adopts it
+  under the reader's own `asCell` wrapper, and a false reader stays false. A
+  link routinely describes (and requires) more of its target than the reader
+  asked for; under the legacy strict pseudo-intersection those extras widened
+  what a read loaded and tracked, and a link-only `required` entry could void
+  the reader's narrower view. Spec:
+  [`docs/specs/memory-v2/05-queries.md`](../specs/memory-v2/05-queries.md)
+  §5.3.4.
+- **Current default and planned end state.** On by default; an explicit
+  `false` restores the strict pseudo-intersection (`combineSchema`) at link
+  crossings as a rollback override. The flag gates only the combine rule: the
+  cfc relevance marking off the link schema (`schemaHasIfc` in
+  `validateAndTransform`) is unconditional in both arms.
+- **Status on 2026-08-26.** Landed on by default in #6338; the rollback arm is
+  covered by a unit test in `packages/runner/test/combine-schema.test.ts`.
+- **Path to removal.** Soak the default; then remove the env mapping, the
+  runtime option, the ambient config module, the rollback branch in
+  `combineSchemaForLink` and its unit test, and the combine-mode bit in the
+  link-hop selector memo key.
 
 ## Category 2: Contextual Flow Control enforcement rollout dials
 

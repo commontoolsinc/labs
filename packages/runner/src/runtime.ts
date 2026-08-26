@@ -25,6 +25,10 @@ import {
   getContentAddressedSchemasConfig,
   setContentAddressedSchemasConfig,
 } from "./schema-doc-config.ts";
+import {
+  getReaderSchemaPrecedenceConfig,
+  setReaderSchemaPrecedenceConfig,
+} from "./reader-schema-precedence-config.ts";
 import { StaticCache } from "@commonfabric/static";
 import {
   type AsyncLocalStore,
@@ -264,6 +268,17 @@ export interface ExperimentalOptions {
    * `docs/plans/lazy-cell-materialization.md`.
    */
   lazyMaterialization?: boolean | undefined;
+
+  /**
+   * Resolve the schema at a link crossing by reader precedence
+   * (`combineSchemaForLink`): the reader's schema stands as-is, and the
+   * link's schema is adopted only where the reader is agnostic (true or
+   * empty; a false reader stays false). Runtime-local — nothing is
+   * negotiated or carried on the wire. On by default; pass `false` as a
+   * temporary rollback override to the legacy strict pseudo-intersection
+   * at hops.
+   */
+  readerSchemaPrecedence?: boolean | undefined;
 
   /**
    * Roll toolshed-backed patterns forward in place when their source serves a
@@ -1315,6 +1330,9 @@ export class Runtime {
     );
     this.experimental.contentAddressedSchemas =
       getContentAddressedSchemasConfig();
+    setReaderSchemaPrecedenceConfig(this.experimental.readerSchemaPrecedence);
+    this.experimental.readerSchemaPrecedence =
+      getReaderSchemaPrecedenceConfig();
     // The sync schema table stays negotiated under this flag: the two
     // mechanisms dedupe the same link-schema positions and compose (the
     // table encoder skips reference-only positions), and stored links

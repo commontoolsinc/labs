@@ -1,6 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { combineSchema, combineSchemaForLink } from "../src/traverse.ts";
+import {
+  resetReaderSchemaPrecedenceConfig,
+  setReaderSchemaPrecedenceConfig,
+} from "../src/reader-schema-precedence-config.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 
 describe("combineSchema type handling", () => {
@@ -621,5 +625,18 @@ describe("combineSchemaForLink reader precedence", () => {
     } as const satisfies JSONSchema;
 
     expect(combineSchemaForLink(true, labeledLink)).toEqual(labeledLink);
+  });
+
+  // The `readerSchemaPrecedence` experimental flag
+  // (docs/development/EXPERIMENTAL_OPTIONS.md) is the rollback override.
+  it("restores the strict pseudo-intersection when the rollback flag is off", () => {
+    setReaderSchemaPrecedenceConfig(false);
+    try {
+      expect(combineSchemaForLink(readerSchema, linkContactSchema)).toEqual(
+        combineSchema(readerSchema, linkContactSchema),
+      );
+    } finally {
+      resetReaderSchemaPrecedenceConfig();
+    }
   });
 });

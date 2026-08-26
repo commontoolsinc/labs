@@ -58,6 +58,7 @@ import {
   onSchemaRegistryClear,
   registerSchemaDocument,
 } from "./schema-registry.ts";
+import { getReaderSchemaPrecedenceConfig } from "./reader-schema-precedence-config.ts";
 import type {
   CellScope,
   JSONObject,
@@ -327,9 +328,15 @@ function narrowAndCombineSelectorForLink(
   targetPath: readonly string[],
   linkSchema: JSONSchema | undefined,
 ): SchemaPathSelector {
+  // The combine mode leads the key: the cached selector embeds
+  // `combineOptionalSchema`'s output, which the `readerSchemaPrecedence`
+  // flag changes, and the cache outlives a mid-process toggle (tests
+  // exercise both arms).
   const key = isMemoizableSchemaInput(selector.schema) &&
       isMemoizableSchemaInput(linkSchema)
-    ? `${pathKey(selector.path)}|${pathKey(docPath)}|${pathKey(targetPath)}|${
+    ? `${getReaderSchemaPrecedenceConfig() ? "p" : "s"}|${
+      pathKey(selector.path)
+    }|${pathKey(docPath)}|${pathKey(targetPath)}|${
       hashSchema(selector.schema)
     }|${hashSchema(linkSchema)}`
     : undefined;
@@ -2972,6 +2979,14 @@ export function combineSchemaForLink(
   parentSchema: JSONSchema,
   linkSchema: JSONSchema,
 ): JSONSchema {
+  // The `readerSchemaPrecedence` experimental flag
+  // (docs/development/EXPERIMENTAL_OPTIONS.md) is the rollback override:
+  // off restores the strict pseudo-intersection at link crossings. The
+  // flag is runtime-local — each process resolves its own hops; nothing
+  // is negotiated or carried on the wire.
+  if (!getReaderSchemaPrecedenceConfig()) {
+    return combineSchema(parentSchema, linkSchema);
+  }
   if (ContextualFlowControl.isFalseSchema(parentSchema)) {
     return parentSchema;
   }

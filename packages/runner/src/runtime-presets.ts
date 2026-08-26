@@ -235,6 +235,9 @@ export const EXPERIMENTAL_ENV_VARS = {
   systemPatternAutoUpdate: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE",
   computedCellIds: "EXPERIMENTAL_COMPUTED_CELL_IDS",
   lazyMaterialization: "EXPERIMENTAL_LAZY_MATERIALIZATION",
+  // Reader precedence at link crossings is default-on; env-reachable so a
+  // process can opt out with an explicit "false" while the flag exists.
+  readerSchemaPrecedence: "EXPERIMENTAL_READER_SCHEMA_PRECEDENCE",
   // Server-execution v2 (docs/specs/server-side-execution/): the
   // deployed-topology presets below resolve an unset flag to
   // `SERVER_EXECUTION_DEFAULT_ENABLED`, so such a process always runs a
@@ -306,12 +309,13 @@ export type ExperimentalFlagAuthority = "server" | "client";
  * on this?" is a decision on record rather than whatever the default happened
  * to be.
  *
- * Every flag is server-authoritative today. That is the safe direction rather
- * than a coincidence — each one is visible in what gets written (the link and
- * entity-id encodings, receipt contents, schema references), in what the
- * server admits (commit preconditions, per-class admission), or in which side
- * runs the compute at all. `"client"` is here for the flag that gates a
- * purely local experiment; nothing qualifies yet.
+ * Nearly every flag is server-authoritative. That is the safe direction
+ * rather than a coincidence — each one is visible in what gets written (the
+ * link and entity-id encodings, receipt contents, schema references), in what
+ * the server admits (commit preconditions, per-class admission), or in which
+ * side runs the compute at all. `readerSchemaPrecedence` is the one
+ * `"client"` flag: it gates a read-side rule with nothing written or
+ * admitted differently.
  */
 export const EXPERIMENTAL_FLAG_AUTHORITY = {
   // Link serialization: the two encodings are a hard mismatch, which the
@@ -340,6 +344,11 @@ export const EXPERIMENTAL_FLAG_AUTHORITY = {
   lazyMaterialization: "server",
   // The whole point of the flag is which side computes what is stored.
   serverExecution: "server",
+  // Read-side only: the combine rule at a link crossing shapes what a
+  // process's own reads select, and nothing written, admitted, or negotiated
+  // differs between the arms. Each process resolves its own hops; a mixed
+  // fleet reads the same stored data either way.
+  readerSchemaPrecedence: "client",
 } as const satisfies Record<
   keyof ExperimentalOptions,
   ExperimentalFlagAuthority
