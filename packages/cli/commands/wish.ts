@@ -252,6 +252,6 @@ export const wish = new Command()
   .action(async function (options, target) {
     // `wish` reads a target directly, so it has no callable section and no
     // marker to close one. See lib/section-marker.ts.
-    refuseSectionMarker("wish", this.getLiteralArgs());
+    refuseSectionMarker("wish", this.getRawArgs());
     await wishAction(options, target);
   });

@@ -1542,10 +1542,12 @@ export function dataCommandAction<
 /**
  * An action that refuses a `--` before it runs.
  *
- * `get` and `set` have no callable section, so a marker on their line sets
- * words aside that nothing reads. `call` is not wrapped: it declares
- * `stopEarly()` and its action reads what the marker set aside, which is the
- * boundary the marker is for.
+ * `get` and `set` have no callable section, so a marker on their line closes
+ * nothing and sets aside whatever follows it. The raw arguments are what carry
+ * the marker: a trailing one sets nothing aside, so the literal arguments
+ * cannot tell it from a line that wrote none. `call` is not wrapped — it
+ * declares `stopEarly()` and its action reads what the marker set aside, which
+ * is the boundary the marker is for.
  */
 export function withNoSectionMarker<
   // deno-lint-ignore no-explicit-any
@@ -1553,7 +1555,7 @@ export function withNoSectionMarker<
 >(spelling: string, action: F): F {
   // deno-lint-ignore no-explicit-any
   return function (this: any, ...args: any[]) {
-    refuseSectionMarker(spelling, this.getLiteralArgs());
+    refuseSectionMarker(spelling, this.getRawArgs());
     return action.apply(this, args);
   } as F;
 }

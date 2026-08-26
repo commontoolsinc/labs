@@ -16,17 +16,38 @@ import { wish } from "../commands/wish.ts";
  */
 describe("section-marker", () => {
   describe("refuseSectionMarker()", () => {
-    it("returns for a line that wrote no marker", () => {
+    it("returns for arguments carrying no marker", () => {
       expect(() => refuseSectionMarker("get", [])).not.toThrow();
+      expect(() => refuseSectionMarker("get", ["addr", "items/0"]))
+        .not.toThrow();
+    });
+
+    it("refuses a marker with nothing after it", () => {
+      // The case the literal arguments cannot see: a trailing marker sets no
+      // words aside, so `getLiteralArgs()` is empty and identical to a line
+      // that wrote none. Reading the marker itself is what tells them apart.
+      expect(() => refuseSectionMarker("get", ["addr", "--"]))
+        .toThrow(/closes nothing/);
     });
 
     it("names the words the marker would have set aside", () => {
-      expect(() => refuseSectionMarker("get", ["--select", "title"]))
+      expect(() => refuseSectionMarker("get", ["--", "--select", "title"]))
         .toThrow(/--select title/);
     });
 
+    it("writes the corrected line without the marker", () => {
+      let message = "";
+      try {
+        refuseSectionMarker("get", ["addr", "--", "--select", "title"]);
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).toContain("written:  cf get addr -- --select title");
+      expect(message).toContain("write:    cf get addr --select title");
+    });
+
     it("names the command the marker was written on", () => {
-      expect(() => refuseSectionMarker("piece get", ["--select", "title"]))
+      expect(() => refuseSectionMarker("piece get", ["--", "--select", "t"]))
         .toThrow(/cf piece get/);
     });
 
@@ -35,7 +56,7 @@ describe("section-marker", () => {
       // spelling does work.
       let message = "";
       try {
-        refuseSectionMarker("wish", ["--select", "name"]);
+        refuseSectionMarker("wish", ["--", "--select", "name"]);
       } catch (error) {
         message = (error as Error).message;
       }
@@ -44,7 +65,8 @@ describe("section-marker", () => {
     });
 
     it("throws a ValidationError, so the CLI reports it as a usage error", () => {
-      expect(() => refuseSectionMarker("get", ["x"])).toThrow(ValidationError);
+      expect(() => refuseSectionMarker("get", ["--", "x"]))
+        .toThrow(ValidationError);
     });
   });
 
@@ -122,6 +144,23 @@ describe("section-marker", () => {
         "name",
       ]);
       expect(text).toContain("closes a callable's section");
+    });
+
+    it("refuses a trailing marker on every command that has no section", async () => {
+      // `cf get addr --` sets no words aside, so the literal arguments are
+      // empty and look exactly like `cf get addr`. Each of these three would
+      // have been accepted by a guard reading what followed the marker.
+      for (
+        const [name, command, args] of [
+          ["get", pieceDataCommand("get"), ["addr", "--"]],
+          ["set", pieceDataCommand("set"), ["addr", "--"]],
+          ["wish", wish, ["#profile", "--"]],
+        ] as const
+      ) {
+        const { text } = await outputFrom(command, [...args]);
+        expect(text, name).toContain("closes a callable's section");
+        expect(text, name).toContain("closes nothing");
+      }
     });
 
     it("leaves a line that writes no marker to its own validation", async () => {

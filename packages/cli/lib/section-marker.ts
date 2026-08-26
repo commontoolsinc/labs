@@ -23,25 +23,38 @@ import { ValidationError } from "@cliffy/command";
 /**
  * Refuse a `--` written on a command that has no callable section.
  *
- * `literalArgs` is what the parser set aside at the marker. Empty means no
- * marker was written, which is every ordinary line.
+ * `rawArgs` is the command's own argument list, marker included. The marker is
+ * read from there rather than from what followed it: a trailing `cf get addr
+ * --` sets no words aside, so the literal arguments are empty and identical to
+ * a line that wrote no marker at all. Judging by what followed would accept the
+ * one spelling that most looks like the caller expected the marker to mean
+ * something.
  *
- * The message names the words that would have been discarded and the line that
+ * The message names the words that would have been set aside and the line that
  * works, because every caller who meets it wrote a spelling they expected to
  * mean something.
  */
 export function refuseSectionMarker(
   spelling: string,
-  literalArgs: readonly string[],
+  rawArgs: readonly string[],
 ): void {
-  if (literalArgs.length === 0) return;
-  const discarded = literalArgs.join(" ");
+  const marker = rawArgs.indexOf("--");
+  if (marker === -1) return;
+
+  const before = rawArgs.slice(0, marker);
+  const after = rawArgs.slice(marker + 1);
+  const written = [...before, "--", ...after].join(" ");
+  const corrected = [...before, ...after].join(" ");
+  const consequence = after.length > 0
+    ? "The words after it are set aside rather than read, so this line would " +
+      "return a value you did not ask for."
+    : "Nothing follows it here, so it closes nothing.";
+
   throw new ValidationError(
     `\`--\` closes a callable's section, and \`cf ${spelling}\` has none. ` +
-      `The words after it are set aside rather than read, so this line would ` +
-      `return a value you did not ask for.\n\n` +
-      `  written:  cf ${spelling} … -- ${discarded}\n` +
-      `  write:    cf ${spelling} … ${discarded}\n\n` +
+      `${consequence}\n\n` +
+      `  written:  cf ${spelling} ${written}\n` +
+      `  write:    cf ${spelling} ${corrected}\n\n` +
       `\`--\` is written on \`cf call\` and \`cf exec\`, where a callable's ` +
       `own flags come first and the marker ends them.`,
   );
