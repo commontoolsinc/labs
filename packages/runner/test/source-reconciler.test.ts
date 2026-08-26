@@ -538,6 +538,52 @@ describe("piece source reconciliation", () => {
       expect(getPatternIdentityRef(piece)).toEqual(movedRef);
     });
 
+    it("follows the new target when the piece's own origin is repointed", async () => {
+      // Changing where a piece looks is a change the piece's own watcher
+      // carries, so the update lands without anyone opening the piece again.
+      const piece = await preparePiece(refuseEveryFetch);
+      const first = runtime.getCell(
+        piece.space,
+        `reconcile-upstream-${crypto.randomUUID()}`,
+      );
+      await runtime.setup(
+        undefined,
+        await compileMarkerPattern("v1"),
+        {},
+        first,
+      );
+      await stampSource(
+        piece,
+        `cf:/${piece.space}/${first.getAsNormalizedFullLink().id}`,
+      );
+      expect(await reconcile(piece)).toBe("current");
+
+      const second = runtime.getCell(
+        piece.space,
+        `reconcile-upstream-${crypto.randomUUID()}`,
+      );
+      const moved = await compileMarkerPattern("v2");
+      const movedRef = runtime.patternManager.getArtifactEntryRef(moved)!;
+      await runtime.setup(undefined, moved, {}, second);
+
+      const reached = defer<void>();
+      const cancel = piece.sinkMeta("patternIdentity", (value) => {
+        const ref = value as { identity?: string } | undefined;
+        if (ref?.identity === movedRef.identity) reached.resolve();
+      });
+      try {
+        await stampSource(
+          piece,
+          `cf:/${piece.space}/${second.getAsNormalizedFullLink().id}`,
+        );
+        await reached.promise;
+      } finally {
+        cancel();
+      }
+      await runtime.sourceReconciler.idle();
+      expect(getPatternIdentityRef(piece)).toEqual(movedRef);
+    });
+
     it("stops following once the piece stops", async () => {
       const piece = await preparePiece(refuseEveryFetch);
       const upstreamPiece = runtime.getCell(
