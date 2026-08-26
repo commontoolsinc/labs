@@ -16,29 +16,23 @@ const logger = getLogger("builtins", { enabled: true, level: "warn" });
  * error — and announces those cells again, because the announcement rode the
  * abandoned transaction and a reader has nothing to look at without it.
  *
- * One transaction for both, attributed to the builtin, and carrying the served
- * effect's completion key where there is one: a writeback that names neither is
- * refused under the serving posture, which would leave the pattern pointing at
- * nothing — the state this exists to prevent.
+ * One transaction for both, attributed to the builtin and carrying the served
+ * effect's completion key: a writeback naming neither is refused under the
+ * serving posture, which would leave the pattern pointing at nothing — the
+ * state this exists to prevent. Every request staged on the outbox has such a
+ * key, so it is required rather than defaulted.
  */
 export async function settleAbandonedRequest(
   runtime: Runtime,
   builtinId: string,
-  effectKey: string | undefined,
+  effectKey: string,
   write: (tx: IExtendedStorageTransaction) => void,
 ): Promise<void> {
   const { error } = await runtime.editWithRetry((tx) => {
     if (runtime.cfcEnforcementMode !== "disabled") {
       tx.setCfcImplementationIdentity({ kind: "builtin", builtinId });
     }
-    if (effectKey !== undefined) {
-      markEffectCompletion(tx, effectKey);
-    } else {
-      runtime.stampServerRun(tx, {
-        actionId: `${builtinId}/abandoned`,
-        kind: "bookkeeping",
-      });
-    }
+    markEffectCompletion(tx, effectKey);
     write(tx);
   });
   if (error) {

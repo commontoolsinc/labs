@@ -104,6 +104,48 @@ describe("a builtin whose staged request is abandoned", () => {
     expect(result.withTx().key("pending").get()).toBe(false);
   });
 
+  it("reports the refusal on generateObject's error cell with no tools", async () => {
+    // The tools path and the direct path build and settle their requests
+    // separately, so a request with no tools reaches the second of them.
+    const { pattern, generateObject, Cell: BuilderCell } = commonfabric;
+    const testPattern = pattern<Record<string, never>>(() => {
+      const messages = BuilderCell.of([{
+        role: "user",
+        content: "a briefing the result store does not declare",
+      }], {
+        type: "array",
+        items: { type: "object", additionalProperties: true },
+        ifc: { confidentiality: [PROMPT_INFLUENCE] },
+      });
+      return generateObject({
+        messages,
+        schema: {
+          type: "object",
+          properties: { ok: { type: "boolean" } },
+          required: ["ok"],
+          additionalProperties: false,
+        },
+        // deno-lint-ignore no-explicit-any
+      } as any);
+    });
+    const resultCell = runtime.getCell(
+      space,
+      "generateObject-direct-abandoned",
+      testPattern.resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+
+    const settled = await waitForError(result);
+    await runtime.settled();
+
+    expect(settled.error).toContain("was refused before it started");
+    expect(settled.error).not.toContain(PROMPT_INFLUENCE.source);
+    expect(result.withTx().key("pending").get()).toBe(false);
+  });
+
   it("reports the refusal on generateText's error cell", async () => {
     const { pattern, generateText, Cell: BuilderCell } = commonfabric;
     const testPattern = pattern<Record<string, never>>(() => {
