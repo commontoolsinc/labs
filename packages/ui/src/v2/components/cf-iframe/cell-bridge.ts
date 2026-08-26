@@ -260,7 +260,16 @@ export async function resolveCellContextBridge(
       : []),
   ]);
   const entries = await Promise.all([...names].map(async (name) => {
-    const cell = await context.key(name).resolveAsCell();
+    const source = context.key(name);
+    const declaredKind = resourceKinds[name] ?? cellKind(properties[name]);
+    if (declaredKind === "sqlite") {
+      // Pull the source path, not only its resolved target. A scoped SQLite
+      // factory can be lazy for this browser session; the source path retains
+      // the producer edge that materializes its concrete handle. The resolved
+      // target remains the capability authority exposed below.
+      await source.pull();
+    }
+    const cell = await source.resolveAsCell();
     const resolvedSchema = cell.ref().schema;
     return [
       name,

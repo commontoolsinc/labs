@@ -409,6 +409,17 @@ export class CellHandle<T = unknown> {
     return this.#value;
   }
 
+  /** Demand lazy producers before fetching the current value. */
+  async pull(): Promise<Readonly<T> | undefined> {
+    const response = await this.#conn.request<RequestType.CellPull>({
+      type: RequestType.CellPull,
+      cell: this.ref(),
+    });
+
+    this.#value = CellHandle.deserialize<T>(this, response.value) as T;
+    return this.#value;
+  }
+
   /**
    * Resolve links in this cell to get the actual cell it points to.
    * Returns a new CellHandle pointing to the resolved cell.

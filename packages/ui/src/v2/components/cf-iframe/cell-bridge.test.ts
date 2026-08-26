@@ -204,6 +204,9 @@ describe("cf-iframe cell bridge", () => {
               },
             });
           }
+          if (request.type === RequestType.CellPull) {
+            return Promise.resolve({ value: undefined });
+          }
           if (request.type === RequestType.CellResolveAsCell) {
             if (request.cell.path.length === 0) {
               return Promise.resolve({
@@ -250,6 +253,11 @@ describe("cf-iframe cell bridge", () => {
     expect(Object.keys(bridge.resources)).toEqual(["command", "database"]);
     expect(bridge.resources.command.kind).toBe("cell");
     expect(bridge.resources.database.kind).toBe("sqlite");
+    expect(
+      requests.filter(({ type }) => type === RequestType.CellPull).map(
+        ({ cell }) => cell.path,
+      ),
+    ).toEqual([["database"]]);
     expect(
       requests.filter(({ type, cell }) =>
         type === RequestType.CellResolveAsCell && cell.path.length > 0

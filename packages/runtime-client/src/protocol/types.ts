@@ -94,6 +94,13 @@ export enum RequestType {
   CellGet = "cell:get",
 
   /**
+   * Pulls a cell through the scheduler before reading it. Unlike
+   * {@link CellGet}, this demands lazy producers and waits for their
+   * transitive work to settle.
+   */
+  CellPull = "cell:pull",
+
+  /**
    * Overwrites a cell's value blindly: the write carries no value-equality
    * precondition, so a concurrent write to the same cell does not make it
    * fail. That is not the same as unconditional. A blind write still carries
@@ -772,6 +779,15 @@ export type CellGetRequest = BaseRequest & {
    * stream fields that the value alone does not.
    */
   includeRef?: boolean;
+};
+
+/** The {@link RequestType.CellPull} request. */
+export type CellPullRequest = BaseRequest & {
+  type: RequestType.CellPull;
+  /**
+   * The cell whose producers to demand before reading its current value.
+   */
+  cell: CellRef;
 };
 
 /**
@@ -2435,6 +2451,7 @@ export type IPCClientRequest =
   | InitializeRequest
   | DisposeRequest
   | CellGetRequest
+  | CellPullRequest
   | CellSetRequest
   | CellPushRequest
   | CellSendRequest
@@ -3042,6 +3059,10 @@ export type Commands = {
   // Cell requests
   [RequestType.CellGet]: {
     request: CellGetRequest;
+    response: CellGetResponse;
+  };
+  [RequestType.CellPull]: {
+    request: CellPullRequest;
     response: CellGetResponse;
   };
   [RequestType.CellSet]: {

@@ -23,6 +23,32 @@ import {
 import { cellRefToKey } from "@/shared/utils.ts";
 
 describe("cell-handle", () => {
+  it("pulls lazy producers before caching the returned value", async () => {
+    const requests: unknown[] = [];
+    const ref: CellRef = {
+      id: "of:lazy-cell" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "session",
+      path: [],
+    };
+    const runtime = {
+      [$conn]: () => ({
+        request: (request: unknown) => {
+          requests.push(request);
+          return Promise.resolve({ value: { ready: true } });
+        },
+      }),
+    } as unknown as RuntimeClient;
+    const cell = new CellHandle<{ ready: boolean }>(runtime, ref);
+
+    await expect(cell.pull()).resolves.toEqual({ ready: true });
+    expect(cell.get()).toEqual({ ready: true });
+    expect(requests).toEqual([{
+      type: RequestType.CellPull,
+      cell: ref,
+    }]);
+  });
+
   describe("SQLite IPC", () => {
     const ref: CellRef = {
       id: "of:database" as CellRef["id"],

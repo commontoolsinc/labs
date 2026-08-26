@@ -2024,6 +2024,41 @@ describe("runtime-processor", () => {
     });
   });
 
+  describe("RuntimeProcessor cell pull IPC", () => {
+    it("pulls scheduler producers before returning a cell value", async () => {
+      const ref: CellRef = {
+        id: "of:lazy-cell" as CellRef["id"],
+        space: "did:key:test" as CellRef["space"],
+        scope: "session",
+        path: [],
+      };
+      let ready = false;
+      const processor = Object.assign(
+        Object.create(
+          RuntimeProcessor.prototype,
+        ),
+        {
+          runtime: {
+            getCellFromLink: () => ({
+              pull: () => {
+                ready = true;
+                return Promise.resolve({ ready: true });
+              },
+              get: () => ready ? { ready: true } : undefined,
+            }),
+          },
+        },
+      ) as RuntimeProcessor;
+
+      await expect(
+        RuntimeProcessor.prototype.handleCellPull.call(processor, {
+          type: RequestType.CellPull,
+          cell: ref,
+        }),
+      ).resolves.toEqual({ value: { ready: true } });
+    });
+  });
+
   describe("RuntimeProcessor CFC label IPC", () => {
     it('fails closed on the raw meta:"cfc" seam (inv-12 Stage 0 / SC-25)', () => {
       const ref: CellRef = {

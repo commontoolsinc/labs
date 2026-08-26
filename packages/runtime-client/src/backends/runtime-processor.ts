@@ -115,6 +115,7 @@ import {
   type CellGetCfcLabelRequest,
   type CellGetRequest,
   type CellGetResponse,
+  type CellPullRequest,
   type CellPushRequest,
   type CellResolveAsCellRequest,
   CellResponse,
@@ -1089,6 +1090,16 @@ export class RuntimeProcessor {
         ? undefined
         : redactCaveatSourcesForDisplay(cfcLabel),
     };
+  }
+
+  async handleCellPull(
+    request: CellPullRequest,
+  ): Promise<CellGetResponse> {
+    await getCell(this.runtime, request.cell).pull();
+    return this.handleCellGet({
+      type: RequestType.CellGet,
+      cell: request.cell,
+    });
   }
 
   // A `CellHandle.set` is a blind leaf overwrite (last-write-wins); a
@@ -2294,6 +2305,8 @@ export class RuntimeProcessor {
         return await this.dispose();
       case RequestType.CellGet:
         return this.handleCellGet(request);
+      case RequestType.CellPull:
+        return await this.handleCellPull(request);
       case RequestType.CellSet:
         return this.handleCellSet(request);
       case RequestType.CellPush:
