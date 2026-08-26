@@ -473,6 +473,10 @@ describe("web-worker-console-bridge", () => {
         expect(posted).toHaveLength(1);
         expect(posted[0].type).toBe(NotificationType.ErrorReport);
         expect(posted[0].message).toContain("Undecodable message");
+        // The reason this reports rather than replies, pinned rather than
+        // stated: a reply is addressed by `msgId`, and a message that did not
+        // decode has none to read.
+        expect(Object.hasOwn(posted[0], "msgId")).toBe(false);
       } finally {
         console.error = realConsoleError;
         (globalThis as { postMessage?: unknown }).postMessage =
