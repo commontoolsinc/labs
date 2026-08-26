@@ -1,7 +1,7 @@
 import type {
   FabricLink as ApiFabricLink,
   FabricLinkConstructor as ApiFabricLinkConstructor,
-} from "@commonfabric/api";
+} from "@/api.ts";
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
 import type { FabricPlainObject, FabricValue } from "@/interface.ts";
@@ -178,6 +178,9 @@ function assertValidPayload(
 }
 
 // Compile-time check that the exported `FabricLink` constructor matches the
-// `FabricLinkConstructor` declared in `@commonfabric/api`. This catches drift
-// between the public type contract and this implementation.
+// `FabricLinkConstructor` declared in `@/api.ts`. This catches a declared member
+// that is missing here or has the wrong type. It does NOT catch the other
+// direction: `satisfies` is an assignability check, so a public member on this
+// class that the declaration omits passes silently. Members added here need
+// adding there by hand.
 FabricLink satisfies ApiFabricLinkConstructor;
