@@ -471,7 +471,7 @@ export class CellHandle<T = unknown> {
       this.#value,
       this as CellHandle<unknown>,
     ) as T;
-    const valueChanged = !valuesEqual(applied, this.#value);
+    const valueChanged = !valuesOrCellsEqual(applied, this.#value);
     // A label-only change (value identical) still fires label-aware subscribers.
     // `labelUpdate` is present only on notifications that carried a label, so a
     // value-only notification never spuriously churns the label.
@@ -684,10 +684,18 @@ function cellRefsEqual(a: CellRef, b: CellRef): boolean {
 }
 
 /**
- * Deep equality check for cell values.
- * Handles primitives, arrays, objects, and CellHandles.
+ * Compares two values a cell can hold, deciding whether a delivered update is
+ * a change this handle's subscribers hear about.
+ *
+ * Distinct from `valueEqual()`, which it calls: that settles a `FabricValue`
+ * by content, and this also knows about cells. A `CellHandle` compares by the
+ * cell it names rather than by what that cell holds, so two handles on one
+ * cell are equal and a handle is equal to nothing else.
+ *
+ * @throws If either side is a `FabricInstance`, whose outgoing references this
+ *   walk cannot reach.
  */
-function valuesEqual(a: unknown, b: unknown): boolean {
+function valuesOrCellsEqual(a: unknown, b: unknown): boolean {
   // `Object.is`, not `===`: an unchanged `NaN` leaf must compare equal (else
   // every delivery of a NaN-bearing value re-notifies all subscribers), and a
   // `0` -> `-0` change must compare unequal (else the update is dropped).
@@ -730,7 +738,7 @@ function valuesEqual(a: unknown, b: unknown): boolean {
     if (!Array.isArray(b)) return false;
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) {
-      if (!valuesEqual(a[i], b[i])) return false;
+      if (!valuesOrCellsEqual(a[i], b[i])) return false;
     }
     return true;
   }
@@ -743,7 +751,7 @@ function valuesEqual(a: unknown, b: unknown): boolean {
   for (const key of aKeys) {
     if (!(key in (b as object))) return false;
     if (
-      !valuesEqual(
+      !valuesOrCellsEqual(
         (a as Record<string, unknown>)[key],
         (b as Record<string, unknown>)[key],
       )
