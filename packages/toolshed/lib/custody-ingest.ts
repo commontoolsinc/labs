@@ -38,6 +38,7 @@ import type { FabricValue } from "@commonfabric/api";
 export type VouchedChannel = {
   /** The ingest channel — its dedicated space DID. Recorded on every mark. */
   readonly channel: string;
+
   /**
    * The stable per-source identifier the grant was vouched to. Recorded for
    * audit/display; NOT enforced (audience-binding is the federation PR5

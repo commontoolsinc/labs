@@ -2,6 +2,7 @@ import { Command, ValidationError } from "@cliffy/command";
 import { type DID, isDID } from "@commonfabric/identity";
 import { parseCellPath } from "@commonfabric/runner";
 import { cliText } from "../lib/cli-name.ts";
+import { refuseSectionMarker } from "../lib/section-marker.ts";
 import { render } from "../lib/render.ts";
 import { getDidFromFile } from "../lib/identity.ts";
 import { absPath } from "../lib/utils.ts";
@@ -248,6 +249,9 @@ export const wish = new Command()
     "Return the resolved target's address instead of its contents.",
   )
   .arguments("<target:string>")
-  .action(async (options, target) => {
+  .action(async function (options, target) {
+    // `wish` reads a target directly, so it has no callable section and no
+    // marker to close one. See lib/section-marker.ts.
+    refuseSectionMarker("wish", this.getRawArgs());
     await wishAction(options, target);
   });

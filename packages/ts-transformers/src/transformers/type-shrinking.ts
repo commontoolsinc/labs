@@ -2069,6 +2069,7 @@ interface ContractObservation {
   readonly write: ReadonlySet<string>;
   readonly read: ReadonlySet<string>;
   readonly comparable: ReadonlySet<string>;
+
   /** Exact positions whose observed use needs an identity handle even when
    * the authored type is plain — `equals`-style comparison materializes
    * through a comparable cell, not through the value. */

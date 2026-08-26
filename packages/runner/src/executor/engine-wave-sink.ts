@@ -96,14 +96,17 @@ export class EngineWaveCommitSink implements WaveCommitSink {
   constructor(options: {
     /** The co-hosted engine per space (memory server's own engines). */
     engineFor: (space: MemorySpace) => Engine;
+
     /** The service session framing the wave's commits are recorded
      * under (replay detection keys on it — see the constructor doc).
      * The SpaceServer passes the DR1 holder identity. */
     sessionId: string;
     principal?: string;
+
     /** The shared, process-lifetime localSeq counter (see the
      * constructor doc). Mutated in place. */
     localSeqRef?: { value: number };
+
     /** The sqlite attachment hook (stage G — the memory server's
      * `attachWaveCommitSqliteDbs`): attach the cell-db file(s) a home
      * batch's folded `sqlite` ops target, keyed by the accumulator's

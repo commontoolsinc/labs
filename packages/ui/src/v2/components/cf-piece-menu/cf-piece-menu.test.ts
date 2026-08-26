@@ -2348,9 +2348,11 @@ function statefulPiece(
   }: {
     result?: Record<string, unknown>;
     argument?: unknown;
+
     /** When set, the argument read also returns this schema-bearing ref. */
     argumentRef?: CellRef;
     getPageFails?: boolean;
+
     /** When true, getPage stays pending until `resolveGetPage()` is called. */
     deferGetPage?: boolean;
     sendFails?: boolean;

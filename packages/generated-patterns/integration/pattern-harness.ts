@@ -34,6 +34,7 @@ export interface PatternIntegrationScenario<TArgument = any> {
   exportName?: string;
   argument?: TArgument;
   steps: TestStep[];
+
   /**
    * Data files to store with the pattern, as paths on disk. A file the pattern
    * reads with `dataFile()` is attached from that call alone and needs no
@@ -42,6 +43,7 @@ export interface PatternIntegrationScenario<TArgument = any> {
    * read it. Each is stored under its path relative to `dataRoot`.
    */
   dataFiles?: readonly string[];
+
   /**
    * Root grounding `dataFiles`, and so the paths those files are stored under.
    * Omitted, it is the common directory containing the module and every data

@@ -10,6 +10,7 @@ export interface DenoCommandWithTemporaryLockOptions {
 
 export interface DenoCheckWithTemporaryConfigOptions {
   root: string;
+
   /**
    * A copy of the root config with the same workspace dependency graph.
    * Compiler options may differ for the check.
@@ -22,12 +23,14 @@ export interface DenoCheckWithTemporaryConfigOptions {
 export interface FrozenDriftCheckOptions {
   /** Import map the baseline lockfile is generated from. */
   baselineImports: Record<string, string>;
+
   /**
    * Import map the frozen check runs against. It must differ from
    * `baselineImports`, and the entry module must only import specifiers that it
    * still maps.
    */
   driftedImports: Record<string, string>;
+
   /** Source of the entry module the checks type-check. */
   entrySource: string;
 }
@@ -35,6 +38,7 @@ export interface FrozenDriftCheckOptions {
 export interface FrozenDriftCheckResult {
   /** Output of generating the baseline lockfile from `baselineImports`. */
   generate: Deno.CommandOutput;
+
   /** Output of the frozen check run against `driftedImports`. */
   check: Deno.CommandOutput;
 }

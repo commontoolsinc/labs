@@ -254,6 +254,7 @@ describe("sqlite-served-identity", () => {
       parent,
       runtime,
     );
+
     /** A SECOND instance of the same query (fresh parent, fresh result
      * cell, fresh per-closure in-flight set) — the determinism pin's
      * probe: nothing per-instance may reach the request hash. */

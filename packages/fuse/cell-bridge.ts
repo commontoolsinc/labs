@@ -236,6 +236,7 @@ export interface WritePath {
   jsonPath: (string | number)[];
   isJsonFile: boolean;
   piece: PieceController;
+
   /** Set when the file is an [FS] projection index file. */
   fsProjection?: "markdown" | "json";
 }
@@ -250,15 +251,18 @@ export interface HandlerTarget {
 export interface SourceWritePath {
   spaceName: string;
   pieceName: string;
+
   /** Relative path within .src/, e.g. "main.tsx" or "utils/helper.tsx". */
   relPath: string;
   piece: PieceController;
+
   /** Inode of the .src/ directory (for error.log lookups). */
   srcIno: bigint;
 }
 
 /** Callback to invalidate kernel cache entries (by name under a parent). */
 export type InvalidateCallback = (parentIno: bigint, names: string[]) => void;
+
 /** Callback to invalidate cached attrs/data for an inode (forces readdir refresh). */
 export type InvalidateInodeCallback = (ino: bigint) => void;
 
@@ -281,14 +285,18 @@ export interface SpaceState {
     string,
     { summary: string; patternRef?: PiecePatternRef }
   >;
+
   /** Per-piece subscription cancellers, keyed by piece name. */
   pieceSubs: Map<string, Cancel[]>;
   did: string;
   unsubscribes: Cancel[];
+
   /** Used names set for collision resolution. */
   usedNames: Set<string>;
+
   /** Map from piece name to the inode of its .src/ directory. */
   srcInos: Map<string, bigint>;
+
   /** Map from piece name to the inode of the synthetic error.log file in .src/. */
   srcErrorLogInos: Map<string, bigint>;
 }
@@ -351,19 +359,24 @@ interface PropRebuildJob {
 export class CellBridge {
   tree: FsTree;
   spaces: Map<string, SpaceState> = new Map();
+
   /** Known space name → DID mapping (for .spaces.json). */
   knownSpaces: Map<string, string> = new Map();
+
   /** Callback for kernel cache invalidation (set by mod.ts after mount). */
   onInvalidate: InvalidateCallback | null = null;
   onInvalidateInode: InvalidateInodeCallback | null = null;
   private identity: string = "";
   private apiUrl: string = "";
   private connecting = new Map<string, Promise<SpaceState>>();
+
   /** In-flight piece-list synchronization keyed by space name. */
   private pieceSyncs = new Map<string, Promise<void>>();
+
   /** Flag: re-run sync after current pass completes. */
   private syncAgain: Set<string> = new Set();
   private pendingPieceHydrations = new Map<string, Promise<void>>();
+
   /** Coalesced subtree rebuilds keyed by piece inode + prop name. */
   private pendingPropRebuilds = new Map<
     string,
@@ -414,11 +427,14 @@ export class CellBridge {
   private entitySubscriptions = new Map<bigint, Cancel[]>();
   private piecePropRoots = new Map<bigint, PiecePropRootInfo>();
   private hydratedPieceProps = new Map<bigint, Set<"input" | "result">>();
+
   /** In-flight hydration promises keyed by `${pieceIno}-${propName}`. */
   private pendingHydrations = new Map<string, Promise<boolean>>();
   private pendingPropRebuildQueues = new Map<string, Promise<void>>();
+
   /** Monotonic invalidation epoch per hydration key. */
   private hydrationEpochs = new Map<string, number>();
+
   /**
    * Tracks root-level entries created by [FS] projections so they can be
    * cleared when the result switches back to the default result/ tree.
@@ -433,6 +449,7 @@ export class CellBridge {
   private maxEntityProjections: number;
 
   private startedAt = new Date().toISOString();
+
   /**
    * Set to true when a write fails due to a transport/connection error.
    * Once disconnected, all files appear read-only (EACCES on write)

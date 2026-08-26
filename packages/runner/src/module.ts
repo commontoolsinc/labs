@@ -28,6 +28,7 @@ export interface RawBuiltinResult {
   debounce?: number;
   noDebounce?: boolean;
   throttle?: number;
+
   /**
    * Receives the Action the runner actually registers with the scheduler —
    * a wrapper around `action`, so `action`'s own identity is not the
@@ -104,12 +105,16 @@ function cloneModuleRecord(module: Module): Module {
 export interface RawModuleOptions {
   /** If true, this module is an effect (side-effectful) rather than a computation */
   isEffect?: boolean;
+
   /** Optional scheduler debounce delay in milliseconds */
   debounce?: number;
+
   /** Opt out of scheduler auto-debounce */
   noDebounce?: boolean;
+
   /** Optional scheduler throttle period in milliseconds */
   throttle?: number;
+
   /**
    * Optional argument schema for the raw module's inputs. Threaded into input
    * binding resolution so the emitted links carry per-key schema annotations

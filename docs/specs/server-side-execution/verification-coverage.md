@@ -5282,8 +5282,10 @@ supply; OW29/OW32/OW34 closed):
   (2026-08-22): the test-side pass closed the step's own interim-race
   half and ISOLATED the residue as the OW45 row's real arm-B client
   starvation, so the entry now names that product charge, not a test
-  flake); they gate the
-  FLIP — whose bar is the list EMPTY — not the land. Rows, one per
+  flake). The current census (2026-08-26) is THREE patterns entries:
+  default-app's reload STEP, lunch-poll-vote's FILE entry, and the
+  topic-board pivot-baseline STEP. They gate the FLIP — whose bar is
+  the list EMPTY — not the land. Rows, one per
   mechanism cluster; each row's trigger names the skip entry it
   lifts:
   - **OW45 — the profile piece's PROGRAM-materialization write path
@@ -5953,6 +5955,54 @@ supply; OW29/OW32/OW34 closed):
     quiet-and-loaded — and its class half is now the named read-side
     residue (the START class the bar originally named is closed by
     this build); the step entry's reason names the narrowed charge.
+    **POST-#6292 RE-MEASURE, 2026-08-26: 9/10 — NO LIFT. The earlier
+    read-side residues are likely closed; the sole red is a NEW
+    store-incomplete setup-error shape.** Method: one ON binary at
+    `37b45336a6b17ad27039cc525e4ba2e89f517449` (contains #6292 as
+    `9c9073995`), sha256
+    `747c162b30bd18e144ebbf9ef1c03b7a84d44d005949bcbd4a919e17d1970ebd`;
+    the STEP guard neutralized for every run while its registry entry
+    stayed present; ensure-off, matching the CI ON lanes; fresh store,
+    independent 97xx port, ON posture probe, and LLM environment masked
+    per run; five quiet plus five loaded; PID-only teardown and a
+    port-free check. Quiet was 4/5 green and loaded 5/5. The nine greens
+    completed the step in 7–24 s. Across ten runs: 12
+    `deferred-start-catchup`, zero catch-up failures, zero
+    `pattern-load-error`, 12 stale-read lines, zero terminal deferred
+    deaths, and zero skip prints.
+
+    The sole red, quiet r01, reached the target step and remained there
+    until the unchanged 600 s harness bound returned rc 124. Its durable
+    notebook space held 89 commits, 808 entities, and 1,220 revisions;
+    the root carried a real pattern identity. The notebook argument held
+    exactly SIX note links, with post-creation patches at seqs 37, 45,
+    55, 63, 71, and 83 and no seventh append. The log held one
+    `pattern-swap-setup-error` whose server detail was “updated arguments
+    do not match the candidate schema: parentNotebook: notes: 0:
+    parentNotebook: recursive schema validation made no progress,” plus
+    seven `event-view-lag` deferrals reaching index 5. It held zero
+    `pattern-load-error`.
+
+    Discriminators: NOT the earlier r01, whose store was complete with
+    all seven appends and whose live context silently starved only the
+    read; this store was incomplete, had an explicit setup error, and
+    never reached the final authority read. NOT r06/r09, which each had
+    one keyless-identity `pattern-load-error` followed by whole-piece
+    unreadability while durable pointers remained real; this run had
+    zero load errors and a real root pattern identity. The previous
+    read-side residues are likely closed by intervening fixes, but the
+    evidence remains split: r01 has #6292's matching client-absorb
+    mechanism plus the signature's absence here; r06/r09 have
+    absence-of-observation only, since their keyless-identity mechanism
+    was never root-caused. The campaign does NOT determine whether the
+    seventh append was refused, dropped, or never issued, and assigns no
+    root cause to the recursive-schema error.
+
+    **DISPOSITION: NO LIFT.** The STEP entry and its bound guard stay,
+    reworded to this store-incomplete `pattern-swap-setup-error` charge.
+    The lift bar remains 10/10 quiet-and-loaded ON. Full ledger and
+    per-run evidence paths:
+    [`ow45-default-app-reload-post-6292-remeasure-2026-08-26.md`](../../history/plans/server-execution-v2/optimize/ow45-default-app-reload-post-6292-remeasure-2026-08-26.md).
     Sibling entry, landed mid-review: #5744 (lunch-poll profile-first
     join) re-skipped `integration/lunch-poll-vote.test.ts` as a FILE
     entry on this row's b04 signature — its recorded reds PREDATE the
@@ -6191,7 +6241,276 @@ supply; OW29/OW32/OW34 closed):
     POST-fill shape (shards 2/6: fill succeeded, click landed,
     `#profile` never resolved) is this same clobber on a later
     surface or another member is undetermined — re-measure on that
-    board at a head carrying this fix.
+    board at a head carrying this fix. **RESOLVED 2026-08-25 (the
+    re-measure: CI failure-path store capture at the lane-flip head,
+    run 32929764230, scratch instrumentation branch
+    `claude/server-exec-v2-postfill-diagnosis` — never merged): NOT
+    this clobber — ANOTHER MEMBER, one mechanism across both shards,
+    store-proven in both captures.** The trusted CreateProfile
+    click's durable entry is healthy (seq 17 in both event spaces:
+    `target.value "Ada Lovelace"`, `rendererTrusted: true`, clean
+    admission), and the served dispatch DROPPED it pre-dispatch: the
+    head-event load park awaited a cross-space replica load of the
+    HOME space's ensured `defaultPattern` quote doc — a doc the
+    server's OWN ensure had durably written ONE second earlier — and
+    the load failed `ConnectionError: memory session revoked:
+    unauthorized` (storage/v2.ts sync-load-failure) because the
+    serving plane's home-space session predated the genesis ACL
+    (activation-before-genesis, the recorded boot order) and the ACL
+    landing revoked it (`#revokeDeauthorizedSessions`,
+    memory/v2/server.ts — by design, heal-on-next-mount; a HOME
+    genesis is `{user: OWNER}` with no `"*"`, so the pre-genesis
+    session is de-authorized the moment it lands);
+    `failHeadEventLoadPark` (scheduler/facade.ts) maps ANY load-park
+    failure to the TERMINAL drop arm, and the drain sealed
+    `{status: "dropped", consequenced: true}` with the watermark
+    advanced (seq 18, `consequence_of` naming the eventId) —
+    at-least-once discharged, nothing ever re-runs the event, the
+    authoritative handler never executes, and the surface starves
+    the full 300 s net. This VIOLATES events.md §5's T3 drop
+    predicate ("no runnable handler", never "the run raced"): the
+    handler was runnable and the input doc existed durably; the
+    spec-conforming disposition for an unreachable input is
+    `deferred` (no consequence; re-drain) — the same code's own
+    docstring names the split. Negative discriminators, both stores
+    swept whole: clobber patch signature 0, `sidecarError` 0,
+    `sidecar-run-raced` 0 (this fix HOLDS — no hole); not the
+    read-side r01 member (an error account exists and the
+    consequence is absent, not present-but-unread); not residual
+    (i)'s basis-row gap (the entry is consequenced-dropped, and the
+    only dropped contributions — 3× `compile-cache/writeback` in the
+    speculative profile space's first waves — re-ran and healed in
+    the same second); not OW54's give-up arm (no CFC rejection, no
+    commit attempted) and not OW58's notice wedge (the notice sealed
+    cleanly). A NEW served-event-family member: the pre-dispatch
+    load-park failure arm. Rates at this base: shard 2 red 2/2 CI
+    boards, shard 6 red 2/2, local control 0/12 — the click must
+    land inside the [pre-genesis session open → revocation →
+    re-mount] window with a cross-space read at preflight; slow CI
+    runners do, the local box did not. Shard 9
+    (`cfc-staged-publish`, `TrustedSaveDraft` → `#saved-title`) red
+    1/2 and GREEN on the capture board — UNHARVESTED: symptom-
+    compatible with this member, no store evidence, classification
+    open. Observability, recorded: a terminally dropped served event
+    is invisible in serving stats (`events.*` has no dropped
+    counter; only the scheduler WARN line and the entry's
+    `status: "dropped"` field carry it). Product exposure: an ACL change
+    that REMOVES the serving session's authority or changes its
+    delegated owner revokes that session by design
+    (`#revokeDeauthorizedSessions` — authority-PRESERVING grants
+    leave the session valid; Cubic P2 on this PR scoped the claim),
+    so under ON a served dispatch's cross-space load racing such a
+    revocation permanently and silently discards a user's trusted
+    action; the fix direction (load-park failure →
+    `deferred`/re-park) touches the seal-adjacent path — OW58's
+    "(α)-critical, its own deliberate pass" caution applies, and the
+    disposition (fix-before-flip vs. narrow honest step-skips naming
+    shared-profile's, profile-embed's, and staged-publish's steps
+    with an owed row) is the owner's call, deliberately not taken by
+    the diagnosis seat.
+    **FIXED 2026-08-26 (its own deliberate seal-adjacent pass, no
+    riders — the OW58 caution above is why): the load-park failure arm
+    DEFERS a served event instead of dropping it.**
+    `failHeadEventLoadPark` (scheduler/facade.ts) now settles a served
+    event through the `deferred` arm — no consequence sealed, the
+    durable entry left pending and UNCONSEQUENCED, the standard
+    re-drain re-delivering it — and carries the drain's arrival-order
+    BARRIER with it (events.md §2, mirroring the sidecar-sync-failure
+    arm), in TWO halves, because the deferral can land in two places.
+    IN THE QUEUE: every later-arrived durable served entry behind the
+    head IN THE SAME SPACE defers too. MID-DRAIN-PASS: the
+    scheduler-side barrier can only hold what is already queued, and
+    the drain awaits a `sync()` per new sidecar — so a park failure can
+    land between one entry's queueing and the next's, and the next
+    entry would queue behind the barrier's back and overtake. The
+    second half (`#loadParkDeferredInPass`) makes the pass STOP there,
+    the same `break` the sidecar-sync arm makes; found in this seat's
+    own adversarial pass, and its mutation reds `["A","B","A"]` exactly
+    like the in-queue one. Its CHECK POSITION is load-bearing and was
+    got wrong first: the loop awaits TWICE per entry (a new sidecar's
+    `sync()` and then the stream doc's), and a rejection landing in
+    either window sweeps only what was queued at that instant — so the
+    check sits past BOTH, immediately before
+    `#drainInFlight.set`/`queueEvent`. Independent review (Codex P1 on
+    PR #6365) caught it one await too early. **Coverage gap recorded,
+    NOT filled:** the pin discriminates the check's EXISTENCE (delete
+    it → red) but NOT its POSITION — measured, not assumed: with the
+    check moved back to the pre-review position the pin still passes.
+    Discriminating the position needs the park rejection to land inside
+    the stream-doc-sync window specifically. **PIN OWED, CONSTRUCTION
+    SKETCHED** (review F7 corrected this seat's earlier "a flaky pin
+    would be worse than none" — the construction is fully CAUSAL, not
+    timing-raced, so that framing overstated): hold B at its sidecar
+    sync (the shipped gate), wait for A2's park to be CREATED (a
+    parkObserved hook in the seam, as the scheduler pin already does),
+    arm a second gate on B's stream-doc sync (`cell.sync()` always
+    reaches `syncCell` — verified, no warm-cache short-circuit),
+    release the sidecar gate, hold at the stream gate, reject the park,
+    disarm, release. Every step causally ordered, no timers. Recorded
+    rather than built here only to keep this round scoped to the two P1
+    pins; see review-6365-report.md F7. Until it exists the position
+    rests on the code comment and this record. Two
+    exclusions, deliberate: cross-space
+    queue neighbours (§2's order is per-space) and LT1 in-process
+    copies (`served` with no `streamEntry` — no durable entry to
+    re-drain, and a running event's same-wave cascade children rather
+    than later arrivals; their entry re-drains WITH a `streamEntry`,
+    the `lt1LeftoversPurged` semantics). CLIENT-side (no `served`) the
+    drop keeps today's shape — there is no durable entry to re-drain,
+    so deferring would lose the event outright; the same split
+    events.ts already makes for a piece-load failure, and client-side
+    the two arms are behaviourally indistinguishable anyway (both
+    remove the event and abort its onCommit). T3's genuine
+    no-runnable-handler drop is UNTOUCHED — only the load-FAILURE
+    routing changed.
+    **Persistent-failure posture, stated:** a load that never heals
+    defers INDEFINITELY — durable, visible, re-tried each drain. The
+    deferral is deliberately kept OFF the queued class's bounded
+    creation-race budget (`EVENT_DEFERRAL_DROP_THRESHOLD`, which
+    hardens into §5's drop after 8 deferrals) by a typed
+    `cause: "load-park"` on the served failure outcome: that budget
+    exists because a piece which never materializes has no runnable
+    handler, whereas here the input doc EXISTS durably and only the
+    read path failed, so hardening would restore exactly the
+    at-least-once discharge this fix removes. Indefinite deferral is
+    strictly better than silent loss and is the accepted posture; its
+    cost is that the backstop rescan keeps ticking, so a never-healing
+    load holds the space out of its idle park. A give-up arm for that
+    case is OW54's separately tracked territory and was deliberately
+    NOT built here.
+    **The price, quantified (review §2 — it was asserted but not
+    costed).** Per poisoned space, per 250 ms backstop tick: one drain
+    pass, one queueEvent, one preflight, one park, one real load attempt
+    against the failing backend, and 1+N WARN lines (head plus barrier
+    victims). So ~4 load attempts/s and, for a 10-event backlog, ~44 log
+    lines/s sustained — a WARN-flood cost the fix frames as
+    observability. Same-space later served events are head-of-line
+    blocked indefinitely BY DESIGN (order over liveness). Cross-space
+    events are not deferred, but the scheduler is head-serial, so the
+    poisoned head occupies the head slot for one park-to-rejection
+    latency every tick — negligible for the production error (a revoked
+    session rejects immediately) but a TIMEOUT-class slow failure would
+    stall co-scheduled dispatch at 4 Hz. That slow-failure case is what
+    makes OW54 worth scheduling rather than itself deferring
+    indefinitely.
+    **Weakening recorded (review F5), and it is DELIBERATE but was
+    unstated.** The arm's `#eventDeferrals.delete(entry.eventId)` on
+    every load-park deferral — head and barrier victims alike — means
+    the cold-view give-up guarantee is no longer "8 deferrals" but "8
+    CONSECUTIVE cold-view deferrals uninterrupted by a load-park
+    failure". Under a FLAPPING serving session (revoke/remount cycling
+    — the production mechanism here) a genuinely unrunnable event whose
+    cold-view deferrals interleave with load-park failures at least once
+    per ~7 ticks never hardens, wedging the park criterion active for an
+    event T3 licenses dropping. The intent was only to keep the budgets
+    unmixed; the sharper alternative — leave the cold-view count ALONE
+    rather than resetting it, since not-mixing is not the same as
+    resetting — preserves the hardening bound and belongs in OW54's
+    design space. Not changed here: it is a behaviour change to the
+    cold-view arm, which this deliberately scoped pass does not touch.
+    Observability gap CLOSED with the fix: `events.loadParkDeferrals`
+    counts each deferral (head and barrier alike) and `events.dropped`
+    counts terminal drop notices sealed onto a durable entry — the
+    previously invisible half; a loud WARN per deferral names the
+    failing doc keys and the error. serving-loop.md §7 carries both.
+    Pins, red-first: `executor-events-down.test.ts`'s "a served event
+    whose HEAD-EVENT LOAD PARK fails DEFERS instead of terminally
+    dropping" (a new `GatedStorageManager.loadParkFailAddress` seam
+    reports one doc as an in-flight load and REJECTS its park settle
+    with the production error text; observed pre-fix red: BOTH entries
+    sealed `{consequenced: true, status: "dropped", reason: "Event
+    dropped: required replica load failed before dispatch"}` — the
+    exact CI store shape) and
+    `scheduler-event-load-park.test.ts`'s "a SERVED event's load-park
+    failure reaches the drain as a load-park DEFERRAL, not a drop"
+    (the contract the SpaceServer's `onFailure` branches on; the
+    pre-existing client-side drop pin beside it is unchanged).
+    A third pin covers the mid-pass half: the drain's sync gate holds a
+    pass at B's sidecar with A2's park already failed inside it, and
+    after healing and release the log still reads `["A","A","B"]`.
+    **CORRECTED 2026-08-26 (independent review F3 — this record briefly
+    claimed a mutation red that does not reproduce, the one thing it
+    must never do).** The original in-queue row was measured BEFORE the
+    mid-pass half existed and never re-run after; with both halves
+    present, emptying the in-queue loop leaves the suite GREEN, because
+    that pin's two handlers both read the ARMED doc — so a barrier-less
+    B parks on the same failure and self-defers through the HEAD arm.
+    The in-queue half is now discriminated by its own pin: the
+    `DISJOINT_CLOSURE_LOG_PATTERN` gives `pushA` an extra `gate` input
+    linked to a SEPARATE doc, the seam arms only that doc (so B stays
+    perfectly runnable), and the park rejection is HELD
+    (`loadParkSettle`) until both entries are provably queued —
+    `events.processed` up by two with the head parked — so the mid-pass
+    half cannot be what preserves the order. A fifth pin discriminates
+    the typed-cause budget bypass (review F4, the posture's load-bearing
+    half, previously unpinned): a PERSISTENT failure, waited past
+    `EVENT_DEFERRAL_DROP_THRESHOLD` on the `loadParkDeferrals` counter
+    rather than a sleep, must still seal nothing — then heals and
+    delivers once.
+    Mutations, all red, all re-run at this head: restore the drop
+    routing → both entries seal dropped and the log never grows past the
+    warm-up (and the scheduler-level pin reads `kind: "dropped"`); empty
+    the in-queue barrier loop → "B1 must not consequence while the
+    earlier-arrived A2 is deferred", `["A","B","A"]`, the OW45 arm-B b01
+    overtake shape; drop the `#loadParkDeferredInPass` check → the same
+    overtake through the mid-pass gap; fall the load-park arm through
+    into the threshold accounting → "a persistent load failure must
+    never harden into events.md §5's drop". The barrier's TWO
+    EXCLUSIONS are pinned too — they were the coverage ratchet's two
+    uncovered lines, and were COVERED rather than accepted: a
+    scheduler-level pin queues, behind a parked served head, a
+    same-space durable sibling, another SPACE's durable entry, and a
+    `streamEntry`-less LT1 copy, and asserts the sweep takes only the
+    first. Independently red: drop the cross-space guard → "another
+    space's entry must not be swept"; drop the LT1 guard → "a
+    streamEntry-less LT1 copy must not be swept". Construction note for
+    whoever edits it — both traps cost this seat a red: `addEventHandler`
+    stamps `populateDependencies` onto the HANDLER FUNCTION OBJECT, so
+    each stream needs its own function (sharing one makes all four park
+    on the armed doc), and same-stream sends COALESCE by doc id, so the
+    cross-space neighbour needs its own id rather than the sibling's
+    with the space swapped. Battery green at the fix:
+    executor-events-down
+    (26 steps, the α3 retry machinery untouched), executor-fan-out,
+    executor-serving-loop, scheduler-event-load-park,
+    executor-space-server, executor-watermark, executor-stats,
+    executor-wave, executor-cross-space, and the full
+    `packages/runner` package (1301 passed / 7549 steps / 0 failed).
+    **THE BARRIER INVARIANT AS STATED IS NOT CLOSED — a THIRD path gets
+    past both halves (review F1, structural from the code; not built as
+    a repro, and NOT a landing blocker because both the re-mark and the
+    shaper routing pre-date this PR and the pre-fix behaviour — terminal
+    drop — was strictly worse).** The drain re-marks durable entries
+    renderer-trusted before queueing (space-server.ts), and
+    `Scheduler.queueEvent` routes any renderer-trusted payload with
+    `doNotLoadPieceIfNotRunning=false` — what the drain passes — through
+    `holdShapedEvent`. The wake shaper's first `BURST_CAPACITY` (10)
+    deliveries per piece-group are synchronous, so the barrier sees
+    those; overflow sits in `group.pending` and releases as a batch on
+    the next window tick (≤1000 ms) straight into `queueSchedulerEvent`,
+    knowing nothing of a barrier sweep that ran while it was held.
+    Scenario, and the fresh-space backlog drain IS the OW45 window:
+    >10 renderer-trusted served entries for one piece drain in one pass;
+    1–10 queue, 11+ are shaper-held with their `#drainInFlight` guards
+    set (so re-drains skip them). Head 1's park fails → the in-queue
+    sweep defers 2–10 and the mid-pass break stops further queueing, but
+    11+ are in NEITHER place. The window tick releases 11 into the
+    now-empty queue; the load heals (this failure heals on next mount,
+    seconds); the rescan re-drains 1–10 BEHIND 11 → 11's consequence
+    lands ahead of 1–10, the §2 inversion the barrier exists to prevent.
+    (If the load still fails when 11 heads, 11 self-parks and order
+    self-heals; the overtake needs the heal inside the
+    release-to-rescan window — a real race for a transient failure.)
+    Named follow-up shape: exempt DRAIN RE-DISPATCHES from shaping —
+    they are re-deliveries of already-shaped input, so re-shaping
+    double-charges the timing budget anyway — or have the shaper's
+    release re-check barrier state. Sibling PRE-EXISTING hazard minted
+    separately as **OW63** below.
+    STILL OPEN, untouched by this fix: shard 9
+    (`cfc-staged-publish`) stays UNHARVESTED — symptom-compatible,
+    no store evidence, classification open — and the #6248 lane
+    disposition remains the owner's call, now with the fix-before-flip
+    option actually available.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
@@ -7581,6 +7900,34 @@ supply; OW29/OW32/OW34 closed):
     never landed at all (`deferred-start-conflict-exhausted` never
     became a live log key; the recovery's keys are
     `deferred-start-catchup` / `deferred-start-catchup-failed`).**
+  - **OW63 — the wake shaper can invert same-space arrival order
+    across PIECES, with no load-park involved (PRE-EXISTING; minted
+    2026-08-26 from the independent review of PR #6365, finding F1's
+    sibling). NOT OWED BY THAT PR** — it neither introduced nor
+    worsened this; it is recorded because reading the barrier's
+    reachability exposed it. events.md §2 orders served entries
+    "across streams in one space, arrival order", but the wake shaper
+    buckets held events per PIECE-GROUP, and two pieces in one space
+    have SEPARATE buckets with independent burst budgets and window
+    ticks. So a later-arrived entry for piece Y whose bucket is cold
+    (synchronous, inside `BURST_CAPACITY`) can consequence ahead of an
+    earlier-arrived entry for piece X whose bucket is saturated and
+    therefore held to the next window tick (≤1000 ms). No failure of
+    any kind is required — only a burst on one piece and normal
+    traffic on another, which is ordinary multi-piece load. What is
+    NOT yet established: whether any §2-visible consequence ordering
+    actually depends on cross-piece order in practice (same-piece and
+    same-stream order are preserved by the shaper's own FIFO), so the
+    first move is to decide whether §2's "across streams in one space"
+    is meant to bind across pieces at all — a SPEC question for the
+    owner before it is a code question. If it does bind, the candidate
+    shapes are the same two F1 names for the load-park case: exempt
+    drain re-dispatches from shaping (re-deliveries of already-shaped
+    input — re-shaping double-charges the timing budget), or give the
+    shaper a space-level ordering constraint rather than a per-group
+    one. Unpinned and unmeasured; structural from the code only
+    (`wake-shaping.ts`'s per-group `pending` + window tick, and the
+    drain's per-entry `queueEvent`).
 
 ## 4. Standing rule
 

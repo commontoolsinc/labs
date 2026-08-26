@@ -522,8 +522,10 @@ export interface Output {
   [UI]: VNode;
   events: CalendarEvent[];
   calendars: Calendar[];
+
   /** Number of events imported */
   eventCount: number;
+
   /** Summary of container-level events for hierarchical indexing */
   summary: string;
 }

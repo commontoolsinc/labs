@@ -233,6 +233,35 @@ The strict-only delta is:
   transaction with recorded reasons CFC-relevant (`prepare-reasons`), so a
   reasoned tx whose reads never tripped an eager relevance mark cannot slip the
   ladder ([extended-storage-transaction.ts](../../packages/runner/src/storage/extended-storage-transaction.ts)).
+
+  The raw meta seam is outside the check at EVERY rung, so a meta path
+  raises neither a strict reject nor a persist-and-flag diagnostic. The
+  measurement quantifies over paths a schema could have declared a policy
+  at, and no value schema describes the document-root siblings of `value`
+  that `setMetaRaw` addresses. One route does reach a ceiling there: a
+  document-root declared entry resolves at every meta path by longest
+  prefix. It is skipped anyway. That entry sits at logical `[]`, the
+  payload root, and reaches the seam only because canonicalization strips a
+  leading `value` — so it is not a declaration about the seam, and honoring
+  it would make a piece updatable or not according to whether its pattern
+  carries a root `ifc`. Declaring on a single result field, which is how a
+  pattern normally labels one, leaves the seam's ceiling empty, and the
+  piece is then un-updatable under strict because the pattern updater,
+  `setsrc`, and setup over an existing piece all stamp meta.
+
+  The exemption is not a hole. A path counts as meta only while no payload
+  write landed on it too, so a transaction writing both leaves the path
+  measured. The collapse of a deeper path against a covering ancestor runs
+  over the measured paths only, so an exempt meta path cannot shadow a value
+  write beneath it. Meta paths remain flow stamp targets, so the join still
+  persists there and the egress, display, and observation gates read the
+  unchanged label. And the seam sits in the same document, space, and
+  replica set as the value surface beside it, so it reaches no reader that
+  surface did not. One residual comes with it: where a payload field carries
+  a `MetaField` name, an exempt meta write can raise the stored derived
+  label at their shared logical path past what that field declares. The
+  direction is over-taint, so reads stay protected; giving the envelope seam
+  a path space of its own is what removes the collision.
 - **Future strict-only fail-closed cases.** Any new check that wants a
   persist-and-flag grace under explicit puts its reject at the strict level,
   same shape.

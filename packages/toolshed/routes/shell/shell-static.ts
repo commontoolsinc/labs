@@ -20,6 +20,7 @@ export interface ShellStaticDeps {
 
 export interface ShellStaticOptions {
   deps?: ShellStaticDeps;
+
   /**
    * Build identifier embedded in a compiled toolshed binary. Its immutable
    * `/builds/<id>/` URL namespace aliases the binary's single static graph.

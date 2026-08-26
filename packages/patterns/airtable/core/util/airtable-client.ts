@@ -23,6 +23,7 @@ export interface AirtableClientConfig {
   /** How many times to refresh an expired token and retry before giving up. */
   retries?: number;
   debugMode?: boolean;
+
   /** External refresh callback for cross-piece token refresh */
   onRefresh?: () => Promise<void>;
 }

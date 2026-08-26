@@ -22,6 +22,7 @@ export class SpeculationLineage {
     private readonly hooks: {
       /** Drop and settle a not-yet-dispatched event from the queue. */
       dropQueuedEvent: (event: QueuedEvent, reason: string) => void;
+
       /** Wake the scheduler (parked cross-space events become ready). */
       queueExecution: () => void;
       onError: (error: unknown) => void;

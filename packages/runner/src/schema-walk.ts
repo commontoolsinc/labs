@@ -128,6 +128,7 @@ export function isSubschema(value: unknown): value is JSONSchema {
 export interface SchemaWalkOptions {
   /** Also descend into `$defs` bodies. Default false. */
   readonly includeDefs?: boolean;
+
   /**
    * Also visit subschemas under the keywords we never emit
    * (`UNUSED_SINGLE_SUBSCHEMA_KEYS` / `UNUSED_RECORD_SUBSCHEMA_KEYS`). Default
@@ -135,11 +136,13 @@ export interface SchemaWalkOptions {
    * we emit — chiefly `$ref` discovery, where a missed ref is a fail-open bug.
    */
   readonly includeUnused?: boolean;
+
   /**
    * Also invoke the visitor for boolean subschemas (`true` / `false`). Default
    * false — most callers only care about object schemas.
    */
   readonly visitBooleans?: boolean;
+
   /**
    * Resolve `$ref` while walking. Honored by {@link walkSchema} only
    * (`forEachSubschema` is shallow). At a node carrying a string `$ref`, the
@@ -310,10 +313,13 @@ export function forEachSubschema(
 /** One immediate subschema of a parent, with the edge that reached it. */
 export interface SubschemaEdge {
   readonly schema: JSONSchema;
+
   /** The keyword this subschema hangs off. */
   readonly keyword: SubschemaKeyword;
+
   /** For record-valued keywords: the property / definition name. */
   readonly key?: string;
+
   /** For array-valued keywords: the index. */
   readonly index?: number;
 }
@@ -430,20 +436,26 @@ export function mapSubschemas(
 export interface SchemaNode {
   /** The subschema at this node. */
   readonly schema: JSONSchema;
+
   /**
    * Structural path from the walk root: keyword-segmented, e.g.
    * `["properties", "user", "items"]` or `["allOf", 0, "properties", "id"]`.
    * Empty at the root.
    */
   readonly path: ReadonlyArray<string | number>;
+
   /** The keyword the edge from the parent used; undefined at the root. */
   readonly keyword?: SubschemaKeyword;
+
   /** Record edge: the property / definition name. */
   readonly key?: string;
+
   /** Array edge: the index. */
   readonly index?: number;
+
   /** The parent subschema; undefined at the root. */
   readonly parent?: JSONSchemaObj;
+
   /**
    * True when this node is a `$ref` target reached via
    * {@link SchemaWalkOptions.resolveRef}. Its `path` is the ref site's path
@@ -457,6 +469,7 @@ export interface SchemaNode {
  * (`undefined`) descends into the node's children — the common case.
  */
 export type WalkControl =
+
   /** Do not descend into this node's children; continue with its siblings. */
   | "skip"
   /** Abort the entire walk immediately. */

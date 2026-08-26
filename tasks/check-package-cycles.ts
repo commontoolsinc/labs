@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-run=git
+
 /**
  * Fails CI when the workspace packages import each other in a circle.
  *
@@ -60,6 +61,7 @@ const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 export interface AllowedCycle {
   /** Package directory names, sorted, exactly as the cycle stands today. */
   readonly packages: readonly string[];
+
   /** What the two sides take from each other. */
   readonly reason: string;
 }
@@ -186,6 +188,7 @@ export function resolveRelative(fromPath: string, specifier: string): string {
 export interface Workspace {
   /** Every member's directory under `packages/`, which may itself be nested. */
   readonly members: readonly string[];
+
   /** Package name to member directory, for the members that declare a name. */
   readonly names: ReadonlyMap<string, string>;
 }
@@ -391,6 +394,7 @@ export function isExcused(
 export interface ScanResult {
   /** Cycles present in the tree that the allowlist does not cover. */
   readonly unexpected: string[][];
+
   /** Allowlist entries that no longer describe a cycle in the tree. */
   readonly resolved: AllowedCycle[];
   readonly edges: readonly Edge[];

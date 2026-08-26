@@ -21,8 +21,10 @@ interface PeerNode {
 interface ProbeEvent {
   /** Read by the body. */
   title: string;
+
   /** Declared and never read. */
   done: boolean;
+
   /** A declared, never-read reference. */
   peer: Writable<PeerNode>;
 }

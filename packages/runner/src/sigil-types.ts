@@ -118,6 +118,7 @@ export function assertWebhookCellLinkRefPayload(
  */
 export type SigilLink<P extends CellLinkRefPayload = CellLinkRefPayload> =
   LinkRef<P>;
+
 /**
  * A {@link SigilLink} whose payload is a write redirect (an alias) — its
  * `overwrite` is fixed to `"redirect"`.

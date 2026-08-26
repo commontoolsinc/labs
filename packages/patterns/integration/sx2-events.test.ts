@@ -53,6 +53,7 @@ const FLAG_ON = Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION") === undefined
 
 type EventStats = {
   derivedCommits: number;
+
   /** Per-space attribution (#6158): lets the logged ratio name THIS
    * test's space instead of the host-global total. */
   derivedCommitsBySpace?: Record<string, number>;
@@ -75,6 +76,7 @@ describe("sx2 events (Phase 3 gates)", () => {
   let piece: PieceController;
   let sinkCancel: (() => void) | undefined;
   let latestValue: number | undefined;
+
   /** Sink-driven value waits (round-2 thread T9): the sink callback IS
    * the delivery channel, so value conditions resolve from it directly
    * — no polling loop, and a paused/slow worker only delays the

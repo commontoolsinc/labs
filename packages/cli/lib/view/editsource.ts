@@ -51,10 +51,12 @@ export interface ExpandResult {
   cursorLine: number;
   insertedAt: number;
   inserted: number;
+
   /** Exact workspace endings for the rows inserted into `text`. */
   insertedLineEndings: readonly (LineEndingProvenance | undefined)[];
   up: boolean;
   removedAt: number | null;
+
   /** Which lines of the workspace file the reveal showed, as the file numbers
    * them and counting from one: `from` to `to`, both ends included. */
   revealed: { from: number; to: number };
@@ -81,25 +83,32 @@ export interface SaveOptions {
 export interface EditableSource {
   /** A short label for the backing target (the filename), or null. */
   readonly label: string | null;
+
   /** True for a diff view, whether or not it is editable. Absent or false for a
    * plain file or a non-diff pipe. */
   readonly isDiff?: boolean;
+
   /** False when there is no underlying file to edit or the selected language
    * is read-only. `reason` is shown when a cursor move is attempted on a
    * non-editable view. */
   readonly editable: boolean;
   readonly reason?: string;
+
   /** Representation used when the caller did not choose one explicitly. */
   readonly defaultViewMode?: ViewMode;
+
   /** Whether rendered rows retain the source document's line layout. */
   readonly renderLineTopology?: "source" | "independent";
+
   /** Whether an empty decoded input is a complete view. */
   readonly allowsEmptyInput?: boolean;
+
   /** Re-parse edited text into a Document — lines, structure and definitions. */
   parse(
     text: string,
     lineEndings?: readonly (LineEndingProvenance | undefined)[],
   ): Document;
+
   /**
    * Build the alternate rendered representation. Rendered documents retain the
    * source text. Most renderers keep one display line per source line;
@@ -107,11 +116,13 @@ export interface EditableSource {
    * source's languages offer no rendered view.
    */
   render?(source: Document): Document;
+
   /** Re-highlight the edited text into rendered lines only (no structure tree),
    * for live highlighting on every keystroke. A fraction of a full {@link
    * parse}; the structure is refreshed separately when typing pauses. When
    * absent, the session falls back to a full parse. */
   highlight?(text: string): readonly Line[];
+
   /** Build an incremental highlighter seeded with `text`, for live highlighting
    * whose cost tracks the size of each edit rather than the whole document. The
    * session re-baselines it on the deferred re-parse. When present it is used in
@@ -125,10 +136,12 @@ export interface EditableSource {
     seedLines?: readonly Line[],
     lineEndings?: readonly (LineEndingProvenance | undefined)[],
   ): Highlighter;
+
   /** Exact file-ending information for transformed editable rows. */
   lineEndingProvenance?(
     text: string,
   ): readonly (LineEndingProvenance | undefined)[];
+
   /** Attempt to persist the edited text. `lineEndings` carries exact source
    * endings for rows that came from a file. `baseline` is the text at the last
    * successful save. A read-only source returns its refusal reason without
@@ -139,6 +152,7 @@ export interface EditableSource {
     baseline?: string,
     options?: SaveOptions,
   ): string;
+
   /** The clean baseline after a successful save. Most sources persist the
    * whole buffer and omit this method. A commit view that saves files without
    * amending keeps commit-message edits outside the returned baseline, so they
@@ -148,12 +162,14 @@ export interface EditableSource {
     current: string,
     options?: SaveOptions,
   ): string;
+
   /** The labels (filenames) of the targets that differ between `original` and
    * `current` — what a save would actually write. A plain file is its one label
    * when changed; a diff reports just the files whose lines an edit touched, so
    * the quit prompt names them instead of every file the diff spans. Absent →
    * the caller falls back to the single {@link label}. */
   dirtyLabels?(original: string, current: string): string[];
+
   /** Restore part of the text to its `original` form: the hunk or file the
    * cursor (`cursorLine`) is in, or everything. Returns the new full text and
    * where to place the cursor, or null when there is nothing to revert at that
@@ -169,6 +185,7 @@ export interface EditableSource {
     cursorLine: number;
     lineEndings?: readonly (LineEndingProvenance | undefined)[];
   } | null;
+
   /** Reveal more of the underlying file around the hunk `cursorLine` sits in (a
    * diff only). Returns the grown diff text, the matching grown baseline (so
    * revealing context is not itself an edit), and where the cursor moves — or
@@ -182,17 +199,21 @@ export interface EditableSource {
     cursorLine: number,
     up?: boolean,
   ): ExpandResult | null;
+
   /** How much context each hunk of `current` could still reveal, keyed by the
    * line its header sits on. The pager offers Ctrl-L only where the edge the
    * user is looking at has room, and says what stopped it where it has not. */
   expandRoom?(current: string): ReadonlyMap<number, HunkRoom>;
+
   /** Constrains where editing may happen. Present only for a diff, whose lines
    * map to fixed file lines: edits stay within a line, past the diff marker. A
    * plain file has no policy and is edited freely. */
   readonly policy?: EditPolicy;
+
   /** The last editable column on a line when the source gives a trailing
    * carriage return meaning beyond ordinary CRLF transport. */
   logicalEnd?(lines: readonly string[], row: number): number;
+
   /** When changed `git show` output contains the HEAD commit, the commit a save
    * would amend — for the confirmation prompt. Null when no such change is
    * pending. Absent on sources that never edit a commit. */
@@ -200,6 +221,7 @@ export interface EditableSource {
     baseline: string,
     current: string,
   ): { sha: string; subject: string } | null;
+
   /** The path of the backing file, when there is a single one. The file picker
    * opens in its directory. */
   readonly path?: string;
@@ -221,12 +243,14 @@ export interface EditPolicy {
    * Takes the whole set of lines because editability depends on the row's
    * region. */
   editStart(lines: readonly string[], row: number): number | null;
+
   /** A source-specific explanation for refusing an edit at `row`, or null to
    * use the editor's general explanation. */
   notEditableMessage?(
     lines: readonly string[],
     row: number,
   ): string | null;
+
   /** What the row at `row` belongs to: a diff hunk's new side (edited as a
    * removed/added pair), a removed line that can be resurrected, an editable
    * commit message (edited as plain indented text), or neither. Drives how the
@@ -235,17 +259,21 @@ export interface EditPolicy {
     lines: readonly string[],
     row: number,
   ): "hunk" | "removed" | "message" | null;
+
   /** The parsed diff hunk containing a body row. */
   hunkAt?(
     lines: readonly string[],
     row: number,
   ): { model: DiffModel; hunk: DiffHunk } | null;
+
   /** Whether the workspace file for the hunk at `row` uses a UTF-8 BOM. */
   hasUtf8Bom?(lines: readonly string[], row: number): boolean | undefined;
+
   /** The marker a newly inserted line is given inside a hunk (a diff adds an
    * added line, so `"+"`), keeping the diff well-formed as the user adds lines.
    * A commit message uses its own indent instead. */
   readonly insertPrefix: string;
+
   /** The indent a new commit-message line is given (git's four spaces). */
   readonly messageIndent: string;
 }
@@ -253,6 +281,7 @@ export interface EditPolicy {
 export interface FileSourceOptions {
   /** Encoder paired with the bytes read when the source was opened. */
   readonly encode?: (text: string) => Uint8Array;
+
   /** Full byte size information for a bounded rendered preview. */
   readonly renderExtent?: RenderInputExtent;
 }

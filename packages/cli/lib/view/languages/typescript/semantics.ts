@@ -41,6 +41,7 @@ import {
 interface SectionFile {
   /** Virtual file name (the section header path, or `fileName`). */
   name: string;
+
   /** Global offset of the section's first character in the blob. */
   start: number;
   end: number;

@@ -48,6 +48,7 @@ export interface Baseline {
 }
 
 export type Finding =
+
   /** The current contract is not recorded, so nothing pins it for the next PR. */
   | { kind: "missing-baseline"; pattern: string; hash: string }
   /** The current contract cannot be applied over a deployed one. */

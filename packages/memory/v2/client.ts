@@ -55,6 +55,7 @@ export type MountOptions = {
   sessionId?: string;
   seenSeq?: number;
   sessionToken?: string;
+
   /** The session-level delegated READ binding (OW31; see the wire
    * `SessionDescriptor.actingAs`): only the serving plane's loopback
    * managers set it; the server admits it for delegating-class
@@ -81,6 +82,7 @@ export type SessionOpenAuthFactory = (
 
 export type WatchMutationResult = {
   view: WatchView;
+
   /** Effects delivered before the first watch response, in wire order. */
   precedingSyncs: SessionSync[];
   sync: SessionSync;

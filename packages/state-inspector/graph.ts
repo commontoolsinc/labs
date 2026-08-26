@@ -35,12 +35,15 @@ export interface GraphNode {
   /** Unique node key. For external stubs this is space-qualified (`<space>/<id>`)
    * so a cross-space target can't collide with a local entity of the same id. */
   id: string;
+
   /** The bare entity id (for display / navigation); equals `id` for local nodes. */
   entityId: string;
   kind: EntityKind;
   label: string;
+
   /** False for a synthesized stub (a cross-space link target not in this space). */
   present: boolean;
+
   /** Set on external stubs: the space DID the target lives in. */
   space?: string;
 }
@@ -49,8 +52,10 @@ export interface GraphEdge {
   from: string;
   to: string;
   kind: EdgeKind;
+
   /** Optional edge annotation (pattern symbol, link path, …). */
   label?: string;
+
   /** True when `to` lives in another space (a cross-space data link). */
   external?: boolean;
 }
@@ -64,6 +69,7 @@ export interface SpaceGraph {
     edgesByKind: Record<EdgeKind, number>;
     externalEdges: number;
   };
+
   /** How far the entity scan this graph was built from reached. */
   extent: ScanExtent;
 }

@@ -45,8 +45,10 @@ export class SchemaGenerator {
     new PrimitiveFormatter(),
     new ObjectFormatter(this),
   ];
+
   /** Synthetic names for anonymous recursive types */
   private anonymousNames: WeakMap<ts.Type, string> = new WeakMap();
+
   /** Counter to generate stable synthetic identifiers */
   private anonymousNameCounter: number = 0;
 

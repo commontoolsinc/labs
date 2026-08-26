@@ -1,4 +1,5 @@
 #!/usr/bin/env deno run -A
+
 /**
  * FUSE benchmark harness — CT-1408
  *

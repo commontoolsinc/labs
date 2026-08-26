@@ -115,22 +115,27 @@ export interface WaveRunContext {
    * restart-stable, never per-process. */
   actionId: string;
   kind: WaveRunKind;
+
   /** ATTRIBUTION — the acting identity, one per action run, where the run
    * has one. A run with no acting identity (a space-scope derivation
    * before any narrowing) carries none (protocol.md §1). */
   acting?: { user: string; session?: string };
+
   /** The event this handler run consequences (`consequenceOf` carriage). */
   eventId?: string;
+
   /** The durable stream entry this handler run is processing (Phase 3;
    * OW14's source-event carriage): a cross-space append the run emits
    * records `{sidecarId, eventId}` on its outbox row so a
    * deterministic delivery refusal can write its failure notice onto
    * the SOURCE entry (protocol.md §2b's LT4 ruling). */
   streamEntry?: { sidecarId: string; index: number; seq: number };
+
   /** The same-wave parent event of a cascade-minted event: a requeued
    * parent folds this contribution into the requeue set (§3d; the
    * model's C8d rollback closure). */
   parentEventId?: string;
+
   /** This handler run is the LT1 same-space IN-PROCESS copy of an event
    * some contribution of this wave emitted (cell.ts's serving-arm send;
    * stage C build W3, (α3)): its durable entry rides the EMITTER's
@@ -141,6 +146,7 @@ export interface WaveRunContext {
    * clause). Never set on a drain copy (which carries a `streamEntry`)
    * or a plain in-process event on the serving runtime. */
   lt1?: true;
+
   /** The scope INSTANCE this run ran as, for basis rows'
    * action_scope_key. Typed as the shared `ScopeKey` vocabulary so a
    * caller cannot hand the basis index a scope NAME or a hand-rolled
@@ -148,6 +154,7 @@ export interface WaveRunContext {
    * pre-narrowing instance; stage F's serving loop supplies per-run
    * demanded instances. */
   actionScopeKey?: ScopeKey;
+
   /** M1 — the PER-RUN identity this run's scoped reads and writes
    * resolve their instance keys against (scopes.md §5, §7 M1): the
    * demand-supplied instance identity for a derivation, the event's
@@ -156,11 +163,13 @@ export interface WaveRunContext {
    * cardinality-1 posture, and pre-narrowing space-scope runs, which
    * resolve no scoped addresses at all). */
   scopeKeyIdentity?: ScopeKeyIdentity;
+
   /** The capability grant a provisioning run's FOREIGN writes are
    * admitted under (protocol.md §2's server-produced authored row, §2b):
    * carried with the acting identity into the foreign commit's metadata
    * for the target's delegated-capability admission. */
   capabilityRef?: string;
+
   /** Server-execution v2 fan-out stage B (RULED 2026-08-16, design §F):
    * this DERIVATION run's `acting`/`capabilityRef` are DERIVED FROM THE
    * SCOPE IT DISCOVERS — space → none; user → the user; session → the
@@ -171,6 +180,7 @@ export interface WaveRunContext {
    * pair. Absent on handler runs (explicit `firedAt` actor — LD1),
    * bookkeeping, and every context off the serving posture. */
   attributionFromScope?: boolean;
+
   /** The BROADEST scope any emission from this run was attributed at
    * (the early-emit guard's evidence): set by {@link actingForEmission};
    * a seal whose final discovered scope is NARROWER than it refuses the
@@ -379,46 +389,57 @@ export interface WaveBasisInstanceRows {
 /** The batched commit the wave hands the sink, per space. */
 export interface WaveSpaceCommit {
   space: MemorySpace;
+
   /** Same-space emitted event entries this batch appends (LT1,
    * events.md §2): their declarations, so the engine's event-append
    * admission stamps each entry's stream `seq` (a derived append must
    * be DECLARED — seq stamping cannot be skipped by a plumbing bug). */
   eventAppends?: Array<{ id: string; scope?: CellScope; eventId: string }>;
+
   /** True for the home space's derived-class commit; false for a foreign
    * space's authored-class provisioning commit (protocol.md §2b). */
   home: boolean;
+
   /** The wave's read basis: the store seq of the wave's input snapshot.
    * The sink's re-verification compares doc heads against it. */
   basisSeq: number;
+
   /** Per doc-instance key (`${id} ${scopeKey}`): the head the wave's
    * REBASE decision observed (§3d's "re-CAS against the new head"). The
    * sink's re-verification MUST require these docs' heads to EQUAL the
    * recorded value — a head that moved past the decision invalidates the
    * field-level merge, and the wave re-decides against the new head. */
   rebasedHeads: ReadonlyArray<{ doc: string; head: number }>;
+
   /** Surviving operations, in seal order — the commit step never reorders
    * (§3's sealing-order MUST binds the loop's processing order; this step
    * preserves what it was handed). */
   operations: Operation[];
   preconditions: CommitPrecondition[];
+
   /** Owning contribution index per precondition — home batch only; lets a
    * reported precondition failure resolve per write class. */
   preconditionOwners?: number[];
   annotations: WaveWriteAnnotation[];
+
   /** Every eventId whose handler consequences ride this commit. */
   consequenceOf: string[];
+
   /** Basis rows to write INSIDE the same store transaction (§3b's
    * carriage rule — never own commits, never commit metadata), already
    * grouped into overwrite units: per (action, instance), the LAST
    * contributing run's set. */
   basisInstances: WaveBasisInstanceRows[];
+
   /** The DR1 lease holder identity the derived-class admission checks. */
   holder: string | undefined;
+
   /** The watermark this home commit is current through (protocol.md §4);
    * every split of one wave repeats the same value. Absent for waves
    * driven outside a serving loop (no watermark exists to carry) and on
    * foreign batches. */
   derivedThrough?: number;
+
   /** Foreign provisioning batches only (protocol.md §2's server-produced
    * authored row, §2b): the ORIGINATING chain actor + the capability
    * grant the target's admission validates — delegation, never
@@ -428,6 +449,7 @@ export interface WaveSpaceCommit {
     actingSession?: string;
     capabilityRef: string;
   };
+
   /** Per-op resolved scope keys for the batch's folded `sqlite` ops
    * (stage G, discharging the stage-D sqlite bound): the accumulator
    * resolves each op's db scope against its RUN's identity (M1 — the
@@ -436,6 +458,7 @@ export interface WaveSpaceCommit {
    * transaction. Ops whose db declares the space scope carry `"space"`
    * explicitly — every sqlite op in the batch has an entry. */
   sqliteScopeKeys?: ReadonlyArray<{ op: number; scopeKey: ScopeKey }>;
+
   /** The wave's outbound cross-space event appends (serving-loop.md §5,
    * FP1): durable rows the sink writes INSIDE the wave's own store
    * transaction, from surviving contributions only — a withdrawn
@@ -487,6 +510,7 @@ export interface WaveCommitSink {
     space: MemorySpace,
     docs: ReadonlyArray<{ id: string; scope?: CellScope; scopeKey: string }>,
   ): Promise<ReadonlyMap<string, number>>;
+
   /** The value paths written to a doc-instance by commits after `sinceSeq`
    * — the field-level merge input for the rebase of non-re-derivable
    * writes (§3d). */
@@ -516,9 +540,11 @@ export interface WaveLease {
 interface WaveContribution {
   index: number;
   context: WaveRunContext;
+
   /** Per-space sealed commits, in the tx's commit order (children first,
    * home last — protocol.md §2b). */
   spaces: SealedSpaceContribution[];
+
   /** Doc-instance keys read in spaces this run WROTE NOTHING to (the
    * sealSpaceReads handoff — stage F, discharging the stage-D bound):
    * `${space}\0${docInstanceKey}`, folded into the withdrawn-read
@@ -528,12 +554,14 @@ interface WaveContribution {
    * spaces) — over-dropping a derivation is sound, committing one
    * derived from withdrawn state is not (§3d). */
   readOnlyReadKeys: Set<string>;
+
   /** Cross-space event appends this run emitted (serving-loop.md §5,
    * FP1): folded into the home batch's durable rows iff the
    * contribution survives — a withdrawn contribution's appends never
    * ride (its event replays and re-emits, the model's committed-only
    * `cascadesCross` fold). */
   outboundAppends: OutboxAppendRow[];
+
   /** The run's DISCOVERED scope at seal (scopes.md §2 S1 — the
    * transaction's read-scope ratchet, learned by running): the narrowest
    * scope of anything the run read, its diff bases and redirect slots
@@ -570,20 +598,25 @@ export interface WaveCommitOutcome {
    * commit or aborted. */
   seq?: number;
   aborted?: "lease-lost" | "abandoned" | "foreign-commit-failed" | "rejected";
+
   /** Superseded pure-derivation writes dropped at the per-doc CAS —
    * §7's `supersededWrites` counter feeds from this. */
   supersededWrites: number;
+
   /** Pure-derivation ops dropped because they read a withdrawn
    * contribution's sealed writes — re-derivable, and re-run through
    * their own reads when fresh state lands (§3d, RULED 2026-08-05).
    * Counted apart from `supersededWrites` so that counter keeps §3d's
    * exact meaning (doc head advanced past the basis). */
   dependencyDroppedWrites: number;
+
   /** Events rolled back to unconsequenced, in seal order — the serving
    * loop retries them in a later wave. */
   requeuedEventIds: string[];
+
   /** Events whose consequences committed (the commit's `consequenceOf`). */
   committedEventIds: string[];
+
   /** Event-handler contributions REFUSED as orphans (server-execution v2
    * stage C build W3, (α3); events.md §4's third clause): runs of an
    * LT1 same-wave cascade whose durable entry rode an emitter write
@@ -594,6 +627,7 @@ export interface WaveCommitOutcome {
    * loop's `events.orphanDeliveriesRefused` feeds from this. */
   orphanDeliveriesRefused: number;
   dispositions: ContributionDisposition[];
+
   /** Foreign provisioning batches this wave DURABLY COMMITTED, in commit
    * order — the serving loop's input for the EXPLICIT WARM REQUEST
    * (serving-loop.md §1's third activation trigger; RULED 2026-08-21).
@@ -731,11 +765,13 @@ export class WaveAccumulator
       acting: { user: string; session?: string },
     ) => ForeignWriteGrantResult | Promise<ForeignWriteGrantResult>)
     | undefined;
+
   /** Grant verdicts per (space, acting user) for THIS wave — one probe
    * per crossing pair, not per sealed tx. A new wave re-probes (grants
    * can change between waves; a transient probe failure must not stick
    * beyond the wave that observed it). */
   readonly #foreignGrantVerdicts = new Map<string, Promise<boolean>>();
+
   /** The grant ARM each admitted crossing resolved through, per
    * (space, acting user) — retained for the commit step (OW31 B4,
    * protocol.md §2b): a `creation`-granted foreign target's genesis
@@ -755,6 +791,7 @@ export class WaveAccumulator
   #assembly: PendingAssembly | undefined;
   #closed = false;
   #derivedThrough: number | undefined;
+
   /** Events one of whose EVENT-STAMPED transactions failed its seal
    * (owner review P1-2, 2026-08-12): the served navigateTo issues its
    * intent as a SEPARATE event-handler-stamped tx (builtins.md §4),
@@ -767,6 +804,7 @@ export class WaveAccumulator
    * for the re-drain. Store-owned idempotency (the engine's nonce
    * dedupe) absorbs the re-run's re-issue. */
   readonly #sealFailedEventIds = new Set<string>();
+
   /** Foreign spaces whose co-hosted ENGINE failed to resolve for this
    * wave's commit step (Phase 5, the F1b fix): commitWave withdraws
    * exactly the contributions that sealed into these spaces (requeue
@@ -779,6 +817,7 @@ export class WaveAccumulator
    * until this isolation. Marked by the serving loop's
    * per-space-caught foreign-engine resolution (failForeignSpace). */
   readonly #failedForeignSpaces = new Map<MemorySpace, string>();
+
   /** Outbound appends staged per transaction before its seal
    * (enqueueOutboundAppend); folded (by copy) into the contribution at
    * seal so only surviving contributions' appends ride the wave (FP1).
@@ -793,10 +832,12 @@ export class WaveAccumulator
   constructor(options: {
     /** The home space this wave derives for. */
     space: MemorySpace;
+
     /** Store seq of the wave's input snapshot: the per-doc CAS basis
      * (serving-loop.md §3b's snapshot discipline — mid-wave commits are
      * the NEXT wave's input). */
     basisSeq: number;
+
     /** The acting identity scoped writes resolve their instance keys
      * against, via the shared scope_key constructor — never a caller-
      * supplied format (key-vocabulary.md §3/§4). At OFF-arm cardinality 1
@@ -806,21 +847,25 @@ export class WaveAccumulator
     scopeKeyIdentity: ScopeKeyIdentity;
     replicaFor: (space: MemorySpace) => ISpaceReplica;
     lease?: WaveLease;
+
     /** Counted observation of §3d's unstamped-seal refusal (the
      * serving loop feeds its §7 `unstampedSealRefusals` counter):
      * called once per refused write-carrying transaction, right
      * before the refusal throws. The refusal semantics are unchanged
      * — this only makes the storm a counter fact. */
     onUnstampedSeal?: () => void;
+
     /** Counted observation of fan-out stage B's early-emit guard (the
      * serving loop feeds its §7 `earlyEmitRefusals` counter): called
      * once per contribution refused for an under-attributed emission. */
     onEarlyEmitRefusal?: () => void;
+
     /** Counted observation of design §B5's accept-and-count residual
      * (the serving loop feeds `undemandedNarrowingRuns`): a derivation
      * run under the wave-level fallback identity that discovered a
      * scope narrower than `space`. */
     onUndemandedNarrowing?: () => void;
+
     /** Foreign-space writes at ACCUMULATION (serving-loop.md §3d, RULED
      * 2026-08-14 (c) — the lunch-wall trigger's ruled seat): on
      * `"refuse"` (the pre-Phase-5 default), a sealing tx carrying a
@@ -841,6 +886,7 @@ export class WaveAccumulator
      * refusing action-scoped and counted. The commit-step guard stays
      * as backstop. */
     foreignWrites?: "refuse" | "accept";
+
     /** The authorization predicate of the accept gate (Phase 5;
      * protocol.md §2b): whether `acting` holds a structural write
      * grant for `space`. REQUIRED with `foreignWrites: "accept"` — an
@@ -856,6 +902,7 @@ export class WaveAccumulator
       space: MemorySpace,
       acting: { user: string; session?: string },
     ) => ForeignWriteGrantResult | Promise<ForeignWriteGrantResult>;
+
     /** Fired once per refused foreign-space write (above): the serving
      * loop counts it into §7's `foreignWriteRefusals`. */
     onForeignWriteRefusal?: (
@@ -1529,6 +1576,7 @@ export class WaveAccumulator
     const homeWrites = this.#contributions.map((contribution) =>
       this.#homeDocInstances(contribution)
     );
+
     /** Per SPACE: sealed localSeq → contribution index. LocalSeqs are
      * per-space replica counters, so the mapping must be per-space too —
      * a pending read in a FOREIGN sealed commit resolves its layers
@@ -1557,6 +1605,7 @@ export class WaveAccumulator
     const conflicted = new Set<string>();
     const requeued = new Set<number>();
     const droppedWhole = new Set<number>();
+
     /** Event-handler contributions refused as ORPHANS (stage C build W3,
      * (α3)) — a subset of `droppedWhole`, kept apart for the
      * disposition message; the outcome COUNT is per EVENT
@@ -1564,6 +1613,7 @@ export class WaveAccumulator
      * same-eventId siblings down with it (the sibling fold below). */
     const orphanRefused = new Set<number>();
     const orphanRefusedEvents = new Set<string>();
+
     /** eventId → the contribution (and its home sidecar doc-instance
      * key) whose sealed ops APPEND that event's durable entry in THIS
      * wave — the LT1 same-wave emitters (cell.ts's serving-arm send
@@ -1571,13 +1621,16 @@ export class WaveAccumulator
      * of the requeue closure keys on it: a cascade child whose emitter
      * write is withdrawn has no durable entry behind it. */
     const emitterOf = this.#lt1EmittersByEventId();
+
     /** per contribution: home doc-instance keys whose ops are dropped */
     const droppedDocs: Set<string>[] = this.#contributions.map(() => new Set());
+
     /** per contribution: conflicted docs whose non-re-derivable ops
      * rebase — the disposition is PER (contribution, doc): one handler's
      * commuting patches never absolve another contribution's writes to
      * the same doc from their own drop/rebase/requeue check. */
     const rebasedDocs: Set<string>[] = this.#contributions.map(() => new Set());
+
     /** per rebased doc: the head every rebase decision on it observed
      * (§3d's "re-CAS against the new head" — the sink re-verifies the
      * doc still sits exactly there inside its store transaction). */

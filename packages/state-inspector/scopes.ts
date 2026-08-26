@@ -41,8 +41,10 @@ export interface Scope {
   /** The raw scope_key as stored (often %-encoded). */
   raw: string;
   kind: ScopeKind;
+
   /** Owning principal DID (user/session scopes). */
   principal?: string;
+
   /** Session uuid (session scopes). */
   sessionId?: string;
   entities: number;
@@ -148,12 +150,15 @@ export function resolveScopeChain(
 
 export interface IdentityValue {
   exists: boolean;
+
   /** The scope the value resolved from (the most specific that held the id). */
   resolvedScope?: string;
   resolvedKind?: ScopeKind;
   value?: unknown;
+
   /** True if a more-general scope ALSO holds this id (i.e. this is an override). */
   overrides?: boolean;
+
   /** Honest reminder this is an approximation, not the runtime read path. */
   approximation: true;
 }
@@ -204,10 +209,13 @@ export function valueAsIdentity(
     sessionId?: string;
     branch?: string;
     atSeq?: number;
+
     /** Exact path segments within the resolved value. */
     path?: string[];
+
     /** Return the resolved document instead of selecting within its value. */
     doc?: boolean;
+
     /** Maximum depth retained in annotated output. Defaults to eight. */
     annotationDepth?: number;
   },
@@ -259,14 +267,19 @@ export function valueAsIdentity(
 export interface Participant {
   /** The identity (user) DID. */
   did: string;
+
   /** True when this DID owns the space (space DID == did → it's their home). */
   isOwner: boolean;
+
   /** Commits whose session principal is this DID. */
   commits: number;
+
   /** Distinct sessions (browser tabs/devices) this DID acted from. */
   sessions: number;
+
   /** Entities this DID has in a `user:<DID>` scope here. */
   userEntities: number;
+
   /** Entities this DID has in `session:<DID>:*` scopes here. */
   sessionEntities: number;
 }
@@ -345,8 +358,10 @@ export interface ScopeVariant {
 export interface ScopeOverlay {
   id: string;
   variants: ScopeVariant[];
+
   /** True when the id appears in >1 scope (a per-identity override exists). */
   overridden: boolean;
+
   /** True when those scopes hold DIFFERENT values (real divergence). */
   divergent: boolean;
 }

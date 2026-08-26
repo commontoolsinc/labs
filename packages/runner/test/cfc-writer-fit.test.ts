@@ -558,6 +558,309 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
     }
   });
 
+  // The measurement quantifies over paths a schema could have declared a
+  // policy at, and the raw meta seam is not one: `setMetaRaw` lands on a
+  // document-root sibling of `value` (`schema`, `internal`, and the rest of
+  // the `MetaField` union), which no value schema describes.
+  //
+  // One route does reach a ceiling there — a document-root declaration
+  // resolves at every meta path by longest prefix — but it widens the
+  // ceiling over the whole payload, and a declaration on a single result
+  // field, which is how a pattern normally labels one, leaves the seam's
+  // ceiling empty. Such a pattern is then un-updatable: the pattern updater,
+  // `setsrc`, and setup over an existing piece all stamp meta.
+  //
+  // The seam is outside the check at every rung, so these cases assert on
+  // both the strict reject and the persist-and-flag diagnostic below it.
+  describe("meta-seam exemption", () => {
+    // Pinned rather than inherited: this exemption is only observable at the
+    // strictness where the misfit rejects.
+    const strictRuntime = (
+      storageManager: ReturnType<typeof StorageManager.emulate>,
+    ) =>
+      new Runtime({
+        apiUrl: new URL("https://example.com"),
+        storageManager,
+        cfcEnforcementMode: "enforce-strict",
+        cfcFlowLabels: "persist",
+      });
+
+    /** Seed `cause` as a plain document declaring no store policy. */
+    const seedUndeclaredTarget = async (
+      runtime: Runtime,
+      cause: string,
+      payload: FabricValue = { note: "public" },
+    ) => {
+      const id = runtime.getCell(signer.did(), cause)
+        .getAsNormalizedFullLink().id;
+      const seed = runtime.edit();
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id,
+        path: [],
+      }, { value: payload });
+      expect((await seed.commit()).ok).toBeDefined();
+      return id;
+    };
+
+    it("admits a meta write of a tainted join into an undeclared store", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = strictRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "wf-meta-source");
+        const targetId = await seedUndeclaredTarget(runtime, "wf-meta-target");
+
+        const tx = runtime.edit();
+        const source = runtime.getCell(
+          signer.did(),
+          "wf-meta-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        expect(raw.secret).toBe("s3cr3t");
+        const target = runtime.getCell(
+          signer.did(),
+          "wf-meta-target",
+          undefined,
+          tx,
+        );
+        await target.sync();
+        // The two paths the piece-update flows land on, and the two the
+        // strict measurement used to reject at.
+        target.setMetaRaw("schema", { type: "object" });
+        target.setMetaRaw("internal", { derived: raw.secret });
+        tx.prepareCfc();
+
+        const result = await tx.commit();
+        expect(result.error).toBeUndefined();
+        expect(result.ok).toBeDefined();
+        // Not merely "did not reject": no measurement named a meta path at
+        // all, at either rung (a strict reject and an explicit flag carry the
+        // identical reason string).
+        expect(writerFitDiagnostics(tx)).toEqual([]);
+
+        // The taint is not lost with the measurement. The join still lands as
+        // the derived component on the meta paths, so the egress, display,
+        // and observation gates read the unchanged label. (Each path carries
+        // the C2 per-class split — a `value` entry and a `shape` entry — so
+        // the paths are compared as a set.)
+        const stamped = replicaEntries(storageManager, targetId).filter((e) =>
+          e.origin === "derived" &&
+          (e.label.confidentiality ?? []).includes("secret")
+        );
+        expect([...new Set(stamped.map((e) => e.path.join("/")))].sort())
+          .toEqual(["internal", "schema"]);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("raises no persist-and-flag diagnostic for a meta write under enforce-explicit", async () => {
+      // The exemption is a statement about what the check can measure, not
+      // about what a rung does with a misfit, so it holds below strict too.
+      // Were it scoped to the reject, the shipped posture would keep flagging
+      // a measurement the strict rung had already declared meaningless.
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "wf-meta-explicit-source");
+        await seedUndeclaredTarget(runtime, "wf-meta-explicit-target");
+
+        const tx = runtime.edit();
+        const source = runtime.getCell(
+          signer.did(),
+          "wf-meta-explicit-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const target = runtime.getCell(
+          signer.did(),
+          "wf-meta-explicit-target",
+          undefined,
+          tx,
+        );
+        await target.sync();
+        target.setMetaRaw("slug", `${raw.secret}!`);
+        tx.prepareCfc();
+
+        expect((await tx.commit()).ok).toBeDefined();
+        expect(writerFitDiagnostics(tx)).toEqual([]);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("still rejects an ordinary value write of the same join into the same store", async () => {
+      // The control: the exemption is about paths a schema cannot reach, not
+      // about this transaction's join or this target's store. Swap the meta
+      // write above for a payload write into the same undeclared document and
+      // the misfit is back.
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = strictRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "wf-meta-control-source");
+        const targetId = await seedUndeclaredTarget(
+          runtime,
+          "wf-meta-control-target",
+        );
+
+        const tx = runtime.edit();
+        const source = runtime.getCell(
+          signer.did(),
+          "wf-meta-control-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        tx.writeOrThrow({
+          space: signer.did(),
+          scope: "space",
+          id: targetId,
+          path: ["value", "note"],
+        }, `${raw.secret}!`);
+        tx.prepareCfc();
+
+        const result = await tx.commit();
+        expect(result.error).toBeDefined();
+        expect(result.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(result.error?.message).toContain(`for ${targetId} at /note`);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("skips the measurement even where a root declaration resolves at the meta path", async () => {
+      // The skip is unconditional, and this pins that. A document-root
+      // declared entry is a prefix of every meta path, so longest-prefix
+      // resolution hands the meta path a non-empty ceiling — but that
+      // reaches the envelope seam only because canonicalization strips a
+      // leading `"value"`, making the payload root and the document root one
+      // logical path. It says nothing about the seam, and honoring it would
+      // make a piece updatable or not according to whether its pattern
+      // carries a root `ifc`.
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = strictRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "wf-meta-rooted-source");
+
+        // A root declaration that does NOT cover the join the tx will carry.
+        const targetId = runtime.getCell(signer.did(), "wf-meta-rooted-target")
+          .getAsNormalizedFullLink().id;
+        const seed = runtime.edit();
+        writeSeedEnvelopeDoc(seed, signer.did());
+        seed.writeOrThrow({
+          space: signer.did(),
+          scope: "space",
+          id: targetId,
+          path: [],
+        }, {
+          value: { note: "public" },
+          cfc: {
+            version: 1,
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+            labelMap: {
+              version: 1,
+              entries: [{
+                path: [],
+                label: { confidentiality: ["unrelated"] },
+              }],
+            },
+          },
+        });
+        expect((await seed.commit()).ok).toBeDefined();
+
+        const tx = runtime.edit();
+        const source = runtime.getCell(
+          signer.did(),
+          "wf-meta-rooted-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const target = runtime.getCell(
+          signer.did(),
+          "wf-meta-rooted-target",
+          undefined,
+          tx,
+        );
+        await target.sync();
+        target.setMetaRaw("slug", `${raw.secret}!`);
+        tx.prepareCfc();
+
+        expect((await tx.commit()).ok).toBeDefined();
+        expect(writerFitDiagnostics(tx)).toEqual([]);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("keeps measuring a payload field that shares a meta field's logical path", async () => {
+      // A payload field literally named `schema` lives at raw
+      // `["value","schema"]` and canonicalizes onto the meta root's logical
+      // path. The exemption is recorded per path across every write that
+      // reached it, so writing both in one transaction leaves the path
+      // measured — and an exempt meta path must not collapse a value write
+      // below it out of the measurement either.
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = strictRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "wf-meta-collide-source");
+        // The payload carries a `schema` object of its own, so the write
+        // below materializes at its own path instead of at the document root.
+        const targetId = await seedUndeclaredTarget(
+          runtime,
+          "wf-meta-collide-target",
+          { schema: { existing: true } },
+        );
+
+        const tx = runtime.edit();
+        const source = runtime.getCell(
+          signer.did(),
+          "wf-meta-collide-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const target = runtime.getCell(
+          signer.did(),
+          "wf-meta-collide-target",
+          undefined,
+          tx,
+        );
+        await target.sync();
+        target.setMetaRaw("schema", { type: "object" });
+        tx.writeOrThrow({
+          space: signer.did(),
+          scope: "space",
+          id: targetId,
+          path: ["value", "schema", "leaked"],
+        }, `${raw.secret}!`);
+        tx.prepareCfc();
+
+        const result = await tx.commit();
+        expect(result.error).toBeDefined();
+        expect(result.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(result.error?.message).toContain(
+          `for ${targetId} at /schema/leaked`,
+        );
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+  });
+
   it("leaves untainted writes untouched under enforce-strict", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = newRuntime(storageManager);

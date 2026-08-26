@@ -143,6 +143,7 @@ interface Tracker {
     rawArgs: string[],
     extra?: Record<string, unknown>,
   ) => Promise<unknown>;
+
   /** How many times a caller reached for the compiled pattern. The declared
    * result is behind it, so this is what a readback pays to bound itself. */
   patternLoads: () => number;

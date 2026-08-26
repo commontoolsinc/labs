@@ -31,20 +31,28 @@ const handleBacklinkClick = handler<
 export interface NoteMdOutput {
   [NAME]: string;
   [UI]: VNode;
+
   /** Passthrough note reference */
   note: NotePiece;
+
   /** Hidden from default-app piece list */
   isHidden: true;
+
   /** Excluded from mentions autocomplete (notes in notebooks may be hidden but still mentionable) */
   isMentionable: false;
+
   /** Tile variant (CT-1764): minimal embedded UI for `<cf-render variant="tile">`. */
   [TILE_UI]: VNode;
+
   /** Processed content with wiki-links converted to markdown links */
   processedContent: string;
+
   /** Stream to toggle checkboxes in content */
   checkboxToggle: Stream<{ detail: { index: number; checked: boolean } }>;
+
   /** Whether backlinks section should be visible */
   hasBacklinks: boolean;
+
   /** Stream to navigate back to source note for editing */
   goToEdit: Stream<void>;
 }

@@ -77,6 +77,7 @@ import {
   type HarnessFabricSessionFactory,
 } from "./fabric-session.ts";
 import { assertValidHarnessHandleTable } from "./handle-table.ts";
+import type { HandleValueResolutionContext } from "./tools/handle-values.ts";
 import type { HarnessWellKnownGrant } from "./contracts/well-known-grants.ts";
 import {
   mintWellKnownGrants,
@@ -210,6 +211,7 @@ export interface CreateHarnessEngineOptions
   sandboxRuntime?: SandboxRuntime;
   artifactStore?: HarnessArtifactStore;
   processRunner?: ProcessRunner;
+
   /**
    * Injection seam for the `run_pattern` fabric session, mirroring how
    * `sandboxRuntime` replaces the engine-built sandbox. When absent, a
@@ -218,6 +220,7 @@ export interface CreateHarnessEngineOptions
    * tool surface.
    */
   fabricSessionFactory?: HarnessFabricSessionFactory;
+
   /**
    * Operator input cells to mint handles for at run start; see
    * `establishInputCells`. Requires a fabric session — the cells live in
@@ -796,6 +799,21 @@ export class CfHarnessEngine {
     return this.#runState.handleTable === undefined
       ? undefined
       : structuredClone(this.#runState.handleTable);
+  }
+
+  /**
+   * What `resolveHandleValue` needs from this run: the handle table and the
+   * fabric session, when the run has one. For trusted-side resolutions the
+   * prompt loop performs itself (a `delegate_task` skillHandle), where no
+   * tool context exists to carry them.
+   */
+  get handleValueResolutionContext(): HandleValueResolutionContext {
+    return {
+      handleTable: this.handleTable,
+      ...(this.#fabricSessionFactory !== undefined
+        ? { getFabricSession: this.#fabricSessionFactory }
+        : {}),
+    };
   }
 
   /**

@@ -26,8 +26,10 @@ export interface CfcPostureReport {
   readonly policyEvaluation: string;
   readonly labelMetadataProtection: string;
   readonly declaredMonotonicity: string;
+
   /** Digest of the deployment policy snapshot; `null` when none configured. */
   readonly policyDigest: string | null;
+
   /** Sink names with a declared confidentiality ceiling, sorted. */
   readonly sinkCeilings: string[];
 }

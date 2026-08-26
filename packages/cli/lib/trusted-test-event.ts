@@ -20,6 +20,7 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 export interface TrustedUiDescriptor {
   /** `data-ui-pattern` / `data-ui-event-integrity` of the trusted surface. */
   surface: string;
+
   /** `data-ui-action` of the control inside the surface. */
   action: string;
 }

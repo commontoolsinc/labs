@@ -91,12 +91,16 @@ export type ValueShape =
 export interface Lineage {
   /** Input cell — a piece's `argument` link target. */
   argument?: string;
+
   /** Pattern pointer + resolved module entity (modern pieces). */
   pattern?: { identity: string; symbol?: string; moduleId?: string };
+
   /** Owning piece — an owned cell's `result` back-link target. */
   owner?: string;
+
   /** Owned child cell ids — a piece's `internal` manifest. */
   internal?: string[];
+
   /**
    * Legacy process/source cell link target.
    * LEGACY-PROCESS-CELL: removed with the process-cell era (top-of-file note).
@@ -109,10 +113,13 @@ export interface EntityModel {
   scope: string;
   kind: EntityKind;
   regime: Regime;
+
   /** True when the entity carries a `result` ownership back-link. */
   owned: boolean;
+
   /** Human label: piece $NAME, module:<file>, stream, schema, or value summary. */
   label: string;
+
   /** Top-level paths present in the document (the control plane, sorted). */
   paths: string[];
   valueShape: ValueShape;
@@ -485,14 +492,17 @@ export function scanLimit(limit: number | undefined): number {
 export interface ScanExtent {
   /** The cap the scan applied. */
   limit: number;
+
   /**
    * Entities this branch and scope can see, before any `kind` filter — the
    * size of the set the scan walked (`visibleEntityRows`), so a complete pass
    * describes exactly this many.
    */
   total: number;
+
   /** True when the scan reached more of what was asked for than `limit`. */
   truncated: boolean;
+
   /**
    * Entities the scan enumerated and could NOT describe — a payload that would
    * not decode, or a reconstruction that threw. A separate count from
@@ -513,6 +523,7 @@ export function isCompleteScan(extent: ScanExtent): boolean {
 export interface EntityScanRow {
   id: string;
   revisions: number;
+
   /**
    * The chain link that owns the visible row. A pass describing an entity's
    * history has to read THIS branch and no other: nearest-branch ownership
@@ -548,6 +559,7 @@ export function visibleEntityRows(
   opts: {
     branch?: string;
     scope?: string;
+
     /** Include entities whose visible head is a `delete`. Default false. */
     includeDeleted?: boolean;
   } = {},
@@ -811,6 +823,7 @@ export function listEntityModels(
 
 export interface PieceCellRef {
   id: string;
+
   /** Classified kind of the owned cell (stream / schema / owned-cell / …). */
   kind: EntityKind;
   label: string;
@@ -821,6 +834,7 @@ export interface PieceModel {
   id: string;
   regime: Regime;
   name: string;
+
   /** The pattern (module) this piece instantiates, resolved via patternIdentity. */
   pattern?: {
     id?: string;
@@ -828,15 +842,20 @@ export interface PieceModel {
     symbol?: string;
     filename?: string;
     codeLines?: number;
+
     /** Full TS source — only populated when `includeCode` is set. */
     code?: string;
   };
+
   /** The piece's input cell (the `argument` link). */
   input?: { id: string; summary: string };
+
   /** Top-level keys of the piece's result value ($UI, $NAME, …pattern outputs). */
   resultKeys: string[];
+
   /** Top-level keys of the result JSONSchema. */
   schemaKeys: string[];
+
   /** The piece's owned child cells (its `internal` manifest, resolved). */
   ownedCells: PieceCellRef[];
 }

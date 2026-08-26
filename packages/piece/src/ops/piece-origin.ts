@@ -42,6 +42,7 @@ export interface PieceOrigin {
   /** The canonical origin URL. */
   url: string;
   kind: PieceOriginKind;
+
   /**
    * The URL as it was recorded on the piece, when normalization changed it. A
    * legacy toolshed-relative path becomes an absolute web URL, so the recorded
@@ -55,22 +56,31 @@ export interface PieceSourceState {
   space: MemorySpace;
   pieceId: string;
   name?: string;
+
   /** The exact executable export the piece runs. */
   pattern?: { identity: string; symbol: string };
+
   /** The identity whose complete setup state was installed. */
   setupPattern?: { identity: string; symbol: string };
+
   /** The pattern identity an in-place update replaced, when one did. */
   displacedPattern?: { identity: string; symbol: string; displacedAt?: number };
+
   /** The active origin, absent when the piece is detached. */
   origin?: PieceOrigin;
+
   /** Descriptive repository locator; never followed. */
   repository?: string;
+
   /** The canonical entry filename of the retained source, when readable. */
   entry?: string;
+
   /** The authored source files of the current pattern, when readable. */
   files: { name: string; contents: string }[];
+
   /** Names among `files` that carry data rather than code. */
   dataFiles?: string[];
+
   /** Ordered, append-only source and origin states accepted by the piece. */
   history: PieceSourceRevisionState[];
   currentRevisionId?: string;
@@ -426,6 +436,7 @@ export async function readPieceSourceState(
 export interface PieceSourceRevisionSource {
   pattern: { identity: string; symbol: string };
   files: { name: string; contents: string }[];
+
   /** Names among `files` that carry data rather than code. */
   dataFiles?: string[];
 }

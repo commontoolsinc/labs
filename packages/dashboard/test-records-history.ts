@@ -37,6 +37,7 @@ export const TEST_RECORDS_REFRESH_TAIL_DAYS = 3;
 export interface DayAggregate {
   /** JSON-array identity key, with an optional fourth variant part. */
   key: string;
+
   /** "yyyy/mm/dd". */
   day: string;
   runs: number;
@@ -142,6 +143,7 @@ export async function collectDay(
 
 interface StoredHistory {
   version: 1;
+
   /** Cached day aggregates; the refresh tail is always refetched. */
   days: Record<string, DayAggregate[]>;
 }
@@ -163,10 +165,13 @@ function isStoredHistory(value: unknown): value is StoredHistory {
 /** The per-test series trend.ts fits: times ascending, one point per day. */
 export interface TestSeries {
   key: string;
+
   /** Milliseconds since epoch, one per day with data, ascending. */
   times: number[];
+
   /** Fraction of runs that passed that day. */
   passRates: number[];
+
   /** Mean duration that day, in milliseconds. */
   meanDurationsMs: number[];
 }

@@ -60,6 +60,7 @@ export interface ProcessOptions {
   verboseErrors?: boolean;
   space?: string;
   patternJson?: boolean;
+
   /** Data file paths to attach, so a pattern that reads one can run here. */
   dataFilePaths?: string[];
 }

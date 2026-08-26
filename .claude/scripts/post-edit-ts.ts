@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-run
+
 /**
  * .claude/scripts/post-edit-ts.ts
  *

@@ -97,6 +97,7 @@ type AppliedRecord = {
 type RejectionError = {
   name: string;
   message: string;
+
   /**
    * Mirrors the real server's retryable-conflict marker: the client attaches
    * `readyToRetry` (the read-repair gate) ONLY when a ConflictError carries a
@@ -116,6 +117,7 @@ type ScriptedOutcome =
     remoteInterleave?: RemoteCommit;
     responseGate?: Promise<void>;
     onReceipt?: () => void;
+
     /**
      * Skip validateReads for this commit. Forces the "impossible" late
      * accept — a server verdict resolving a pending dependency the client
@@ -128,6 +130,7 @@ type ScriptedOutcome =
   | {
     kind: "rejectConflict";
     message?: string;
+
     /** See {@link RejectionError.retryAfterSeq}. */
     retryAfterSeq?: number;
     remoteInterleave?: RemoteCommit;
@@ -564,9 +567,11 @@ type PushSyncOptions = {
     value?: RootValue;
     deleted?: true;
   }>;
+
   /** Wire REMOVES (the watch-scope eviction frame): carry NO seq — the
    * shape whose shadow records the sentinel floor 1. */
   removes?: Array<{ id: URI }>;
+
   /** The server's caught-up marker: resolves client + runner read-repair
    * waiters for every localSeq <= this value. */
   caughtUpLocalSeq?: number;

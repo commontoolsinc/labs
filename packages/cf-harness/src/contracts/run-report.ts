@@ -43,6 +43,7 @@ export interface HarnessToolActivity {
   endedAt: string;
   toolCallId: string;
   toolId: string;
+
   /** Absent when the call named a tool the run offers no descriptor for. */
   effectClass?: HarnessToolEffectClass;
   cfcEnforcementMode: CfcEnforcementMode;
@@ -103,6 +104,7 @@ export interface HarnessRunReport {
   generatedAt: string;
   status: string;
   model: string;
+
   /** Requested effort; provider clients reject routes that cannot apply it. */
   reasoningEffort?: string;
   promptCacheMode?: "implicit" | "explicit";
@@ -112,12 +114,15 @@ export interface HarnessRunReport {
   credentialOwner?: HarnessCredentialOwnerRef;
   harnessHomeIdentity?: string;
   modelTurns: number;
+
   /** Usage from model turns executed directly by this run. */
   usage?: HarnessModelUsage;
+
   /** Direct usage plus usage reported by completed descendant runs. */
   totalUsage?: HarnessModelUsage;
   modelUsage?: HarnessModelTurnUsage[];
   cfcEnforcementMode: CfcEnforcementMode;
+
   /** The fabric session's resolved CFC posture, when the run had a session. */
   fabricSessionCfc?: HarnessFabricSessionCfcPosture;
   createdAt?: string;

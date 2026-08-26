@@ -16,12 +16,16 @@ import type { CellScope } from "../builder/types.ts";
 export type CfcExternalIngestMeta = {
   /** The ingest channel (its dedicated space DID). */
   readonly channel: string;
+
   /** The presenter the grant was vouched to (recorded, not enforced). */
   readonly audience: string;
+
   /** Operator wall-clock receive time (ISO 8601), captured before the write. */
   readonly receivedAt: string;
+
   /** Digest of the payload bytes the helper actually wrote. */
   readonly valueDigest: string;
+
   /**
    * The document + path the mark anchors to — the cell the ingest writes into.
    * Declared explicitly (rather than inferred from the write diff) so the mark

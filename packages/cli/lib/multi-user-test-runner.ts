@@ -62,6 +62,7 @@ import type {
 
 export interface MultiUserParticipantSpec {
   name: string;
+
   /** Identity seed; participants with the same `user` share an identity. */
   user: string;
 }

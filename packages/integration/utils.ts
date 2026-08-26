@@ -88,6 +88,7 @@ export const awaitViewSettled = async (page: Page): Promise<boolean> => {
 export interface ProbeApi {
   /** Every element matching `selector`, descending through shadow roots. */
   collect(selector: string): Element[];
+
   /**
    * Whether `element` is rendered: it has a non-empty layout box and is not
    * `display:none` or `visibility:hidden`. Viewport-independent, so an element
@@ -96,10 +97,13 @@ export interface ProbeApi {
    * a click scrolls the element into view itself.
    */
   isRendered(element: Element): boolean;
+
   /** Whether `element` is rendered and also on-screen. */
   isVisible(element: Element): boolean;
+
   /** Visible text of `root` plus its shadow and slotted descendants. */
   deepText(root: ParentNode): string;
+
   /**
    * Add `token` to the whitespace-separated token list held in `element`'s
    * `attribute`, keeping the tokens already there. This is how a predicate

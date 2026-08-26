@@ -254,6 +254,7 @@ export type LabelMapEntry = {
   path: readonly string[];
   label: IFCLabel;
   origin?: LabelEntryOrigin;
+
   /**
    * Payload consumption classes, or — on `origin:"label-metadata"`
    * population templates only (Stage B) — the `labelMetadata` class, which
@@ -308,6 +309,7 @@ export type ConsumedRead =
   & Immutable<{
     meta?: Metadata;
     nonRecursive?: boolean;
+
     /**
      * Position on the transaction's activity clock (shared with write
      * attempts — see `OrderedWriteAttempt`). Part of the prepared digest:
@@ -375,12 +377,14 @@ export type ImplementationIdentity =
   | { kind: "builtin"; builtinId: string }
   | {
     kind: "verified";
+
     /**
      * Content-addressed module identity (prefix-free `cf:module/<hash>`
      * hash) — reload-stable and robust to unrelated module changes in the
      * same program.
      */
     moduleIdentity?: string;
+
     /** Export/`__cfReg` symbol of the registered factory, when module-scope. */
     symbol?: string;
     sourceFile?: string;
@@ -415,6 +419,7 @@ export type WritePolicyInput =
     readonly target: CfcAddress;
     readonly schemaHash?: string;
     readonly schema?: JSONSchema;
+
     /**
      * Present only when this schema describes a generated output of the
      * running module. Such outputs may introduce required fields without
@@ -490,6 +495,7 @@ export type PreparedDigestInput = {
   readonly consumedReads: readonly ConsumedRead[];
   readonly attemptedWrites: readonly AttemptedWrite[];
   readonly writes: readonly AttemptedWrite[];
+
   /**
    * The ordered write-attempt log (see `OrderedWriteAttempt`). Mandatory in
    * the digest: `consumedReads`/`writes` are canonicalized by address-sort,
@@ -505,6 +511,7 @@ export type PreparedDigestInput = {
   readonly writePolicyInputs: readonly WritePolicyInput[];
   readonly implementationIdentity?: ImplementationIdentity;
   readonly trustSnapshot?: TrustSnapshot;
+
   /** Update-authority aliases consulted by writeAuthorizedBy verification. */
   readonly moduleDelegations?: readonly ModuleDelegationSnapshotEntry[];
   // Digest of the policy snapshot the boundary decisions evaluated under
@@ -530,6 +537,7 @@ export type PostCommitSideEffect = {
   id: string;
   kind: string;
   idempotencyKey?: string;
+
   /** The client-effect nonce this enactment carries (server-execution v2
    * Phase 4, protocol.md §5) — set by `navigateTo` under the flag so the
    * speculation overlay's OPTIMISTIC enactment records the SAME nonce the

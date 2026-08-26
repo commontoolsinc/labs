@@ -24,10 +24,13 @@ const HKDF_INFO = "common-fabric test-records key delivery v1";
 
 export interface SealedBox {
   v: 1;
+
   /** Ephemeral sender public key, base64url raw. */
   epk: string;
+
   /** AES-GCM nonce, base64url. */
   iv: string;
+
   /** Ciphertext with tag, base64url. */
   ct: string;
 }
@@ -35,6 +38,7 @@ export interface SealedBox {
 export interface KeyDeliveryIdentity {
   /** The recipient string to paste into the minting workflow. */
   recipient: string;
+
   /** X25519 private key, base64url PKCS#8. */
   privateKey: string;
 }

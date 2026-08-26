@@ -58,6 +58,7 @@ type LinkHop = {
   link: NormalizedFullLink;
   source: NormalizedFullLink;
   kind: "value" | "write-redirect";
+
   /**
    * How many of the resolving link's path segments the stored link sits under.
    * Equal to `link.path.length` for a hop found at the full path, and shorter
@@ -121,6 +122,7 @@ const recordDereferenceHop = (
 // directly (`runtime.getCellFromLink` with a multi-segment path) has no
 // recorded caps at all, and removing the floor lets such a read follow a
 // narrower link that main blocks. Pinned by a test.
+
 /**
  * Shift recorded caps onto a link's target after a hop consumed `consumed`
  * leading segments. Caps at or below the hop are dropped (already enforced);
@@ -242,8 +244,10 @@ const kickDocPull = (
 type LinkResolutionRecord = {
   /** The resolved link. Handed out as a copy, never this object. */
   readonly result: NormalizedFullLink;
+
   /** Every hop the walk recorded, in order, ready to be recorded again. */
   readonly traces: readonly CfcDereferenceTrace[];
+
   /**
    * Hop targets in another space. Their sync kick is unreserved, so it fires on
    * every resolution and a memoized one has to fire it too. A same-space kick

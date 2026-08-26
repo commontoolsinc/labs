@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run -A
+
 /**
  * Tier 1 pattern-update gate. Compiles every authored pattern, then proves its
  * argument/result contract can still be applied over every contract recorded
@@ -117,6 +118,7 @@ async function main() {
   const cwd = Deno.cwd();
 
   const contracts = new Map<string, PatternContract>();
+
   /**
    * Files that yielded no contract, and why. Most of `packages/patterns` is not
    * a pattern entry — `schemas.tsx`, `auth-types.ts`, client helpers — and a
@@ -126,6 +128,7 @@ async function main() {
    * and can no longer roll forward. That case is `checkPattern`'s `retired`.
    */
   const unavailable = new Map<string, string>();
+
   /** Skips that are an evaluation error rather than "not a pattern entry". */
   const evaluationErrors: { pattern: string; error: string }[] = [];
 

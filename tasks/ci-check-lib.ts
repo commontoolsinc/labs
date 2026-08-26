@@ -11,6 +11,7 @@
 // ---------------------------------------------------------------------------
 
 export const REPO = Deno.env.get("GITHUB_REPOSITORY") ?? "commontoolsinc/labs";
+
 /** Where the repository is hosted; a workflow run names it. */
 export const SERVER_URL = Deno.env.get("GITHUB_SERVER_URL") ??
   "https://github.com";
@@ -69,13 +70,17 @@ export const COVERAGE_COMMENT_FILE = "coverage-comment.json";
 export interface CoverageCommentPayload {
   prNumber: number;
   state: "regressed" | "resolved";
+
   /** Present when `state` is "regressed". */
   body?: string;
+
   /** Present when `state` is "resolved". */
   improvedLines?: number;
+
   /** Present when `state` is "resolved": the changed source groups and where
    * this PR left each one's uncovered-line count. */
   groups?: CoverageResolvedGroup[];
+
   /** Present when `state` is "resolved": true when the gate passed because a
    * changed group's debt was accepted with a per-group acceptance or the reset
    * marker, not because the new code is covered. */
@@ -184,8 +189,10 @@ export type CompileCacheStates = Partial<
 export interface CacheStateRecord {
   family: string;
   shard: string;
+
   /** The cache key `actions/cache` restored from; empty on a full miss. */
   matchedKey: string;
+
   /** True only when the primary key matched exactly. */
   exactHit: boolean;
 }
@@ -194,6 +201,7 @@ export interface CoverageBaselineFile {
   version: 1;
   generatedAt: string;
   metrics: MetricRecord[];
+
   /**
    * Per-family compile cache states for the run this file describes. Absent
    * when no cache-state artifact recorded for the run.
@@ -211,8 +219,10 @@ export interface PRInfo {
 
 export interface PRFile {
   filename: string;
+
   /** Old path for renamed files; the fingerprint classifier needs both. */
   previous_filename?: string;
+
   /** Unified diff for this file. Absent for binary or oversized changes. */
   patch?: string;
 }
@@ -236,6 +246,7 @@ export interface BaselineOverrides {
    * reads the number off the current pull request alone.
    */
   metrics: Map<string, number>;
+
   /** Reset all coverage-debt metrics at the commit carrying this marker. */
   coverageBaselineReset: boolean;
 }
@@ -465,6 +476,7 @@ function metricsToRecords(
 /** Parsed coverage baseline plus the run's compile cache states, when tagged. */
 export interface CoverageBaselineDetailed {
   metrics: Map<string, BaselineSample>;
+
   /** Null when the file recorded no compile cache states. */
   compileCacheStates: CompileCacheStates | null;
 }
@@ -854,8 +866,10 @@ export function parseAddedLinesFromPatch(patch: string): Map<number, string> {
 /** A changed source group whose uncovered-line count regressed. */
 export interface CoverageSuggestionGroup {
   group: string;
+
   /** Uncovered-line count from latest `main`; the PR must not exceed it. */
   target: number;
+
   /** Uncovered-line count this PR produced. */
   current: number;
 }
@@ -870,8 +884,10 @@ export interface CoverageSuggestionFileLines {
 /** A changed source group and where this PR left its uncovered-line count. */
 export interface CoverageResolvedGroup {
   group: string;
+
   /** Uncovered-line count from latest `main`. */
   baseline: number;
+
   /** Uncovered-line count this PR produced. */
   current: number;
 }
@@ -1081,6 +1097,7 @@ export interface CoverageUnattributedFile {
 export interface CoverageMeasurement {
   /** The run's page on GitHub. */
   runUrl?: string;
+
   /** The base-branch commit the run merged the pull request into. */
   baseSha?: string;
 }
@@ -1089,6 +1106,7 @@ export interface CoverageMeasurement {
 export interface CoverageRunIdentity {
   /** The run's page on GitHub. */
   runUrl?: string;
+
   /** The commit that run measured. */
   sha?: string;
 }
@@ -1101,12 +1119,14 @@ export interface CoverageUnattributedGroup extends CoverageSuggestionGroup {
 export interface CoverageDebtUnattributedInput {
   groups: CoverageUnattributedGroup[];
   files: CoverageUnattributedFile[];
+
   /** The run whose coverage report the affected lines were read from. */
   measurement?: CoverageMeasurement;
 }
 
 /** How many affected files the comment names before it starts counting. */
 const MAX_UNATTRIBUTED_FILES = 20;
+
 /** How many line numbers one file contributes before the rest are counted. */
 const MAX_UNATTRIBUTED_LINES_PER_FILE = 20;
 

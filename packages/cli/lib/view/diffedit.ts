@@ -2072,10 +2072,13 @@ interface MutableHunk {
   newFileHasUtf8Bom?: boolean;
   oldNoTrailingNewline?: boolean;
   newNoTrailingNewline?: boolean;
+
   /** The nearest preceding commit header in the source text. */
   commitSha?: string | null;
+
   /** This is the first verified hunk that names its workspace range. */
   writable?: boolean;
+
   /** Removed lines have a workspace-verified insertion point. */
   resurrectable?: boolean;
 }

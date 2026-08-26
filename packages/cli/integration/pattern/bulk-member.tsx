@@ -17,6 +17,7 @@ export interface MemberInput {
 export interface MemberOutput {
   [NAME]: string;
   title: string;
+
   /** Which generation of this fixture the member runs. */
   generation: string;
 }

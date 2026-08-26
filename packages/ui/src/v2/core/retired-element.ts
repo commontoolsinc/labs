@@ -68,6 +68,7 @@ export abstract class RetiredElement extends BaseElement {
 
   /** The tag this stub stands in for. */
   protected abstract retiredTag: string;
+
   /** What to use instead, when there is a successor. */
   protected retiredReplacement?: string;
 

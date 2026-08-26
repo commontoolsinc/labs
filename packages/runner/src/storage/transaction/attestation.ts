@@ -40,6 +40,7 @@ const cacheHitLogger = getLogger("attestation-hit", {
   enabled: false,
   level: "debug",
 });
+
 /**
  * Cache for parsed data URIs to avoid redundant parsing.
  * Key format: `${address.id}::${address.type}`

@@ -13,17 +13,22 @@ export interface DescribeHandleToolInput {
 
 export interface DescribeHandleToolOutput {
   outputId: string;
+
   /** The token as asked about, echoed so a reply stands on its own. */
   token: string;
+
   /** Whether this run's handle table holds the token. */
   known: boolean;
+
   /** Whether a schema was found to report, from either source. */
   hasSchema: boolean;
+
   /**
    * The reported schema: fabric-declared, or harness-derived, whichever
    * answered first in that order.
    */
   schema?: JSONSchema;
+
   /**
    * Path segments of the referent within its piece — which field of which
    * piece the token names. Read off the entry's already-parsed reference, so

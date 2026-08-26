@@ -24,12 +24,14 @@ import {
 export interface NormalizedLLMFriendlyRef {
   pieceId: string;
   scope?: CellScope;
+
   /**
    * True when the reference ended in the `#argument` suffix: the caller
    * selected the piece's arguments cell, the same selection `--input`
    * spells as a flag. Only commands that take `--input` accept it.
    */
   input?: boolean;
+
   /**
    * The space DID embedded in the reference, when the command's target
    * space is a name (or absent) rather than a DID. A name only resolves to
@@ -39,6 +41,7 @@ export interface NormalizedLLMFriendlyRef {
    * never sets this field.
    */
   embeddedSpace?: string;
+
   /**
    * Path segments embedded in the reference: a canonical array-index
    * segment is a number, everything else stays a string.

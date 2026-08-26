@@ -95,6 +95,7 @@ export interface TopicExportRow {
   patternIdentity: string;
   argumentId: string;
   content: TopicContent;
+
   /** The argument document exactly as stored, links unresolved — the
    * forensic copy. Restore consumes `content`, never this. */
   rawArgument: unknown;
@@ -109,11 +110,13 @@ export interface TopicsExport {
     fid: string;
     patternIdentity: string;
     argumentId: string;
+
     /** Stored membership links of the board's `topics` array, in order —
      * evidence of membership and order, never a restore payload. */
     topicsLinks: unknown[];
   } | null;
   topics: TopicExportRow[];
+
   /** Every piece in the snapshot, so "did I select the right ones?" is
    * answerable from the export alone. */
   manifest: { fid: string; patternIdentity: string; resultKeys: string[] }[];
@@ -122,6 +125,7 @@ export interface TopicsExport {
 /** The known link-valued argument fields a restore handles specially:
  * `mentionable` is re-established with `cf piece link` after the write, and
  * the deprecated `myName` stays retired. */
+
 /**
  * The link-valued argument fields a restore re-establishes with
  * `cf piece link` rather than writing as data, mapped to the board path each
@@ -145,8 +149,10 @@ export const LEGACY_LINK_FIELDS = ["myName"] as const;
 export interface RestoreDocument {
   /** The complete input document a restore applies. */
   doc: Record<string, unknown>;
+
   /** Link fields present in the raw argument that the caller re-links. */
   structural: string[];
+
   /** Deprecated link fields present in the raw argument, left retired. */
   legacy: string[];
 }

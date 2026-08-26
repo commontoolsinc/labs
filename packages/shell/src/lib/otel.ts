@@ -1,6 +1,7 @@
 // deno-lint-ignore-file cf-imports/no-inline-module-import -- the OpenTelemetry
 // web SDK enters the shell's bundle only along this path, which runs when the
 // operator has switched telemetry on.
+
 /**
  * Browser-side OpenTelemetry setup for the shell (Phase 3).
  *
@@ -39,11 +40,13 @@ export interface InitBrowserOtelOptions {
 export interface BrowserTelemetry {
   /** Feed one RuntimeTelemetry marker into the OTel bridge. */
   handleMarker(marker: RuntimeTelemetryMarkerResult): void;
+
   /**
    * Update the space.did stamped on subsequent spans. The runtime (and this
    * sink) lives across space navigations, so the host must keep this current.
    */
   setSpace(spaceDid: string | undefined): void;
+
   /** Close open spans and flush + shut down the tracer provider. */
   shutdown(): Promise<void>;
 }

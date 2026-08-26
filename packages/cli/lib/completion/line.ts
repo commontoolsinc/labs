@@ -28,6 +28,7 @@ export type AnyCommand = Command<any>;
 
 /** What the word under the cursor is a position for. */
 export type CompletionSlot =
+
   /** A subcommand name of `command`. */
   | { readonly kind: "subcommand" }
   /** An option flag (the word starts with `-`). */
@@ -36,6 +37,7 @@ export type CompletionSlot =
   | {
     readonly kind: "option-value";
     readonly option: Option;
+
     /** Set when completing `--name=value`; candidates must carry the prefix. */
     readonly inlinePrefix?: string;
   }
@@ -70,6 +72,7 @@ export type CompletionSlot =
 export interface PreParseGlobal {
   readonly flags: readonly string[];
   readonly description: string;
+
   /** Accepted values, when the flag takes one. */
   readonly values?: readonly string[];
 }
@@ -94,23 +97,30 @@ function findPreParseGlobal(token: string): PreParseGlobal | undefined {
 export interface CompletionLine {
   /** Deepest command the words resolved to. */
   readonly command: AnyCommand;
+
   /** Command path below the program name, e.g. `["piece", "call"]`. */
   readonly path: readonly string[];
   readonly slot: CompletionSlot | null;
+
   /** The partial word under the cursor; `""` at a fresh position. */
   readonly word: string;
+
   /** Long name -> last value, for value-taking options already on the line. */
   readonly options: ReadonlyMap<string, string>;
+
   /** Long names of valueless flags already on the line. */
   readonly flags: ReadonlySet<string>;
+
   /**
    * A canonical reference written in the first positional, in place of
    * `--piece`. It does not count as a positional: the command reads it out
    * before the rest, so `<callable>` is still the argument after it.
    */
   readonly address?: string;
+
   /** Positional words already supplied to `command`. */
   readonly positionals: readonly string[];
+
   /** Words after a `--` separator, excluding the separator itself. */
   readonly passthrough: readonly string[];
 }
@@ -552,8 +562,10 @@ export { longName, takesValue };
 export interface DeclaredPositional {
   /** `<command path>:<argument name>`, the key its provider carries. */
   readonly key: string;
+
   /** The command path, or `<root>` for the root command's own. */
   readonly where: string;
+
   /** Its place in that command's argument order, so a line can reach it. */
   readonly index: number;
 }
@@ -563,6 +575,7 @@ export interface DeclaredSlots {
   /** Option long name -> the command paths declaring it. */
   readonly options: ReadonlyMap<string, readonly string[]>;
   readonly positionals: readonly DeclaredPositional[];
+
   /**
    * The option slots whose value may be omitted, as
    * `<command path>:--<long name>`.

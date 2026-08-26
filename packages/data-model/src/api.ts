@@ -7,8 +7,13 @@
  * The canonical implementations live in this module's siblings --
  * `interface.ts`, `fabric-primitives/FabricHash.ts`,
  * `fabric-primitives/FabricEpochNsec.ts`, and the rest -- and these
- * declarations mirror their public surface. The two must agree: where they
- * drift, pattern type-checking diverges from runtime behavior.
+ * declarations mirror their public surface. Each of those files asserts beside
+ * its own definition that its implementation satisfies the declaration here,
+ * so a declaration that no implementation meets stops the build. That check
+ * runs one way only: a public member an implementation gains without a
+ * declaration here is simply unreachable from a pattern, and no gate reports
+ * it. `interface.ts` asserts both directions for the three base classes, whose
+ * protocol carries no symbol-keyed members to hold apart.
  *
  * Every concrete `FabricPrimitive` subclass needs an instanceof-capable
  * declaration here, that being an interface, a constructor interface, and a
@@ -58,6 +63,17 @@ export declare const FabricSpecialObject:
  * one -- a spread, `Object.keys()`, a naive walk -- therefore sees nothing.
  */
 export interface FabricInstance extends FabricSpecialObject {
+  /**
+   * Returns a new deep clone of this instance with equivalent data but no
+   * shared structure for any unfrozen data in the original. When `frozen ===
+   * true`, produces a frozen instance with maximal structural sharing,
+   * including returning `this` if it is already deep-frozen. When `frozen ===
+   * false`, produces a deeply-mutable instance with no visible shared
+   * reference structure with the original.
+   */
+  deepClone(frozen: boolean): FabricInstance;
+
+  /** Returns a shallow clone of this instance with the requested frozenness. */
   shallowClone(frozen: boolean): FabricInstance;
 }
 
@@ -257,14 +273,19 @@ export declare const FabricKeyPair: FabricKeyPairConstructor;
 export type FabricErrorState = {
   /** Constructor name of the originating native `Error` (e.g. `"TypeError"`). */
   readonly type: string;
+
   /** The `.name` property. Omit to mean "same as `type`". */
   readonly name?: string | null | undefined;
+
   /** The `.message` property. */
   readonly message: string;
+
   /** The `.stack` property, or `undefined`. */
   readonly stack: string | undefined;
+
   /** The `.cause` value, in `FabricValue` form, or `undefined`. */
   readonly cause: FabricValue | undefined;
+
   /** Custom enumerable own properties, in `FabricValue` form. */
   readonly extras?:
     | Iterable<readonly [string, FabricValue]>
@@ -312,7 +333,29 @@ export declare const FabricError: FabricErrorConstructor;
 // absence is a decision, not an oversight; revisit once that rework lands.
 
 /**
- * The full set of values that the fabric storage layer can represent.
+ * The full set of values that the fabric storage layer can represent. This is
+ * the strongly-typed "middle layer" of the three-layer architecture:
+ *
+ *     JavaScript "wild west" (`unknown`)
+ *       <-> `FabricValue`
+ *       <-> serialized (`Uint8Array`)
+ *
+ * Most native JS object types enter the fabric layer via wrapper classes that
+ * extend `FabricInstance`; other special values extend `FabricPrimitive`. Both
+ * of those reach `FabricValue` through the common `FabricSpecialObject` arm.
+ * The non-object values (`bigint` and the other scalars) are direct members of
+ * the union instead, not routed through that arm. Some native types are
+ * converted to `FabricPrimitive`s during conversion.
+ *
+ * `undefined` is preserved.
+ *
+ * `symbol` values are restricted at runtime to **registry-interned** symbols --
+ * those for which `Symbol.keyFor(s)` returns a string. These are portable
+ * across realms and processes via their registry key. Unique symbols
+ * (`Symbol(desc)`) are not portable and are rejected at the fabric boundary.
+ * TypeScript's `symbol` type cannot distinguish the two, so the gate is a
+ * runtime one, and it is the same gate at every point a symbol is admitted or
+ * refused: `Symbol.keyFor(value) !== undefined`.
  *
  * From a typesystem perspective, all `FabricValue`s are immutable (deeply
  * read-only), _except_ members of the `FabricInstance` tree. `FabricInstance`s
@@ -320,18 +363,30 @@ export declare const FabricError: FabricErrorConstructor;
  * changing the set of outgoing references from the instance. This is an
  * _intentional_ hole, because TypeScript has no ergonomic/pithy way to express
  * the desired semantics. (To be clear, it _can_ be done, just not cleanly.)
+ *
+ * **Deep-frozen honesty (mandatory).** A `FabricValue` must report its frozen
+ * state truthfully and permanently. In particular, a `FabricPlainObject` or
+ * `FabricArray` is data-only: it must not expose an own accessor
+ * (getter/setter) whose result can contradict, or change after, the value's
+ * frozen state -- once a `FabricValue` graph is deeply frozen, its contents are
+ * fixed. (For a `FabricInstance`, the analogous obligation is on its
+ * `[IS_DEEP_FROZEN]` report; see `BaseFabricInstance`.) The rest of the system
+ * -- the data model in general and `isDeepFrozen()` specifically, but also the
+ * entire codebase that _uses_ the data model -- relies on this to cache
+ * deep-frozen proofs by root identity without re-validating; a value that
+ * violates it can corrupt data-model invariants, as any broken contract can.
  */
 export type FabricValue =
-  | null
+  | bigint
   | boolean
+  | null
   | number
   | string
-  | bigint
   | symbol
-  | FabricSpecialObject
+  | undefined
   | FabricArray
   | FabricPlainObject
-  | undefined;
+  | FabricSpecialObject;
 
 /**
  * The container types that are part of `FabricValue`. Note that
@@ -348,6 +403,16 @@ export type NonNullableFabricValue = NonNullable<FabricValue>;
 /** Read-only array of `FabricValue`s. */
 export interface FabricArray extends ReadonlyArray<FabricValue> {}
 
-/** Read-only object/record of `FabricValue`s. */
+/**
+ * Object/record of `FabricValue`s.
+ *
+ * The names `__proto__` and `constructor` are refused at the boundaries where
+ * values enter or leave storage, so no `FabricPlainObject` carries one. The
+ * type cannot say as much -- a string index signature admits every string --
+ * so the guarantee is the boundary's, not TypeScript's. Note the internal copy
+ * loops are unguarded and rely on it: they rebuild records by assignment,
+ * which for `__proto__` would repoint the copy's prototype rather than
+ * creating a property.
+ */
 export interface FabricPlainObject
   extends Readonly<Record<string, FabricValue>> {}

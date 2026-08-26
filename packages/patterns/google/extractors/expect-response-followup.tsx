@@ -134,6 +134,7 @@ interface TrackedThread {
   settings: ThreadSettings;
   isDue: boolean;
   shouldGiveUp: boolean;
+
   /** Most recent message ID (for threading replies) */
   lastMessageId: string;
 }

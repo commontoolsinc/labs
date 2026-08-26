@@ -50,10 +50,13 @@ import {
 export interface SelectItem {
   /** Text shown to the user */
   label: string;
+
   /** Arbitrary JS value returned when this option is selected */
   value: unknown;
+
   /** Disabled state for this option */
   disabled?: boolean;
+
   /**
    * Optional grouping key. When provided, options with
    * identical `group` values will be wrapped in an <optgroup>.
@@ -181,6 +184,7 @@ export class CFSelect extends BaseElement {
   ];
 
   private _select!: HTMLSelectElement;
+
   /** Mapping from stringified option key -> SelectItem */
   private _keyMap = new Map<string, SelectItem>();
 

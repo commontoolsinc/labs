@@ -75,6 +75,7 @@ class LoopbackSessionFactory implements SessionFactory {
  */
 class CountingStorageManager extends StorageManager {
   closeCount = 0;
+
   /** Subscriptions handed to `subscribe` and not yet handed back. Mirrors the
    * calls reaching the manager, which is what the assertions below are about;
    * the relay's own membership is private, and its `hasSubscribers()` would
@@ -121,8 +122,10 @@ class FailingCloseStorageManager extends CountingStorageManager {
 
 describe("runtime.dispose({ closeStorage })", () => {
   let server: MemoryV2Server.Server;
+
   /** The store under test — handed to a runtime that does not own it. */
   let held: CountingStorageManager;
+
   /** An independent view of the same durable state, for witnessing writes. */
   let witness: CountingStorageManager;
   let witnessRuntime: Runtime;

@@ -26,6 +26,7 @@ export interface FabricActionErrorRecord {
   sequence: number;
   pieceId: string;
   patternId: string;
+
   /** The error's name — the discriminant that tells a policy refusal
    * (`CfcCommitRefusalError`) from a thrown computation (`Error`). */
   name: string;
@@ -34,6 +35,7 @@ export interface FabricActionErrorRecord {
 
 export interface FabricDeferredActionRecord {
   label: string;
+
   /**
    * Comparable entity hash of the piece the deferred action serves, from the
    * marker's observation identity; absent when the action carried none or
@@ -52,11 +54,13 @@ export interface FabricDeferredEpisodeRecord {
 export interface FabricRuntimeObservations {
   /** Monotonic position; capture before starting a piece. */
   sequence(): number;
+
   /** Action errors recorded after `since` for the given piece. */
   errorsSince(
     since: number,
     pieceId: string,
   ): readonly FabricActionErrorRecord[];
+
   /** Convergence-budget episodes recorded after `since`. */
   episodesSince(since: number): readonly FabricDeferredEpisodeRecord[];
 }

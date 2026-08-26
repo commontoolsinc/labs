@@ -51,16 +51,21 @@ export interface RowLabelWritePolicy {
 
 export interface RowLabelWriteArgs {
   sql: string;
+
   /** Bind values as `.exec()` received them — NOT `SqliteParamsWire`. The
    *  gate runs before encoding, so a value here may still be a `Cell`
    *  (that is what `confidentialityOf` reads a label off). */
   params: ReadonlyArray<unknown> | Record<string, unknown> | undefined;
+
   /** Declared table schemas (`db.tables`, wire-supplied — re-validated). */
   tables: SqliteDbRef["tables"];
+
   /** The db's owner (db ref), resolving the rule's `dbOwner()` term. */
   owner?: string;
+
   /** The confidentiality atoms carried by a bound value ([] if unlabeled). */
   confidentialityOf: (value: unknown) => readonly unknown[];
+
   /** True iff the connected server advertised commit-time re-derivation
    *  (Phase 3.c) — the gate then admits the non-attributable shapes with
    *  unlabeled inputs instead of failing closed. Default false. */

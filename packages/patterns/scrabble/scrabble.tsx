@@ -45,8 +45,10 @@ export type ScrabbleProfileCell = Cell<{ name?: string; avatar?: string }>;
 
 export interface Player {
   name: string;
+
   /** Avatar URL or glyph, snapshotted from the joiner's shared profile. */
   avatar?: string;
+
   /**
    * Live profile cell — present for profile-joined players (the scoreboard
    * renders it via `<cf-profile-badge>`), absent for headless name-only joins

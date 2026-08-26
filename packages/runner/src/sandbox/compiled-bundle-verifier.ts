@@ -77,8 +77,10 @@ export interface BindingInfo {
 export interface ModuleItemClassificationOptions {
   /** Canonical shadow-guard statements that MUST be present, or none. */
   requiredGuards: ReadonlySet<string>;
+
   /** Reserved wrapper bindings authored code may not declare, or none. */
   reservedBindings: ReadonlySet<string>;
+
   /** Source offset used for the "missing required shadow guards" error. */
   missingGuardsErrorAt: number;
 }

@@ -16,7 +16,7 @@
 import type {
   FabricError as ApiFabricError,
   FabricErrorConstructor as ApiFabricErrorConstructor,
-} from "@commonfabric/api";
+} from "@/api.ts";
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
@@ -62,6 +62,7 @@ const FABRIC_ERROR_RESERVED_KEYS: FrozenSet<string> = new FrozenSet([
 export type FabricErrorState = {
   /** Constructor name of the originating native `Error`, e.g. `TypeError`. */
   readonly type: string;
+
   /**
    * The `.name` property. Pass `null` (or omit) to mean "same as `type`"; the
    * resulting instance's `.name` is always a concrete string (`null` is a
@@ -69,12 +70,16 @@ export type FabricErrorState = {
    * public API).
    */
   readonly name?: string | null | undefined;
+
   /** The `.message` property. */
   readonly message: string;
+
   /** The `.stack` property, or `undefined`. */
   readonly stack: string | undefined;
+
   /** The `.cause` value, in `FabricValue` form, or `undefined`. */
   readonly cause: FabricValue | undefined;
+
   /**
    * Optional iterable of custom enumerable own properties, in `FabricValue`
    * form. Keys must not collide with the fixed-schema slot names or with
@@ -528,9 +533,9 @@ export class FabricError extends FabricNativeWrapper<Error>
 }
 
 // Compile-time check that the exported `FabricError` constructor matches the
-// `FabricErrorConstructor` declared in `@commonfabric/api`. This catches a
-// declared member that is missing here or has the wrong type. It does NOT
-// catch the other direction: `satisfies` is an assignability check, so a
-// public member on this class that the declaration omits passes silently.
-// Members added here need adding there by hand.
+// `FabricErrorConstructor` declared in `@/api.ts`. This catches a declared member
+// that is missing here or has the wrong type. It does NOT catch the other
+// direction: `satisfies` is an assignability check, so a public member on this
+// class that the declaration omits passes silently. Members added here need
+// adding there by hand.
 FabricError satisfies ApiFabricErrorConstructor;

@@ -50,6 +50,7 @@ export interface ChannelSummary {
   revoked?: { at: string; by: string };
   revocations?: { at: string; by: string }[];
   lastSeenAt: string | null;
+
   /** The generation this summary describes; `revoke` must name it. */
   revision: number;
 }
@@ -61,6 +62,7 @@ export interface MintedChannel {
   causePrefix: string;
   installId: string;
   expiresAt?: string;
+
   /** Shown ONCE. The server keeps only its hash. */
   token: string;
 }

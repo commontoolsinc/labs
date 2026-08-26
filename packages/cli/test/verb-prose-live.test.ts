@@ -159,10 +159,13 @@ const PROGRAM = {
 
 const VERB_PROSE = "File a new root item on the board.";
 const FIELD_PROSE = "One line naming the work.";
+
 /** `Details.note` — one declared reference deep. */
 const NESTED_PROSE = "Free text the caller may attach.";
+
 /** `Details.tags` — the array property, one declared reference deep. */
 const NESTED_ARRAY_PROSE = "Labels to file it under.";
+
 /** `Tag.label` — reached through the inlined `primary`, two deep. */
 const ELEMENT_PROSE = "The tag's visible text.";
 

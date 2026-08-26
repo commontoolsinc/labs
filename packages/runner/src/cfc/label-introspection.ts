@@ -125,6 +125,7 @@ export type ConfLabelConsumedObservation = {
 
 export type ConfLabelQueryEvaluation = {
   result: InspectConfLabelResult;
+
   /**
    * Joined population-rule confidentiality of every labeled metadata
    * observation the evaluation consumed (per-field consultations and
@@ -133,6 +134,7 @@ export type ConfLabelQueryEvaluation = {
    * the shared constant), so nothing protected flowed to the caller.
    */
   consumedConfidentiality: readonly CfcConfClause[];
+
   /**
    * The same consumption, one record per consulted concrete metadata path
    * (paths are unique by construction — clause/alternative indices plus
@@ -378,6 +380,7 @@ const QUERY_PREDICATES: Record<
   keyof ConfLabelQuery,
   {
     readonly field: string;
+
     /** Absent = family-generic. Input is the record atom's `type` field. */
     readonly familyTypes?: readonly (string | undefined)[];
   }

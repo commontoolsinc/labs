@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read
+
 /**
  * Ask who called a key, using the containment forest in `measure-forest.ts`.
  *

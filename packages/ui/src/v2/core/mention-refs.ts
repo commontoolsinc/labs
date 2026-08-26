@@ -12,6 +12,7 @@ export interface MentionRef {
    * the piece's fields.
    */
   destination: unknown;
+
   /**
    * Whether the label in the document and the destination's name have
    * deliberately diverged. While it is set, a change to the destination's
@@ -43,9 +44,11 @@ export const MentionRefMapSchema = {
 
 /** Length of a freshly minted key. */
 const KEY_LENGTH = 6;
+
 /** Longest key {@link mintRefKey} widens to before it gives up. */
 const MAX_KEY_LENGTH = 10;
 const KEY_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
+
 /** Samples drawn at one length before widening. */
 const SAMPLES_PER_LENGTH = 4;
 
