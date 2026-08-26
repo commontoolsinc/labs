@@ -540,27 +540,57 @@ filter listing the tests to run silently drops a test the pull request
 just added, because its name is not on a list built from records that
 predate it.
 
-### The mechanism is the preload the plan already adds
+### Most tests are not registered where you would think
 
-[Part one](#part-one--the-data-and-what-it-already-tells-us) adds a
-preload to `@commonfabric/test-support` that intercepts every `Deno.test`
-to capture the module that registered it. That interception point is all
-this needs.
+A test's identity is the name its runner reports, which for a file written
+with `describe` and `it` is [the describe chain joined with `" > "`
+](../specs/test-records.md#identity). Deno reports the container as a
+testcase too, and `dropContainerCases` in
+`packages/test-support/src/records/junit.ts` throws it away, so what
+reaches the store is one identity per `it`.
 
-The preload also reads a **skip list**: the identities this invocation is
-not to run. A listed test is registered with `ignore: true` rather than
-dropped, so it appears in the run's output and in its JUnit report as
-skipped, and the store learns that it was deliberately not run instead of
-watching the identity disappear.
+Registration does not follow that shape. `describe` registers one
+`Deno.test` and every `it` inside it is a step within that one test. So an
+interception on `Deno.test` sees the container and never the leaves, and
+the two granularities come apart exactly where the tests are: 1,283 test
+files use `describe` and `it`, 85 percent of those hold exactly one
+top-level `describe`, and between them those files hold 15,191 `it`
+blocks. For 1,096 files, skipping the registered `Deno.test` is skipping
+the whole file, which is what items already do.
 
-Four properties come from putting it there rather than on the command
-line. The list is a file named by an environment variable, so nothing is
-bounded by argument length. Names match exactly, so nothing needs
-escaping. The list is keyed by registering file and name together, because
-the same test name occurs in more than one file and the preload already
-computes the file for its attribution work. And no test file changes: a
-suite that already passes `--preload` takes a second one, since repeating
-the flag works where the comma-separated form does not.
+Reaching an `it` therefore needs a second interception, and both are
+available without editing a test file.
+
+### Two interception points, and no test file changed
+
+The first is the preload
+[part one](#part-one--the-data-and-what-it-already-tells-us) already adds
+to `@commonfabric/test-support`, which wraps every `Deno.test` to capture
+the module that registered it. It gains the skip list, and that reaches
+every bare `Deno.test` — 511 files' worth.
+
+The second is a line in the import map. `@std/testing/bdd` resolves to a
+module in `@commonfabric/test-support` that re-exports the real one under
+another specifier, tracks the enclosing `describe` chain, and registers a
+listed `it` through `it.ignore` instead of `it`. Every file keeps its own
+`import { describe, it } from "@std/testing/bdd"` unchanged; what that
+specifier means changes once, centrally.
+
+Both consult the same **skip list**: the identities this invocation is not
+to run. A listed test is registered as ignored rather than dropped, so it
+appears in the run's output and in its JUnit report as skipped, and the
+store learns it was deliberately not run instead of watching the identity
+disappear.
+
+Four properties come from intercepting at registration rather than on the
+command line. The list is a file named by an environment variable, so
+nothing is bounded by argument length. Names match exactly, so nothing
+needs escaping. The list is keyed by registering file and name together,
+because the same test name occurs in more than one file and the preload
+already computes the file for its attribution work. And no test file
+changes at all: a suite that already passes `--preload` takes a second
+one, since repeating the flag works where the comma-separated form does
+not, and the import map is one line.
 
 One consequence is worth stating because it looks like a bug when first
 seen. Wrapping `Deno.test` moves Deno's own JUnit `classname` from the
@@ -589,9 +619,9 @@ build's 17,999 executions.
 
 | Invocation unit | Suites | Identities inside it | Reaching one of them |
 | --- | --- | --- | --- |
-| A `deno test` file | `workspace-unit`, `runner-unit`, `pattern-integration` and its ON arm, `package-integration` and its ON arm, `generated-patterns`, `cli-deno` | One per registered `Deno.test`: every top-level test in a plain file, and every top-level `describe` in a file written with `describe` and `it`, whose `it`s are steps within it | The skip list. This is the row the whole section is about. |
+| A `deno test` file | `workspace-unit`, `runner-unit`, `pattern-integration` and its ON arm, `package-integration` and its ON arm, `generated-patterns`, `cli-deno` | One per bare `Deno.test`, and one per `it`, named as its describe chain joined with `" > "`. The container testcase Deno also reports is dropped at ingestion, so a `describe` is not an identity | The skip list, through the preload for a bare `Deno.test` and through the remapped `describe`/`it` for the rest. This is the row the whole section is about. |
 | A pattern file run by `cf test` | `pattern-unit` | One. The runner writes one record per pattern file | Nothing to reach: the file is the identity. |
-| A pattern file checked by the compatibility gate | `pattern-compat` | One gate record per pattern file | Nothing to reach. The task already takes `--only` to restrict which files it reads. |
+| A pattern file checked by the compatibility gate | `pattern-compat` | One, named `pattern-compat <key>`, which the task appends itself as each file's verdict is known | Nothing to reach. The task already takes `--only` to restrict which files it reads. |
 | A single-step arm of `integration.sh` | `cli-core` | One, named for its step | Nothing to reach. The script's own whole-invocation record is suite-level and belongs to no invocation unit at all. |
 | One gate command | `repo-gates` | One per gate | Nothing to reach. |
 | One `deno check` invocation | `typecheck` | One per checked path group, which the task records itself | Nothing to reach. |
@@ -605,10 +635,10 @@ items holding one identity each and start being described as identities.
 
 ### What it reaches, and what it does not
 
-One registered `Deno.test` is the floor, as the table's first row says.
-Going below it — reaching an individual `it` inside a `describe` — would
-mean changing the wrappers those come from, or the test files themselves,
-which is the disruption this design exists to avoid.
+The identity is the floor, and with both interceptions in place the floor
+is reached everywhere the store has an identity to score. What is left
+below it is a `t.step` inside a bare `Deno.test`, which the store does not
+name separately either, so nothing is lost that selection could have used.
 
 The module still loads. Skipping a test inside a file does not avoid
 importing that file, and for some suites the import is most of the cost:
@@ -680,7 +710,13 @@ being imposed.
 ### The work this adds
 
 - [ ] The preload reads a skip list keyed by registering file and name,
-      and registers a listed test as ignored rather than dropping it.
+      and registers a listed bare `Deno.test` as ignored rather than
+      dropping it.
+- [ ] `@commonfabric/test-support` gains a `describe` and `it` that
+      re-export the real ones, track the enclosing describe chain, and
+      route a listed `it` through `it.ignore`. The root import map points
+      `@std/testing/bdd` at it and the real module at a second specifier.
+      No test file's own import changes.
 - [ ] Every `deno test` suite in the topology passes the preload, appended
       the way `--junit-path` already is.
 - [ ] `cost` and the packing passes key on identities, with
