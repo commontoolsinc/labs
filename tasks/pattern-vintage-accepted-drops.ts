@@ -76,21 +76,24 @@ export interface AcceptedStateDrop {
 
 export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
   {
-    // The board demanded the topic's whole published surface of every stored
-    // topic, three verb streams among them, and a holder's required demands
-    // are write-once — so a verb named there priced every future verb as a
-    // break of the board. The demand is now the eight members the board reads,
-    // and the thirteen below go from each element of both lists it holds.
-    //
-    // Listed per element rather than as whole roots, deliberately: `topics`
-    // and `mentionable` both survive and are still compared, so a removal that
-    // also stranded a title, a body, or a timestamp still fails.
-    //
-    // A stored topic loses none of this. What it loses is the board's claim on
-    // it: the fields and the verbs stay on the topic, reachable at the topic's
-    // own address, and only the board's view of them narrows.
     pattern: "topics/main.tsx",
     paths: [
+      // --- the demand narrowing (docs/history/topics-demand-narrowing-break.md)
+      // The board demanded the topic's whole published surface of every stored
+      // topic, three verb streams among them. A holder's required demands are
+      // write-once and a stream cannot carry a default, so a verb named there
+      // priced every future verb as a break of the board. The demand is now the
+      // eight members the board reads.
+      //
+      // These sit in this entry rather than their own because `acceptedDropsFor`
+      // takes the FIRST entry matching a pattern and window: a second entry for
+      // `topics/main.tsx` covering the same vintages would shadow this one
+      // instead of adding to it, and the paths above would silently stop
+      // applying. Two breaks on one pattern inside one window share an entry.
+      //
+      // A stored topic loses none of this. What it loses is the board's claim
+      // on it: the fields and verbs stay on the topic, reachable at its own
+      // address, and only the board's view of them narrows.
       "topics[].addComment",
       "topics[].addLink",
       "topics[].bodyUpdatedAt",
@@ -107,22 +110,7 @@ export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
       "mentionable[].createdByName",
       "mentionable[].links",
       "mentionable[].setBody",
-    ],
-    // The vintages this forgives are those captured while the board still
-    // demanded the wide shape. Anything captured after holds the narrow one and
-    // owes the comparison the same answer as any other state.
-    capturedThrough: "2026-08-06T23-04-13.189Z",
-    reason:
-      "The board's demand narrowed to the eight members it uses, so a new " +
-      "topic verb stops moving the board's shape — see the matching entry in " +
-      "tasks/pattern-compat-accepted-breaks.ts. The verbs, thread, links and " +
-      "update stamps stay on the topic; only the board's projection of them " +
-      "goes.",
-    record: "docs/history/topics-demand-narrowing-break.md",
-  },
-  {
-    pattern: "topics/main.tsx",
-    paths: [
+      // --- the reference-graph rebuild follows
       "crossrefs",
       "index[].refsOut",
       "index[].referencedBy",
