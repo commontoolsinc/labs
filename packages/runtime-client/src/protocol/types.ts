@@ -1989,13 +1989,18 @@ export type SerializedEventTarget = {
    */
   name?: string;
   /**
-   * The element's current value.
+   * The element's current value. A `JSONValue` rather than a string: a custom
+   * element chooses what its `value` is, and a `cf-input`, a `cf-tabs` and a
+   * `cf-calendar` each declare theirs as `CellHandle<string> | string`, which
+   * arrives here as the sigil link the main thread resolved it to.
    */
-  value?: string;
+  value?: JSONValue;
   /**
-   * Whether a checkbox or radio is checked.
+   * Whether a checkbox or radio is checked -- or, where the element chose to
+   * expose something else, what it chose. `cf-checkbox` and `cf-switch` each
+   * declare theirs as `CellHandle<boolean> | boolean`.
    */
-  checked?: boolean;
+  checked?: JSONValue;
   /**
    * Whether an option is selected.
    */

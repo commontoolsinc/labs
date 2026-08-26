@@ -174,6 +174,38 @@ Deno.test("events - serializeEvent", async (t) => {
     assertEquals(serialized.type, "click");
   });
 
+  await t.step("resolves a target's `toJSON()`-bearing value", () => {
+    // A `cf-input`, a `cf-tabs` and a `cf-calendar` each declare `value` as
+    // `CellHandle<string> | string`, and a `CellHandle` renders as its sigil
+    // link. Modelled here rather than imported: `html` does not depend on
+    // `runtime-client`'s class, and what the conversion acts on is `toJSON()`.
+    const link = { "/": { "link@1": { id: "of:fid1:abc" } } };
+    const handle = new (class {
+      toJSON() {
+        return link;
+      }
+    })();
+    const event = new MockEvent("input", {
+      target: { value: handle },
+    }) as unknown as Event;
+
+    const serialized = serializeEvent(event);
+
+    assertEquals(serialized.target?.value, link);
+  });
+
+  await t.step("describes a target value with no JSON form", () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const event = new MockEvent("input", {
+      target: { value: circular },
+    }) as unknown as Event;
+
+    const serialized = serializeEvent(event);
+
+    assertEquals(serialized.target?.value, "[object Object]");
+  });
+
   await t.step("captures trusted provenance", () => {
     const event = new MockEvent("click", {
       isTrusted: true,
