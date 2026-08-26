@@ -1,10 +1,18 @@
 import {
   CommonIframeSandboxElement as _,
+  type FabricBridge,
   IPC,
 } from "@commonfabric/iframe-sandbox";
+import { isCellHandle } from "@commonfabric/runtime-client";
 import { css, html } from "lit";
+import type { PropertyValues } from "lit";
 
 import { BaseElement } from "../../core/base-element.ts";
+import {
+  type CellContextResourceKind,
+  createCellContextBridge,
+  resolveCellContextBridge,
+} from "./cell-bridge.ts";
 
 /**
  * CFIframe - An iframe to execute arbitrary scripts
@@ -14,32 +22,42 @@ import { BaseElement } from "../../core/base-element.ts";
  * @element cf-iframe
  *
  * @attr {string} src - String representation of HTML content to load within an iframe
- * @attr {object} context - Cell context
+ * @prop {object} bridge - Explicit capability bridge
+ * @prop {object} context - Convenience cell context
+ * @prop {object} resourceKinds - Explicit kinds for opaque context resources
  *
  * @event {CustomEvent} load - The iframe was successfully loaded
  * @event {CustomEvent} fix - Dispatched when user clicks "Fix" on an error modal
  *
  * @example
- * <cf-iframe src="<html>...</html>" .context=${cellContext}></cf-iframe>
+ * <cf-iframe src="<html>...</html>" .bridge=${bridge}></cf-iframe>
  */
 export class CFIframe extends BaseElement {
   static override properties = {
     src: { type: String },
     context: { type: Object },
+    bridge: { type: Object },
+    resourceKinds: { attribute: false },
     _errorDetails: { state: true },
   };
 
   declare src: string;
-  // HACK: The UI framework already translates the top level cell into updated
-  // properties, but we want to only have to deal with one type of listening, so
-  // we'll add a an extra level of indirection with the "context" property.
   declare context: object | null;
+  declare bridge: FabricBridge | null;
+  declare resourceKinds:
+    | Readonly<Record<string, CellContextResourceKind>>
+    | null;
   declare _errorDetails: IPC.GuestError | null;
+  private _contextBridge: FabricBridge = { resources: {} };
+  private _contextReady = true;
+  private _contextGeneration = 0;
 
   constructor() {
     super();
     this.src = "";
     this.context = null;
+    this.bridge = null;
+    this.resourceKinds = null;
     this._errorDetails = null;
   }
 
@@ -175,16 +193,59 @@ export class CFIframe extends BaseElement {
     this._errorDetails = null;
   }
 
+  protected override willUpdate(changed: PropertyValues<this>) {
+    if (changed.has("context") || changed.has("resourceKinds")) {
+      const generation = ++this._contextGeneration;
+      if (!this.context) {
+        this._contextBridge = { resources: {} };
+        this._contextReady = true;
+      } else if (!isCellHandle<Record<string, unknown>>(this.context)) {
+        this._contextBridge = createCellContextBridge(this.context);
+        this._contextReady = true;
+      } else {
+        const context = this.context;
+        this._contextBridge = { resources: {} };
+        this._contextReady = false;
+        void resolveCellContextBridge(
+          context,
+          this.resourceKinds ?? {},
+        ).then((bridge) => {
+          if (generation !== this._contextGeneration) return;
+          this._contextBridge = bridge;
+          this._contextReady = true;
+          this.requestUpdate();
+        }).catch((error) => {
+          if (generation !== this._contextGeneration) return;
+          const description = error instanceof Error
+            ? error.message
+            : String(error);
+          this._errorDetails = {
+            description,
+            source: "cf-iframe context",
+            lineno: 0,
+            colno: 0,
+            stacktrace: error instanceof Error
+              ? error.stack ?? description
+              : description,
+          };
+          this.requestUpdate();
+        });
+      }
+    }
+  }
+
   override render() {
+    const bridge = this.bridge ?? this._contextBridge;
+    const source = this.bridge || this._contextReady ? this.src : "";
     return html`
       <common-iframe-sandbox
-        .context="${this.context}"
-        .src="${this.src}"
+        .bridge="${bridge}"
+        .src="${source}"
         height="100%"
         width="100%"
         style="border: none;"
         @load="${this.onLoad}"
-        @error="${this.onError}"
+        @common-iframe-error="${this.onError}"
       ></common-iframe-sandbox>
       ${this._errorDetails
         ? html`

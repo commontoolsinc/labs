@@ -1,21 +1,20 @@
-import { describe, it } from "@std/testing/bdd";
-import { expect } from "@std/expect";
-
 import {
   fabricFromRealmValue,
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
 
-import { connectGuestContext, reportGuestError } from "../src/guest.ts";
+import { connectFabric, reportGuestError } from "../src/guest.ts";
 import {
+  BRIDGE_PROTOCOL,
+  BRIDGE_VERSION,
+  type BridgeHostMessage,
+  type BridgeRequest,
   GUEST_PORT_HANDOFF,
-  type GuestMessage,
-  GuestMessageType,
-  HostMessageType,
 } from "../src/ipc.ts";
 
-// Stands in for the host: holds the far end of the channel, and delivers the
-// handoff the way a window message carrying a transferred port arrives.
 function handOffPort(): MessagePort {
   const channel = new MessageChannel();
   channel.port1.start();
@@ -28,139 +27,175 @@ function handOffPort(): MessagePort {
   return channel.port1;
 }
 
-// Resolves with the next `count` messages the host end receives, decoded as
-// the host decodes them.
-function received(port: MessagePort, count: number): Promise<GuestMessage[]> {
-  const messages: GuestMessage[] = [];
+function receive(port: MessagePort): Promise<BridgeRequest> {
   return new Promise((resolve) => {
-    port.onmessage = (event: MessageEvent) => {
-      messages.push(fabricFromRealmValue(event.data) as GuestMessage);
-      if (messages.length === count) resolve(messages);
-    };
+    port.addEventListener("message", (event) => {
+      resolve(fabricFromRealmValue(event.data) as BridgeRequest);
+    }, { once: true });
   });
 }
 
-// Sends `message` the way the host sends one.
-function fromHost(port: MessagePort, message: unknown): void {
-  port.postMessage(realmFromFabricValue(message as never));
+function send(port: MessagePort, message: BridgeHostMessage): void {
+  port.postMessage(realmFromFabricValue(message));
 }
 
-// Lets whatever the ports have queued be delivered.
-function settled(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
+function response(
+  id: number,
+  value?: FabricValue,
+): BridgeHostMessage {
+  return {
+    protocol: BRIDGE_PROTOCOL,
+    version: BRIDGE_VERSION,
+    type: "response",
+    id,
+    ok: true,
+    ...(value !== undefined && { value }),
+  };
 }
 
 describe("guest", () => {
-  describe("connectGuestContext", () => {
-    it("sends what was said before the port arrived, in the order said", async () => {
-      const guest = connectGuestContext(() => {});
+  describe("connectFabric", () => {
+    it("queues a request until the capability port arrives", async () => {
+      const fabric = connectFabric();
       try {
-        guest.read("first");
-        guest.write("second", 2);
-        guest.subscribe("third");
-
+        const result = fabric.cell<number>("count").read();
         const host = handOffPort();
-        expect(await received(host, 3)).toEqual([
-          { type: GuestMessageType.Read, data: "first" },
-          { type: GuestMessageType.Write, data: ["second", 2] },
-          { type: GuestMessageType.Subscribe, data: ["third"] },
-        ]);
-      } finally {
-        guest.disconnect();
-      }
-    });
-
-    it("sends an unsubscribe naming every key given", async () => {
-      const guest = connectGuestContext(() => {});
-      try {
-        const host = handOffPort();
-        guest.unsubscribe("a", "b");
-        expect(await received(host, 1)).toEqual([
-          { type: GuestMessageType.Unsubscribe, data: ["a", "b"] },
-        ]);
-      } finally {
-        guest.disconnect();
-      }
-    });
-
-    it("passes an update's key and value to the handler", async () => {
-      const seen: [string, unknown][] = [];
-      const guest = connectGuestContext((key, value) =>
-        seen.push([key, value])
-      );
-      try {
-        const host = handOffPort();
-        fromHost(host, {
-          type: HostMessageType.Update,
-          data: ["counted", 9n],
+        const request = await receive(host);
+        expect(request).toEqual({
+          protocol: BRIDGE_PROTOCOL,
+          version: BRIDGE_VERSION,
+          type: "request",
+          id: 0,
+          operation: "read",
+          resource: "count",
         });
-        await settled();
-        expect(seen).toEqual([["counted", 9n]]);
+        send(host, response(request.id, 3));
+        expect(await result).toBe(3);
       } finally {
-        guest.disconnect();
+        fabric.disconnect();
       }
     });
 
-    it("ignores port traffic that is not an update it can read", async () => {
-      const seen: [string, unknown][] = [];
-      const guest = connectGuestContext((key, value) =>
-        seen.push([key, value])
-      );
+    it("exposes subscription events as stable cell snapshots", async () => {
+      const fabric = connectFabric();
       try {
         const host = handOffPort();
-        // The first is not an encoding at all -- the shape the protocol used
-        // to put on the wire -- and the rest decode to something an update is
-        // not.
-        host.postMessage({ type: HostMessageType.Update, data: ["plain", 1] });
-        for (
-          const bad of [
-            undefined,
-            "not a message at all",
-            { type: "something-else" },
-            { type: HostMessageType.Update },
-            { type: HostMessageType.Update, data: ["solo"] },
-            { type: HostMessageType.Update, data: [7, "non-string key"] },
-          ]
-        ) {
-          fromHost(host, bad);
-        }
-        await settled();
-        expect(seen).toEqual([]);
+        const cell = fabric.cell<number>("count");
+        const ready = new Promise<void>((resolve) => {
+          cell.subscribe((snapshot) => {
+            if (snapshot.status === "ready" && snapshot.value === 4) resolve();
+          });
+        });
+        const request = await receive(host);
+        expect(request.operation).toBe("subscribe");
+        expect(request.subscription).toBe("subscription-0");
+        send(host, response(request.id));
+        send(host, {
+          protocol: BRIDGE_PROTOCOL,
+          version: BRIDGE_VERSION,
+          type: "event",
+          subscription: request.subscription!,
+          value: 4,
+        });
+
+        await ready;
+        expect(cell.getSnapshot()).toEqual({ status: "ready", value: 4 });
       } finally {
-        guest.disconnect();
+        fabric.disconnect();
       }
     });
 
-    it("keeps the first port it is given", async () => {
-      const guest = connectGuestContext(() => {});
+    it("accepts the capability port only from the host window", async () => {
+      const attacker = new MessageChannel();
+      const host = new MessageChannel();
+      host.port1.start();
+      const hostSource = host.port1 as unknown as Window;
+      const originalParent = Reflect.get(globalThis, "parent");
+      Reflect.set(globalThis, "parent", { parent: hostSource });
+      const fabric = connectFabric();
+      let pending: Promise<unknown> | undefined;
+      try {
+        pending = fabric.describe();
+        globalThis.dispatchEvent(
+          new MessageEvent("message", {
+            data: GUEST_PORT_HANDOFF,
+            ports: [attacker.port2],
+            source: attacker.port1,
+          }),
+        );
+        globalThis.dispatchEvent(
+          new MessageEvent("message", {
+            data: GUEST_PORT_HANDOFF,
+            ports: [host.port2],
+            source: host.port1,
+          }),
+        );
+        const request = await receive(host.port1);
+        send(
+          host.port1,
+          response(request.id, {
+            protocol: BRIDGE_PROTOCOL,
+            version: BRIDGE_VERSION,
+            resources: {},
+          }),
+        );
+
+        await expect(pending).resolves.toMatchObject({ resources: {} });
+      } finally {
+        fabric.disconnect();
+        await pending?.catch(() => {});
+        attacker.port1.close();
+        host.port1.close();
+        Reflect.set(globalThis, "parent", originalParent);
+      }
+    });
+
+    it("does not publish an equivalent object twice after a write", async () => {
+      const fabric = connectFabric();
       try {
         const host = handOffPort();
-        handOffPort();
-        guest.write("k", 1);
-        expect(await received(host, 1)).toEqual([
-          { type: GuestMessageType.Write, data: ["k", 1] },
-        ]);
+        const cell = fabric.cell<{ count: number }>("state");
+        const snapshots: unknown[] = [];
+        cell.subscribe((snapshot) => snapshots.push(snapshot));
+        const subscribe = await receive(host);
+        send(host, response(subscribe.id));
+        snapshots.length = 0;
+
+        const writing = cell.write({ count: 2 });
+        const write = await receive(host);
+        send(host, {
+          protocol: BRIDGE_PROTOCOL,
+          version: BRIDGE_VERSION,
+          type: "event",
+          subscription: subscribe.subscription!,
+          value: { count: 2 },
+        });
+        send(host, response(write.id));
+        await writing;
+
+        expect(snapshots).toEqual([{
+          status: "ready",
+          value: { count: 2 },
+        }]);
       } finally {
-        guest.disconnect();
+        fabric.disconnect();
       }
     });
 
-    it("stops listening once disconnected", async () => {
-      const seen: [string, unknown][] = [];
-      const guest = connectGuestContext((key, value) =>
-        seen.push([key, value])
-      );
-      const host = handOffPort();
-      guest.disconnect();
+    it("rejects pending work when disconnected", async () => {
+      const fabric = connectFabric();
+      const pending = fabric.describe();
+      fabric.disconnect();
 
-      fromHost(host, { type: HostMessageType.Update, data: ["late", 1] });
-      await settled();
-      expect(seen).toEqual([]);
+      await expect(pending).rejects.toMatchObject({
+        name: "FabricBridgeError",
+        code: "disconnected",
+      });
     });
   });
 
   describe("reportGuestError", () => {
-    it("posts the error to the guest's parent", () => {
+    it("posts an alarm to the guest's parent", () => {
       const posted: unknown[] = [];
       const parent = { postMessage: (data: unknown) => posted.push(data) };
       const original = Reflect.get(globalThis, "parent");
@@ -168,23 +203,23 @@ describe("guest", () => {
       try {
         reportGuestError({
           description: "boom",
-          source: "s",
+          source: "source",
           lineno: 1,
           colno: 2,
-          stacktrace: "st",
+          stacktrace: "stack",
         });
       } finally {
         Reflect.set(globalThis, "parent", original);
       }
 
       expect(posted).toEqual([{
-        type: GuestMessageType.Error,
+        type: "error",
         data: {
           description: "boom",
-          source: "s",
+          source: "source",
           lineno: 1,
           colno: 2,
-          stacktrace: "st",
+          stacktrace: "stack",
         },
       }]);
     });

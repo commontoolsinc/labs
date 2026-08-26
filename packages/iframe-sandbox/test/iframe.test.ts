@@ -1,6 +1,6 @@
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 
-import { CommonIframeSandboxElement as _ } from "../src/common-iframe-sandbox.ts";
+import "../src/common-iframe-sandbox.ts";
 import {
   assert,
   assertDeepEquals,
@@ -9,25 +9,46 @@ import {
   ContextShim,
   deepEquals,
   render,
-  setIframeTestHandler,
   waitForContextValue,
 } from "./utils.ts";
-
-setIframeTestHandler();
 
 // Each guest document is one module script: this prolog, the test's own body,
 // and `GUEST_EPILOG`. The prolog names the guest API's operations as the body
 // uses them, so a body reads as the guest code it is.
 const GUEST_PROLOG = `<script type="module">
-import { connectGuestContext } from "/guest.js";
-import { realmFromFabricValue as encodeForHost } from "/codec.js";
+import { connectFabric, reportGuestError } from "/guest.js";
+
+const report = (description, error) => reportGuestError({
+  description,
+  source: "guest test",
+  lineno: 0,
+  colno: 0,
+  stacktrace: error?.stack ?? String(error ?? description),
+});
+window.addEventListener("error", (event) => report(event.message, event.error));
+window.addEventListener("unhandledrejection", (event) =>
+  report(String(event.reason), event.reason));
 
 let onUpdate = (key, value) => {};
-const guest = connectGuestContext((key, value) => onUpdate(key, value));
-const read = (key) => guest.read(key);
-const write = (key, value) => guest.write(key, value);
-const subscribe = (key) => guest.subscribe(key);
-const unsubscribe = (key) => guest.unsubscribe(key);
+const fabric = connectFabric();
+const cells = new Map();
+const subscriptions = new Map();
+const cell = (key) => {
+  if (!cells.has(key)) cells.set(key, fabric.cell(key));
+  return cells.get(key);
+};
+const read = async (key) => onUpdate(key, await cell(key).read());
+const write = (key, value) => cell(key).write(value);
+const subscribe = (key) => {
+  subscriptions.get(key)?.();
+  subscriptions.set(key, cell(key).subscribe((snapshot) => {
+    if (snapshot.status === "ready") onUpdate(key, snapshot.value);
+  }));
+};
+const unsubscribe = (key) => {
+  subscriptions.get(key)?.();
+  subscriptions.delete(key);
+};
 `;
 
 const GUEST_EPILOG = `
@@ -363,7 +384,7 @@ ${GUEST_EPILOG}`;
   }
 });
 
-Deno.test("a subscription is cancelled against the context that issued it", async () => {
+Deno.test("a subscription is cancelled against the bridge that issued it", async () => {
   cleanupFixtures();
   try {
     const first = new ContextShim({ watched: 1 });
@@ -380,14 +401,12 @@ ${GUEST_EPILOG}`;
     );
     assertEquals(first.callbacks.length, 1);
 
-    // A receipt is only good to the context that issued it, and `context` is a
-    // property a consumer may reassign. Swapping it here and then asking for a
-    // new document is what separates cancelling against the context the
-    // subscription was taken out against from cancelling against whichever one
-    // happens to be current.
+    // A subscription belongs to one bridge session, and `bridge` is a property
+    // a consumer may reassign. Swapping it here and then asking for a new
+    // document distinguishes cancelling the old session from touching the new
+    // bridge.
     const second = new ContextShim();
-    // @ts-ignore This is a lit property.
-    iframe.context = second;
+    iframe.bridge = second.bridge;
     // @ts-ignore This is a lit property.
     iframe.src = `${GUEST_PROLOG}
 write("second-ran", true);

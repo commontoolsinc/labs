@@ -1,8 +1,8 @@
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { defer } from "@commonfabric/utils/defer";
 
+import type { BridgeResource, FabricBridge } from "../src/bridge.ts";
 import { CommonIframeSandboxElement } from "../src/common-iframe-sandbox.ts";
-import { setIframeContextHandler } from "../src/index.ts";
 
 type Callback = (key: string, value: FabricValue) => void;
 interface Context {
@@ -14,12 +14,41 @@ export class ContextShim {
   callbacks: [number, string, Callback][];
   receiptIds: number;
   observers: [string, Callback][];
+  bridge: FabricBridge;
 
   constructor(object = {}) {
     this.data = object;
     this.callbacks = [];
     this.receiptIds = 0;
     this.observers = [];
+    this.bridge = {
+      resources: new Proxy<Record<string, BridgeResource>>({}, {
+        get: (_target, key) =>
+          typeof key === "string" ? this.resource(key) : undefined,
+        ownKeys: () => Object.keys(this.data),
+        getOwnPropertyDescriptor: () => ({
+          configurable: true,
+          enumerable: true,
+        }),
+      }),
+    };
+  }
+
+  private resource(key: string): BridgeResource {
+    return {
+      kind: "cell",
+      read: () => this.get({} as CommonIframeSandboxElement, key),
+      write: (value) => this.set({} as CommonIframeSandboxElement, key, value),
+      subscribe: (listener) => {
+        const receipt = this.subscribe(
+          {} as CommonIframeSandboxElement,
+          key,
+          (_key, value) => listener(value),
+        );
+        return () =>
+          this.unsubscribe({} as CommonIframeSandboxElement, receipt);
+      },
+    };
   }
   set(_element: CommonIframeSandboxElement, key: string, value: FabricValue) {
     this.data[key] = value;
@@ -75,23 +104,6 @@ export class ContextShim {
   }
 }
 
-export function setIframeTestHandler() {
-  setIframeContextHandler({
-    read(element, context, key) {
-      return (context as ContextShim).get(element, key);
-    },
-    write(element, context, key, value) {
-      (context as ContextShim).set(element, key, value);
-    },
-    subscribe(element, context, key, callback) {
-      return (context as ContextShim).subscribe(element, key, callback);
-    },
-    unsubscribe(element, context, receipt) {
-      (context as ContextShim).unsubscribe(element, receipt as number);
-    },
-  });
-}
-
 export function assert(condition: boolean) {
   if (!condition) {
     throw new Error(`${condition} is not truthy.`);
@@ -125,7 +137,7 @@ export function cleanupFixtures() {
 
 export function render(
   src: string,
-  context = {},
+  context = new ContextShim(),
 ): Promise<CommonIframeSandboxElement> {
   return new Promise((resolve) => {
     const parent = document.createElement("div");
@@ -133,8 +145,7 @@ export function render(
     const iframe = document.createElement(
       "common-iframe-sandbox",
     ) as CommonIframeSandboxElement;
-    // @ts-ignore This is a lit property.
-    iframe.context = context;
+    iframe.bridge = context.bridge;
     iframe.addEventListener("load", (_) => {
       resolve(iframe);
     });

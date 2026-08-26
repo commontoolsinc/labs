@@ -1,135 +1,201 @@
-# common-iframe-sandbox
+# Fabric iframe bridge
 
-This package contains a custom element `<common-iframe-sandbox>`, which enables
-a sandboxed iframe to execute arbitrary code.
-
-> [!CAUTION]
-> This is incomplete, experimental software and no guarantees of security are
-> provided. Continue reading for full details of current status and limitations.
-
-## Goals
-
-To run untrusted code within an iframe, with the ability to communicate with
-host to read, write, and subscribe to values in a key value store, not allowing
-code to communicate with any external third party.
+`@commonfabric/iframe-sandbox` runs guest HTML in a double-iframe sandbox and
+connects it to an explicit set of host capabilities. The host describes named
+resources; the guest discovers and uses only those resources.
 
 > [!CAUTION]
-> During experimental development, there are intentional gaps in the sandboxing
-> to enable product features where data within the sandbox may be exfiltrated.
+> This remains experimental sandboxing. Review the security considerations below
+> before exposing sensitive data or accepting third-party guest code.
 
-## Usage
+## Host API
 
-`<common-iframe-sandbox>` takes a `src` string of HTML content and a `context`
-object. The contents in `src` are loaded inside a sandboxed iframe (via
-`srcdoc`).
+Give each element its own bridge. There is no process-global handler and no
+ambient access to host state.
 
-```js
-const element = document.createElement("common-iframe-sandbox");
-element.src = "<h1>Hello</h1>";
-element.context = {};
-```
+```ts
+import {
+  createFabricBridge,
+  type FabricBridge,
+} from "@commonfabric/iframe-sandbox";
 
-The element has a `context` property that can be set to read, write, or
-subscribe to a key/value store from the iframe contents. See the inter-frame
-communications in [ipc.ts](/common-iframe-sandbox/src/ipc.ts).
+let count = 0;
+const listeners = new Set<(value: number) => void>();
 
-To handle these messages, a global singleton handler is used that must be set
-via `setIframeContextHandler(handler)`. The handler is called with the `context`
-provided to the iframe, and the handler determines how values are stored and
-retrieved. See [context.ts](/common-iframe-sandbox/src/context.ts).
-
-## The guest side
-
-Guest content reaches the context through
-[guest.ts](/common-iframe-sandbox/src/guest.ts), exported as
-`@commonfabric/iframe-sandbox/guest`:
-
-```js
-import { connectGuestContext } from "@commonfabric/iframe-sandbox/guest";
-
-const guest = connectGuestContext((key, value) => {
-  // `value` is what the host read for `key`.
+const bridge: FabricBridge = createFabricBridge({
+  count: {
+    kind: "cell",
+    schema: { type: "number", description: "Shared counter" },
+    read: () => count,
+    write: (value) => {
+      count = value as number;
+      for (const listener of listeners) listener(count);
+    },
+    subscribe: (listener) => {
+      listeners.add(listener as (value: number) => void);
+      return () => listeners.delete(listener as (value: number) => void);
+    },
+  },
 });
 
-guest.subscribe("counter");
-guest.write("counter", 1);
+const frame = document.createElement("common-iframe-sandbox");
+frame.bridge = bridge;
+frame.src = "<main id='root'></main>";
 ```
 
-The host and the guest hold the two ends of a `MessagePort`, and every message
-of this protocol crosses on it as a single `codec-realm` encoding — the whole
-message, not the value inside it. That format carries the whole `FabricValue`
-domain, so a `FabricBytes` arrives as a `FabricBytes` rather than as the bare
-object structured cloning would leave. Both realms run the same
-`@commonfabric/data-model`, which is what makes an encoding written in one
-decodable in the other. A guest may call these operations at once: the port
-arrives once the document has loaded, and what is said before it does is sent
-when it comes, in the order it was said.
+A resource has a `kind`, optional schema and description, and only the
+operations the host supplies. The resource kinds are `cell`, `stream`, `sqlite`,
+and `service`. Named methods let an application expose a narrow service without
+expanding the core protocol.
 
-`read()` does not return the value. The host answers a read the same way it
-announces a subscribed key's change, so both arrive at the handler.
+The higher-level `cf-iframe` component accepts the same `bridge` property. Its
+`context` convenience property turns top-level Fabric cells into cell resources,
+stream cells into `send` resources, and SQLite database cells into
+`query`/`exec` resources. A pattern can supply a serializable capability hint
+when a context cell's schema is intentionally opaque at the renderer boundary:
 
-### Raising an alarm without a port
+```tsx
+<cf-iframe
+  src={guestHtml}
+  $context={context}
+  resourceKinds={{ appDatabase: "sqlite" }}
+/>;
+```
 
-`reportGuestError(error)` reaches the host by the guest's parent rather than by
-the port, so it works from a guest that has no working port — a document whose
-scripts a policy blocked, or one that failed before the handoff. The host
-dispatches it as a `common-iframe-error` event on the element.
+`resourceKinds` is a narrow manifest of `cell`, `stream`, or `sqlite` kinds. It
+does not grant access to another cell: each name must still be present in the
+bound context, and the bridge resolves that cell's concrete scope before the
+guest loads.
 
-That route carries nothing else. It is one-way, and a guest cannot be answered
-on it; anything a guest means to say about the context goes over the port. What
-crosses on it is plain rather than encoded, a guest that could not run its own
-scripts having no encoder either.
+## Guest API
 
-## How it works
+The guest connects once and receives a promise-based client. Calls made before
+the document receives its `MessagePort` remain queued in order.
 
-Three realms are involved, all in the browser: the **host** page holding the
-element, the **outer frame** it renders, and the **guest** in the inner frame.
-The outer frame carries the CSP and loads documents. It routes nothing of this
-protocol — the host hands each freshly loaded guest one end of a `MessagePort`,
-and the two talk directly.
+```ts
+import { connectFabric } from "@commonfabric/iframe-sandbox/guest";
 
-The one thing the outer frame passes along is whatever the guest posts to it,
-which it forwards without reading, that being the alarm route described above.
+const fabric = connectFabric();
+const manifest = await fabric.describe();
+console.log(manifest.resources);
 
-`common-iframe-sandbox` is a [Lit] element that manages rendering content in an
-iframe, using [CSP]. Due to
-[inconsistent HTMLIFrameElement.prototype.csp support](https://caniuse.com/mdn-html_elements_iframe_csp),
-we take the approach of each untrusted iframe running inside
-[another iframe](/common-iframe-sandbox/src/outer-frame.ts). Setting contents
-via `srcdoc` on the iframes, this approach allows us to set CSP in the outer
-frame that propagates to the inner (untrusted) frame across browsers.
+const count = fabric.cell<number>("count");
+console.log(await count.read());
+await count.write(1);
 
-> Whenever a user agent creates an iframe srcdoc document in a browsing context
-> nested in the protected resource, if the user agent is enforcing any policies
-> for the protected resource, the user agent MUST enforce those policies on the
-> iframe srcdoc document as well. -
-> [CSP Spec](https://www.w3.org/TR/CSP2/#processing-model-iframe-srcdoc)
+const stop = count.subscribe((snapshot) => {
+  if (snapshot.status === "ready") console.log(snapshot.value);
+});
 
-## Missing Functionality
+// When the application unmounts:
+stop();
+fabric.disconnect();
+```
 
-- Audit the remaining `postMessage()` communication with origin-bounds and
-  ensure other frames can't spoof messages. This covers the host's exchange with
-  the outer frame and the alarm route out of a guest; the key/value traffic
-  between host and guest is not among it, a port being reachable only by whoever
-  holds an end.
-- Abort on unsupported browsers.
-- Further testing.
+`describe()` makes the API inspectable by people and agents. It returns every
+resource's kind, supported methods, description, and schema. Missing resources
+and unsupported operations reject with `FabricBridgeError`, whose `code` and
+`resource` fields are stable machine-readable context.
 
-## Incomplete Security Considerations
+## React
 
-Some of these are shortcomings of implementation, and some are intentional
-product decisisons during experimentation.
+The React adapter takes the React instance already used by the guest, so this
+package does not impose or duplicate a React version. `useCell` is built on
+`useSyncExternalStore`; it exposes a status snapshot, a setter that accepts a
+value or updater function, and an explicit refresh.
 
-- Hardcoded CDNs (and their logging services) are an exfiltration vector.
-- Allowing anchor elements with `target="_blank"` is an exfiltration vector.
-- `document.baseURI` is accessible in an iframe, leaking the parent URL
-- Currently without CFC, data can be written in the iframe containing other
-  sensitive data, or newly synthesized fingerprinting via capabilities
-  (accelerometer, webrtc, canvas), and saved back into the database, where some
-  other vector of exfiltration could occur.
-- Exposing iframe status to outer content could be considered leaky, though all
-  content is inlined, not HTTP URLs.
-  <https://developer.mozilla.org/en-US/docs/Web/HTML/Element/iframe#error_and_load_event_behavior>
+```tsx
+import React from "react";
+import { connectFabric } from "@commonfabric/iframe-sandbox/guest";
+import { createFabricReact } from "@commonfabric/iframe-sandbox/react";
 
-[Lit]: https://lit.dev/
-[CSP]: https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP
+const fabric = connectFabric();
+const { useCell, useSqliteQuery } = createFabricReact(React, fabric);
+
+export function App() {
+  const count = useCell<number>("count");
+  const notes = useSqliteQuery<{ id: number; title: string }>(
+    "appDatabase",
+    "SELECT id, title FROM notes ORDER BY id DESC",
+  );
+
+  if (count.status !== "ready" || notes.status !== "ready") return <>Loading</>;
+  return (
+    <>
+      <button onClick={() => count.set((value) => value + 1)}>
+        {count.value}
+      </button>
+      <ul>{notes.rows.map((note) => <li key={note.id}>{note.title}</li>)}</ul>
+    </>
+  );
+}
+```
+
+SQLite query hooks subscribe to the database resource's invalidation stream, so
+a committed `exec` refreshes active queries.
+
+## SQLite
+
+SQLite is a resource on the same bridge rather than a separate transport.
+
+```ts
+const database = fabric.sqlite("appDatabase");
+
+const { rows } = await database.query<{ id: number; title: string }>(
+  "SELECT id, title FROM notes WHERE archived = ?",
+  [false],
+);
+
+await database.exec(
+  "INSERT INTO notes (title) VALUES (:title)",
+  { title: "Bridge the database" },
+);
+```
+
+`exec` uses the runner's transactional SQLite path, including its write checks,
+commit conflict handling, and database revision update. Direct bridge queries
+are available for unlabeled databases. A database whose schema needs CFC column
+provenance is refused because the direct response has no Fabric result cell on
+which to persist derived labels; query that database inside a pattern instead.
+
+## Protocol
+
+Each loaded document owns a fresh capability session over a `MessagePort`.
+Requests carry a protocol name, version, numeric request ID, operation, resource
+name, and optional method/input. Responses correlate by ID and carry either a
+result or a structured error. Subscriptions have explicit IDs and are cancelled
+when the guest unsubscribes, reloads, or disconnects.
+
+The complete request, response, or event is encoded with `codec-realm`. This
+preserves Fabric values such as `FabricBytes` instead of relying on structured
+clone to preserve class instances.
+
+Three browser realms participate: the host page, an outer frame that enforces
+the CSP and loads documents, and the inner guest. The host transfers a port
+directly to each guest; the outer frame does not relay capability traffic.
+
+`reportGuestError(error)` is the exception. It posts a one-way alarm through the
+parent so a guest can report failure before it has a working port. The host
+emits a `common-iframe-error` event.
+
+## Security considerations
+
+- The bridge is capability-based, but every resource supplied to a frame is
+  readable or mutable exactly as its descriptor says. Keep the manifest small.
+- The remaining window `postMessage()` lifecycle, port handoff, and alarm
+  traffic uses source-window checks but not origin-bound messages; audit that
+  path before treating this as a hardened security boundary.
+- Allowed script CDNs and their logging services can exfiltrate data.
+- Links opened with `target="_blank"`, `document.baseURI`, and browser
+  fingerprinting capabilities can reveal information outside the bridge.
+- The iframe CSP, sandbox flags, and permissions policy are separate controls
+  from Fabric's CFC checks. A bridge does not make an over-broad browser policy
+  safe.
+
+The double-frame construction exists because support for the iframe `csp`
+attribute is inconsistent. The outer `srcdoc` frame applies a Content Security
+Policy inherited by the inner guest document. See the [CSP processing model] and
+[browser support for the `csp` attribute].
+
+[CSP processing model]: https://www.w3.org/TR/CSP2/#processing-model-iframe-srcdoc
+[browser support for the `csp` attribute]: https://caniuse.com/mdn-html_elements_iframe_csp

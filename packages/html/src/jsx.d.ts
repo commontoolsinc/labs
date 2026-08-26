@@ -3588,7 +3588,9 @@ interface CFFileDownloadAttributes<T> extends CFHTMLAttributes<T> {
 
 interface CFIframeAttributes<T> extends CFHTMLAttributes<T> {
   "src": string;
-  "$context": CellLike<any>;
+  "context"?: object;
+  "$context"?: CellLike<any>;
+  "resourceKinds"?: Record<string, "cell" | "stream" | "sqlite">;
 }
 
 interface CFRenderAttributes<T> extends CFHTMLAttributes<T> {
