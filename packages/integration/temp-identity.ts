@@ -3,6 +3,7 @@ import { Identity, type IdentityCreateConfig } from "@commonfabric/identity";
 export interface TempIdentity {
   /** The identity, for in-process use. */
   identity: Identity;
+
   /** Path to the PKCS8 keyfile, for a spawned CLI's `--identity` flag. */
   path: string;
 }

@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read
+
 /**
  * Accumulate calls and time per key segment from emitted timing measures.
  *
@@ -39,9 +40,11 @@ interface MeasureEntry {
 interface Bucket {
   path: string;
   depth: number;
+
   /** Spans recorded at this exact path. */
   own: number;
   ownTime: number;
+
   /** Spans recorded at this path or anywhere beneath it. */
   calls: number;
   time: number;

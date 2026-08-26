@@ -54,6 +54,7 @@ export type Result<T extends Unit = Unit, E extends Error = Error> =
 
 export interface Ok<T extends Unit> {
   ok: T;
+
   /**
    * Discriminant to differentiate between Ok and Fail.
    */
@@ -62,6 +63,7 @@ export interface Ok<T extends Unit> {
 
 export interface Fail<E extends Error> {
   error: E;
+
   /**
    * Discriminant to differentiate between Ok and Fail.
    */

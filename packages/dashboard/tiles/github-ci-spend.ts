@@ -70,12 +70,14 @@ interface DailySpend {
 interface GitHubDollarSpend extends DailySpend {
   kind: "dollars";
   budget: number;
+
   /**
    * The projected month-end spend of the products the organization has
    * budgeted, which is the figure the budget is a ceiling for. The headline
    * covers every product; this covers the ones the budget speaks to.
    */
   projectedBudgeted: number;
+
   /**
    * The calendar months whose usage report was read, as "YYYY-MM". A month
    * that could not be read is absent, and its days are unknown rather than $0.
@@ -180,6 +182,7 @@ function requireCurrentReport(
 interface OrgBudget {
   /** The product budgets added up, or NaN when none is set. */
   total: number;
+
   /** The products those budgets cover, lowercased. */
   products: Set<string>;
 }

@@ -49,6 +49,7 @@ export interface SpendChartSource {
   color: string;
   label?: string;
   lagDays: number;
+
   /**
    * The calendar months, as "YYYY-MM", the source has a report for. A day
    * outside them is left out of the source's line. Leave it undefined when the
