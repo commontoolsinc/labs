@@ -82,6 +82,11 @@ import {
   mintWellKnownGrants,
   resolveWellKnownGrantRefs,
 } from "./well-known-grants.ts";
+import type {
+  HarnessInputCell,
+  HarnessInputCellSpec,
+} from "./contracts/input-cells.ts";
+import { mintInputCellHandles } from "./input-cells.ts";
 import {
   appendHarnessCfcModelContextObservations,
   appendHarnessFailureRecord,
@@ -213,6 +218,12 @@ export interface CreateHarnessEngineOptions
    * tool surface.
    */
   fabricSessionFactory?: HarnessFabricSessionFactory;
+  /**
+   * Operator input cells to mint handles for at run start; see
+   * `establishInputCells`. Requires a fabric session — the cells live in
+   * its space.
+   */
+  inputCells?: readonly HarnessInputCellSpec[];
   now?: () => string;
 }
 
@@ -334,6 +345,7 @@ export class CfHarnessEngine {
   #outputSequence: number;
   readonly #now: () => string;
   readonly #fabricSessionFactory?: HarnessFabricSessionFactory;
+  readonly #inputCells: readonly HarnessInputCellSpec[];
   readonly #hostMounts: readonly HostSandboxMount[];
   readonly #ownedRunscConfig?: DockerRunscSandboxConfig;
   readonly #resumedRun: boolean;
@@ -472,6 +484,7 @@ export class CfHarnessEngine {
     this.#fabricSessionFactory = fabricSessionFactory === undefined
       ? undefined
       : cacheHarnessFabricSessionFactory(fabricSessionFactory);
+    this.#inputCells = options.inputCells ?? [];
     const sandboxConfig = options.sandboxRuntime === undefined
       ? resolveSandboxConfig(this.config, {
         workspaceHostPath: options.workspaceHostPath,
@@ -553,12 +566,55 @@ export class CfHarnessEngine {
           this.config.fabricSession.cfcEnforcementMode !== undefined
             ? "configured" as const
             : "preset-pin" as const,
-        flowLabels: this.config.fabricSession.cfcFlowLabels ?? "off" as const,
+        flowLabels: this.config.fabricSession.cfcFlowLabels ??
+          (this.config.fabricSession.cfcPosture === "max-enforcement"
+            ? "persist" as const
+            : "off" as const),
         flowLabelsSource: this.config.fabricSession.cfcFlowLabels !== undefined
           ? "configured" as const
+          : this.config.fabricSession.cfcPosture === "max-enforcement"
+          ? "posture" as const
           : "default" as const,
+        ...(this.config.fabricSession.cfcPosture !== undefined
+          ? { posture: this.config.fabricSession.cfcPosture }
+          : {}),
       }
       : undefined;
+    // A resumed run keeps its recorded fabric-session posture, so a session
+    // config that resolves to a DIFFERENT posture would put the artifacts in
+    // contradiction with the Runtime that executes: refuse rather than let
+    // either record win silently. A run resumed without a session keeps its
+    // record as history (no runtime exists for it to contradict). A LEGACY
+    // record — one that never captured a posture — stays absent rather than
+    // being backfilled, and stays frozen as history: resuming such a run
+    // with plain session dials is allowed (the flags may simply restate the
+    // original invocation, which the record predates), but resuming it under
+    // the named posture bundle is refused — no legacy run can have run the
+    // bundle, so that resume would execute enforcement the artifacts cannot
+    // attest.
+    if (options.runState !== undefined && fabricSessionCfc !== undefined) {
+      const recorded = options.runState.fabricSessionCfc;
+      if (recorded === undefined) {
+        if (fabricSessionCfc.posture !== undefined) {
+          throw new Error(
+            `fabric session CFC posture mismatch on resume: run state ` +
+              `records no fabric-session posture, so it cannot attest the ` +
+              `${fabricSessionCfc.posture} bundle the session ` +
+              `configuration resolves`,
+          );
+        }
+      } else if (
+        recorded.enforcementMode !== fabricSessionCfc.enforcementMode ||
+        recorded.flowLabels !== fabricSessionCfc.flowLabels ||
+        recorded.posture !== fabricSessionCfc.posture
+      ) {
+        throw new Error(
+          `fabric session CFC posture mismatch on resume: run state records ` +
+            `${JSON.stringify(recorded)} but the session configuration ` +
+            `resolves ${JSON.stringify(fabricSessionCfc)}`,
+        );
+      }
+    }
     this.#runState = options.runState ??
       createHarnessRunState({
         runId,
@@ -796,6 +852,46 @@ export class CfHarnessEngine {
     );
     await this.persistRunState();
     return minted.grants;
+  }
+
+  /**
+   * Establishes the run's operator input cells: mints a token for each
+   * `--input-cell` reference into the handle table, records the cells in
+   * run state, and returns them. Idempotent across resume, like the
+   * well-known grants: cells already recorded are returned as they stand.
+   *
+   * Unlike a grant, an input cell is explicit operator configuration, so
+   * failure is closed and loud rather than tolerated: cells configured on a
+   * run with no fabric session, a reference that does not parse, and a
+   * reference targeting another space all throw before anything is recorded.
+   */
+  async establishInputCells(): Promise<HarnessInputCell[]> {
+    if (this.#runState.inputCells !== undefined) {
+      return structuredClone(this.#runState.inputCells);
+    }
+    if (this.#inputCells.length === 0) {
+      return [];
+    }
+    if (this.#fabricSessionFactory === undefined) {
+      throw new Error(
+        "--input-cell requires a fabric session; configure --fabric-space",
+      );
+    }
+    const session = await this.#fabricSessionFactory();
+    const minted = await mintInputCellHandles(
+      this.handleTable,
+      this.#runState.runId,
+      this.#inputCells,
+      session.pieces.getSpace(),
+    );
+    await this.recordHandleTable(minted.table);
+    this.#runState = patchHarnessRunState(
+      this.#runState,
+      { inputCells: structuredClone(minted.inputCells) },
+      this.#now(),
+    );
+    await this.persistRunState();
+    return minted.inputCells;
   }
 
   async ensureRunManifestPersisted(): Promise<string | undefined> {

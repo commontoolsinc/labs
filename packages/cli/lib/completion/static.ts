@@ -24,12 +24,31 @@ export interface Candidate {
  *
  * `log-level` mirrors `lib/log-level.ts`; `color` mirrors the corresponding
  * `cf view` option. Language names come from the view language registry.
+ *
+ * A name here is one option's vocabulary across the whole tree. Two commands
+ * declaring the same name with different accepted values would need the
+ * provider table's command scoping instead, which is where `--scope` and
+ * `--from` are settled.
  */
 const ENUMERATED_OPTION_VALUES: Readonly<Record<string, readonly string[]>> = {
   "log-level": ["debug", "info", "warn", "error", "silent"],
   "color": ["auto", "always", "never"],
   "language": languageNames(),
   "cfc-mode": ["off", "warn", "enforce"],
+  // `cf piece map --format`.
+  "format": ["ascii", "dot"],
+  // `cf piece survey --side`: which document holds the collection.
+  "side": ["input", "result"],
+  // `cf inspect entities --kind`, the seven its help enumerates.
+  "kind": [
+    "piece",
+    "module",
+    "stream",
+    "schema",
+    "owned-cell",
+    "free-cell",
+    "unknown",
+  ],
 };
 
 /** First sentence of a description, for the shell's annotation column. */
@@ -100,6 +119,16 @@ export function optionNameCandidates(
 /** Accepted values of a pre-parse global, for its `--flag <value>` slot. */
 export function preParseGlobalValues(global: PreParseGlobal): Candidate[] {
   return (global.values ?? []).map((value) => ({ value }));
+}
+
+/**
+ * The option long names carrying a statically known value set.
+ *
+ * For the gate that asks whether every slot has been decided about: an option
+ * answered from this table needs no provider entry.
+ */
+export function enumeratedOptionNames(): ReadonlySet<string> {
+  return new Set(Object.keys(ENUMERATED_OPTION_VALUES));
 }
 
 /**

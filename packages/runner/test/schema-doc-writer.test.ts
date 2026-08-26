@@ -51,9 +51,8 @@ describe("schema-doc-writer", () => {
   });
 
   afterEach(async () => {
-    // The ambient flag is realm-sticky; later test files must see its
-    // default, and the sync schema table (disabled by the flag-on Runtime
-    // construction above) must come back to its own.
+    // The ambient flags are realm-sticky; later test files must see
+    // their defaults.
     resetContentAddressedSchemasConfig();
     resetSyncSchemaTableConfig();
     await writer.dispose();
@@ -301,11 +300,13 @@ describe("schema-doc-writer", () => {
     expect(collectExternalSchemaRefHashes(uiDoc).size).toBe(0);
   });
 
-  it("disables the sync schema table for the process", () => {
-    // Both mechanisms dedupe the same link-schema positions; a flag-on
-    // process must not negotiate the frame table (the Runtime in
-    // beforeEach carries the flag).
-    expect(getSyncSchemaTableConfig()).toBe(false);
+  it("keeps the sync schema table negotiated for the process", () => {
+    // The mechanisms compose: the table encoder skips reference-only
+    // positions, and stored links minted before the flag still carry
+    // inline schemas that only the table compresses in flight. The
+    // flag-on Runtime construction in beforeEach must therefore leave
+    // the table's negotiation untouched.
+    expect(getSyncSchemaTableConfig()).toBe(true);
   });
 
   it("keeps a schema decomposition refuses inline", () => {

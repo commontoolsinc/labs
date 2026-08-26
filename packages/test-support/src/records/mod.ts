@@ -9,6 +9,7 @@ export {
   RECORD_SCHEMA_VERSION,
   serializeContextLine,
   serializeRecordLine,
+  testIdentityKey,
 } from "./schema.ts";
 export type {
   CiContext,

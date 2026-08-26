@@ -35,7 +35,6 @@ export class FabricEpochDay extends BaseFabricPrimitive
   constructor(value: bigint) {
     super();
     this.#value = value;
-    Object.freeze(this);
   }
 
   /** Days from POSIX Epoch. Negative values represent pre-epoch dates. */

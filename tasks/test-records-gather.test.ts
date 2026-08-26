@@ -104,6 +104,7 @@ describe("test-records-gather", () => {
         out,
         job: "Test (3/8)",
         shard: "3/8",
+        variant: "wood-fired",
         junit: [{
           kind: "unit",
           scope: "cli",
@@ -125,9 +126,15 @@ describe("test-records-gather", () => {
       expect(lines.length).toBe(2);
       const records = lines.map((line) => parseRecordLine(line));
       expect(records[0]?.test.n).toBe("check-docs");
+      expect(records[0]?.test.v).toBe("wood-fired");
       expect(records[1]).toEqual({
         line: "record",
-        test: { k: "unit", s: "cli", n: "alpha" },
+        test: {
+          k: "unit",
+          s: "cli",
+          n: "alpha",
+          v: "wood-fired",
+        },
         outcome: "pass",
         durationMs: 250,
         file: "packages/cli/test/alpha.test.ts",
@@ -142,6 +149,12 @@ describe("test-records-gather", () => {
         await Deno.readTextFile(join(out, "job.json")),
       );
       expect(facts.job).toBe("Check");
+    });
+
+    it("rejects an empty variant from a direct caller", async () => {
+      await expect(
+        gather({ out: join(dir, "out"), job: "Check", variant: "", junit: [] }),
+      ).rejects.toThrow("--variant must not be empty");
     });
 
     it("records the commit, branch, and pull request head from the environment", async () => {
@@ -194,12 +207,15 @@ describe("test-records-gather", () => {
         "Test (3/8)",
         "--shard",
         "3/8",
+        "--variant",
+        "wood-fired",
         "--junit",
         "kind=unit,scope=cli,glob=*.xml",
       ]);
       expect(options?.out).toBe("artifact");
       expect(options?.job).toBe("Test (3/8)");
       expect(options?.shard).toBe("3/8");
+      expect(options?.variant).toBe("wood-fired");
       expect(options?.junit.length).toBe(1);
     });
 
@@ -221,6 +237,16 @@ describe("test-records-gather", () => {
       expect(parseGatherArgs(["--out"])).toBeUndefined();
       expect(parseGatherArgs(["--mystery", "x"])).toBeUndefined();
       expect(parseGatherArgs(["--out", "artifact"])).toBeUndefined();
+      expect(
+        parseGatherArgs([
+          "--out",
+          "artifact",
+          "--job",
+          "Check",
+          "--variant",
+          "",
+        ]),
+      ).toBeUndefined();
     });
   });
 });

@@ -1,8 +1,8 @@
 # Bulk piece operations
 
-**Status:** proposed; stages 1 and 2 — the survey and repair libraries,
-their `cf` entry points, and their coverage in the CI drill and the demo —
-are built. Every later stage is unbuilt. This is the design and build sequence for changing
+**Status:** proposed; stages 1 through 3 — the survey, repair, and retarget
+libraries, their `cf` entry points, and their coverage in the CI drill and
+the demo — are built. Every later stage is unbuilt. This is the design and build sequence for changing
 many pieces in one space as one reviewable, resumable operation. Driven by
 recurring Topics board upgrades.
 
@@ -628,36 +628,36 @@ siblings may run concurrently and whether stage 5 is worth building; and the
 retarget drill. The entry point's spelling follows decision 1: the `piece`
 group.
 
-- [ ] A retarget of a seeded board runs to completion from a checked-in plan.
-- [ ] Preconditions are proved for every row before the first write.
-- [ ] The identity of each row's resolved source is recomputed before the
+- [x] A retarget of a seeded board runs to completion from a checked-in plan.
+- [x] Preconditions are proved for every row before the first write.
+- [x] The identity of each row's resolved source is recomputed before the
       write and must equal `op.patternIdentity`, and the export it runs must
       be `op.symbol`; `rev` is never enforced.
-- [ ] The compatibility override is honored from the row field alone.
-- [ ] Every retarget row carries the `{identity, symbol}` reference its
+- [x] The compatibility override is honored from the row field alone.
+- [x] Every retarget row carries the `{identity, symbol}` reference its
       source produces, the identity computed without compiling, and the
       precondition check classifies each piece as outstanding, landed, or
       moved elsewhere against that row alone — comparing both halves of the
       reference, never the identity by itself.
-- [ ] A run interrupted partway is completed by re-invoking the same command,
+- [x] A run interrupted partway is completed by re-invoking the same command,
       and the pieces that landed are not rewritten. A piece on neither of its
       row's references stops the run by name rather than being skipped or
       rewritten.
-- [ ] A stopped run names every unattempted piece, not a count of them.
-- [ ] The after-survey distinguishes "moved as planned", "still outstanding",
+- [x] A stopped run names every unattempted piece, not a count of them.
+- [x] The after-survey distinguishes "moved as planned", "still outstanding",
       and "moved to something the plan did not ask for" — the third being
       what an upgrade that half-converged looks like.
-- [ ] It composes with the existing space-level checks rather than replacing
+- [x] It composes with the existing space-level checks rather than replacing
       them; those remain the acceptance gate.
-- [ ] Sessions are grouped rather than per-piece or per-run, and the group
+- [x] Sessions are grouped rather than per-piece or per-run, and the group
       size is a knob rather than a constant in the code.
-- [ ] A group boundary is a resume point: a run that dies inside a group
+- [x] A group boundary is a resume point: a run that dies inside a group
       resumes from the start of that group, having lost at most a group's
       worth of warm-up.
-- [ ] Per-piece timing is reported as the run proceeds. A run whose cost per
+- [x] Per-piece timing is reported as the run proceeds. A run whose cost per
       piece is unknown cannot be improved, and the number is the input to
       every decision below about whether to go faster.
-- [ ] The apply and survey-diff acts in
+- [x] The apply and survey-diff acts in
       `packages/cli/integration/bulk-ops-demo.sh` stop being pending: the
       transcript applies a stamped plan and diffs the after-survey against
       it where it now shows the provisional spellings.

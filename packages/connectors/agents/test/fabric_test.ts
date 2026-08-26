@@ -6,31 +6,31 @@ import {
 } from "../src/fabric.ts";
 
 Deno.test("agent connector Fabric causes are stable", () => {
-  assertEquals(agentFabricCauses("did:key:test"), {
+  assertEquals(agentFabricCauses("did:key:test", "did:key:owner"), {
     index: {
       spaceDid: "did:key:test",
+      ownerDid: "did:key:owner",
       agentConnector: "recent-session-index",
-      version: 1,
     },
     allIndex: {
       spaceDid: "did:key:test",
+      ownerDid: "did:key:owner",
       agentConnector: "all-session-index",
-      version: 1,
     },
     health: {
       spaceDid: "did:key:test",
+      ownerDid: "did:key:owner",
       agentConnector: "health",
-      version: 1,
     },
     commands: {
       spaceDid: "did:key:test",
+      ownerDid: "did:key:owner",
       agentConnector: "commands",
-      version: 1,
     },
     receipts: {
       spaceDid: "did:key:test",
+      ownerDid: "did:key:owner",
       agentConnector: "receipts",
-      version: 1,
     },
   });
 });

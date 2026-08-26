@@ -241,16 +241,14 @@ const NESTED_ROW_ARGS_TIGHTENED = nestedSource()
 /**
  * A subject that returns a key its declared output type never NAMES, riding an
  * index signature instead — the shape `system/default-app.tsx` declares
- * (`[key: string]: unknown`), and the reason its root's `recentPieces`,
- * `summaryIndex` and `trackRecent` are stored under
- * `additionalProperties: {"type": "unknown"}`.
+ * (`[key: string]: unknown`), and the reason its root's `summaryIndex` is
+ * stored under `additionalProperties: {"type": "unknown"}`.
  *
  * A schema-driven read resolves nothing at an `unknown` position, so such a key
  * came back `undefined` however much state it held — indistinguishable from a
  * key the document does not hold, which the comparison treats as nothing to
- * lose. Measured on the committed `default-app.tsx` fixture: DROPPING
- * `trackRecent` from the returned result replayed "3 updated cleanly with no
- * state stranded".
+ * lose. The committed `default-app.tsx` fixture exercises this shape through
+ * `summaryIndex`.
  *
  * `notes` is written through a HANDLER rather than seeded, for the reason the
  * cross-space child is: today's source seeds the fresh cell under the new name
@@ -2005,10 +2003,8 @@ describe("the vintage gate, end to end", () => {
       // stores it under `additionalProperties: {"type": "unknown"}` and a
       // schema-driven read resolves NOTHING there — the before value came back
       // `undefined`, `isPreserved` read that as "held nothing", and the moved
-      // key replayed clean. Red/green on the real tree, not just here: dropping
-      // `trackRecent` from `system/default-app.tsx`'s result reported "3
-      // updated cleanly with no state stranded" against the committed fixture,
-      // and names the key once the read is relaxed.
+      // key replayed clean. The committed `system/default-app.tsx` fixture
+      // exercises the same shape through its undeclared `summaryIndex` key.
       await captureMissing(roots, [UNDECLARED_TEST_KEY], STAMP);
       await writeUndeclared(undeclaredSource("notesMoved"));
 

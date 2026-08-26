@@ -23,7 +23,6 @@ export type StableArrayCellPlan =
 
 export interface StableArrayElementCause {
   agentConnector: "array-element";
-  version: 1;
   scope: unknown;
   path: string[];
   identity: Record<string, unknown>;
@@ -205,7 +204,6 @@ function planArray(
     duplicateCounts.set(duplicateKey, duplicate + 1);
     const cause: StableArrayElementCause = {
       agentConnector: "array-element",
-      version: 1,
       scope,
       path: [...path],
       identity: candidate.identity,
@@ -265,7 +263,6 @@ export function planStableArrayCells(
 
 const HASH_SCOPE = {
   agentConnector: "stable-array-value-hash",
-  version: 1,
 } as const;
 
 interface StoredCellFingerprint {
@@ -315,7 +312,6 @@ function calculateStableArrayValueHash(plan: StableArrayCellPlan): string {
     left.valueHash.localeCompare(right.valueHash)
   );
   return hashFabricValue({
-    formatVersion: 1,
     rootHash,
     cells,
   });

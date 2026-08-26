@@ -407,10 +407,10 @@ export function splitPathPrefix(
  * offering none. `wish` shapes what its query resolved to, and resolving a
  * wish commits a cell to the space: a Tab must not write.
  */
-const PROJECTION_SOURCE_COMMANDS: ReadonlySet<string> = new Set([
+const PROJECTION_SOURCE_COMMANDS: readonly string[] = [
   "piece get",
   "get",
-]);
+];
 
 /**
  * Field paths into the value a read returns, for `--select` and `--schema`.
@@ -428,7 +428,6 @@ function projectionFieldCandidates(
   flag: "select" | "schema",
 ): (line: CompletionLine) => Promise<ProviderResult> {
   return async (line) => {
-    if (!PROJECTION_SOURCE_COMMANDS.has(line.path.join(" "))) return NOTHING;
     // `--schema` reads a JSON Schema or an `@file` as well as this list, and
     // both are recognized by their first character. Neither is a field path.
     if (flag === "schema" && /^[@{]/.test(line.word)) return NOTHING;
@@ -706,6 +705,214 @@ async function spaceCandidates(): Promise<ProviderResult> {
   return values(candidates);
 }
 
+/**
+ * Entities in the space a positional already names, as `cf inspect entities`
+ * lists them: the label reads, the id is what the next positional takes.
+ *
+ * The listing covers the view the command will read rather than the space's
+ * default one, which is what `entityListingView` works out from the line.
+ *
+ * Local stores only. `--remote` fetches a snapshot over the network before it
+ * can list anything, which is a round trip a keystroke should not start — so a
+ * line that names one is answered by `namesRemote` instead. Every caller is an
+ * `inspect` subcommand, which is what makes that check belong here.
+ */
+async function entityCandidates(
+  line: CompletionLine,
+): Promise<ProviderResult> {
+  if (namesRemote(line)) return NOTHING;
+  const token = line.positionals[0];
+  if (!token) return NOTHING;
+  const { listEntityModels, listScopes, openSpace, resolveSpace } =
+    await import("@commonfabric/state-inspector");
+  const space = openSpace(await resolveSpace(token));
+  try {
+    const view = entityListingView(line);
+    const scopes = view.allScopes
+      ? listScopes(space, { branch: view.branch }).map((scope) => scope.raw)
+      : [view.scope];
+    // No limit of its own: the set is what `cf inspect entities` would list
+    // with no `--limit`, so a completed id is one that command names too. The
+    // listing reports its own extent, and a capped one is still every
+    // candidate this slot can honestly offer.
+    //
+    // `listScopes` sorts the space scope first, so an entity written in more
+    // than one scope keeps the label its space-scope value reconstructs to.
+    const seen = new Set<string>();
+    const entities: EntityListingLike[] = [];
+    for (const scope of scopes) {
+      for (
+        const entity of listEntityModels(space, { branch: view.branch, scope })
+          .entities
+      ) {
+        if (seen.has(entity.id)) continue;
+        seen.add(entity.id);
+        entities.push(entity);
+      }
+    }
+    return values(shapeEntityCandidates(entities));
+  } finally {
+    space.close();
+  }
+}
+
+/**
+ * The view of a space an inspect line's entity slot has to cover: the branch,
+ * and either the one scope the command reads or every scope it reads across.
+ *
+ * A command that declares `--scope` reads one, the line's or the listing's own
+ * default. `cf inspect overlay` declares none and reports an entity's value in
+ * EVERY scope, so a slot completed from the default scope alone would hide the
+ * per-user and per-session entities that command exists to show.
+ *
+ * Separated from the read so a test can assert the view without a space DB.
+ */
+export function entityListingView(
+  line: CompletionLine,
+): { branch?: string; scope?: string; allScopes: boolean } {
+  return {
+    branch: line.options.get("branch"),
+    scope: line.options.get("scope"),
+    allScopes: line.path.join(" ") === "inspect overlay",
+  };
+}
+
+/** Entity shape used by `shapeEntityCandidates`, structural so tests need no DB. */
+export interface EntityListingLike {
+  readonly id: string;
+  readonly label?: string;
+  readonly kind?: string;
+}
+
+/**
+ * Label entities the way `cf inspect entities` does: the reconstructed label
+ * reads, and the kind says what sort of thing it is where no label was found.
+ */
+export function shapeEntityCandidates(
+  entities: readonly EntityListingLike[],
+): Candidate[] {
+  return entities.map((entity) => ({
+    value: entity.id,
+    description: entity.label && entity.label !== "(piece)"
+      ? entity.label
+      : entity.kind,
+  }));
+}
+
+/**
+ * The wish targets `cf wish --help` enumerates: the profile ones, which
+ * resolve against the identity's home space, and the space-relative ones.
+ *
+ * A hand-maintained list, because the vocabulary is the wish builtin's rather
+ * than the command tree's and nothing on the tree carries it. The help text is
+ * where it is documented and where it is kept in step.
+ */
+export function wishTargetCandidates(): ProviderResult {
+  return values([
+    { value: "#profile", description: "the viewer's active profile object" },
+    { value: "#profileName", description: "its live display name" },
+    { value: "#profileAvatar", description: "its avatar" },
+    { value: "#profileBio", description: "its owner-authored bio" },
+    { value: "#profileSpace", description: "its own space cell" },
+    { value: "#favorites", description: "space-relative" },
+    { value: "#journal", description: "space-relative" },
+    { value: "#learned", description: "space-relative" },
+    { value: "#mentionable", description: "space-relative" },
+    { value: "#pieceRegistry", description: "space-relative" },
+    { value: "/", description: "the space's root" },
+  ]);
+}
+
+/** `cf wish --scope`: three names, plus any space DID. */
+async function wishScopeCandidates(): Promise<ProviderResult> {
+  const spaces = await spaceCandidates();
+  return values([
+    { value: "~", description: "favorites" },
+    { value: ".", description: "the current space" },
+    { value: "profile", description: "profile elements" },
+    ...spaces.candidates,
+  ]);
+}
+
+/**
+ * Whether the line puts `cf inspect` in remote mode.
+ *
+ * `--remote` is a global option on `inspect`, and it decides where the space
+ * comes from: `openByToken` resolves the token through the REMOTE's own
+ * listing and opens the snapshot it fetches, so a locally discovered DID and
+ * the entities of a local DB are candidates the command rejects. Its value is
+ * optional, so the flag reaches the line as an option when written
+ * `--remote=<url>` and as a bare flag otherwise, and both spellings count.
+ *
+ * Completion answers nothing there rather than listing the remote, which is a
+ * network round trip a keystroke must not start. The slot stays decided, and
+ * is decided as empty — the same disposition `inspect pull` carries.
+ */
+function namesRemote(line: CompletionLine): boolean {
+  return line.options.has("remote") || line.flags.has("remote");
+}
+
+/**
+ * An option's provider, and the command paths it answers on.
+ *
+ * `commands` is absent on a provider that answers wherever the option is
+ * declared, and carries the paths of one restricted by {@link onlyOn}. The
+ * gate reads it: a key alone says which option was decided about, and only the
+ * paths say on which commands.
+ */
+export type OptionProvider =
+  & ((line: CompletionLine) => Promise<ProviderResult>)
+  & { readonly commands?: readonly string[] };
+
+/**
+ * Restrict a provider to the commands whose option of that name means this.
+ *
+ * The option table is keyed by long name alone, and a name can mean two things
+ * on two commands: `--from` is a file on `space clone` and a sequence number on
+ * `inspect diff`, `--scope` is a wish search scope and an inspect scope key.
+ * Offering the wrong set is worse than offering none, so the provider says
+ * where it applies.
+ */
+function onlyOn(
+  commands: readonly string[],
+  provider: (line: CompletionLine) => Promise<ProviderResult>,
+): OptionProvider {
+  const paths = new Set(commands);
+  const scoped = (line: CompletionLine) =>
+    paths.has(line.path.join(" ")) ? provider(line) : Promise.resolve(NOTHING);
+  return Object.assign(scoped, { commands });
+}
+
+/** The commands whose `--root` is the directory their sources resolve against. */
+const ROOT_DIRECTORY_COMMANDS: readonly string[] = [
+  "check",
+  "piece new",
+  "piece set-home",
+  "piece setsrc",
+  "piece survey",
+  "test",
+];
+
+/** Every command whose `--root` this table answers, in both meanings. */
+const ROOT_COMMANDS: readonly string[] = [
+  ...ROOT_DIRECTORY_COMMANDS,
+  "inspect graph",
+];
+
+/**
+ * `--root` by what it names: a source directory on the commands that resolve
+ * imports and authored paths against one, and on `cf inspect graph` the entity
+ * whose neighborhood the graph is drawn around.
+ *
+ * The graph's root is a node id, so it takes what the entity positionals take,
+ * read from the space the command already names.
+ */
+function rootCandidates(line: CompletionLine): Promise<ProviderResult> {
+  return line.path.join(" ") === "inspect graph"
+    ? entityCandidates(line)
+    : Promise.resolve(directive({ kind: "dirs" }));
+}
+
 /** API URLs worth offering: the environment's, plus the local dev server. */
 function apiUrlCandidates(): ProviderResult {
   const candidates: Candidate[] = [];
@@ -727,25 +934,97 @@ function patternFiles(): Promise<ProviderResult> {
  * Option values by long name. A name absent here falls through to the shell's
  * own file completion only when the option is path-shaped.
  */
-const OPTION_VALUE_PROVIDERS: Readonly<
-  Record<string, (line: CompletionLine) => Promise<ProviderResult>>
-> = {
+const OPTION_VALUE_PROVIDERS: Readonly<Record<string, OptionProvider>> = {
   piece: pieceCandidates,
-  select: projectionFieldCandidates("select"),
-  schema: projectionFieldCandidates("schema"),
+  select: onlyOn(
+    PROJECTION_SOURCE_COMMANDS,
+    projectionFieldCandidates("select"),
+  ),
+  schema: onlyOn(
+    PROJECTION_SOURCE_COMMANDS,
+    projectionFieldCandidates("schema"),
+  ),
   space: () => spaceCandidates(),
   "api-url": () => Promise.resolve(apiUrlCandidates()),
+  // `--remote` takes what `--api-url` takes: the toolshed to read from.
+  remote: () => Promise.resolve(apiUrlCandidates()),
   identity: () => Promise.resolve(directive({ kind: "files", glob: "*.key" })),
-  root: () => Promise.resolve(directive({ kind: "dirs" })),
+  // A source directory on the commands that compile one, and an entity on
+  // `inspect graph`.
+  root: onlyOn(ROOT_COMMANDS, rootCandidates),
   test: patternFiles,
   // A data file has no fixed extension; the shell's own file completion is the
   // only honest candidate set.
   datafile: () => Promise.resolve(directive({ kind: "files" })),
-  // `cf space clone --to <dir>` builds a clone directory.
-  to: () => Promise.resolve(directive({ kind: "dirs" })),
-  "log-file": () => Promise.resolve(directive({ kind: "files" })),
-  "state-path": () => Promise.resolve(directive({ kind: "files" })),
+  // A clone directory on `space clone`, and a sequence number on `inspect
+  // diff`.
+  to: onlyOn(
+    ["space clone"],
+    () => Promise.resolve(directive({ kind: "dirs" })),
+  ),
+  // `--list` names a piece to survey or repair instead of a collection, so it
+  // takes what `--piece` takes. Scoped, because a `--list` elsewhere would
+  // mean something else entirely.
+  list: onlyOn(["piece survey", "piece repair"], pieceCandidates),
+  // `cf piece survey --validator` reads a JSON-schema file.
+  validator: () => Promise.resolve(directive({ kind: "files" })),
+  // `cf piece repair --fixer` names a TypeScript module whose default export
+  // is the transform; `--plan` reads the rows a survey wrote.
+  fixer: () => Promise.resolve(directive({ kind: "files", glob: "*.ts" })),
+  plan: () => Promise.resolve(directive({ kind: "files" })),
+  // `cf piece survey --diff` reads the plan the survey is checked against,
+  // which is the file `--out` wrote.
+  diff: () => Promise.resolve(directive({ kind: "files" })),
+  // `cf inspect --dir` is an extra directory to search for space DBs.
+  dir: () => Promise.resolve(directive({ kind: "dirs" })),
+  // `cf inspect html --out` and `cf check --output` write a file.
+  out: () => Promise.resolve(directive({ kind: "files" })),
+  output: () => Promise.resolve(directive({ kind: "files" })),
+  // The remaining path-shaped values: two artifacts `cf test` writes, and the
+  // state file `cf fuse mount` passes to its child.
+  "pattern-coverage-dir": () => Promise.resolve(directive({ kind: "dirs" })),
+  "timing-measures-out": () => Promise.resolve(directive({ kind: "files" })),
+  "cfc-writeback-state": () => Promise.resolve(directive({ kind: "files" })),
+  // A snapshot file on `space clone`, and a sequence number on `inspect diff`.
+  from: onlyOn(
+    ["space clone"],
+    () => Promise.resolve(directive({ kind: "files" })),
+  ),
+  // A hashtag search scope on `wish`, and a scope key on `inspect`.
+  scope: onlyOn(["wish"], () => wishScopeCandidates()),
 };
+
+/** `cf inspect` subcommands whose first positional opens a local space. */
+const INSPECT_SPACE_COMMANDS: readonly string[] = [
+  "churn",
+  "commits",
+  "conflicts",
+  "diff",
+  "entities",
+  "graph",
+  "history",
+  "hot",
+  "html",
+  "overlay",
+  "piece",
+  "scopes",
+  "summary",
+  "timeline",
+  "users",
+  "value-at",
+];
+
+/** Those of them whose next positional is an entity within that space. */
+const INSPECT_ENTITY_COMMANDS: readonly string[] = [
+  "conflicts",
+  "converge",
+  "diff",
+  "history",
+  "overlay",
+  "piece",
+  "timeline",
+  "value-at",
+];
 
 /**
  * Positional providers, keyed by `<command path>:<argument name>`. The command
@@ -777,6 +1056,8 @@ const ARGUMENT_PROVIDERS: Readonly<
   // Naming an existing slug re-points it, which is the case completion helps
   // with; a slug being coined for the first time is a word nothing can offer.
   "piece set-slug:slug": slugCandidates,
+  // The target a slug redirects to takes what `--piece` takes.
+  "piece set-slug:source": pieceCandidates,
   "piece new:main": patternFiles,
   "piece setsrc:main": patternFiles,
   "check:files": patternFiles,
@@ -785,13 +1066,94 @@ const ARGUMENT_PROVIDERS: Readonly<
   "exec:mountedFile": () => Promise.resolve(directive({ kind: "files" })),
   "id did:keypath": () =>
     Promise.resolve(directive({ kind: "files", glob: "*.key" })),
-  // `cf space` names a space positionally rather than through `--space`.
+  "piece set-home:main": patternFiles,
+  "piece getsrc:outpath": () => Promise.resolve(directive({ kind: "files" })),
+  "deps update:file": () => Promise.resolve(directive({ kind: "files" })),
+  "fuse mount:mountpoint": () => Promise.resolve(directive({ kind: "dirs" })),
+  "fuse unmount:mountpoint": () => Promise.resolve(directive({ kind: "dirs" })),
+  "wish:target": () => Promise.resolve(wishTargetCandidates()),
+  // `inspect pull` names a space on the REMOTE, resolved through
+  // `resolveRemoteDid` against the remote's own listing, so a locally
+  // discovered DID is a candidate the command rejects. Listing the remote is a
+  // network round trip a keystroke must not start, which leaves this slot
+  // nothing honest to offer — decided, and decided as empty.
+  "inspect pull:space": () => Promise.resolve(NOTHING),
+  // `cf space` and `cf inspect` name a space positionally rather than through
+  // `--space`. Both read the same local stores, so both take the same
+  // candidates.
   "space clone:space": () => spaceCandidates(),
   "space fingerprint:space": () => spaceCandidates(),
   // `verify`/`reset` take a clone directory built by `space clone`.
   "space verify:dir": () => Promise.resolve(directive({ kind: "dirs" })),
   "space reset:dir": () => Promise.resolve(directive({ kind: "dirs" })),
+  ...inspectSpaceProviders(),
+  ...inspectEntityProviders(),
 };
+
+/**
+ * Every `cf inspect` subcommand that names a space positionally.
+ *
+ * Generated from the list rather than written out, because the set is one
+ * fact — "the inspect subcommands that open a space" — and eighteen table
+ * entries repeating it is eighteen places for the nineteenth to be forgotten.
+ */
+function inspectSpaceProviders(): Record<
+  string,
+  (line: CompletionLine) => Promise<ProviderResult>
+> {
+  const entries: Record<
+    string,
+    (line: CompletionLine) => Promise<ProviderResult>
+  > = {};
+  for (const command of INSPECT_SPACE_COMMANDS) {
+    entries[`inspect ${command}:space`] = (line) =>
+      namesRemote(line) ? Promise.resolve(NOTHING) : spaceCandidates();
+  }
+  return entries;
+}
+
+/** The same, for the `<entity>` that follows a space on some of them. */
+function inspectEntityProviders(): Record<
+  string,
+  (line: CompletionLine) => Promise<ProviderResult>
+> {
+  const entries: Record<
+    string,
+    (line: CompletionLine) => Promise<ProviderResult>
+  > = {};
+  for (const command of INSPECT_ENTITY_COMMANDS) {
+    entries[`inspect ${command}:entity`] = entityCandidates;
+  }
+  return entries;
+}
+
+/**
+ * What both provider tables answer, as command paths.
+ *
+ * For the gate that asks whether every slot has been decided about. Both keys
+ * are derivable from the same command tree `resolveCompletionLine` walks, so
+ * the drift between the tree and these tables is machine-detectable — in both
+ * directions, since an entry matching no slot is the same subtraction run the
+ * other way.
+ *
+ * An option maps to the command paths its provider answers on, or to `null`
+ * where it answers on every command declaring it. A scoped provider answers
+ * nothing off its paths, so a key alone would report those commands as decided
+ * when what they get is silence.
+ */
+export function completionProviderKeys(): {
+  readonly options: ReadonlyMap<string, readonly string[] | null>;
+  readonly arguments: ReadonlySet<string>;
+} {
+  const options = new Map<string, readonly string[] | null>();
+  for (const [name, provider] of Object.entries(OPTION_VALUE_PROVIDERS)) {
+    options.set(name, provider.commands ?? null);
+  }
+  return {
+    options,
+    arguments: new Set(Object.keys(ARGUMENT_PROVIDERS)),
+  };
+}
 
 /**
  * Run the provider for the line's slot.

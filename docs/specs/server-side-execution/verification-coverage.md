@@ -1970,7 +1970,7 @@ red-first-evidenced where the batch required it):
   `event-append-client.test.ts`); the browser-adapter follow-up
   carries the remaining debts as OW20.
 - m7 — worker/host flag-posture AGREEMENT
-  (`runtime-client/backends/runtime-processor.ts`):
+  (`runtime-client/src/backends/runtime-processor.ts`):
   `InitializationData.experimental` now types `serverExecution` (it
   rode as an untyped excess property), and the worker asserts the
   constructed runtime's resolved posture matches the host's
@@ -5651,6 +5651,51 @@ supply; OW29/OW32/OW34 closed):
     same family's second, pre-existing member is `PatternManager`'s
     compile-cache write-backs minted inside `compilePattern` (escape
     the stamp hook; enumerated with the flag in the stage-1 report).
+    **SHARD-10 DISCRIMINATED AND FIXED 2026-08-25 (PR #6320): the
+    ensure-ON board's compile-cache write-back CFC red is NOT this
+    attribution family** — the failing writer is the CLIENT under its
+    own identity in its own space, and no identity/carriage question is
+    open (the stamp-hook escape above stays flagged exactly as
+    written). Root cause, reproduced 3/3 deterministic at the true
+    topology: `loadCompiledClosure`'s `verifiedDoc` returned
+    `cell.get()` docs whose `sourceMap` is a LIVE query-result view;
+    consumers carry the field verbatim into module artifacts (the
+    process byte cache — `putAll` runs on storage-served compiles too
+    and replaces existing entries — storage-served compile bodies,
+    repair/replication write-backs), and written back into ANOTHER
+    space the view serializes as the sigil link it names: a cross-space
+    `/sourceMap` link into the space it was read from. Under ensure-ON
+    the target doc pre-exists with its stored envelope (the ensured
+    default-app closure shares content-addressed helper docs with every
+    pattern's closure), so the link write is CFC-relevant and prepare
+    fail-closes on the unreadable foreign source — `missing link source
+    metadata … at /sourceMap`, the sx2-scale shard-10 red; CFC is
+    CORRECT there. Under ensure-OFF the same corrupt link LANDED
+    SILENTLY AND DURABLY (control run: 10 of 12 fresh spaces held a
+    quoted cross-space link at `/sourceMap`; value-level reads resolve
+    THROUGH the link, which is why the green regime never noticed) — so
+    the ensure exposed a pre-existing silent-corruption class rather
+    than creating one. FIXED red-first at the one read boundary every
+    consumer funnels through: `verifiedDoc` snapshots `sourceMap`
+    exactly as it already snapshots `policyManifests`; enforcement
+    untouched. Pin `compile-cache-storage-served-values.test.ts` (both
+    arms, asserting on the RAW stored value — resolved reads are
+    blind). Live: pre-fix 3/3 red, post-fix 3/3 green ensure-ON, and
+    the ensure-OFF store dump post-fix holds 0 corrupt of 24 stored
+    sourceMap fields. Legacy residual (recorded, not owed): the
+    fleet's EXISTING poisoned docs are never healed in place — a warm
+    hit skips write-back and a runtimeVersion bump orphans rather than
+    rewrites them — but they are inert going forward (the independent
+    review's planted-corruption probes, review-6320-report.md): with
+    the serving space reachable a value read resolves THROUGH the
+    legacy link and post-fix onward write-backs LAUNDER it to the
+    plain value; with the target dangling the doc loads mapless and
+    compiles fine; and a snapshot-time throw (e.g. an
+    unreachable-space authorization error) degrades that one doc to a
+    cache miss instead of failing the closure load. Healing is
+    deliberately out of scope. Expected on #6248's board: shard 10
+    greens (its red is this exact deterministic producer); shards 2/6
+    remain the row's separate profile program-materialization family.
     **SCOPE RULED 2026-08-24 (the owner; verbatim in the stage-1
     report): production ensures a root for EVERY activated space —
     per-space discrimination is DEFERRED to its own design work — and
@@ -6056,6 +6101,97 @@ supply; OW29/OW32/OW34 closed):
     program-materialization loss. The lift bar is UNCHANGED: this
     entry's own gate evidence at the merged head, 10/10, never by
     inference from the default-app gate.**
+    **THE ENSURE-ON PROFILE-SURFACE MEMBER ROOT-CAUSED AND FIXED
+    2026-08-25 (PR #6312) — the n=3 side probe's "create surface never renders"
+    shape and the #6248 board's profile-shard family, reproduced
+    locally: a WRITE-side SELF-CLOBBER of the wish's create-surface
+    sidecar — neither recorded read-side member, and not a
+    provisioning loss.** Reproduced 6/11 at main `35ab29c38` (true
+    topology, ensure defaulting ON, fresh store + posture probe per
+    run; shared-profile, profile-embed, and a probe driver): every
+    red's store shows the served `#profile` wish's profile-create
+    sidecar materialize DURABLY and then — inside the SAME wave
+    commit — a patch removing `/value/$NAME` and
+    `/value/createProfile` and replacing `$UI` with an error span
+    carrying a conflict message. Mechanism: every pre-resolve launch
+    of the sidecar chains its OWN instantiation continuation on the
+    memoized fetch (`createSidecarPatternCache.fetch` — by design,
+    for cross-slot joiners), so a wish node that runs twice before
+    the fetch resolves instantiates the sidecar twice into the same
+    cause-derived result cell; the losing duplicate's commit fails on
+    the conflict class (`StorageTransactionInconsistent` /
+    `ConflictError` — its snapshot predates the winner) and
+    `runSidecarInOwnTx`'s error arm wrote the ERROR UI over the
+    winner's surface (`commitPatternErrorUI`). Nothing re-issues (the
+    continuation is one-shot; the wish never re-ran — residual (i)
+    below), the client faithfully renders the durable error box, the
+    create input never exists, and the run is SILENT — the register's
+    "fail EARLIER at the host's create" prediction, mechanized. FIX
+    (red-first): a conflict-class failure (commit-refused or thrown
+    mid-run) now checks the RESULT CELL — a materialized value there
+    means a sibling instantiation won, and the loser YIELDS, loudly
+    (`sidecar-run-raced`, serving-loop.md §3d's failure-arm
+    contract); an EMPTY cell means the conflict came from an input
+    doc (e.g. the home `profiles` list moving), and the run RE-RUNS
+    against fresh state (bounded, three attempts) rather than
+    abandoning the only instantiation; the error UI is reserved for
+    real fetch/compile/run failures and the bounded-retry terminal.
+    No local dedupe latch: the pin drives the duplicate from a
+    second runtime instance of the same node (cause-derived
+    convergence is the design), so yield-on-conflict — the OCC
+    discipline `createSpaceRootIfAbsent` already uses — is the fix,
+    not dedupe. Pin: `wish-sidecar-duplicate-launch.test.ts` (two
+    runtimes, one store, the same compiled `#profile` piece → one
+    wish-node cause → one sidecar cell; a gated fetch holds the
+    duplicate window open, a registration-counted witness — the
+    `wishSidecarDiagnostics` test seam, this package's stand-in for
+    the missing logger-capture idiom — proves the duplicate
+    continuation is chained before release, and a runs-delta
+    assertion kills the vacuous-green path; watched red at `$NAME`
+    undefined with the conflict text durable; removing only the
+    conflict-class yield reds it again). The sidecar run also now
+    observes its wave settlement OUTSIDE the tracked launch (an
+    awaited settlement would make `idle()` wait on the wave that
+    waits on quiescence) and warns (`sidecar-run-withdrawn`) when a
+    committed instantiation is withdrawn, and the wave accumulator
+    names DROPPED contributions (`contribution-dropped` — requeues
+    and superseded derivations stay quiet; both are expected
+    recovery): the r05/p11 cascades each surfaced exactly ONE logged
+    symptom before this.
+    Live evidence, by head: 6/6 GREEN in 23-27 s at the ORIGINAL fix
+    head `bcd816b8a` (shared-profile ×2, profile-embed ×2, probe ×2)
+    and 3/3 GREEN in 20-22 s re-run at the review-round head
+    `95734a5b0` (one of each) — same harness, fresh store + posture
+    probe per run, against 6/11 red pre-fix on the same box; the
+    9-green record has well under 1% probability at the pre-fix
+    rate.
+    Residuals recorded, NOT owed by this fix: (i) in red r05 the wish
+    action held a durable `scheduler_basis` row on its ready-cell
+    read (seq 0, user-instance-keyed), the ready flip landed at
+    commit 31, waves kept running through 44 — and the wish action
+    provably never re-ran (wish-state doc frozen; greens re-run it
+    within 60 ms and heal everything). When that re-run fires, every
+    one-shot loss heals; when it does not, any one-shot loss is
+    permanent. Gear undetermined — its own seat. Related, from code
+    reading: a DROPPED contribution leaves NO basis rows
+    (`#basisRowsFor` covers survivors only), so "its own reads re-run
+    it when fresh state lands" is structurally false for a first-ever
+    run that gets dropped. (ii) The client and server auto-updaters
+    ping-pong the ensure-created root's summary-index child between
+    its closure-embedded pattern identity and the standalone compile
+    of the same source (alternating authored/derived
+    `pieceSourceHistory` + `/value` replaces;
+    `pattern-swap-setup-withdrawn` fires in greens and reds alike) —
+    the contention population that multiplies pre-resolve wish
+    re-runs; its own defect, untouched. (iii) The lunch FILE entry's
+    third member (ensure-OFF: the guest's ~98-101-op
+    program-materialization commit never landing) is a DIFFERENT,
+    post-click stage and is untouched — the entry and its lift bar
+    stand exactly as written. (iv) Whether the #6248 board's
+    POST-fill shape (shards 2/6: fill succeeded, click landed,
+    `#profile` never resolved) is this same clobber on a later
+    surface or another member is undetermined — re-measure on that
+    board at a head carrying this fix.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:

@@ -35,18 +35,16 @@ const signer = await Identity.fromPassphrase("default-app golden replay");
 
 const newSharedServer = (): MemoryV2Server.Server => newLoopbackServer();
 
-// A default-app-shaped root before and after the registry rename. V2 keeps the
-// old owned-cell cause privately and migrates its contents into the new cell
-// once.
+// Two versions of a default-app-shaped root with the same registry cause.
 const ROOT_V1 = [
   "import { pattern, computed, Writable } from 'commonfabric';",
   "interface Profile { name: string; }",
   "interface Input { label?: string; profile?: Profile; }",
   "export default pattern<Input>(() => {",
-  "  const allPieces = new Writable<string[]>([]);",
+  "  const pieceRegistry = new Writable<string[]>([]);",
   "  return {",
-  "    allPieces,",
-  "    summary: computed(() => `v1:` + allPieces.get().length),",
+  "    pieceRegistry,",
+  "    summary: computed(() => `v1:` + pieceRegistry.get().length),",
   "  };",
   "});",
   "",
@@ -57,19 +55,7 @@ const ROOT_V2 = [
   "interface Profile { name: string; }",
   "interface Input { label?: string; profile: Profile; count: number | Default<2>; }",
   "export default pattern<Input>(({ profile }) => {",
-  "  const legacyPieceRegistry = new Writable<string[]>([]).for('allPieces');",
   "  const pieceRegistry = new Writable<string[]>([]);",
-  "  const pieceRegistryMigrationComplete = new Writable(false).for(",
-  "    'pieceRegistryMigrationComplete'",
-  "  );",
-  "  computed(() => {",
-  "    if (pieceRegistryMigrationComplete.get()) return;",
-  "    const legacyPieces = legacyPieceRegistry.get();",
-  "    if (legacyPieces.length > 0 && pieceRegistry.get().length === 0) {",
-  "      pieceRegistry.set([...legacyPieces]);",
-  "    }",
-  "    pieceRegistryMigrationComplete.set(true);",
-  "  });",
   "  return {",
   "    pieceRegistry,",
   "    summary: computed(() => `v2:` + pieceRegistry.get().length),",
@@ -163,7 +149,7 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     stub.restore();
   });
 
-  it("migrates legacy state once without restoring removed pieces", async () => {
+  it("preserves registry state without restoring removed pieces", async () => {
     // N: instantiate the default-app-shaped root.
     const piece = await controller.ensureDefaultPattern();
     const root = piece.getCell();
@@ -186,11 +172,11 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     // Seed representative state: add pieces to the running root, the way a
     // user filling a fresh space would, and confirm they landed durably.
     await runtime.editWithRetry((tx) => {
-      root.withTx(tx).key("allPieces").set([...SEEDED_PIECES]);
+      root.withTx(tx).key("pieceRegistry").set([...SEEDED_PIECES]);
     });
     await piece.setInput({ profile: { name: "warm" } });
     await runtime.idle();
-    expect(root.key("allPieces").get()).toEqual(SEEDED_PIECES);
+    expect(root.key("pieceRegistry").get()).toEqual(SEEDED_PIECES);
     // V1's reactive summary sees the seeded state.
     expect(summary).toBe("v1:" + SEEDED_PIECES.length);
 
@@ -229,15 +215,14 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     expect(idV2).not.toBe(idV1);
 
     // The new computation proves that V2 is running before we inspect the
-    // migrated state.
+    // registry state.
     expect(summary).toBe("v2:" + SEEDED_PIECES.length);
 
     // The crux: the state seeded under V1 survived the swap, intact and in
     // order. No crash, no loss.
     expect(pieceRegistry).toEqual(SEEDED_PIECES);
 
-    // Emptying the canonical registry later is intentional user state. The
-    // completed migration must not restore entries from the retained old cell.
+    // Emptying the registry later is intentional user state.
     await runtime.editWithRetry((tx) => {
       rolled.withTx(tx).key("pieceRegistry").set([]);
     });
@@ -249,7 +234,7 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     cancelSink();
   });
 
-  it("migrates the legacy registry before a cold root starts", async () => {
+  it("preserves the registry before a cold root starts", async () => {
     const piece = await controller.ensureDefaultPattern();
     const root = piece.getCell();
     const profilePattern = await runtime.patternManager.compilePattern(
@@ -272,7 +257,7 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
       "cold update profile",
     );
     await runtime.editWithRetry((tx) => {
-      root.withTx(tx).key("allPieces").set([...SEEDED_PIECES]);
+      root.withTx(tx).key("pieceRegistry").set([...SEEDED_PIECES]);
     });
     await piece.setInput({ label: "durable", profile });
     const storedProfile = (controller.getArgument(root).getRawUntyped() as {
@@ -359,7 +344,7 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     const root = piece.getCell();
     await piece.setInput({ profile: { name: "warm" } });
     await runtime.editWithRetry((tx) => {
-      root.withTx(tx).key("allPieces").set([...SEEDED_PIECES]);
+      root.withTx(tx).key("pieceRegistry").set([...SEEDED_PIECES]);
     });
     await runtime.idle();
     await controller.stopPiece(root);
@@ -378,7 +363,7 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     expect(currentRef.identity).toBe(await identityForSource(ROOT_V2));
     expect(
       (currentPattern.resultSchema as { required?: string[] }).required,
-    ).toContain("pieceRegistry");
+    ).toContain("profileName");
 
     // Reproduce the updater that advanced only patternIdentity. The persisted
     // root still carries V1's stored schema and projection.
@@ -392,7 +377,7 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
       currentPattern.resultSchema,
     );
     await controller.startPiece(metadataOnlyRoot);
-    expect(metadataOnlyRoot.key("pieceRegistry").getRaw()).toBeUndefined();
+    expect(metadataOnlyRoot.key("profileName").getRaw()).toBeUndefined();
 
     const outcome = await controller.checkAndUpdateDefaultPattern(
       metadataOnlyRoot,

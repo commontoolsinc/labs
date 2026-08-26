@@ -15,7 +15,7 @@
 
 import { assert, assertEquals } from "@std/assert";
 
-const WORKER_ENTRY = "packages/runtime-client/backends/web-worker/index.ts";
+const WORKER_ENTRY = "packages/runtime-client/src/backends/web-worker/index.ts";
 
 /** Server-only modules the worker's CODE-reachable set must not hold:
  * the memory v2 server, its engine, and the sqlite disk source (the

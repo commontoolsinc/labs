@@ -3,13 +3,11 @@ import ts from "typescript";
 
 import {
   assertNoEmitErrors,
-  cliMain,
   declarationName,
   findEmitted,
   flatten,
   formatTypeScript,
   generateCfcTypes,
-  runCli,
   withExport,
 } from "./generate-cfc-types.ts";
 
@@ -22,10 +20,10 @@ import {
  * exposes exactly the public authoring surface. The rest exercise the
  * generator's own code paths directly.
  *
- * These tests read files, load the TypeScript compiler, spawn `deno fmt`, and
- * write to temporary files, so they run under the Deno test runner only. They
- * live beside the generator under `scripts/`, where the recursive deno-test
- * task finds them but the browser-bundled `test/*.test.ts` pass does not.
+ * These tests read files, load the TypeScript compiler, and spawn `deno fmt`,
+ * so they run under the Deno test runner only. They live beside the generator
+ * under `scripts/`, where the recursive deno-test task finds them but the
+ * browser-bundled `test/*.test.ts` pass does not.
  */
 
 const GENERATED_URL = new URL("../assets/types/cfc.ts", import.meta.url);
@@ -149,48 +147,6 @@ Deno.test("generateCfcTypes reproduces the checked-in module", async () => {
   );
 });
 
-Deno.test("runCli check mode passes when the target matches", async () => {
-  const target = await Deno.makeTempFile({ suffix: ".ts" });
-  try {
-    await Deno.writeTextFile(target, await generateCfcTypes());
-    assertEquals(await runCli(["--check"], target), 0);
-  } finally {
-    await Deno.remove(target);
-  }
-});
-
-Deno.test("runCli check mode fails when the target differs", async () => {
-  const target = await Deno.makeTempFile({ suffix: ".ts" });
-  try {
-    await Deno.writeTextFile(target, "// stale\n");
-    assertEquals(await runCli(["--check"], target), 1);
-  } finally {
-    await Deno.remove(target);
-  }
-});
-
-Deno.test("runCli check mode treats a missing target as out of date", async () => {
-  const dir = await Deno.makeTempDir();
-  try {
-    assertEquals(
-      await runCli(["--check"], `${dir}/does-not-exist.ts`),
-      1,
-    );
-  } finally {
-    await Deno.remove(dir, { recursive: true });
-  }
-});
-
-Deno.test("runCli write mode writes the generated module", async () => {
-  const target = await Deno.makeTempFile({ suffix: ".ts" });
-  try {
-    assertEquals(await runCli([], target), 0);
-    assertEquals(await Deno.readTextFile(target), await generateCfcTypes());
-  } finally {
-    await Deno.remove(target);
-  }
-});
-
 Deno.test("findEmitted throws when no emitted file matches", () => {
   assertThrows(
     () => findEmitted(new Map(), "missing.d.ts"),
@@ -263,22 +219,4 @@ Deno.test("formatTypeScript rejects input that deno fmt cannot parse", async () 
     Error,
     "deno fmt failed",
   );
-});
-
-Deno.test("cliMain runs the CLI and reports its exit status when it is main", async () => {
-  let exitCode: number | undefined;
-  // The checked-in asset is up to date, so check mode exits 0. A fake exit
-  // captures the status instead of terminating the test runner.
-  await cliMain(["--check"], true, (code) => {
-    exitCode = code;
-  });
-  assertEquals(exitCode, 0);
-});
-
-Deno.test("cliMain does nothing when the module is not the entry point", async () => {
-  let exited = false;
-  await cliMain(["--check"], false, () => {
-    exited = true;
-  });
-  assertEquals(exited, false);
 });

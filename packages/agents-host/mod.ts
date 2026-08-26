@@ -1,4 +1,5 @@
 export * from "./src/cli-options.ts";
+export * from "./src/checkout-discovery.ts";
 export * from "./src/config.ts";
 export * from "./src/debug-view.ts";
 export * from "./src/fabric-runtime.ts";

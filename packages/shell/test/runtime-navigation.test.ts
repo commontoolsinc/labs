@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { DID } from "@commonfabric/identity";
 import { createSession, Identity } from "@commonfabric/identity";
-import { EventEmitter } from "../../runtime-client/client/emitter.ts";
+import { EventEmitter } from "../../runtime-client/src/client/emitter.ts";
 import {
   createRuntimeClientOptions,
   RuntimeInternals,
@@ -25,6 +25,8 @@ type MockRuntimeClientEvents = {
 class MockRuntimeClient extends EventEmitter<MockRuntimeClientEvents> {
   idleCalls = 0;
   syncedCalls = 0;
+  spaceRootPatternCalls = 0;
+  registryWriteCalls = 0;
   slugByPageId = new Map<string, string | undefined>();
 
   idle(): Promise<void> {
@@ -39,6 +41,21 @@ class MockRuntimeClient extends EventEmitter<MockRuntimeClientEvents> {
 
   getPageSlug(pageId: string): Promise<string | undefined> {
     return Promise.resolve(this.slugByPageId.get(pageId));
+  }
+
+  getSpaceRootPattern() {
+    this.spaceRootPatternCalls += 1;
+    return Promise.resolve({
+      cell: () => ({
+        key: () => ({
+          send: () => {
+            this.registryWriteCalls += 1;
+            return Promise.resolve();
+          },
+        }),
+        sync: () => Promise.resolve(),
+      }),
+    });
   }
 
   dispose(): Promise<void> {
@@ -83,80 +100,7 @@ describe("RuntimeInternals navigation", () => {
     }
   });
 
-  it("does not block same-space navigation on piece registration", async () => {
-    const env = globalThis as typeof globalThis & {
-      $API_URL?: string;
-      $ENVIRONMENT?: string;
-      $COMMIT_SHA?: string;
-      $MEMORY_VERSION?: string;
-      $EXPERIMENTAL_MODERN_CELL_REP?: string;
-    };
-    const originalEnv = {
-      $API_URL: env.$API_URL,
-      $ENVIRONMENT: env.$ENVIRONMENT,
-      $COMMIT_SHA: env.$COMMIT_SHA,
-      $MEMORY_VERSION: env.$MEMORY_VERSION,
-      $EXPERIMENTAL_MODERN_CELL_REP: env.$EXPERIMENTAL_MODERN_CELL_REP,
-    };
-    env.$API_URL = "http://shell.test/";
-    env.$ENVIRONMENT = "development";
-    env.$COMMIT_SHA = undefined;
-    env.$MEMORY_VERSION = undefined;
-    env.$EXPERIMENTAL_MODERN_CELL_REP = undefined;
-
-    const spaceDid = "did:key:z6Mk-shell-runtime-did-nav" as DID;
-    const client = new MockRuntimeClient();
-    const runtime = new (RuntimeInternals as any)(client);
-
-    let registrations = 0;
-    const registrationStarted = deferred<void>();
-    const registrationReleased = deferred<void>();
-    runtime.registerNavigatedPiece = async () => {
-      registrations += 1;
-      registrationStarted.resolve();
-      await registrationReleased.promise;
-    };
-
-    let navigation: NavigationDetail | undefined;
-    const navigationReceived = deferred<NavigationDetail>();
-    const onNavigate = (event: Event) => {
-      navigation = (event as CustomEvent<typeof navigation>).detail;
-      navigationReceived.resolve(navigation!);
-    };
-    globalThis.addEventListener("cf-navigate", onNavigate);
-
-    try {
-      client.emit("navigaterequest", {
-        cell: {
-          id: () => "piece-123",
-          space: () => spaceDid,
-        },
-      });
-
-      await registrationStarted.promise;
-
-      expect(registrations).toBe(1);
-      await navigationReceived.promise;
-      expect(client.idleCalls).toBe(1);
-      expect(client.syncedCalls).toBe(1);
-      expect(navigation).toEqual({
-        spaceDid,
-        pieceId: "piece-123",
-      });
-      registrationReleased.resolve();
-    } finally {
-      globalThis.removeEventListener("cf-navigate", onNavigate);
-      env.$API_URL = originalEnv.$API_URL;
-      env.$ENVIRONMENT = originalEnv.$ENVIRONMENT;
-      env.$COMMIT_SHA = originalEnv.$COMMIT_SHA;
-      env.$MEMORY_VERSION = originalEnv.$MEMORY_VERSION;
-      env.$EXPERIMENTAL_MODERN_CELL_REP =
-        originalEnv.$EXPERIMENTAL_MODERN_CELL_REP;
-      await runtime.dispose();
-    }
-  });
-
-  it("waits for the current runtime to settle before cross-space navigation", async () => {
+  it("navigates after convergence without reading the space root", async () => {
     const env = globalThis as typeof globalThis & {
       $API_URL?: string;
       $ENVIRONMENT?: string;
@@ -201,6 +145,8 @@ describe("RuntimeInternals navigation", () => {
 
       expect(client.idleCalls).toBe(1);
       expect(client.syncedCalls).toBe(1);
+      expect(client.spaceRootPatternCalls).toBe(0);
+      expect(client.registryWriteCalls).toBe(0);
       expect(navigation).toEqual({
         spaceDid: nextSpace,
         pieceId: "piece-456",

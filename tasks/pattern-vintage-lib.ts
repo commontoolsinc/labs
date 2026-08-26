@@ -367,10 +367,10 @@ export function promotedPath(ref: VintageRef): string {
  * check on the way in. A change they cannot read bricks a live piece.
  *
  * Deliberately NOT "everything under `system/`". That directory also holds
- * personal variants (`*-ben.tsx`) and modules that are not patterns at all
- * (`piece-registry-migration.ts`), and requiring a vintage for those would
- * either wedge the gate on files that cannot be materialized or pad coverage
- * with fixtures nobody replays. Any other TEST can still be pinned
+ * personal variants (`*-ben.tsx`) and support modules that are not patterns,
+ * and requiring a vintage for those would either wedge the gate on files that
+ * cannot be materialized or pad coverage with fixtures nobody replays. Any
+ * other TEST can still be pinned
  * deliberately (`--update <test key>`) — a vintage that exists is always
  * replayed; it is only being REQUIRED that this list governs.
  */

@@ -5,7 +5,7 @@
  * recorded no-inference decision), and bare `return;` stays control flow.
  *
  * These sources compile against the REAL commonfabric surface
- * (`COMMONFABRIC_TYPES` loads `types/commonfabric.d.ts`, a symlink to
+ * (`COMMONFABRIC_TYPES` loads `types/commonfabric.d.ts`, generated from
  * `packages/api/index.ts`), so the declared-result cases also prove the
  * `action<E, R>` / `handler<E, T, R>` overloads are reachable from a pattern.
  */

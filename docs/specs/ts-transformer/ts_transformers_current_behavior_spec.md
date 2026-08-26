@@ -898,7 +898,9 @@ report these through the same collector (deduplicated via §2.2's
 - **Error** `pattern-result:opaque-reserved-key`
   (`reserved-result-keys.ts`, called from `schema-generator.ts`) — a pattern's
   own result declares one of the framework's reserved keys `unknown` at its
-  root; see §6.12
+  root; demoted to a **Warning** under `TransformationOptions.storedSource`
+  (an identity-pinned reload of durable stored source admits nothing new, so
+  the report keeps its visibility and loses its veto); see §6.12
 - **Error** `reactive-capture:unknown-type` (`src/ast/type-building.ts:681`) —
   a captured reactive value's inferred type is `unknown`, so its schema would
   be `{ type: "unknown" }` and the runner would not materialize it, reading it
@@ -936,7 +938,13 @@ as a value.
 
 `reportOpaqueReservedResultKeys` (`src/transformers/reserved-result-keys.ts`)
 reports it as **Error** `pattern-result:opaque-reserved-key`, naming every
-offending key in one diagnostic. It runs from SchemaGeneration, which is the
+offending key in one diagnostic. Under `TransformationOptions.storedSource` —
+the runner engine's cold-recovery recompile of durable stored source, where an
+identity pin guarantees the compile reconstructs an already-admitted artifact
+rather than admitting a new one — the same diagnostic reports as a
+**Warning**: a rule added after those bytes were admitted must not brick
+their reload, while authoring paths stay strict because the author is present
+to fix the shape. It runs from SchemaGeneration, which is the
 one place a declared result exists as the schema it generated — whatever type
 the author named, and whichever inference path §10.2 took to reach it.
 SchemaInjection records the result schema calls and the node to point at
@@ -1712,8 +1720,9 @@ it drives the full pipeline over a five-origin fixture and asserts every
 builder call AND callback recovers to its distinctive authored snippet
 (content is the ground truth, not merely `pos >= 0`). This is the read path
 for transform-time source annotation (A′, CT-1870), and the same fallback
-family §16.2's coverage spans use. Rationale, per-site table, and the probe
-rig: `packages/ts-transformers/APRIME-LINEAGE-HANDOFF.md`.
+family §16.2's coverage spans use. The investigation and probe record is
+archived at
+`docs/history/packages/ts-transformers/APRIME-LINEAGE-HANDOFF.md`.
 
 The same source-map-range-only rule applies to semantic replacement boundaries
 outside the builder-artifact path. Pattern-body reactive-root replacements,
@@ -1727,6 +1736,25 @@ node's text range or original-node identity.
 `test/replacement-source-map-range.test.ts` runs fixtures through the owning
 pipeline stage and content-binds every recovered range; it also directly pins
 the non-input-bound reactive-wrapper helper branch.
+
+Opaque destructuring uses explicit anchors carried by `DestructureBinding`.
+The temporary-root declaration maps to the authored initializer it names;
+each lowered leaf declaration maps to its binding element. A prologue statement
+created from a destructured callback parameter carries that same binding-element
+range. `AssertDiagnosticsTransformer` maps its rebuilt callback body to the
+authored concise expression or block, and maps each replacement record block
+and `return` to the authored expression or `return` it replaces. These nodes
+carry source-map ranges only, so the lineage does not alter printing or checker
+identity.
+
+`CFHelpers.preserveNodeSourceMap` requires explicit range and checker-identity
+nodes; a caller whose targets coincide passes the same node twice to carry
+identity without a text range. Helper names, property accesses, and calls that
+need position alone use `preserveSourceMapRange`.
+The logical-expression helpers keep their asymmetric authored anchors:
+`ifElse` maps to the whole conditional expression, while `when` and `unless`
+map to their left condition. The regression binds all three choices to source
+content.
 
 That file closes with a corpus-wide invariant: across every fixture, no
 synthesized `JsxAttribute`, `JsxElement`, `JsxExpression`, or

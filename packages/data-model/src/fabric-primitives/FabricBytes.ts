@@ -50,7 +50,6 @@ export class FabricBytes extends BaseFabricPrimitive {
   constructor(bytes: Uint8Array | ArrayBufferLike, transfer: boolean = false) {
     super();
     this.#bytes = toOwnedUint8Array(bytes, transfer);
-    Object.freeze(this);
   }
 
   //

@@ -10,8 +10,9 @@ export const RECORD_SCHEMA_VERSION = 1;
 
 /**
  * Durable name of a test: the kind of check, the workspace member that owns
- * it (or "repo" for repository-level checks), and the full name the test's
- * own runner reports.
+ * it (or "repo" for repository-level checks), the full name the test's own
+ * runner reports, and a non-default configuration when one needs separate
+ * history.
  */
 export interface TestIdentity {
   /** Class of check: "unit", "browser", "pattern", "integration",
@@ -21,6 +22,17 @@ export interface TestIdentity {
   s: string;
   /** Name as reported by the test's own runner. */
   n: string;
+  /** Non-default configuration under which the test ran. */
+  v?: string;
+}
+
+/** Stable JSON-array key for grouping records by test identity. */
+export function testIdentityKey(test: TestIdentity): string {
+  return JSON.stringify(
+    test.v === undefined
+      ? [test.k, test.s, test.n]
+      : [test.k, test.s, test.n, test.v],
+  );
 }
 
 /** One line stating that one test executed once in one run. */
@@ -127,6 +139,7 @@ export function parseRecordLine(line: string): TestRecord | undefined {
   ) {
     return undefined;
   }
+  if (test.v !== undefined && !isNonEmptyString(test.v)) return undefined;
   if (!OUTCOMES.has(record.outcome as string)) return undefined;
   if (
     typeof record.durationMs !== "number" ||
@@ -141,6 +154,7 @@ export function parseRecordLine(line: string): TestRecord | undefined {
     outcome: record.outcome as TestRecord["outcome"],
     durationMs: record.durationMs,
   };
+  if (test.v !== undefined) result.test.v = test.v;
   if (record.file !== undefined) result.file = record.file as string;
   return result;
 }

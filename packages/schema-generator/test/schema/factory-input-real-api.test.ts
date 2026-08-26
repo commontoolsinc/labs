@@ -11,6 +11,27 @@ const DEEP_FREEZE_STUB = join(
   REPO_ROOT,
   "__schema_factory_input_deep_freeze.d.ts",
 );
+const DATA_MODEL_API = join(REPO_ROOT, "packages/data-model/src/api.ts");
+
+/**
+ * The workspace specifiers `packages/api/index.ts` names, resolved by hand
+ * because this program compiles without an import map. `deep-freeze` is a
+ * value module no part of the surface under test reaches, so a stub
+ * declaration stands in for it; the fabric value declarations are part of that
+ * surface, so they resolve to the real module.
+ */
+const WORKSPACE_MODULES: ReadonlyMap<string, ts.ResolvedModuleFull> = new Map([
+  ["@commonfabric/data-model/deep-freeze", {
+    resolvedFileName: DEEP_FREEZE_STUB,
+    extension: ts.Extension.Dts,
+    isExternalLibraryImport: false,
+  }],
+  ["@commonfabric/data-model/api", {
+    resolvedFileName: DATA_MODEL_API,
+    extension: ts.Extension.Ts,
+    isExternalLibraryImport: false,
+  }],
+]);
 
 function formatDiagnostics(diagnostics: readonly ts.Diagnostic[]): string {
   return diagnostics.map((diagnostic) => {
@@ -89,12 +110,9 @@ function getTypeFromRealApiCode(
     virtualFiles.get(fileName) ?? originalReadFile(fileName);
   host.resolveModuleNames = (moduleNames, containingFile) =>
     moduleNames.map((moduleName) => {
-      if (moduleName === "@commonfabric/data-model/deep-freeze") {
-        return {
-          resolvedFileName: DEEP_FREEZE_STUB,
-          extension: ts.Extension.Dts,
-          isExternalLibraryImport: false,
-        };
+      const workspaceModule = WORKSPACE_MODULES.get(moduleName);
+      if (workspaceModule !== undefined) {
+        return workspaceModule;
       }
       return ts.resolveModuleName(
         moduleName,

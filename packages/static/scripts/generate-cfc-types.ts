@@ -3,6 +3,8 @@ import { fromFileUrl, join } from "@std/path";
 
 import ts from "typescript";
 
+import { cliMain, type GeneratedAsset } from "./generated-asset.ts";
+
 /**
  * Generates `packages/static/assets/types/cfc.ts` from the public
  * `commonfabric/cfc` authoring module (`packages/api/cfc-authoring.ts`).
@@ -325,52 +327,11 @@ export async function generateCfcTypes(): Promise<string> {
   return await formatTypeScript(`${HEADER}\n\n${body}`);
 }
 
-/**
- * Runs the command-line interface and returns the process exit code. With
- * `--check` it reports whether the file at `target` already matches the
- * generated output; otherwise it rewrites that file.
- */
-export async function runCli(
-  args: string[],
-  target: string = targetPath,
-): Promise<number> {
-  const check = args.includes("--check");
-  const generated = await generateCfcTypes();
+/** This script's asset. */
+export const asset: GeneratedAsset = {
+  target: targetPath,
+  genTask: GEN_TASK,
+  generate: generateCfcTypes,
+};
 
-  if (check) {
-    let existing = "";
-    try {
-      existing = await Deno.readTextFile(target);
-    } catch {
-      existing = "";
-    }
-    if (existing !== generated) {
-      console.error(
-        `${target} is out of date. Run \`${GEN_TASK}\` to regenerate it.`,
-      );
-      return 1;
-    }
-    console.log(`${target} is up to date.`);
-    return 0;
-  }
-
-  await Deno.writeTextFile(target, generated);
-  console.log(`Wrote ${target}`);
-  return 0;
-}
-
-/**
- * Entry point: runs the CLI and exits with its status, but only when this
- * module is the program's entry point. `isMain` and `exit` are injectable so
- * the entry behavior can be exercised without terminating the test runner.
- */
-export async function cliMain(
-  args: string[] = Deno.args,
-  isMain: boolean = import.meta.main,
-  exit: (code: number) => void = Deno.exit,
-): Promise<void> {
-  if (!isMain) return;
-  exit(await runCli(args));
-}
-
-await cliMain();
+await cliMain(asset, Deno.args, import.meta.main);

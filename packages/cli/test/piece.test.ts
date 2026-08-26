@@ -810,7 +810,6 @@ describe("cli piece parsing", () => {
     expect(output).toContain(
       'Link the well-known "pieceRegistry" list to a piece field.',
     );
-    expect(output).not.toContain("allPieces");
   });
 
   describe("parseLink", () => {

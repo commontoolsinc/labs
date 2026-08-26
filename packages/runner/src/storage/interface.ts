@@ -779,7 +779,16 @@ export interface ITransactionWriteRequest {
   delete?: boolean;
 }
 
-export interface IMemoryChange {
+/**
+ * One address's before-and-after across a change.
+ *
+ * A type alias rather than an `interface`, and it has to stay one: its members
+ * are `FabricValue`s and it rides the IPC envelope inside a telemetry marker,
+ * so it must be able to satisfy `FabricPlainObject`. An `interface` never can,
+ * however plain its members -- TypeScript grants the implicit index signature
+ * that requires to an anonymous object type and not to an interface.
+ */
+export type IMemoryChange = {
   /**
    * Memory address that was changed.
    */
@@ -792,7 +801,7 @@ export interface IMemoryChange {
    * Value memory address has after change.
    */
   after: FabricValue;
-}
+};
 
 export type StorageTransactionStatus =
   | { status: "ready"; journal: ITransactionJournal }
@@ -2016,6 +2025,23 @@ export interface IPreconditionFailedError extends Error {
 }
 
 /**
+ * The CFC boundary refused to hand the transaction to storage: policy
+ * evaluated the transaction's own reads and writes and rejected them
+ * (`rejectCommitBeforeStorage` in extended-storage-transaction.ts). A
+ * terminal rejection in the spec scheduler-v2 §7.6 taxonomy: the refusal is
+ * deterministic — re-running the identical computation recomputes the
+ * identical refused write — so the client must not retry. `reasons` carries
+ * the prepare refusal reasons verbatim (writer-fit misfits and the rest of
+ * what `prepareBoundaryCommit` collects); empty when the transaction reached
+ * commit relevant but never prepared, which is a caller bug with the same
+ * deterministic character.
+ */
+export interface ICfcCommitRefusalError extends IStorageError {
+  readonly name: "CfcCommitRefusalError";
+  readonly reasons: readonly string[];
+}
+
+/**
  * Error that indicating that no change could be made to a transaction is it is
  * no longer active.
  */
@@ -2032,6 +2058,7 @@ export type StorageTransactionRejected =
   | IStorageTransactionInconsistent
   | IConflictError
   | IPreconditionFailedError
+  | ICfcCommitRefusalError
   | IStoreError
   | TransactionError
   | IConnectionError
@@ -2491,6 +2518,7 @@ export type PushError =
   | IStorageTransactionInconsistent
   | IConflictError
   | IPreconditionFailedError
+  | ICfcCommitRefusalError
   | TransactionError
   | IAuthorizationError;
 

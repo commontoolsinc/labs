@@ -28,6 +28,7 @@ export type {
 export {
   ADOPT_SERVER_FLAGS_ENV,
   type BrowserWorkerPresetParams,
+  type CfcPosture,
   type DeployedClientExperimentalParams,
   type EnvReader,
   EXPERIMENTAL_ENV_VARS,
@@ -35,6 +36,8 @@ export {
   type ExperimentalFlagAuthority,
   experimentalOptionsForDeployedClient,
   experimentalOptionsFromEnv,
+  MAX_ENFORCEMENT_CFC_OPTIONS,
+  MAX_ENFORCEMENT_SINK_CEILINGS,
   type PatternTestPresetParams,
   type ProductionServerPresetParams,
   type RemoteClientPresetParams,
@@ -98,6 +101,7 @@ export {
 export { effect } from "./reactivity.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
 export {
+  CompilerStackLoadError,
   computeEntryIdentity,
   Console,
   type ConsoleEvent,
@@ -305,7 +309,6 @@ export {
   cellWithScopedLinkRequiredsRelaxed,
   compileAndSavePattern,
   parseCellPath,
-  pieceRegistryKeyForRoot,
   resolveCellPath,
 } from "./piece-helpers.ts";
 export type { ModuleByteCache } from "./runtime.ts";

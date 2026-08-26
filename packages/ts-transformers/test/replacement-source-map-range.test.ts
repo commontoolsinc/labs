@@ -150,6 +150,60 @@ const DATA = { marker: "CT1869_DATA" };
 export default pattern(() => ({ DATA }));
 `;
 
+const OPAQUE_DESTRUCTURE_FIXTURE = `import {
+  fetchText,
+  pattern,
+} from "commonfabric";
+
+interface Input {
+  profile: { label: string };
+}
+
+export default pattern<Input>(({ profile: { label: ctLabel } }) => {
+  const {
+    pending: ctPending,
+    result: ctResult,
+  } = fetchText({ url: "CT1869_DESTRUCTURE" });
+  return { ctLabel, ctPending, ctResult };
+});
+`;
+
+const ASSERT_DIAGNOSTICS_FIXTURE = `import {
+  assert,
+  pattern,
+} from "commonfabric";
+
+interface Input {
+  count: number;
+}
+
+export default pattern<Input>((state) => {
+  const concise = assert(() => state.count > 0);
+  const branched = assert(() => {
+    if (state.count > 10) return state.count < 20;
+    return state.count === 1;
+  });
+  return { concise, branched };
+});
+`;
+
+const CONDITIONAL_HELPER_FIXTURE = `import {
+  pattern,
+} from "commonfabric";
+
+interface Input {
+  count: number;
+  visible: boolean;
+}
+
+export default pattern<Input>((state) => {
+  const shown = state.visible && state.count;
+  const fallback = state.visible || state.count;
+  const selected = state.visible ? state.count : 0;
+  return { shown, fallback, selected };
+});
+`;
+
 interface StageTransformResult {
   readonly original: ts.SourceFile;
   readonly transformed: ts.SourceFile;
@@ -550,6 +604,180 @@ describe("replacement source-map ranges", () => {
       replacement,
       original,
       '{ marker: "CT1869_DATA" }',
+    );
+  });
+
+  it("preserves authored positions on opaque destructuring declarations", async () => {
+    const { original, transformed } = await transformThroughStage(
+      OPAQUE_DESTRUCTURE_FIXTURE,
+      "/ct1869-opaque-destructure.tsx",
+      "PatternCallbackLoweringTransformer",
+    );
+
+    const root = findOnly(
+      transformed,
+      (node): node is ts.VariableDeclaration =>
+        ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) &&
+        node.name.text.startsWith("__cf_destructure"),
+      "opaque destructuring temporary root",
+    );
+    expectAuthoredText(
+      root,
+      original,
+      'fetchText({ url: "CT1869_DESTRUCTURE" })',
+    );
+
+    const pending = findOnly(
+      transformed,
+      (node): node is ts.VariableDeclaration =>
+        ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) &&
+        node.name.text === "ctPending",
+      "opaque destructuring pending leaf",
+    );
+    expectAuthoredText(pending, original, "pending: ctPending");
+
+    const result = findOnly(
+      transformed,
+      (node): node is ts.VariableDeclaration =>
+        ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) &&
+        node.name.text === "ctResult",
+      "opaque destructuring result leaf",
+    );
+    expectAuthoredText(result, original, "result: ctResult");
+
+    const parameterLeaf = findOnly(
+      transformed,
+      (node): node is ts.VariableDeclaration =>
+        ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) &&
+        node.name.text === "ctLabel",
+      "opaque destructured-parameter leaf",
+    );
+    expectAuthoredText(parameterLeaf, original, "label: ctLabel");
+  });
+
+  it("preserves authored positions on assert-diagnostics replacements", async () => {
+    const { original, transformed } = await transformThroughStage(
+      ASSERT_DIAGNOSTICS_FIXTURE,
+      "/ct1869-assert-diagnostics.tsx",
+      "AssertDiagnosticsTransformer",
+    );
+
+    const conciseCallback = findOnly(
+      transformed,
+      (node): node is ts.ArrowFunction =>
+        ts.isArrowFunction(node) && node.parameters.length === 0 &&
+        hasString(node, "state.count > 0"),
+      "rewritten concise assert callback",
+    );
+    assert(ts.isBlock(conciseCallback.body));
+    expectAuthoredText(conciseCallback.body, original, "state.count > 0");
+
+    const conciseReturn = findOnly(
+      conciseCallback.body,
+      (node): node is ts.ReturnStatement =>
+        ts.isReturnStatement(node) && hasString(node, "state.count > 0"),
+      "rewritten concise assert return",
+    );
+    expectAuthoredText(conciseReturn, original, "state.count > 0");
+
+    const branchedCallback = findOnly(
+      transformed,
+      (node): node is ts.ArrowFunction =>
+        ts.isArrowFunction(node) && node.parameters.length === 0 &&
+        hasString(node, "state.count < 20") &&
+        hasString(node, "state.count === 1"),
+      "rewritten block assert callback",
+    );
+    assert(ts.isBlock(branchedCallback.body));
+    expectAuthoredText(
+      branchedCallback.body,
+      original,
+      "if (state.count > 10)",
+    );
+
+    const earlyReturnBlock = findOnly(
+      branchedCallback.body,
+      (node): node is ts.Block =>
+        ts.isBlock(node) && hasString(node, "state.count < 20") &&
+        node.statements.some(ts.isReturnStatement),
+      "rewritten early assert return block",
+    );
+    expectAuthoredText(
+      earlyReturnBlock,
+      original,
+      "return state.count < 20;",
+    );
+    const earlyRecordReturn = findOnly(
+      earlyReturnBlock,
+      ts.isReturnStatement,
+      "rewritten early assert record return",
+    );
+    expectAuthoredText(
+      earlyRecordReturn,
+      original,
+      "return state.count < 20;",
+    );
+
+    const finalReturnBlock = findOnly(
+      branchedCallback.body,
+      (node): node is ts.Block =>
+        ts.isBlock(node) && hasString(node, "state.count === 1") &&
+        node.statements.some(ts.isReturnStatement),
+      "rewritten final assert return block",
+    );
+    expectAuthoredText(
+      finalReturnBlock,
+      original,
+      "return state.count === 1;",
+    );
+    const finalRecordReturn = findOnly(
+      finalReturnBlock,
+      ts.isReturnStatement,
+      "rewritten final assert record return",
+    );
+    expectAuthoredText(
+      finalRecordReturn,
+      original,
+      "return state.count === 1;",
+    );
+  });
+
+  it("keeps conditional helpers anchored to their semantic authored sites", async () => {
+    const { original, transformed } = await transformThroughStage(
+      CONDITIONAL_HELPER_FIXTURE,
+      "/ct1869-conditional-helpers.tsx",
+      "PatternCallbackLoweringTransformer",
+    );
+
+    for (const helper of ["when", "unless"] as const) {
+      const call = findOnly(
+        transformed,
+        (node): node is ts.CallExpression =>
+          ts.isCallExpression(node) &&
+          ts.isPropertyAccessExpression(node.expression) &&
+          node.expression.name.text === helper,
+        `rewritten ${helper} call`,
+      );
+      expectAuthoredText(call, original, "state.visible");
+      const position = recoverAuthoredPosition(call);
+      assert(position, `expected authored position for ${helper}`);
+      expect(original.text.slice(position.pos, position.end)).not.toContain(
+        helper === "when" ? "&&" : "||",
+      );
+    }
+
+    const ifElse = findOnly(
+      transformed,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "ifElse",
+      "rewritten ifElse call",
+    );
+    expectAuthoredText(
+      ifElse,
+      original,
+      "state.visible ? state.count : 0",
     );
   });
 

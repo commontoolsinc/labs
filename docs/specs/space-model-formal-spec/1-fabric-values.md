@@ -87,10 +87,12 @@ wrapper classes (Section 1.4).
 > say where something is defined; consult the package's `exports` map to know
 > where to import it from.
 >
-> Type declarations visible to patterns are in `packages/api/index.ts` (inline
-> `interface` + `declare const` pattern), and must agree with the `data-model`
-> declarations — nothing checks that mechanically. `packages/runner/` wires
-> concrete implementations into builder exports.
+> Type declarations visible to patterns are in
+> `packages/data-model/src/api.ts` (the `interface` + `declare const` pattern),
+> which `packages/api/index.ts` re-exports as part of the `commonfabric`
+> surface. They must agree with the `data-model` declarations they mirror —
+> nothing checks that mechanically. `packages/runner/` wires concrete
+> implementations into builder exports.
 
 ```typescript
 // Shown at module scope.
@@ -869,8 +871,8 @@ annotation carry information.
 
 The brand is a well-known string key rather than a `unique symbol` because
 `interface.ts` is deliberately free of runtime imports, and a `unique symbol`
-would have to be imported as a *value*. `packages/api/index.ts` declares the
-identical member; the two must agree exactly, since a value branded by one
+would have to be imported as a *value*. `packages/data-model/src/api.ts` declares
+the identical member; the two must agree exactly, since a value branded by one
 would otherwise not satisfy the other.
 
 ```typescript
@@ -1804,6 +1806,20 @@ export abstract class BaseFabricInstance extends FabricInstance {
 > therefore stable against changes to the template-method scaffolding, and the
 > `instanceof FabricInstance` brand check still catches every concrete
 > `FabricInstance` value.
+
+> **An aside on sealing instances.** Nothing in this model requires it, and an
+> implementation is free to skip it, but a JavaScript implementation may want
+> to seal an instance so that adding a property to one throws rather than
+> silently attaching data that no structural view, encoder, or hash will read.
+> Doing so takes one wrinkle. `Object.isFrozen()` reports `true` for any sealed
+> object with no own properties, so an instance holding all of its state
+> privately would report as frozen from the moment it was built, and a request
+> for a mutable copy would hand back the original. Giving the instance a single
+> writable own property, keyed by a symbol and non-enumerable, is enough to fix
+> that: `Object.freeze()` clears the property's `writable` bit, so
+> `Object.isFrozen()` again tracks the instance's frozen state. Such a property
+> is invisible to a spread, `Object.keys()`, and `JSON.stringify()` alike, so
+> instances still present no properties to a client.
 
 ### 2.4 Codec Protocol
 

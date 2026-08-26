@@ -55,6 +55,7 @@ import {
   setPatternSource,
   type SpaceCellContents,
 } from "@commonfabric/runner";
+import type { CfcPosture } from "@commonfabric/runner";
 import type {
   CfcEnforcementMode,
   CfcFlowLabelsMode,
@@ -72,10 +73,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { prepareSourceClosureVerification } from "../../../runner/src/compilation-cache/cell-cache.ts";
-import {
-  getResultCellWithSourceSchema,
-  isLegacyPieceRegistryRoot,
-} from "../../../runner/src/piece-helpers.ts";
+import { getResultCellWithSourceSchema } from "../../../runner/src/piece-helpers.ts";
 import { pieceId } from "../piece-id.ts";
 // System space-root pattern refs, their derivation, and the source→URL
 // resolution live in ../system-pattern-url.ts; re-exported here for existing
@@ -198,25 +196,6 @@ const isCfcMigrationRejection = (error: unknown): boolean =>
 const readEnv: EnvReader = (key) =>
   typeof Deno !== "undefined" ? Deno.env.get(key) : undefined;
 
-/**
- * Records a piece a running pattern navigated to in the space's registry, so a
- * piece a pattern created inside this runtime is reachable from the space
- * afterwards. A piece the registry already lists is left alone.
- */
-export async function registerNavigatedPiece(
-  pieces: PiecesController,
-  target: Cell<unknown>,
-): Promise<void> {
-  const id = pieceId(target);
-  if (id === undefined) {
-    throw new Error("navigateTo: the target carries no piece id");
-  }
-  await pieces.runtime.storageManager.synced();
-  const registry = await pieces.getPieceRegistry();
-  if (registry.get().some((piece) => pieceId(piece) === id)) return;
-  await pieces.add([target]);
-}
-
 export interface PiecesControllerOptions {
   deferSpaceCellSync?: boolean;
 }
@@ -263,9 +242,8 @@ export class PiecesController<T = unknown> {
       ? Promise.resolve()
       : Promise.resolve(this.spaceCell.sync());
 
-    // Note: pieceRegistry and recentPieces are managed by the default pattern,
-    // not directly on the space cell. The space cell only contains a link to
-    // defaultPattern.
+    // The piece registry is managed by the default pattern, not directly on
+    // the space cell. The space cell only contains a link to defaultPattern.
     // Default pattern creation is handled by ensureDefaultPattern(), which is
     // called by CLI/shell entry points. Construction doesn't auto-create it.
     this.ready = syncSpaceCellContents.then(() => {});
@@ -279,8 +257,7 @@ export class PiecesController<T = unknown> {
    * authorization error. A connection that does not complete takes its socket
    * and its replica down with it.
    *
-   * A pattern that navigates to a piece has that piece recorded in the
-   * space's registry, and one that reaches the LLM reaches this deployment's.
+   * A pattern that reaches the LLM reaches this deployment's service.
    */
   static async initialize(
     {
@@ -293,6 +270,7 @@ export class PiecesController<T = unknown> {
       navigateCallback,
       cfcEnforcementMode,
       cfcFlowLabels,
+      cfcPosture,
     }: {
       apiUrl: URL | string;
       identity: Identity;
@@ -326,14 +304,14 @@ export class PiecesController<T = unknown> {
       // preset; unset means the preset's first-party posture.
       cfcEnforcementMode?: CfcEnforcementMode;
       cfcFlowLabels?: CfcFlowLabelsMode;
+      // Named CFC posture bundle for this controller's runtime (the
+      // remoteClient preset's `cfcPosture` opt-in); the two dials above still
+      // apply over it.
+      cfcPosture?: CfcPosture;
     },
   ): Promise<PiecesController> {
     const api = new URL(apiUrl);
     setLLMUrl(api.toString());
-    // Holds the controller built below, which the navigate callback reads and
-    // the runtime takes at construction. A pattern navigates only from a
-    // running piece, and the controller is what starts one.
-    const piecesRef: { current?: PiecesController } = {};
     const session = await createSession(
       isDID(space)
         ? { identity, spaceDid: space }
@@ -362,10 +340,8 @@ export class PiecesController<T = unknown> {
       patternCoverage,
       ...(cfcEnforcementMode !== undefined ? { cfcEnforcementMode } : {}),
       ...(cfcFlowLabels !== undefined ? { cfcFlowLabels } : {}),
-      // A caller-supplied surface (the client-effect channel's test hook,
-      // server-execution v2 Phase 4) overrides the registry default.
-      navigateCallback: navigateCallback ??
-        ((target) => registerNavigatedPiece(piecesRef.current!, target)),
+      ...(cfcPosture !== undefined ? { cfcPosture } : {}),
+      ...(navigateCallback !== undefined ? { navigateCallback } : {}),
       trustSnapshotProvider: () => ({
         id: `principal:${session.as.did()}`,
         actingPrincipal: session.as.did(),
@@ -378,7 +354,6 @@ export class PiecesController<T = unknown> {
       const pieces = new PiecesController(session, runtime, {
         deferSpaceCellSync,
       });
-      piecesRef.current = pieces;
       // Opening the space's session is what turns a permanent denial into an
       // error: the per-space status below is written while the session opens,
       // and `synced()` stays quiet about a denial so that a denied cross-space
@@ -576,8 +551,7 @@ export class PiecesController<T = unknown> {
   /**
    * Get the cell containing the registered pieces in this space.
    * This is the discovery root, not a list of every stored piece root. Reads
-   * the default pattern's pieceRegistry export. An eligible legacy system root
-   * is read through its retired registry export.
+   * the default pattern's pieceRegistry export.
    */
   async getPieceRegistry(): Promise<Cell<Cell<unknown>[]>> {
     const defaultPattern = await this.getDefaultPattern(true);
@@ -596,20 +570,11 @@ export class PiecesController<T = unknown> {
       type: "object",
       properties: {
         pieceRegistry: pieceListSchema,
-        allPieces: pieceListSchema,
       },
     });
     const pieceRegistry = cell.key("pieceRegistry") as Cell<Cell<unknown>[]>;
     await this.syncPieces(pieceRegistry);
-    if (!isLegacyPieceRegistryRoot(defaultPattern)) {
-      return pieceRegistry;
-    }
-
-    const legacyPieceRegistry = cell.key("allPieces") as Cell<
-      Cell<unknown>[]
-    >;
-    await this.syncPieces(legacyPieceRegistry);
-    return legacyPieceRegistry;
+    return pieceRegistry;
   }
 
   /** Return the piece registry, not every stored piece root. */

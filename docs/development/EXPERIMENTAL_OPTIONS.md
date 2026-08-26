@@ -157,11 +157,14 @@ server](#clients-that-are-not-built-alongside-their-server).
   written under it persist, so turning it back off stops emission without
   un-writing anything.
 - **Interaction with `syncSchemaTableV2`.** Both mechanisms dedupe the same
-  link-schema positions, so a flag-on process disables the sync schema
-  table outright (`setSyncSchemaTableConfig(false)` at Runtime
-  construction) rather than running both — a reference-bearing link never
-  needs frame compression, and the table's negotiation simply stops being
-  offered by that process.
+  link-schema positions, and they compose: the table encoder skips
+  reference-only positions (`{ "$ref": "cid:…" }` is already smaller than
+  a table ref), so over reference-bearing frames the table approaches a
+  no-op, while stored links minted before this flag still carry inline
+  schemas that only the table compresses in flight. A Runtime therefore
+  leaves the table's negotiation untouched; the table retires through the
+  spec's Phase 3 — by ceasing to match once reference-bearing links
+  dominate — not by a construction-time switch.
 - **Current default and planned end state.** On by default, everywhere.
   An explicit `false` (env for servers and CLI, build define for the
   shell) is the rollback override: it stops emission without un-writing
@@ -579,6 +582,26 @@ latter's for its fabric session from `--fabric-cfc-enforcement-mode`
 (raise-only: `enforce-explicit` or `enforce-strict`) and
 `--fabric-cfc-flow-labels`, with `CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE` and
 `CF_HARNESS_FABRIC_CFC_FLOW_LABELS` as their environment defaults.
+
+One named bundle sits beside the per-dial rollout: every preset's `CoreParams`
+accepts `cfcPosture: "max-enforcement"`, which spreads
+`MAX_ENFORCEMENT_CFC_OPTIONS` (same file) over the core — flow labels
+`persist`, write floor / policy evaluation / declared monotonicity /
+label-metadata protection at `enforce`, trigger-read gating on, the §10.1
+standard prompt-caveat policy as the deployment's `cfcPolicyRecords`, and
+public-only confidentiality ceilings on the network-fetch sinks
+(`MAX_ENFORCEMENT_SINK_CEILINGS`). The llm sinks carry no ceiling, and a sink
+with no ceiling gets no gate: llm-sink release is ungoverned under this
+posture — pending a boundary-scoped admission mechanism, since an exact-match
+ceiling cannot admit the source-varying material-risk caveats an llm sink
+exists to process. The bundle deliberately leaves the
+enforcement-mode pin at `enforce-explicit` (strict stays a per-session host
+raise), and leaves `cfcDecomposedEnvelopes`, `cfcTrustConfig`, and
+`cfcPrefixProvenanceStats` alone. It is opt-in per runtime, never a fleet
+flip: cf-harness exposes it for its fabric session as `--fabric-cfc-posture`
+(`CF_HARNESS_FABRIC_CFC_POSTURE`); toolshed publishes whatever CFC posture its
+Runtime resolved on `/api/meta` (`lib/cfc-posture.ts`), so a deployment's
+enforcement is readable rather than indistinguishable from the default.
 The interactive `cf-harness` and the `fuse` mount expose the enforcement mode
 through `CF_CFC_MODE` for testing. Because these dials are keys of
 `RuntimeOptions`, the exhaustive `RUNTIME_OPTION_KEYS` registry in the same file
@@ -905,20 +928,22 @@ the per-epic implementation notes).
   It changes only the size of the payload, not its meaning. Peers that do not
   advertise the capability keep receiving the historical fully-expanded
   `SessionSync` shape.
-- **Interaction with `contentAddressedSchemas`.** A process with that
-  flag on — its default — disables this table outright: content-addressed
-  references dedupe the same link-schema positions at rest, so the two
-  mechanisms never run together (see that flag's entry).
-- **Current default and planned end state.** On by default at the memory
-  layer, but any process that constructs a Runtime with
-  `contentAddressedSchemas` on (its default) stops offering the table, so
-  it runs only where that flag is rolled back. It is negotiated, so it
-  degrades safely against older peers. The end state is to retire the
-  negotiation and the expanded form once every peer in the fleet speaks the
-  compact form — the content-addressed-schemas spec's Phase 3 covers the
-  link-position half of that retirement.
-- **Status on 2026-08-19.** Implemented; on at the memory layer, disabled
-  in any default-configured Runtime process by `contentAddressedSchemas`.
+- **Interaction with `contentAddressedSchemas`.** The two mechanisms
+  compose (see that flag's entry): the table encoder skips
+  reference-only positions, so it compresses exactly the stored links
+  that still carry inline schemas and approaches a no-op as
+  reference-bearing links take over. Runtime construction leaves the
+  table's negotiation untouched.
+- **Current default and planned end state.** On by default, everywhere;
+  negotiated, so it degrades safely against older peers. The end state is
+  to retire the negotiation and the expanded form once every peer AND the
+  stored stock speak the compact form — the content-addressed-schemas
+  spec's Phase 3 covers the link-position half of that retirement, and it
+  is gated on stored data (reference-bearing links dominating), not on
+  the flag: inline stock outlives every flag flip, and delivering it
+  uncompressed pushes a large space's sync past Deno's 64 MiB inbound
+  websocket frame cap (#6319).
+- **Status on 2026-08-25.** Implemented; on by default everywhere.
 - **Path to removal.** Confirm no peer still needs the expanded payload, then
   delete the negotiation and the expanded-form encoder and always send the
   compact form.
@@ -1260,7 +1285,7 @@ Browser (main thread)
         |  postMessage (IPC), InitializationData carries experimental + CFC dials
         v
 Browser web worker
-  +-- runtime-client/backends/runtime-processor.ts
+  +-- runtime-client/src/backends/runtime-processor.ts
         --> new Runtime(runtimePresets.browserWorker({ experimental, cfcEnforcementMode, cfcFlowLabels, ... }))
 ```
 

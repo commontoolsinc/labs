@@ -19,7 +19,6 @@ import {
   serverExecutionEnablerCount,
   setCommitPreconditionsConfig,
   setServerExecutionConfig,
-  setSyncSchemaTableConfig,
 } from "@commonfabric/memory/v2";
 import { RuntimeTelemetry } from "@commonfabric/runner";
 import {
@@ -1254,15 +1253,15 @@ export class Runtime {
     );
     this.experimental.contentAddressedSchemas =
       getContentAddressedSchemasConfig();
-    if (this.experimental.contentAddressedSchemas) {
-      // Content-addressed schema references and the sync schema table dedupe
-      // the same link-schema positions; a reference-bearing link never needs
-      // frame compression, so a flag-on process stops negotiating the table
-      // entirely rather than running both mechanisms. Ambient and one-way
-      // like the flag itself: once any runtime in the realm enables the
-      // flag, the table stays off for the process.
-      setSyncSchemaTableConfig(false);
-    }
+    // The sync schema table stays negotiated under this flag: the two
+    // mechanisms dedupe the same link-schema positions and compose (the
+    // table encoder skips reference-only positions), and stored links
+    // minted before the flag still carry inline schemas that only the
+    // table compresses in flight — delivering that stock uncompressed
+    // pushes a large space's sync past Deno's 64 MiB inbound websocket
+    // frame cap (#6319). The table retires by ceasing to match once
+    // reference-bearing links dominate (content-addressed-schemas.md,
+    // Phase 3), not by a construction-time switch.
     setCommitPreconditionsConfig(this.experimental.commitPreconditions);
     this.experimental.commitPreconditions = getCommitPreconditionsConfig();
     // Propagate only when EXPLICITLY set (stage F): a co-hosted serving
@@ -2307,10 +2306,13 @@ export class Runtime {
    * which is an allow-list: a stale basis (server conflict or the local
    * inconsistency guard), a liveness failure the memory client heals on its own
    * (a transport failure, an undecodable frame), a discarded attempt
-   * (`tx.abort()` or a CFC pre-storage refusal), or an authorization denial the
-   * server itself marked `retriable`. Every other rejection — an ACL/protocol
-   * refusal, an authorization denial, a precondition failure, a commit-rule
-   * violation, a `SessionError` (nothing on this path remounts the session, so
+   * (`tx.abort()`, or a prepared CFC transaction whose inputs drifted before
+   * the verdict), or an authorization denial the server itself marked
+   * `retriable`. Every other rejection — an ACL/protocol refusal, an
+   * authorization denial, a precondition failure, a commit-rule violation, a
+   * CFC boundary refusal (`CfcCommitRefusalError`, a deterministic verdict on
+   * the transaction's own reads and writes), a `SessionError` (nothing on this
+   * path remounts the session, so
    * every attempt reuses the handle the server just refused) — is returned on
    * the FIRST attempt, because re-running cannot change the outcome and each
    * doomed attempt costs a round-trip plus a subscriber revert notification.
@@ -2423,6 +2425,14 @@ export class Runtime {
   }
 
   prepareTxForCommit(tx: IExtendedStorageTransaction): void {
+    // A transaction that is no longer open takes no prepare work, because it
+    // can no longer commit. Everything below reaches storage through the
+    // transaction: the flow probe reads stored metadata, and prepareCfc reads
+    // and writes the derived label map. A settled transaction refuses both,
+    // and its commit reports the terminal state as the result.
+    if (tx.status().status !== "ready") {
+      return;
+    }
     const state = tx.getCfcState();
     if (state.enforcementMode === "disabled") {
       // A vouched ingest still needs its provenance mark minted even where CFC

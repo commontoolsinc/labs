@@ -448,6 +448,16 @@ lunch poll's `addUser`
 ([participant-identity-card.tsx](../../packages/patterns/lunch-poll/participant-identity-card.tsx))
 is a deliberate read-then-push that relies on it.
 
+The narrowing keys on the read's path, and does not care which layer issued the
+read. Runtime machinery that runs during a commit is bound by the same rule as
+handler code. A recursive read at a document's root depends on every path in
+that document, so a concurrent write anywhere in it — including the mergeable
+append the commit is carrying — invalidates that read and conflicts the commit.
+A runtime pass that needs one member of a document reads that member's own path
+instead. The CFC label envelope at `["cfc"]` and the schema meta at
+`["schema"]` are each read at their own path, so each depends on that member
+alone and a concurrent append to the document's value leaves it undisturbed.
+
 Two further responses make the keyed case cheaper and catch misuse (see
 `keyed-collection-writes.md`):
 
@@ -532,10 +542,10 @@ in-app remove button can address the same entity without introspecting the piece
 cell. A space's key is the space name, which the handler already has from the
 event.
 
-The MRU lists — the profile most-recently-used list and the recent-pieces list —
-stay a read-modify-write `set`. Their write is not a set-membership change: it
-moves an entry to the front of the list and caps the length, so its correctness
-depends on reading the current order and count. That is a condition other than
+The profile most-recently-used list stays a read-modify-write `set`. Its write
+is not a set-membership change: it moves an entry to the front of the list and
+caps the length, so its correctness depends on reading the current order and
+count. That is a condition other than
 uniqueness, which the mergeable ops do not preserve: `addUnique` appends at the
 tail and never reorders, and there is no mergeable "keep only the first N". A
 concurrent pair of most-recently-used stamps conflicts and one retries, which

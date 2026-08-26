@@ -19,6 +19,8 @@ import {
   planStableArrayCells,
 } from "../src/array-cell-identity.ts";
 import {
+  agentOwnerSchema,
+  cellHasOwnerProtection,
   pushStableCellGraph,
   readStableCellGraphValue,
 } from "../src/fabric-graph.ts";
@@ -69,7 +71,7 @@ Deno.test("stable graph writes keep child identity and hydrate linked values", a
     storageManager,
   });
   const space = signer.did();
-  const connection = { runtime, spaceDid: space };
+  const connection = { runtime, spaceDid: space, ownerDid: space };
   let coldRuntime: Runtime | undefined;
   try {
     const parent = runtime.getCell(space, { graphTest: "parent" });
@@ -130,7 +132,7 @@ Deno.test("stable graph writes preserve native `FabricValue`s", async () => {
     storageManager,
   });
   const space = signer.did();
-  const connection = { runtime, spaceDid: space };
+  const connection = { runtime, spaceDid: space, ownerDid: space };
   try {
     const root = runtime.getCell(space, { graphTest: "native-values" });
     await pushStableCellGraph(connection, [{
@@ -165,6 +167,134 @@ Deno.test("stable graph writes preserve native `FabricValue`s", async () => {
   }
 });
 
+Deno.test("stable graph writes refuse populated unprotected cells", async () => {
+  const signer = await Identity.fromPassphrase(
+    "agent connector unprotected graph test",
+  );
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const space = signer.did();
+  const connection = { runtime, spaceDid: space, ownerDid: space };
+  try {
+    const unprotectedRoot = runtime.getCell(space, {
+      graphTest: "unprotected-root",
+    });
+    const unprotectedChild = runtime.getCell(space, {
+      graphTest: "unprotected-child",
+    });
+    const confidentialOnly = runtime.getCell(
+      space,
+      { graphTest: "confidential-only" },
+      agentOwnerSchema(space, false),
+    );
+    await Promise.all([
+      unprotectedRoot.sync(),
+      unprotectedChild.sync(),
+      confidentialOnly.sync(),
+    ]);
+    await storageManager.synced();
+    const seed = runtime.edit();
+    unprotectedRoot.withTx(seed).setRawUntyped({ exposed: "root" });
+    unprotectedChild.withTx(seed).setRawUntyped({ exposed: "child" });
+    const confidentialSeed = confidentialOnly.withTx(seed);
+    confidentialSeed.setRawUntyped({ exposed: "confidential" });
+    confidentialSeed.applyCfcSchemaToExistingValue();
+    seed.prepareCfc();
+    const seeded = await seed.commit();
+    if (seeded.error) throw seeded.error;
+
+    await assertRejects(
+      () =>
+        pushStableCellGraph(connection, [{
+          cell: unprotectedRoot,
+          value: () => ({ exposed: false }),
+        }]),
+      Error,
+      "refusing to adopt an unprotected stable graph cell",
+    );
+
+    await assertRejects(
+      () =>
+        pushStableCellGraph(connection, [{
+          cell: confidentialOnly,
+          value: () => ({ exposed: false }),
+        }]),
+      Error,
+      "refusing to adopt an unprotected stable graph cell",
+    );
+
+    const parent = runtime.getCell(space, { graphTest: "protected-parent" });
+    await parent.sync();
+    await storageManager.synced();
+    await assertRejects(
+      () =>
+        pushStableCellGraph(connection, [{
+          cell: parent,
+          value: (materializeCell) => ({
+            child: materializeCell(
+              { graphTest: "unprotected-child" },
+              { exposed: false },
+            ),
+          }),
+        }]),
+      Error,
+      "refusing to adopt an unprotected stable graph cell",
+    );
+    assertEquals(unprotectedRoot.getRaw(), { exposed: "root" });
+    assertEquals(unprotectedChild.getRaw(), { exposed: "child" });
+    assertEquals(confidentialOnly.getRaw(), { exposed: "confidential" });
+    assertEquals(parent.getRaw(), undefined);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("stable graph writes one new cell referenced twice", async () => {
+  const signer = await Identity.fromPassphrase(
+    "agent connector repeated graph cell test",
+  );
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const space = signer.did();
+  const connection = { runtime, spaceDid: space, ownerDid: space };
+  try {
+    const parent = runtime.getCell(space, { graphTest: "repeated-parent" });
+    await pushStableCellGraph(connection, [{
+      cell: parent,
+      value: (materializeCell) => ({
+        first: materializeCell(
+          { graphTest: "repeated-child" },
+          { value: "shared" },
+        ),
+        second: materializeCell(
+          { graphTest: "repeated-child" },
+          { value: "shared" },
+        ),
+      }),
+    }]);
+
+    assertEquals(await readStableCellGraphValue(connection, parent), {
+      first: { value: "shared" },
+      second: { value: "shared" },
+    });
+    const child = runtime.getCell(space, { graphTest: "repeated-child" });
+    assertEquals(
+      cellHasOwnerProtection(runtime.readTx(), child, space),
+      true,
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
 Deno.test("stable graph deletes fields whose names exist on the prototype", async () => {
   const signer = await Identity.fromPassphrase(
     "agent connector inherited field test",
@@ -174,7 +304,11 @@ Deno.test("stable graph deletes fields whose names exist on the prototype", asyn
     apiUrl: new URL(import.meta.url),
     storageManager,
   });
-  const connection = { runtime, spaceDid: signer.did() };
+  const connection = {
+    runtime,
+    spaceDid: signer.did(),
+    ownerDid: signer.did(),
+  };
   try {
     const root = runtime.getCell(signer.did(), {
       graphTest: "inherited-fields",
@@ -204,7 +338,7 @@ Deno.test("stable graph reads can preserve links in named fields", async () => {
     storageManager,
   });
   const space = signer.did();
-  const connection = { runtime, spaceDid: space };
+  const connection = { runtime, spaceDid: space, ownerDid: space };
   try {
     const child = runtime.getCell(space, { graphTest: "preserved-child" });
     const parent = runtime.getCell(space, { graphTest: "preserved-parent" });
@@ -243,7 +377,7 @@ Deno.test("stable array planning preserves links to cell subpaths", async () => 
     storageManager,
   });
   const space = signer.did();
-  const connection = { runtime, spaceDid: space };
+  const connection = { runtime, spaceDid: space, ownerDid: space };
   try {
     const referenced = runtime.getCell(space, {
       graphTest: "subpath-reference",
@@ -285,7 +419,7 @@ Deno.test("stable graph field writes preserve document metadata", async () => {
   });
   const space = signer.did();
   const cell = runtime.getCell(space, { graphTest: "field-writes" });
-  const connection = { runtime, spaceDid: space };
+  const connection = { runtime, spaceDid: space, ownerDid: space };
   try {
     await pushStableCellGraph(connection, [{
       cell,
@@ -317,12 +451,13 @@ Deno.test("stable graph field writes preserve document metadata", async () => {
           space: link.space,
           scope: link.scope,
           id: link.id,
-          path: [],
+          path: ["connectorMetadata"],
         }),
-        {
-          connectorMetadata: { preserved: true },
-          value: { retained: "after" },
-        },
+        { preserved: true },
+      );
+      assertEquals(
+        inspectionTx.readValueOrThrow(link),
+        { retained: "after" },
       );
     } finally {
       inspectionTx.abort();
@@ -334,14 +469,89 @@ Deno.test("stable graph field writes preserve document metadata", async () => {
 });
 
 function fakeCell(id = "of:parent") {
-  return {
+  const cell = {
     getAsNormalizedFullLink: () => ({
       space: "did:test:space",
       id,
       path: [],
     }),
+    sync: () => Promise.resolve(),
+    withTx: () => cell,
+    asSchema: () => cell,
+    setRawUntyped: () => {},
+    applyCfcSchemaToExistingValue: () => {},
   };
+  return cell;
 }
+
+Deno.test("stable graph hydrates the owner-schema cell before writing", async () => {
+  let schemaBindings = 0;
+  let syncs = 0;
+  let writes = 0;
+  let hydrated = false;
+  const link = {
+    space: "did:test:space",
+    scope: "space",
+    id: "of:parent",
+    path: [],
+  };
+  const protectedCell = {
+    getAsNormalizedFullLink: () => link,
+    sync: () => {
+      syncs++;
+      hydrated = true;
+      return Promise.resolve();
+    },
+    withTx: () => protectedCell,
+    setRawUntyped: () => {
+      assertEquals(hydrated, true);
+      writes++;
+    },
+    applyCfcSchemaToExistingValue: () => assertEquals(hydrated, true),
+  };
+  const makeCell = () => ({
+    getAsNormalizedFullLink: () => link,
+    asSchema: () => {
+      schemaBindings++;
+      return protectedCell;
+    },
+  });
+  const firstCell = makeCell();
+  const secondCell = makeCell();
+  const transaction = {
+    readValueOrThrow: () => undefined,
+    writeOrThrow: () => {},
+    setCfcImplementationIdentity: () => {},
+    prepareCfc: () => {},
+    abort: () => ({ ok: {} }),
+    commit: () => Promise.resolve({ ok: {} }),
+  };
+
+  await pushStableCellGraph(
+    // deno-lint-ignore no-explicit-any -- focused runtime fixture.
+    {
+      runtime: { edit: () => transaction },
+      spaceDid: "did:test:space",
+      ownerDid: "did:test:owner",
+    } as any,
+    [
+      {
+        // deno-lint-ignore no-explicit-any -- focused cell fixture.
+        cell: firstCell as any,
+        value: () => ({ value: "first" }),
+      },
+      {
+        // deno-lint-ignore no-explicit-any -- focused cell fixture.
+        cell: secondCell as any,
+        value: () => ({ value: "second" }),
+      },
+    ],
+  );
+
+  assertEquals(schemaBindings, 1);
+  assertEquals(syncs, 1);
+  assertEquals(writes, 2);
+});
 
 Deno.test("stable graph writes await one commit", async () => {
   const commitStarted = Promise.withResolvers<void>();
@@ -353,6 +563,8 @@ Deno.test("stable graph writes await one commit", async () => {
     readValueOrThrow: () => undefined,
     writeOrThrow: () => {},
     writeValueOrThrow: () => {},
+    setCfcImplementationIdentity: () => {},
+    prepareCfc: () => {},
     abort: () => ({ ok: {} }),
     commit: () => {
       commitCount++;
@@ -361,8 +573,11 @@ Deno.test("stable graph writes await one commit", async () => {
     },
   };
   const connection = {
-    runtime: { edit: () => transaction },
+    runtime: {
+      edit: () => transaction,
+    },
     spaceDid: "did:test:space",
+    ownerDid: "did:test:owner",
   };
   let settled = false;
   const pending = pushStableCellGraph(
@@ -395,6 +610,8 @@ Deno.test("stable graph writes surface a commit failure without retrying", async
         readValueOrThrow: () => undefined,
         writeOrThrow: () => {},
         writeValueOrThrow: () => {},
+        setCfcImplementationIdentity: () => {},
+        prepareCfc: () => {},
         abort: () => ({ ok: {} }),
         commit: () => {
           commitCount++;
@@ -403,6 +620,7 @@ Deno.test("stable graph writes surface a commit failure without retrying", async
       }),
     },
     spaceDid: "did:test:space",
+    ownerDid: "did:test:owner",
   };
   const error = await assertRejects(
     () =>
@@ -453,7 +671,7 @@ Deno.test("stable graph hydration bounds concurrent child syncs", async () => {
   };
   const pending = readStableCellGraphValue(
     // deno-lint-ignore no-explicit-any -- focused runtime fixture.
-    { runtime, spaceDid: space } as any,
+    { runtime, spaceDid: space, ownerDid: space } as any,
     // deno-lint-ignore no-explicit-any -- focused cell fixture.
     parent as any,
   );

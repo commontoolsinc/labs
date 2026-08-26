@@ -17,7 +17,8 @@ async function writeConfig(
   await Deno.writeTextFile(
     path,
     JSON.stringify({
-      schema: "commonfabric.agents-host.config.v1",
+      schema: "commonfabric.agents-host.config",
+      ownerDid: "did:key:test-owner",
       ...interval,
       sources: [{
         id: "codex",

@@ -10,6 +10,7 @@ import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-pri
 import {
   cloneForMutation,
   type CloneForMutationResult,
+  FabricInstance,
   FabricPrimitive,
   isFabricObjectOrArray,
   valueEqual,
@@ -27,6 +28,7 @@ import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { encodePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { refuseFabricInstance } from "../fabric-special-object.ts";
 import {
   containsExternalSchemaRef,
   decomposeSchema,
@@ -96,6 +98,7 @@ import {
   CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON,
   CfcSchemaMigrationError,
 } from "./migration-reason.ts";
+import { verdictReason } from "./verdict-reason.ts";
 import {
   type ReadClassSelection,
   readConsumesEntry,
@@ -1386,6 +1389,10 @@ const valueWriteTargets = (
     // present slot holding `undefined` must not read as absent (the
     // snapshot value cannot make that distinction at its own root).
     previousPresentByPath: Map<string, boolean>;
+    // Whether every write recorded at a path (pathKey) arrived on the raw
+    // meta seam. Such a path carries no schema write-policy input, so the
+    // policy requirement skips it; it stays a flow-label target.
+    metaOnlyByPath: Map<string, boolean>;
   }
 > => {
   const result = new Map<
@@ -1399,6 +1406,7 @@ const valueWriteTargets = (
       valuesByPath: Map<string, unknown>;
       previousValuesByPath: Map<string, unknown>;
       previousPresentByPath: Map<string, boolean>;
+      metaOnlyByPath: Map<string, boolean>;
     }
   >();
   const log = tx.getReactivityLog?.();
@@ -1432,6 +1440,18 @@ const valueWriteTargets = (
       ) {
         continue;
       }
+      // Whether this write came in on the meta seam. `value` is the payload
+      // root, and the runtime surfaces that are not payload either returned
+      // above (`cfc`, `source`) or are the meta fields `setMetaRaw`
+      // addresses, so a write rooted anywhere but `value` is envelope
+      // metadata, which no schema describes. Recorded per canonical path
+      // rather than excluding the write: the meta seam is a flow-label
+      // target like any other write, and only the schema-policy requirement
+      // treats it differently. A meta root and a user field of the same
+      // name canonicalize to one path, so a path counts as meta only while
+      // every write that reached it was a meta write. A document-root write
+      // carries the whole envelope, payload included, and is not the seam.
+      const metaWrite = rawPath.length > 0 && rawPath[0] !== "value";
       // A document-root write carries the RAW envelope ({value, source, …}):
       // writeOrThrow's missing-doc retry materializes the whole document in
       // one write at storage path []. `writePath` is already logical, so the
@@ -1464,6 +1484,11 @@ const valueWriteTargets = (
       if (existing !== undefined) {
         existing.paths.push(writePath);
         existing.valuesByPath.set(pathKey(writePath), writtenValue);
+        existing.metaOnlyByPath.set(
+          pathKey(writePath),
+          (existing.metaOnlyByPath.get(pathKey(writePath)) ?? true) &&
+            metaWrite,
+        );
         if (!existing.previousValuesByPath.has(pathKey(writePath))) {
           existing.previousValuesByPath.set(
             pathKey(writePath),
@@ -1490,6 +1515,7 @@ const valueWriteTargets = (
             pathKey(writePath),
             previousWrittenPresent,
           ]]),
+          metaOnlyByPath: new Map([[pathKey(writePath), metaWrite]]),
         });
       }
     }
@@ -2607,6 +2633,20 @@ export const writeDetailValueForTarget = (
       rel.slice(0, -1),
       { createMissing: true, nextKeyAfterPath: leaf },
     );
+    if (thawed.pathValue instanceof FabricInstance) {
+      // An instance is a container, but its state is private, so `leaf`
+      // addresses nothing in it: assigning through one would leave an own
+      // property the codec cannot persist. This is every overlay path's
+      // parent, the base's own included, so it is the only check needed.
+      //
+      // TODO(danfuzz): descend by codec-mediated traversal into instance
+      // state, at which point an overlay onto one becomes a walk rather than
+      // a refusal.
+      refuseFabricInstance(
+        thawed.pathValue,
+        "when overlaying deeper CFC field-writes",
+      );
+    }
     setValueAtPath(
       thawed.pathValue as Record<PropertyKey, unknown> | unknown[],
       [leaf],
@@ -3412,7 +3452,12 @@ const verifyInputRequirements = (
   // accumulated across the boundary pass. undefined — the default, whenever
   // no onPrefixProvenance hook is installed — skips all measurement.
   provenance?: CfcPrefixProvenanceSummary,
-): string | undefined => {
+  // `verdict` says whether the failure is a VERDICT on the data (see
+  // cfc/verdict-reason.ts): every check here is, except a `maxConfidentiality`
+  // miss whose policy evaluation could not resolve a manifest or grant — the
+  // label was left un-rewritten, so the attempt after the referenced document
+  // syncs can fit, and tagging it terminal would strand that write.
+): { reason: string; verdict: boolean } | undefined => {
   // The labeled reads the per-entry checks below quantify over, each carrying
   // its activity-clock position. Distinct from the egress side's consumed set
   // (collectConsumedLabel), which stays transaction-global — a sink request
@@ -3527,14 +3572,14 @@ const verifyInputRequirements = (
       entry.path,
     );
     if (unsupportedTrustSensitive !== undefined) {
-      return unsupportedTrustSensitive;
+      return { reason: unsupportedTrustSensitive, verdict: true };
     }
     const disallowedClause = disallowedAuthoredClauseReason(
       entry.schema,
       entry.path,
     );
     if (disallowedClause !== undefined) {
-      return disallowedClause;
+      return { reason: disallowedClause, verdict: true };
     }
     const currentPrincipalFailure = currentPrincipalIntegrityReason(
       tx,
@@ -3542,7 +3587,7 @@ const verifyInputRequirements = (
       entry.path,
     );
     if (currentPrincipalFailure !== undefined) {
-      return currentPrincipalFailure;
+      return { reason: currentPrincipalFailure, verdict: true };
     }
     const writeAuthorizedByFailure = writeAuthorizedByReason(
       tx,
@@ -3558,7 +3603,7 @@ const verifyInputRequirements = (
     ) || writeIsPatternSetupInitialization(tx, target, entry.path) ||
       writeIsSeedMaterialization(tx, target);
     if (writeAuthorizedByFailure !== undefined && !setupProjection) {
-      return writeAuthorizedByFailure;
+      return { reason: writeAuthorizedByFailure, verdict: true };
     }
     const requiredIntegrity = ifc?.requiredIntegrity ?? [];
     const maxConfidentiality = ifc?.maxConfidentiality;
@@ -3650,7 +3695,10 @@ const verifyInputRequirements = (
         cfcFloorTrustContext(tx),
       );
       if (!ok) {
-        return `requiredIntegrity failed at /${entry.path.join("/")}`;
+        return {
+          reason: `requiredIntegrity failed at /${entry.path.join("/")}`,
+          verdict: true,
+        };
       }
     }
 
@@ -3683,6 +3731,7 @@ const verifyInputRequirements = (
           )
         );
       const mode = tx.getCfcState().policyEvaluationMode;
+      let ceilingResolutionIncomplete = false;
       const ok = gating.every((read) => {
         const confidentiality = read.label?.confidentiality ?? [];
         if (mode === "off") return fitsLegacy(confidentiality);
@@ -3703,9 +3752,25 @@ const verifyInputRequirements = (
           // Exhaustion fails closed; otherwise subsumption-fit the REWRITTEN
           // label (spec §8.10.3 clause fit — flat ceilings keep their
           // conjunctive meaning through atomsOutsideCeiling).
-          return outcome.exhausted === false &&
+          const fits = outcome.exhausted === false &&
             atomsOutsideCeiling(outcome.confidentiality, maxConfidentiality)
                 .length === 0;
+          if (
+            !fits &&
+            (outcome.resolutionFailures.length > 0 ||
+              outcome.grantResolutionUnavailable)
+          ) {
+            // The miss was evaluated over a manifest or grant that did not
+            // resolve, so the label kept atoms a rewrite might have cleared:
+            // not a verdict (see the return-type note above).
+            noteModulePolicyResolutionFailures(
+              tx,
+              `input requirement /${entry.path.join("/")}`,
+              outcome.resolutionFailures,
+            );
+            ceilingResolutionIncomplete = true;
+          }
+          return fits;
         }
         // observe: decide exactly as `off` would, diagnose the divergence.
         noteModulePolicyResolutionFailures(
@@ -3734,7 +3799,16 @@ const verifyInputRequirements = (
         return decision;
       });
       if (!ok) {
-        return `maxConfidentiality failed at /${entry.path.join("/")}`;
+        // The short-circuit is sound for the verdict: `.every` stops at the
+        // FIRST missing read, so an unresolved read behind it goes
+        // unexamined — but a miss whose evaluation fully resolved dooms the
+        // write on every attempt by itself (the same complete evaluation
+        // re-runs identically, and labels only widen), so unexamined reads
+        // cannot soften a deterministic miss into a retryable one.
+        return {
+          reason: `maxConfidentiality failed at /${entry.path.join("/")}`,
+          verdict: !ceilingResolutionIncomplete,
+        };
       }
     }
   }
@@ -4286,19 +4360,22 @@ const setupResultSchemaFor = (
   tx: IExtendedStorageTransaction,
   source: LinkWritePolicyInput["source"],
 ): JSONSchema | undefined => {
-  const document = tx.readOrThrow({
+  // Read AT ["schema"], never the whole document: the same commit-time
+  // concurrency scoping `storedMetadataFor` above applies here. A path-[]
+  // recursive read makes the whole source document a value dependency, so
+  // a concurrent write to the source's value — an append to a collection
+  // this link points into among them — conflicts the commit. The
+  // ["schema"] read depends on that member alone, which such a write
+  // leaves undisturbed.
+  const schema = tx.readOrThrow({
     space: source.space,
     id: source.id as URI,
     scope: source.scope,
     type: "application/json",
-    path: [],
+    path: ["schema"],
   }, {
     meta: INTERNAL_VERIFIER_META,
   });
-  if (!isObjectOrArray(document)) {
-    return undefined;
-  }
-  const schema = (document as Record<string, unknown>).schema;
   return schema === undefined || schema === null
     ? undefined
     : schema as JSONSchema;
@@ -4373,6 +4450,8 @@ const derivePersistedLinkLabel = (
     !hasLabelValues(linkSchemaLabel) && !hasCarriedLabel
   ) {
     return {
+      // Untagged, so retryable: the source document's metadata is not
+      // available in this transaction. It loads, and the re-run decides.
       reason: `missing link source metadata for ${input.target.id} at /${
         input.target.path.join("/")
       }`,
@@ -4718,6 +4797,9 @@ export const loadStoredCfcEnvelope = (
   } catch (error) {
     return {
       status: "unreadable",
+      // Untagged, so retryable: the schema document could not be read in
+      // this transaction. A CID CONTENT mismatch is a different animal — it
+      // is deterministic, and tagged as a verdict where it is detected.
       reason: error instanceof Error
         ? error.message
         : `schema load failed for ${target.id}`,
@@ -4865,8 +4947,11 @@ const evaluateGatedConfidentiality = (
     readonly reference: unknown;
     readonly reason: string;
   }[];
+  /** A grant lookup could not be read; see `createTxCfcGrantResolver`. */
+  grantResolutionUnavailable: boolean;
 } => {
   const state = tx.getCfcState();
+  const grantAvailability = { unavailable: false };
   const result = evaluateExchangeRules(
     { confidentiality: [...confidentiality] },
     state.policySnapshot,
@@ -4881,7 +4966,9 @@ const evaluateGatedConfidentiality = (
       // consulted address+digest into the prepare state for the B5-style
       // digest binding. Rides the same cfcPolicyEvaluation dial as the rest
       // of this evaluation — this function only runs when the dial is on.
-      grantResolver: createTxCfcGrantResolver(tx),
+      grantResolver: createTxCfcGrantResolver(tx, {
+        availability: grantAvailability,
+      }),
       grantConsumption: consumption,
       modulePolicyResolver: createTxCfcModulePolicyResolver(
         tx,
@@ -4904,6 +4991,7 @@ const evaluateGatedConfidentiality = (
     exhausted: result.exhausted,
     firings: result.firings.length,
     resolutionFailures: result.resolutionFailures,
+    grantResolutionUnavailable: grantAvailability.unavailable,
   };
 };
 
@@ -4956,6 +5044,14 @@ const verifySinkRequestCeilings = (
   const reasons: string[] = [];
   for (const [sink, ceiling] of gatedSinks) {
     let effective = consumed.confidentiality;
+    // Whether the fits-decision below is a pure function of this
+    // transaction's data — a VERDICT (see verdict-reason.ts). Two things
+    // make it not, both enforce-mode availability holes in the rewrite: a
+    // module policy manifest that did not resolve, and a grant lookup that
+    // could not be read — either might carry the discharge that admits the
+    // request on an attempt that resolves it. `off` and `observe` decide on
+    // the raw label every time, so their refusal is always a verdict.
+    let verdict = true;
     if (mode !== "off") {
       // Boundary context for this release site (spec §8.10.5 / §15.4): the
       // sink name plus its class. Every sink in the initial inventory is a
@@ -5005,6 +5101,8 @@ const verifySinkRequestCeilings = (
           continue;
         }
         effective = outcome.confidentiality;
+        verdict = outcome.resolutionFailures.length === 0 &&
+          !outcome.grantResolutionUnavailable;
       } else {
         // observe: decide exactly as `off` would; diagnose what enforce
         // would have done differently.
@@ -5045,10 +5143,10 @@ const verifySinkRequestCeilings = (
     if (offending.length > 0) {
       // Name the offending atom(s) so an observe-mode diagnostic identifies the
       // exact (sink, atom) pair that needs a ceiling entry (review on #3993).
-      reasons.push(
-        `sink-request confidentiality exceeds ceiling for ${sink}: ` +
-          offending.map((atom) => JSON.stringify(atom)).join(", "),
-      );
+      const reason = `sink-request confidentiality exceeds ceiling for ` +
+        `${sink}: ` +
+        offending.map((atom) => JSON.stringify(atom)).join(", ");
+      reasons.push(verdict ? verdictReason(reason) : reason);
     }
   }
   return reasons;
@@ -5298,6 +5396,14 @@ export const prepareBoundaryCommit = (
   tx: IExtendedStorageTransaction,
   instrumentation?: CfcPrepareInstrumentation,
 ): string[] => {
+  // WATCH(cfc-verdict): every reason recorded here decides whether the commit
+  // is retried. A reason that says policy REFUSED this data — deterministic,
+  // so an identical re-run refuses identically — must be wrapped in
+  // `verdictReason(...)` to make the rejection terminal. Everything else is
+  // left untagged and stays retryable: an input this transaction did not
+  // have, a resolution that failed, a prepared state that drifted. Untagged
+  // is the safe default deliberately; see cfc/verdict-reason.ts for why, and
+  // for what getting it wrong in each direction costs.
   const reasons: string[] = [];
   const state = tx.getCfcState();
   // D4: per-target last-overlapping-write bounds over the ordered write-
@@ -5318,7 +5424,9 @@ export const prepareBoundaryCommit = (
   // chokepoint; surface one fail-closed reason apiece so it rejects in enforce
   // mode and diagnoses in observe, uniformly with every other reason here.
   for (const target of state.unprivilegedSystemWrites ?? []) {
-    reasons.push(`unprivileged write to protected cfc path ${target}`);
+    reasons.push(
+      verdictReason(`unprivileged write to protected cfc path ${target}`),
+    );
   }
   const identityForInput = (
     input: WritePolicyInput,
@@ -5400,7 +5508,23 @@ export const prepareBoundaryCommit = (
     if (existing === undefined) {
       continue;
     }
-    if (!metadataAppliesToAnyPath(existing, target.paths)) {
+    // The schema write-policy requirement quantifies over the paths a
+    // schema could describe. A raw meta-seam write is not one: `setMetaRaw`
+    // lands on a document-root sibling of `value` (`slug`,
+    // `patternIdentity`, and the rest of the `MetaField` union), and no
+    // schema describes that seam, so demanding a policy input for it
+    // rejects every meta write on a labeled document — slug assignment, the
+    // pattern updater's identity swap, setup over an existing piece, and
+    // the source-lifecycle transitions. These paths stay flow-label
+    // targets: the write above still carries the transaction's join onto
+    // the document, so nothing is laundered by skipping them here.
+    const policyPaths = target.paths.filter((path) =>
+      target.metaOnlyByPath.get(pathKey(path)) !== true
+    );
+    if (policyPaths.length === 0) {
+      continue;
+    }
+    if (!metadataAppliesToAnyPath(existing, policyPaths)) {
       continue;
     }
     const linkWriteInputs = linkWrites.get(key) ?? [];
@@ -5408,13 +5532,15 @@ export const prepareBoundaryCommit = (
       linkWriteInputs.length > 0 &&
       linkWritesCoverCfcAffectedPaths(
         existing,
-        target.paths,
+        policyPaths,
         linkWriteInputs,
       )
     ) {
       continue;
     }
     reasons.push(
+      // Untagged, so retryable: the schema's write-policy input is not
+      // available in this transaction yet.
       `missing schema write-policy input for ${target.id}`,
     );
   }
@@ -5613,7 +5739,11 @@ export const prepareBoundaryCommit = (
     // runtime's mark, never the payload's unverified policy metadata.
     let ingestVerificationFailed = false;
     if (requirementFailure) {
-      reasons.push(requirementFailure);
+      reasons.push(
+        requirementFailure.verdict
+          ? verdictReason(requirementFailure.reason)
+          : requirementFailure.reason,
+      );
       if (!isIngestTarget) continue;
       ingestVerificationFailed = true;
     }
@@ -5623,7 +5753,7 @@ export const prepareBoundaryCommit = (
       verificationSchema,
     );
     if (trustedEventFailure) {
-      reasons.push(trustedEventFailure);
+      reasons.push(verdictReason(trustedEventFailure));
       if (!isIngestTarget) continue;
       ingestVerificationFailed = true;
     }
@@ -5641,7 +5771,7 @@ export const prepareBoundaryCommit = (
       verificationSchema,
     );
     if (exactCopyFailure) {
-      reasons.push(exactCopyFailure);
+      reasons.push(verdictReason(exactCopyFailure));
       if (!isIngestTarget) continue;
       ingestVerificationFailed = true;
     }
@@ -5821,7 +5951,7 @@ export const prepareBoundaryCommit = (
       });
       if (monotonicityViolations.length > 0) {
         if (state.declaredMonotonicityMode === "enforce") {
-          reasons.push(...monotonicityViolations);
+          reasons.push(...monotonicityViolations.map(verdictReason));
           if (!isIngestTarget) continue;
           // Mirror ingestVerificationFailed above: the runtime's ingest mark
           // (appended below) still persists in non-rejecting modes, but the
@@ -6439,7 +6569,7 @@ export const prepareBoundaryCommit = (
               } (canWrite, §8.12.4): ` +
               offending.map((atom) => JSON.stringify(atom)).join(", ");
             if (writerFitRejects) {
-              reasons.push(misfit);
+              reasons.push(verdictReason(misfit));
             } else {
               tx.noteCfcDiagnostic(`writer-fit(persist-and-flag): ${misfit}`);
             }

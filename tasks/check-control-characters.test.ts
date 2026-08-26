@@ -203,6 +203,35 @@ describe("check-control-characters", () => {
       expect(parseBatchBlobs(encode("abc missing\ndef blob 2\nhi\n"), 2))
         .toEqual([]);
     });
+
+    it("stops at a size that is not the digits git writes", () => {
+      // An empty field and a negative one both read as a number, so both
+      // would push a record and carry on from an offset nothing lines up
+      // with — the count comes out right and the contents do not.
+      expect(parseBatchBlobs(encode("abc blob \ndef blob 2\nhi\n"), 2))
+        .toEqual([]);
+      expect(parseBatchBlobs(encode("abc blob -1\ndef blob 2\nhi\n"), 2))
+        .toEqual([]);
+    });
+
+    it("stops at a record the output does not carry in full", () => {
+      // The slice clamps to what is there, so a blob short of its declared
+      // size would be scanned as the whole file — and with the count intact,
+      // the caller's fail-closed check would see a tree fully read.
+      expect(parseBatchBlobs(encode("abc blob 2\nhi\ndef blob 9\nnope"), 2))
+        .toEqual([encode("hi")]);
+      expect(parseBatchBlobs(encode("abc blob 100\nhi\n"), 1)).toEqual([]);
+    });
+
+    it("keeps the last record, whose trailing newline ends the output", () => {
+      // The boundary either side of the guard above: a complete final record
+      // reaches exactly to the last byte of the output, and an empty blob
+      // carries nothing between its header and that newline.
+      expect(parseBatchBlobs(encode("abc blob 3\nbye\n"), 1).map(decode))
+        .toEqual(["bye"]);
+      expect(parseBatchBlobs(encode("abc blob 0\n\n"), 1).map(decode))
+        .toEqual([""]);
+    });
   });
 
   describe("scan()", () => {
@@ -315,7 +344,7 @@ describe("check-control-characters", () => {
       );
       await expect(
         blobContents(root, ids),
-      ).rejects.toThrow("git cat-file failed");
+      ).rejects.toThrow("git cat-file failed: fatal: not a git repository");
     });
 
     it("throws when git cannot list the tree", async () => {

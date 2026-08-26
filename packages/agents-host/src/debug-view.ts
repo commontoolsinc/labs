@@ -1,5 +1,10 @@
 import { AgentFabricTarget } from "@commonfabric/agents-connector/fabric";
-import { stableCellId } from "@commonfabric/agents-connector/fabric-graph";
+import {
+  AGENT_CONNECTOR_WRITER_ID,
+  agentOwnerSchema,
+  cellHasOwnerProtection,
+  stableCellId,
+} from "@commonfabric/agents-connector/fabric-graph";
 import type {
   FabricPlainObject,
   FabricValue,
@@ -12,6 +17,7 @@ import {
   asPatternIdentityRef,
   type Cell,
   compileAndSavePattern,
+  deepEqual,
   type Pattern,
 } from "@commonfabric/runner";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
@@ -19,8 +25,6 @@ import { dirname, fromFileUrl, join, resolve } from "@std/path";
 import type { AgentsHostTargetDescription } from "./host.ts";
 
 const AGENT_SESSIONS_DEBUG_CAUSE_PREFIX = "agent-sessions-debug";
-const AGENT_SESSIONS_DEBUG_REGISTRATION_CAUSE =
-  "agent-sessions-debug-registration-v1";
 const SHALLOW_PIECE_LINK_LIST_SCHEMA = internSchema({
   type: "array",
   items: { type: "unknown" },
@@ -30,6 +34,75 @@ const SHALLOW_DEBUG_PIECE_SCHEMA = internSchema({
   type: "object",
   properties: {},
 });
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+export function debugCommandWriterAuthorization(
+  pattern: Pattern,
+): unknown | undefined {
+  const root = recordValue(pattern.resultSchema);
+  const properties = recordValue(root?.properties);
+  let authorization = recordValue(properties?.commandAuthorization);
+  const reference = authorization?.$ref;
+  if (typeof reference === "string" && reference.startsWith("#/$defs/")) {
+    const definitions = recordValue(root?.$defs);
+    authorization = recordValue(
+      definitions?.[decodeURIComponent(reference.slice("#/$defs/".length))],
+    );
+  }
+  const ifc = recordValue(authorization?.ifc);
+  const writers = ifc?.writeAuthorizedBy;
+  return writers === null ? undefined : writers;
+}
+
+async function protectOwnerDebugCells(
+  manager: PiecesController,
+  cells: readonly Cell<unknown>[],
+  ownerDid: string,
+  expectedDocuments?: ReadonlyMap<Cell<unknown>, unknown>,
+): Promise<void> {
+  const tx = manager.runtime.edit();
+  tx.setCfcImplementationIdentity({
+    kind: "builtin",
+    builtinId: AGENT_CONNECTOR_WRITER_ID,
+  });
+  try {
+    for (const cell of cells) {
+      const expectedDocument = expectedDocuments?.get(cell);
+      if (
+        expectedDocuments?.has(cell) &&
+        !deepEqual(readDocumentRootWithTx(tx, cell), expectedDocument)
+      ) {
+        throw new Error("debug view changed before owner protection");
+      }
+      cell.withTx(tx).asSchema(agentOwnerSchema(ownerDid))
+        .applyCfcSchemaToExistingValue();
+    }
+    tx.prepareCfc();
+  } catch (error) {
+    tx.abort(error);
+    throw error;
+  }
+  const committed = await tx.commit();
+  if (committed.error) {
+    throw new Error(
+      `could not protect the owner debug result: ${committed.error.message}`,
+      { cause: committed.error },
+    );
+  }
+}
+
+export function protectOwnerDebugResult(
+  manager: PiecesController,
+  result: Cell<unknown>,
+  ownerDid: string,
+): Promise<void> {
+  return protectOwnerDebugCells(manager, [result], ownerDid);
+}
 const DEBUG_REGISTRATION_SCHEMA = internSchema({
   type: "object",
   properties: {
@@ -62,6 +135,14 @@ interface DebugRegistration extends FabricPlainObject {
   retiredCauses: string[];
 }
 
+const EMPTY_DEBUG_REGISTRATION: DebugRegistration = {
+  cause: "",
+  pieceId: "",
+  patternIdentity: "",
+  patternSymbol: "",
+  retiredCauses: [],
+};
+
 interface DebugRegistrationState {
   link: ReturnType<Cell<unknown>["getAsNormalizedFullLink"]>;
   value: DebugRegistration | undefined;
@@ -88,12 +169,17 @@ async function serializeDebugDeployment<T>(
   }
 }
 
-function debugPieceCause(patternRef: {
+function debugPieceCause(ownerDid: string, patternRef: {
   identity: string;
   symbol: string;
 }): string {
-  return `${AGENT_SESSIONS_DEBUG_CAUSE_PREFIX}:${patternRef.identity}:` +
+  return `${AGENT_SESSIONS_DEBUG_CAUSE_PREFIX}:${ownerDid}:` +
+    `${patternRef.identity}:` +
     encodeURIComponent(patternRef.symbol);
+}
+
+function debugRegistrationCause(ownerDid: string): string {
+  return `agent-sessions-debug-registration:${ownerDid}`;
 }
 
 async function syncDocumentRoot(
@@ -117,6 +203,26 @@ function readDocumentValue(
   return tx.readValueOrThrow(cell.getAsNormalizedFullLink());
 }
 
+function readDocumentRootWithTx(
+  tx: ReturnType<PiecesController["runtime"]["readTx"]>,
+  cell: Cell<unknown>,
+): unknown {
+  const link = cell.getAsNormalizedFullLink();
+  return tx.readOrThrow({
+    space: link.space,
+    id: link.id,
+    path: [],
+    ...(link.scope !== undefined && { scope: link.scope }),
+  });
+}
+
+function readDocumentRoot(
+  manager: PiecesController,
+  cell: Cell<unknown>,
+): unknown {
+  return readDocumentRootWithTx(manager.runtime.readTx(), cell);
+}
+
 function readDocumentMeta(
   manager: PiecesController,
   cell: Cell<unknown>,
@@ -136,6 +242,8 @@ async function currentDebugPiece(
   manager: PiecesController,
   pattern: Pattern,
   cause: string,
+  ownerDid: string,
+  expectedArguments: Record<string, unknown>,
 ): Promise<Cell<unknown> | undefined> {
   const expectedPattern = manager.runtime.patternManager.getArtifactEntryRef(
     pattern,
@@ -147,16 +255,30 @@ async function currentDebugPiece(
     SHALLOW_DEBUG_PIECE_SCHEMA,
   );
   await syncDocumentRoot(manager, shallowPiece);
-  const storedPattern = asPatternIdentityRef(
-    readDocumentMeta(manager, shallowPiece, "patternIdentity"),
+  const initialPattern = readDocumentMeta(
+    manager,
+    shallowPiece,
+    "patternIdentity",
   );
-  const argument = readDocumentMeta(manager, shallowPiece, "argument");
+  const initialArgument = readDocumentMeta(manager, shallowPiece, "argument");
   if (
-    storedPattern === undefined && argument === undefined &&
+    initialPattern === undefined && initialArgument === undefined &&
     readDocumentValue(manager, shallowPiece) === undefined
   ) {
     return undefined;
   }
+  if (
+    !cellHasOwnerProtection(manager.runtime.readTx(), shallowPiece, ownerDid)
+  ) {
+    throw new Error(
+      `refusing to adopt an unprotected debug view for ${ownerDid}`,
+    );
+  }
+  await protectOwnerDebugCells(manager, [shallowPiece], ownerDid);
+  const storedPattern = asPatternIdentityRef(
+    readDocumentMeta(manager, shallowPiece, "patternIdentity"),
+  );
+  const argument = readDocumentMeta(manager, shallowPiece, "argument");
   if (
     storedPattern === undefined ||
     storedPattern.identity !== expectedPattern.identity ||
@@ -165,6 +287,30 @@ async function currentDebugPiece(
   ) {
     throw new Error(
       `debug view cause ${cause} contains a different prepared piece`,
+    );
+  }
+  const argumentCell = manager.getArgument(shallowPiece);
+  await argumentCell.sync();
+  if (
+    !cellHasOwnerProtection(manager.runtime.readTx(), argumentCell, ownerDid)
+  ) {
+    throw new Error(
+      `refusing to adopt unprotected debug view arguments for ${ownerDid}`,
+    );
+  }
+  await protectOwnerDebugCells(manager, [argumentCell], ownerDid);
+  const storedArguments = recordValue(argumentCell.getRaw());
+  if (
+    storedArguments === undefined ||
+    Object.entries(expectedArguments).some(([name, expected]) => {
+      const stored = storedArguments[name];
+      return typeof expected === "string"
+        ? stored !== expected
+        : !areLinksSame(stored, expected, argumentCell);
+    })
+  ) {
+    throw new Error(
+      `debug view cause ${cause} contains different owner inputs`,
     );
   }
   return shallowPiece.asSchema(pattern.resultSchema);
@@ -191,6 +337,14 @@ function asDebugRegistration(
     candidate.retiredCauses.some((cause) => typeof cause !== "string")
   ) {
     throw new Error("debug view registration is malformed");
+  }
+  if (
+    candidate.cause === "" && candidate.pieceId === "" &&
+    candidate.patternIdentity === "" && candidate.patternSymbol === "" &&
+    candidate.deploymentId === undefined &&
+    candidate.retiredCauses.length === 0
+  ) {
+    return undefined;
   }
   return {
     cause: candidate.cause,
@@ -268,42 +422,62 @@ async function stopAndDrainPieces(
 
 async function debugRegistration(
   manager: PiecesController,
+  ownerDid: string,
 ): Promise<DebugRegistrationState> {
   const registration = manager.runtime.getCell<DebugRegistration>(
     manager.getSpace(),
-    AGENT_SESSIONS_DEBUG_REGISTRATION_CAUSE,
+    debugRegistrationCause(ownerDid),
     DEBUG_REGISTRATION_SCHEMA,
   );
   await syncDocumentRoot(manager, registration);
+  const tx = manager.runtime.edit();
+  tx.setCfcImplementationIdentity({
+    kind: "builtin",
+    builtinId: AGENT_CONNECTOR_WRITER_ID,
+  });
+  try {
+    const protectedRegistration = registration.withTx(tx);
+    const value = tx.readValueOrThrow(registration.getAsNormalizedFullLink());
+    if (value === undefined) {
+      protectedRegistration.setRawUntyped(EMPTY_DEBUG_REGISTRATION);
+    } else if (!cellHasOwnerProtection(tx, registration, ownerDid)) {
+      throw new Error(
+        `refusing to adopt an unprotected debug registration for ${ownerDid}`,
+      );
+    }
+    protectedRegistration.asSchema(agentOwnerSchema(ownerDid))
+      .applyCfcSchemaToExistingValue();
+    tx.prepareCfc();
+  } catch (error) {
+    tx.abort(error);
+    throw error;
+  }
+  const committed = await tx.commit();
+  if (committed.error) {
+    throw new Error(
+      `could not claim the owner debug registration: ${committed.error.message}`,
+      { cause: committed.error },
+    );
+  }
   return {
     link: registration.getAsNormalizedFullLink(),
     value: asDebugRegistration(readDocumentValue(manager, registration)),
   };
 }
 
-async function debugRegistrationLists(
+async function debugPieceRegistry(
   defaultPattern: Cell<unknown>,
-): Promise<Map<"allPieces" | "recentPieces", Cell<FabricValue[]>>> {
-  const lists = new Map<
-    "allPieces" | "recentPieces",
-    Cell<FabricValue[]>
-  >();
+): Promise<Cell<FabricValue[]>> {
   const root = defaultPattern.asSchema(undefined);
-  for (const name of ["allPieces", "recentPieces"] as const) {
-    const slot = root.key(name);
-    if (slot.getRaw() === undefined) {
-      if (name === "allPieces") {
-        throw new Error("default pattern does not expose allPieces");
-      }
-      continue;
-    }
-    const list = slot.resolveAsCell().asSchema(
-      SHALLOW_PIECE_LINK_LIST_SCHEMA,
-    ) as Cell<FabricValue[]>;
-    await list.sync();
-    lists.set(name, list);
+  const slot = root.key("pieceRegistry");
+  if (slot.getRaw() === undefined) {
+    throw new Error("default pattern does not expose pieceRegistry");
   }
-  return lists;
+  const registry = slot.resolveAsCell().asSchema(
+    SHALLOW_PIECE_LINK_LIST_SCHEMA,
+  ) as Cell<FabricValue[]>;
+  await registry.sync();
+  return registry;
 }
 
 async function registerDebugPiece(
@@ -313,12 +487,13 @@ async function registerDebugPiece(
   cause: string,
   patternRef: { identity: string; symbol: string },
   deploymentId: string,
+  ownerDid: string,
   signal?: AbortSignal,
 ): Promise<void> {
   signal?.throwIfAborted();
-  const [lists, registration] = await Promise.all([
-    debugRegistrationLists(defaultPattern),
-    debugRegistration(manager),
+  const [registry, registration] = await Promise.all([
+    debugPieceRegistry(defaultPattern),
+    debugRegistration(manager, ownerDid),
   ]);
   const precedingPiece = registration.value?.cause !== undefined &&
       registration.value.cause !== cause
@@ -361,17 +536,78 @@ async function registerDebugPiece(
   if (!nextRegistration.pieceId) {
     throw new Error("debug view piece has no entity ID");
   }
-  const priorListValues = new Map<
-    "allPieces" | "recentPieces",
-    FabricValue[]
-  >();
-  const removedListValues = new Map<
-    "allPieces" | "recentPieces",
-    FabricValue[]
-  >();
+  const candidateLink = piece.getAsNormalizedFullLink();
+  const piecesToRemove = [...piecesToUnregister, piece];
+  const removePublicDebugLinks = async () => {
+    return await manager.runtime.editWithRetry((tx) => {
+      const activeDefaultPatternCell = manager.getSpaceCellContents().withTx(tx)
+        .key("defaultPattern");
+      const activeDefaultPattern = activeDefaultPatternCell.get();
+      if (
+        !activeDefaultPattern ||
+        !areLinksSame(
+          activeDefaultPattern,
+          defaultPattern,
+          activeDefaultPatternCell,
+        )
+      ) {
+        throw new Error(
+          "default pattern changed during debug view deployment",
+        );
+      }
+      const activeRegistry = defaultPattern.withTx(tx).key("pieceRegistry");
+      if (
+        activeRegistry.getRawUntyped() === undefined ||
+        !areLinksSame(
+          activeRegistry.resolveAsCell(),
+          registry,
+          activeRegistry,
+        )
+      ) {
+        throw new Error(
+          "default pattern registry changed during debug view deployment",
+        );
+      }
+      const registryWithTx = registry.withTx(tx);
+      const current = registryWithTx.getRawUntyped({ frozen: false });
+      if (!Array.isArray(current)) {
+        throw new Error("default pattern pieceRegistry is not an array");
+      }
+      const retained = current.filter((value) =>
+        !piecesToRemove.some((target) =>
+          areLinksSame(value, target, registryWithTx)
+        )
+      );
+      if (retained.length === current.length) return false;
+      registryWithTx.setRawUntyped(retained);
+      return true;
+    });
+  };
   signal?.throwIfAborted();
-  const { error } = await manager.runtime.editWithRetry((tx) => {
-    const candidateLink = piece.getAsNormalizedFullLink();
+  const publicUpdate = await removePublicDebugLinks();
+  if (publicUpdate.error) {
+    throw new Error(
+      `Could not update public debug view registrations: ${publicUpdate.error.message}`,
+      { cause: publicUpdate.error },
+    );
+  }
+  try {
+    signal?.throwIfAborted();
+  } catch (error) {
+    const cleanup = await removePublicDebugLinks();
+    if (cleanup.error) {
+      throw new AggregateError(
+        [error, cleanup.error],
+        "debug view abort and public-list cleanup failed",
+      );
+    }
+    throw error;
+  }
+  const privateUpdate = await manager.runtime.editWithRetry((tx) => {
+    tx.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: AGENT_CONNECTOR_WRITER_ID,
+    });
     const candidatePattern = asPatternIdentityRef(tx.readOrThrow({
       space: candidateLink.space,
       id: candidateLink.id,
@@ -403,62 +639,23 @@ async function registerDebugPiece(
         "debug view registration changed during deployment",
       );
     }
-    const activeDefaultPatternCell = manager.getSpaceCellContents().withTx(tx)
-      .key("defaultPattern");
-    const activeDefaultPattern = activeDefaultPatternCell.get();
-    if (
-      !activeDefaultPattern ||
-      !areLinksSame(
-        activeDefaultPattern,
-        defaultPattern,
-        activeDefaultPatternCell,
-      )
-    ) {
-      throw new Error("default pattern changed during debug view deployment");
-    }
-    let changed = false;
-    for (const [name, list] of lists) {
-      const listWithTx = list.withTx(tx);
-      const current = listWithTx.getRawUntyped({ frozen: false });
-      if (!Array.isArray(current)) {
-        throw new Error(`default pattern ${name} is not an array`);
-      }
-      priorListValues.set(name, [...current]);
-      const remove = name === "allPieces"
-        ? [...piecesToUnregister, piece]
-        : piecesToUnregister;
-      removedListValues.set(
-        name,
-        current.filter((value) =>
-          remove.some((target) => areLinksSame(value, target, listWithTx))
-        ),
-      );
-      const retained = current.filter((value) =>
-        !remove.some((target) => areLinksSame(value, target, listWithTx))
-      );
-      if (name === "allPieces") {
-        retained.push(piece.getAsLink({
-          base: listWithTx,
-          includeSchema: true,
-        }));
-      }
-      if (retained.length !== current.length || name === "allPieces") {
-        listWithTx.setRawUntyped(retained);
-        changed = true;
-      }
-    }
-    tx.writeValueOrThrow(registration.link, nextRegistration);
-    changed = true;
-    return changed;
+    manager.runtime.getCellFromLink(registration.link, undefined, tx)
+      .asSchema(agentOwnerSchema(ownerDid))
+      .setRawUntyped(nextRegistration);
+    return true;
   });
-  if (error) {
-    const message = typeof error === "object" && error !== null &&
-        "message" in error
-      ? String(error.message)
-      : String(error);
-    throw new Error(`Could not update debug view registrations: ${message}`, {
-      cause: error,
-    });
+  if (privateUpdate.error) {
+    const cleanup = await removePublicDebugLinks();
+    if (cleanup.error) {
+      throw new AggregateError(
+        [privateUpdate.error, cleanup.error],
+        "debug view registration update and public-list cleanup failed",
+      );
+    }
+    throw new Error(
+      `Could not update private debug view registration: ${privateUpdate.error.message}`,
+      { cause: privateUpdate.error },
+    );
   }
   let supersededPiecesStopped = false;
   const stopPreceding = async (): Promise<void> => {
@@ -497,76 +694,27 @@ async function registerDebugPiece(
         );
       }
     }
-    const rollback = await manager.runtime.editWithRetry((tx) => {
+    const registrationRollback = await manager.runtime.editWithRetry((tx) => {
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: AGENT_CONNECTOR_WRITER_ID,
+      });
       const activeRegistration = asDebugRegistration(
         tx.readValueOrThrow(registration.link),
       );
       if (!debugRegistrationsMatch(activeRegistration, nextRegistration)) {
         return false;
       }
-      for (const [name, list] of lists) {
-        const previous = priorListValues.get(name);
-        const removed = removedListValues.get(name);
-        if (previous === undefined || removed === undefined) {
-          throw new Error(`default pattern ${name} snapshot is missing`);
-        }
-        const listWithTx = list.withTx(tx);
-        const current = listWithTx.getRawUntyped({ frozen: false });
-        if (!Array.isArray(current)) {
-          throw new Error(`default pattern ${name} is not an array`);
-        }
-        const restored = current.filter((value) =>
-          !areLinksSame(value, piece, listWithTx)
-        );
-        const valuesToRestore = [
-          ...removed,
-          ...previous.filter((value) => areLinksSame(value, piece, listWithTx)),
-        ];
-        for (const removedValue of valuesToRestore) {
-          if (
-            restored.some((value) =>
-              areLinksSame(value, removedValue, listWithTx)
-            )
-          ) {
-            continue;
-          }
-          const previousIndex = previous.indexOf(removedValue);
-          const following = previous.slice(previousIndex + 1).find((value) =>
-            restored.some((candidate) =>
-              areLinksSame(candidate, value, listWithTx)
-            )
-          );
-          if (following !== undefined) {
-            const followingIndex = restored.findIndex((candidate) =>
-              areLinksSame(candidate, following, listWithTx)
-            );
-            restored.splice(followingIndex, 0, removedValue);
-            continue;
-          }
-          const preceding = previous.slice(0, previousIndex).findLast((value) =>
-            restored.some((candidate) =>
-              areLinksSame(candidate, value, listWithTx)
-            )
-          );
-          if (preceding === undefined) {
-            restored.push(removedValue);
-            continue;
-          }
-          const precedingIndex = restored.findLastIndex((candidate) =>
-            areLinksSame(candidate, preceding, listWithTx)
-          );
-          restored.splice(precedingIndex + 1, 0, removedValue);
-        }
-        listWithTx.setRawUntyped(restored);
-      }
-      tx.writeValueOrThrow(registration.link, registration.value);
+      manager.runtime.getCellFromLink(registration.link, undefined, tx)
+        .asSchema(agentOwnerSchema(ownerDid))
+        .setRawUntyped(registration.value ?? EMPTY_DEBUG_REGISTRATION);
       return true;
     });
-    if (rollback.error) {
+    if (registrationRollback.error) {
       let registrationWasRestored = true;
       try {
         registrationWasRestored = debugRegistrationsMatch(
-          (await debugRegistration(manager)).value,
+          (await debugRegistration(manager, ownerDid)).value,
           registration.value,
         );
       } catch {
@@ -577,17 +725,24 @@ async function registerDebugPiece(
           await stopPreceding();
         } catch (cleanupError) {
           throw new AggregateError(
-            [abortError, rollback.error, cleanupError],
+            [abortError, registrationRollback.error, cleanupError],
             "debug view rollback and cleanup failed",
           );
         }
       }
       throw new AggregateError(
-        [abortError, rollback.error],
+        [abortError, registrationRollback.error],
         "debug view rollback failed",
       );
     }
-    if (!rollback.ok && precedingStarted) {
+    const listCleanup = await removePublicDebugLinks();
+    if (listCleanup.error) {
+      throw new AggregateError(
+        [abortError, listCleanup.error],
+        "debug view public-list cleanup failed",
+      );
+    }
+    if (!registrationRollback.ok && precedingStarted) {
       try {
         await stopPreceding();
       } catch (cleanupError) {
@@ -642,7 +797,7 @@ export function deployAgentSessionsDebugView(
   signal?: AbortSignal,
 ): Promise<string> {
   return serializeDebugDeployment(
-    manager.getSpace(),
+    `${manager.getSpace()}:${target.conn.ownerDid}`,
     () => deployAgentSessionsDebugViewNow(manager, target, location, signal),
   );
 }
@@ -676,31 +831,73 @@ async function deployAgentSessionsDebugViewNow(
     pattern,
   );
   if (!patternRef) throw new Error("debug view pattern has no identity");
-  const cause = debugPieceCause(patternRef);
-  const currentPiece = await currentDebugPiece(manager, pattern, cause);
-  const piece = currentPiece ?? await manager.setupPersistent(
-    pattern,
-    {
-      recentIndex: target.cells.index,
-      allIndex: target.cells.allIndex,
-      health: target.cells.health,
-      commands: target.cells.commands,
-      receipts: target.cells.receipts,
-      recentIndexCell: target.cells.index,
-      allIndexCell: target.cells.allIndex,
-      healthCell: target.cells.health,
-      commandsCell: target.cells.commands,
-      receiptsCell: target.cells.receipts,
-    },
-    cause,
+  const commandWriterAuthorization = debugCommandWriterAuthorization(pattern);
+  if (commandWriterAuthorization === undefined) {
+    throw new Error("debug view has no verified command writer authorization");
+  }
+  await target.bindCommandCell(
+    target.cells.commands,
+    commandWriterAuthorization,
   );
-  const existingRegistration = (await debugRegistration(manager)).value;
+  const cause = debugPieceCause(target.conn.ownerDid, patternRef);
+  const setupArguments = {
+    ownerDid: target.conn.ownerDid,
+    recentIndex: target.cells.index,
+    allIndex: target.cells.allIndex,
+    health: target.cells.health,
+    receipts: target.cells.receipts,
+    recentIndexCell: target.cells.index,
+    allIndexCell: target.cells.allIndex,
+    healthCell: target.cells.health,
+    commandsCell: target.cells.commands,
+    receiptsCell: target.cells.receipts,
+  };
+  const currentPiece = await currentDebugPiece(
+    manager,
+    pattern,
+    cause,
+    target.conn.ownerDid,
+    setupArguments,
+  );
+  let piece = currentPiece;
+  if (piece === undefined) {
+    const createdPiece = await manager.setupPersistent(
+      pattern,
+      setupArguments,
+      cause,
+    );
+    const createdArgument = manager.getArgument(createdPiece);
+    await protectOwnerDebugCells(
+      manager,
+      [createdPiece, createdArgument],
+      target.conn.ownerDid,
+      new Map([
+        [createdPiece, readDocumentRoot(manager, createdPiece)],
+        [createdArgument, readDocumentRoot(manager, createdArgument)],
+      ]),
+    );
+    piece = await currentDebugPiece(
+      manager,
+      pattern,
+      cause,
+      target.conn.ownerDid,
+      setupArguments,
+    );
+    if (piece === undefined) {
+      throw new Error("new debug view disappeared after owner protection");
+    }
+  }
+  const existingRegistration = (await debugRegistration(
+    manager,
+    target.conn.ownerDid,
+  )).value;
   const pieceWasRegistered = debugRegistrationTargets(
     existingRegistration,
     cause,
     pieceId(piece),
     patternRef,
   );
+  signal?.throwIfAborted();
   const stopStartingPiece = () => manager.runtime.runner.stop(piece);
   if (!pieceWasRegistered) {
     signal?.addEventListener("abort", stopStartingPiece, { once: true });
@@ -734,12 +931,16 @@ async function deployAgentSessionsDebugViewNow(
       cause,
       patternRef,
       deploymentId,
+      target.conn.ownerDid,
       signal,
     );
   } catch (error) {
     let registrationIsOwned = true;
     try {
-      const activeRegistration = (await debugRegistration(manager)).value;
+      const activeRegistration = (await debugRegistration(
+        manager,
+        target.conn.ownerDid,
+      )).value;
       registrationIsOwned = debugRegistrationTargets(
         activeRegistration,
         cause,
@@ -776,6 +977,7 @@ export function describeAgentFabricTarget(
 ): AgentsHostTargetDescription {
   return {
     spaceDid,
+    ownerDid: target.conn.ownerDid,
     ...(debugPieceId ? { debugPieceId } : {}),
     cells: {
       recentIndex: stableCellId(target.cells.index),
