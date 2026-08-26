@@ -14,13 +14,19 @@ not "deploy the fix" but "carry every existing piece to it" — a hundred
 documents to rewrite, or a hundred pieces to move onto a new source, one at a
 time, without losing track of which ones were done.
 
-Every failure mode that work has is a failure of bookkeeping rather than of
-transformation. A run stops halfway and nobody knows where. A piece is missed
-because the enumeration that found the others never held it. A write lands on a
-document that changed since it was read. An apply exits zero and the caller
-believes it.
+The failures worth building against are the ones that leave no trace. A fixer
+that throws, an answer the store cannot hold, a source that resolves to
+something other than the identity a row recorded — those announce themselves,
+and the surface names the row and stops. These four announce nothing on their
+own. A run stops halfway and nobody knows where. A piece is missed because the
+enumeration that found the others never held it. A write lands on a document
+that changed since it was read. An apply exits zero and the caller believes it.
+What they have in common is the ending they reach when nothing is built to stop
+them: a caller who thinks the work is done, and a collection that says otherwise
+weeks later, with nothing written down that would have said which pieces.
 
-The surface is shaped around those four, and three ideas carry the whole of it.
+The surface is shaped around making that silent class loud, and three ideas
+carry the whole of it.
 
 ### Three ideas, and then the commands make sense
 
@@ -38,22 +44,33 @@ stage writes without `--apply`, and what the dry run reports differs: a repair
 prints the exact per-piece document diff, a retarget prints where each piece
 stands against its own row's reference pair.
 
-The precondition differs too, and the difference is what matters when something
-else is writing at the same time. A repair row's precondition is the hash of the
-document its dry run read, and it is proved *inside* the transaction that
-writes: the check runs in the edit closure, which re-runs against fresh state on
-a commit conflict, so a document that moved fails its own row rather than being
-overwritten. A retarget row's precondition is the reference pair it records, and
-it is proved by a read in the same session immediately *before* the write rather
-than by the write itself — `setPattern` conditions its commit on the reference
-it reads for itself, not on the one the row recorded. The two reads are not
-adjacent — the run resolves the row's source from disk and recomputes its
-identity in between — and a piece that something else moves inside that gap is
-carried to the row's target rather than refused, so a retarget plan is not a
-defense against a second writer working the same pieces at the same time. What
-the recorded pair does buy is that a piece already moved when the run reaches it
-stops the run: once at the preflight that classifies every row before the first
-write, and again in the read taken immediately before that row's own write.
+The precondition differs too, and the difference decides what happens when
+something else is writing at the same time.
+
+A repair row's precondition is the hash of the document its dry run read, and
+the write is what proves it: the check runs inside the edit closure, which
+re-runs against fresh state on a commit conflict, so a document that moved fails
+its own row rather than being overwritten.
+
+A retarget row's precondition is the reference pair it records, and the write
+does not prove it. A row runs as a sequence — read the piece's current
+reference, classify it against the pair, resolve the row's source from disk,
+recompute the identity that source produces, then call `setPattern`, which loads
+the current reference for itself and holds its own commit to that and never to
+the pair the row recorded. The classification is a read taken some way before
+the write, not a condition on it.
+
+What the classification catches is a piece standing on neither of the row's two
+references. At the preflight that reads every row before the first write, such a
+piece keeps the run from starting at all; in a row's own read it stops the run
+there, and every piece after it is named unattempted. What it does not catch has
+two shapes, and a reader should assume neither is caught. A piece that something
+else moved onto the row's own target classifies as landed — the same verdict a
+resume produces — so the run leaves it alone and reports nothing unusual about
+it. And a piece moved during the sequence above is carried to the row's target
+from wherever it had been taken, because the row's pair is never consulted
+again. A retarget plan is a record of what a run intended and a check on what it
+finds, not an interlock against a second writer working the same pieces.
 
 **The verdict is a second look, never the apply's exit code.** An apply that
 exits zero says the writes it attempted returned success, which is not the same
