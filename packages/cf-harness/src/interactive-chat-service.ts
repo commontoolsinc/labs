@@ -41,6 +41,7 @@ import {
 } from "./contracts/run-manifest.ts";
 import type {
   HarnessAssistantTranscriptMessage,
+  HarnessToolCall,
   HarnessToolTranscriptMessage,
   HarnessTranscriptMessage,
 } from "./contracts/transcript.ts";
@@ -309,6 +310,145 @@ const interruptedTurnError = (
     priorStatus,
   },
 });
+
+type HarnessTranscriptMalformation =
+  | "duplicate_tool_call_id"
+  | "tool_result_without_pending_call";
+
+class MalformedHarnessChatTranscriptError extends Error {
+  readonly malformation: HarnessTranscriptMalformation;
+  readonly transcriptIndex: number;
+
+  constructor(
+    malformation: HarnessTranscriptMalformation,
+    transcriptIndex: number,
+  ) {
+    super(
+      `durable chat transcript is malformed at message ${transcriptIndex}: ${malformation}`,
+    );
+    this.name = "MalformedHarnessChatTranscriptError";
+    this.malformation = malformation;
+    this.transcriptIndex = transcriptIndex;
+  }
+}
+
+const malformedTranscriptError = (
+  requestId: string,
+  error: MalformedHarnessChatTranscriptError,
+): HarnessChatErrorResponse =>
+  createHarnessChatErrorResponse(requestId, {
+    code: "internal_error",
+    message:
+      "The durable chat transcript is malformed and cannot be safely repaired.",
+    details: {
+      reason: "malformed_transcript",
+      malformation: error.malformation,
+      transcriptIndex: error.transcriptIndex,
+    },
+  });
+
+const unknownToolOutcome = (
+  toolCall: HarnessToolCall,
+): HarnessToolTranscriptMessage => ({
+  role: "tool",
+  toolCallId: toolCall.id,
+  toolName: toolCall.function.name,
+  content: JSON.stringify({
+    type: "cf-harness.tool-outcome-unknown",
+    outcome: "unknown",
+    reason: "process_interrupted",
+    message:
+      "The run was interrupted after this tool call was recorded and before a result was recorded. Whether the tool ran or produced side effects is unknown. Inspect current state before deciding whether to retry.",
+  }),
+});
+
+interface NormalizedHarnessChatTranscript {
+  transcript: HarnessTranscriptMessage[];
+  synthesizedToolCallIds: readonly string[];
+}
+
+/**
+ * Makes persisted tool exchanges safe for the next provider request without
+ * deleting model-visible history. Missing results become explicit
+ * unknown-outcome results at the batch boundary, preserving both the original
+ * call (including any compaction continuation) and everything after it.
+ *
+ * A tool result without a pending call cannot be repaired honestly: inventing
+ * a call would claim an invocation that may never have happened, while deleting
+ * the result would erase the only remaining evidence. A reused call id is
+ * similarly ambiguous across batches. Callers therefore fail that session
+ * closed before provider traffic rather than guessing.
+ */
+const normalizeIncompleteToolExchanges = (
+  transcript: readonly HarnessTranscriptMessage[],
+): NormalizedHarnessChatTranscript => {
+  const normalized: HarnessTranscriptMessage[] = [];
+  const synthesizedToolCallIds: string[] = [];
+  const seenToolCallIds = new Set<string>();
+  let pendingToolCalls: HarnessToolCall[] = [];
+  let pendingToolCallIds = new Set<string>();
+
+  const completePendingBatch = (): void => {
+    for (const toolCall of pendingToolCalls) {
+      if (!pendingToolCallIds.has(toolCall.id)) {
+        continue;
+      }
+      normalized.push(unknownToolOutcome(toolCall));
+      synthesizedToolCallIds.push(toolCall.id);
+    }
+    pendingToolCalls = [];
+    pendingToolCallIds = new Set();
+  };
+
+  for (const [index, message] of transcript.entries()) {
+    if (pendingToolCalls.length > 0) {
+      if (message.role === "tool") {
+        if (!pendingToolCallIds.delete(message.toolCallId)) {
+          throw new MalformedHarnessChatTranscriptError(
+            "tool_result_without_pending_call",
+            index,
+          );
+        }
+        normalized.push(message);
+        if (pendingToolCallIds.size === 0) {
+          pendingToolCalls = [];
+        }
+        continue;
+      }
+      completePendingBatch();
+    }
+
+    if (message.role === "tool") {
+      throw new MalformedHarnessChatTranscriptError(
+        "tool_result_without_pending_call",
+        index,
+      );
+    }
+    normalized.push(message);
+    if (message.role !== "assistant" || !message.toolCalls?.length) {
+      continue;
+    }
+    const toolCallIds = message.toolCalls.map((toolCall) => toolCall.id);
+    const batchToolCallIds = new Set<string>();
+    for (const toolCallId of toolCallIds) {
+      if (
+        seenToolCallIds.has(toolCallId) ||
+        batchToolCallIds.has(toolCallId)
+      ) {
+        throw new MalformedHarnessChatTranscriptError(
+          "duplicate_tool_call_id",
+          index,
+        );
+      }
+      batchToolCallIds.add(toolCallId);
+      seenToolCallIds.add(toolCallId);
+    }
+    pendingToolCallIds = batchToolCallIds;
+    pendingToolCalls = [...message.toolCalls];
+  }
+  completePendingBatch();
+  return { transcript: normalized, synthesizedToolCallIds };
+};
 
 const chatTurnError = (error: unknown): HarnessChatError => {
   if (
@@ -663,10 +803,33 @@ export class HarnessInteractiveChatService {
 
   async #terminalizeInterruptedTurnsFromStore(): Promise<void> {
     for (const record of [...this.#sessions.values()]) {
+      let transcriptRepaired = false;
+      try {
+        const normalized = normalizeIncompleteToolExchanges(record.transcript);
+        if (normalized.synthesizedToolCallIds.length > 0) {
+          record.transcript = normalized.transcript;
+          transcriptRepaired = true;
+        }
+      } catch (error) {
+        if (!(error instanceof MalformedHarnessChatTranscriptError)) {
+          throw error;
+        }
+        // Keep evidence intact. startTurn validates again and returns a local
+        // error for this session before any malformed transcript reaches a
+        // provider; one bad legacy session must not prevent all chat startup.
+      }
+
       const activeTurnId = record.status.activeTurnId;
       const activeTurn = activeTurnId === undefined
         ? undefined
         : record.turns.get(activeTurnId);
+      const recoveryWillPersistTranscript =
+        (activeTurnId !== undefined && activeTurn === undefined) ||
+        (activeTurn !== undefined &&
+          isTerminalTurnStatus(activeTurn.turn.status)) ||
+        [...record.turns.values()].some((turn) =>
+          !isTerminalTurnStatus(turn.turn.status)
+        );
       if (activeTurnId !== undefined && activeTurn === undefined) {
         await this.#emit(record.status.sessionId, activeTurnId, {
           kind: "turn_failed",
@@ -723,6 +886,13 @@ export class HarnessInteractiveChatService {
           kind: "turn_failed",
           turnId: turn.turn.turnId,
           error: interruptedTurnError(turn.turn.turnId, turn.turn.status),
+        });
+      }
+
+      if (transcriptRepaired && !recoveryWillPersistTranscript) {
+        await this.#sessionStore?.saveSession({
+          session: record.status,
+          transcript: record.transcript,
         });
       }
     }
@@ -930,6 +1100,17 @@ export class HarnessInteractiveChatService {
           undefined
       ) {
         return turnExistsError(requestId, params.sessionId, turnId);
+      }
+      try {
+        const normalized = normalizeIncompleteToolExchanges(record.transcript);
+        if (normalized.synthesizedToolCallIds.length > 0) {
+          record.transcript = normalized.transcript;
+        }
+      } catch (error) {
+        if (error instanceof MalformedHarnessChatTranscriptError) {
+          return malformedTranscriptError(requestId, error);
+        }
+        throw error;
       }
       await this.#emit(params.sessionId, turn.turnId, {
         kind: "turn_started",

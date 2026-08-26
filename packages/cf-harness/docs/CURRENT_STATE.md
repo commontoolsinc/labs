@@ -234,7 +234,13 @@ mode.
 - Model-driven dynamic skill activation is not implemented. Skills are
   explicitly preloaded by the caller; child skills are profile-controlled.
 - Resume is transcript-oriented and does not recover an arbitrary partially
-  executed tool or orchestration state machine.
+  executed tool or orchestration state machine. Interactive chat restore and the
+  next-turn boundary normalize an incomplete tool-call batch by adding an
+  explicit unknown-outcome result for each missing result. This preserves the
+  call and later history without replaying the interrupted side effect; a tool
+  result with no pending call or a duplicate call ID anywhere in the transcript
+  fails closed before provider traffic because the harness cannot honestly
+  invent or delete the missing history.
 - Raw operator artifacts use filesystem paths. Parent-visible child returns are
   sanitized, and the prompt loop swaps model-bound tool output and
   model-authored tool arguments through the address handle table; denial-path

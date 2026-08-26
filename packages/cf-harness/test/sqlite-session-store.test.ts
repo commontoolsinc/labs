@@ -17,6 +17,7 @@ import type {
   RunHarnessTranscriptOptions,
 } from "../src/prompt-loop.ts";
 import type { LoomLocalHostBinding } from "../src/contracts/run-manifest.ts";
+import type { HarnessTranscriptMessage } from "../src/contracts/transcript.ts";
 import { openSqliteHarnessChatSessionStore } from "../src/sqlite-session-store.ts";
 
 const nextIsoNow = () => {
@@ -40,6 +41,27 @@ const makeResult = (
   modelTurns: 1,
   runState: {} as HarnessPromptLoopResult["runState"],
 });
+
+const assertUnknownToolOutcome = (
+  message: HarnessTranscriptMessage,
+  toolCallId: string,
+  toolName: string,
+): void => {
+  if (message.role !== "tool") {
+    throw new Error(`expected synthetic tool result, got ${message.role}`);
+  }
+  assertEquals(message.toolCallId, toolCallId);
+  assertEquals(message.toolName, toolName);
+  const payload = JSON.parse(message.content) as Record<string, unknown>;
+  assertEquals(payload.type, "cf-harness.tool-outcome-unknown");
+  assertEquals(payload.outcome, "unknown");
+  assertEquals(payload.reason, "process_interrupted");
+  assertEquals(
+    payload.message,
+    "The run was interrupted after this tool call was recorded and before a result was recorded. Whether the tool ran or produced side effects is unknown. Inspect current state before deciding whether to retry.",
+  );
+  assertEquals("ok" in payload, false);
+};
 
 const localHostPromptLoopOptions = (
   binding: LoomLocalHostBinding,
@@ -706,12 +728,35 @@ Deno.test("sqlite session store restores and terminalizes interrupted turns", as
   });
 
   try {
+    let resolvePartialTranscript: (() => void) | undefined;
+    const partialTranscriptPersisted = new Promise<void>((resolve) => {
+      resolvePartialTranscript = resolve;
+    });
     const stalled = new HarnessInteractiveChatService({
       createPromptLoop: () => ({
-        runTranscript: () =>
-          new Promise<HarnessPromptLoopResult>(() => {
-            // Simulates a process dying while a turn is still in flight.
-          }),
+        runTranscript: async (options) => {
+          const assistant = {
+            role: "assistant" as const,
+            content: "",
+            toolCalls: [{
+              id: "call-interrupted",
+              type: "function" as const,
+              function: {
+                name: "read_file",
+                arguments: '{"path":"/workspace/note.md"}',
+              },
+            }],
+          };
+          const transcript = [...options.transcript, assistant];
+          await options.onTranscriptEvent?.({
+            message: assistant,
+            transcript,
+          });
+          resolvePartialTranscript?.();
+          return await new Promise<HarnessPromptLoopResult>(() => {
+            // Simulates a process dying before the tool result is recorded.
+          });
+        },
       }),
       now: nextIsoNow(),
       sessionStore: store,
@@ -726,6 +771,7 @@ Deno.test("sqlite session store restores and terminalizes interrupted turns", as
       turnId: "turn-1",
       input: { text: "This will be interrupted" },
     });
+    await partialTranscriptPersisted;
 
     assertEquals(
       (await store.listTurns({ sessionId: "session-1" })).map((turn) =>
@@ -734,10 +780,13 @@ Deno.test("sqlite session store restores and terminalizes interrupted turns", as
       ["running"],
     );
 
+    const restoredInputs: RunHarnessTranscriptOptions["transcript"][] = [];
     const restored = new HarnessInteractiveChatService({
       createPromptLoop: () => ({
-        runTranscript: (options) =>
-          Promise.resolve(makeResult(options, "Recovered.")),
+        runTranscript: (options) => {
+          restoredInputs.push([...options.transcript]);
+          return Promise.resolve(makeResult(options, "Recovered."));
+        },
       }),
       now: () => "2026-05-27T00:01:00.000Z",
       sessionStore: store,
@@ -761,7 +810,32 @@ Deno.test("sqlite session store restores and terminalizes interrupted turns", as
     assertEquals(
       restored.listEvents({ sessionId: "session-1", afterSequence: 2 }).events
         .map((event) => [event.sequence, event.event.kind]),
-      [[3, "turn_failed"]],
+      [[3, "tool_started"], [4, "turn_failed"]],
+    );
+    const recoveredTranscript = store.getSession("session-1")?.transcript ?? [];
+    assertEquals(recoveredTranscript.slice(0, 2), [
+      {
+        role: "user",
+        content: "This will be interrupted",
+      },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-interrupted",
+          type: "function",
+          function: {
+            name: "read_file",
+            arguments: '{"path":"/workspace/note.md"}',
+          },
+        }],
+      },
+    ]);
+    assertEquals(recoveredTranscript.length, 3);
+    assertUnknownToolOutcome(
+      recoveredTranscript[2],
+      "call-interrupted",
+      "read_file",
     );
 
     const followUp = await restored.startTurn("req-3", {
@@ -772,6 +846,19 @@ Deno.test("sqlite session store restores and terminalizes interrupted turns", as
     assertEquals(followUp.ok, true);
     await restored.waitForTurn("session-1", "turn-2");
     assertEquals(
+      restoredInputs[0].slice(0, 2),
+      recoveredTranscript.slice(0, 2),
+    );
+    assertUnknownToolOutcome(
+      restoredInputs[0][2],
+      "call-interrupted",
+      "read_file",
+    );
+    assertEquals(restoredInputs[0][3], {
+      role: "user",
+      content: "Continue",
+    });
+    assertEquals(
       restored.listTurns({ sessionId: "session-1" }).turns.map((turn) => [
         turn.turn.turnId,
         turn.turn.status,
@@ -781,6 +868,583 @@ Deno.test("sqlite session store restores and terminalizes interrupted turns", as
   } finally {
     store.close();
     await Deno.remove(path);
+  }
+});
+
+Deno.test("sqlite session restore heals terminal legacy transcripts idempotently", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const store = await openSqliteHarnessChatSessionStore({
+    url: toFileUrl(path),
+  });
+
+  try {
+    const session = {
+      ...createHarnessChatSessionStatus({
+        sessionId: "session-legacy",
+        createdAt: "2026-05-27T00:00:00.000Z",
+        workspace: { hostPath: "/workspace" },
+      }),
+      turnCount: 1,
+      updatedAt: "2026-05-27T00:00:03.000Z",
+    };
+    const interruptedAssistant: HarnessTranscriptMessage = {
+      role: "assistant",
+      content: "",
+      toolCalls: [{
+        id: "call-legacy",
+        type: "function",
+        function: { name: "bash", arguments: '{"command":"touch marker"}' },
+      }],
+    };
+    store.saveSession({
+      session,
+      transcript: [
+        { role: "user", content: "Create the marker" },
+        interruptedAssistant,
+      ],
+    });
+    store.saveTurn({
+      sessionId: session.sessionId,
+      turn: {
+        turnId: "turn-legacy",
+        status: "failed",
+        startedAt: "2026-05-27T00:00:01.000Z",
+        updatedAt: "2026-05-27T00:00:03.000Z",
+        endedAt: "2026-05-27T00:00:03.000Z",
+        error: {
+          code: "internal_error",
+          message: "legacy recovery already terminalized this turn",
+        },
+      },
+      input: { text: "Create the marker" },
+      policy: session.policy,
+    });
+
+    const restoredInputs: RunHarnessTranscriptOptions["transcript"][] = [];
+    const createRestored = () =>
+      new HarnessInteractiveChatService({
+        createPromptLoop: () => ({
+          runTranscript: (options) => {
+            restoredInputs.push([...options.transcript]);
+            return Promise.resolve(makeResult(options, "Recovered."));
+          },
+        }),
+        now: () => "2026-05-27T00:01:00.000Z",
+        sessionStore: store,
+      });
+
+    const firstRestore = createRestored();
+    await firstRestore.initializeFromStore();
+    const once = store.getSession(session.sessionId)?.transcript ?? [];
+    assertEquals(once.slice(0, 2), [
+      { role: "user", content: "Create the marker" },
+      interruptedAssistant,
+    ]);
+    assertEquals(once.length, 3);
+    assertUnknownToolOutcome(once[2], "call-legacy", "bash");
+    const sequenceAfterFirstRestore = await store.latestSequence();
+    const changesAfterFirstRestore = (store.database.prepare(
+      "SELECT total_changes() AS count",
+    ).get() as { count: number }).count;
+
+    const secondRestore = createRestored();
+    await secondRestore.initializeFromStore();
+    assertEquals(store.getSession(session.sessionId)?.transcript, once);
+    assertEquals(await store.latestSequence(), sequenceAfterFirstRestore);
+    assertEquals(
+      (store.database.prepare("SELECT total_changes() AS count").get() as {
+        count: number;
+      }).count,
+      changesAfterFirstRestore,
+    );
+
+    const followUp = await secondRestore.startTurn("req-follow-up", {
+      sessionId: session.sessionId,
+      turnId: "turn-follow-up",
+      input: { text: "Continue carefully" },
+    });
+    assertEquals(followUp.ok, true);
+    await secondRestore.waitForTurn(session.sessionId, "turn-follow-up");
+    assertEquals(restoredInputs[0].slice(0, 3), once);
+    assertEquals(restoredInputs[0][3], {
+      role: "user",
+      content: "Continue carefully",
+    });
+  } finally {
+    store.close();
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("sqlite chat normalizes a canceled tool call before the next turn", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const store = await openSqliteHarnessChatSessionStore({
+    url: toFileUrl(path),
+  });
+
+  try {
+    let resolveToolCallPersisted: (() => void) | undefined;
+    const toolCallPersisted = new Promise<void>((resolve) => {
+      resolveToolCallPersisted = resolve;
+    });
+    const followUpInputs: RunHarnessTranscriptOptions["transcript"][] = [];
+    let invocation = 0;
+    const service = new HarnessInteractiveChatService({
+      createPromptLoop: () => ({
+        runTranscript: async (options) => {
+          invocation += 1;
+          if (invocation > 1) {
+            followUpInputs.push([...options.transcript]);
+            return makeResult(options, "Recovered.");
+          }
+          const assistant: HarnessTranscriptMessage = {
+            role: "assistant",
+            content: "",
+            toolCalls: [{
+              id: "call-canceled",
+              type: "function",
+              function: { name: "bash", arguments: '{"command":"sleep 600"}' },
+            }],
+          };
+          await options.onTranscriptEvent?.({
+            message: assistant,
+            transcript: [...options.transcript, assistant],
+          });
+          resolveToolCallPersisted?.();
+          return await new Promise<HarnessPromptLoopResult>(
+            (_resolve, reject) => {
+              options.signal?.addEventListener("abort", () => {
+                reject(options.signal?.reason ?? new Error("aborted"));
+              }, { once: true });
+            },
+          );
+        },
+      }),
+      now: nextIsoNow(),
+      sessionStore: store,
+    });
+
+    await service.startSession("req-1", {
+      sessionId: "session-canceled",
+      workspace: { hostPath: "/workspace" },
+    });
+    await service.startTurn("req-2", {
+      sessionId: "session-canceled",
+      turnId: "turn-canceled",
+      input: { text: "Run the long command" },
+    });
+    await toolCallPersisted;
+    await service.cancelTurn(
+      "req-3",
+      "session-canceled",
+      "turn-canceled",
+      "user_requested",
+    );
+    await service.waitForTurn("session-canceled", "turn-canceled");
+    assertEquals(service.status("session-canceled").sessions[0].reusable, true);
+
+    const followUp = await service.startTurn("req-4", {
+      sessionId: "session-canceled",
+      turnId: "turn-follow-up",
+      input: { text: "Continue" },
+    });
+    assertEquals(followUp.ok, true);
+    await service.waitForTurn("session-canceled", "turn-follow-up");
+    assertEquals(followUpInputs[0].length, 4);
+    assertEquals(followUpInputs[0].slice(0, 2), [
+      { role: "user", content: "Run the long command" },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-canceled",
+          type: "function",
+          function: { name: "bash", arguments: '{"command":"sleep 600"}' },
+        }],
+      },
+    ]);
+    assertUnknownToolOutcome(followUpInputs[0][2], "call-canceled", "bash");
+    assertEquals(followUpInputs[0][3], {
+      role: "user",
+      content: "Continue",
+    });
+    assertEquals(
+      store.getSession("session-canceled")?.transcript.slice(0, 3),
+      followUpInputs[0].slice(0, 3),
+    );
+  } finally {
+    store.close();
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("sqlite session restore preserves partial batches later history and compaction", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const store = await openSqliteHarnessChatSessionStore({
+    url: toFileUrl(path),
+  });
+
+  try {
+    const session = createHarnessChatSessionStatus({
+      sessionId: "session-partial-batch",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      workspace: { hostPath: "/workspace" },
+    });
+    const compaction = {
+      providerId: "openai-compatible-gateway",
+      state: {
+        version: 1,
+        sourceModel: "gpt-test",
+        output: [{
+          type: "compaction",
+          id: "cmp-1",
+          encrypted_content: "encrypted-cmp-1",
+        }],
+      },
+    };
+    const partial: HarnessTranscriptMessage[] = [
+      { role: "user", content: "Read both files" },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-complete",
+          type: "function",
+          function: { name: "read_file", arguments: '{"path":"one"}' },
+        }, {
+          id: "call-missing",
+          type: "function",
+          function: { name: "read_file", arguments: '{"path":"two"}' },
+        }],
+        providerContinuation: compaction,
+      },
+      {
+        role: "tool",
+        toolCallId: "call-complete",
+        toolName: "read_file",
+        content: '{"contents":"one"}',
+      },
+      { role: "user", content: "A later valid question" },
+      { role: "assistant", content: "A later valid answer" },
+    ];
+    store.saveSession({ session, transcript: partial });
+
+    const service = new HarnessInteractiveChatService({
+      createPromptLoop: () => ({
+        runTranscript: (options) =>
+          Promise.resolve(makeResult(options, "Should not run.")),
+      }),
+      now: () => "2026-05-27T00:01:00.000Z",
+      sessionStore: store,
+    });
+    await service.initializeFromStore();
+
+    const normalized = store.getSession(session.sessionId)?.transcript ?? [];
+    assertEquals(normalized.length, partial.length + 1);
+    assertEquals(normalized.slice(0, 3), partial.slice(0, 3));
+    assertEquals(
+      (normalized[1] as Extract<
+        HarnessTranscriptMessage,
+        { role: "assistant" }
+      >)
+        .providerContinuation,
+      compaction,
+    );
+    assertUnknownToolOutcome(normalized[3], "call-missing", "read_file");
+    assertEquals(normalized.slice(4), partial.slice(3));
+  } finally {
+    store.close();
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("sqlite session restore leaves complete tool exchanges byte-for-byte unchanged", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const store = await openSqliteHarnessChatSessionStore({
+    url: toFileUrl(path),
+  });
+
+  try {
+    const session = createHarnessChatSessionStatus({
+      sessionId: "session-complete-batch",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      workspace: { hostPath: "/workspace" },
+    });
+    const complete: HarnessTranscriptMessage[] = [
+      { role: "user", content: "Read it" },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-complete",
+          type: "function",
+          function: { name: "read_file", arguments: '{"path":"one"}' },
+        }],
+      },
+      {
+        role: "tool",
+        toolCallId: "call-complete",
+        toolName: "read_file",
+        content: '{"contents":"one"}',
+      },
+      { role: "assistant", content: "Done" },
+    ];
+    store.saveSession({ session, transcript: complete });
+
+    const service = new HarnessInteractiveChatService({
+      createPromptLoop: () => ({
+        runTranscript: (options) =>
+          Promise.resolve(makeResult(options, "Should not run.")),
+      }),
+      sessionStore: store,
+    });
+    await service.initializeFromStore();
+
+    assertEquals(store.getSession(session.sessionId)?.transcript, complete);
+  } finally {
+    store.close();
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("sqlite chat fails closed on malformed tool exchanges", async () => {
+  const cases: Array<{
+    name: string;
+    transcript: HarnessTranscriptMessage[];
+    malformation:
+      | "duplicate_tool_call_id"
+      | "tool_result_without_pending_call";
+    transcriptIndex: number;
+  }> = [{
+    name: "orphan",
+    transcript: [
+      { role: "user", content: "Question" },
+      {
+        role: "tool",
+        toolCallId: "call-orphan",
+        toolName: "read_file",
+        content: "{}",
+      },
+    ],
+    malformation: "tool_result_without_pending_call",
+    transcriptIndex: 1,
+  }, {
+    name: "unexpected-result-in-batch",
+    transcript: [
+      { role: "user", content: "Question" },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-expected",
+          type: "function",
+          function: { name: "read_file", arguments: "{}" },
+        }],
+      },
+      {
+        role: "tool",
+        toolCallId: "call-unexpected",
+        toolName: "read_file",
+        content: "{}",
+      },
+    ],
+    malformation: "tool_result_without_pending_call",
+    transcriptIndex: 2,
+  }, {
+    name: "duplicate",
+    transcript: [
+      { role: "user", content: "Question" },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-duplicate",
+          type: "function",
+          function: { name: "read_file", arguments: "{}" },
+        }],
+      },
+      {
+        role: "tool",
+        toolCallId: "call-duplicate",
+        toolName: "read_file",
+        content: "{}",
+      },
+      {
+        role: "tool",
+        toolCallId: "call-duplicate",
+        toolName: "read_file",
+        content: "{}",
+      },
+    ],
+    malformation: "tool_result_without_pending_call",
+    transcriptIndex: 3,
+  }, {
+    name: "duplicate-call-id",
+    transcript: [
+      { role: "user", content: "Question" },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-duplicate",
+          type: "function",
+          function: { name: "read_file", arguments: '{"path":"one"}' },
+        }, {
+          id: "call-duplicate",
+          type: "function",
+          function: { name: "read_file", arguments: '{"path":"two"}' },
+        }],
+      },
+    ],
+    malformation: "duplicate_tool_call_id",
+    transcriptIndex: 1,
+  }, {
+    name: "reused-call-id",
+    transcript: [
+      { role: "user", content: "Question" },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-reused",
+          type: "function",
+          function: { name: "read_file", arguments: '{"path":"one"}' },
+        }],
+      },
+      {
+        role: "tool",
+        toolCallId: "call-reused",
+        toolName: "read_file",
+        content: '{"contents":"one"}',
+      },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-reused",
+          type: "function",
+          function: { name: "read_file", arguments: '{"path":"two"}' },
+        }],
+      },
+    ],
+    malformation: "duplicate_tool_call_id",
+    transcriptIndex: 3,
+  }];
+
+  for (const testCase of cases) {
+    const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+    const store = await openSqliteHarnessChatSessionStore({
+      url: toFileUrl(path),
+    });
+    try {
+      const session = createHarnessChatSessionStatus({
+        sessionId: `session-${testCase.name}`,
+        createdAt: "2026-05-27T00:00:00.000Z",
+        workspace: { hostPath: "/workspace" },
+      });
+      store.saveSession({ session, transcript: testCase.transcript });
+      let providerCalls = 0;
+      const service = new HarnessInteractiveChatService({
+        createPromptLoop: () => ({
+          runTranscript: (options) => {
+            providerCalls += 1;
+            return Promise.resolve(makeResult(options, "Must not run."));
+          },
+        }),
+        now: nextIsoNow(),
+        sessionStore: store,
+      });
+      await service.initializeFromStore();
+
+      const result = await service.startTurn(`req-${testCase.name}`, {
+        sessionId: session.sessionId,
+        turnId: `turn-${testCase.name}`,
+        input: { text: "Continue" },
+      });
+      assertEquals(result.ok, false);
+      if (result.ok) {
+        throw new Error("malformed transcript unexpectedly started a turn");
+      }
+      assertEquals(result.error.code, "internal_error");
+      assertEquals(result.error.details, {
+        reason: "malformed_transcript",
+        malformation: testCase.malformation,
+        transcriptIndex: testCase.transcriptIndex,
+      });
+      assertEquals(providerCalls, 0);
+      assertEquals(await store.listTurns({ sessionId: session.sessionId }), []);
+      assertEquals(
+        store.getSession(session.sessionId)?.transcript,
+        testCase.transcript,
+      );
+    } finally {
+      store.close();
+      await Deno.remove(path);
+    }
+  }
+});
+
+Deno.test("sqlite chat propagates unexpected transcript normalization faults", async () => {
+  for (const phase of ["restore", "next-turn"] as const) {
+    const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+    const store = await openSqliteHarnessChatSessionStore({
+      url: toFileUrl(path),
+    });
+    try {
+      const session = createHarnessChatSessionStatus({
+        sessionId: `session-unexpected-${phase}`,
+        createdAt: "2026-05-27T00:00:00.000Z",
+        workspace: { hostPath: "/workspace" },
+      });
+      const normalizationFault = new Error(
+        `unexpected ${phase} normalization fault`,
+      );
+      let roleReads = 0;
+      const allowedRoleReads = phase === "restore" ? 0 : 2;
+      const faultingMessage: HarnessTranscriptMessage = {
+        get role(): "user" {
+          roleReads += 1;
+          if (roleReads > allowedRoleReads) {
+            throw normalizationFault;
+          }
+          return "user";
+        },
+        content: "Question",
+      };
+      store.listSessions = () => [{
+        session,
+        transcript: [faultingMessage],
+      }];
+      let providerCalls = 0;
+      const service = new HarnessInteractiveChatService({
+        createPromptLoop: () => ({
+          runTranscript: (options) => {
+            providerCalls += 1;
+            return Promise.resolve(makeResult(options, "Must not run."));
+          },
+        }),
+        sessionStore: store,
+      });
+
+      if (phase === "restore") {
+        const error = await assertRejects(() => service.initializeFromStore());
+        assertEquals(error, normalizationFault);
+      } else {
+        await service.initializeFromStore();
+        const error = await assertRejects(() =>
+          service.startTurn(`req-${phase}`, {
+            sessionId: session.sessionId,
+            turnId: `turn-${phase}`,
+            input: { text: "Continue" },
+          })
+        );
+        assertEquals(error, normalizationFault);
+      }
+      assertEquals(providerCalls, 0);
+    } finally {
+      store.close();
+      await Deno.remove(path);
+    }
   }
 });
 
