@@ -1,6 +1,6 @@
 # `cf-code-editor` Co-presence — Implementation Plan
 
-Status: Proposed — depends on the Memory `apply-op` CodeMirror implementation
+Status: In progress — depends on the Memory `apply-op` CodeMirror implementation
 
 This plan adds live participant names, carets, and selections to collaborative
 `cf-code-editor` instances. It builds on
@@ -13,7 +13,13 @@ The first deployment is one Cloudflare Worker with one hibernating Durable
 Object per room. It has no authentication, durable storage, replay, or document
 data. A room identifier and participant name opt an editor into the feature;
 the service endpoint is deployment configuration with an explicit component
-override for local development and integration tests.
+override for local development and integration tests. Hosts supply that
+deployment configuration through the exported `copresenceUrlContext`; Labs
+Shell supplies none until an endpoint is deployed. The Worker and Durable
+Object live in the independent private
+[`commontoolsinc/cloudflare-copresence`](https://github.com/commontoolsinc/cloudflare-copresence)
+repository so their deployment and operational access do not become part of a
+Labs or Memory deployment.
 
 ## Status convention
 
@@ -104,25 +110,28 @@ Add these optional properties to `cf-code-editor`:
 | --- | --- |
 | `presenceRoom` | Opaque, high-entropy room identifier. Its absence disables presence. |
 | `participantName` | Plain-text display name. Its absence disables presence. |
-| `presenceUrl` | Optional WebSocket service override. Production hosts provide the default endpoint; tests and local development may set it directly. |
+| `presenceUrl` | Optional WebSocket service override. A host-provided `copresenceUrlContext` is the default; tests and local development may set the override directly. |
 
 Setting both `presenceRoom` and `participantName` while `collaborative` is
-active opens the socket. Changing the room, endpoint, bound Cell, or
+active opens the socket when either the context or override supplies an
+endpoint. Changing the room, endpoint, bound Cell, or
 collaborative mode closes the old socket, removes all remote decorations, and
 starts a new session only after the new Memory operation session is ready.
 Changing the participant name in the same room publishes a replacement record
 without reconnecting.
 
-The component creates an unpredictable participant id for each socket session.
-The room owns that id and ignores any client attempt to update another
-participant. Names render as text, never HTML. Color is derived locally from
-the participant id so it is stable within the connection without becoming
-server state.
+The room creates and owns an unpredictable participant id for each socket
+session and ignores any client attempt to update another participant. Names
+render as text, never HTML. Color is derived locally from the participant id so
+it is stable within the connection without becoming server state.
 
 Presence errors emit `cf-presence-error` and clear remote decorations. They do
 not reuse `cf-collaboration-reconcile`, change `collaborative`, or stop document
 editing. The event exposes a safe error category and not the room id, name, or
-raw server payload.
+raw server payload. Connection and protocol failures retry only after focus,
+selection, user-edit, browser-online, or page-visible signals; no timer or retry
+loop runs. Invalid configuration is reported once and remains disabled until
+its room, name, or effective endpoint changes.
 
 ## Versioned presence protocol
 
@@ -139,7 +148,7 @@ A participant's latest record contains:
 | `name` | Bounded plain-text display name. |
 | `focused` | Whether this editor currently owns focus. |
 | `cursor` | Confirmed Memory `{ epoch, version }` used as the selection's coordinate space. |
-| `selection` | CodeMirror `EditorSelection` JSON, or null when unfocused. |
+| `selection` | CodeMirror selection JSON with `{ anchor, head, assoc }` per range, or null when unfocused. |
 | `basis` | `provisional` when mapped back over pending edits, otherwise `confirmed`. |
 
 The wire messages are deliberately small:
@@ -206,6 +215,8 @@ Apply a record as follows:
 - A different epoch clears both values for that participant. Presence from an
   old epoch must not cross a Memory reset.
 - A record at the current confirmed version replaces `displayed`.
+- A current or newly reached record maps forward through the receiver's pending
+  local CodeMirror changes before it becomes `displayed`.
 - A future record replaces `latest` but leaves `displayed` visible. When Memory
   reaches that version, install it after the same transaction that installs the
   content.
@@ -247,60 +258,60 @@ shown. At no point does presence hold back the Memory transaction.
 
 Purpose: fix the cross-plane contract before opening a network connection.
 
-- [ ] Define versioned protocol types, strict validators, configured bounds,
+- [x] Define versioned protocol types, strict validators, configured bounds,
       and JSON fixtures for snapshot, replacement, removal, and invalid data.
-- [ ] Add pure helpers that compose pending CodeMirror changes and map a local
+- [x] Add pure helpers that compose pending CodeMirror changes and map a local
       selection backward to a confirmed Memory cursor.
-- [ ] Define receiver transitions for `latest` and `displayed` without DOM or
+- [x] Define receiver transitions for `latest` and `displayed` without DOM or
       WebSocket dependencies.
-- [ ] Add fixtures for insertion, deletion, multi-range selection, concurrent
+- [x] Add fixtures for insertion, deletion, multi-range selection, concurrent
       remote change, late provisional state, future confirmed state, skipped
       version, and epoch replacement.
 
 Required tests:
 
-- [ ] A provisional selection round-trips through the pending change mapping
+- [x] A provisional selection round-trips through the pending change mapping
       and the later canonical transaction.
-- [ ] Future presence does not hide the last displayable selection.
-- [ ] Late past presence and mismatched epochs are discarded without changing
+- [x] Future presence does not hide the last displayable selection.
+- [x] Late past presence and mismatched epochs are discarded without changing
       the document.
-- [ ] Invalid ranges, oversized values, duplicate/older revisions, and unknown
+- [x] Invalid ranges, oversized values, duplicate/older revisions, and unknown
       protocol versions fail at the decoder.
 
 Completion gate:
 
-- [ ] All ordering cases are deterministic pure tests, and no helper contains a
+- [x] All ordering cases are deterministic pure tests, and no helper contains a
       hand-written text offset transform.
 
 ### WP1 — Ephemeral Cloudflare room service
 
 Purpose: provide the smallest deployable latest-value relay.
 
-- [ ] Add a workspace package at `packages/editor-presence` with its own
-      `deno.jsonc` test task, Worker entry point, Durable Object, shared protocol
-      module, and Wrangler configuration.
-- [ ] Route one versioned WebSocket endpoint to a Durable Object named from the
+- [x] Add the Worker entry point, Durable Object, protocol module, tests, and
+      Wrangler configuration to the independent
+      `commontoolsinc/cloudflare-copresence` repository.
+- [x] Route one versioned WebSocket endpoint to a Durable Object named from the
       opaque room id.
-- [ ] Assign participant ids server-side, validate every client replacement,
+- [x] Assign participant ids server-side, validate every client replacement,
       serialize the latest state into the socket attachment, and broadcast only
       newer revisions.
-- [ ] Reconstruct snapshots from `getWebSockets()` and their attachments after
+- [x] Reconstruct snapshots from `getWebSockets()` and their attachments after
       hibernation. Do not instantiate or write a storage API.
-- [ ] Broadcast removal from the WebSocket close and error lifecycle handlers.
-- [ ] Enforce connection, message, range, name, origin, and update-rate bounds.
+- [x] Broadcast removal from the WebSocket close and error lifecycle handlers.
+- [x] Enforce connection, message, range, name, origin, and update-rate bounds.
       Logs and metrics exclude names, selections, raw room ids, and document
       identifiers.
-- [ ] Add local development, deploy, rollback, and endpoint-configuration
+- [x] Add local development, deploy, rollback, and endpoint-configuration
       instructions. Keep service deployment independent from Memory deployment.
 
 Required tests:
 
-- [ ] Join receives an exact current snapshot; upsert replaces one participant;
+- [x] Join receives an exact current snapshot; upsert replaces one participant;
       disconnect removes it.
-- [ ] Two sockets cannot claim or update each other's participant id.
-- [ ] A hibernation reconstruction test proves live attachments restore the
+- [x] Two sockets cannot claim or update each other's participant id.
+- [x] A hibernation reconstruction test proves live attachments restore the
       room and a disconnected participant leaves no recoverable state.
-- [ ] Invalid origin, room, message, and capacity cases close only the offending
+- [x] Invalid origin, room, message, and capacity cases close only the offending
       connection.
 
 Completion gate:
@@ -313,75 +324,76 @@ Completion gate:
 
 Purpose: render remote state through CodeMirror's own transaction model.
 
-- [ ] Add `codemirror-presence.ts` beside the existing collaboration adapter.
+- [x] Add `codemirror-presence.ts` beside the existing collaboration adapter.
       Keep network/session ownership out of
       `codemirror-collaboration.ts`.
-- [ ] Store remote participants in a StateField updated by typed StateEffects.
+- [x] Store remote participants in a StateField updated by typed StateEffects.
       Map `displayed` selections through every transaction's changes.
-- [ ] Render selection ranges with `Decoration.mark`, carets with a widget
+- [x] Render selection ranges with `Decoration.mark`, carets with a widget
       decoration, and bounded plain-text names adjacent to carets.
-- [ ] Derive accessible, theme-compatible colors from participant ids. Do not
+- [x] Derive accessible, theme-compatible colors from participant ids. Do not
       inject per-participant style elements or untrusted CSS.
 - [ ] Avoid obscuring local selections, diagnostics, backlinks, mention
       decorations, and keyboard focus indicators.
 
 Required tests:
 
-- [ ] StateField tests cover transaction mapping, replacement, removal,
+- [x] StateField tests cover transaction mapping, replacement, removal,
       multiple ranges, future queueing, and epoch clear.
 - [ ] DOM tests cover escaped names, collapsed carets, selections, theme
       changes, and cleanup.
 
 Completion gate:
 
-- [ ] Remote decorations survive the same CodeMirror changes that move their
+- [x] Remote decorations survive the same CodeMirror changes that move their
       document positions and disappear without rebuilding the editor.
 
 ### WP3 — Collaboration-to-presence seam and two-phase publication
 
 Purpose: coordinate spaces without coupling their transports.
 
-- [ ] Give `CodeMirrorCollaborationController` a read-only observer seam for
+- [x] Give `CodeMirrorCollaborationController` a read-only observer seam for
       readiness, the confirmed `{ epoch, version }`, pending CodeMirror changes,
       and canonical transaction/cursor advancement.
-- [ ] Keep the existing operation submission payload byte-for-byte unchanged;
+- [x] Keep the existing operation submission payload byte-for-byte unchanged;
       presence never enters `codeMirrorSubmission()` or shared effects.
-- [ ] Publish provisional base-coordinate selections immediately after local
+- [x] Publish provisional base-coordinate selections immediately after local
       changes and confirmed selections after Memory advancement.
-- [ ] Resolve future presence immediately after the CodeMirror transaction that
+- [x] Resolve future presence immediately after the CodeMirror transaction that
       reaches its cursor, while leaving `displayed` state mapped through that
       transaction.
-- [ ] Clear the presence extension before installing a new Memory epoch or
+- [x] Clear the presence extension before installing a new Memory epoch or
       reconciliation document.
 
 Required tests:
 
-- [ ] Presence faster than Memory maps the provisional caret with the arriving
+- [x] Presence faster than Memory maps the provisional caret with the arriving
       edit and is corrected by confirmation.
-- [ ] Memory faster than presence ignores the late provisional record and
+- [x] Memory faster than presence ignores the late provisional record and
       installs the confirmed record without cursor disappearance.
-- [ ] Several pending local updates compose back to one confirmed cursor.
-- [ ] A concurrent rebase maps local and remote selections through the same
+- [x] Several pending local updates compose back to one confirmed cursor.
+- [x] A concurrent rebase maps local and remote selections through the same
       canonical transaction.
 
 Completion gate:
 
-- [ ] Both delivery orders produce the same final document and selection, and
+- [x] Both delivery orders produce the same final document and selection, and
       no test can make presence delay or alter an `apply-op` transaction.
 
 ### WP4 — `cf-code-editor` API and lifecycle
 
 Purpose: expose opt-in co-presence without changing existing editor modes.
 
-- [ ] Add the properties and `cf-presence-error` event to the component API and
+- [x] Add the properties and `cf-presence-error` event to the component API and
       component documentation.
-- [ ] Add a small presence session controller that owns the WebSocket,
+- [x] Add a small presence session controller that owns the WebSocket,
       connection participant id, revision counter, and CodeMirror effects.
-- [ ] Open only after collaboration readiness; publish focus/name/selection;
+- [x] Open only after collaboration readiness; publish focus/name/selection;
       and close on every lifecycle boundary listed above.
-- [ ] Configure the production endpoint at the host boundary and retain the
-      explicit override for tests and local development.
-- [ ] Keep presence disabled when configuration is incomplete. Report invalid
+- [ ] Provide a deployed production endpoint through the exported host context;
+      retain the explicit override for tests and local development. Labs Shell
+      remains unconfigured until deployment.
+- [x] Keep presence disabled when configuration is incomplete. Report invalid
       explicit configuration without affecting document collaboration.
 
 Required tests:
@@ -389,7 +401,7 @@ Required tests:
 - [ ] Component tests cover opt-in, incomplete properties, name change, blur,
       Cell rebind, toggle, disposal, release, socket failure, collaboration
       failure, and epoch reset.
-- [ ] Existing ordinary and collaborative editor tests remain unchanged and
+- [x] Existing ordinary and collaborative editor tests remain unchanged and
       green with presence absent.
 
 Completion gate:
@@ -428,7 +440,7 @@ Completion gate:
 | Work packages | Required validation |
 | --- | --- |
 | WP0 | Protocol and pure CodeMirror mapping tests; `deno task check-docs` |
-| WP1 | Complete `packages/editor-presence` tests; Wrangler local integration and configuration validation |
+| WP1 | Complete `cloudflare-copresence` tests; Wrangler local integration and configuration validation |
 | WP2–WP4 | Complete UI Deno and browser tests plus existing CodeMirror collaboration tests |
 | WP5 | Focused two-browser integration in both delivery orders and deployed non-production smoke test |
 
@@ -447,5 +459,7 @@ Request explicit review at these boundaries:
    that presence never blocks Memory.
 4. After WP5, before supplying a production endpoint to any host.
 
-The first implementation PR should cover WP0 only. The service, rendering,
-component lifecycle, and deployment remain separately reviewable changes.
+The service and Labs implementation are separate pull requests in their
+respective repositories. Within Labs, keep pure mapping/rendering, component
+lifecycle, and browser integration independently reviewable when the stack
+size permits it.
