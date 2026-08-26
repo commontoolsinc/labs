@@ -230,6 +230,90 @@ describe("schema-doc-writer", () => {
     expect((await second.commit()).ok).toBeDefined();
   });
 
+  it("re-stages a schema document that is visible only through speculation", async () => {
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { speculativeField: { type: "string" } },
+    };
+    const sigil = sigilFor(schema);
+    const rootRef = (payloadSchema(sigil) as JSONSchemaObj).$ref!;
+    const rootHash = parseExternalSchemaRef(rootRef)!.taggedHash;
+    const rootId = `cid:${rootHash}` as URI;
+    const rootDocument = lookupSchemaDocument(rootHash)!;
+
+    // Model a computed write from server-side execution: the schema document
+    // is visible in the client's speculative overlay, but that write is never
+    // sent to the server and the server has no confirmed copy of it.
+    const replica = writerStorage.open(space).replica;
+    const { promise, resolve } = Promise.withResolvers<
+      { withdrawn: { message: string; superseded: true } }
+    >();
+    const sealed = replica.sealNative!(
+      {
+        operations: [{
+          op: "set",
+          id: rootId,
+          type: "application/json",
+          scope: "space",
+          value: { value: rootDocument },
+        }],
+        preconditions: [],
+      },
+      undefined,
+      promise,
+      { speculative: true },
+    );
+
+    try {
+      expect(replica.getDocument(rootId, "space")).toEqual({
+        value: rootDocument,
+      });
+      expect(writerStorage.isSchemaDocPersisted?.(space, rootHash)).toBe(
+        false,
+      );
+
+      // This is an unrelated authored write that happens to reference the
+      // speculative schema document. It must carry its own copy: local
+      // visibility is not proof that the server already has the CID.
+      const authored = writer.edit();
+      authored.writeValueOrThrow(
+        {
+          space,
+          id: "of:authored-speculative-carrier" as URI,
+          scope: "space",
+          path: [],
+        },
+        { person: sigil },
+      );
+      const stagedIds = [...authored.getWriteDetails?.(space) ?? []].map(
+        (detail) => detail.address.id,
+      );
+      const result = await authored.commit();
+      if (result.error) {
+        throw new Error(
+          `authored commit did not re-stage ${rootId}: ${result.error.message}`,
+        );
+      }
+      expect(result.ok).toBeDefined();
+      expect(stagedIds).toContain(rootId);
+
+      const reader = readerStorage.open(space);
+      const synced = await reader.sync(rootId, { path: [], schema: false });
+      expect(synced.error).toBeUndefined();
+      expect(
+        (reader as unknown as { get: (uri: URI) => unknown }).get(rootId),
+      ).toBeDefined();
+    } finally {
+      resolve({
+        withdrawn: {
+          message: "speculative schema test cleanup",
+          superseded: true,
+        },
+      });
+      await sealed.settled;
+    }
+  });
+
   it("stages for a replica that has not confirmed the closure", async () => {
     // The elision keys on THIS replica's server-confirmed state, not on
     // the registry: a fresh manager against the same server has confirmed
