@@ -580,14 +580,35 @@ run](#two-rules-that-force-a-test-in) enforced by construction rather than
 by a rule the packer has to remember, and it is the whole reason the
 mechanism is a skip list rather than a selection list.
 
+### Every invocation unit, and the identities inside it
+
+There are eight kinds of invocation unit across the topology, and only one
+of them holds more than one identity. That one holds almost everything:
+the workspace and runner unit shards alone carry 15,997 of the reference
+build's 17,999 executions.
+
+| Invocation unit | Suites | Identities inside it | Reaching one of them |
+| --- | --- | --- | --- |
+| A `deno test` file | `workspace-unit`, `runner-unit`, `pattern-integration` and its ON arm, `package-integration` and its ON arm, `generated-patterns`, `cli-deno` | One per registered `Deno.test`: every top-level test in a plain file, and every top-level `describe` in a file written with `describe` and `it`, whose `it`s are steps within it | The skip list. This is the row the whole section is about. |
+| A pattern file run by `cf test` | `pattern-unit` | One. The runner writes one record per pattern file | Nothing to reach: the file is the identity. |
+| A pattern file checked by the compatibility gate | `pattern-compat` | One gate record per pattern file | Nothing to reach. The task already takes `--only` to restrict which files it reads. |
+| A single-step arm of `integration.sh` | `cli-core` | One, named for its step | Nothing to reach. The script's own whole-invocation record is suite-level and belongs to no invocation unit at all. |
+| One gate command | `repo-gates` | One per gate | Nothing to reach. |
+| One `deno check` invocation | `typecheck` | One per checked path group, which the task records itself | Nothing to reach. |
+| A whole task carrying one record | `cfcheck`, `pattern-vintage` | One, for everything the task did | Nothing to reach, and nothing finer exists: the suite is its own identity. |
+| A script with no section argument | `cli-fuse`, `pattern-reload` | One | Not reachable, for two different reasons. `fuse-exec.sh` takes no section argument, and the fix is to give it the dispatch its sibling has. `pattern-reload` holds a single `it`, so the finest subset and the whole suite are already the same thing. |
+
+Seven of the eight rows are already one identity per invocation, which is
+why this change is smaller than removing a concept sounds. The topology
+does not gain a mechanism for them; they simply stop being described as
+items holding one identity each and start being described as identities.
+
 ### What it reaches, and what it does not
 
-One registered `Deno.test` is the floor. In a plain test file that is each
-test. In a file written with `describe` and `it`, `describe` registers one
-`Deno.test` and each `it` is a step inside it, so the finest unit reachable
-is the whole `describe`. Going finer would mean changing the wrappers that
-`describe` and `it` come from, or the test files themselves, which is the
-disruption this design exists to avoid.
+One registered `Deno.test` is the floor, as the table's first row says.
+Going below it — reaching an individual `it` inside a `describe` — would
+mean changing the wrappers those come from, or the test files themselves,
+which is the disruption this design exists to avoid.
 
 The module still loads. Skipping a test inside a file does not avoid
 importing that file, and for some suites the import is most of the cost:
