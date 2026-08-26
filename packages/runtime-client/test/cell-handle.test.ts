@@ -1167,6 +1167,87 @@ describe("cell-handle", () => {
       ]);
     });
 
+    it("publishes optimistic sets immediately while their requests stay queued", async () => {
+      const firstWrite = Promise.withResolvers<void>();
+      const requests: Array<{ type: RequestType; value?: { n: number } }> = [];
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: {
+            type: RequestType;
+            value?: { n: number };
+          }) => {
+            requests.push(request);
+            return requests.length === 1
+              ? firstWrite.promise.then(() => ({}))
+              : Promise.resolve({});
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle(runtime, ref, { n: 0 });
+      const updates: Array<{ n: number } | undefined> = [];
+      const cancel = cell.subscribe((value) => {
+        updates.push(value);
+      });
+      updates.length = 0;
+
+      const first = cell.set({ n: 1 });
+      const second = cell.set({ n: 2 });
+      const third = cell.set({ n: 3 });
+
+      expect(updates).toEqual([{ n: 1 }, { n: 2 }, { n: 3 }]);
+      expect(cell.get()).toEqual({ n: 3 });
+      expect(requests.map(({ type }) => type)).toEqual([
+        RequestType.CellSet,
+      ]);
+
+      firstWrite.resolve();
+      await Promise.all([first, second, third]);
+      expect(requests.map(({ value }) => value)).toEqual([
+        { n: 1 },
+        { n: 2 },
+        { n: 3 },
+      ]);
+      cancel();
+    });
+
+    it("keeps a later optimistic set over an earlier read response", async () => {
+      const readResponse = Promise.withResolvers<{
+        value: { n: number };
+      }>();
+      const requests: RequestType[] = [];
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: { type: RequestType }) => {
+            requests.push(request.type);
+            return request.type === RequestType.CellGet
+              ? readResponse.promise
+              : Promise.resolve({});
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle(runtime, ref, { n: 0 });
+
+      const reading = cell.sync();
+      const setting = cell.set({ n: 2 });
+      expect(cell.get()).toEqual({ n: 2 });
+      expect(requests).toEqual([RequestType.CellGet]);
+
+      readResponse.resolve({ value: { n: 0 } });
+      await expect(reading).resolves.toEqual({ n: 0 });
+      await setting;
+      expect(requests).toEqual([
+        RequestType.CellGet,
+        RequestType.CellSet,
+      ]);
+      expect(cell.get()).toEqual({ n: 2 });
+    });
+
     it("keeps a queued read ahead of a later strict write", async () => {
       const firstWrite = Promise.withResolvers<void>();
       const readResponse = Promise.withResolvers<void>();

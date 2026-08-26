@@ -96,6 +96,10 @@ export class CellHandle<T = unknown> {
   #nextCallbackId = 0;
   #schemaWarned = false;
   #updateGeneration = 0;
+  // Monotonic invocation order for local value mutations on this handle.
+  // Async read and strict-write responses use it to avoid replacing a later
+  // optimistic value while their remote operations remain FIFO-serialized.
+  #writeGeneration = 0;
 
   constructor(worker: RuntimeClient, cellRef: CellRef, value?: T) {
     this.#rt = worker;
@@ -164,16 +168,21 @@ export class CellHandle<T = unknown> {
   async set(value: T): Promise<void> {
     this.#requireSchema("set");
     // A plain set is a blind last-write-wins overwrite (CellSet).
+    const serialized = this.#serializeWrite(value);
+    this.#writeGeneration++;
+    this.#publishValue(value);
     await this.#enqueueOperation(() =>
-      this.#applyLocalAndSend(value, RequestType.CellSet)
+      this.#sendWrite(serialized, RequestType.CellSet)
     );
   }
 
   /** Set the cell's value and reject when the runtime refuses the write. */
   async setStrict(value: T): Promise<void> {
     this.#requireSchema("setStrict");
+    const serialized = this.#serializeWrite(value);
+    const writeGeneration = ++this.#writeGeneration;
     await this.#enqueueOperation(() =>
-      this.#applyLocalAndSend(value, RequestType.CellSet, true)
+      this.#sendStrictWrite(value, serialized, writeGeneration)
     );
   }
 
@@ -197,21 +206,10 @@ export class CellHandle<T = unknown> {
     return result;
   }
 
-  // Optimistic local update (mirrors the old set()) plus the remote write. The
-  // request _type_ encodes the intent: CellSet is a blind overwrite, CellPush
-  // is a read-modify-write append that the runtime keeps as compare-and-set.
-  #applyLocalAndSend(
-    value: T,
-    type: RequestType.CellSet | RequestType.CellPush,
-    propagateFailure = false,
-  ): Promise<void> {
-    // Serialized _first_, because it can refuse. The local update below is
-    // optimistic about the _write_ -- it assumes a value the connection
-    // accepts will land -- and not about whether the value can be sent at all.
-    // Were the refusal to come after, a value the runtime is never going to
-    // see would already be this handle's cached value and would already have
-    // reached every subscriber, leaving the display showing state that does
-    // not exist.
+  #serializeWrite(value: T): WireCellValue {
+    // Serialize before an optimistic local publication, because this can
+    // refuse. A value the runtime will never see must not become this handle's
+    // cached value or reach its subscribers.
     //
     // `T` is unconstrained, so this says what the write path requires rather
     // than what the class guarantees. Constraining `T` to `ClientCellValue` is
@@ -221,29 +219,14 @@ export class CellHandle<T = unknown> {
     // an identical type alias does.
     //
     // TODO(danfuzz): constrain `T`, once those types are assignable.
-    const serialized = CellHandle.serialize(value as ClientCellValue);
+    return CellHandle.serialize(value as ClientCellValue);
+  }
+
+  #sendWrite(
+    serialized: WireCellValue,
+    type: RequestType.CellSet | RequestType.CellPush,
+  ): Promise<void> {
     const cell = this.ref();
-
-    if (propagateFailure) {
-      const before = this.#value;
-      const updateGeneration = this.#updateGeneration;
-      return this.#conn.request<RequestType.CellSet>({
-        type: RequestType.CellSet,
-        cell,
-        value: serialized,
-        awaitCommit: true,
-      }).then(() => {
-        if (
-          updateGeneration === this.#updateGeneration &&
-          this.#value === before
-        ) {
-          this.#publishValue(value);
-        }
-      });
-    }
-
-    this.#publishValue(value);
-
     const request = type === RequestType.CellPush
       ? this.#conn.request<RequestType.CellPush>({
         type: RequestType.CellPush,
@@ -258,6 +241,29 @@ export class CellHandle<T = unknown> {
     return request.catch((error) => {
       if (!this.#conn.signal.aborted) {
         console.error("[CellHandle] Write failed:", error);
+      }
+    });
+  }
+
+  #sendStrictWrite(
+    value: T,
+    serialized: WireCellValue,
+    writeGeneration: number,
+  ): Promise<void> {
+    const before = this.#value;
+    const updateGeneration = this.#updateGeneration;
+    return this.#conn.request<RequestType.CellSet>({
+      type: RequestType.CellSet,
+      cell: this.ref(),
+      value: serialized,
+      awaitCommit: true,
+    }).then(() => {
+      if (
+        writeGeneration === this.#writeGeneration &&
+        updateGeneration === this.#updateGeneration &&
+        this.#value === before
+      ) {
+        this.#publishValue(value);
       }
     });
   }
@@ -332,10 +338,11 @@ export class CellHandle<T = unknown> {
       if (!Array.isArray(current)) {
         throw new Error("push() can only be used on array cells");
       }
-      return this.#applyLocalAndSend(
-        [...current, ...values] as unknown as U[],
-        RequestType.CellPush,
-      );
+      const value = [...current, ...values] as unknown as U[];
+      const serialized = this.#serializeWrite(value);
+      this.#writeGeneration++;
+      this.#publishValue(value);
+      return this.#sendWrite(serialized, RequestType.CellPush);
     };
     void this.#enqueueOperation(append).catch((error) => {
       if (!this.#conn.signal.aborted) {
@@ -435,6 +442,7 @@ export class CellHandle<T = unknown> {
    * If the value is itself a link, follows it to get the actual value.
    */
   async sync(): Promise<Readonly<T> | undefined> {
+    const writeGeneration = this.#writeGeneration;
     const response = await this.#enqueueOperation(() =>
       this.#conn.request<RequestType.CellGet>({
         type: RequestType.CellGet,
@@ -442,12 +450,14 @@ export class CellHandle<T = unknown> {
       })
     );
 
-    this.#value = CellHandle.deserialize<T>(this, response.value) as T;
-    return this.#value;
+    const value = CellHandle.deserialize<T>(this, response.value) as T;
+    if (writeGeneration === this.#writeGeneration) this.#value = value;
+    return value;
   }
 
   /** Demand lazy producers before fetching the current value. */
   async pull(): Promise<Readonly<T> | undefined> {
+    const writeGeneration = this.#writeGeneration;
     const response = await this.#enqueueOperation(() =>
       this.#conn.request<RequestType.CellPull>({
         type: RequestType.CellPull,
@@ -455,8 +465,9 @@ export class CellHandle<T = unknown> {
       })
     );
 
-    this.#value = CellHandle.deserialize<T>(this, response.value) as T;
-    return this.#value;
+    const value = CellHandle.deserialize<T>(this, response.value) as T;
+    if (writeGeneration === this.#writeGeneration) this.#value = value;
+    return value;
   }
 
   /**

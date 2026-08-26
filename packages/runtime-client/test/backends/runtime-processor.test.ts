@@ -4411,15 +4411,19 @@ describe("runtime-processor", () => {
       ]]);
     });
 
-    it("uses the handle materialized by pull before querying it", async () => {
+    it("loads a scoped database handle that pull has not materialized", async () => {
       const calls: string[] = [];
       const db = { id: "db-1", tables: { notes: {} }, scope: "user" };
       let loaded = false;
       const cell = {
         pull: () => {
           calls.push("pull");
-          loaded = true;
           return Promise.resolve();
+        },
+        sync: () => {
+          calls.push("sync");
+          loaded = true;
+          return Promise.resolve(db);
         },
         getRaw: () => loaded ? db : undefined,
         asSchema: () => ({ get: () => loaded ? db : undefined }),
@@ -4447,7 +4451,7 @@ describe("runtime-processor", () => {
         sql: "SELECT * FROM notes",
       });
 
-      expect(calls).toEqual(["pull", "query"]);
+      expect(calls).toEqual(["pull", "sync", "query"]);
     });
 
     it("keeps SQLite BLOB parameters encoded across the storage boundary", async () => {

@@ -1637,6 +1637,12 @@ export class RuntimeProcessor {
 
   private async pullSqliteDbRef(cell: Cell<unknown>): Promise<SqliteDbRef> {
     await cell.pull();
+    if (cell.getRaw({ lastNode: "value" }) === undefined) {
+      // A resolved scoped target can be demanded before its lazy factory write
+      // reaches this client. Load only that first missing value; established
+      // handles stay on the non-blocking pull path for later queries and writes.
+      await cell.sync();
+    }
     return this.readSqliteDbRef(cell);
   }
 
