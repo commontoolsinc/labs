@@ -6325,8 +6325,12 @@ supply; OW29/OW32/OW34 closed):
     re-runs; its own defect, untouched. (iii) The lunch FILE entry's
     third member (ensure-OFF: the guest's ~98-101-op
     program-materialization commit never landing) is a DIFFERENT,
-    post-click stage and is untouched — the entry and its lift bar
-    stand exactly as written. (iv) Whether the #6248 board's
+    post-click stage; it is now resolved by the served-event
+    name-resolution requeue described in that entry's current
+    disposition. The owner-directed pin supersedes the earlier 10/10
+    lift bar with the requested approximately eight-run re-baseline,
+    a red-first mechanism regression, and eight post-fix runs. (iv)
+    Whether the #6248 board's
     POST-fill shape (shards 2/6: fill succeeded, click landed,
     `#profile` never resolved) is this same clobber on a later
     surface or another member is undetermined — re-measure on that
