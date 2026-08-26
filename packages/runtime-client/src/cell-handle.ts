@@ -3,8 +3,11 @@
  */
 
 import {
+  FabricInstance,
+  FabricPrimitive,
   FabricSpecialObject,
   type FabricValue,
+  valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { DID } from "@commonfabric/identity";
 import { type CfcCellLinkRefPayload } from "@commonfabric/runner/cfc";
@@ -19,6 +22,7 @@ import {
   linkRefFrom,
   linkRefPayload,
   linkRefPayloadToString,
+  refuseFabricInstance,
   type SigilLink,
 } from "@commonfabric/runner/shared";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -466,7 +470,7 @@ export class CellHandle<T = unknown> {
       this.#value,
       this as CellHandle<unknown>,
     ) as T;
-    const valueChanged = !valuesEqual(applied, this.#value);
+    const valueChanged = !valuesOrCellsEqual(applied, this.#value);
     // A label-only change (value identical) still fires label-aware subscribers.
     // `labelUpdate` is present only on notifications that carried a label, so a
     // value-only notification never spuriously churns the label.
@@ -502,6 +506,25 @@ export class CellHandle<T = unknown> {
 
     if (Array.isArray(value)) {
       return value.map((item) => CellHandle.deserialize(base, item));
+    }
+
+    // A `FabricPrimitive` is a leaf, so a walk that stops at it has already
+    // done the right thing -- and this goes _before_ the record branch, which
+    // rebuilds from enumerable own properties a fabric class does not have and
+    // would put `{}` here in place of the value.
+    if (value instanceof FabricPrimitive) return value;
+
+    // An instance is a container, reached by its codec contents rather than by
+    // property name, so a sigil link can sit inside one where this walk cannot
+    // see it -- and a value handed back unhydrated would carry that link where
+    // a `CellHandle` belongs.
+    //
+    // Nothing reaches this today, de facto rather than by construction: the
+    // connection carries a value by structured cloning, which strips a fabric
+    // class before it arrives, and `CellHandle.serialize()` refuses one on the
+    // way out.
+    if (value instanceof FabricInstance) {
+      refuseFabricInstance(value, "when hydrating a value off the connection");
     }
 
     if (isObjectOrArray(value)) {
@@ -638,6 +661,20 @@ function applyValue(
     );
   }
 
+  // A leaf, carried through whole as `deserialize()` hydrates one: the record
+  // branch below would rebuild it from enumerable own properties it does not
+  // have.
+  if (current instanceof FabricPrimitive) {
+    return current;
+  }
+
+  // A container this walk cannot descend, so it cannot preserve a handle
+  // inside one against the incoming value the way it does for a record.
+  // Unreachable for the same reason as in `deserialize()`.
+  if (current instanceof FabricInstance) {
+    refuseFabricInstance(current, "when applying a delivered value");
+  }
+
   // For plain objects, recursively apply to each property
   if (isObjectOrArray(current)) {
     const prevRecord = (isObjectNotArray(previous))
@@ -667,10 +704,18 @@ function cellRefsEqual(a: CellRef, b: CellRef): boolean {
 }
 
 /**
- * Deep equality check for cell values.
- * Handles primitives, arrays, objects, and CellHandles.
+ * Compares two values a cell can hold, deciding whether a delivered update is
+ * a change this handle's subscribers hear about.
+ *
+ * Distinct from `valueEqual()`, which it calls: that settles a `FabricValue`
+ * by content, and this also knows about cells. A `CellHandle` compares by the
+ * cell it names rather than by what that cell holds, so two handles on one
+ * cell are equal and a handle is equal to nothing else.
+ *
+ * @throws If either side is a `FabricInstance`, whose outgoing references this
+ *   walk cannot reach.
  */
-function valuesEqual(a: unknown, b: unknown): boolean {
+function valuesOrCellsEqual(a: unknown, b: unknown): boolean {
   // `Object.is`, not `===`: an unchanged `NaN` leaf must compare equal (else
   // every delivery of a NaN-bearing value re-notifies all subscribers), and a
   // `0` -> `-0` change must compare unequal (else the update is dropped).
@@ -678,14 +723,41 @@ function valuesEqual(a: unknown, b: unknown): boolean {
   if (a == null || b == null) return a === b;
   if (typeof a !== typeof b) return false;
   if (typeof a !== "object") return false;
-  if (isCellHandle(a) && isCellHandle(b)) {
-    return a.equals(b);
+  // Either side being a handle is enough to ask. A handle holds its state
+  // privately, so the record branch below would read `{}` off it and call it
+  // equal to anything else without enumerable own keys -- `{}` itself among
+  // them, so replacing a handle with a record would be judged a no-change and
+  // reach no subscriber. A handle is a reference to a cell and equals only
+  // another reference to the same cell.
+  if (isCellHandle(a) || isCellHandle(b)) {
+    return isCellHandle(a) && isCellHandle(b) && a.equals(b);
+  }
+
+  // A `FabricPrimitive` is compared by the data model rather than by this
+  // walk, and _before_ the record branch, for the same reason: two
+  // `FabricBytes` over different bytes both present as `{}` there and would
+  // compare equal. A primitive is a leaf, so comparing its content is the
+  // whole comparison.
+  if (a instanceof FabricPrimitive || b instanceof FabricPrimitive) {
+    return valueEqual(a as FabricValue, b as FabricValue);
+  }
+
+  // An instance is not a leaf, and `valueEqual()` would settle its outgoing
+  // references by the data model's rules where this walk has its own -- a
+  // handle compares by the cell it names, not by content. Rather than answer
+  // with a comparison that is right for one of those and wrong for the other,
+  // this refuses. Unreachable for the same reason as in `deserialize()`.
+  if (a instanceof FabricInstance || b instanceof FabricInstance) {
+    refuseFabricInstance(
+      (a instanceof FabricInstance ? a : b) as FabricInstance,
+      "when comparing a delivered value against the cached one",
+    );
   }
   if (Array.isArray(a)) {
     if (!Array.isArray(b)) return false;
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) {
-      if (!valuesEqual(a[i], b[i])) return false;
+      if (!valuesOrCellsEqual(a[i], b[i])) return false;
     }
     return true;
   }
@@ -698,7 +770,7 @@ function valuesEqual(a: unknown, b: unknown): boolean {
   for (const key of aKeys) {
     if (!(key in (b as object))) return false;
     if (
-      !valuesEqual(
+      !valuesOrCellsEqual(
         (a as Record<string, unknown>)[key],
         (b as Record<string, unknown>)[key],
       )

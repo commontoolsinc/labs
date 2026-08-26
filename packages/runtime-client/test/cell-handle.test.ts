@@ -1,6 +1,7 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
+import { FabricLink } from "@commonfabric/data-model/fabric-instances";
 import {
   FabricBytes,
   FabricEpochNsec,
@@ -592,6 +593,59 @@ describe("cell-handle", () => {
       const after = calls.length;
       cell[$onCellUpdate]({ x: NaN });
       expect(calls.length).toBe(after);
+    });
+
+    it("notifies when a special object's contents change", () => {
+      // Two `FabricBytes` over different bytes are different values, and their
+      // state is private -- so a walk over enumerable own properties sees `{}`
+      // on both sides and would call them equal.
+      const cell = new CellHandle<FabricBytes>(makeRuntime(), ref);
+      const calls: Array<unknown> = [];
+      cell.subscribe((value) => {
+        calls.push(value);
+      });
+
+      cell[$onCellUpdate](new FabricBytes(new Uint8Array([1])));
+      const after = calls.length;
+      cell[$onCellUpdate](new FabricBytes(new Uint8Array([2])));
+
+      expect(calls.length).toBe(after + 1);
+    });
+
+    it("refuses a `FabricInstance` rather than compare one", () => {
+      // A tripwire: nothing delivers an instance today, the transport striping
+      // a fabric class before it arrives. Reached here directly, because a
+      // walk that cannot descend a container must say so rather than answer.
+      const cell = new CellHandle<unknown>(makeRuntime(), ref);
+      cell.subscribe(() => {});
+      const link = new FabricLink(
+        Object.freeze({ id: "of:fid1:refusal", path: [] }),
+      );
+
+      expect(() => cell[$onCellUpdate](link)).toThrow(
+        "Cannot yet handle `FabricLink` (a `FabricInstance`)",
+      );
+    });
+
+    it("notifies when a handle is replaced by a record", () => {
+      // A handle holds its state privately, so a walk over enumerable own
+      // properties reads `{}` off it -- equal to any other key-less object,
+      // `{}` included, which would drop the update and tell no subscriber.
+      const cell = new CellHandle<{ a: unknown }>(makeRuntime(), ref);
+      const calls: Array<unknown> = [];
+      cell.subscribe((value) => {
+        calls.push(value);
+      });
+      const inner = new CellHandle(makeRuntime(), {
+        ...ref,
+        id: "of:other-cell" as CellRef["id"],
+      });
+
+      cell[$onCellUpdate]({ a: inner });
+      const after = calls.length;
+      cell[$onCellUpdate]({ a: {} });
+
+      expect(calls.length).toBe(after + 1);
     });
 
     it("notifies on a 0 -> -0 change", () => {
