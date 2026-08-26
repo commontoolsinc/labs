@@ -135,6 +135,11 @@ import {
   setCurrentProvenance,
   setProvenanceCommand,
 } from "./provenance.ts";
+import type { HarnessInputCellSpec } from "./contracts/input-cells.ts";
+import {
+  inputCellsContextMessage,
+  parseInputCellArgument,
+} from "./input-cells.ts";
 import {
   HarnessControlError,
   type HarnessControlErrorCode,
@@ -146,6 +151,7 @@ const DEFAULT_ARTIFACT_DIRNAME = ".cf-harness-artifacts";
 const CLI_OUTPUT_MODES = ["operator", "batch"] as const;
 const CLI_STRING_FLAGS = [
   "handle-value-origin",
+  "input-cell",
   "workspace",
   "cwd",
   "focus-root",
@@ -187,6 +193,7 @@ const CLI_STRING_FLAGS = [
   "fabric-space",
   "fabric-cfc-enforcement-mode",
   "fabric-cfc-flow-labels",
+  "fabric-cfc-posture",
   "host-mount",
   "browser-access-lease-id",
   "browser-access-cdp-url",
@@ -210,6 +217,7 @@ const CLI_COLLECT_FLAGS = [
   "image",
   "host-mount",
   "handle-value-origin",
+  "input-cell",
 ] as const;
 
 export type CfHarnessCliOutputMode = (typeof CLI_OUTPUT_MODES)[number];
@@ -251,6 +259,7 @@ export interface CfHarnessCliConfig {
   cfcInvocationContextDir?: string;
   browserAccess?: HarnessBrowserAccessLease;
   handleValueOrigins: readonly string[];
+  inputCells: readonly HarnessInputCellSpec[];
   maxModelTurns: number;
   printTranscript: boolean;
   apiKey?: string;
@@ -514,6 +523,7 @@ Options:
   --browser-access-profile-mode <mode> persistent | transient
   --browser-access-account-access <access> available | none
   --handle-value-origin <origin> Origin a handle's value may be sent to (repeatable; none by default)
+  --input-cell <name>=<link>       Pass a cell in the fabric space into the run by reference, announced to the model as a handle under the operator-authored <name>; its shape and labels live on the cell's declared schema (repeatable; requires --fabric-space)
   --cfc-enforcement-mode <mode> disabled | observe | enforce-explicit | enforce-strict
   --cfc-result-dir <path>       Host dir where runsc writes the CFC result sidecar (required for enforce-* modes)
   --cfc-invocation-context-dir <path> Host dir where the harness writes the CFC invocation-context sidecar (required for enforce-* modes)
@@ -529,6 +539,10 @@ Options:
                                 --cfc-enforcement-mode, which governs the harness)
   --fabric-cfc-flow-labels <mode> off | observe | persist flow-label propagation on
                                 the fabric session's runtime
+  --fabric-cfc-posture <name>   max-enforcement: opt the fabric session's runtime
+                                into the named CFC posture bundle (every staged
+                                enforcement dial on); the two dials above still
+                                apply over the bundle
   --host-mount <spec>           Extra host bind mount (repeatable: name=<id>,source=<host>,target=<sandbox>,mode=readonly|writable)
   --max-model-turns <n>         Maximum model turns before aborting
   --print-transcript            Print the final transcript JSON after the response
@@ -552,6 +566,7 @@ Environment:
   CF_HARNESS_FABRIC_SPACE       Default value for --fabric-space
   CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE Default value for --fabric-cfc-enforcement-mode
   CF_HARNESS_FABRIC_CFC_FLOW_LABELS Default value for --fabric-cfc-flow-labels
+  CF_HARNESS_FABRIC_CFC_POSTURE Default value for --fabric-cfc-posture
   CF_HARNESS_SANDBOX_IMAGE      Default value for --sandbox-image
   CF_HARNESS_SANDBOX_DOCKER_RUNTIME Default value for --sandbox-docker-runtime
   ${CFC_RESULT_DIR_ENV} Fallback for --cfc-result-dir
@@ -827,6 +842,36 @@ const parseHandleValueOrigins = (
     origins.push(origin);
   }
   return uniqueStrings(origins);
+};
+
+/**
+ * The input cells `--input-cell` names. Grammar defects are refused at
+ * parse: an input cell is explicit operator configuration, and a run must
+ * not start without what it asked for. No shape is stated here — a cell's
+ * schema and labels live on its declaration in the fabric. The references
+ * themselves are validated against the session space later, at mint time,
+ * where the space is known.
+ */
+const parseInputCells = (
+  raw: string | readonly string[] | undefined,
+): readonly HarnessInputCellSpec[] => {
+  const values = raw === undefined
+    ? []
+    : (typeof raw === "string" ? [raw] : raw);
+  const specs: HarnessInputCellSpec[] = [];
+  const names = new Set<string>();
+  for (const value of values) {
+    const parsed = parseInputCellArgument(value);
+    // Refused here, at parse, so the defect is classified as the invalid
+    // request it is and no model client, session, or run setup is reached;
+    // `mintInputCellHandles` keeps its own check for non-CLI callers.
+    if (names.has(parsed.name)) {
+      throw new Error(`--input-cell names \`${parsed.name}\` twice`);
+    }
+    names.add(parsed.name);
+    specs.push({ name: parsed.name, ref: parsed.ref });
+  }
+  return specs;
 };
 
 const parseBrowserAccessLease = (
@@ -1323,6 +1368,9 @@ export const parseCfHarnessCliArgs = async (
       CF_HARNESS_FABRIC_CFC_FLOW_LABELS: Deno.env.get(
         "CF_HARNESS_FABRIC_CFC_FLOW_LABELS",
       ),
+      CF_HARNESS_FABRIC_CFC_POSTURE: Deno.env.get(
+        "CF_HARNESS_FABRIC_CFC_POSTURE",
+      ),
       CF_HARNESS_SANDBOX_IMAGE: Deno.env.get("CF_HARNESS_SANDBOX_IMAGE"),
       CF_HARNESS_SANDBOX_DOCKER_RUNTIME: Deno.env.get(
         "CF_HARNESS_SANDBOX_DOCKER_RUNTIME",
@@ -1421,6 +1469,15 @@ export const parseCfHarnessCliArgs = async (
     );
   }
   const readTextFile = deps.readTextFile ?? Deno.readTextFile;
+  const inputCells = parseInputCells(
+    args["input-cell"] as string | readonly string[] | undefined,
+  );
+  // A resumed run replays the input cells its run state recorded; a new
+  // one on resume would be silently ignored, so it is refused like --skill
+  // and --image are.
+  if (resumeRun !== undefined && inputCells.length > 0) {
+    throw new Error("--input-cell is not supported with --resume-run");
+  }
   const structuredResult = await parseStructuredResultConfig(args, {
     cwd,
     workspace,
@@ -1505,7 +1562,8 @@ export const parseCfHarnessCliArgs = async (
       | "fabric-identity"
       | "fabric-space"
       | "fabric-cfc-enforcement-mode"
-      | "fabric-cfc-flow-labels",
+      | "fabric-cfc-flow-labels"
+      | "fabric-cfc-posture",
     envValue: string | undefined,
   ): string | undefined => {
     const raw = typeof args[flag] === "string"
@@ -1555,6 +1613,17 @@ export const parseCfHarnessCliArgs = async (
       `--fabric-cfc-flow-labels must be off, observe, or persist: ${fabricCfcFlowLabels}`,
     );
   }
+  const fabricCfcPosture = fabricSessionFlagValue(
+    "fabric-cfc-posture",
+    env.CF_HARNESS_FABRIC_CFC_POSTURE,
+  );
+  if (
+    fabricCfcPosture !== undefined && fabricCfcPosture !== "max-enforcement"
+  ) {
+    throw new Error(
+      `--fabric-cfc-posture must be max-enforcement: ${fabricCfcPosture}`,
+    );
+  }
   let fabricSession: HarnessFabricSessionConfig | undefined;
   if (
     fabricApiUrl !== undefined || fabricIdentity !== undefined ||
@@ -1587,12 +1656,16 @@ export const parseCfHarnessCliArgs = async (
       ...(fabricCfcFlowLabels !== undefined
         ? { cfcFlowLabels: fabricCfcFlowLabels }
         : {}),
+      ...(fabricCfcPosture !== undefined
+        ? { cfcPosture: fabricCfcPosture }
+        : {}),
     };
   } else if (
-    fabricCfcEnforcementMode !== undefined || fabricCfcFlowLabels !== undefined
+    fabricCfcEnforcementMode !== undefined ||
+    fabricCfcFlowLabels !== undefined || fabricCfcPosture !== undefined
   ) {
     throw new Error(
-      "--fabric-cfc-enforcement-mode and --fabric-cfc-flow-labels configure the fabric session's runtime and need --fabric-api-url, --fabric-identity, and --fabric-space",
+      "--fabric-cfc-enforcement-mode, --fabric-cfc-flow-labels, and --fabric-cfc-posture configure the fabric session's runtime and need --fabric-api-url, --fabric-identity, and --fabric-space",
     );
   }
   // An allowlisted fabric-session tool with no session to run it against is
@@ -1659,6 +1732,7 @@ export const parseCfHarnessCliArgs = async (
       : {}),
     ...(browserAccess !== undefined ? { browserAccess } : {}),
     handleValueOrigins,
+    inputCells,
     maxModelTurns: parsePositiveInteger(
       typeof args["max-model-turns"] === "string"
         ? args["max-model-turns"]
@@ -2326,7 +2400,9 @@ export const formatCfHarnessCliResult = (
   if (result.runState.fabricSessionCfc !== undefined) {
     const posture = result.runState.fabricSessionCfc;
     lines.push(
-      `fabricSessionCfc: ${posture.enforcementMode} (${posture.enforcementModeSource}), flow-labels ${posture.flowLabels} (${posture.flowLabelsSource})`,
+      `fabricSessionCfc: ${posture.enforcementMode} (${posture.enforcementModeSource}), flow-labels ${posture.flowLabels} (${posture.flowLabelsSource})${
+        posture.posture !== undefined ? `, posture ${posture.posture}` : ""
+      }`,
     );
   }
   if (
@@ -2338,6 +2414,17 @@ export const formatCfHarnessCliResult = (
         result.runState.wellKnownGrants.map((grant) =>
           `${grant.name} ${grant.token}`
         ).join(", ")
+      }`,
+    );
+  }
+  if (
+    result.runState.inputCells !== undefined &&
+    result.runState.inputCells.length > 0
+  ) {
+    lines.push(
+      `inputCells: ${
+        result.runState.inputCells.map((cell) => `${cell.name} ${cell.token}`)
+          .join(", ")
       }`,
     );
   }
@@ -3207,6 +3294,9 @@ export const runCfHarnessCli = async (
           ? { runManifestPath: parsed.runManifestPath }
           : {}),
         ...(additionalMounts.length > 0 ? { additionalMounts } : {}),
+        ...(parsed.inputCells.length > 0
+          ? { inputCells: parsed.inputCells }
+          : {}),
       });
       activateEngine(engine);
       const loop = createPromptLoop({
@@ -3281,6 +3371,14 @@ export const runCfHarnessCli = async (
             })\n`,
           );
         }
+      }
+      // Operator input cells are explicit configuration, so unlike the
+      // grants a failure here fails the run rather than proceeding without
+      // what the operator asked for.
+      const inputCells = await engine.establishInputCells();
+      const inputCellsMessage = inputCellsContextMessage(inputCells);
+      if (inputCellsMessage !== undefined) {
+        contextMessages.push(inputCellsMessage);
       }
       result = await loop.runPrompt({
         prompt: parsed.prompt!,

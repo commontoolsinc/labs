@@ -37,6 +37,8 @@ const ENUMERATED_OPTION_VALUES: Readonly<Record<string, readonly string[]>> = {
   "cfc-mode": ["off", "warn", "enforce"],
   // `cf piece map --format`.
   "format": ["ascii", "dot"],
+  // `cf piece survey --side`: which document holds the collection.
+  "side": ["input", "result"],
   // `cf inspect entities --kind`, the seven its help enumerates.
   "kind": [
     "piece",
@@ -117,6 +119,16 @@ export function optionNameCandidates(
 /** Accepted values of a pre-parse global, for its `--flag <value>` slot. */
 export function preParseGlobalValues(global: PreParseGlobal): Candidate[] {
   return (global.values ?? []).map((value) => ({ value }));
+}
+
+/**
+ * The option long names carrying a statically known value set.
+ *
+ * For the gate that asks whether every slot has been decided about: an option
+ * answered from this table needs no provider entry.
+ */
+export function enumeratedOptionNames(): ReadonlySet<string> {
+  return new Set(Object.keys(ENUMERATED_OPTION_VALUES));
 }
 
 /**

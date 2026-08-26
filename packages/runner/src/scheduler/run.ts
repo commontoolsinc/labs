@@ -182,6 +182,7 @@ export function watchReactiveActionCommit(state: {
   readonly queueExecution: () => void;
   readonly restoreInvalidCauses: () => void;
   readonly getActionId: (action: Action) => string;
+  readonly reportTerminalRejection?: (error: Error) => void;
 }): Promise<void> {
   const handleResult = async (error: unknown): Promise<void> => {
     if (!error) {
@@ -287,9 +288,19 @@ export function watchReactiveActionCommit(state: {
     // a count accumulated by earlier transient attempts or the terminal one.
     // Resubscribe still happens (finalizeReactiveActionCommit), so a real input
     // change re-triggers.
+    //
+    // A terminal rejection additionally SURFACES (spec scheduler-v2 §7.6):
+    // it is a verdict on the action's own output, so it reaches the
+    // scheduler's error channel with the refusal carried along, where a
+    // permanent rejection — a benign lost idempotency race — stays quiet.
     if (isPermanentRejection(error) || isTerminalRejection(error)) {
       state.retries.delete(state.action);
       state.offBudgetRetries.delete(state.action);
+      if (isTerminalRejection(error)) {
+        state.reportTerminalRejection?.(
+          toTerminalRejectionError(error, state.action),
+        );
+      }
       return;
     }
 
@@ -836,6 +847,47 @@ function normalizeThrownError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
+/**
+ * A commit rejection is a plain result object, not an Error, so the error
+ * channel gets a constructed one preserving the rejection's name and, for a
+ * CFC refusal, its structured `reasons` — the discriminants a consumer needs
+ * to tell a policy refusal from a thrown computation. A thrown computation
+ * carries a pattern frame the error decoration reads piece attribution from;
+ * a commit rejection has none, so the attribution comes from the action's own
+ * observation identity, with the scope prefix stripped back to the result
+ * cell's id.
+ */
+function toTerminalRejectionError(error: unknown, action: Action): Error {
+  const rejection = error as {
+    name?: string;
+    message?: string;
+    reasons?: readonly string[];
+  };
+  const surfaced = new Error(
+    typeof rejection?.message === "string" ? rejection.message : String(error),
+  );
+  if (typeof rejection?.name === "string") surfaced.name = rejection.name;
+  if (rejection?.reasons !== undefined) {
+    (surfaced as { reasons?: readonly string[] }).reasons = rejection.reasons;
+  }
+  const identity = (action as Partial<TelemetryAnnotations>)
+    .schedulerObservationIdentity;
+  if (identity !== undefined) {
+    const context = surfaced as Error & { pieceId?: string; space?: string };
+    // `pieceRootId` is the raw result-cell id. `pieceId` is a SCOPE KEY plus
+    // that id, and a scope key is not one segment — `user:<principal>` and
+    // `session:<principal>:<sessionId>` both carry colons — so slicing at the
+    // first one leaves principal segments on a scoped piece and misattributes
+    // it.
+    const rootId = identity.pieceRootId;
+    if (rootId !== undefined) context.pieceId = rootId;
+    if (identity.ownerSpace !== undefined) {
+      context.space = identity.ownerSpace;
+    }
+  }
+  return surfaced;
+}
+
 function finalizeReactiveActionCommit(
   state: SchedulerActionRunState,
   args: {
@@ -946,6 +998,7 @@ function finalizeReactiveActionCommit(
         restoreInvalidCauses(state.nodes, args.action, args.invalidCauses);
       }
     },
+    reportTerminalRejection: (error) => state.handleError(error, args.action),
   });
   // The barrier entry commit() registered settles with the commit promise,
   // but the disposition above — a conflict's catch-up-then-requeue in

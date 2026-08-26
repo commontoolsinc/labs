@@ -619,10 +619,10 @@ function causeOnlySpotIds(
  * id — see {@link causeOnlySpotIds}) is returned PARSED, never resolved:
  * its coordinates are already the identity the caller wants, resolution of
  * a loaded spot stops there anyway (a stored plain link is not followed
- * under `writeRedirect`), and reading an absent one would record a
- * provisional miss on the transaction that the enclosing setup's argument
- * validation then inherits — postponing a child whose own argument read
- * everything it needed.
+ * under `writeRedirect`), and reading an absent one ties the scan to
+ * replication state while kicking a doc pull nothing can satisfy — for a
+ * kinded descriptor, the data lives at the KINDED entity and this id is
+ * never written.
  *
  * Exported for tests only.
  */
@@ -1509,10 +1509,21 @@ export class Runner {
               : new Error(error.message);
           }
           if (
-            error.name === "StorageTransactionAborted" &&
+            (error.name === "CfcCommitRefusalError" ||
+              error.name === "StorageTransactionAborted") &&
             error.message.startsWith("CFC enforcement rejected commit")
           ) {
-            throw new Error(error.message, { cause: error.reason });
+            // The two rejections carry their diagnostic differently: the
+            // boundary refusal carries every prepare reason as `reasons`,
+            // while the prepared-digest drift carries a marker `reason`.
+            // Reading only one drops the cause for the other.
+            const { reason, reasons } = error as {
+              reason?: unknown;
+              reasons?: readonly string[];
+            };
+            throw new Error(error.message, {
+              cause: reasons !== undefined ? [...reasons] : reason,
+            });
           }
         }
 
@@ -7911,9 +7922,9 @@ export class Runner {
       );
       // The manifest-blind bind above renders a partialCause alias as its
       // derived cell's kind-free id, which is cause-only — resolving it
-      // would read an entity the kinded data never lives at (and record a
-      // provisional miss the child's argument validation inherits), so the
-      // scan is told to take those coordinates as they stand.
+      // would read an entity the kinded data never lives at (and kick a
+      // doc pull nothing can satisfy), so the scan is told to take those
+      // coordinates as they stand.
       const outputRedirect = firstResolvedOutputRedirect(
         this.runtime,
         tx,

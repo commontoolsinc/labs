@@ -686,13 +686,15 @@ The prompt/tool loop applies the swaps at three seams. Successful tool output
 bound for model context carries tokens, while the persisted tool-output artifact
 keeps the raw addresses. Model-authored tool arguments resolve tokens back to
 canonical references before policy evaluation, summarization, and dispatch —
-except for `delegate_task`, whose arguments reach the child verbatim, so a token
-there is inert text to the parent boundary. And a sealed subagent
-structured-return string whose raw value names an address comes back as a token
-rather than an opaque `@link` object; the return's `linkedStringCount` counts
-only the positions still sealed. Denial-path tool messages are not swapped; that
-coverage, value handles, and an explicit release/readback mechanism are listed
-in [docs/ROADMAP.md](docs/ROADMAP.md).
+except for `delegate_task`, whose `goal` and `context` reach the child verbatim,
+so a token there is inert text to the parent boundary (its `skillHandle` is the
+one delegate argument the parent boundary resolves itself: trusted-side
+materialization is that parameter's whole point — see "Skill by handle" below).
+And a sealed subagent structured-return string whose raw value names an address
+comes back as a token rather than an opaque `@link` object; the return's
+`linkedStringCount` counts only the positions still sealed. Denial-path tool
+messages are not swapped; that coverage, value handles, and an explicit
+release/readback mechanism are listed in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 #### Well-known grants
 
@@ -721,6 +723,28 @@ session that cannot be established leaves the run to proceed without its grants,
 and the CLI says so on stderr rather than staying silent. The grant list is
 designed to grow; the identity's profile is the expected next entry.
 
+#### Operator input cells
+
+`--input-cell <name>=<link>` (repeatable) passes a cell into the run by
+reference: a cell populated in the space before the run exists, handed to the
+run as its input. Cells are the runtime's medium of exchange; the handle minted
+for one is only how the harness names a cell to a model that cannot hold
+addresses. The model is told the token and the operator's `<name>` for it,
+nothing more: the run's inputs reach the model from its first turn while their
+values stay in the fabric, so a prompt never holds a literal it could inline or
+pass on by accident. No shape is stated on the flag, by rule: an input cell
+carries its own declared schema in the fabric — the same place its CFC labels
+live — and `describe_handle` answers from that declaration, so there is one
+source of truth and nothing an operator-written view could drift from or quietly
+claim.
+
+Unlike a grant, an input cell is explicit configuration, so failure is closed
+and loud rather than tolerated: a malformed argument is a usage error, and a
+reference that does not parse, targets another space, or arrives on a run
+without a fabric session fails the run before the model is involved. The cells
+are recorded in run state (`inputCells`), replayed rather than re-minted on
+resume, and reported in the operator summary as `inputCells:`.
+
 #### Inspecting a handle's shape
 
 A token says nothing about what it refers to, and an agent handed one cannot
@@ -745,14 +769,15 @@ piece the token names — and never the value.
 Two sources can answer, in this order. The referent's own declared schema, read
 through the run's fabric session when it has one: a piece's document schema is
 the result schema of the pattern behind it, which is exactly what an agent
-holding a handle to that piece would be wiring into a pattern of its own.
-Failing that, the schema the mint recorded out of the harness's own work — a
-`run_pattern` result reference carries the compiled pattern's result schema,
-which compilation produced anyway, and the entry is marked
-`schemaSource: "harness"`. A run with no session still answers from its own
-table, so shape stays inspectable in every run that has handles at all. A token
-the run's table does not hold comes back `known: false` rather than as an error,
-since a token from another run simply names nothing here.
+holding a handle to that piece would be wiring into a pattern of its own — and
+it is where a cell's CFC labels live, which is why an input cell's shape always
+answers from its own declaration. Failing that, the schema the mint recorded out
+of the harness's own work — a `run_pattern` result reference carries the
+compiled pattern's result schema, which compilation produced anyway, and the
+entry is marked `schemaSource: "harness"`. A run with no session still answers
+from its own table, so shape stays inspectable in every run that has handles at
+all. A token the run's table does not hold comes back `known: false` rather than
+as an error, since a token from another run simply names nothing here.
 
 **What is disclosed is structure and only structure**: property names, types,
 nesting, required-ness, array and object composition, a `type` from the schema
@@ -876,6 +901,34 @@ with no session configured the tool is absent from the child's surface rather
 than present-but-failing. The `browser`, `web_fetch`, and `web_search` profiles
 do not offer it.
 
+#### Skill by handle
+
+`delegate_task` takes an optional `skillHandle`: a handle the parent holds,
+naming a cell whose string value is skill text for the child. The text is
+materialized on the trusted host side at child spawn — through the same
+resolution contract as every other handle value: table membership mandatory,
+string-only, same-space-only, with a structured refusal naming the reference on
+any miss, delivered before any child exists — and injected into the child's
+context as a `<skill_context source="handle:<token>">` block beside the
+profile's registry preload. The parent never reads the text, and the child never
+holds the handle. The return path is mediated too: every parent-facing return of
+such a delegation has the exact injected payload (and its JSON-escaped spelling)
+scrubbed to fixed inert text, so a child that echoes its instructions verbatim
+cannot walk the payload into the parent transcript. The scrub is deliberately no
+more than that — the child exists to act on the skill, so what it did because of
+the text is its ordinary, policy-mediated output.
+
+A handle-delivered skill bypasses the registry entirely: it is transient run
+state from a cell, the untrusted-acquisition complement to the trusted operator
+`--skills-root`, and for the delegated path it retires selection by name — the
+name-squat surface — in favor of an unforgeable table entry. It carries no
+directory, so it has no supporting-resource index and no scripts;
+`run_skill_script`'s operator allowlist cannot name it, and the skill-context
+preamble that keeps a skill from authorizing tools applies to it unchanged. The
+child's activation record carries `source: "skill-handle"`, the token, and the
+digest of the exact text injected, so the artifacts say which reference supplied
+the skill and what it said.
+
 ### Running patterns against a Fabric space
 
 This is the second half of [the model](#the-model-handles-and-patterns): the
@@ -914,8 +967,8 @@ space's authorization, and only a healthy session is cached for the run. A
 session that fails to build surfaces as an ordinary tool-output error rather
 than a run failure, and the next tool call retries the construction.
 
-Two further flags set the session runtime's CFC dials, and both need the three
-session flags present. `--fabric-cfc-enforcement-mode`
+Three further flags set the session runtime's CFC dials, and each needs the
+three session flags present. `--fabric-cfc-enforcement-mode`
 (`CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE`) accepts `enforce-explicit` or
 `enforce-strict` — raise-only, since the session's runtime preset already pins
 `enforce-explicit`; under `enforce-strict`, a pattern whose writes carry
@@ -923,15 +976,26 @@ confidentiality its target's declared policy does not admit has its commit
 refused. `--fabric-cfc-flow-labels` (`CF_HARNESS_FABRIC_CFC_FLOW_LABELS`)
 accepts `off`, `observe`, or `persist`; `persist` stamps the derived flow labels
 onto everything a pattern's transaction writes, which is what makes a labelled
-read visible to that refusal. These dials govern the fabric session's runtime
-only — `--cfc-enforcement-mode` remains the harness's own dial for tool policy
-and the sandbox, and the two are set independently.
+read visible to that refusal. `--fabric-cfc-posture`
+(`CF_HARNESS_FABRIC_CFC_POSTURE`) accepts `max-enforcement` and opts the
+session's runtime into the named CFC posture bundle
+(`MAX_ENFORCEMENT_CFC_OPTIONS` in the runner's presets): every staged
+enforcement dial on, the standard prompt-caveat policy loaded, and public-only
+ceilings on the network-fetch sinks (the llm sinks carry no ceiling and are
+ungoverned by the posture, pending a boundary-scoped admission mechanism). The
+two per-dial flags still apply over the bundle, so
+`--fabric-cfc-posture max-enforcement
+--fabric-cfc-enforcement-mode enforce-strict`
+is the full-strictness configuration. These dials govern the fabric session's
+runtime only — `--cfc-enforcement-mode` remains the harness's own dial for tool
+policy and the sandbox, and the two are set independently.
 
 A run states both postures rather than leaving them to be inferred: the resolved
 fabric-session posture — each dial's value and whether the operator configured
-it or the preset supplied it — is recorded as `fabricSessionCfc` in
-`run-state.json` and the run report, and the operator summary prints it beside
-the harness's own `cfcMode`.
+it, the named posture bundle supplied it, or the preset's default stood — is
+recorded as `fabricSessionCfc` in `run-state.json` and the run report (with the
+selected bundle, when there is one, as its `posture` field), and the operator
+summary prints it beside the harness's own `cfcMode`.
 
 The tool takes `sourceText` (inline pattern source, at most 256 KiB — an
 over-cap source is a structured tool error), an optional `inputs` object, and an

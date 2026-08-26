@@ -189,10 +189,113 @@ Deno.test("CfHarnessEngine records the fabric session's resolved CFC posture in 
     flowLabelsSource: "default",
   });
 
+  // The named bundle supplies persist when the operator selects the posture
+  // and leaves the flow-labels dial unset; a configured dial would still win.
+  const postured = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSession: {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+      cfcPosture: "max-enforcement",
+    },
+  });
+  assertEquals(postured.getRunState().fabricSessionCfc, {
+    enforcementMode: "enforce-explicit",
+    enforcementModeSource: "preset-pin",
+    flowLabels: "persist",
+    flowLabelsSource: "posture",
+    posture: "max-enforcement",
+  });
+
   const sessionless = new CfHarnessEngine({
     workspaceHostPath: "/host/project",
   });
   assertEquals(sessionless.getRunState().fabricSessionCfc, undefined);
+});
+
+Deno.test("CfHarnessEngine refuses to resume under a fabric-session posture that contradicts the recorded one", () => {
+  const posturedSession = {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "my-space",
+    cfcPosture: "max-enforcement",
+  } as const;
+  const runState = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSession: posturedSession,
+  }).getRunState();
+
+  // The contradiction: the artifacts claim max-enforcement while the session
+  // the resumed engine would actually build runs the default posture.
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        workspaceHostPath: "/host/project",
+        fabricSession: {
+          apiUrl: posturedSession.apiUrl,
+          identityKeyPath: posturedSession.identityKeyPath,
+          space: posturedSession.space,
+        },
+        runState,
+      }),
+    Error,
+    "fabric session CFC posture mismatch on resume",
+  );
+
+  // The same session configuration resumes cleanly, record unchanged.
+  const resumed = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSession: posturedSession,
+    runState,
+  });
+  assertEquals(resumed.getRunState().fabricSessionCfc, {
+    enforcementMode: "enforce-explicit",
+    enforcementModeSource: "preset-pin",
+    flowLabels: "persist",
+    flowLabelsSource: "posture",
+    posture: "max-enforcement",
+  });
+
+  // A resume with no session at all keeps the record as history: no runtime
+  // exists for it to contradict.
+  const detached = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    runState,
+  });
+  assertEquals(
+    detached.getRunState().fabricSessionCfc?.posture,
+    "max-enforcement",
+  );
+
+  // A legacy record (no posture ever captured) stays frozen as history:
+  // plain session dials may restate the original invocation, but the named
+  // bundle cannot have been what the run ran, so a posture resume is refused.
+  const legacyState = {
+    ...runState,
+    fabricSessionCfc: undefined,
+  } as typeof runState;
+  const legacyWithDials = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSession: {
+      apiUrl: posturedSession.apiUrl,
+      identityKeyPath: posturedSession.identityKeyPath,
+      space: posturedSession.space,
+      cfcEnforcementMode: "enforce-strict",
+    },
+    runState: legacyState,
+  });
+  assertEquals(legacyWithDials.getRunState().fabricSessionCfc, undefined);
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        workspaceHostPath: "/host/project",
+        fabricSession: posturedSession,
+        runState: legacyState,
+      }),
+    Error,
+    "records no fabric-session posture",
+  );
 });
 
 Deno.test("CfHarnessEngine grants no well-known handles without a fabric session", async () => {
@@ -245,6 +348,91 @@ Deno.test("CfHarnessEngine seeds the piece-registry grant once and replays the r
   // A second establishment answers from the record without another resolve.
   assertEquals(await engine.establishWellKnownGrants(), granted);
   assertEquals(registryReads, 1);
+});
+
+Deno.test("CfHarnessEngine mints operator input cells once and replays the record", async () => {
+  const cellSpace = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+  const cellRef = `/of:fid1:${"D".repeat(43)}/travellerName`;
+  let spaceReads = 0;
+  const engine = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    inputCells: [{
+      name: "travellerName",
+      ref: cellRef,
+    }],
+    fabricSessionFactory: () =>
+      Promise.resolve(
+        {
+          pieces: {
+            getSpace: () => {
+              spaceReads += 1;
+              return cellSpace;
+            },
+          },
+          // deno-lint-ignore no-explicit-any
+        } as any,
+      ),
+  });
+
+  const inputCells = await engine.establishInputCells();
+  assertEquals(inputCells.length, 1);
+  assertEquals(inputCells[0]!.name, "travellerName");
+  assertEquals(inputCells[0]!.ref, cellRef);
+  assertEquals(engine.getRunState().inputCells, inputCells);
+  const entry = engine.handleTable?.entries.find(
+    (candidate) => candidate.token === inputCells[0]!.token,
+  );
+  assertEquals(entry?.schema, undefined);
+  assertEquals(entry?.schemaSource, undefined);
+
+  // A second establishment answers from the record without another session.
+  assertEquals(await engine.establishInputCells(), inputCells);
+  assertEquals(spaceReads, 1);
+});
+
+Deno.test("CfHarnessEngine refuses operator input cells without a fabric session", async () => {
+  const engine = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    inputCells: [{
+      name: "travellerName",
+      ref: `/of:fid1:${"D".repeat(43)}/travellerName`,
+    }],
+  });
+  await assertRejects(
+    () => engine.establishInputCells(),
+    Error,
+    "requires a fabric session",
+  );
+  assertEquals(engine.getRunState().inputCells, undefined);
+});
+
+Deno.test("CfHarnessEngine refuses an operator input cell into another space, recording nothing", async () => {
+  const engine = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    inputCells: [{
+      name: "foreign",
+      ref: `/@did:key:z6MkforeignSpaceForEngineSeedTest/of:fid1:${
+        "E".repeat(43)
+      }/x`,
+    }],
+    fabricSessionFactory: () =>
+      Promise.resolve(
+        {
+          pieces: {
+            getSpace: () =>
+              "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
+          },
+          // deno-lint-ignore no-explicit-any
+        } as any,
+      ),
+  });
+  await assertRejects(
+    () => engine.establishInputCells(),
+    Error,
+    "targets another space",
+  );
+  assertEquals(engine.getRunState().inputCells, undefined);
+  assertEquals(engine.handleTable, undefined);
 });
 
 Deno.test("CfHarnessEngine rejects only cross-model Codex resume", () => {

@@ -516,6 +516,14 @@ export interface DelegateTaskToolInput {
   context?: string;
   maxModelTurns?: number;
   returnSchema?: JSONSchema;
+  /**
+   * A handle the PARENT holds, naming a cell whose string value is skill
+   * text for the child. Materialized trusted-side at child spawn — the
+   * parent never reads the text, and the child receives it as a skill
+   * context block rather than as a registry activation, so selection is by
+   * unforgeable table membership instead of by name.
+   */
+  skillHandle?: string;
 }
 
 export interface DelegateTaskToolOutput {

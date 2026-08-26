@@ -1581,36 +1581,36 @@ export async function dispatchQueuedEvent(state: {
         telemetryFailure = { error };
       }
 
+      // A served event's DETERMINISTIC CFC pre-storage refusal seals an
+      // error consequence (events.md §5: the error IS the consequence — the
+      // same honesty as the throw arm in `finalize` above). Without one the
+      // durable entry stays unconsequenced and every wave re-drains it into
+      // the identical refusal. Scoped to exactly the class
+      // `reportDroppedCfcRejectedWrite` reports: every other non-retried
+      // outcome (transport, authorization, a handler abort, opt-out) leaves
+      // the entry pending for the wave cadence to re-drain. Called before the
+      // commit callback on both paths that carry a refusal, so the drain's
+      // in-flight guard sees the staged notice ("marked") rather than
+      // releasing the still-"queued" copy.
+      const sealCfcRefusalConsequence = (): void => {
+        if (served === undefined || !isCfcRejectedCommitError(error)) return;
+        try {
+          served.onFailure?.({ kind: "error", message: error.message });
+        } catch (callbackError) {
+          logger.error(
+            "schedule-error",
+            "Error in served event failure callback:",
+            callbackError,
+          );
+        }
+      };
+
       switch (disposition.kind) {
         case "success":
           runFinalCommitCallback();
           break;
         case "give-up":
-          // A served event's DETERMINISTIC CFC pre-storage refusal seals an
-          // error consequence (events.md §5: the error IS the consequence —
-          // the same honesty as the throw arm in `finalize` above). Without
-          // one the durable entry stays unconsequenced and every wave
-          // re-drains it into the identical refusal. Scoped to exactly the
-          // class `reportDroppedCfcRejectedWrite` reports below: every other
-          // give-up (transport, authorization, a handler abort, opt-out)
-          // leaves the entry pending for the wave cadence to re-drain.
-          // Ordered before the commit callback so the drain's in-flight
-          // guard sees the staged notice ("marked") rather than releasing
-          // the still-"queued" copy.
-          if (served !== undefined && isCfcRejectedCommitError(error)) {
-            try {
-              served.onFailure?.({
-                kind: "error",
-                message: error.message,
-              });
-            } catch (callbackError) {
-              logger.error(
-                "schedule-error",
-                "Error in served event failure callback:",
-                callbackError,
-              );
-            }
-          }
+          sealCfcRefusalConsequence();
           runFinalCommitCallback();
           reportDroppedCfcRejectedWrite(error, handlerId);
           logger.warn(
@@ -1643,7 +1643,16 @@ export async function dispatchQueuedEvent(state: {
           // handleError — the rejection is observable via the commit telemetry
           // marker (`terminal: "rule"`), mirroring the permanent path; surfacing
           // a scheduler error here is reserved for non-deterministic failures.
+          // A CFC boundary refusal is classified terminal rather than
+          // give-up, so both of the give-up path's CFC obligations have to
+          // hold here too: seal the served entry's error consequence, and
+          // report the dropped write. Neither is optional — see
+          // `sealCfcRefusalConsequence` for what an unconsequenced entry
+          // costs, and `reportDroppedCfcRejectedWrite` for why the
+          // `logger.warn` below is not enough on its own.
+          sealCfcRefusalConsequence();
           runFinalCommitCallback();
+          reportDroppedCfcRejectedWrite(error, handlerId);
           logger.warn(
             "scheduler",
             "Event handler commit terminally rejected (deterministic refusal); " +
@@ -1790,8 +1799,9 @@ type CommitDisposition =
  *  - permanent: a commit-time precondition failure (receipt-exists,
  *    origin-committed). Re-running can never succeed and would double-handle the
  *    event, so it is never retried.
- *  - terminal: a deterministic server-side refusal of the committed data (a CFC
- *    row-label commit-rule violation, `isTerminalRejection`); never retried —
+ *  - terminal: a deterministic refusal of the committed data on its own merits
+ *    (`isTerminalRejection`) — the server's CFC row-label commit rule, or the
+ *    client's CFC boundary refusing before storage; never retried —
  *    re-running recomputes the identical refused write, and the doomed re-runs'
  *    speculative rev bumps would starve concurrent siblings. Surfaced as a
  *    terminal outcome (telemetry `terminal: "rule"`) rather than a silent drop.

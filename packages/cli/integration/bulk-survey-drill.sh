@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
 # The bulk-operations drill: deploy a board whose members are created
-# through its own verb, survey it, assert the plan — and repair it: a fixer
-# run dry with every plan row recording its precondition and fixer, applied
-# from that plan, resumed as all-landed writing nothing, and a
-# field-dropping fixer refused by name. Stages 1 and 2 of
-# docs/plans/piece-bulk-operations.md, which finishes each stage with a CI
-# drill so "does the migration tooling still work?" stays a CI result.
+# through its own verb, survey it, assert the plan — repair it: a fixer run
+# dry with every plan row recording its precondition and fixer, applied from
+# that plan, resumed as all-landed writing nothing, and a field-dropping
+# fixer refused by name — and retarget it: the stamped plan applied to
+# completion, a run killed midway and finished by re-invocation, an edited
+# source refused with every unattempted piece named, a piece moved elsewhere
+# stopping the run, and the after-survey diffed against the plan it verifies.
+# Stages 1 through 3 of docs/plans/piece-bulk-operations.md, which finishes
+# each stage with a CI drill so "does the migration tooling still work?"
+# stays a CI result.
 #
 # It deploys pattern/bulk-board.tsx (members from pattern/bulk-member.tsx, a
 # separate module so member and board identities differ, the way topic.tsx
-# sits beside the topics board's main.tsx) and stamps a retarget from
-# pattern/bulk-member-v2.tsx, which is never deployed: the survey computes the
-# identity the source produces without writing anything. The fixtures belong
-# to this drill alone.
+# sits beside the topics board's main.tsx) and retargets them onto
+# pattern/bulk-member-v2.tsx — the checked-in fixture pair the design calls
+# for, a trimmed prior generation and a current one, so the drill reds when
+# bulk operations break rather than when a real pattern changes. The fixtures
+# belong to this drill alone.
 #
 # Every step names the property it asserts. A fresh space per run, no prior
 # state, no store access — the survey is API-only.
@@ -28,6 +33,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 API_URL="${API_URL:-http://localhost:8000}"
 BOARD_FIXTURE="$SCRIPT_DIR/pattern/bulk-board.tsx"
+MEMBER_FIXTURE="$SCRIPT_DIR/pattern/bulk-member.tsx"
 RETARGET_FIXTURE="$SCRIPT_DIR/pattern/bulk-member-v2.tsx"
 
 # Prefer a built binary when the harness supplies one; fall back to source.
@@ -287,9 +293,207 @@ RUN3=$($CF piece repair -q --piece "$BOARD" --path items $ARGS \
 check "$(printf '%s\ttrue' "$((MEMBERS_NOW - 2))")" "$RUN3" \
   "the amended fixer completes the remainder by re-invocation"
 
-step "12. A registered in-scope orphan makes the survey refuse"
+step "12. A retarget plan over the whole board, from the fixture pair"
+# The source is a copy, so a later step can edit it and prove the apply
+# refuses a source that no longer produces the reference the plan recorded.
+NEXT_SOURCE="$WORK/member-next.tsx"
+cp "$RETARGET_FIXTURE" "$NEXT_SOURCE"
+RETARGET_PLAN="$WORK/retarget.jsonl"
+if $CF piece survey -q --piece "$BOARD" --path items $ARGS \
+  --retarget "items=$NEXT_SOURCE" --main-export Member \
+  --out "$RETARGET_PLAN" 2>"$WORK/retarget-survey.err"; then
+  ok "the survey stamped the retarget onto every member row"
+else
+  bad "the retarget survey exited nonzero"
+  sed 's/^/  | /' "$WORK/retarget-survey.err"
+  exit 1
+fi
+PLAN_OPS=$(tail -n +2 "$RETARGET_PLAN" | jq -rs \
+  'map(select(has("op"))) | length')
+check "$MEMBERS_NOW" "$PLAN_OPS" "one retarget row per member, the holder none"
+
+step "13. The dry run classifies every row and writes nothing"
+DRY=$($CF piece retarget -q $ARGS --plan "$RETARGET_PLAN" --json \
+  2>"$WORK/retarget-dry.err" | sed 's/^fvj1://' |
+  jq -r '[(.applied|tostring), (.complete|tostring),
+    (.rows | map(.verdict) | unique | join(",")),
+    (.rows | length | tostring)] | @tsv')
+check "$(printf '0\ttrue\toutstanding\t%s' "$MEMBERS_NOW")" "$DRY" \
+  "every row reads outstanding against its own reference pair"
+
+step "14. An edited source is refused, and the stop names the remainder"
+# The reviewed plan pins the identity the source produced when it was
+# reviewed. An edited source is a different identity, so the apply refuses
+# the first row rather than landing something the plan's reader never saw.
+printf '\n// edited after the plan was reviewed\n' >> "$NEXT_SOURCE"
+if $CF piece retarget -q $ARGS --plan "$RETARGET_PLAN" --apply \
+  --out "$WORK/stop.json" 2>"$WORK/retarget-stop.err"; then
+  bad "an edited source ran under the reviewed plan"
+else
+  ok "an edited source exited nonzero under the reviewed plan"
+fi
+STOP_FACTS=$(sed 's/^fvj1://' "$WORK/stop.json" | jq -r '[(.applied|tostring),
+  (.complete|tostring), (.rows[0].verdict),
+  (.rows | map(select(.verdict == "unattempted") | .piece) | unique | length
+    | tostring)] | @tsv')
+check "$(printf '0\tfalse\trefused\t%s' "$((MEMBERS_NOW - 1))")" "$STOP_FACTS" \
+  "the first row was refused, and every other piece is named unattempted"
+if grep -q "resolves to" "$WORK/retarget-stop.err"; then
+  ok "the refusal names the identity the source resolves to now"
+else
+  bad "the refusal does not name the resolved identity"
+  sed 's/^/  | /' "$WORK/retarget-stop.err"
+fi
+cp "$RETARGET_FIXTURE" "$NEXT_SOURCE"
+
+step "15. A run killed midway is completed by re-invoking the same command"
+# The report streams a row at a time to stdout, so the drill reads rows as
+# they land and kills the run on the sixth — inside the second group, past
+# one group boundary. Nothing is waited on but the rows themselves.
+#
+# The interruption is proved rather than assumed, because a run that finished
+# on its own would satisfy every assertion about the second invocation while
+# exercising none of what this step exists for. Two independent proofs, both
+# required: the first invocation's exit status must be a signal death, and a
+# read-only pass between the two invocations must find real work on both
+# sides of the cut.
+mkfifo "$WORK/progress"
+$CF piece retarget -q $ARGS --plan "$RETARGET_PLAN" --apply --group-size 5 \
+  >"$WORK/progress" 2>"$WORK/retarget-killed.err" &
+KILLED_PID=$!
+# The read end stays open past the loop, on its own descriptor: closing it at
+# the break would deliver a broken pipe and end the run before the signal
+# does, which is a different interruption from the one this step claims.
+exec 3<"$WORK/progress"
+WATCHED=0
+while IFS= read -r _row <&3; do
+  WATCHED=$((WATCHED + 1))
+  [ "$WATCHED" -ge 6 ] && break
+done
+if [ "$WATCHED" -ge 6 ]; then
+  ok "watched $WATCHED rows land"
+else
+  bad "the run ended before six rows landed (saw $WATCHED)"
+  sed 's/^/  | /' "$WORK/retarget-killed.err"
+fi
+if kill "$KILLED_PID" 2>/dev/null; then
+  ok "signalled the run partway through its second group"
+else
+  bad "the run was already gone when the drill signalled it, so nothing was \
+interrupted and this step proves nothing"
+fi
+wait "$KILLED_PID"
+KILLED_STATUS=$?
+exec 3<&-
+# 128 plus the signal number: 143 for the SIGTERM sent above, 137 if it
+# escalated. Any other status is a run that reached its own exit — the race
+# this step must go red on rather than pass through.
+if [ "$KILLED_STATUS" = "143" ] || [ "$KILLED_STATUS" = "137" ]; then
+  ok "the first invocation died on the signal (exit $KILLED_STATUS)"
+else
+  bad "the first invocation exited $KILLED_STATUS rather than on the signal: \
+it ran to its own end before the drill could stop it"
+fi
+# What the cut left behind, read without writing: rows on both sides of it.
+# Zero on either side is a run that was never stopped midway, whatever the
+# exit status said.
+MIDWAY=$($CF piece retarget -q $ARGS --plan "$RETARGET_PLAN" --json \
+  2>"$WORK/retarget-midway.err" | sed 's/^fvj1://' |
+  jq -r '[(.rows | map(select(.verdict == "landed")) | length | tostring),
+    (.rows | map(select(.verdict == "outstanding")) | length | tostring)]
+    | @tsv')
+MIDWAY_LANDED=$(printf '%s' "$MIDWAY" | cut -f1)
+MIDWAY_OUTSTANDING=$(printf '%s' "$MIDWAY" | cut -f2)
+if [ "${MIDWAY_LANDED:-0}" -ge "$WATCHED" ] &&
+  [ "${MIDWAY_OUTSTANDING:-0}" -gt 0 ]; then
+  ok "the cut left $MIDWAY_LANDED landed and $MIDWAY_OUTSTANDING outstanding"
+else
+  bad "the cut left $MIDWAY_LANDED landed and $MIDWAY_OUTSTANDING \
+outstanding, of $WATCHED rows watched: the run was not stopped midway"
+fi
+check "$MEMBERS_NOW" \
+  "$((${MIDWAY_LANDED:-0} + ${MIDWAY_OUTSTANDING:-0}))" \
+  "between the invocations every row is landed or outstanding, nothing else"
+RESUME=$($CF piece retarget -q $ARGS --plan "$RETARGET_PLAN" --apply --json \
+  2>"$WORK/retarget-resume.err" | sed 's/^fvj1://' |
+  jq -r '[(.complete|tostring),
+    (.rows | map(select(.verdict == "landed")) | length | tostring),
+    (.rows | map(select(.verdict == "applied")) | length | tostring)] | @tsv')
+RESUME_COMPLETE=$(printf '%s' "$RESUME" | cut -f1)
+RESUME_LANDED=$(printf '%s' "$RESUME" | cut -f2)
+RESUME_APPLIED=$(printf '%s' "$RESUME" | cut -f3)
+check "true" "$RESUME_COMPLETE" "the re-invocation completed the run"
+check "$MIDWAY_LANDED" "$RESUME_LANDED" \
+  "the rows the killed run landed were read as landed, not rewritten"
+check "$MIDWAY_OUTSTANDING" "$RESUME_APPLIED" \
+  "the re-invocation wrote the remainder, and only the remainder"
+check "$MEMBERS_NOW" "$((${RESUME_LANDED:-0} + ${RESUME_APPLIED:-0}))" \
+  "every member row is accounted for across the two invocations"
+
+step "16. Re-running the completed plan writes nothing"
+SETTLED=$($CF piece retarget -q $ARGS --plan "$RETARGET_PLAN" --apply --json \
+  2>/dev/null | sed 's/^fvj1://' | jq -r '[(.applied|tostring),
+    (.complete|tostring), (.rows | map(.verdict) | unique | join(","))]
+    | @tsv')
+check "$(printf '0\ttrue\tlanded')" "$SETTLED" \
+  "a settled plan re-runs as all-landed and writes nothing"
+
+step "17. A piece on neither of its row's references stops the run by name"
+FIRST_MEMBER=$(tail -n +2 "$RETARGET_PLAN" |
+  jq -r 'select(has("op")) | .piece' | head -1)
+SECOND_MEMBER=$(tail -n +2 "$RETARGET_PLAN" |
+  jq -r 'select(has("op")) | .piece' | sed -n 2p)
+# MemberAlias is the same module under a second symbol, so this piece now
+# carries the target row's identity and not its symbol: a check comparing the
+# identity alone would call it landed.
+if $CF piece setsrc -q --piece "$FIRST_MEMBER" --main-export MemberAlias \
+  "$RETARGET_FIXTURE" $ARGS >/dev/null 2>"$WORK/alias.err"; then
+  ok "moved a member to the target identity under another symbol"
+else
+  bad "moving a member to the alias export failed"
+  sed 's/^/  | /' "$WORK/alias.err"
+fi
+if $CF piece retarget -q $ARGS --plan "$RETARGET_PLAN" --apply \
+  --out "$WORK/moved.json" 2>"$WORK/moved.err"; then
+  bad "a piece on neither reference did not stop the run"
+else
+  ok "a piece on neither reference exited nonzero"
+fi
+MOVED_FACTS=$(sed 's/^fvj1://' "$WORK/moved.json" | jq -r '[(.applied|tostring),
+  (.complete|tostring),
+  (.rows | map(select(.verdict == "moved-elsewhere") | .piece) | join(",")),
+  (.rows | map(select(.verdict == "landed")) | length | tostring)] | @tsv')
+check "$(printf '0\tfalse\t%s\t%s' "$FIRST_MEMBER" "$((MEMBERS_NOW - 1))")" \
+  "$MOVED_FACTS" \
+  "the moved piece is named, and nothing was written for any row"
+if grep -q "$FIRST_MEMBER" "$WORK/moved.err"; then
+  ok "the stop names the piece rather than counting it"
+else
+  bad "the stop does not name the moved piece"
+  sed 's/^/  | /' "$WORK/moved.err"
+fi
+
+step "18. The after-survey tells the three outcomes apart"
+# One member back on the prior generation, so the diff has an outstanding row
+# to distinguish from the one that moved somewhere the plan never named.
+$CF piece setsrc -q --piece "$SECOND_MEMBER" --main-export Member \
+  "$MEMBER_FIXTURE" $ARGS >/dev/null 2>"$WORK/revert.err" ||
+  bad "moving a member back to the prior generation failed"
+if $CF piece survey -q --piece "$BOARD" --path items $ARGS \
+  --diff "$RETARGET_PLAN" --json >"$WORK/diff.json" 2>"$WORK/diff.err"; then
+  bad "the diff exited 0 with rows outstanding and moved elsewhere"
+else
+  ok "the diff exited nonzero with rows outstanding and moved elsewhere"
+fi
+DIFF_FACTS=$(jq -r '[(.counts.landed|tostring), (.counts.outstanding|tostring),
+  (.counts["moved-elsewhere"]|tostring), (.counts.unchanged|tostring),
+  (.unplanned | length | tostring)] | @tsv' "$WORK/diff.json")
+check "$(printf '%s\t1\t1\t1\t0' "$((MEMBERS_NOW - 2))")" "$DIFF_FACTS" \
+  "moved as planned, still outstanding, and moved to something unplanned"
+
+step "19. A registered in-scope orphan makes the survey refuse"
 ORPHAN=$($CF piece new --quiet --main-export Member \
-  "$SCRIPT_DIR/pattern/bulk-member.tsx" $ARGS 2>/dev/null |
+  "$MEMBER_FIXTURE" $ARGS 2>/dev/null |
   grep -oE '^fid1:[A-Za-z0-9_-]+' | head -1)
 if [ -n "$ORPHAN" ]; then ok "registered orphan $ORPHAN"; else
   bad "orphan deploy failed"
@@ -306,7 +510,7 @@ else
   bad "the refusal does not name the orphan"
 fi
 
-step "13. A list survey claims no containment"
+step "20. A list survey claims no containment"
 LIST_FACTS=$($CF piece survey -q --list "$BOARD" $ARGS 2>/dev/null |
   head -1 | jq -r '[.selector, (.enumerated.collection|tostring),
     (.enumerated.registeredOutside|tostring)] | @tsv')

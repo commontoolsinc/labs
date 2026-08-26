@@ -4,7 +4,10 @@ import {
   compileAndSavePattern,
   getPatternIdentityRef,
 } from "@commonfabric/runner";
-import { validateAgainstSchema } from "@commonfabric/runner/cfc";
+import {
+  selectReferencedCfcSchemaDefs,
+  validateAgainstSchema,
+} from "@commonfabric/runner/cfc";
 import {
   createLLMFriendlyLink,
   FRAMEWORK_RESULT_KEYS,
@@ -15,7 +18,10 @@ import {
 import { PieceController } from "@commonfabric/piece/ops";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
-import { fabricRuntimeObservations } from "../fabric-observations.ts";
+import {
+  comparableEntityHash,
+  fabricRuntimeObservations,
+} from "../fabric-observations.ts";
 import { defineOwnEntry } from "../handle-table.ts";
 import {
   addressSealedPositions,
@@ -557,12 +563,38 @@ export const runPatternTool: HarnessToolDefinition<
         `run_pattern input "${key}" does not match the pattern's argument schema: ${failure}`,
       );
     };
+    // A property schema referring into the argument schema's `$defs` leaves
+    // its root behind when it becomes a cell's whole schema, so the read
+    // schema carries the referenced definitions along —
+    // `selectReferencedCfcSchemaDefs` computes that closure, honoring a
+    // property's own `$defs` scope over the root's.
+    const argumentDefs = isObjectNotArray(argumentSchema) &&
+        isObjectNotArray((argumentSchema as { $defs?: unknown }).$defs)
+      ? (argumentSchema as { $defs: Record<string, JSONSchema> }).$defs
+      : undefined;
+    const readSchemaForKey = (key: string): JSONSchema | undefined => {
+      const propertySchema = argumentSchemaForKey(key);
+      if (propertySchema === undefined || !isObjectNotArray(propertySchema)) {
+        return propertySchema;
+      }
+      const defs = selectReferencedCfcSchemaDefs(propertySchema, argumentDefs);
+      return defs === undefined ? propertySchema : {
+        ...propertySchema,
+        $defs: defs,
+      };
+    };
     for (const { key, cell } of liveCellInputs) {
-      if (argumentSchemaForKey(key) === undefined) {
+      const readSchema = readSchemaForKey(key);
+      if (readSchema === undefined) {
         continue;
       }
-      await cell.sync();
-      const mismatch = argumentMismatch(key, cell.get());
+      // The read goes through the argument schema: a schema-less sync can
+      // complete without data for a referent that needs schema-driven
+      // materialization (a registry grant is one), and its `undefined` would
+      // be measured here as the cell's value.
+      const typedCell = cell.asSchema(readSchema);
+      await typedCell.sync();
+      const mismatch = argumentMismatch(key, typedCell.get());
       if (mismatch !== undefined) {
         return mismatch;
       }
@@ -657,12 +689,12 @@ export const runPatternTool: HarnessToolDefinition<
     // A result that settled to nothing is not a success to report. When the
     // sanitized value failed its schema, or the raw result holds no fields of
     // its own beyond the framework keys, the runtime's observation window
-    // says why: an action error attributed to this piece names the failing
-    // computation, and a non-settling episode names the other observed shape
-    // — actions deferred past the convergence budget, which is what both a
-    // reactive cycle and a policy-refused commit look like from here. The
-    // refusal reason itself has no channel of its own, so the message names
-    // the shapes rather than claiming to know which one happened.
+    // says why: an action error attributed to this piece names the cause —
+    // a CFC commit refusal arrives there as a terminal
+    // `CfcCommitRefusalError` — and a non-settling episode names the other
+    // observed shape, actions deferred past the convergence budget, which is
+    // what a reactive cycle or a non-idempotent computation looks like from
+    // here.
     const inertResultKeys = isObjectNotArray(rawValue)
       ? Object.keys(rawValue).filter((key) => !key.startsWith("$"))
       : undefined;
@@ -670,6 +702,24 @@ export const runPatternTool: HarnessToolDefinition<
       (inertResultKeys !== undefined && inertResultKeys.length === 0);
     if (valueError !== undefined || resultAbsent) {
       const pieceErrors = observations.errorsSince(observationStart, piece.id);
+      // A policy refusal is named as what it is. The refusal reason stays
+      // out of the model-facing message the same way thrown text does: it
+      // names the documents and label atoms involved — fabric identifiers
+      // and policy detail the model does not read — so the artifact keeps it
+      // and the model gets the fact of the refusal.
+      const refusal = pieceErrors.find((record) =>
+        record.name === "CfcCommitRefusalError"
+      );
+      if (refusal !== undefined) {
+        return {
+          ...errorOutput(
+            "error",
+            `the pattern ran but the space's policy refused to commit its result: flow enforcement rejected the write at the commit boundary, so the result never landed. The refusal reason is retained in the run artifact and withheld here, since it names the labels and documents involved`,
+          ),
+          pieceId: piece.id,
+          rawCauseMessage: refusal.message,
+        };
+      }
       if (pieceErrors.length > 0) {
         // The thrown text stays out of the model-facing message: a
         // computation over data the model cannot read may carry that data in
@@ -684,44 +734,41 @@ export const runPatternTool: HarnessToolDefinition<
           rawCauseMessage: pieceErrors[0].message,
         };
       }
-      // A convergence-budget episode is claimed only when its deferred-action
-      // labels name this pattern's module identity — an unrelated piece
-      // churning during this invocation's settle window is not evidence
-      // about this one. Module identity is as fine as the labels resolve:
-      // another live piece created from the same source shares it, so the
-      // message says "this pattern's module" rather than claiming the
+      // A convergence-budget episode is claimed when a deferred action's
+      // piece attribution matches this piece, or — for an action carrying no
+      // observation identity — when its label names this pattern's module
+      // identity. An unrelated piece churning during this invocation's
+      // settle window is not evidence about this one. The identity match is
+      // exact; the label match is as fine as labels resolve: another live
+      // piece created from the same source shares the module identity, so
+      // the message says "this pattern's module" rather than claiming the
       // episode as this piece's own. An episode lists at most its first ten
       // deferred actions, so a wide episode can omit this pattern and
       // under-report, which falls back to the plain ok-with-valueError
       // rather than misattributing.
-      //
-      // The built-in list coordinators are a systematic miss with the same
-      // fallback: a pattern-body `.map()` runs as the `map` builtin, whose
-      // deferred coordinator is labelled `raw:map:<key>` with no module
-      // identity, so an episode made only of such actions is never claimed
-      // and a refused container write reads as ok over an absent value.
-      // Closing that needs the piece-scoped marker identity CT-2037 asks
-      // for, not a looser match here.
       // The scheduler composes deferred-action ids as
       // `cf:module/<identity>:<symbol>:<instanceKey>` from the same entry
-      // ref this meta stamp stores, so the match is on that composed prefix
-      // rather than a bare substring — a representation drift on either
-      // side fails the settle-cause test that drives this path, loudly.
+      // ref this meta stamp stores, so the label match is on that composed
+      // prefix rather than a bare substring — a representation drift on
+      // either side fails the settle-cause test that drives this path,
+      // loudly.
       const patternIdentity = getPatternIdentityRef(resultCell)?.identity;
-      const ownEpisodes = patternIdentity === undefined
-        ? []
-        : observations.episodesSince(observationStart).filter((episode) =>
-          episode.deferredActions.some((label) =>
-            label.includes(`cf:module/${patternIdentity}:`)
-          )
-        );
+      const pieceHash = comparableEntityHash(piece.id);
+      const ownEpisodes = observations.episodesSince(observationStart).filter(
+        (episode) =>
+          episode.deferredActions.some((entry) =>
+            (pieceHash !== undefined && entry.pieceId === pieceHash) ||
+            (patternIdentity !== undefined &&
+              entry.label.includes(`cf:module/${patternIdentity}:`))
+          ),
+      );
       if (ownEpisodes.length > 0) {
         return {
           ...errorOutput(
             "error",
             `the pattern ran but its result never landed: while it settled, the scheduler deferred ${
               ownEpisodes[ownEpisodes.length - 1].deferredActionCount
-            } action(s) of this pattern's module past its convergence budget — this piece's own, or another live piece created from the same source in an earlier attempt. A reactive cycle, a non-idempotent computation, or a write the space's policy refuses all produce this shape`,
+            } action(s) of this piece or this pattern's module past its convergence budget. A reactive cycle or a non-idempotent computation produces this shape`,
           ),
           pieceId: piece.id,
         };

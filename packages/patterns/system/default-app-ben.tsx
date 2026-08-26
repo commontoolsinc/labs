@@ -14,9 +14,6 @@ import {
 
 import { default as Note } from "../notes/note.tsx";
 
-// Maximum number of recent pieces to track
-const MAX_RECENT_PIECES = 10;
-
 import BacklinksIndex, { type MentionablePiece } from "./backlinks-index.tsx";
 import SummaryIndex from "./summary-index.tsx";
 import KnowledgeGraph, {
@@ -172,18 +169,8 @@ const addPiece = handler<
   pieceRegistry.addUnique(piece);
 });
 
-// Handler: Track piece as recently used (add to front, maintain max)
-const trackRecent = handler<
-  { piece: MentionablePiece },
-  { recentPieces: Writable<MentionablePiece[]> }
->(({ piece }, { recentPieces }) => {
-  const current = recentPieces.get();
-  // Remove if already present
-  const filtered = current.filter((c) => !equals(c, piece));
-  // Add to front and limit to max
-  const updated = [piece, ...filtered].slice(0, MAX_RECENT_PIECES);
-  recentPieces.set(updated);
-});
+// Retained stream cell for existing default-app roots. Events have no effect.
+const retiredAction = handler<unknown, Record<string, never>>(() => {});
 
 const recordSuggestion = handler<
   SuggestionHistoryEntry,
@@ -216,7 +203,6 @@ Knowledge graph:
 export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   // OWN the data cells (not from wish)
   const pieceRegistry = new Writable<MentionablePiece[]>([]);
-  const recentPieces = new Writable<MentionablePiece[]>([]);
   const suggestionHistory = new Writable<SuggestionHistoryEntry[]>([]);
   const suggestionHistoryViewer = SuggestionHistory({});
 
@@ -288,7 +274,6 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   });
 
   const gridView = PieceGrid({ pieces: visiblePieces });
-  const recentGridView = PieceGrid({ pieces: recentPieces });
 
   return {
     backlinksIndex: index,
@@ -456,28 +441,6 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
             </div>
 
             <div style={{ flex: "1", minWidth: "0" }}>
-              {computed(() => recentPieces.get().length > 0)
-                ? (
-                  <cf-vstack gap="4" style={{ marginBottom: "16px" }}>
-                    <cf-hstack gap="2" align="center">
-                      <h3 style={{ margin: "0", fontSize: "16px" }}>Recent</h3>
-                      <cf-cell-link $cell={recentGridView} />
-                    </cf-hstack>
-                    <cf-table full-width hover>
-                      <tbody>
-                        {recentPieces.map((piece: any) => (
-                          <tr>
-                            <td>
-                              <cf-render variant="chip" $cell={piece} />
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </cf-table>
-                  </cf-vstack>
-                )
-                : undefined}
-
               <cf-vstack gap="4">
                 <cf-hstack gap="2" align="center">
                   <h3 style={{ margin: "0", fontSize: "16px" }}>Pieces</h3>
@@ -540,12 +503,11 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
 
     // Exported data
     pieceRegistry,
-    recentPieces,
     suggestionHistory,
 
     // Exported handlers (bound to state cells for external callers)
     addPiece: addPiece({ pieceRegistry }),
-    trackRecent: trackRecent({ recentPieces }),
+    trackRecent: retiredAction({}),
     recordSuggestion: recordSuggestion({ suggestionHistory }),
     pinToChat: fab.pinToChat,
   };

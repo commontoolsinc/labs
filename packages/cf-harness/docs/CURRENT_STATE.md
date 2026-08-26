@@ -84,6 +84,15 @@ The current package provides:
   boundary, reaching the parent as a parent-resolvable token, and any
   token-shaped text still standing after that resolution is scrubbed to fixed
   inert text so it cannot resolve later in the parent's own table;
+- skill by handle: `delegate_task` takes an optional `skillHandle` naming a cell
+  whose string value is skill text for the child, materialized trusted-side at
+  child spawn under `resolveHandleValue`'s contract (table membership,
+  string-only, same-space-only, structured refusal before any child exists) and
+  injected as a `<skill_context source="handle:<token>">` block beside the
+  profile preload; it bypasses the registry — no resource index, no scripts,
+  name-based selection retired for the delegated path — and the child's
+  activation records `source: "skill-handle"` with the token and the digest of
+  the injected text;
 - shape captured where it is free and read back by token: a handle entry may
   carry the schema of its referent — a `run_pattern` result reference records
   the compiled pattern's result schema, marked `schemaSource: "harness"` — while
@@ -146,11 +155,15 @@ The current package provides:
   `--fabric-cfc-enforcement-mode` (raise-only: `enforce-explicit` or
   `enforce-strict`) and `--fabric-cfc-flow-labels` (`off`/`observe`/`persist`)
   set the session runtime's CFC dials, so with labels persisted a
-  confidentiality-tainted pattern write is refused at commit under strict —
-  these are the fabric session's dials, independent of the harness's own
-  `--cfc-enforcement-mode`, and the resolved posture (each dial's value and
-  source) is recorded as `fabricSessionCfc` in run state and printed in the
-  operator summary;
+  confidentiality-tainted pattern write is refused at commit under strict, and
+  `--fabric-cfc-posture max-enforcement` opts the session runtime into the
+  runner's named posture bundle (every staged enforcement dial on, the standard
+  prompt-caveat policy loaded, public-only ceilings on the network-fetch sinks),
+  with the two per-dial flags applying over it — these are the fabric session's
+  dials, independent of the harness's own `--cfc-enforcement-mode`, and the
+  resolved posture (each dial's value and whether the operator, the named
+  bundle, or the default supplied it) is recorded as `fabricSessionCfc` in run
+  state and the run report, and printed in the operator summary;
 - a `pattern-author` child profile that authors and runs Common Fabric pattern
   source: `run_pattern` under the same fabric-session gate, plus `read_file`,
   `bash`, and `read_skill_resource`, and no workspace writes, so its deliverable

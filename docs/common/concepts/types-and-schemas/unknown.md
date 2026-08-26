@@ -88,7 +88,10 @@ and what those get is an empty object.
 
 The compiler refuses that declaration, at the root of a result and only there:
 `pattern-result:opaque-reserved-key`, one diagnostic naming every reserved key
-the result leaves opaque. It covers every key the framework puts on a result —
+the result leaves opaque. The refusal is an authoring gate: when the runtime
+reloads a piece's already-deployed stored source — an identity-pinned
+reconstruction that can admit nothing new — the same diagnostic reports as a
+warning instead, so a pattern accepted before the rule existed keeps loading. It covers every key the framework puts on a result —
 `[TYPE]`, `[NAME]`, `[UI]`, `[TILE_UI]`, `[CHIP_UI]`, `[FS]`, `[TESTS]` — for
 the same reason: a key whose spelling the framework fixed holds a value this
 pattern produced.

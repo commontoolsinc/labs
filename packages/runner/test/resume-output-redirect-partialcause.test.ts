@@ -9,7 +9,6 @@ import {
   createSigilLinkFromParsedLink,
   getDerivedInternalCellLink,
 } from "../src/link-utils.ts";
-import { missingLinkTargetsTx } from "../src/storage/reactivity-log.ts";
 
 // Seen live on estuary home spaces (2026-07-29): a sub-pattern node whose
 // stored outputs carry a DEFERRED partialCause alias unwraps to a bare
@@ -77,13 +76,12 @@ describe("firstResolvedOutputRedirect vs partialCause aliases", () => {
   it("returns a cause-only spot link parsed, with no read of its doc", () => {
     // The identity bind (CT-1943) renders a partialCause alias as its
     // derived cell's kind-free id — a cause-only coordinate whose data,
-    // for a computed-kind descriptor, lives at the KINDED entity.
-    // Resolving it reads a doc that is never there and records a
-    // provisional miss on the transaction, which the child's argument
-    // validation then inherits as a postponement (the vintage gate's
-    // home pendings). Given the id in `causeOnlyIds`, the scan returns
-    // the parsed coordinates and the transaction stays free of
-    // missing-link notes.
+    // for a computed-kind descriptor, lives at the KINDED entity, so
+    // nothing is ever written under this id. Resolving it reads that
+    // never-written doc, tying the scan to replication state and kicking
+    // a pull no store can satisfy. Given the id in `causeOnlyIds`, the
+    // scan returns the parsed coordinates and the transaction records no
+    // read of the doc.
     const tx = rt.edit();
     const base = rt.getCell<Record<string, unknown>>(
       space,
@@ -107,8 +105,112 @@ describe("firstResolvedOutputRedirect vs partialCause aliases", () => {
       new Set([twin.id]),
     );
     expect(found?.id).toBe(twin.id);
-    expect(missingLinkTargetsTx(tx)).toEqual([]);
+    const reads = tx.getReactivityLog?.().reads ?? [];
+    expect(reads.filter((read) => read.id === twin.id)).toEqual([]);
     tx.abort("test: read-only");
+  });
+
+  it("keeps a scoped cause-only link's scope while skipping its read", () => {
+    // Cross-scope id matching is deliberate: the id hashes parent+cause
+    // while scope rides the link, so a per-principal instance of the same
+    // derived cell is recognized by the same set entry — and its scope
+    // must survive untouched, because downstream consumers (the resultFor
+    // cause, the owned-cell pre-sync) address the instance through it.
+    const tx = rt.edit();
+    const base = rt.getCell<Record<string, unknown>>(
+      space,
+      "cause-only-scoped-base",
+      undefined,
+      tx,
+    );
+    const twin = getDerivedInternalCellLink(base, {
+      partialCause: { "$generated": 1 },
+      scope: "user",
+    });
+    const binding = createSigilLinkFromParsedLink(twin, {
+      overwrite: "redirect",
+    });
+
+    const found = firstResolvedOutputRedirect(
+      rt,
+      tx,
+      { generated: binding },
+      base,
+      new Set([twin.id]),
+    );
+    expect(found?.id).toBe(twin.id);
+    expect(found?.scope).toBe("user");
+    const reads = tx.getReactivityLog?.().reads ?? [];
+    expect(reads.filter((read) => read.id === twin.id)).toEqual([]);
+    tx.abort("test: read-only");
+  });
+
+  it("still resolves a spot whose id is not in the cause-only set", () => {
+    // The set bounds the skip: an ordinary reserved spot resolves exactly
+    // as before, even when a cause-only id is supplied for a different
+    // cell of the same pattern.
+    const tx = rt.edit();
+    const base = rt.getCell<Record<string, unknown>>(
+      space,
+      "cause-only-other-base",
+      undefined,
+      tx,
+    );
+    const spot = rt.getCell<Record<string, unknown>>(
+      space,
+      "cause-only-other-spot",
+      undefined,
+      tx,
+    );
+    const twin = getDerivedInternalCellLink(base, {
+      partialCause: { "$generated": 2 },
+    });
+    const found = firstResolvedOutputRedirect(
+      rt,
+      tx,
+      { result: spot.getAsWriteRedirectLink({ base }) },
+      base,
+      new Set([twin.id]),
+    );
+    tx.abort("test: read-only");
+    expect(found?.id).toBe(spot.getAsNormalizedFullLink().id);
+  });
+
+  it("returns a cause-only first entry of an ARRAY binding as the spot", () => {
+    // Output bindings are usually objects, so the array descent otherwise
+    // goes unexercised: a list-shaped binding is scanned in order, and a
+    // cause-only first entry IS the found spot — taken as parsed, never
+    // read — with the ordinary spot after it left alone.
+    const tx = rt.edit();
+    const base = rt.getCell<Record<string, unknown>>(
+      space,
+      "cause-only-array-base",
+      undefined,
+      tx,
+    );
+    const spot = rt.getCell<Record<string, unknown>>(
+      space,
+      "cause-only-array-spot",
+      undefined,
+      tx,
+    );
+    const twin = getDerivedInternalCellLink(base, {
+      partialCause: { "$generated": 3 },
+    });
+    const binding = [
+      createSigilLinkFromParsedLink(twin, { overwrite: "redirect" }),
+      spot.getAsWriteRedirectLink({ base }),
+    ];
+
+    const found = firstResolvedOutputRedirect(
+      rt,
+      tx,
+      binding,
+      base,
+      new Set([twin.id]),
+    );
+    tx.abort("test: read-only");
+    expect(found?.id).toBe(twin.id);
   });
 
   it("returns undefined (not a throw) when outputs hold ONLY such aliases", () => {

@@ -174,6 +174,53 @@ Deno.test("events - serializeEvent", async (t) => {
     assertEquals(serialized.type, "click");
   });
 
+  await t.step("resolves a target's `toJSON()`-bearing value", () => {
+    // A `cf-input`, a `cf-tabs` and a `cf-calendar` each declare `value` as
+    // `CellHandle<string> | string`, and a `CellHandle` renders as its sigil
+    // link. Modelled here rather than imported: `html` does not depend on
+    // `runtime-client`'s class, and what the conversion acts on is `toJSON()`.
+    const link = { "/": { "link@1": { id: "of:fid1:abc" } } };
+    const handle = new (class {
+      toJSON() {
+        return link;
+      }
+    })();
+    const event = new MockEvent("input", {
+      target: { value: handle },
+    }) as unknown as Event;
+
+    const serialized = serializeEvent(event);
+
+    assertEquals(serialized.target?.value, link);
+  });
+
+  await t.step("describes a target value with no JSON form", () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const event = new MockEvent("input", {
+      target: { value: circular },
+    }) as unknown as Event;
+
+    const serialized = serializeEvent(event);
+
+    assertEquals(serialized.target?.value, "[object Object]");
+  });
+
+  await t.step("describes a target value that refuses coercion too", () => {
+    // `String()` reaches for `toString` and `valueOf`; a null-prototype object
+    // has neither, and a circular one has no JSON form either, so both routes
+    // out of the conversion throw. The event still has to reach the worker.
+    const bare = Object.create(null);
+    bare.self = bare;
+    const event = new MockEvent("input", {
+      target: { value: bare },
+    }) as unknown as Event;
+
+    const serialized = serializeEvent(event);
+
+    assertEquals(serialized.target?.value, "/unconvertible");
+  });
+
   await t.step("captures trusted provenance", () => {
     const event = new MockEvent("click", {
       isTrusted: true,

@@ -941,7 +941,7 @@ describe("relaxing the stored schema for reading", () => {
     // `unknown` field lowers to the first, and an index signature
     // (`[key: string]: unknown`, which `system/default-app.tsx` declares) to
     // the second. Measured on the committed `default-app.tsx` fixture, the
-    // second is what hid `recentPieces`, `summaryIndex` and `trackRecent`.
+    // second is what hid `summaryIndex`, which the result type does not name.
     expect(schemaRelaxedForComparison({
       type: "object",
       properties: { note: { type: "unknown" } },
