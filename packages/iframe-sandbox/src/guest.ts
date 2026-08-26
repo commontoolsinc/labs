@@ -55,6 +55,7 @@ export class RemoteCell<T = FabricValue> {
   #unsubscribeRemote: (() => void) | undefined;
   #writeTail: Promise<void> | undefined;
   #readGeneration = 0;
+  #eventGeneration = 0;
 
   constructor(client: FabricClient, name: string) {
     this.#client = client;
@@ -69,7 +70,10 @@ export class RemoteCell<T = FabricValue> {
     if (this.#listeners.size === 1) {
       this.#unsubscribeRemote = this.#client.subscribeResource(
         this.#name,
-        (value) => this.#setReady(value as T),
+        (value) => {
+          this.#eventGeneration++;
+          this.#setReady(value as T);
+        },
         (error) => this.#setError(error),
       );
     }
@@ -85,16 +89,25 @@ export class RemoteCell<T = FabricValue> {
   async read(): Promise<T> {
     const before = this.#snapshot;
     const generation = ++this.#readGeneration;
+    const eventGeneration = this.#eventGeneration;
     try {
       const value = await this.#client.request("read", {
         resource: this.#name,
       }) as T;
-      if (generation === this.#readGeneration && this.#snapshot === before) {
+      if (
+        generation === this.#readGeneration &&
+        eventGeneration === this.#eventGeneration &&
+        this.#snapshot === before
+      ) {
         this.#setReady(value);
       }
       return value;
     } catch (error) {
-      if (generation === this.#readGeneration && this.#snapshot === before) {
+      if (
+        generation === this.#readGeneration &&
+        eventGeneration === this.#eventGeneration &&
+        this.#snapshot === before
+      ) {
         this.#setError(error);
       }
       throw error;
@@ -160,6 +173,11 @@ export type SqliteQueryInput = {
   params?: ReadonlyArray<FabricValue> | Record<string, FabricValue>;
 };
 
+/** Key-safe wire form of SQLite rows transported through the realm codec. */
+export type SqliteQueryWireResult = {
+  rows: Array<Array<[string, FabricValue]>>;
+};
+
 /** Guest-side query and mutation interface for one SQLite resource. */
 export class RemoteSqlite {
   readonly #client: FabricClient;
@@ -170,14 +188,17 @@ export class RemoteSqlite {
     this.#name = name;
   }
 
-  query<Row = Record<string, unknown>>(
+  async query<Row = Record<string, unknown>>(
     sql: string,
     params?: SqliteQueryInput["params"],
   ): Promise<{ rows: Row[] }> {
-    return this.#client.call(this.#name, "query", {
+    const result = await this.#client.call(this.#name, "query", {
       sql,
       ...(params !== undefined && { params }),
-    }) as Promise<{ rows: Row[] }>;
+    }) as SqliteQueryWireResult;
+    return {
+      rows: result.rows.map((entries) => Object.fromEntries(entries) as Row),
+    };
   }
 
   async exec(

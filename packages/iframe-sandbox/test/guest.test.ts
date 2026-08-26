@@ -241,6 +241,40 @@ describe("guest", () => {
       }
     });
 
+    it("preserves an equal authoritative update over an older read", async () => {
+      const fabric = connectFabric();
+      try {
+        const host = handOffPort();
+        const cell = fabric.cell<number>("count");
+        cell.subscribe(() => {});
+        const subscribe = await receive(host);
+        send(host, response(subscribe.id));
+        send(host, {
+          protocol: BRIDGE_PROTOCOL,
+          version: BRIDGE_VERSION,
+          type: "event",
+          subscription: subscribe.subscription!,
+          value: 1,
+        });
+
+        const reading = cell.read();
+        const read = await receive(host);
+        send(host, {
+          protocol: BRIDGE_PROTOCOL,
+          version: BRIDGE_VERSION,
+          type: "event",
+          subscription: subscribe.subscription!,
+          value: 1,
+        });
+        send(host, response(read.id, 0));
+        await expect(reading).resolves.toBe(0);
+
+        expect(cell.getSnapshot()).toEqual({ status: "ready", value: 1 });
+      } finally {
+        fabric.disconnect();
+      }
+    });
+
     it("publishes the later of two overlapping reads", async () => {
       const responses = [
         Promise.withResolvers<FabricValue | undefined>(),

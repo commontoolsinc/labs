@@ -114,10 +114,14 @@ function cellResource(
       methods: {
         query: async (value) => {
           const { sql, params } = sqliteInput(value);
+          const rows = await cell.querySqlite(sql, params);
           return {
-            rows: bridgeValue(
-              await cell.querySqlite(sql, params),
-            ) as FabricValue[],
+            rows: rows.map((row) =>
+              Object.entries(row).map(([key, member]) => [
+                key,
+                bridgeValue(member),
+              ])
+            ),
           };
         },
         exec: async (value) => {
@@ -261,7 +265,10 @@ export async function resolveCellContextBridge(
   ]);
   const entries = await Promise.all([...names].map(async (name) => {
     const source = context.key(name);
-    const declaredKind = resourceKinds[name] ?? cellKind(properties[name]);
+    const kindHint = Object.hasOwn(resourceKinds, name)
+      ? resourceKinds[name]
+      : undefined;
+    const declaredKind = kindHint ?? cellKind(properties[name]);
     if (declaredKind === "sqlite") {
       // Pull the source path, not only its resolved target. A scoped SQLite
       // factory can be lazy for this browser session; the source path retains
@@ -273,7 +280,7 @@ export async function resolveCellContextBridge(
     const resolvedSchema = cell.ref().schema;
     return [
       name,
-      cellResource(cell, resolvedSchema, resourceKinds[name]),
+      cellResource(cell, resolvedSchema, kindHint),
     ] as const;
   }));
   return createFabricBridge(Object.fromEntries(entries));

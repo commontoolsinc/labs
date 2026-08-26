@@ -59,6 +59,8 @@ function loadingQuery<Row>(): QuerySnapshot<Row> {
 
 /** Builds hooks against the React instance already used by the guest app. */
 export function createFabricReact(react: ReactHooks, client: FabricClient) {
+  const writeTails = new WeakMap<object, Promise<void>>();
+
   function useCell<T = FabricValue>(
     name: string,
   ): CellHookResult<T> {
@@ -68,8 +70,6 @@ export function createFabricReact(react: ReactHooks, client: FabricClient) {
       cell.getSnapshot,
       cell.getSnapshot,
     );
-    const writeTails = react.useRef(new WeakMap<object, Promise<void>>());
-
     react.useEffect(() => {
       if (cell.getSnapshot().status === "loading") {
         void cell.read().catch(() => {});
@@ -87,18 +87,18 @@ export function createFabricReact(react: ReactHooks, client: FabricClient) {
             : next;
           await cell.write(value);
         };
-        const previous = writeTails.current.get(cell);
+        const previous = writeTails.get(cell);
         const writing = previous ? previous.then(write) : write();
         const tail = writing.catch(() => {});
-        writeTails.current.set(cell, tail);
+        writeTails.set(cell, tail);
         void tail.then(() => {
-          if (writeTails.current.get(cell) === tail) {
-            writeTails.current.delete(cell);
+          if (writeTails.get(cell) === tail) {
+            writeTails.delete(cell);
           }
         });
         return writing;
       },
-      [cell, writeTails],
+      [cell],
     );
 
     return {

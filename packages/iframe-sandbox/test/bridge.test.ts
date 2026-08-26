@@ -93,7 +93,15 @@ describe("Fabric iframe bridge", () => {
         methods: {
           query: (input) => {
             calls.push({ method: "query", input });
-            return { rows: [{ id: 1, title: "Ship it", payload: output }] };
+            return {
+              rows: [[
+                ["id", 1],
+                ["title", "Ship it"],
+                ["payload", output],
+                ["constructor", "safe-constructor"],
+                ["__proto__", "safe-prototype"],
+              ]],
+            };
           },
           exec: (input) => {
             calls.push({ method: "exec", input });
@@ -108,13 +116,21 @@ describe("Fabric iframe bridge", () => {
 
     try {
       const db = client.sqlite("app");
-      const result = await db.query<{ payload: FabricBytes }>(
+      const result = await db.query<{
+        payload: FabricBytes;
+        constructor: string;
+        __proto__: string;
+      }>(
         "SELECT * FROM todos",
       );
       expect(result.rows[0]?.payload).toBeInstanceOf(FabricBytes);
       expect(result.rows[0]?.payload.slice()).toEqual(
         new Uint8Array([1, 2, 3]),
       );
+      expect(Object.hasOwn(result.rows[0]!, "constructor")).toBe(true);
+      expect(Object.hasOwn(result.rows[0]!, "__proto__")).toBe(true);
+      expect(result.rows[0]?.constructor).toBe("safe-constructor");
+      expect(result.rows[0]?.__proto__).toBe("safe-prototype");
       await db.exec("INSERT INTO todos(title, payload) VALUES (?, ?)", [
         "Test it",
         input,
@@ -250,6 +266,44 @@ describe("Fabric iframe bridge", () => {
         code: "method-not-supported",
       });
       await expect(client.call("service", "own")).resolves.toBe("right");
+    } finally {
+      client.disconnect();
+      host.disconnect();
+    }
+  });
+
+  it("refuses inherited resource operations and method containers", async () => {
+    let inheritedWrites = 0;
+    const inherited = {
+      write: () => inheritedWrites++,
+      subscribe: () => () => {},
+      methods: { inherited: () => "wrong" },
+    };
+    const resource = Object.create(inherited) as {
+      kind: "cell";
+      read: () => number;
+    };
+    resource.kind = "cell";
+    resource.read = () => 1;
+    const channel = new MessageChannel();
+    const host = new FabricBridgeHost(
+      createFabricBridge({ count: resource }),
+      channel.port1,
+    );
+    const client = connectFabric();
+    handOff(channel.port2);
+
+    try {
+      await expect(client.describe()).resolves.toMatchObject({
+        resources: { count: { methods: ["read"] } },
+      });
+      await expect(client.cell("count").write(2)).rejects.toMatchObject({
+        code: "method-not-supported",
+      });
+      await expect(client.call("count", "inherited")).rejects.toMatchObject({
+        code: "method-not-supported",
+      });
+      expect(inheritedWrites).toBe(0);
     } finally {
       client.disconnect();
       host.disconnect();

@@ -277,6 +277,54 @@ describe("cf-iframe cell bridge", () => {
     ]);
   });
 
+  it("ignores inherited resource-kind hints", async () => {
+    const requests: Array<{ type: RequestType; cell: CellRef }> = [];
+    const runtime = {
+      [$conn]: () => ({
+        request: (request: { type: RequestType; cell: CellRef }) => {
+          requests.push(request);
+          if (request.type === RequestType.CellGet) {
+            return Promise.resolve({ value: { database: "ordinary" } });
+          }
+          if (request.type === RequestType.CellResolveAsCell) {
+            return Promise.resolve({
+              cell: {
+                ...request.cell,
+                id: request.cell.path.length === 0
+                  ? "of:resolved-context"
+                  : "of:database",
+                path: [],
+                schema: request.cell.path.length === 0
+                  ? { type: "object", properties: { database: true } }
+                  : true,
+              },
+            });
+          }
+          return Promise.resolve({});
+        },
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+        signal: { aborted: false },
+      }),
+    } as unknown as RuntimeClient;
+    const context = new CellHandle<Record<string, unknown>>(runtime, {
+      ...ref,
+      schema: true,
+    });
+    const inheritedHints = Object.create({ database: "sqlite" }) as Record<
+      string,
+      "sqlite"
+    >;
+
+    const bridge = await resolveCellContextBridge(context, inheritedHints);
+
+    expect(bridge.resources.database.kind).toBe("cell");
+    expect(bridge.resources.database.methods).toBeUndefined();
+    expect(
+      requests.some(({ type }) => type === RequestType.CellPull),
+    ).toBe(false);
+  });
+
   it("reports a cell write the runtime refuses", async () => {
     const runtime = {
       [$conn]: () => ({
@@ -375,7 +423,11 @@ describe("cf-iframe cell bridge", () => {
           requests.push(request);
           if (request.type === RequestType.SqliteQuery) {
             return Promise.resolve({
-              rows: [{ title: realmFromFabricValue("One") }],
+              rows: [Object.fromEntries([
+                ["title", realmFromFabricValue("One")],
+                ["constructor", realmFromFabricValue("safe-constructor")],
+                ["__proto__", realmFromFabricValue("safe-prototype")],
+              ])],
             });
           }
           return Promise.resolve({});
@@ -407,7 +459,13 @@ describe("cf-iframe cell bridge", () => {
     await expect(database.methods!.query({
       sql: "SELECT title FROM notes WHERE id = ?",
       params: [1],
-    })).resolves.toEqual({ rows: [{ title: "One" }] });
+    })).resolves.toEqual({
+      rows: [[
+        ["title", "One"],
+        ["constructor", "safe-constructor"],
+        ["__proto__", "safe-prototype"],
+      ]],
+    });
     await database.methods!.exec({
       sql: "INSERT INTO notes (title) VALUES (:title)",
       params: { title: "New" },

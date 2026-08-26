@@ -58,10 +58,23 @@ export function createFabricBridge(
 
 function descriptor(resource: BridgeResource): BridgeResourceDescriptor {
   const methods: string[] = [];
-  if (resource.read) methods.push("read");
-  if (resource.write) methods.push("write");
-  if (resource.subscribe) methods.push("subscribe");
-  methods.push(...Object.keys(resource.methods ?? {}).sort());
+  if (Object.hasOwn(resource, "read") && typeof resource.read === "function") {
+    methods.push("read");
+  }
+  if (
+    Object.hasOwn(resource, "write") && typeof resource.write === "function"
+  ) {
+    methods.push("write");
+  }
+  if (
+    Object.hasOwn(resource, "subscribe") &&
+    typeof resource.subscribe === "function"
+  ) {
+    methods.push("subscribe");
+  }
+  if (Object.hasOwn(resource, "methods") && resource.methods) {
+    methods.push(...Object.keys(resource.methods).sort());
+  }
   return {
     kind: resource.kind,
     methods,
@@ -216,7 +229,10 @@ export class FabricBridgeHost {
 
     switch (request.operation) {
       case "read":
-        if (!resource.read) {
+        if (
+          !Object.hasOwn(resource, "read") ||
+          typeof resource.read !== "function"
+        ) {
           throw bridgeError(
             "method-not-supported",
             `Resource \`${request.resource}\` is not readable.`,
@@ -225,7 +241,10 @@ export class FabricBridgeHost {
         }
         return await resource.read();
       case "write":
-        if (!resource.write) {
+        if (
+          !Object.hasOwn(resource, "write") ||
+          typeof resource.write !== "function"
+        ) {
           throw bridgeError(
             "method-not-supported",
             `Resource \`${request.resource}\` is not writable.`,
@@ -235,9 +254,12 @@ export class FabricBridgeHost {
         await resource.write(request.value as FabricValue);
         return undefined;
       case "call": {
-        const method = request.method !== undefined &&
-            Object.hasOwn(resource.methods ?? {}, request.method)
-          ? resource.methods?.[request.method]
+        const methods = Object.hasOwn(resource, "methods")
+          ? resource.methods
+          : undefined;
+        const method = request.method !== undefined && methods &&
+            Object.hasOwn(methods, request.method)
+          ? methods[request.method]
           : undefined;
         if (!method) {
           throw bridgeError(
@@ -251,7 +273,11 @@ export class FabricBridgeHost {
         return await method(request.value);
       }
       case "subscribe": {
-        if (!resource.subscribe || request.subscription === undefined) {
+        if (
+          !Object.hasOwn(resource, "subscribe") ||
+          typeof resource.subscribe !== "function" ||
+          request.subscription === undefined
+        ) {
           throw bridgeError(
             "method-not-supported",
             `Resource \`${request.resource}\` is not subscribable.`,

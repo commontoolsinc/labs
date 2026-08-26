@@ -123,9 +123,10 @@ const GUEST_HTML = `<!doctype html>
     } catch (error) {
       throw new Error(database + ": " + error.message);
     }
+    const rows = result.rows.map((entries) => Object.fromEntries(entries));
     await write(
       databaseRows[database],
-      result.rows.map((row) => row.value).join(","),
+      rows.map((row) => row.value).join(","),
     );
   };
 

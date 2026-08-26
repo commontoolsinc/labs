@@ -103,6 +103,57 @@ describe("React bridge adapter", () => {
     expect(writes).toEqual([{ count: 2 }, { count: 3 }]);
   });
 
+  it("serializes updater writes from separate hooks for the same cell", async () => {
+    type Counter = { count: number };
+    const firstStarted = Promise.withResolvers<void>();
+    const releaseFirst = Promise.withResolvers<void>();
+    const writes: Counter[] = [];
+    let snapshot: ResourceSnapshot<Counter> = {
+      status: "ready",
+      value: { count: 1 },
+    };
+    const remote = {
+      getSnapshot: () => snapshot,
+      subscribe: () => () => {},
+      read: () => Promise.resolve((snapshot as { value: Counter }).value),
+      write: async (value: Counter) => {
+        writes.push(value);
+        if (writes.length === 1) {
+          firstStarted.resolve();
+          await releaseFirst.promise;
+        }
+        snapshot = { status: "ready", value };
+      },
+    };
+    const client = { cell: () => remote } as unknown as FabricClient;
+    const hooks: ReactHooks = {
+      useCallback: (callback) => callback,
+      useEffect: () => {},
+      useMemo: (factory) => factory(),
+      useRef: (initial) => ({ current: initial }),
+      useState: (initial) =>
+        [
+          typeof initial === "function"
+            ? (initial as () => unknown)()
+            : initial,
+          () => {},
+        ] as never,
+      useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot(),
+    };
+    const { useCell } = createFabricReact(hooks, client);
+    const firstHook = useCell<Counter>("count");
+    const secondHook = useCell<Counter>("count");
+
+    const first = firstHook.set((value) => ({ count: value.count + 1 }));
+    const second = secondHook.set((value) => ({ count: value.count + 1 }));
+    await firstStarted.promise;
+    expect(writes).toEqual([{ count: 2 }]);
+
+    releaseFirst.resolve();
+    await Promise.all([first, second]);
+    expect(writes).toEqual([{ count: 2 }, { count: 3 }]);
+  });
+
   it("keeps the write queue when React discards memoized values", async () => {
     type Counter = { count: number };
     const firstStarted = Promise.withResolvers<void>();
@@ -155,9 +206,10 @@ describe("React bridge adapter", () => {
         ] as never,
       useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot(),
     };
+    const { useCell } = createFabricReact(hooks, client);
     const render = (name: string) => {
       refIndex = 0;
-      return createFabricReact(hooks, client).useCell<Counter>(name);
+      return useCell<Counter>(name);
     };
 
     const first = render("count").set((value) => ({ count: value.count + 1 }));
