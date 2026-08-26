@@ -7,6 +7,7 @@ import {
   HARNESS_CHAT_REQUEST_TYPE,
   type HarnessChatListEventsResult,
   type HarnessChatSessionStatus,
+  type HarnessChatTurnStatus,
 } from "../src/contracts/interactive-chat.ts";
 import {
   HarnessInteractiveChatService,
@@ -870,6 +871,149 @@ Deno.test("sqlite session store restores and terminalizes active legacy transcri
   }
 });
 
+Deno.test("sqlite restore normalizes legacy history through every terminalization branch", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const store = await openSqliteHarnessChatSessionStore({
+    url: toFileUrl(path),
+  });
+
+  try {
+    const incompleteTranscript = (
+      callId: string,
+    ): readonly HarnessTranscriptMessage[] => [{
+      role: "assistant",
+      content: "Working.",
+      toolCalls: [toolCall(callId)],
+    }];
+    const runningTurn = (turnId: string) => ({
+      turnId,
+      status: "running" as const,
+      startedAt: "2026-05-27T00:00:01.000Z",
+      updatedAt: "2026-05-27T00:00:01.000Z",
+    });
+    const cancelingTurn = (turnId: string) => ({
+      ...runningTurn(turnId),
+      status: "canceling" as const,
+      cancelReason: "user_requested",
+    });
+    const saveTurn = (
+      session: HarnessChatSessionStatus,
+      turn: HarnessChatTurnStatus,
+    ) =>
+      store.saveTurn({
+        sessionId: session.sessionId,
+        turn,
+        input: { text: "Continue" },
+        policy: session.policy,
+      });
+    const activeSession = (
+      sessionId: string,
+      turn: HarnessChatTurnStatus,
+    ): HarnessChatSessionStatus => ({
+      ...createHarnessChatSessionStatus({
+        sessionId,
+        createdAt: "2026-05-27T00:00:00.000Z",
+        workspace: { hostPath: "/workspace" },
+      }),
+      status: turn.status === "canceling" ? "canceling" : "turn_running",
+      reusable: false,
+      turnCount: 1,
+      activeTurnId: turn.turnId,
+      activeTurn: turn,
+    });
+
+    const missingTurn = runningTurn("turn-missing");
+    const missingSession = activeSession("session-missing", missingTurn);
+    store.saveSession({
+      session: missingSession,
+      transcript: incompleteTranscript("call-missing-active-turn"),
+    });
+
+    const completedTurn = {
+      ...runningTurn("turn-completed"),
+      status: "completed" as const,
+      endedAt: "2026-05-27T00:00:02.000Z",
+    };
+    const completedSession = activeSession(
+      "session-completed",
+      completedTurn,
+    );
+    store.saveSession({
+      session: completedSession,
+      transcript: incompleteTranscript("call-terminal-active-turn"),
+    });
+    saveTurn(completedSession, completedTurn);
+
+    const activeCancelingTurn = cancelingTurn("turn-canceling-active");
+    const activeCancelingSession = activeSession(
+      "session-canceling-active",
+      activeCancelingTurn,
+    );
+    store.saveSession({
+      session: activeCancelingSession,
+      transcript: incompleteTranscript("call-canceling-active-turn"),
+    });
+    saveTurn(activeCancelingSession, activeCancelingTurn);
+
+    const inactiveCancelingTurn = cancelingTurn("turn-canceling-inactive");
+    const inactiveCancelingSession = createHarnessChatSessionStatus({
+      sessionId: "session-canceling-inactive",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      workspace: { hostPath: "/workspace" },
+    });
+    store.saveSession({
+      session: inactiveCancelingSession,
+      transcript: incompleteTranscript("call-canceling-inactive-turn"),
+    });
+    saveTurn(inactiveCancelingSession, inactiveCancelingTurn);
+
+    const restored = new HarnessInteractiveChatService({
+      createPromptLoop: () => ({
+        runTranscript: (options) =>
+          Promise.resolve(makeResult(options, "Should not run.")),
+      }),
+      now: nextIsoNow(),
+      sessionStore: store,
+    });
+    await restored.initializeFromStore();
+
+    for (
+      const [sessionId, callId] of [
+        ["session-missing", "call-missing-active-turn"],
+        ["session-completed", "call-terminal-active-turn"],
+        ["session-canceling-active", "call-canceling-active-turn"],
+        ["session-canceling-inactive", "call-canceling-inactive-turn"],
+      ] as const
+    ) {
+      const transcript = store.getSession(sessionId)?.transcript ?? [];
+      assertEquals(transcript.length, 2);
+      assertUnknownToolOutcome(transcript[1], callId, "read_file");
+      assertEquals(inspectHarnessTranscriptPairing(transcript).valid, true);
+    }
+    assertEquals(
+      store.getTurn("session-completed", completedTurn.turnId)?.turn.status,
+      "completed",
+    );
+    assertEquals(
+      store.getTurn(
+        "session-canceling-active",
+        activeCancelingTurn.turnId,
+      )?.turn.status,
+      "canceled",
+    );
+    assertEquals(
+      store.getTurn(
+        "session-canceling-inactive",
+        inactiveCancelingTurn.turnId,
+      )?.turn.status,
+      "canceled",
+    );
+  } finally {
+    store.close();
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("sqlite session restore heals terminal legacy transcripts idempotently", async () => {
   const path = await Deno.makeTempFile({ suffix: ".sqlite" });
   const store = await openSqliteHarnessChatSessionStore({
@@ -1281,6 +1425,66 @@ Deno.test("sqlite session restore pairs late tool results across interleaved his
       service.listEvents({ sessionId: session.sessionId }).events,
       [],
     );
+  } finally {
+    store.close();
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("sqlite restore closes a missing sibling without moving a late real result", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const store = await openSqliteHarnessChatSessionStore({
+    url: toFileUrl(path),
+  });
+
+  try {
+    const session = createHarnessChatSessionStatus({
+      sessionId: "session-mixed-result-order",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      workspace: { hostPath: "/workspace" },
+    });
+    const recorded: HarnessTranscriptMessage[] = [
+      {
+        role: "assistant",
+        content: "Reading both.",
+        toolCalls: [toolCall("call-late"), toolCall("call-missing")],
+      },
+      { role: "user", content: "Also summarize them." },
+      {
+        role: "tool",
+        toolCallId: "call-late",
+        toolName: "read_file",
+        content: '{"contents":"one"}',
+      },
+    ];
+    store.saveSession({ session, transcript: recorded });
+
+    const restored = new HarnessInteractiveChatService({
+      createPromptLoop: () => ({
+        runTranscript: (options) =>
+          Promise.resolve(makeResult(options, "Should not run.")),
+      }),
+      sessionStore: store,
+    });
+    await restored.initializeFromStore();
+
+    const normalized = store.getSession(session.sessionId)?.transcript ?? [];
+    assertEquals(normalized[0], recorded[0]);
+    assertUnknownToolOutcome(normalized[1], "call-missing", "read_file");
+    assertEquals(normalized.slice(2), recorded.slice(1));
+    assertEquals(inspectHarnessTranscriptPairing(normalized).valid, true);
+    const { input } = await toResponsesInput(
+      normalized,
+      "gpt-test",
+      "openai-compatible-gateway",
+      "gateway Responses",
+    );
+    const calls = input.filter((item) => item.type === "function_call").map(
+      (item) => item.call_id,
+    ).sort();
+    const results = input.filter((item) => item.type === "function_call_output")
+      .map((item) => item.call_id).sort();
+    assertEquals(results, calls);
   } finally {
     store.close();
     await Deno.remove(path);
