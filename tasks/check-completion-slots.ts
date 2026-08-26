@@ -89,6 +89,7 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
   ["depth", "a graph depth"],
   ["seq", "a revision sequence number"],
   ["top", "a result count"],
+  ["group-size", "a piece count"],
   ["bucket", "a time bucket size"],
   ["since", "a timestamp"],
   ["until", "a timestamp"],

@@ -229,6 +229,7 @@ const DIRECTIVE_CASES: Array<[string, string, string | undefined]> = [
   ["cf piece repair --fixer ", "files", "*.ts"],
   ["cf piece repair --plan ", "files", undefined],
   ["cf piece survey --validator ", "files", undefined],
+  ["cf piece survey --diff ", "files", undefined],
   ["cf test --pattern-coverage-dir ", "dirs", undefined],
   ["cf test --timing-measures-out ", "files", undefined],
   ["cf fuse mount --cfc-writeback-state ", "files", undefined],
@@ -353,6 +354,7 @@ Deno.test("provider keys report which commands each option provider answers on",
   assertEquals(options.get("to"), ["space clone"]);
   assertEquals(options.get("scope"), ["wish"]);
   assertEquals(options.get("list"), ["piece survey", "piece repair"]);
+  assertEquals(options.get("diff"), ["piece survey"]);
   assertEquals(options.get("select"), ["piece get", "get"]);
   assertEquals(options.get("root"), [
     "check",

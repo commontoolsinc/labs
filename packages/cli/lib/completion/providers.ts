@@ -972,6 +972,12 @@ const OPTION_VALUE_PROVIDERS: Readonly<Record<string, OptionProvider>> = {
   // is the transform; `--plan` reads the rows a survey wrote.
   fixer: () => Promise.resolve(directive({ kind: "files", glob: "*.ts" })),
   plan: () => Promise.resolve(directive({ kind: "files" })),
+  // A plan file on `cf piece survey`, which reports the survey against it, and
+  // a boolean about the input on `cf view`.
+  diff: onlyOn(
+    ["piece survey"],
+    () => Promise.resolve(directive({ kind: "files" })),
+  ),
   // `cf inspect --dir` is an extra directory to search for space DBs.
   dir: () => Promise.resolve(directive({ kind: "dirs" })),
   // `cf inspect html --out` and `cf check --output` write a file.
