@@ -260,13 +260,6 @@ interface Suite {
   /** Environment variables its commands run with. */
   env?: Record<string, string>;
 
-  /**
-   * The finest subset the runner can execute. "item" means the runner
-   * can be given an arbitrary set of items; "whole" means the suite
-   * runs entirely or not at all.
-   */
-  granularity: "item" | "whole";
-
   /** Whether a subset of this suite is always run, and on what basis. */
   mandatory?: "always" | "changed";
 
@@ -360,12 +353,6 @@ suite supplies the variant shared by all of them. Direct records already
 carry their kind, scope, and name; the runner checks their record surface
 against the suite before applying that same variant.
 
-`granularity` is an honest declaration of what the runner can do, and the
-packer respects it. A suite that can only run whole is charged for all of
-its items whenever any one of them is selected. A suite that can run
-arbitrary items is charged only for what is picked. Nothing pretends to a
-precision the runner does not have.
-
 `mandatory` is the policy escape hatch. `"always"` means every item runs
 on every pull request, with no exceptions of any kind — it outranks the
 score, the budget, and both exclusion rules, and
@@ -387,25 +374,25 @@ the set is a decision to spend part of every lane's budget forever.
 The 18 job definitions in `deno.yml` become the following suites. This
 table is the migration's checklist.
 
-| Suite | Today's jobs | Record variant | Capabilities | Granularity |
-| --- | --- | --- | --- | --- |
-| `repo-gates` | `Check` (all but the type check) | — | `deno` | item |
-| `typecheck` | `Check` (the type check) | — | `deno` | item |
-| `workspace-unit` | `Test (1..8)` | — | `deno`, `fuse`, `browser` | item |
-| `runner-unit` | `Runner Tests (1..8)` | — | `deno` | item |
-| `cfcheck` | `CFC Pattern Check` | — | `deno` | item |
-| `pattern-compat` | `Pattern Update Compatibility (1..3)` | — | `deno` | item |
-| `pattern-vintage` | `Pattern Update State and Baseline Integrity` | — | `deno`, `git-history` | item |
-| `generated-patterns` | `Generated Patterns Integration Tests (1..2)` | — | `deno`, `compile-cache` | item |
-| `package-integration` | `Package Integration Tests (3 suites)` | — | `deno`, `toolshed`, `browser` | item |
-| `package-integration-on` | the server-execution ON arm | `server-execution` | `deno`, `toolshed-baked-on`, `browser` | item |
-| `cli-core` | `CLI Integration Tests (3 suites)` | — | `deno`, `toolshed`, `cf`, `jq` | item |
-| `cli-fuse` | the FUSE steps of the third CLI suite | — | `deno`, `toolshed`, `cf`, `fuse` | item, once the script is split; see below |
-| `cli-deno` | the Deno-based CLI integration step | — | `deno`, `toolshed`, `cf` | item |
-| `pattern-integration` | `Pattern Integration Tests (1..10)` | — | `deno`, `toolshed`, `browser`, `compile-cache` | item |
-| `pattern-integration-on` | the server-execution ON arm | `server-execution` | `deno`, `toolshed-baked-on`, `browser` | item |
-| `pattern-reload` | `Pattern Reload Integration Tests` | — | `deno`, `local-dev-servers`, `browser` | whole |
-| `pattern-unit` | `Pattern Unit Tests (1..4)` | — | `deno`, `cf`, `compile-cache` | item |
+| Suite | Today's jobs | Record variant | Capabilities |
+| --- | --- | --- | --- |
+| `repo-gates` | `Check` (all but the type check) | — | `deno` |
+| `typecheck` | `Check` (the type check) | — | `deno` |
+| `workspace-unit` | `Test (1..8)` | — | `deno`, `fuse`, `browser` |
+| `runner-unit` | `Runner Tests (1..8)` | — | `deno` |
+| `cfcheck` | `CFC Pattern Check` | — | `deno` |
+| `pattern-compat` | `Pattern Update Compatibility (1..3)` | — | `deno` |
+| `pattern-vintage` | `Pattern Update State and Baseline Integrity` | — | `deno`, `git-history` |
+| `generated-patterns` | `Generated Patterns Integration Tests (1..2)` | — | `deno`, `compile-cache` |
+| `package-integration` | `Package Integration Tests (3 suites)` | — | `deno`, `toolshed`, `browser` |
+| `package-integration-on` | the server-execution ON arm | `server-execution` | `deno`, `toolshed-baked-on`, `browser` |
+| `cli-core` | `CLI Integration Tests (3 suites)` | — | `deno`, `toolshed`, `cf`, `jq` |
+| `cli-fuse` | the FUSE steps of the third CLI suite | — | `deno`, `toolshed`, `cf`, `fuse` |
+| `cli-deno` | the Deno-based CLI integration step | — | `deno`, `toolshed`, `cf` |
+| `pattern-integration` | `Pattern Integration Tests (1..10)` | — | `deno`, `toolshed`, `browser`, `compile-cache` |
+| `pattern-integration-on` | the server-execution ON arm | `server-execution` | `deno`, `toolshed-baked-on`, `browser` |
+| `pattern-reload` | `Pattern Reload Integration Tests` | — | `deno`, `local-dev-servers`, `browser` |
+| `pattern-unit` | `Pattern Unit Tests (1..4)` | — | `deno`, `cf`, `compile-cache` |
 
 When server execution becomes the default, the unmarked
 `package-integration` and `pattern-integration` suites change their commands
@@ -442,9 +429,6 @@ become suites. They are not tests; they are setup, and they become
 capability providers. The deploy and attestation jobs stay exactly as they
 are, since they only ever ran on `main`.
 
-`pattern-reload` is the only suite declared `whole`, and `cli-fuse` is the
-one suite that has to change before it can stop being.
-
 **`cli-fuse` must gain fine granularity, and this is not optional.**
 `packages/cli/integration/fuse-exec.sh` is 1,062 lines that record a
 single identity for the entire run, through one
@@ -471,11 +455,11 @@ selection, and it is the same independence question [asked of unit
 tests](#skipping-assumes-tests-do-not-lean-on-each-other). The answer may
 well be a handful of sections rather than 23, and a handful is enough.
 
-`pattern-reload` is `whole` because it *is* one item.
+`pattern-reload` needs nothing done to it, because it *is* one identity.
 `packages/patterns/integration/reload/` holds a single file with a single
-`it()`, so the finest subset the suite has and the whole suite are the same
-thing, and declaring it `whole` costs nothing. Its runner could subset if
-there were anything to subset: the underlying command is a plain
+`it()`, so the finest subset the suite has and the whole suite are the
+same thing. Its runner could subset if there were anything to subset: the
+underlying command is a plain
 `deno test` over a glob, which takes file paths and `--filter` like every
 other Deno suite. What stands in the way is two layers above it —
 `tasks/integration.ts` dispatches `patterns-reload` in a branch that sits
@@ -483,7 +467,7 @@ ahead of the one honoring the name filter, so a filter passed to that
 target is silently dropped, and `packages/patterns`' `integration:reload`
 task hard-codes its glob. If a second reload case ever lands, moving that
 branch below the filter branch is the whole of what makes the suite
-`item`.
+subsettable.
 
 `pattern-reload` also shows why capabilities are named rather than
 implied. It needs a server, but not the one the other integration suites
@@ -746,6 +730,37 @@ case [the reporter](#telling-a-pull-request-what-main-found) already
 exists to explain. The failure is also evidence, and the identity loses
 its flag.
 
+### `granularity` goes with it
+
+The `Suite` interface declared `granularity`, `"item"` or `"whole"`, so a
+runner that could not be handed a subset could say so and the packer could
+charge it for everything whenever anything in it was picked. Both halves
+of that stop being needed.
+
+Nothing is left to declare. Every invocation unit in the topology either
+holds one identity, in which case skipping it is declining to invoke it
+and no runner has to support anything, or it is a `deno test` file, in
+which case the skip list reaches inside it. There is no third case, so an
+enum with two values is describing a distinction the topology no longer
+contains.
+
+Nothing is left to charge, either. `whole` was a coarse way of saying that
+running one thing costs you its neighbours, and
+[`fileOverhead`](#what-it-costs-to-run-one-test) says that better: an
+invocation with an empty skip list costs its overhead plus every identity
+in it, which is exactly what `whole` meant, and it falls out of the cost
+model rather than being a case in the packer.
+
+What the enum was reaching for does survive, one level down. Whether the
+identities inside an invocation unit can be skipped is a property of that
+unit rather than of the suite around it, and the [table
+above](#every-invocation-unit-and-the-identities-inside-it) is where it is
+written down. `cli-fuse` is the illustration: once its 23 phases record
+separately, a section holding four of them will not be able to skip one of
+the four, while a `deno test` file with 23 tests will. Those two suites
+would have carried the same declaration under the old field and behaved
+differently, which is the sign the field was in the wrong place.
+
 ### What replaces the item
 
 The item was doing two jobs, and they separate cleanly.
@@ -792,9 +807,9 @@ being imposed.
 
 - The per-package coverage gate runs a package's whole measured set, so
   its invocations carry no skip list.
-- Suites that are not `deno test` keep the granularity they have. The
-  command-line script's arms are already one identity each, and `cf test`
-  writes one record per pattern file.
+- Suites that are not `deno test` need no mechanism. Every one of their
+  invocation units holds a single identity, so skipping it is declining to
+  invoke it.
 - Both halves of the drift guard are unchanged: the tree half still claims
   files, the store half still claims identities.
 - A repeat names an identity and invokes its file with every other
@@ -1312,12 +1327,11 @@ that a renamed test is an unknown identity until an alias lands. The lane
 runner enforces it at item granularity: an available item that
 `enumerate()` returns and that no known identity with the same variant
 locates to at item level is mandatory. A suite-level measurement does not
-make any item known.
-An identity explicitly declared unavailable by that variant's skip
-registry is not unknown. History from the default configuration does not
-satisfy this rule for a new variant. A newly marked suite therefore runs in
-full, apart from its declared unavailable tests, until a successful `main`
-run has produced records for it.
+make any item known. An identity explicitly declared unavailable by that
+variant's skip registry is not unknown. History from the default
+configuration does not satisfy this rule for a new variant. A newly marked
+suite therefore runs in full, apart from its declared unavailable tests,
+until a successful `main` run has produced records for it.
 
 **What the change touches must run.** A pull request that edits a test and
 does not run it is not something this repository should permit, so a
