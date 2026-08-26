@@ -1,3 +1,7 @@
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
@@ -23,9 +27,13 @@ class CapturingTransport extends EventEmitter<RuntimeTransportEvents>
   implements RuntimeTransport {
   readonly sent: Array<IPCClientMessage | IPCClientNotification> = [];
   send(original: IPCClientMessage | IPCClientNotification): void {
-    // Cloned, as a real transport delivers it, so what is captured cannot
-    // change under later mutation by the sender.
-    const message = structuredClone(original);
+    // Encoded and decoded, as a real transport delivers it: the round trip is
+    // what carries the `FabricKeyPair` this payload holds, where a bare clone
+    // would strip it to `{}`. It copies as that clone did, so what is captured
+    // cannot change under later mutation by the sender.
+    const message = fabricFromRealmValue(
+      realmFromFabricValue(original),
+    ) as IPCClientMessage | IPCClientNotification;
     this.sent.push(message);
     if (!("msgId" in message)) return;
     queueMicrotask(() => {

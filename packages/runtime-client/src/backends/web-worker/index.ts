@@ -11,6 +11,7 @@ import "core-js/proposals/async-explicit-resource-management";
 import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
 import { getLogger } from "@commonfabric/utils/logger";
 import { unrefTimer } from "@commonfabric/utils/sleep";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import { CompilerStackLoadError } from "@commonfabric/runner";
 import {
@@ -28,7 +29,6 @@ import {
 import { RuntimeProcessor } from "@/backends/mod.ts";
 import { postToClient } from "@/backends/post-to-client.ts";
 import { describeFailure } from "@/shared/utils.ts";
-import { isObjectNotArray } from "@commonfabric/utils/types";
 
 // Count-only ledger of request traffic as seen by the worker: one
 // `received/<type>` per request that reached this message handler and one

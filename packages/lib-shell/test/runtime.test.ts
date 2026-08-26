@@ -1,5 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 import { createSession, Identity } from "@commonfabric/identity";
 import type { DID } from "@commonfabric/identity";
 import {
@@ -7,10 +11,6 @@ import {
   defaultRenderConfidentialityCeiling,
   RuntimeInternals,
 } from "@commonfabric/lib-shell";
-import {
-  fabricFromRealmValue,
-  realmFromFabricValue,
-} from "@commonfabric/data-model/codecs";
 import { TransportNotificationType } from "@commonfabric/runtime-client";
 
 type MockRuntimeClientEvents = {

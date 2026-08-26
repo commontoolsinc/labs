@@ -158,13 +158,15 @@ export class CellHandle<T = unknown> {
     value: T,
     type: RequestType.CellSet | RequestType.CellPush,
   ): Promise<void> {
-    // Serialized _first_, because it can refuse. The local update below is
-    // optimistic about the _write_ -- it assumes a value the connection
-    // accepts will land -- and not about whether the value can be sent at all.
-    // Were the refusal to come after, a value the runtime is never going to
-    // see would already be this handle's cached value and would already have
-    // reached every subscriber, leaving the display showing state that does
-    // not exist.
+    // Serialized first, though nothing here now depends on the order:
+    // `serialize()` no longer refuses anything, so the local update below is
+    // optimistic about the value being sendable as well as about the write
+    // landing. A value the encode cannot carry therefore does become this
+    // handle's cached value and does reach every subscriber before the send
+    // fails. Accepted deliberately -- the values that refusal protected are
+    // the ones this connection now carries -- and the failure still reaches
+    // the caller, because `RuntimeConnection.request()` is not `async` and the
+    // encode's throw leaves before the `.catch()` below can absorb it.
     //
     // `T` is unconstrained, so this says what the write path requires rather
     // than what the class guarantees. Constraining `T` to `ClientCellValue` is

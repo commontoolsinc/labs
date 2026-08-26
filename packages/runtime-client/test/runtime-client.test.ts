@@ -455,7 +455,7 @@ describe("RuntimeClient", () => {
   });
 
   describe("uploadBlob", () => {
-    it("sends the blob's bytes as an encoded `FabricBytes`", async () => {
+    it("sends the blob's bytes as a `FabricBytes`", async () => {
       const requests: unknown[] = [];
       const conn = {
         on: () => {},

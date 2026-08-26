@@ -2,6 +2,10 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
+import {
   FabricBytes,
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-primitives";
@@ -17,10 +21,6 @@ import {
   type RuntimeClient,
 } from "@/mod.ts";
 import { cellRefToKey } from "@/shared/utils.ts";
-import {
-  fabricFromRealmValue,
-  realmFromFabricValue,
-} from "@commonfabric/data-model/codecs";
 
 describe("cell-handle", () => {
   describe("CellHandle CFC label IPC", () => {
