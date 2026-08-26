@@ -6311,8 +6311,17 @@ supply; OW29/OW32/OW34 closed):
     durable entry left pending and UNCONSEQUENCED, the standard
     re-drain re-delivering it — and carries the drain's arrival-order
     BARRIER with it (events.md §2, mirroring the sidecar-sync-failure
-    arm): every later-arrived durable served entry behind it IN THE
-    SAME SPACE defers too. Two exclusions, deliberate: cross-space
+    arm), in TWO halves, because the deferral can land in two places.
+    IN THE QUEUE: every later-arrived durable served entry behind the
+    head IN THE SAME SPACE defers too. MID-DRAIN-PASS: the
+    scheduler-side barrier can only hold what is already queued, and
+    the drain awaits a `sync()` per new sidecar — so a park failure can
+    land between one entry's queueing and the next's, and the next
+    entry would queue behind the barrier's back and overtake. The
+    second half (`#loadParkDeferredInPass`) makes the pass STOP there,
+    the same `break` the sidecar-sync arm makes; found in this seat's
+    own adversarial pass, and its mutation reds `["A","B","A"]` exactly
+    like the in-queue one. Two exclusions, deliberate: cross-space
     queue neighbours (§2's order is per-space) and LT1 in-process
     copies (`served` with no `streamEntry` — no durable entry to
     re-drain, and a running event's same-wave cascade children rather
@@ -6357,11 +6366,20 @@ supply; OW29/OW32/OW34 closed):
     failure reaches the drain as a load-park DEFERRAL, not a drop"
     (the contract the SpaceServer's `onFailure` branches on; the
     pre-existing client-side drop pin beside it is unchanged).
-    Mutations, both red: restore the drop routing → both entries seal
-    dropped and the log never grows past the warm-up; skip the barrier
-    loop → the log reads `["A","B","A"]`, the OW45 arm-B b01 overtake
-    shape. Battery green at the fix: executor-events-down (23 steps),
-    executor-fan-out, executor-serving-loop, scheduler-event-load-park.
+    A third pin covers the mid-pass half: the drain's sync gate holds a
+    pass at B's sidecar with A2's park already failed inside it, and
+    after healing and release the log still reads `["A","A","B"]`.
+    Mutations, all red: restore the drop routing → both entries seal
+    dropped and the log never grows past the warm-up (and the
+    scheduler-level pin reads `kind: "dropped"`); skip the in-queue
+    barrier loop → `["A","B","A"]`, the OW45 arm-B b01 overtake shape;
+    drop the `#loadParkDeferredInPass` check → the same overtake through
+    the mid-pass gap. Battery green at the fix: executor-events-down
+    (24 steps, the α3 retry machinery untouched), executor-fan-out,
+    executor-serving-loop, scheduler-event-load-park,
+    executor-space-server, executor-watermark, executor-stats,
+    executor-wave, executor-cross-space, and the full
+    `packages/runner` package (1301 passed / 7549 steps / 0 failed).
     STILL OPEN, untouched by this fix: shard 9
     (`cfc-staged-publish`) stays UNHARVESTED — symptom-compatible,
     no store evidence, classification open — and the #6248 lane

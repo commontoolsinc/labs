@@ -739,6 +739,18 @@ export class SpaceServer implements TransactionSealDestination {
    * EVENT_PREQUEUE_STUCK_AFTER. */
   #preQueueDeferralStreaks = new Map<string, number>();
 
+  /** Set when a LOAD-PARK deferral fires while a drain pass is running
+   * (verification-coverage.md's OW45 residue member). The scheduler's
+   * own arrival-order barrier holds every later-arrived durable entry
+   * that is already QUEUED behind the deferred one, but an entry this
+   * pass has not reached yet is out of its reach — and the pass awaits
+   * TWICE per entry (a new sidecar's `sync()`, then the stream doc's),
+   * so a park failure genuinely can land in either gap. The drain reads
+   * this immediately before queueing each entry — past both awaits —
+   * and stops the pass, the same barrier `break` the sidecar-sync-
+   * failure arm makes. Cleared at the top of every pass. */
+  #loadParkDeferredInPass = false;
+
   /** Post-commit effects of sealed transactions, deferred per wave
    * (serving-loop.md §3: effects hand to the outbox POST-commit, never
    * at seal). Admitted to the outbox after the wave's commit step;
@@ -2441,6 +2453,9 @@ export class SpaceServer implements TransactionSealDestination {
     const pendingDocs = Engine.selectPendingStreamEventDocs(engine);
     if (pendingDocs.length === 0) return 0;
     let queued = 0;
+    // The load-park barrier's mid-pass half (see #loadParkDeferredInPass).
+    // Cleared here so each pass judges its own deferrals.
+    this.#loadParkDeferredInPass = false;
     // Pending entries process ACROSS sidecars in append commit-seq
     // order — events.md §2: per stream, commit-seq order; across streams
     // in one space, arrival order. A deferral (a lagging sidecar view or
@@ -2500,6 +2515,18 @@ export class SpaceServer implements TransactionSealDestination {
           doc.id,
           () => `sidecar ${doc.id} (sync failing)`,
         );
+        this.#armDeferredRescan();
+        break;
+      }
+      // The load-park barrier's OTHER half. The scheduler-side barrier
+      // (failHeadEventLoadPark) can only hold entries already IN the
+      // event queue; an entry this pass has not queued YET would slip
+      // past it and overtake the deferred one. The window is real —
+      // each new sidecar's `sync()` above is an await, so a park failure
+      // can land between one entry's queueing and the next's — so the
+      // pass STOPS here, the same `break` the sidecar-sync arm makes,
+      // and the rescan re-drains from arrival position.
+      if (this.#loadParkDeferredInPass) {
         this.#armDeferredRescan();
         break;
       }
@@ -2712,6 +2739,10 @@ export class SpaceServer implements TransactionSealDestination {
                     // idle park; a give-up arm for that is OW54's
                     // separately tracked territory, not this fix's.
                     this.#options.stats.events.loadParkDeferrals += 1;
+                    // The barrier's mid-pass half: a drain pass in
+                    // flight must stop before queueing an entry that
+                    // arrived after this one.
+                    this.#loadParkDeferredInPass = true;
                     // Never mix budgets: if this entry later defers for
                     // the cold-view reason, that count starts fresh.
                     this.#eventDeferrals.delete(entry.eventId);

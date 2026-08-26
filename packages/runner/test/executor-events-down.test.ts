@@ -3373,4 +3373,132 @@ describe("Phase 3 events-down (serving side)", () => {
       cancelDemand();
     }
   });
+
+  it("the load-park barrier reaches entries the drain has NOT queued yet: a park failure landing MID-PASS stops the pass, instead of letting the next-arrived entry queue behind the barrier's back and overtake (the scheduler-side barrier can only hold what is already IN the event queue, and each new sidecar's sync() is an await — so the gap is real; held open here with the drain's sync gate on B's sidecar. Mutation: drop the #loadParkDeferredInPass check in #drainStreamEvents → B1 queues into the healed load and the log reads [\"A\",\"B\",\"A\"], the OW45 arm-B b01 overtake shape)", async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+
+    const compiled = await clientRuntime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: ORDERED_LOG_PATTERN }],
+    }, { space });
+    const argument = clientRuntime.getCell<{ log: string[] }>(
+      space,
+      "load-park-midpass-arg",
+      undefined,
+    );
+    const result = clientRuntime.getCell<Record<string, unknown>>(
+      space,
+      "load-park-midpass-result",
+      compiled.resultSchema,
+    );
+    await argument.sync();
+    await result.sync();
+    {
+      const seed = clientRuntime.edit();
+      argument.withTx(seed).set({ log: [] });
+      expect((await seed.commit()).error).toBeUndefined();
+    }
+    {
+      const tx = clientRuntime.edit();
+      clientRuntime.run(tx, compiled, argument, result);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    const argumentId = argument.getAsNormalizedFullLink().id;
+    const storedLog =
+      (): string[] => ((Engine.read(engine, { id: argumentId })?.value as
+        | { log?: string[] }
+        | undefined)?.log ?? []);
+    const entriesOf = (sidecarId: string) =>
+      ((Engine.read(engine, { id: sidecarId })?.value ??
+        {}) as StreamEventsDocValue).entries ?? [];
+    const send = (stream: "a" | "b") =>
+      (result.key(stream) as unknown as { send(value: unknown): unknown })
+        .send({});
+
+    GatedStorageManager.loadParkFailHits = 0;
+    const gate = Promise.withResolvers<void>();
+    try {
+      // Warm the piece and stream `a`'s sidecar, ungated.
+      send("a");
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(
+        () => storedLog().length === 1,
+        "the warm-up consequence to land",
+      );
+      const aSidecarId = sidecarIdsIn(engine)[0];
+      expect(aSidecarId).toBeDefined();
+      expect(servingManager).toBeDefined();
+
+      // Hold the drain at B's sidecar sync — the exact point at which A2
+      // has been queued and B1 has not. `a`'s sidecar passes through, so
+      // A2 still queues in this pass.
+      servingManager!.syncGateWhen = (id) =>
+        id.startsWith("of:stream-events:") && id !== aSidecarId;
+      servingManager!.syncGate = gate.promise;
+
+      // Fail A2's head-event load park while the pass is held.
+      GatedStorageManager.loadParkFailDocId = argumentId;
+      GatedStorageManager.loadParkFailAddress = {
+        space,
+        scope: "space",
+        id: argumentId,
+      };
+
+      send("a");
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(
+        () => entriesOf(aSidecarId).length === 2,
+        "A2's append to land",
+      );
+      send("b");
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(
+        () => sidecarIdsIn(engine).length === 2,
+        "B1's append to land on its own sidecar",
+      );
+
+      // The window: a pass held at B's sidecar sync, with A2's park
+      // already failed inside it.
+      await waitUntil(
+        () =>
+          (servingManager?.syncGateHits ?? 0) > 0 &&
+          GatedStorageManager.loadParkFailHits > 0,
+        "a drain pass held at B's sidecar with A2's park already failed",
+      );
+
+      // HEAL FIRST, then release: with the load healthy, an unbarriered
+      // pass would queue B1 and dispatch it immediately — the overtake.
+      GatedStorageManager.loadParkFailDocId = undefined;
+      GatedStorageManager.loadParkFailAddress = undefined;
+      servingManager!.syncGateWhen = undefined;
+      servingManager!.syncGate = undefined;
+      gate.resolve();
+
+      await waitUntil(
+        () => storedLog().length === 3,
+        "all three consequences to land after the pass resumes",
+        30_000,
+      );
+      // THE PIN: arrival order held across the mid-pass gap.
+      expect(storedLog()).toEqual(["A", "A", "B"]);
+    } finally {
+      GatedStorageManager.loadParkFailDocId = undefined;
+      GatedStorageManager.loadParkFailAddress = undefined;
+      if (servingManager !== undefined) {
+        servingManager.syncGateWhen = undefined;
+        servingManager.syncGate = undefined;
+      }
+      gate.resolve();
+      cancelDemand();
+    }
+  });
 });
