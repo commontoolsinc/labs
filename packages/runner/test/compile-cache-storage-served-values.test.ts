@@ -242,7 +242,11 @@ describe("compile-cache storage-served closures round-trip as values", () => {
         const rawB = await rawStoredSourceMap(rt2, spaceB, identity);
         if (rawA !== undefined) docsWithMap++;
         expect(rawB).toEqual(rawA);
-        expect(JSON.stringify(rawB ?? null)).not.toContain('"/quote"');
+        // Sigil-signature guard: the raw stored value must not be a link.
+        // One token suffices for both corrupt shapes — the bare sigil this
+        // topology produces (`{"/":{"link@1":…}}`) and the quoted wrapper
+        // observed in live ensure-OFF stores (`{"/quote":{"/":{"link@1":…}}}`)
+        // both carry it.
         expect(JSON.stringify(rawB ?? null)).not.toContain('"link@');
       }
       // Vacuity guard: the raw-shape assertions above only mean something if
@@ -280,8 +284,8 @@ describe("compile-cache storage-served closures round-trip as values", () => {
         const rawC = await rawStoredSourceMap(rt2, spaceC, identity);
         if (rawA !== undefined) docsWithMap++;
         // The fresh space's stored sourceMap is the VALUE, not a (quoted)
-        // link into the space that served the modules.
-        expect(JSON.stringify(rawC ?? null)).not.toContain('"/quote"');
+        // link into the space that served the modules. The one token covers
+        // both corrupt shapes (bare and quoted sigil — see arm 1's note).
         expect(JSON.stringify(rawC ?? null)).not.toContain('"link@');
         expect(rawC).toEqual(rawA);
       }
