@@ -657,7 +657,9 @@ liveInput.onchange=()=>{ LIVE=liveInput.value.trim(); localStorage.setItem("si-l
   if(cur) renderDetail(cur); flash(LIVE?"live links on":"live links off"); };
 $("#copy-space").onclick=()=>{ navigator.clipboard?.writeText(B.space); flash("copied space DID"); };
 
-// --- identities (users of this space) ---
+//
+// identities (users of this space)
+//
 function renderIdentities(){
   const host=$("#idlist"); const ps=B.participants||[];
   $("#idpanel>summary").textContent="Identities ("+ps.length+")";
@@ -676,7 +678,9 @@ function renderIdentities(){
   }
   host.append(el("div",{class:"muted",style:"margin-top:6px",text:"cross-space (home + profiles): cf inspect identity <DID>"}));
 }
-// --- conflicts (contested cells) ---
+//
+// conflicts (contested cells)
+//
 function renderConflicts(){
   const host=$("#cflist"); const cs=B.conflicts||[];
   const mu=cs.filter(c=>c.multiUser).length;

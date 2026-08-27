@@ -329,7 +329,9 @@ export class Session {
   /** How much context each hunk can reveal, cached against the document. */
   private roomCache?: { doc: Document; room: ReadonlyMap<number, HunkRoom> };
 
-  // --- editing ---
+  //
+  // editing
+  //
   private source?: EditableSource;
   private buffer?: EditBuffer;
 
@@ -359,14 +361,18 @@ export class Session {
    * listed above it. */
   private editedFiles: string[] = [];
 
-  // --- file picker (C-x C-f) ---
+  //
+  // file picker (C-x C-f)
+  //
   private readonly files?: FileGateway;
   private pickerDir = "";
   private pickerFilter = "";
   private pickerEntries: DirEntry[] = [];
   private pickerSel = 0;
 
-  // --- jump list (i) ---
+  //
+  // jump list (i)
+  //
 
   /** Every file and commit in the diff, in document order; the filter narrows
    * this into the shown {@link jumpEntries}. */

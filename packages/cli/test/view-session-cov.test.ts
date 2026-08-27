@@ -2707,7 +2707,9 @@ Deno.test("filepickercov: escape cancels the picker", () => {
 // off-screen scroll, or a non-editable diff line under a policy gate).
 //
 
-// --- card reference up-scroll lands a higher target above the scroll (392) --
+//
+// card reference up-scroll lands a higher target above the scroll (392)
+//
 
 /** A node in the SAMPLE blob whose card carries several reference targets, used
  * to step the card selection and force the overlay to scroll. */
@@ -2776,11 +2778,13 @@ Deno.test("session: a card with many references scrolls down then up across the 
   }
 });
 
-// --- jumpToTarget via a use reference with no def offset (428, 446, 464-477) -
+//
+// jumpToTarget via a use reference with no def offset (428, 446, 464-477) -
 // The lift node's card lists both a definition reference (carrying a node
 // offset) and a plain "use" reference (no offset). Revealing the use one takes
 // the offset-less path: findTargetIndex returns -1, jumpToTarget falls back to
 // nodeAtLine, and the off-screen destination column pans the view.
+//
 
 Deno.test("session: revealing a use reference (no def offset) jumps via nodeAtLine and pans", () => {
   const doc = parseDocument(SAMPLE);
@@ -3045,7 +3049,9 @@ Deno.test("diffcov: a same-line region past the marker is killed (guardRegionEdi
   }
 });
 
-// --- the mark rides onto the added line when a context edit splits (1109-1111)
+//
+// the mark rides onto the added line when a context edit splits (1109-1111)
+//
 
 Deno.test("diffcov: a mark on a context line rides onto the added line when split", () => {
   const { ws, done } = diffWorkspace();
@@ -3064,7 +3070,9 @@ Deno.test("diffcov: a mark on a context line rides onto the added line when spli
   }
 });
 
-// --- ensureCursorVisible scrolls the cursor into view (1371-1372, 1375-1376) -
+//
+// ensureCursorVisible scrolls the cursor into view (1371-1372, 1375-1376) -
+//
 
 Deno.test("session: moving the edit cursor off-screen scrolls it back into view", () => {
   // A tall, wide file so cursor moves cross the viewport edges in both axes.

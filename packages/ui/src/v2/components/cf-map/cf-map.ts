@@ -354,7 +354,9 @@ export class CFMap extends BaseElement {
     `;
   }
 
-  // === Keyboard Navigation ===
+  //
+  // Keyboard Navigation
+  //
 
   private _handleKeydown(event: KeyboardEvent): void {
     // Only handle when interactive and map exists and is stable
@@ -397,7 +399,9 @@ export class CFMap extends BaseElement {
     }
   }
 
-  // === Map State Helpers ===
+  //
+  // Map State Helpers
+  //
 
   /**
    * Check if the map is in a stable state for operations.
@@ -425,7 +429,9 @@ export class CFMap extends BaseElement {
     return true;
   }
 
-  // === Map Initialization ===
+  //
+  // Map Initialization
+  //
 
   private _initializeMap(): void {
     const container = this.shadowRoot?.querySelector(
@@ -581,7 +587,9 @@ export class CFMap extends BaseElement {
     this.emit("cf-click", detail);
   }
 
-  // === Value Getters (using CellControllers) ===
+  //
+  // Value Getters (using CellControllers)
+  //
 
   private _getValue(): MapValue {
     return this._valueController.getValue() || {};
@@ -601,7 +609,9 @@ export class CFMap extends BaseElement {
     return this._boundsController.getValue() || null;
   }
 
-  // === Cell Updates (bidirectional, using CellControllers) ===
+  //
+  // Cell Updates (bidirectional, using CellControllers)
+  //
 
   private _updateCenterCell(center: LatLng): void {
     if (!this._centerController.hasCell()) return;
@@ -636,7 +646,9 @@ export class CFMap extends BaseElement {
     }
   }
 
-  // === Map Updates ===
+  //
+  // Map Updates
+  //
 
   private _updateMapCenter(): void {
     if (!this._map) return;
@@ -771,7 +783,9 @@ export class CFMap extends BaseElement {
     }
   }
 
-  // === Feature Rendering ===
+  //
+  // Feature Rendering
+  //
 
   private _clearLayers(): void {
     // Remove event listeners from tracked markers before clearing to prevent memory leaks
@@ -1109,7 +1123,9 @@ export class CFMap extends BaseElement {
     }
   }
 
-  // === Popup Rendering ===
+  //
+  // Popup Rendering
+  //
 
   private _createPopupContent(
     feature: MapMarker | MapCircle,
@@ -1153,7 +1169,9 @@ export class CFMap extends BaseElement {
     return container;
   }
 
-  // === Fit to Bounds ===
+  //
+  // Fit to Bounds
+  //
 
   private _fitMapToBounds(): void {
     if (!this._map) return;
@@ -1262,7 +1280,9 @@ export class CFMap extends BaseElement {
     }
   }
 
-  // === Utilities ===
+  //
+  // Utilities
+  //
 
   private _isEmoji(str: string): boolean {
     // Simple emoji detection - checks for emoji unicode ranges
@@ -1270,7 +1290,9 @@ export class CFMap extends BaseElement {
     return EMOJI_REGEX.test(str);
   }
 
-  // === Coordinate Validation ===
+  //
+  // Coordinate Validation
+  //
 
   /**
    * Clamp zoom level to valid range, handling NaN/Infinity
@@ -1357,7 +1379,9 @@ export class CFMap extends BaseElement {
     return bounds;
   }
 
-  // === Cleanup ===
+  //
+  // Cleanup
+  //
 
   private _cleanup(): void {
     // Cancel pending RAF to prevent race condition if component disconnects before it fires
@@ -1403,7 +1427,9 @@ export class CFMap extends BaseElement {
     // the host element disconnects.
   }
 
-  // === Public API ===
+  //
+  // Public API
+  //
 
   /**
    * Get the underlying Leaflet map instance for advanced usage

@@ -477,7 +477,9 @@ Deno.test("parse: an anonymous namespace (string-literal module name) has no nam
   assertEquals(ns!.name, undefined, "a string-named module exposes no name");
 });
 
-// --- classify: multi-declarator variable statement & declaration (1400-1408) -
+//
+// classify: multi-declarator variable statement & declaration (1400-1408) -
+//
 
 Deno.test("parse: a multi-declarator var statement yields a binding node per declaration", () => {
   const doc = parseDocument("const a = 1, b = 2, c = 3;\n", "m.ts");
@@ -589,7 +591,9 @@ Deno.test("parse: a bare arrow-function expression statement is a closure node",
   assert(node!.label.startsWith("λ"), `label was ${node!.label}`);
 });
 
-// --- primaryChildren: arrow + reactive call in return position (1620-1626) ---
+//
+// primaryChildren: arrow + reactive call in return position (1620-1626)
+//
 
 Deno.test("parse: a return of an arrow recurses into its body", () => {
   const src = [

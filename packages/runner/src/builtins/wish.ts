@@ -116,12 +116,14 @@ class WishError extends Error {
   }
 }
 
-// -- Interval #now constants and helpers --
+//
+// Interval #now constants and helpers
 // Bounds for #now/N intervals, specified in whole seconds. Values outside this
 // range are rejected, not clamped. The 1-second minimum caps the sampling rate
 // at 1Hz; the 24-hour maximum keeps the scheduled delay within the setTimeout
 // range. Both serve as defense-in-depth against timing side-channel attacks once
 // SES sandboxing removes patterns' direct access to Date.now/performance.now.
+//
 const MIN_INTERVAL_SECONDS = 1;
 const MAX_INTERVAL_SECONDS = 24 * 60 * 60;
 const ONE_SHOT_RESOLUTION_MS = 1000;

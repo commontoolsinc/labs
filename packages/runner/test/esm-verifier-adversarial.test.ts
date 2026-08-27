@@ -19,7 +19,9 @@ interface Attack {
 }
 
 const ATTACKS: Attack[] = [
-  // --- ASI / statement-merge desync (splitter only `}`-terminates block keywords) ---
+  //
+  // ASI / statement-merge desync (splitter only `}`-terminates block keywords)
+  //
   {
     name: "ASI: const builder call then side-effect require, no semicolons",
     body:
@@ -40,7 +42,9 @@ const ATTACKS: Attack[] = [
     body: `${IMPORT}\nconst a = (0, cf.pattern)(() => 1) globalThis.pwned = 1`,
   },
 
-  // --- tokenizer confusion ---
+  //
+  // tokenizer confusion
+  //
   {
     name: "regex-vs-divide: division parsed as regex to swallow a semicolon",
     body:
@@ -57,7 +61,9 @@ const ATTACKS: Attack[] = [
     accept: true, // legitimate: a direct callback whose body is a template
   },
 
-  // --- shadowing trusted names ---
+  //
+  // shadowing trusted names
+  //
   {
     name: "shadow `require` then call it as an arbitrary function",
     body:
@@ -93,7 +99,9 @@ const ATTACKS: Attack[] = [
       `const a = 1, __importStar = (m) => globalThis;\nconst ns = __importStar(require("commonfabric"));`,
   },
 
-  // --- __cf_data / schema opaque-argument boundary ---
+  //
+  // __cf_data / schema opaque-argument boundary
+  //
   {
     name: "legit __cf_data-wrapped plain object (negative control)",
     body: `${IMPORT}\nexports.config = cf.__cf_data({ a: 1, b: 2 });`,
@@ -121,14 +129,18 @@ const ATTACKS: Attack[] = [
     accept: true,
   },
 
-  // --- reexport getter abuse ---
+  //
+  // reexport getter abuse
+  //
   {
     name: "reexport getter returning a call expression",
     body:
       `Object.defineProperty(exports, "x", { enumerable: true, get: function () { return globalThis.fetch("//x"); } });`,
   },
 
-  // --- default export laundering ---
+  //
+  // default export laundering
+  //
   {
     name: "default export of comma-sequence with a side effect",
     body:
@@ -139,7 +151,9 @@ const ATTACKS: Attack[] = [
     body: `${IMPORT}\nexports.default = exports.v = cf.require;`,
   },
 
-  // --- trusted-builder callback indirection ---
+  //
+  // trusted-builder callback indirection
+  //
   {
     name: "builder callback is a member of an import (indirect)",
     body:
@@ -177,7 +191,9 @@ const ATTACKS: Attack[] = [
       `${IMPORT}\nconst cb = () => 1;\nexports.h = cf.handler(cb, () => globalThis.fetch("//x"), 0);`,
   },
 
-  // --- top-level executable / mutable forms ---
+  //
+  // top-level executable / mutable forms
+  //
   {
     name: "IIFE disguised as a parenthesized arrow",
     body: `exports.x = (() => { globalThis.fetch("//x"); return 1; })();`,
@@ -226,7 +242,9 @@ const ATTACKS: Attack[] = [
     accept: true,
   },
 
-  // --- export form abuse ---
+  //
+  // export form abuse
+  //
   { name: "module.exports = runtime", body: `${IMPORT}\nmodule.exports = cf;` },
   {
     name: "computed-key export assignment",
@@ -242,7 +260,9 @@ const ATTACKS: Attack[] = [
     body: `${IMPORT}\nexports.x = cf.\\u0070attern(() => 1);`,
   },
 
-  // --- import fast-path / require boundary abuse ---
+  //
+  // import fast-path / require boundary abuse
+  //
   {
     name: "side-effect require with quote-escape break-out attempt",
     body: `require("./a.ts\\");globalThis.pwned=(\\"");`,
@@ -269,12 +289,14 @@ const ATTACKS: Attack[] = [
     body: `const x = require("commonfabric"), y = globalThis;`,
   },
 
-  // --- `__cfReg` hoist-registration call (CT-1623) ---
+  //
+  // `__cfReg` hoist-registration call (CT-1623)
   // `__cfReg` is supplied to the module wrapper as a parameter (the registrar);
   // it is deliberately NOT a referenceable binding, and only a single top-level
   // `__cfReg({ <shorthand top-level bindings> })` statement is approved. Every
   // other shape must be rejected so an attacker can neither register an arbitrary
   // symbol nor smuggle a second/aliased registrar call.
+  //
   {
     name: "__cfReg: legitimate single shorthand registration (control)",
     accept: true,
