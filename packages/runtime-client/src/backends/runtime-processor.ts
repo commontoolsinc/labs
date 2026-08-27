@@ -1628,12 +1628,19 @@ export class RuntimeProcessor {
 
   private async pullSqliteDbRef(cell: Cell<unknown>): Promise<SqliteDbRef> {
     await cell.pull();
-    if (cell.getRaw({ lastNode: "value" }) === undefined) {
+    const raw = cell.getRaw({ lastNode: "value" });
+    const missing = raw === undefined ||
+      (raw !== null && typeof raw === "object" && !Array.isArray(raw) &&
+        Object.keys(raw).length === 0);
+    if (missing) {
       // A resolved scoped target can be demanded while its lazy factory write
-      // is still committing. Pull waits for reactive work, but deliberately not
-      // for in-flight commits; sync before that commit can confirm the target
-      // absent and leave this request holding an empty replica. Cross the
-      // commit-aware barrier before loading only that first missing value.
+      // is still committing. Its object schema presents that missing value as
+      // an empty object rather than `undefined`. Pull waits for reactive work,
+      // but deliberately not for in-flight commits; sync before that commit can
+      // confirm the target absent and leave this request holding an empty
+      // replica. Cross the commit-aware barrier before loading only that first
+      // missing value. Non-empty malformed handles still fail immediately in
+      // readSqliteDbRef instead of being mistaken for a pending factory.
       await this.runtime.scheduler.idleWithPendingCommits();
       await cell.sync();
     }

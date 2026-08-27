@@ -4444,7 +4444,7 @@ describe("runtime-processor", () => {
           loaded = committed;
           return Promise.resolve(loaded ? db : undefined);
         },
-        getRaw: () => loaded ? db : undefined,
+        getRaw: () => loaded ? db : {},
         asSchema: () => ({ get: () => loaded ? db : undefined }),
       };
       const processor = Object.assign(
