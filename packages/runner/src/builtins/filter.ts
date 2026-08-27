@@ -251,7 +251,7 @@ export function filter(
         return runtime.getCellFromLink(resolved, undefined, tx);
       });
 
-    const opPattern = resolveOpPattern(runtime, op.getRaw(), "filter");
+    const opPattern = resolveOpPattern(runtime, op.getRaw(), "filter", inputsCell);
     const argumentUsage = inferListOpArgumentUsage(opPattern);
     const outputScope = narrowestCellScope(runtime, tx, [
       inputsCell.key("list"),

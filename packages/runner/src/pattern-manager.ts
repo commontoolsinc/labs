@@ -6,8 +6,11 @@ import {
   brandTrustedPattern,
   getArtifactEntryRef,
   getPatternProgram,
+  getPatternSourcePath,
+  isKeylessPatternIdentity,
   isTrustedBuilderArtifact,
   isTrustedPattern,
+  KEYLESS_PATTERN_IDENTITY_PREFIX,
   resolveOriginal,
   setArtifactEntryRef,
   setPatternProgram,
@@ -530,10 +533,75 @@ export class PatternManager {
     const root = resolveOriginal(pattern);
     const existing = getArtifactEntryRef(root);
     if (existing) return existing;
-    const identity = `keyless:${fromURI(toURI(createRef(root, "pattern")))}`;
+    // Mint-site tripwire (the keyless close-out's insurance): the sanctioned
+    // keyless population is runtime-BUILT pattern values — the transformer
+    // hoists all source-authored lift()/handler() code to cf:module
+    // (CT-1644/CT-1655), so a COMPILED pattern reaching this mint means its
+    // content-addressed association went missing (a registration that never
+    // ran, or a ref lost to shadowing). The source path is stamped by the
+    // same module-indexing loop that assigns entry refs
+    // (`registerEvaluatedModules`), so "has a source path, needs a mint" is
+    // that bug surfacing — count it and say so loudly.
+    if (getPatternSourcePath(root) !== undefined) {
+      this.keylessMintAnomalies++;
+      logger.warn("keyless-mint-missing-association", () => [
+        "minting a session keyless identity for a MODULE-INDEXED pattern",
+        `(source ${getPatternSourcePath(root)}) — its content-addressed`,
+        "association is missing; this should never happen for compiled code",
+      ]);
+    }
+    const identity = `${KEYLESS_PATTERN_IDENTITY_PREFIX}${
+      fromURI(toURI(createRef(root, "pattern")))
+    }`;
     const ref = { identity, symbol: "default" };
     this.associatePatternIdentity(root, ref);
     return ref;
+  }
+
+  /**
+   * Count of keyless mints that hit a module-indexed pattern (see the
+   * tripwire in {@link ensureKeylessPatternIdentity}). Always expected to be
+   * zero; test suites assert on it to prove the runtime keyless population is
+   * runtime-built values only.
+   */
+  keylessMintAnomalies = 0;
+
+  // Session-side resolution hints for KEYLESS list-builtin ops, keyed by the
+  // node's immutable inputs-doc address (`<space>\0<id>`). A keyless op's
+  // durable inputs carry its full embedded graph (the never-durable contract
+  // forbids the `keyless:` `$patternRef` sentinel there — L3(a), RULED
+  // 2026-08-27), but the embedded round-trip corrupts nested output-alias
+  // defer levels (CT-1812/CT-1811), so the SAME session that instantiated the
+  // node resolves the pristine artifact through this map instead. Entries are
+  // session-lifetime like the artifact index; a fresh session re-instantiates
+  // the node and re-registers. Content-addressed key, so two structurally
+  // identical nodes share one (equally valid) entry.
+  private keylessOpRefsByInputsDoc = new Map<
+    string,
+    { identity: string; symbol: string }
+  >();
+
+  /** Record that the node whose immutable inputs doc is `inputsDocKey`
+   * carries a keyless op resolvable in-session as `ref` (already minted and
+   * indexed via {@link ensureKeylessPatternIdentity}). */
+  registerKeylessOpResolution(
+    inputsDocKey: string,
+    ref: { identity: string; symbol: string },
+  ): void {
+    this.keylessOpRefsByInputsDoc.set(inputsDocKey, ref);
+  }
+
+  /** The pristine in-session artifact for a keyless op registered under
+   * `inputsDocKey`, or undefined (no registration this session — the reader
+   * is not the instantiating session, so the embedded graph is all there
+   * is). */
+  keylessOpPatternFor(inputsDocKey: string): Pattern | undefined {
+    const ref = this.keylessOpRefsByInputsDoc.get(inputsDocKey);
+    if (!ref) return undefined;
+    const live = this.artifactFromIdentitySync(ref.identity, ref.symbol);
+    return live !== undefined && isTrustedPattern(live)
+      ? live as Pattern
+      : undefined;
   }
 
   /**
@@ -543,7 +611,7 @@ export class PatternManager {
    * keyless pointer, so such refs must never be written into durable state.
    */
   static isKeylessPatternIdentity(identity: string): boolean {
-    return identity.startsWith("keyless:");
+    return isKeylessPatternIdentity(identity);
   }
 
   /**
@@ -1312,6 +1380,18 @@ export class PatternManager {
     ) {
       this.esmCacheStats.byIdentityHits++;
       return indexed;
+    }
+    // A keyless identity is session-only by construction: no source or
+    // compiled closure exists behind it anywhere, so once the in-memory index
+    // missed, storage cannot help. Answer definitively without probing (a
+    // pointer like this read from durable state is a pre-guard legacy orphan
+    // — tolerated, never loadable; see L3(a), RULED 2026-08-27).
+    if (isKeylessPatternIdentity(entryIdentity)) {
+      logger.debug("keyless-identity-load-skipped", () => [
+        `session-synthetic identity ${entryIdentity}#${symbol} is not in the`,
+        "in-memory index; no durable closure can exist for it",
+      ]);
+      return undefined;
     }
     if (this.runtime.cfcEnforcementMode === "disabled") {
       return undefined;

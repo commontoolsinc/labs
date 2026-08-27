@@ -9,6 +9,10 @@ import { Runtime } from "../src/runtime.ts";
 import type { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { getPatternIdentityRef, resolveEntryIdentity } from "../src/index.ts";
+import {
+  brandTrustedPattern,
+  setPatternSourcePath,
+} from "../src/builder/pattern-metadata.ts";
 
 /**
  * L3(a), RULED 2026-08-27 (owner): session-synthetic `keyless:` identities
@@ -320,5 +324,140 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
     expect(healed?.identity).toBe(realRef!.identity);
     cancel();
     await runtime.idle();
+  });
+
+  it("heals a legacy durable keyless pointer over a running real pattern", async () => {
+    // Pre-guard stores carry durable `keyless:` pattern pointers (today's
+    // leaked orphans). Read back while a REAL pattern runs, such a pointer is
+    // definitively unloadable in every session and every CFC mode — the
+    // watcher tolerates it (debug record, no load probe) and, with the heal
+    // family on, rolls the pointer forward to the running identity.
+    storageManager = EmulatedStorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      experimental: { systemPatternAutoUpdate: true },
+    });
+    const tx = runtime.edit();
+    const compiled = await runtime.patternManager.compilePattern(mapProgram, {
+      space,
+      tx,
+    });
+    const realRef = runtime.patternManager.getArtifactEntryRef(
+      compiled as object,
+    )!;
+    const cell = runtime.getCell<Record<string, unknown>>(
+      space,
+      "legacy-keyless-pointer-heal",
+      undefined,
+      tx,
+    );
+    const running = runtime.run(
+      tx,
+      compiled as Parameters<Runtime["run"]>[1],
+      {},
+      cell,
+    );
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    const cancel = running.sink(() => {});
+    await runtime.idle();
+    expect(getPatternIdentityRef(cell)?.identity).toBe(realRef.identity);
+
+    // The legacy orphan: a durable keyless pointer from a pre-guard session
+    // (never minted here, so the in-memory index cannot serve it either).
+    {
+      const repointTx = runtime.edit();
+      cell.withTx(repointTx).setMetaRaw("patternIdentity", {
+        identity: "keyless:fid1:legacy-orphan-from-a-pre-guard-session",
+        symbol: "default",
+      });
+      await repointTx.commit();
+    }
+    await runtime.idle();
+    await runtime.runner.idlePointerMaintenance();
+    await runtime.idle();
+    await runtime.runner.idlePointerMaintenance();
+
+    expect(getPatternIdentityRef(cell)?.identity).toBe(realRef.identity);
+    cancel();
+    await runtime.idle();
+  });
+
+  it("tolerates a legacy keyless pointer in the start walk: not started, not rejected", async () => {
+    // The boot-walk face of the same legacy state: starting a piece whose
+    // durable pointer is a pre-guard keyless orphan must not fail the walk
+    // with a load rejection — the pointer is unloadable by construction, the
+    // piece is reported as not started (the tolerated orphan), and the debug
+    // record says why.
+    storageManager = EmulatedStorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const tx = runtime.edit();
+    const cell = runtime.getCell<Record<string, unknown>>(
+      space,
+      "legacy-keyless-pointer-start",
+      undefined,
+      tx,
+    );
+    cell.withTx(tx).set({ marker: "orphan" });
+    cell.withTx(tx).setMetaRaw("patternIdentity", {
+      identity: "keyless:fid1:legacy-orphan-from-a-pre-guard-session",
+      symbol: "default",
+    });
+    await tx.commit();
+    await runtime.idle();
+
+    const started = await runtime.runner.start(cell);
+    expect(started).toBe(false);
+  });
+
+  it("counts a keyless mint against a module-indexed pattern (missing-association tripwire)", async () => {
+    // The sanctioned keyless population is runtime-BUILT values. A pattern
+    // carrying a module-index source path reaching the mint means its
+    // content-addressed association went missing — the tripwire counts it.
+    storageManager = EmulatedStorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+
+    // A plain hand-built pattern mints silently: anomaly count stays 0.
+    {
+      const tx = runtime.edit();
+      const cell = runtime.getCell<Record<string, unknown>>(
+        space,
+        "mint-tripwire-clean",
+        undefined,
+        tx,
+      );
+      // deno-lint-ignore no-explicit-any
+      const running = runtime.run(tx, handBuiltPattern() as any, {}, cell);
+      await tx.commit();
+      await running.pull();
+      expect(runtime.patternManager.keylessMintAnomalies).toBe(0);
+    }
+
+    // The anomaly shape: a "module-indexed" pattern (source path stamped by
+    // the indexing loop — always on a branded artifact) that somehow lost
+    // its entry-ref association.
+    {
+      const anomalous = brandTrustedPattern(handBuiltPattern());
+      setPatternSourcePath(anomalous, "/tripwire.tsx");
+      const tx = runtime.edit();
+      const cell = runtime.getCell<Record<string, unknown>>(
+        space,
+        "mint-tripwire-anomalous",
+        undefined,
+        tx,
+      );
+      // deno-lint-ignore no-explicit-any
+      const running = runtime.run(tx, anomalous as any, {}, cell);
+      await tx.commit();
+      await running.pull();
+      expect(runtime.patternManager.keylessMintAnomalies).toBe(1);
+    }
   });
 });

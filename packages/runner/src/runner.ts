@@ -84,6 +84,7 @@ import {
   navigateEventContextOf,
   setNavigateEventContext,
 } from "./builtins/navigate-context.ts";
+import { opInputsDocKey } from "./builtins/op-pattern-ref.ts";
 import { waveRunContextOf, waveSettlementOf } from "./executor/wave.ts";
 import {
   causalFormOfBinding,
@@ -130,6 +131,7 @@ import {
   getPatternSourcePath,
   isTrustedBuilderArtifact,
   resolveOriginal,
+  resolveProducerEntryRef,
 } from "./builder/pattern-metadata.ts";
 import {
   resolveBuiltinImplementationIdentity,
@@ -1747,11 +1749,14 @@ export class Runner {
   }
 
   /**
-   * The pattern pointer to record for `pattern`: its real content-addressed
-   * entry ref when it has one (a compiled pattern), else a stable
-   * session-synthetic ref minted for the keyless pattern object (so a separate
-   * start() / setup-without-pattern can resolve it in-session). See
-   * `syntheticPatternIdentity`.
+   * The pattern pointer for `pattern`: its real content-addressed entry ref
+   * when it has one (a compiled pattern), else a stable session-synthetic
+   * `keyless:` ref minted for the hand-built pattern object. The keyless ref
+   * is INDEX-only — it resolves through `artifactFromIdentitySync` for any
+   * in-session holder of the ref, but it is never recorded durably
+   * (`applySetupState` skips the stamp for it; L3(a), RULED 2026-08-27), so
+   * a keyless piece carries no pattern pointer and cannot be started by
+   * identity: its producer re-derives and re-runs it instead.
    */
   private entryRefForPattern(
     pattern: Pattern,
@@ -2302,34 +2307,40 @@ export class Runner {
     }
 
     // Record the content-addressed {identity, symbol} reference — the ONLY
-    // pattern pointer — when the pattern's entry identity is known (every
-    // space-compiled pattern post-E4). On reload this loads the pattern straight
-    // from the compiled cache by identity (or, on a version bump, recompiles
-    // from the source-doc closure). A KEYLESS hand-built pattern has no entry
-    // ref and so gets no durable pointer: it is session-only (run()-only), the
-    // sanctioned "keyless → session-only" behavior. The ref carries the
-    // authoritative export symbol (recorded at compile/load time); we never
-    // recompute it from `pattern`'s program here, since a source-free reloaded
-    // pattern only has a stub program (mainExport "default"), which would
-    // clobber a non-"default" export name.
-    if (entryRef) {
+    // pattern pointer — when the pattern's entry identity is a REAL one
+    // (every space-compiled pattern post-E4). On reload this loads the
+    // pattern straight from the compiled cache by identity (or, on a version
+    // bump, recompiles from the source-doc closure). A KEYLESS hand-built
+    // pattern gets NO durable pointer: `entryRefForPattern` mints a
+    // `keyless:<hash>` session pointer for it, but that identity is
+    // session-only by construction and must never land in durable state
+    // (pattern-manager's contract; L3(a), RULED 2026-08-27 — the serving
+    // runtime's stamp here was the durable keyless writer the 2026-08-27
+    // diagnosis rooted the r06/r09 poisoned-pointer collateral in). Readers
+    // of such a piece get the designed no-pattern-meta verdict; recovery is
+    // the producer's (re-run the producing lift), never a load. The ref
+    // carries the authoritative export symbol (recorded at compile/load
+    // time); we never recompute it from `pattern`'s program here, since a
+    // source-free reloaded pattern only has a stub program (mainExport
+    // "default"), which would clobber a non-"default" export name.
+    const durableEntryRef =
+      entryRef && !PatternManager.isKeylessPatternIdentity(entryRef.identity)
+        ? entryRef
+        : undefined;
+    if (durableEntryRef) {
       resultCell.withTx(tx).setMetaRaw("patternIdentity", {
-        identity: entryRef.identity,
-        symbol: entryRef.symbol,
+        identity: durableEntryRef.identity,
+        symbol: durableEntryRef.symbol,
       });
       // Same condition as the durable stamp, deliberately: an observer that
       // saw instantiations the store does not label would report update
       // targets that cannot be found again, and one that missed a labeled
-      // root would under-report. That includes the KEYLESS case —
-      // `entryRefForPattern` always yields a ref, minting a `keyless:<hash>`
-      // session pointer when there is no content-addressed one, and that
-      // pointer is stamped durably like any other. So keyless roots are
-      // reported here; whether one is an UPGRADE target is a separate judgment
-      // its consumer makes (a `keyless:` identity can never equal a content
-      // identity, so it is not one).
+      // root would under-report. That EXCLUDES the keyless case now that the
+      // stamp does: an unstamped keyless root reported here would name an
+      // update target no store labels.
       this.runtime.onPatternInstantiated?.({
-        identity: entryRef.identity,
-        symbol: entryRef.symbol,
+        identity: durableEntryRef.identity,
+        symbol: durableEntryRef.symbol,
         // The source path stamped at module-index time is the reliable one: a
         // pattern reloaded BY IDENTITY carries no program, so a nested
         // instantiation would otherwise arrive sourceless. Fall back to the
@@ -2346,10 +2357,10 @@ export class Runner {
     // This completion marker records the identity whose schema, arguments,
     // internal cells, and result projection were staged by setup(). Pattern
     // loading continues to use patternIdentity.
-    if (entryRef) {
+    if (durableEntryRef) {
       resultCell.withTx(tx).setMetaRaw("patternSetupIdentity", {
-        identity: entryRef.identity,
-        symbol: entryRef.symbol,
+        identity: durableEntryRef.identity,
+        symbol: durableEntryRef.symbol,
       });
     }
   }
@@ -2775,6 +2786,12 @@ export class Runner {
     // pointer may still hold an older identity. The unloadable-pointer
     // roll-forward below writes THIS ref back, never the observed key.
     let runningRef: { identity: string; symbol: string } | undefined;
+    // The live pattern VALUE those nodes were instantiated from. Kept for the
+    // roll-forward's keyless arm: when `runningRef` is absent or keyless (the
+    // never-durable session mint), the durable convergence target is the
+    // value's module-addressed PRODUCER — the first real entry ref up its
+    // derivation chain (`resolveProducerEntryRef`; L3(a), RULED 2026-08-27).
+    let runningPattern: Pattern | undefined;
     let cancelNodes: Cancel | undefined;
     let initialSchedulerRehydrationAvailable = true;
 
@@ -2910,6 +2927,7 @@ export class Runner {
           cancelNodes?.();
           instantiatePattern(pattern);
           runningRef = newRef;
+          runningPattern = pattern;
         };
         if (!this.runtime.sealDestinationInstalled) {
           // The OFF arm (and ON-arm client speculation): today's
@@ -3041,10 +3059,27 @@ export class Runner {
                 currentPatternKey !== newKey
               ) return;
               if (!loaded) {
-                logger.error(
-                  "pattern-load-error",
-                  `Failed to load pattern ${newRef.identity}#${newRef.symbol}`,
-                );
+                if (
+                  PatternManager.isKeylessPatternIdentity(newRef.identity)
+                ) {
+                  // A `keyless:` pointer READ from durable state is a
+                  // pre-guard legacy orphan (the guard means nothing new
+                  // mints one into a store): unloadable by construction for
+                  // every session but its minter, and expected in aged
+                  // spaces. Tolerated as the orphan it is — a debug record,
+                  // not an error — and healed below when a producer identity
+                  // is available to converge to.
+                  logger.debug("legacy-keyless-pattern-pointer", () => [
+                    `durable patternIdentity carries a session-synthetic`,
+                    `identity ${newRef.identity}#${newRef.symbol} (pre-guard`,
+                    "legacy state); no session can load it",
+                  ]);
+                } else {
+                  logger.error(
+                    "pattern-load-error",
+                    `Failed to load pattern ${newRef.identity}#${newRef.symbol}`,
+                  );
+                }
                 // CT-1923: an undefined result is a DEFINITIVE verdict — the
                 // load synced and found the identity's docs absent or
                 // uncompilable — while a pattern is still running here. Left
@@ -3055,23 +3090,50 @@ export class Runner {
                 // pattern's identity, durably, with a superseded-check so a
                 // legitimate concurrent repoint wins. Gated on the same flag
                 // as the rest of the heal family; thrown load errors (which
-                // may be transient) never trigger this. Two verdicts are NOT
-                // definitive and must never trigger it either: with CFC
-                // enforcement disabled, loadPatternByIdentity returns
-                // undefined for anything outside the in-memory index (probe
-                // unsupported, not artifact dead); and a session-synthetic
-                // keyless running ref must never be written durably (a fresh
-                // runtime is guaranteed unable to load it).
+                // may be transient) never trigger this. One verdict is NOT
+                // definitive and must never trigger it: with CFC enforcement
+                // disabled, loadPatternByIdentity returns undefined for
+                // anything outside the in-memory index (probe unsupported,
+                // not artifact dead).
+                //
+                // The ref written back must be durable-legal: a
+                // session-synthetic keyless ref never is (L3(a), RULED
+                // 2026-08-27 — a fresh runtime is guaranteed unable to load
+                // it). When the RUNNING ref is keyless or absent, converge to
+                // the running VALUE's module-addressed PRODUCER instead — the
+                // first real entry ref up its derivation chain (walking as
+                // many steps as recorded). A from-scratch runtime-built value
+                // has no such link; the piece then keeps running on its
+                // session value and the pointer is left alone (the tolerated
+                // orphan), because there is nothing durable-legal to write.
+                const revertTarget = runningRef !== undefined &&
+                    !PatternManager.isKeylessPatternIdentity(
+                      runningRef.identity,
+                    )
+                  ? runningRef
+                  : runningPattern !== undefined
+                  ? resolveProducerEntryRef(runningPattern)
+                  : undefined;
                 if (
                   this.runtime.experimental.systemPatternAutoUpdate &&
                   this.runtime.cfcEnforcementMode !== "disabled" &&
-                  runningRef !== undefined &&
-                  !PatternManager.isKeylessPatternIdentity(
-                    runningRef.identity,
-                  ) &&
-                  patternIdentityKey(runningRef) !== newKey
+                  revertTarget === undefined &&
+                  runningPattern !== undefined
                 ) {
-                  const revertRef = runningRef;
+                  logger.debug("keyless-running-no-producer", () => [
+                    "unloadable durable pointer over a running keyless",
+                    "pattern with no module-addressed producer link;",
+                    "nothing durable-legal to converge to — leaving the",
+                    "pointer as written",
+                  ]);
+                }
+                if (
+                  this.runtime.experimental.systemPatternAutoUpdate &&
+                  this.runtime.cfcEnforcementMode !== "disabled" &&
+                  revertTarget !== undefined &&
+                  patternIdentityKey(revertTarget) !== newKey
+                ) {
+                  const revertRef = revertTarget;
                   const rollForward = this.runtime.editWithRetry((tx) => {
                     // Async pointer repair from the meta watcher's load
                     // promise — no scheduler run stamps it; bookkeeping
@@ -3109,7 +3171,9 @@ export class Runner {
                         () => [
                           "durable patternIdentity named an unloadable",
                           `identity (${newRef.identity}#${newRef.symbol});`,
-                          "rolled back to the running pattern",
+                          revertRef === runningRef
+                            ? "rolled back to the running pattern"
+                            : "converged to the running pattern's producer",
                           `${revertRef.identity}#${revertRef.symbol}`,
                         ],
                       );
@@ -3304,7 +3368,9 @@ export class Runner {
         // Real artifact refs only: setup mints and INDEXES a `keyless:`
         // session pointer for hand-built patterns, so getArtifactEntryRef
         // returns it — filter synthetics explicitly, or the roll-forward
-        // would write a pointer no fresh runtime can load.
+        // would write a pointer no fresh runtime can load. The VALUE is kept
+        // regardless: the roll-forward's keyless arm converges through its
+        // derivation chain to a module-addressed producer when one exists.
         const givenRef = this.runtime.patternManager.getArtifactEntryRef(
           givenPattern,
         );
@@ -3312,6 +3378,7 @@ export class Runner {
             !PatternManager.isKeylessPatternIdentity(givenRef.identity)
           ? givenRef
           : undefined;
+        runningPattern = givenPattern;
       } catch (error) {
         // Without cleanup the piece stays registered in `this.cancels`, so
         // every later start() reports "already running" for a piece that has
@@ -3361,12 +3428,14 @@ export class Runner {
 
     // Sync path - instantiate immediately
     currentPatternKey = patternIdentityKey(initialRef);
+    const initialPattern = this.resolveToPattern(initialResolved);
     instantiateInitialPattern(
-      this.resolveToPattern(initialResolved),
+      initialPattern,
       initialRef,
       tx,
     );
     runningRef = initialRef;
+    runningPattern = initialPattern;
     if (!doNotUpdateOnPatternChange) {
       setupPatternWatcher();
     }
@@ -3482,6 +3551,23 @@ export class Runner {
       identityRef.identity,
       identityRef.symbol,
     ) as Pattern | undefined;
+    if (
+      !pattern &&
+      PatternManager.isKeylessPatternIdentity(identityRef.identity)
+    ) {
+      // A durable `keyless:` pointer is pre-guard legacy state (nothing
+      // mints one into a store any more — L3(a), RULED 2026-08-27), and
+      // session-only by construction: with the in-memory index missed there
+      // is no closure anywhere to load. Tolerate the orphan — record it and
+      // report the piece as not started, rather than failing the caller's
+      // whole start walk over state no session can ever serve.
+      logger.debug("legacy-keyless-pattern-pointer", () => [
+        `piece ${rootCell.getAsNormalizedFullLink().id} carries a`,
+        `session-synthetic patternIdentity ${identityRef.identity}#` +
+        `${identityRef.symbol} (pre-guard legacy state); not startable`,
+      ]);
+      return Promise.resolve(false);
+    }
     if (!pattern) {
       // Load by content identity: in-memory live module → compiled closure →
       // cold recompile from the verified source-doc closure (a version bump).
@@ -7557,50 +7643,59 @@ export class Runner {
    * bare non-registering `Engine.compileAndEvaluateModules` — whose serialized
    * copy carries a derivation link to its pristine in-memory pattern. It is
    * minted its content-hash session identity right here (the same pointer
-   * `entryRefForPattern` mints for a keyless ROOT pattern), so it rides a
-   * `$patternRef` to that pristine artifact. Leaving it embedded instead
-   * would send it through the immutable-cell JSON round-trip, which corrupts
-   * a nested sub-pattern's output-alias `defer` levels (CT-1812 — the
-   * CT-1811 corruption, reachable ref-lessly). The trust gate stays intact:
-   * minting BRANDS, so only a value whose original is already a trusted
-   * builder pattern is minted.
+   * `entryRefForPattern` mints for a keyless ROOT pattern) — but that
+   * identity is session-synthetic and must never land in the durable inputs
+   * doc (L3(a), RULED 2026-08-27; the sentinel here was one of the durable
+   * keyless writers the 2026-08-27 diagnosis named). So the op is LEFT IN
+   * PLACE — the boundary walk inside `getImmutableCell` serializes its full
+   * graph, readable by any session — and the minted ref is returned for the
+   * caller to register as a SESSION-side resolution hint keyed by the inputs
+   * doc (`registerKeylessOpResolution`): the builtin then resolves the
+   * pristine artifact in-session, so the embedded round-trip's defer
+   * corruption (CT-1812 — the CT-1811 corruption, reachable ref-lessly)
+   * still never engages for the instantiating session. The trust gate stays
+   * intact: minting BRANDS, so only a value whose original is already a
+   * trusted builder pattern is minted.
    *
    * An op with no ref AND no live original — a plain deserialized graph,
    * i.e. a STORED no-entry-ref pattern value (the live keyless writer path
-   * pinned by stored-pattern-rehydration.test.ts) — is left embedded: there
-   * is no pristine artifact in existence to point at, and re-rooting the
-   * graph bind-free is exactly the defer surgery CT-1812 records as the
-   * residual there. Such an op takes the builtin's legacy graph path.
+   * pinned by stored-pattern-rehydration.test.ts) — is left embedded with no
+   * hint: there is no pristine artifact in existence to point at, and
+   * re-rooting the graph bind-free is exactly the defer surgery CT-1812
+   * records as the residual there. Such an op takes the builtin's legacy
+   * graph path.
    */
   private substituteOpPatternRefs(
     moduleRefName: string | undefined,
     inputBindings: FabricExecValue,
-  ): void {
+  ): { identity: string; symbol: string } | undefined {
     if (
       moduleRefName !== "map" && moduleRefName !== "filter" &&
       moduleRefName !== "flatMap"
     ) {
-      return;
+      return undefined;
     }
-    if (!isObjectOrArray(inputBindings)) return;
+    if (!isObjectOrArray(inputBindings)) return undefined;
     const op = (inputBindings as Record<string, unknown>).op;
-    if (!isObjectOrArray(op)) return;
-    let ref = this.runtime.patternManager.getArtifactEntryRef(
+    if (!isObjectOrArray(op)) return undefined;
+    const ref = this.runtime.patternManager.getArtifactEntryRef(
       op as unknown as object,
     );
-    if (!ref) {
-      const original = resolveOriginal(op as unknown as object);
-      if (isTrustedBuilderArtifact(original) && isPattern(original)) {
-        ref = this.runtime.patternManager.ensureKeylessPatternIdentity(
-          original as unknown as Pattern,
-        );
-      }
-    }
-    if (ref) {
+    if (ref && !PatternManager.isKeylessPatternIdentity(ref.identity)) {
       (inputBindings as Record<string, unknown>).op = {
         $patternRef: { identity: ref.identity, symbol: ref.symbol },
       };
+      return undefined;
     }
+    const original = resolveOriginal(op as unknown as object);
+    if (isTrustedBuilderArtifact(original) && isPattern(original)) {
+      // Keyless: session mint only — never substituted into the (durable)
+      // bindings; the caller registers the in-session hint.
+      return this.runtime.patternManager.ensureKeylessPatternIdentity(
+        original as unknown as Pattern,
+      );
+    }
+    return undefined;
   }
 
   private instantiateRawNode(
@@ -7644,8 +7739,14 @@ export class Runner {
     // (linked to its original via `noteDerivedCopy`, preserved through binding)
     // carries its `{ identity, symbol }`; the sentinel then survives the immutable-cell
     // JSON round-trip, so the builtin resolves the live canonical pattern by
-    // identity instead of deserializing the embedded graph.
-    this.substituteOpPatternRefs(moduleRefName, mappedInputBindings);
+    // identity instead of deserializing the embedded graph. A KEYLESS op is
+    // never substituted (its session identity must not land durably); the
+    // returned mint is registered below, once the inputs doc's address is
+    // known, as this session's resolution hint for the builtin.
+    const keylessOpRef = this.substituteOpPatternRefs(
+      moduleRefName,
+      mappedInputBindings,
+    );
 
     // Opaque forwarded references (argument keys the module's schema marks
     // `asCell: ["opaque"]`, e.g. ifElse's `ifTrue`/`ifFalse` branches) are
@@ -7682,6 +7783,17 @@ export class Runner {
       undefined,
       tx,
     );
+    if (keylessOpRef !== undefined) {
+      // The keyless op's in-session resolution hint (see
+      // `substituteOpPatternRefs`): the builtin reads the embedded graph from
+      // this immutable doc and resolves the pristine minted artifact through
+      // this registration instead (CT-1812 stays sealed in-session, with
+      // nothing keyless durable).
+      this.runtime.patternManager.registerKeylessOpResolution(
+        opInputsDocKey(inputsCell),
+        keylessOpRef,
+      );
+    }
 
     // CT-1623: the output spot this node writes through is reserved for this
     // node, so its fully-resolved coordinates are a stable, position-derived,
