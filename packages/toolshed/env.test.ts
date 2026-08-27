@@ -86,28 +86,3 @@ Deno.test("INGEST_SELF_SERVE_ENABLED is off unless explicitly enabled", () => {
   assertEquals(flag("true"), true);
   assertEquals(flag("1"), true);
 });
-
-Deno.test("MEMORY_WS_IDLE_TIMEOUT_SECONDS defaults to 300 and accepts overrides", () => {
-  // The memory websocket pong deadline has to be tunable per deployment: it
-  // must exceed the memory server's longest synchronous busy stretch, which an
-  // operator observes in production, and 0 must disable the timeout entirely
-  // (Deno.upgradeWebSocket's contract for idleTimeout).
-
-  const idle = (value: string | undefined) =>
-    EnvSchema.parse(
-      value === undefined ? {} : { MEMORY_WS_IDLE_TIMEOUT_SECONDS: value },
-    ).MEMORY_WS_IDLE_TIMEOUT_SECONDS;
-
-  assertEquals(idle(undefined), 300);
-  assertEquals(idle(""), 300);
-  assertEquals(idle("   "), 300);
-  assertEquals(idle("45"), 45);
-  assertEquals(idle("0"), 0);
-
-  // A negative deadline has no meaning for a pong window; reject rather
-  // than hand Deno an invalid option at upgrade time.
-  assertEquals(
-    EnvSchema.safeParse({ MEMORY_WS_IDLE_TIMEOUT_SECONDS: "-5" }).success,
-    false,
-  );
-});

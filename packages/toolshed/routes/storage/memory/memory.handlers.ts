@@ -16,7 +16,6 @@ import { getLogger } from "@commonfabric/utils/logger";
 
 import type * as Routes from "./memory.routes.ts";
 import { formatMemWriteTrace, type MemWriteOp } from "./memwrite-trace.ts";
-import env from "@/env.ts";
 import type { AppRouteHandler } from "@/lib/types.ts";
 import { createSpan } from "@/middlewares/opentelemetry.ts";
 import { memoryServer } from "@/routes/storage/memory.ts";
@@ -332,14 +331,12 @@ export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
     try {
       span.setAttribute("memory.operation", "subscribe");
 
-      // The pong deadline must exceed the memory server's longest
-      // synchronous busy stretch (frame evaluation, flush passes), not a
-      // round-trip time: Deno's 30-second default closes every connection
-      // on the process at once whenever the event loop is busy longer than
-      // that, and the resulting reconnect stampede re-establishes each
-      // session's full watch set against the same busy process.
+      // Deno's default idle timeout can mistake a legitimate synchronous
+      // memory-server stretch for a dead peer, then close every connection
+      // together when the event loop yields. Disable that transport-level
+      // pong deadline rather than turning server load into a reconnect storm.
       const { socket, response } = Deno.upgradeWebSocket(c.req.raw, {
-        idleTimeout: env.MEMORY_WS_IDLE_TIMEOUT_SECONDS,
+        idleTimeout: 0,
       });
       span.setAttribute("websocket.upgrade", "success");
 
