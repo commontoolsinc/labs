@@ -181,7 +181,7 @@ describe("sqlite-served-identity", () => {
     }
   });
 
-  // ---- The cleared-read half (CFC Phase 3.b under served execution) ----
+  // The cleared-read half (CFC Phase 3.b under served execution)
 
   const KEY = /z[1-9A-HJ-NP-Za-km-z]+/g;
 

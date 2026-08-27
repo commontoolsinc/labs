@@ -44,12 +44,12 @@ const space = signer.did();
 // against a caller-owned `newSharedServer()`), so each manager has its own
 // heap/replica while sharing the durable state.
 
-// ---------------------------------------------------------------------------
+//
 // The pattern under test: a rule-bearing db whose rule is a term LIST
 // (`all(sender, recipients)` — the mailbox shape), plus a shared query.
 // Rebuilt per runtime (each has its own trusted builder); the causal ids
 // derive from the shared result cell, so both runtimes address the same docs.
-// ---------------------------------------------------------------------------
+//
 
 const RESULT_CAUSE = "sqlite-handle-multi-runtime";
 

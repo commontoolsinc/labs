@@ -17,11 +17,11 @@ import {
   type RuntimeTelemetryMarkerResult,
 } from "../src/telemetry.ts";
 
-// ---------------------------------------------------------------------------
+//
 // Hand-rolled recording fakes for the OTel API interfaces. The bridge only
 // depends on `@opentelemetry/api` (interfaces), so tests don't need the SDK:
 // we record every instrument call and assert on the translation directly.
-// ---------------------------------------------------------------------------
+//
 
 interface InstrumentCall {
   instrument: string;

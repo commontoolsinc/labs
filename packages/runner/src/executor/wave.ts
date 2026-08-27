@@ -1571,7 +1571,7 @@ export class WaveAccumulator
       return outcome;
     }
 
-    // ---- per-doc conflict resolution, per write class (§3d) ----
+    // per-doc conflict resolution, per write class (§3d)
 
     const homeWrites = this.#contributions.map((contribution) =>
       this.#homeDocInstances(contribution)
@@ -1932,7 +1932,7 @@ export class WaveAccumulator
 
     await resolveConflicts();
 
-    // ---- foreign provisioning commits FIRST (protocol.md §2b) ----
+    // foreign provisioning commits FIRST (protocol.md §2b)
     //
     // Committed exactly once, before the home commit loop below: a home
     // re-attempt never re-sends them. A contribution that requeues AFTER
@@ -1987,7 +1987,7 @@ export class WaveAccumulator
       });
     }
 
-    // ---- the home commit, re-resolving on sink-reported races ----
+    // the home commit, re-resolving on sink-reported races
     while (true) {
       const batch = this.#buildHomeBatch(
         requeued,
@@ -2137,7 +2137,9 @@ export class WaveAccumulator
     }
   }
 
-  // ---- helpers ----
+  //
+  // helpers
+  //
 
   #homeSealed(
     contribution: WaveContribution,

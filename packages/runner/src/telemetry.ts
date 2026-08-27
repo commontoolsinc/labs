@@ -101,9 +101,9 @@ export type SchedulerEventPreflightActionSummary = {
   writeCount: number;
 };
 
-// ============================================================
+//
 // Diagnosis types for non-settling / non-idempotent detection
-// ============================================================
+//
 
 /**
  * Report for a single action detected as non-idempotent.

@@ -36,13 +36,13 @@ import {
   normalizeExact,
 } from "../src/sandbox/tslib-helpers.ts";
 
-// ---------------------------------------------------------------------------
+//
 // Pre-shadow-detection baseline: the single-pass verifyCompiledModuleBody from
 // Phase D2.1 (commit 4e3f69d05), before the helper-shadow bypass fix landed in
 // 3517a3433 / a0213d532 added a second full statement scan.
 // This is used ONLY in the regression-delta bench group to quantify the cost of
 // the shadow-detection pass. Product code is untouched.
-// ---------------------------------------------------------------------------
+//
 
 const EMPTY_BINDING_SET: ReadonlySet<string> = new Set<string>();
 
@@ -94,9 +94,9 @@ function verifyCompiledModuleBodyLegacy(
   });
 }
 
-// ---------------------------------------------------------------------------
+//
 // Setup helpers
-// ---------------------------------------------------------------------------
+//
 
 const signer = await Identity.fromPassphrase("bench esm verifier");
 
@@ -124,9 +124,9 @@ async function compileToGraph(program: RuntimeProgram) {
   }
 }
 
-// ---------------------------------------------------------------------------
+//
 // Programs
-// ---------------------------------------------------------------------------
+//
 
 /** Small: 2 authored modules, minimal bodies. */
 const smallProgram: RuntimeProgram = {
@@ -175,9 +175,9 @@ async function loadParkingCoordinatorProgram(): Promise<RuntimeProgram> {
   };
 }
 
-// ---------------------------------------------------------------------------
+//
 // Pre-compile everything (outside bench timing)
-// ---------------------------------------------------------------------------
+//
 
 const parkingCoordinatorProgram = await loadParkingCoordinatorProgram();
 
@@ -209,12 +209,12 @@ console.error(
     `total body bytes: ${parkingBodies.reduce((s, [, b]) => s + b.length, 0)}`,
 );
 
-// ---------------------------------------------------------------------------
+//
 // Bench naming: performance tracking keys each benchmark's timeline by the
 // origin file, group, and verbatim name, so groups and names must stay
 // stable across commits — no content hashes, byte counts, or module counts.
 // Volatile sizes go to stderr.
-// ---------------------------------------------------------------------------
+//
 
 /** Basenames too vague to identify a module on their own. */
 const GENERIC_BASENAMES = new Set([
@@ -266,9 +266,9 @@ function labelFor(specifier: string): string {
   return label;
 }
 
-// ---------------------------------------------------------------------------
+//
 // Benchmarks: small program
-// ---------------------------------------------------------------------------
+//
 
 Deno.bench(
   "body verify: small",
@@ -288,9 +288,9 @@ Deno.bench(
   },
 );
 
-// ---------------------------------------------------------------------------
+//
 // Benchmarks: parking-coordinator (large)
-// ---------------------------------------------------------------------------
+//
 
 Deno.bench(
   "body verify: parking",
@@ -310,11 +310,11 @@ Deno.bench(
   },
 );
 
-// ---------------------------------------------------------------------------
+//
 // Per-module body verify: one bench per authored module (parking only, to
 // show per-module cost distribution — body size varies widely in a real
 // pattern, the per-module numbers help pinpoint which module dominates).
-// ---------------------------------------------------------------------------
+//
 
 console.error(
   "parking-coordinator modules: " +
@@ -335,13 +335,13 @@ for (const [specifier, body] of parkingBodies) {
   );
 }
 
-// ---------------------------------------------------------------------------
+//
 // Regression delta: shadow-detection pass overhead
 //
 // Compare current `verifyCompiledModuleBody` (two passes: shadow-scan + classify)
 // against the pre-shadow-detection single-pass version from Phase D2.1.
 // The delta is the overhead introduced by commits 3517a3433 + a0213d532.
-// ---------------------------------------------------------------------------
+//
 
 // Use only the dominant large module (first parking body by size) for the
 // per-module regression delta, so the signal is not diluted by tiny modules.

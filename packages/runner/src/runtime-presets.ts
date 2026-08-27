@@ -146,9 +146,9 @@ import type {
   RuntimeOptions,
 } from "./runtime.ts";
 
-// ---------------------------------------------------------------------------
+//
 // Gate 1: the exhaustive option registry.
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Every key of `RuntimeOptions`, by hand. The `satisfies` clause rejects
@@ -201,9 +201,9 @@ type MissingOptionKeys = Exclude<keyof RuntimeOptions, RuntimeOptionKey>;
 // the missing key(s).
 const _unclassifiedOptions: never[] = [] as MissingOptionKeys[];
 
-// ---------------------------------------------------------------------------
+//
 // Gate 2: the canonical experimental-flag env mapping.
-// ---------------------------------------------------------------------------
+//
 
 /** Reads one environment variable; pass `Deno.env.get` in Deno contexts. */
 export type EnvReader = (name: string) => string | undefined;
@@ -280,9 +280,9 @@ export function experimentalOptionsFromEnv(
   return opts;
 }
 
-// ---------------------------------------------------------------------------
+//
 // Gate 3: which flags a deployed client takes from the server it talks to.
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Where a client resolves one flag when it is not built alongside the server
@@ -519,9 +519,9 @@ export async function experimentalOptionsForDeployedClient(
   );
 }
 
-// ---------------------------------------------------------------------------
+//
 // The max-enforcement CFC posture (CT-2075's named bundle).
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Names of the CFC posture bundles a preset caller can opt into. One posture
@@ -590,9 +590,9 @@ export const MAX_ENFORCEMENT_CFC_OPTIONS = Object.freeze(
   } as const,
 ) satisfies Partial<RuntimeOptions>;
 
-// ---------------------------------------------------------------------------
+//
 // Gate 4: the shared core all presets compose.
-// ---------------------------------------------------------------------------
+//
 
 interface CoreParams {
   /** Base URL of the memory/API service this runtime talks to. */
@@ -673,9 +673,9 @@ function coreOptions(params: CoreParams): RuntimeOptions {
   };
 }
 
-// ---------------------------------------------------------------------------
+//
 // The presets.
-// ---------------------------------------------------------------------------
+//
 
 export interface ProductionServerPresetParams extends CoreParams {
   /**

@@ -88,9 +88,9 @@ const inputDataSchema: JSONSchema = {
 type InputData = { values: number[]; label: string };
 type ResultData = { sum: number; result: string };
 
-// ============================================================
+//
 // Helper types and functions
-// ============================================================
+//
 
 interface TestContext {
   runtime: Runtime;
@@ -137,9 +137,9 @@ function getResultCell(
   return runtime.getCell<ResultData>(space, cellId, undefined, tx);
 }
 
-// ============================================================
+//
 // Phase functions
-// ============================================================
+//
 
 /**
  * Phase 1: Save pattern and initial data to storage.
@@ -420,9 +420,9 @@ async function phase4CrossSessionReactivity(
   console.log("Runtime 4 disposed");
 }
 
-// ============================================================
+//
 // Main test
-// ============================================================
+//
 
 async function testPatternAndDataPersistence() {
   console.log("\n=== TEST: Pattern and Data Persistence ===");

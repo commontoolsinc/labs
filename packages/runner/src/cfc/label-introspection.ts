@@ -174,9 +174,10 @@ export const parseConfLabelTargetPath = (
   return canonical;
 };
 
-// ---------------------------------------------------------------------------
+//
 // The §4.6.4.2 population rule: persisted templates as the carrier, the
 // interim rule computed from the entry in hand as source and fallback.
+//
 
 /**
  * Observation label of one atom field, or `undefined` when the field is
@@ -358,8 +359,9 @@ const atomProjectionLabel = (
   return consumed;
 };
 
-// ---------------------------------------------------------------------------
+//
 // Query evaluation.
+//
 
 /**
  * The atom field each §4.6.4.1 query predicate tests, plus the atom FAMILY

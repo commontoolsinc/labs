@@ -38,9 +38,9 @@ function link(id: string, path: string[] = []): NormalizedFullLink {
   return { space, id, path } as unknown as NormalizedFullLink;
 }
 
-// ---------------------------------------------------------------------------
+//
 // stripClockFields
-// ---------------------------------------------------------------------------
+//
 
 describe("stripClockFields", () => {
   it("removes a top-level timestamp without mutating the input", () => {
@@ -87,9 +87,9 @@ describe("stripClockFields", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // shouldShapeDelivery
-// ---------------------------------------------------------------------------
+//
 
 describe("shouldShapeDelivery", () => {
   it("is true only for renderer-trusted events", () => {
@@ -101,9 +101,9 @@ describe("shouldShapeDelivery", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Wake shaper, event path (unit, deterministic zero-length window)
-// ---------------------------------------------------------------------------
+//
 
 // The old DeliveryShaper surface, expressed over the unified WakeShaper +
 // holdShapedEvent adapter, so the event-path contract assertions below stay
@@ -356,9 +356,9 @@ describe("wake shaper (event path)", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Unified engine (plan C): properties specific to one shaper serving both paths
-// ---------------------------------------------------------------------------
+//
 
 describe("WakeShaper (unified engine)", () => {
   it("keeps event-path and cell-path budgets separate for the same pattern", async () => {
@@ -435,9 +435,9 @@ describe("WakeShaper (unified engine)", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Scheduler integration (real Runtime, default shaper)
-// ---------------------------------------------------------------------------
+//
 
 const STREAM_SCHEMA = {
   type: "object",

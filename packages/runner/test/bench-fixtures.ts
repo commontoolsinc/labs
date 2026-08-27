@@ -9,10 +9,10 @@
  * - manySmallObjects: Wide, shallow graphs (tests traversal overhead)
  */
 
-// ============================================================================
+//
 // Median complexity fixtures - representative of typical Cell values
 // (arrays of objects with string/boolean/number fields)
-// ============================================================================
+//
 
 export const medianComplexityA = {
   items: [
@@ -40,13 +40,13 @@ medianComplexityC.items[4].done = false;
 export const medianComplexityD = JSON.parse(JSON.stringify(medianComplexityA));
 medianComplexityD.items[0].done = true;
 
-// ============================================================================
+//
 // Many small objects fixtures - 20 arrays x 15 objects x 15 properties = 4,500
 // properties. Tests deepEqual performance on wide, shallow object graphs.
 // Note: Originally tried 100 x 25 x 25 = 62,500 properties but that caused OOM
 // when running benchmarks with many iterations. Can tune these numbers to find
 // a sweet spot that stresses the comparison without exhausting memory.
-// ============================================================================
+//
 
 function buildSmallObject(groupIdx: number, objIdx: number) {
   const obj: Record<string, string | number | boolean | null> = {};
@@ -99,10 +99,10 @@ manySmallObjectsC.groups[19][14].prop_14 = "DIFFERENT_VALUE";
 export const manySmallObjectsD = JSON.parse(JSON.stringify(manySmallObjectsA));
 manySmallObjectsD.groups[0][0].prop_0 = -999999;
 
-// ============================================================================
+//
 // Large string fixtures - 100k character strings, difference at last character
 // Tests worst case for deepEqual (no short-circuit, maximum traversal)
-// ============================================================================
+//
 
 const hugeString = "x".repeat(100_000);
 const hugeStringDifferentEnd = hugeString.slice(0, -1) + "y";

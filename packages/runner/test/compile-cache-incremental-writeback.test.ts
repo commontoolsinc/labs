@@ -325,7 +325,7 @@ describe("chunked compile-cache write-back (interruption survivability)", () => 
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // System-level degradation pin: the by-identity load's hit test is ENTRY
 // presence (`closure.has(entryIdentity)`), not closure completeness. Chunked
 // interruption cannot create an entry-present/descendant-missing compiled
@@ -335,7 +335,7 @@ describe("chunked compile-cache write-back (interruption survivability)", () => 
 // falls back to a clean recompile from the verified source closure — a
 // working pattern, never a corrupt load — and the recovery write-back heals
 // the compiled namespace.
-// ---------------------------------------------------------------------------
+//
 describe("descendant-missing compiled closure degrades to a clean recompile", () => {
   it("loadPatternByIdentity recompiles from source and heals the compiled set", async () => {
     const RTVER = "test-degrade-1";

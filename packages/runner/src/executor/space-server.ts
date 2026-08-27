@@ -556,7 +556,8 @@ export class SpaceServer implements TransactionSealDestination {
     string,
     { id: string; scopeKey: string }
   >();
-  // ---- (d′) — server-settle instrumentation (design §6 W4's
+  //
+  // (d′) — server-settle instrumentation (design §6 W4's
   // metric; §2.8 (c)). Per authored input: admission (the feed notice's
   // arrival, `enqueueCommit`) → COVERAGE (the wave commit whose
   // derivedThrough ≥ seq = the value-only settle) → and, when a
@@ -564,6 +565,7 @@ export class SpaceServer implements TransactionSealDestination {
   // structural-growth path, §2.3), the NEXT derived commit = the
   // structural-growth landing. Attribution of a growth wake to an input
   // is by adjacency (the most recently covered input), stated as such.
+  //
   #growthWakeCounter = 0;
   // MINOR-2 / obligation (iii): the last-folded demand-root enter/leave
   // counter values, so the space-lived accumulators fold the FULL delta
@@ -1367,7 +1369,9 @@ export class SpaceServer implements TransactionSealDestination {
     }, DEMAND_WAKE_GRACE_MS);
   }
 
-  // ---- TransactionSealDestination ----
+  //
+  // TransactionSealDestination
+  //
 
   seal(tx: IExtendedStorageTransaction): Promise<Result<Unit, CommitError>> {
     // Effect-COMPLETION routing (stage G, serving-loop.md §4): a marked
@@ -2184,7 +2188,9 @@ export class SpaceServer implements TransactionSealDestination {
     }
   }
 
-  // ---- the loop (serving-loop.md §3) ----
+  //
+  // the loop (serving-loop.md §3)
+  //
 
   async #loop(): Promise<void> {
     if (this.#loopRunning) return;

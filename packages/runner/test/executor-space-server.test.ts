@@ -688,7 +688,7 @@ describe("stage G SpaceServer recovery seams", () => {
     expect(notices.length).toBe(1);
   });
 
-  // ---- stage P2-F: late-notice accounting (the sx2 unskip flake) ----
+  // stage P2-F: late-notice accounting (the sx2 unskip flake)
 
   it("counts an authored notice that arrives AFTER a higher-seq echo (the two-producer notice race): late records still count and re-arm, and coverage stays in-order", async () => {
     const stats = emptyServingLoopStats();
@@ -745,7 +745,7 @@ describe("stage G SpaceServer recovery seams", () => {
     expect(created.watermark).toBeGreaterThanOrEqual(second.seq);
   });
 
-  // ---- stage P2-F: the demand-cycle terminal state (OW19) ----
+  // stage P2-F: the demand-cycle terminal state (OW19)
 
   /** A facade whose watch registry names exactly the given demanded
    * roots — the unit-level stand-in for client sessions' watches (the
@@ -1097,7 +1097,7 @@ describe("stage G SpaceServer recovery seams", () => {
     }
   });
 
-  // ---- stage P2-F: the argument-doc demand → owning-piece run supply ----
+  // stage P2-F: the argument-doc demand → owning-piece run supply
 
   it("supplies a scoped ARGUMENT-doc demand's identity to the owning piece's derivation runs: the ensure-resolved root differs from the demanded id, and the derived commit still carries the demanding actor (the #pieceRootByDemandKey arm)", async () => {
     // An ordinary nested-doc watch: the client's scoped subscription

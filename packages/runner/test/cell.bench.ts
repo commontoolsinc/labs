@@ -1389,9 +1389,9 @@ Deno.bench("Notebook read - 100 notes, 1000 reads", async () => {
   await benchmarkNotebookReads(100, 1000);
 });
 
-// ============================================================================
+//
 // Overhead microbenchmarks for comparison
-// ============================================================================
+//
 
 Deno.bench(
   "Overhead - isObjectNotArray check (10000x)",

@@ -107,7 +107,7 @@ export function navigateTo(
     // navigation; requiring a current value can block valid piece targets.
     if (!target) return;
 
-    // ---- Server-execution v2 Phase 4 (protocol.md §5, builtins.md §4):
+    // Server-execution v2 Phase 4 (protocol.md §5, builtins.md §4):
     // under the flag, navigateTo is the SPLIT contract. The SERVED half
     // (a wave-stamped run) computes the target and writes the intent into
     // the firing session's effects INSTANCE; the CLIENT half of a flag-ON

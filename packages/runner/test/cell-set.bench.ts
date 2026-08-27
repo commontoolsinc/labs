@@ -53,10 +53,10 @@ async function cleanup(
   await runtime.dispose();
 }
 
-// =============================================================================
+//
 // DATA SIZE BENCHMARKS
 // Test how data size affects Cell.set() performance
-// =============================================================================
+//
 
 Deno.bench({
   name: "Cell.set() - size: small object (5 fields)",
@@ -154,10 +154,10 @@ Deno.bench({
   },
 });
 
-// =============================================================================
+//
 // NESTING DEPTH BENCHMARKS
 // Test how nesting depth affects Cell.set() performance
-// =============================================================================
+//
 
 function createNestedObject(depth: number, i: number): any {
   if (depth === 0) {
@@ -240,10 +240,10 @@ Deno.bench({
   },
 });
 
-// =============================================================================
+//
 // CHANGE PATTERN BENCHMARKS
 // Test how different change patterns affect Cell.set() performance
-// =============================================================================
+//
 
 Deno.bench({
   name: "Cell.set() - change: full replace (same structure)",
@@ -418,10 +418,10 @@ Deno.bench({
   },
 });
 
-// =============================================================================
+//
 // CT-1123 REPRODUCTION BENCHMARKS
 // Specifically test scenarios similar to the issue
-// =============================================================================
+//
 
 // Schema similar to the Person pattern in CT-1123
 const personSchema = {
@@ -556,10 +556,10 @@ Deno.bench({
   },
 });
 
-// =============================================================================
+//
 // ARRAY SIZE BENCHMARKS
 // Test how array sizes affect performance (relevant to CT-1123 interests/skills arrays)
-// =============================================================================
+//
 
 Deno.bench({
   name: "Cell.set() - array: small (10 items)",
@@ -614,10 +614,10 @@ Deno.bench({
   },
 });
 
-// =============================================================================
+//
 // ARRAY STRUCTURE BENCHMARKS
 // Test path-level array structural edits that were previously missing coverage
-// =============================================================================
+//
 
 Deno.bench({
   name: "Cell.set() - array: path replace truncation (100↔50 items)",
@@ -674,10 +674,10 @@ Deno.bench({
 // facts), not in Cell.set() itself (~3.4s for all 100 iterations). The benchmark
 // was measuring SQLite write throughput rather than Cell.set() performance.
 
-// =============================================================================
+//
 // WRITE COUNT BENCHMARKS
 // Test the specific scenario of ~226 writes (like CT-1123)
-// =============================================================================
+//
 
 Deno.bench({
   name: "Cell.set() - write count: ~50 writes (small complex object)",
@@ -783,10 +783,10 @@ Deno.bench({
   },
 });
 
-// =============================================================================
+//
 // SCHEMA WITH NESTED CELLS (asCell: ["cell"])
 // Test performance impact of asCell which creates sub-cell references
-// =============================================================================
+//
 
 const schemaWithAsCell = {
   type: "object",
@@ -867,10 +867,10 @@ Deno.bench({
   },
 });
 
-// =============================================================================
+//
 // TRANSACTION OVERHEAD BENCHMARKS
 // Test if transaction management adds overhead
-// =============================================================================
+//
 
 Deno.bench({
   name: "Cell.set() - single transaction, many sets",
@@ -915,10 +915,10 @@ Deno.bench({
   },
 });
 
-// =============================================================================
+//
 // CELL.UPDATE() vs CELL.SET() COMPARISON
 // Test if update() is more efficient than set() for partial changes
-// =============================================================================
+//
 
 Deno.bench({
   name: "Cell.update() vs set() - update() for partial changes",
