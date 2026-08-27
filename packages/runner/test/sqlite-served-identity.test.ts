@@ -181,6 +181,51 @@ describe("sqlite-served-identity", () => {
     }
   });
 
+  it("replays handle materialization when the first transaction does not commit", async () => {
+    const first = runtime.edit();
+    const parent = runtime.getCell(
+      space,
+      `ow53 retry parent ${crypto.randomUUID()}`,
+      undefined,
+      first,
+    );
+    const inputs = runtime.getImmutableCell(
+      space,
+      {
+        tables: {
+          notes: table({ id: "integer primary key", body: "text" }),
+        },
+      },
+      undefined,
+      first,
+    );
+    let handle: Cell<SqliteDbRef> | undefined;
+    let publications = 0;
+    const builtin = sqliteDatabase(
+      inputs as never,
+      (_tx, result) => {
+        handle = result as Cell<SqliteDbRef>;
+        publications++;
+      },
+      () => {},
+      [parent],
+      parent,
+      runtime,
+    );
+
+    builtin.action(first);
+    expect(handle!.withTx(first).get()).toBeDefined();
+    first.abort(new Error("reject the first scheduler attempt"));
+
+    const retry = runtime.edit();
+    builtin.action(retry);
+    expect(handle!.withTx(retry).get()).toBeDefined();
+    expect((await retry.commit()).error).toBeUndefined();
+
+    expect(handle!.get()).toBeDefined();
+    expect(publications).toBe(2);
+  });
+
   // ---- The cleared-read half (CFC Phase 3.b under served execution) ----
 
   const KEY = /z[1-9A-HJ-NP-Za-km-z]+/g;

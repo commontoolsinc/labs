@@ -696,7 +696,15 @@ export function sqliteDatabase(
         );
       }
       sendResult(tx, handle);
-      initialized = true;
+      // The scheduler retries this same action closure after a stale-basis
+      // rejection. Marking it initialized while the write is still staged
+      // would turn that retry into a no-op and leave the handle absent. The
+      // guard becomes durable only with the transaction that materializes it.
+      tx.addCommitCallback((_settledTx, result) => {
+        if (!result.error) {
+          initialized = true;
+        }
+      });
     }
   };
   return { action };
