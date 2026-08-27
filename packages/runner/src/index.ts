@@ -224,6 +224,7 @@ export {
   type RunSyncedOptions,
   schemaAcceptsOpaqueCellValue,
   schemaHasDefaultValue,
+  SEALING_RECEIPT_REFUSAL,
   setPatternRepository,
   setPatternSource,
   setPieceReconciliation,

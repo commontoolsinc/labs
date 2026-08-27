@@ -1015,13 +1015,6 @@ export interface RunSyncedCommitResult<R> {
 }
 
 /**
- * Reports work which failed after storage accepted a pattern setup.
- *
- * The receipt remains authoritative for the setup transaction. `.cause`
- * describes the later dependency synchronization, start, or schema-load
- * failure.
- */
-/**
  * Why a receipt is refused on a runtime that seals rather than commits. One
  * string because the refusal is raised twice — once as a fast answer, once
  * against the transaction the receipt would have described — and a caller
@@ -1031,6 +1024,13 @@ export const SEALING_RECEIPT_REFUSAL =
   "a committed pattern setup receipt is unavailable while sealing into a " +
   "wave, whose acceptance a later withdrawal can undo";
 
+/**
+ * Reports work which failed after storage accepted a pattern setup.
+ *
+ * The receipt remains authoritative for the setup transaction. `.cause`
+ * describes the later dependency synchronization, start, or schema-load
+ * failure.
+ */
 export class PatternSetupPostCommitError extends Error {
   #commit: PatternSetupCommitReceipt;
 

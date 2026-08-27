@@ -33,6 +33,7 @@ import {
   PatternSetupPostCommitError,
   schemaAcceptsOpaqueCellValue,
   schemaHasDefaultValue,
+  SEALING_RECEIPT_REFUSAL,
 } from "../src/runner.ts";
 import {
   type ICommitNotification,
@@ -1875,7 +1876,7 @@ describe("setup/start", () => {
             symbol: "default",
           },
         },
-      )).rejects.toThrow("while sealing into a wave");
+      )).rejects.toThrow(SEALING_RECEIPT_REFUSAL);
       // Refused at the boundary, so nothing reached the wave to be withdrawn.
       expect(sealed).toEqual([]);
     } finally {
@@ -1938,7 +1939,7 @@ describe("setup/start", () => {
         trustExecutable(serving, pattern),
         {},
         { expectedPatternIdentity: previous! },
-      )).rejects.toThrow("while sealing into a wave");
+      )).rejects.toThrow(SEALING_RECEIPT_REFUSAL);
       expect(sealed).toEqual([]);
     } finally {
       mutableCell.sync = originalSync;

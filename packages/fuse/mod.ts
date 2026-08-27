@@ -1831,10 +1831,7 @@ export async function main(argv: string[] = Deno.args) {
             sourceRoots: program.sourceRoots,
             dataFiles: program.dataFiles,
           }, { dangerouslyAllowIncompatibleSchema });
-          const errorLogIno = tree.lookup(srcIno, "error.log");
-          if (errorLogIno !== undefined) {
-            tree.updateFile(errorLogIno, "");
-          }
+          bridge.writeSourceErrorLog(writeTarget.target, "");
           markExistingReady();
           await bridge.finalizeSourceWritePath(writeTarget.target, receipt);
           reconcileCfcWritebacks("source flush post-finalize");
@@ -1854,10 +1851,7 @@ export async function main(argv: string[] = Deno.args) {
             markExistingFailed(errorMsg);
             return EROFS;
           }
-          const errorLogIno = tree.lookup(srcIno, "error.log");
-          if (errorLogIno !== undefined) {
-            tree.updateFile(errorLogIno, errorMsg);
-          }
+          bridge.writeSourceErrorLog(writeTarget.target, errorMsg);
           console.error(`[source] Compile error in ${relPath}: ${errorMsg}`);
           markExistingFailed(errorMsg);
           return EACCES;

@@ -5497,3 +5497,58 @@ Deno.test("sourceRefreshWarning says nothing for a refreshed or absent write", (
   // A finalize with no receipt — a metadata write, which updated no source.
   assertEquals(sourceRefreshWarning(undefined), undefined);
 });
+
+Deno.test("CellBridge stops tracking a synthetic error.log the source takes over", async () => {
+  // The synthetic log is minted only while no authored file claims the name,
+  // so a rebuild whose new source DOES claim it leaves no synthetic file at
+  // all. Tracking has to drop with it: writing through the inode the previous
+  // rebuild recorded would hit a node that is no longer a file, which turns a
+  // committed source update into a failed write at the mount.
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "home", []);
+  const pieceIno = tree.addDir(state.piecesIno, "notes");
+  let files = [{ name: "/main.tsx", contents: "export default 1;" }];
+  const piece = {
+    id: "of:source-piece",
+    getPatternSourceProgram: () =>
+      Promise.resolve({ main: "/main.tsx", files }),
+  };
+  state.pieceControllers.set("notes", piece as never);
+  const build = () =>
+    (bridge as unknown as { buildSourceTree: BuildSourceTree })
+      .buildSourceTree(pieceIno, piece, state, "notes");
+
+  // First rebuild: nothing claims the name, so the synthetic log exists.
+  await build();
+  const syntheticIno = state.srcErrorLogInos.get("notes");
+  assert(syntheticIno !== undefined, "the synthetic error.log was not minted");
+
+  // Second rebuild: the source now ships its own error.log.
+  files = [
+    { name: "/main.tsx", contents: "export default 1;" },
+    { name: "/error.log", contents: "authored, not a diagnostic\n" },
+  ];
+  await build();
+
+  assertEquals(state.srcErrorLogInos.get("notes"), undefined);
+
+  const errors = captureConsoleErrors();
+  try {
+    // Reporting neither throws nor touches the authored file; the console
+    // line is the whole report a piece in this state gets.
+    bridge.reportSourceRefreshWarning(
+      sourceWritePath("home", "notes", tree.lookup(pieceIno, ".src")!),
+      "committed, but the refresh failed",
+    );
+  } finally {
+    errors.restore();
+  }
+
+  const srcIno = tree.lookup(pieceIno, ".src")!;
+  assertEquals(
+    getFileContent(tree, srcIno, "error.log"),
+    "authored, not a diagnostic\n",
+  );
+  assertEquals(errors.lines.length, 1);
+});

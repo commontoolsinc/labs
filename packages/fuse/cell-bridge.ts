@@ -2368,10 +2368,34 @@ export class CellBridge {
   ): void {
     if (warning === undefined) return;
     console.error(`[source] ${warning}`);
+    this.writeSourceErrorLog(writePath, warning);
+  }
+
+  /**
+   * Write the synthetic `.src/error.log`, and only ever that file.
+   *
+   * Every mutation of the log goes through here — the clear a clean write
+   * performs, the diagnostic a failed one leaves, and the refresh warning
+   * above — because the file is identified by the inode `buildSourceTree`
+   * recorded when it minted it, never by name. A pattern is free to author a
+   * source file called `error.log`, and resolving by name would find that
+   * file and overwrite the mounted copy of committed source with a
+   * diagnostic, which the mount would then be able to save back.
+   *
+   * Reports whether the write landed, so a caller can say so by another
+   * route when the piece has no synthetic log to write into.
+   */
+  writeSourceErrorLog(writePath: SourceWritePath, text: string): boolean {
     const state = this.spaces.get(writePath.spaceName);
     const errorLogIno = state?.srcErrorLogInos.get(writePath.pieceName);
-    if (errorLogIno === undefined) return;
-    this.tree.updateFile(errorLogIno, warning);
+    if (errorLogIno === undefined) return false;
+    // The map is dropped whenever `.src` is rebuilt, so a tracked inode names
+    // a live file. Checked anyway: a write through a stale one throws, which
+    // would turn a committed source update into a failed one at the mount.
+    const node = this.tree.getNode(errorLogIno);
+    if (node?.kind !== "file") return false;
+    this.tree.updateFile(errorLogIno, text);
+    return true;
   }
 
   invalidateHandlerTarget(target: HandlerTarget): void {
@@ -4433,7 +4457,12 @@ export class CellBridge {
       value: { files },
     });
 
-    // Create or reuse .src/ dir
+    // Create or reuse .src/ dir. The synthetic error.log is minted below only
+    // when no authored file claims that name, so the tracked inode is dropped
+    // here rather than overwritten: a rebuild whose new source DOES claim the
+    // name would otherwise leave the deleted synthetic inode in the map, and
+    // a later write through it fails on an inode that is no longer a file.
+    state.srcErrorLogInos.delete(pieceName);
     let srcIno = this.tree.lookup(pieceIno, ".src");
     if (srcIno !== undefined) {
       this.tree.clear(srcIno);
