@@ -3153,15 +3153,34 @@ class SpaceReplica implements ISpaceReplica {
       "resolve as the space's OWNER), so a genuine de-authorization is " +
       "denied there rather than healed here.",
     ]);
-    // NOT re-installed here: watches that were installed on the DEAD
-    // session. The revocation had already stopped their pushes (the server
-    // removes the session from its registry and `terminateSession` clears
-    // `#watchSpecs`), so this leaves them exactly where the revocation did,
-    // and each re-installs on its next pull — a failed pull removes its own
-    // selectors from `#watchSelectorTracker`, so the next pull for the same
-    // address is a genuine fetch rather than a tracker hit. A general
-    // "replay the whole watch set on remount" belongs with the reconnect
-    // path's replay, and is FLAGGED rather than built here.
+    // DROP THE WATCH-SELECTOR TRACKER. The fresh session carries no
+    // watches — `terminateSession` cleared `#watchSpecs` and the server
+    // dropped the session from its registry — but the tracker still records
+    // every selector the DEAD session had successfully covered, and `pull()`
+    // answers a covered selector out of it WITHOUT ever reaching a session.
+    // So without this line, a doc the replica had read before the revocation
+    // is answered `{ok:{}}` from a replica that stopped receiving its
+    // updates: a SILENT STALE READ.
+    //
+    // The first pass flagged this as a residual with the claim that "each
+    // address re-installs on its next pull". That claim was FALSE, and an
+    // independent review (Cubic, P1 ×3 on this PR) was right to push on it:
+    // it holds only for an address whose pull FAILED, because a failed
+    // fetch removes its own selectors from the tracker — which is the
+    // starved-load case this PR fixes, and not this one. Reproduced before
+    // fixing: after the remount the read returned SUCCESS while the replica
+    // still held the pre-revocation value.
+    //
+    // Scope is deliberately the tracker ALONE — not `#docs`, not
+    // `#watchedIds`, not the conflict-admission state, all of which
+    // `reset()` also wipes (that is a rebuild-from-scratch; this is not).
+    // The cost is one genuine fetch per still-wanted address after a
+    // remount, which re-installs its watch on the fresh session. A remount
+    // is rare; the alternative is serving values from a subscription that
+    // no longer exists.
+    this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>(
+      () => this.#scopeKeyIdentity(),
+    );
   }
 
   async sqliteQuery(
@@ -3688,6 +3707,16 @@ class SpaceReplica implements ISpaceReplica {
     if (entries.length === 0) {
       return { ok: {} };
     }
+    // The owed session remount, consumed BEFORE the watch-selector tracker
+    // is consulted below — not only at `sessionHandle()`. A selector the
+    // tracker already covers is answered from it and never reaches a
+    // session at all, so consuming only at the mount point leaves precisely
+    // the docs the replica had successfully read being served out of a
+    // subscription the revocation killed. Found by independent review
+    // (Cubic P1) and reproduced before fixing: the post-remount read
+    // returned SUCCESS carrying the pre-revocation value. Idempotent and
+    // cheap — a bare boolean test when nothing is owed.
+    this.consumeOwedSessionRemount();
 
     const normalizedEntries = normalizeSyncEntries(entries);
     // Phase 5's delegated-scoped-read fail-closed refusal, ENTRY-scoped

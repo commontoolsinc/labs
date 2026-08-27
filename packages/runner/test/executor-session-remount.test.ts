@@ -208,6 +208,51 @@ describe("the session remount (profile-starvation fifth face)", () => {
     return cell.getAsNormalizedFullLink().id as URI;
   };
 
+  /** REMOVE a principal's grant. `setAcl` only ever adds or upgrades — a
+   * pin that needs an actual de-authorization has to call this, and a pin
+   * that assumes `setAcl` removes what it omits is vacuous (this one was,
+   * until a diagnostic probe caught it). */
+  const revokeAcl = async (
+    as: Identity,
+    space: MemorySpace,
+    who: string,
+  ): Promise<void> => {
+    const runtime = clientRuntime(as);
+    const manager = new ACLManager(runtime, space as never);
+    await manager.remove(who as never);
+    await runtime.idle();
+    await runtime.storageManager.synced();
+  };
+
+  /** Overwrite an existing doc as its owner. */
+  const writeDoc = async (
+    as: Identity,
+    space: MemorySpace,
+    cause: string,
+    value: string,
+  ): Promise<void> => {
+    const runtime = clientRuntime(as);
+    const cell = runtime.getCell<string>(space, cause, undefined);
+    await cell.sync();
+    const tx = runtime.edit();
+    cell.withTx(tx).set(value);
+    expect((await tx.commit()).error).toBeUndefined();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+  };
+
+  /** What the replica has materialized for `id`, or undefined. */
+  const materialized = (
+    manager: LoopbackStorageManager,
+    space: MemorySpace,
+    id: URI,
+  ): unknown => {
+    const document = (manager.open(space) as unknown as {
+      get(uri: URI): { value?: unknown } | undefined;
+    }).get(id);
+    return document?.value;
+  };
+
   /** One serving-plane read of a foreign doc: the pull's own verdict. */
   const probeRead = async (
     manager: LoopbackStorageManager,
@@ -401,6 +446,68 @@ describe("the session remount (profile-starvation fifth face)", () => {
         (await probeRead(serving, homeSpace, mintProbeId(minter, homeSpace)))
           .error === undefined,
       "the remount re-bound the new owner",
+    );
+  });
+
+  it("a doc watched on the DEAD session is refetched after the remount, not answered stale from the watch tracker", async () => {
+    // Cubic P1 (three violations, one property). A pull whose selector the
+    // watch tracker already covers returns WITHOUT reaching
+    // `sessionHandle()` — so for such a doc the remount's latch is never
+    // consumed, and worse, the read is answered from a replica whose
+    // watch died with the revoked session. My first pass flagged this as
+    // a residual and claimed "each address re-installs on its next pull";
+    // that claim was FALSE for exactly the tracker-covered case, which is
+    // every doc the replica had successfully read before the revocation.
+    //
+    // Note this was never a REGRESSION — the staleness starts at the
+    // revocation, which the remount does not cause — but "the session is
+    // re-established" has to mean the replica can read again, including
+    // what it was already watching. So the remount drops the tracker.
+    const stranger = LoopbackStorageManager.connect(server, {
+      as: strangerSigner,
+    });
+    cleanups.push(() => stranger.close());
+
+    // Authorized from the start, so the doc is read SUCCESSFULLY and its
+    // selector enters the tracker as covered.
+    await setAcl(homeSigner, homeSpace, {
+      [homeSigner.did()]: "OWNER",
+      [strangerSigner.did()]: "READ",
+    });
+    const docId = await seedDoc(homeSigner, homeSpace, "tracker-stale", "v1");
+    expect((await probeRead(stranger, homeSpace, docId)).error).toBeUndefined();
+    expect(materialized(stranger, homeSpace, docId)).toEqual("v1");
+
+    // The stranger loses READ — an actual REMOVAL, not an omission: the
+    // session is revoked and stops receiving pushes. Nothing pulls in this
+    // window, so the tracker still holds the doc's selector as covered.
+    await revokeAcl(homeSigner, homeSpace, strangerSigner.did());
+    // The value moves while the replica is deaf to it.
+    await writeDoc(homeSigner, homeSpace, "tracker-stale", "v2");
+
+    // READ comes back, and the trigger fires.
+    await setAcl(homeSigner, homeSpace, {
+      [homeSigner.did()]: "OWNER",
+      [strangerSigner.did()]: "READ",
+    });
+    (stranger as AclChangeNotifier).noteSpaceAclChanged?.(homeSpace);
+
+    // The pin: this read must reach the wire on the remounted session and
+    // come back with v2. Pre-fix it returned ok immediately from the
+    // tracker and the replica still read "v1" — a silent stale answer.
+    // The pin, and note WHAT it asserts: not that the read errors, but
+    // that it returns the CURRENT value. Pre-fix the pull returned
+    // `{ok:{}}` — a successful read — while the replica still held "v1".
+    // A silent stale answer is the worst shape this could take, which is
+    // why the assertion is on the materialized value and not on the
+    // pull's verdict.
+    await waitUntil(
+      async () => {
+        const result = await probeRead(stranger, homeSpace, docId);
+        return result.error === undefined &&
+          materialized(stranger, homeSpace, docId) === "v2";
+      },
+      "the remounted session refetched the doc it had been watching",
     );
   });
 
