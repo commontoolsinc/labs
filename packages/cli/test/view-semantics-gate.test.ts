@@ -217,11 +217,11 @@ Deno.test("diff semantics: no in-workspace root file means no service (not a fai
   assertEquals(sem, undefined);
 });
 
-// lazyProgram is the shared build/cache/latch both factories use. The
-// configured host never makes it fail, so its failure isolation is exercised
-// directly: a build is cached after the first success, and a throwing or
-// program-less build latches so it is not retried.
 Deno.test("lazyProgram: caches a success and latches a failed build", () => {
+  // lazyProgram is the shared build/cache/latch both factories use. The
+  // configured host never makes it fail, so its failure isolation is exercised
+  // directly: a build is cached after the first success, and a throwing or
+  // program-less build latches so it is not retried.
   const fake = {} as unknown as ts.Program;
 
   let okCalls = 0;

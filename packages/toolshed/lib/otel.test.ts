@@ -13,12 +13,12 @@ import {
   shutdownOpenTelemetry,
 } from "@/lib/otel.ts";
 
-// The provider takes the configured resource as given, so the service
-// attributes and the SDK's own defaults have to be merged before it is handed
-// over. Both halves are read off a span the real provider produced, since a
-// span carries the resource the exporter will stamp on it. The span is left
-// unended so nothing is queued for export.
 Deno.test("spans carry both the service attributes and the SDK defaults", () => {
+  // The provider takes the configured resource as given, so the service
+  // attributes and the SDK's own defaults have to be merged before it is handed
+  // over. Both halves are read off a span the real provider produced, since a
+  // span carries the resource the exporter will stamp on it. The span is left
+  // unended so nothing is queued for export.
   const span = provider.getTracer("otel-test").startSpan(
     "resource-probe",
   ) as unknown as ReadableSpan;

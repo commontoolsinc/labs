@@ -129,11 +129,12 @@ describe("CFC wildcard policy value conditions on `FabricPrimitive` types", () =
   });
 });
 
-// CT-1895: policySchemaMatchesValue validated arrays only against `items`,
-// so a tuple-shaped (prefixItems) value condition vacuously matched ANY
-// array — the policy entry applied where its condition should have excluded
-// it, or vice versa.
 describe("CFC policy value-conditions on tuple (prefixItems) schemas", () => {
+  // CT-1895: policySchemaMatchesValue validated arrays only against `items`, so
+  // a tuple-shaped (prefixItems) value condition vacuously matched ANY array —
+  // the policy entry applied where its condition should have excluded it, or
+  // vice versa.
+
   const space = "did:key:tuple-policy" as const;
   const target = { space, id: "of:guarded" as const, scope: "space" as const };
   const tx = {

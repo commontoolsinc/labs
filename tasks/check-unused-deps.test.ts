@@ -145,10 +145,10 @@ Deno.test("importsAlias ignores a substring of a different specifier", () => {
   );
 });
 
-// The loose matching is deliberate: an occurrence inside a comment or string
-// counts as used. That can only ever hide a dead alias, never flag a live one,
-// so the check does not misfire on a real dependency.
 Deno.test("importsAlias counts a commented-out import as used", () => {
+  // The loose matching is deliberate: an occurrence inside a comment or string
+  // counts as used. That can only ever hide a dead alias, never flag a live
+  // one, so the check does not misfire on a real dependency.
   assert(importsAlias('// import { x } from "zod";', "zod"));
 });
 

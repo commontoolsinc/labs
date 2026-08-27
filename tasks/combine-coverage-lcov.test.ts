@@ -268,10 +268,10 @@ Deno.test("main returns exit code 2 when a required flag is missing", async () =
   assertEquals(await main(["--input-dir=a", "--output=b"]), 2);
 });
 
-// Run the task as its own process so the `import.meta.main` entry point is
-// exercised end to end. Lockfile isolation keeps the real deno.lock untouched,
-// and all inputs and outputs live under temporary directories.
 Deno.test("the CLI entry point runs the task as a process", async () => {
+  // Run the task as its own process so the `import.meta.main` entry point is
+  // exercised end to end. Lockfile isolation keeps the real deno.lock
+  // untouched, and all inputs and outputs live under temporary directories.
   const dir = await Deno.makeTempDir({ prefix: "combine-lcov-cli-" });
   try {
     const inputDir = path.join(dir, "in");

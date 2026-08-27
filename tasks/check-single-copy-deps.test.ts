@@ -69,10 +69,10 @@ Deno.test("findProblems reports nothing when each package resolves once", () => 
   assertEquals(findProblems(singleCopyLock()), []);
 });
 
-// The shape of the bug this check exists for: rolling the arizeai packages
-// alone leaves the AI SDK resolved twice, once for toolshed and once for
-// @ai-sdk/otel.
 Deno.test("findProblems reports a package resolved twice", () => {
+  // The shape of the bug this check exists for: rolling the arizeai packages
+  // alone leaves the AI SDK resolved twice, once for toolshed and once for
+  // @ai-sdk/otel.
   const lock = singleCopyLock();
   lock.npm["ai@5.0.27_zod@3.25.76"] = {};
 
@@ -99,10 +99,10 @@ Deno.test("the repository's own lockfile passes", async () => {
   assertEquals(await main(REPO_ROOT), 0);
 });
 
-// main() reads deno.lock from the root it is given, so a temp tree with a
-// duplicated lockfile drives the reporting path the passing repo never does:
-// the message, the per-copy listing, and the non-zero exit.
 Deno.test("main reports the duplicate and returns 1", async () => {
+  // main() reads deno.lock from the root it is given, so a temp tree with a
+  // duplicated lockfile drives the reporting path the passing repo never does:
+  // the message, the per-copy listing, and the non-zero exit.
   const root = await Deno.makeTempDir({ prefix: "check-single-copy-deps-" });
   try {
     const lock = singleCopyLock();

@@ -79,13 +79,14 @@ describe("CFC policy value matching resolves $refs against the schema root", () 
   });
 });
 
-// A write-authority policy whose value condition is carried by a `$ref` (the
-// generated array-items shape) must still apply when that ref is unresolvable.
-// Otherwise `ifcEntryAppliesToAttemptedWrite` treats the `writeAuthorizedBy`
-// entry as not applying and the protected write is accepted unverified — a
-// fail-open direction the nearby comment ("must fail closed on unresolved
-// refs") and the S17 link branch both forbid.
 describe("CFC writeAuthorizedBy policy applies when its value-condition $ref is unresolvable", () => {
+  // A write-authority policy whose value condition is carried by a `$ref` (the
+  // generated array-items shape) must still apply when that ref is
+  // unresolvable. Otherwise `ifcEntryAppliesToAttemptedWrite` treats the
+  // `writeAuthorizedBy` entry as not applying and the protected write is
+  // accepted unverified — a fail-open direction the nearby comment ("must fail
+  // closed on unresolved refs") and the S17 link branch both forbid.
+
   const space = "did:key:policy-schema-refs" as const;
   const target = { space, id: "of:guarded" as const, scope: "space" as const };
   const tx = {

@@ -877,13 +877,13 @@ describe("stage A: instance keying — unit pins", () => {
   });
 });
 
-// The OFF-arm serialized-form witness the stage-A build report claimed
-// and the independent review found unpinned (finding 9): with the flag OFF
-// and no serving posture — every client today — no storage notification
-// change address, reactivity-log address, replica state, or replica
-// document carries a `scopeKey` own-property. Adopted from the review's
-// probe (`zz-review-off-notification-probe`).
 describe("stage A: OFF-arm serialized forms carry no scopeKey", () => {
+  // The OFF-arm serialized-form witness the stage-A build report claimed and
+  // the independent review found unpinned (finding 9): with the flag OFF and no
+  // serving posture — every client today — no storage notification change
+  // address, reactivity-log address, replica state, or replica document carries
+  // a `scopeKey` own-property. Adopted from the review's probe
+  // (`zz-review-off-notification-probe`).
   let offManager: ReturnType<typeof StorageManager.emulate>;
   let offRuntime: Runtime;
 

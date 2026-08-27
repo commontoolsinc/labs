@@ -503,9 +503,9 @@ Deno.test("the script runs as a command over the real repo", async () => {
   );
 });
 
-// Runs against the real repository: every fact every covered document cites
-// must resolve.
 Deno.test("every cited path and specifier resolves", async () => {
+  // Runs against the real repository: every fact every covered document cites
+  // must resolve.
   const root = fromFileUrl(new URL("..", import.meta.url));
   const tree = await readTree(root);
   const docs = await readSkillDocs(root, tree);

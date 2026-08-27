@@ -319,10 +319,11 @@ describe("sidecarRunFailureDisposition", () => {
   });
 });
 
-// The winner predicate itself (Cubic P2, review round): an error ACCOUNT
-// left by commitPatternErrorUI must NOT count as a racing winner — yielding
-// to it would leave the surface permanently red and defeat the heal path.
 describe("sidecarValueIsWinner", () => {
+  // The winner predicate itself (Cubic P2, review round): an error ACCOUNT left
+  // by commitPatternErrorUI must NOT count as a racing winner — yielding to it
+  // would leave the surface permanently red and defeat the heal path.
+
   it("an empty cell is no winner", () => {
     expect(sidecarValueIsWinner(undefined)).toBe(false);
   });
