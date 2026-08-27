@@ -68,6 +68,7 @@ export class CFSelect extends BaseElement {
   //
   // Styles
   //
+
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -190,9 +191,7 @@ export class CFSelect extends BaseElement {
   /** Mapping from stringified option key -> SelectItem */
   private _keyMap = new Map<string, SelectItem>();
 
-  //
-  // Cell controller for value binding
-  //
+  /** Cell controller for value binding */
   private _cellController = createCellController<unknown | unknown[]>(this, {
     timing: { strategy: "immediate" }, // Select changes should be immediate
     onChange: (newValue, oldValue) => {
@@ -214,9 +213,7 @@ export class CFSelect extends BaseElement {
     },
   });
 
-  //
-  // Form field controller for buffering
-  //
+  /** Form field controller for buffering */
   private _formField = createFormFieldController<unknown | unknown[]>(this, {
     cellController: this._cellController,
     validate: () => ({
@@ -228,6 +225,7 @@ export class CFSelect extends BaseElement {
   //
   // Reactive properties
   //
+
   static override properties = {
     disabled: { type: Boolean, reflect: true },
     multiple: { type: Boolean, reflect: true },
@@ -273,6 +271,7 @@ export class CFSelect extends BaseElement {
   //
   // Lifecycle
   //
+
   override connectedCallback() {
     super.connectedCallback();
     this._updateAccessibilityAttributes();
@@ -339,6 +338,7 @@ export class CFSelect extends BaseElement {
   //
   // Render
   //
+
   override render() {
     return html`
       <!-- The host owns role and tabindex; focus is forwarded to this native
@@ -434,6 +434,7 @@ export class CFSelect extends BaseElement {
   //
   // Events
   //
+
   private _onChange(e: Event) {
     const select = e.target as HTMLSelectElement;
     const _oldValue = this.getCurrentValue();
@@ -456,6 +457,7 @@ export class CFSelect extends BaseElement {
   //
   // Public API
   //
+
   override focus(options?: FocusOptions) {
     if (this.disabled) return;
     this._select?.focus(options);
@@ -483,6 +485,7 @@ export class CFSelect extends BaseElement {
   //
   // Accessibility
   //
+
   private _updateAccessibilityAttributes() {
     // A single select is a combobox; a multi-select is a listbox (ARIA spec).
     const role = this.multiple ? "listbox" : "combobox";
@@ -504,6 +507,7 @@ export class CFSelect extends BaseElement {
   //
   // Internal helpers
   //
+
   private _makeKey(_item: SelectItem, index: number) {
     // Unique deterministic key for each option
     return `${index}`;

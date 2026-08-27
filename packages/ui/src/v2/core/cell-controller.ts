@@ -98,14 +98,14 @@ export class CellController<T> implements ReactiveController {
   private _cellUnsubscribe: (() => void) | null = null;
   private _inputTiming?: InputTimingController;
 
-  //
-  // Pending-local-edit tracking (early-boot wipe guard)
-  // A locally-edited value that bound state has not yet confirmed. While set,
-  // it wins over stale bound state in getValue(), so a re-render cannot
-  // repaint a pre-write snapshot over what the user just typed. Released when
-  // the echo confirms it (a delivery equal to the edit), when a post-settle
-  // delivery supersedes it, or when the binding moves to a different cell.
-  //
+  /**
+   * Pending-local-edit tracking (early-boot wipe guard)
+   * A locally-edited value that bound state has not yet confirmed. While set,
+   * it wins over stale bound state in getValue(), so a re-render cannot
+   * repaint a pre-write snapshot over what the user just typed. Released when
+   * the echo confirms it (a delivery equal to the edit), when a post-settle
+   * delivery supersedes it, or when the binding moves to a different cell.
+   */
   private _localEdit: { value: T } | undefined;
   // Number of in-flight cell writes started by the default setter.
   private _inFlightWrites = 0;

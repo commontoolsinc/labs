@@ -151,9 +151,6 @@ export function createOAuth2Handlers(
     (OAuth2TokenSchema as unknown as JSONSchema);
   const emptyAuthData = options.emptyAuthData ?? EMPTY_OAUTH2_DATA;
 
-  //
-  // LOGIN
-  //
   async function login(c: Context) {
     try {
       const payload = await c.req.json();
@@ -203,9 +200,6 @@ export function createOAuth2Handlers(
     }
   }
 
-  //
-  // CALLBACK
-  //
   async function callback(c: Context) {
     const query = c.req.query();
     logger.info(`Received ${config.name} OAuth callback`, query);
@@ -366,9 +360,6 @@ export function createOAuth2Handlers(
     }
   }
 
-  //
-  // REFRESH
-  //
   async function refresh(c: Context) {
     try {
       const payload = await c.req.json();
@@ -432,9 +423,6 @@ export function createOAuth2Handlers(
     }
   }
 
-  //
-  // LOGOUT
-  //
   async function logout(c: Context) {
     try {
       const payload = await c.req.json();
@@ -467,6 +455,7 @@ export function createOAuth2Handlers(
   //
   // BACKGROUND INTEGRATION (shared, not provider-specific)
   //
+
   async function backgroundIntegration(c: Context) {
     try {
       const payload = await c.req.json();
