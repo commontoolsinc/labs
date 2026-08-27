@@ -350,9 +350,13 @@ traversal (what A expects B to look like) governs whenever it says anything at
 all; the schema embedded in the reference itself (what the reference declares
 B to contain) fills in only where the traversal is agnostic.
 
-`combineSchemaForLink` implements the rule, gated by the `readerSchemaPrecedence` experimental flag (default on; off restores
-the strict pseudo-intersection at reference crossings — see
-`docs/development/EXPERIMENTAL_OPTIONS.md`). A reference routinely describes
+`combineSchemaForLink` implements the rule, gated by the
+`readerSchemaPrecedence` experimental flag (default on; off restores the
+strict pseudo-intersection at reference crossings — see
+`docs/development/EXPERIMENTAL_OPTIONS.md`).
+[`link-schema-precedence.md`](../link-schema-precedence.md) is the
+consolidated specification of the rule, the `default` exception, and the
+flow-control crossing seam. A reference routinely describes
 more of its target than the traversal asked for, and none of that description
 — extra properties, extra `required` entries, a different shape — reaches the
 combined schema:

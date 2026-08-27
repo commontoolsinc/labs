@@ -159,9 +159,11 @@ property declared only by the other side, an explicit
 `additionalProperties: false` rejects such one-sided properties, and `true`
 permits them.
 
-See [Schema Narrowing in the Memory v2 query specification](memory-v2/05-queries.md#534-schema-narrowing)
-for the complete rules, including the rollback flag and the cfc-relevance
-marking that stays independent of the combination.
+See [Link-schema precedence](link-schema-precedence.md) for the
+consolidated specification, and
+[Schema Narrowing in the Memory v2 query specification](memory-v2/05-queries.md#534-schema-narrowing)
+for the rules in the query pipeline's context, including the rollback flag
+and the cfc-relevance marking that stays independent of the combination.
 
 ## Unsupported Features
 

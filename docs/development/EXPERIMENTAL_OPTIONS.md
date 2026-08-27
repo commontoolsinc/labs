@@ -590,8 +590,10 @@ Still unbuilt, and recorded in the plan: handlers materialize eagerly.
   the reader's narrower view. `default` is the exception that crosses the
   precedence line: a value's default is inherited from the last crossed
   schema that declares one. Spec:
+  [`docs/specs/link-schema-precedence.md`](../specs/link-schema-precedence.md)
+  (consolidated), with
   [`docs/specs/memory-v2/05-queries.md`](../specs/memory-v2/05-queries.md)
-  §5.3.4.
+  §5.3.4 for the query-pipeline context.
 - **Current default and planned end state.** On by default; an explicit
   `false` restores the strict pseudo-intersection (`combineSchema`) at link
   crossings as a rollback override. The rollback is an OWNED process-global
