@@ -1112,6 +1112,30 @@ describe("piece source reconciliation", () => {
       expect(getPatternSource(piece)).toBe(PARENT_SOURCE);
     });
 
+    it("reports no update when the piece stops while the write is in flight", async () => {
+      // The write transaction re-checks the abort signal on entry, so a stop
+      // landing after that check still commits. What it must not do is report
+      // an update: the piece is no longer running, and a caller told the
+      // source moved would resync and start a piece that was just stopped.
+      const v2Identity = await identityFor(source("v2"));
+      const piece = await preparePiece(
+        servingFetch(() => v2Identity, () => source("v2")),
+      );
+      await stampSource(piece, PARENT_SOURCE);
+
+      // Setup runs inside the write callback, after the entry check.
+      const setup = runtime.setup.bind(runtime);
+      runtime.setup = ((...args: Parameters<typeof setup>) => {
+        runtime.sourceReconciler.unwatch(piece);
+        return setup(...args);
+      }) as typeof runtime.setup;
+      try {
+        expect(await reconcile(piece)).toBe("unavailable");
+      } finally {
+        runtime.setup = setup;
+      }
+    });
+
     it("abandons an in-flight reconciliation on disposal", async () => {
       const identityRequested = defer();
       identityGate = defer();
