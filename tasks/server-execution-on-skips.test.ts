@@ -235,6 +235,22 @@ Deno.test("main: the patterns list carries the two current phase-7 entries and k
   assertMatch(entry.reason, /zero pattern-swap-setup-error/);
   assertMatch(entry.reason, /distinct from the split-source/);
   assertMatch(entry.reason, /10\/10 quiet-and-loaded/);
+  // The 2026-08-27 root cause narrowed the charge: the navigation half
+  // (wrong-branch optimistic navigateTo — L2, ruled PUNT: sanctioned) is
+  // absorbed by the step's id-bound reads, so the residue that KEEPS the
+  // entry is the a04 write-side member — consequenced marks whose derived
+  // commits carry none of the effects. Pin the narrowed discriminators so
+  // a stale cause-unassigned reason (or the closed navigation charge)
+  // cannot return silently.
+  assertMatch(entry.reason, /a04/);
+  assertMatch(entry.reason, /mark-without-effects/);
+  assertMatch(entry.reason, /ruled PUNT/);
+  assertMatch(entry.reason, /keyless-diagnosis-2026-08-27\.md/);
+  assert(
+    !/cause is not yet assigned/.test(entry.reason),
+    "the reason must not claim the cause is unassigned — it was root-caused " +
+      "2026-08-27 (register OW45; keyless-diagnosis-2026-08-27.md)",
+  );
   // The shard filter drops exactly the FILE entry's file (the shard
   // lanes feed explicit file lists) and passes every other candidate
   // through untouched — remove the lunch-poll-vote entry and this

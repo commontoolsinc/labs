@@ -192,16 +192,18 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
   // verification-coverage.md OW60, not as a flaky test.
   patterns: [
     {
-      // The current charge is a direct CI ON failure, not the invalid
-      // split-source launcher topology root-caused in the OW45 RCA. The
-      // unskip probe at 66a969ca0 ran this exact step in ON shard 5 and
-      // failed at its unchanged 300 s condition bound. Its final client
-      // diagnostics reported all seven invocation traces but no bound
-      // notebook action state, with stored note chips present and none
-      // rendered. The run had no pattern-swap-setup-error, recursive-schema
-      // error, or pattern-load-error, so that older signature is not the
-      // reason for this skip. verification-coverage.md OW45 carries the
-      // full run and job evidence. The entry lifts on the established 10/10
+      // The charge was root-caused 2026-08-27 (register OW45;
+      // docs/history/plans/server-execution-v2/optimize/
+      // keyless-diagnosis-2026-08-27.md) and split in two. The
+      // NAVIGATION half — the client's speculative final-"Create" run
+      // reading a stale usedCreateAnotherNote and optimistically
+      // navigating into the new note while the authoritative run computed
+      // no intent — is SANCTIONED (L2 ruled PUNT) and absorbed: the
+      // step's waits and assertions now read the notebook by its captured
+      // id, indifferent to where the view wandered. What KEEPS this entry
+      // is the residue member the same campaign classified in a04: the
+      // WRITE-side mark-without-effects family, which no test-side
+      // robustness can absorb. The entry lifts on the established 10/10
       // quiet-and-loaded gate under the current source-authority posture;
       // the flip PR needs this list empty.
       file: "integration/default-app.test.ts",
@@ -217,9 +219,17 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "zero pattern-swap-setup-error, recursive-schema errors, and " +
         "pattern-load-error, so this is distinct from the split-source " +
         "off-repository launcher failure root-caused by the OW45 RCA. " +
-        "The current CI failure's cause is not yet assigned. Lifts on " +
-        "10/10 quiet-and-loaded ON under the current source-authority " +
-        "posture.",
+        "ROOT-CAUSED 2026-08-27 (keyless-diagnosis-2026-08-27.md; " +
+        "register OW45): that fingerprint is the wrong-branch optimistic " +
+        "navigation — sanctioned under the L2 ruled PUNT and absorbed by " +
+        "the step's id-bound reads — so the residue keeping this entry " +
+        "is the a04 member: the WRITE-side mark-without-effects family " +
+        "(all create events durably appended and marked consequenced, " +
+        "but the final consequences are 1-op derived commits carrying " +
+        "none of the effects — user actions permanently lost, no basis " +
+        "rows to re-run; the section 3d mark-vs-effects atomicity " +
+        "question is the owner's). Lifts on 10/10 quiet-and-loaded ON " +
+        "under the current source-authority posture.",
     },
     {
       // Re-listed by the lunch-poll identity PR (#5744). This file was
