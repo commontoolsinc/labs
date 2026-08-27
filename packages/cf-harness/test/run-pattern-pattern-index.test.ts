@@ -258,6 +258,15 @@ const entryIdentityOf = async (source: string): Promise<string> => {
   ]);
 };
 
+const STRANDED_RECORDS = [{
+  sequence: 1,
+  identity: "keyless:zStranded",
+  symbol: "default",
+  cell: comparableEntityHash(
+    "of:fid1:Lu5lEvAZXeeCOI6SprXO9EG6gDFeZbLWP-MexaaM_qc",
+  )!,
+}];
+
 describe("run-pattern over the pattern index", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -778,14 +787,8 @@ describe("run-pattern over the pattern index", () => {
       const result = await createEngine(index, {
         instantiations: {
           sequence: () => 0,
-          since: () => [{
-            sequence: 1,
-            identity: "keyless:zStranded",
-            symbol: "default",
-            cell: comparableEntityHash(
-              "of:fid1:Lu5lEvAZXeeCOI6SprXO9EG6gDFeZbLWP-MexaaM_qc",
-            )!,
-          }],
+          since: () => STRANDED_RECORDS,
+          keylessSince: () => STRANDED_RECORDS,
         },
       }).invokeBuiltinTool("run_pattern", publishInput);
 
@@ -795,19 +798,48 @@ describe("run-pattern over the pattern index", () => {
       expect(index.calls).toEqual([]);
     });
 
+    it("withholds the index's failure body from a failed lookup's message", async () => {
+      // The service's own error text can quote indexed source — "unknown
+      // pattern" stands in for it here. The model-facing message carries the
+      // stable failure; the body reaches only the artifact.
+      const index = stubIndex({});
+      const result = await createEngine(index).invokeBuiltinTool(
+        "run_pattern",
+        { patternId: "pat-missing" },
+      );
+
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("pat-missing");
+      expect(output.message).not.toContain("unknown pattern");
+      expect(output.rawCauseMessage).toContain("unknown pattern");
+    });
+
+    it("publishes nothing when eviction rolled the keyless record out of the general window", async () => {
+      // The regression the keyless side-buffer exists for: a run that
+      // materializes many durable roots after the session-only one leaves
+      // `since` empty of keyless evidence, and the guard must read the
+      // eviction-proof window instead of failing open into a publish.
+      const index = stubIndex({}, { publish: { created: true } });
+      const result = await createEngine(index, {
+        instantiations: {
+          sequence: () => 0,
+          since: () => [],
+          keylessSince: () => STRANDED_RECORDS,
+        },
+      }).invokeBuiltinTool("run_pattern", publishInput);
+
+      expect((result.output as RunPatternToolErrorOutput).status).toBe("error");
+      expect(index.calls).toEqual([]);
+    });
+
     it("reports an indexed run whose piece carries a session-only pointer as failed", async () => {
       const index = stubIndex({ "pat-doubler": INDEXED_PATTERN });
       await createEngine(index, {
         instantiations: {
           sequence: () => 0,
-          since: () => [{
-            sequence: 1,
-            identity: "keyless:zStranded",
-            symbol: "default",
-            cell: comparableEntityHash(
-              "of:fid1:Lu5lEvAZXeeCOI6SprXO9EG6gDFeZbLWP-MexaaM_qc",
-            )!,
-          }],
+          since: () => STRANDED_RECORDS,
+          keylessSince: () => STRANDED_RECORDS,
         },
       }).invokeBuiltinTool("run_pattern", {
         patternId: "pat-doubler",

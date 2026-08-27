@@ -42,11 +42,20 @@ export interface FabricPatternInstantiations {
 
   /** Instantiations recorded after `since`, oldest first. */
   since(since: number): readonly FabricInstantiationRecord[];
+
+  /**
+   * The KEYLESS instantiations recorded after `since`, oldest first. Held
+   * apart from the general buffer so ordinary record eviction cannot erase
+   * the evidence a guard exists to see: a run that materializes many durable
+   * roots after one session-only root would otherwise roll the keyless
+   * record out of `since` and fail open.
+   */
+  keylessSince(since: number): readonly FabricInstantiationRecord[];
 }
 
 /**
  * The observer a runtime is constructed with, paired with the read side an
- * invocation queries. Both halves address the same buffer.
+ * invocation queries. Both halves address the same buffers.
  */
 export interface FabricInstantiationRecorder {
   observe: (instantiation: PatternInstantiation) => void;
@@ -59,6 +68,7 @@ export const createFabricInstantiationRecorder =
   (): FabricInstantiationRecorder => {
     let sequence = 0;
     const records: FabricInstantiationRecord[] = [];
+    const keyless: FabricInstantiationRecord[] = [];
     return {
       observe: (instantiation) => {
         // A record that cannot be attributed to an entity can never be
@@ -69,19 +79,32 @@ export const createFabricInstantiationRecorder =
         if (cell === undefined) {
           return;
         }
-        records.push({
+        const record = {
           sequence: ++sequence,
           identity: instantiation.identity,
           symbol: instantiation.symbol,
           cell,
-        });
+        };
+        records.push(record);
         if (records.length > BUFFER_LIMIT) {
           records.shift();
+        }
+        // Keyless records are rare — a session-only root is the defect one
+        // per run at most in practice — so this buffer's bound protects
+        // memory against pathology without ever evicting the evidence a
+        // single invocation's window needs.
+        if (PatternManager.isKeylessPatternIdentity(record.identity)) {
+          keyless.push(record);
+          if (keyless.length > BUFFER_LIMIT) {
+            keyless.shift();
+          }
         }
       },
       instantiations: {
         sequence: () => sequence,
         since: (since) => records.filter((record) => record.sequence > since),
+        keylessSince: (since) =>
+          keyless.filter((record) => record.sequence > since),
       },
     };
   };

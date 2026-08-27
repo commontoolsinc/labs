@@ -161,10 +161,22 @@ export class PatternIndexError extends Error {
   /** The index function that answered, for a message that says where. */
   readonly fn: string;
 
-  constructor(fn: string, status: number, message: string) {
-    super(`pattern index ${fn} failed (${status}): ${message}`);
+  /**
+   * What the service actually said. Deliberately NOT part of `message`: a
+   * failure body from the index can quote indexed source or storage detail,
+   * and `message` is what tool error paths render toward the model. The
+   * detail is for artifacts — the paths that stash withheld text into
+   * `rawCauseMessage` read it from here.
+   */
+  readonly detail?: string;
+
+  constructor(fn: string, status: number, detail?: string) {
+    super(`pattern index ${fn} failed (${status})`);
     this.fn = fn;
     this.status = status;
+    if (detail !== undefined) {
+      this.detail = detail;
+    }
   }
 }
 

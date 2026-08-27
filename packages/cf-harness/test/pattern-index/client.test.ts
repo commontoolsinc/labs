@@ -236,7 +236,12 @@ describe("PatternIndexClient", () => {
     expect(error).toBeInstanceOf(PatternIndexError);
     expect((error as PatternIndexError).status).toBe(404);
     expect((error as PatternIndexError).fn).toBe("getPattern");
-    expect((error as PatternIndexError).message).toContain("unknown pattern");
+    // The service body stays off `message` — error paths render `message`
+    // toward the model, and a failure body can quote indexed source.
+    expect((error as PatternIndexError).message).toBe(
+      "pattern index getPattern failed (404)",
+    );
+    expect((error as PatternIndexError).detail).toContain("unknown pattern");
   });
 
   it("throws rather than answering when a 2xx body does not parse", async () => {
@@ -246,6 +251,6 @@ describe("PatternIndexClient", () => {
     const error = await client.searchPatterns({ text: "x" })
       .then(() => undefined, (thrown: unknown) => thrown);
     expect(error).toBeInstanceOf(PatternIndexError);
-    expect((error as PatternIndexError).message).toContain("not JSON");
+    expect((error as PatternIndexError).detail).toContain("not JSON");
   });
 });

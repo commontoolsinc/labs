@@ -37,6 +37,7 @@ import type {
   PatternIndexEventType,
   PatternIndexPublishRequest,
 } from "../pattern-index/client.ts";
+import { PatternIndexError } from "../pattern-index/client.ts";
 import {
   composedPatternIds,
   materializeComposedPatterns,
@@ -635,12 +636,20 @@ export const runPatternTool: HarnessToolDefinition<
           includeSource: true,
         });
       } catch (error) {
-        return errorOutput(
-          "error",
-          `pattern index lookup failed for "${patternId}": ${
-            errorMessage(error)
-          }`,
-        );
+        // `PatternIndexError.message` is stable by construction; the service
+        // body it withheld can quote indexed source, so it goes only to the
+        // artifact.
+        return {
+          ...errorOutput(
+            "error",
+            `pattern index lookup failed for "${patternId}": ${
+              errorMessage(error)
+            }`,
+          ),
+          ...(error instanceof PatternIndexError && error.detail !== undefined
+            ? { rawCauseMessage: error.detail }
+            : {}),
+        };
       }
       if (indexed.program === undefined) {
         return errorOutput(
@@ -913,7 +922,7 @@ export const runPatternTool: HarnessToolDefinition<
     const strandedInstantiation = session.instantiations === undefined
       ? undefined
       : keylessInstantiation(
-        session.instantiations.since(instantiationStart),
+        session.instantiations.keylessSince(instantiationStart),
       );
     if (strandedInstantiation !== undefined) {
       recordOutcome("run_failed");

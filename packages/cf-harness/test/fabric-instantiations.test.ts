@@ -97,6 +97,27 @@ describe("fabric-instantiations", () => {
         .toEqual(["keyless:second"]);
     });
 
+    it("keeps keyless evidence past general-buffer eviction", () => {
+      // One session-only root followed by enough durable roots to roll the
+      // general buffer over: `since` forgets the keyless record, and
+      // `keylessSince` is the read that must not.
+      const recorder = createFabricInstantiationRecorder();
+      recorder.observe(instantiation("keyless:evicted", PIECE_ENTITY));
+      for (let i = 0; i < 200; i++) {
+        recorder.observe(instantiation(`zDurable${i}`, RESULT_ENTITY));
+      }
+
+      expect(
+        recorder.instantiations.since(0).some((one) =>
+          one.identity === "keyless:evicted"
+        ),
+      ).toBe(false);
+      expect(
+        keylessInstantiation(recorder.instantiations.keylessSince(0))
+          ?.identity,
+      ).toBe("keyless:evicted");
+    });
+
     it("records nothing for an instantiation whose entity does not reduce", () => {
       // A kinded id names a different entity from the `of:` id over the same
       // hash, so the canonical helper refuses it rather than aliasing.

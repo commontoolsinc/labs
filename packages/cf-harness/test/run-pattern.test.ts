@@ -343,6 +343,15 @@ class FakeSandboxRuntime implements SandboxRuntime {
   }
 }
 
+const STRANDED_RECORDS = [{
+  sequence: 1,
+  identity: "keyless:zStranded",
+  symbol: "default",
+  cell: comparableEntityHash(
+    "of:fid1:Lu5lEvAZXeeCOI6SprXO9EG6gDFeZbLWP-MexaaM_qc",
+  )!,
+}];
+
 describe("run-pattern", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -448,14 +457,8 @@ describe("run-pattern", () => {
       // `keyless:` pointer stamped somewhere in the created piece's graph.
       const stranded: FabricPatternInstantiations = {
         sequence: () => 0,
-        since: () => [{
-          sequence: 1,
-          identity: "keyless:zStranded",
-          symbol: "default",
-          cell: comparableEntityHash(
-            "of:fid1:Lu5lEvAZXeeCOI6SprXO9EG6gDFeZbLWP-MexaaM_qc",
-          )!,
-        }],
+        since: () => STRANDED_RECORDS,
+        keylessSince: () => STRANDED_RECORDS,
       };
       const result = await createEngine(stranded).invokeBuiltinTool(
         "run_pattern",

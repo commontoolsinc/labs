@@ -25,10 +25,11 @@ import {
   sourceDocKey,
 } from "@commonfabric/runner";
 import { isObjectNotArray } from "@commonfabric/utils/types";
-import type {
-  HarnessPatternIndexClientFactory,
-  PatternIndexClient,
-  PatternIndexProgram,
+import {
+  type HarnessPatternIndexClientFactory,
+  type PatternIndexClient,
+  PatternIndexError,
+  type PatternIndexProgram,
 } from "./client.ts";
 
 /**
@@ -118,6 +119,14 @@ export class PatternCompositionError extends Error {
     }
   }
 }
+
+/**
+ * The service body a failed index call carried, for the artifact-side
+ * `rawCauseMessage`. `PatternIndexError.message` is stable by construction;
+ * the body it withheld is the part that can quote indexed source.
+ */
+const patternIndexErrorDetail = (error: unknown): string | undefined =>
+  error instanceof PatternIndexError ? error.detail : undefined;
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -215,6 +224,7 @@ export const materializeComposedPatterns = async (
   } catch (error) {
     throw new PatternCompositionError(
       `pattern index unavailable: ${errorMessage(error)}`,
+      patternIndexErrorDetail(error),
     );
   }
   /** Ids made durable by this call, dependencies first. */
@@ -263,6 +273,7 @@ export const materializeComposedPatterns = async (
         `the imported pattern "${patternId}" could not be read from the pattern index: ${
           errorMessage(error)
         }`,
+        patternIndexErrorDetail(error),
       );
     }
     if (record.program === undefined) {
