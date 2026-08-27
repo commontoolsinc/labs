@@ -130,6 +130,7 @@ deno task cf inspect summary  z6Mkqa41
 deno task cf inspect entities z6Mkqa41 [--kind piece] [--limit 5000] [--require-complete]
 deno task cf inspect piece    z6Mkqa41 of:fid1:… [--code]   # pattern source, input, owned cells
 deno task cf inspect hot      z6Mkqa41 --limit 10
+deno task cf inspect commits  z6Mkqa41 [--limit 20]   # recent commits: who, ops, reads
 deno task cf inspect churn    z6Mkqa41 [--bucket 60] [--since '2026-07-22 10:00:00'] [--top 10]
 deno task cf inspect history  z6Mkqa41 of:fid1:…
 deno task cf inspect operations z6Mkqa41 [of:fid1:…] [--history-limit 100]
