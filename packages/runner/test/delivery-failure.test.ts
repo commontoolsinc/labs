@@ -5,7 +5,10 @@ import {
   observeDeliveryRecovery,
   spentDeliveryFailureMs,
 } from "../src/executor/delivery-failure.ts";
-import { toReplicaLoadFailureError } from "../src/storage/interface.ts";
+import {
+  ReplicaLoadFailureError,
+  toReplicaLoadFailureError,
+} from "../src/storage/interface.ts";
 
 describe("served-event delivery failure policy", () => {
   it("accumulates failed episodes across recovery without charging recovery work", () => {
@@ -32,6 +35,11 @@ describe("served-event delivery failure policy", () => {
       recoveryEpoch: "session:2",
     });
     expect(spentDeliveryFailureMs(recovering, 51_000)).toBe(20_000);
+    expect(observeDeliveryRecovery(recovering, "session:3", 31_000)).toBe(
+      recovering,
+    );
+    expect(observeDeliveryRecovery(first.checkpoint, "session:1", 31_000))
+      .toBe(first.checkpoint);
 
     const repeated = observeDeliveryFailure(recovering, {
       now: 51_000,
@@ -123,6 +131,15 @@ describe("served-event delivery failure policy", () => {
   });
 
   it("accepts current-ACL evidence from the load producer, never from its name alone", () => {
+    const existing = new ReplicaLoadFailureError({
+      failureClass: "connection",
+      recoveryEpoch: "load:existing",
+      permanentEvidence: false,
+    }, new Error("already classified"));
+    expect(toReplicaLoadFailureError(existing, "load:replacement")).toBe(
+      existing,
+    );
+
     expect(
       toReplicaLoadFailureError({
         name: "AuthorizationError",

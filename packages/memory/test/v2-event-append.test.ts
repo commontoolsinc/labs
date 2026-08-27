@@ -732,6 +732,32 @@ Deno.test("event-append admission: declarations and the sidecar write guard", as
           ProtocolError,
           "authored whole-doc set of existing stream doc",
         );
+        // Replacing the entries array through a patch is the other
+        // whole-array vocabulary and must obey the same existing-log guard.
+        assertThrows(
+          () =>
+            applyCommit(engine, {
+              sessionId: SESSION,
+              space: SPACE,
+              principal: ALICE,
+              commit: {
+                localSeq: 13,
+                reads: { confirmed: [], pending: [] },
+                operations: [{
+                  op: "patch",
+                  id: SIDECAR,
+                  patches: [{
+                    op: "replace",
+                    path: "/value/entries",
+                    value: [entryOf("evt-h-patch")],
+                  }],
+                }],
+                eventAppends: [{ id: SIDECAR, eventId: "evt-h-patch" }],
+              },
+            }),
+          ProtocolError,
+          "authored whole-array write",
+        );
         // Creation carrying non-entry fields (a smuggled watermark) is
         // refused even on a fresh doc.
         const other = streamEntriesDocId({ id: "of:other", path: [] });
@@ -742,7 +768,7 @@ Deno.test("event-append admission: declarations and the sidecar write guard", as
               space: SPACE,
               principal: ALICE,
               commit: {
-                localSeq: 13,
+                localSeq: 14,
                 reads: { confirmed: [], pending: [] },
                 operations: [{
                   op: "set",
@@ -1188,11 +1214,31 @@ Deno.test("event-append admission: the non-array /value/entries shape guard — 
     );
 
     await t.step(
-      "flag ON: an authored whole-doc `set` whose entries field is a NON-ARRAY is refused (the set arm coerced it to [] pre-fix)",
+      "flag ON: an authored `append` patch with a NON-ARRAY values field is refused",
       () => {
         assertThrows(
           () =>
             authoredOps(3, [{
+              op: "patch",
+              id: SIDECAR,
+              patches: [{
+                op: "append",
+                path: "/value/entries",
+                values: "garbage-not-an-array" as never,
+              }],
+            }]),
+          ProtocolError,
+          "non-array",
+        );
+      },
+    );
+
+    await t.step(
+      "flag ON: an authored whole-doc `set` whose entries field is a NON-ARRAY is refused (the set arm coerced it to [] pre-fix)",
+      () => {
+        assertThrows(
+          () =>
+            authoredOps(4, [{
               op: "set",
               id: SIDECAR as never,
               value: { value: { entries: "garbage-string" } } as never,
@@ -1211,7 +1257,7 @@ Deno.test("event-append admission: the non-array /value/entries shape guard — 
           sessionId: SESSION,
           space: SPACE,
           principal: ALICE,
-          commit: appendCommit(4, [entryOf("evt-honest")]),
+          commit: appendCommit(5, [entryOf("evt-honest")]),
         });
         const pending = selectPendingStreamEventDocs(engine);
         assertEquals(pending.length, 1);
@@ -1233,7 +1279,7 @@ Deno.test("event-append admission: the non-array /value/entries shape guard — 
           // forged firedAt (which no OFF-arm admission would validate).
           assertThrows(
             () =>
-              authoredOps(5, [{
+              authoredOps(6, [{
                 op: "patch",
                 id: offSidecar,
                 patches: [{
@@ -1247,7 +1293,7 @@ Deno.test("event-append admission: the non-array /value/entries shape guard — 
           );
           assertThrows(
             () =>
-              authoredOps(6, [{
+              authoredOps(7, [{
                 op: "patch",
                 id: offSidecar,
                 patches: [{
@@ -1285,7 +1331,7 @@ Deno.test("event-append admission: the non-array /value/entries shape guard — 
           commitClass: "derived",
           holder,
           commit: {
-            localSeq: 7,
+            localSeq: 8,
             reads: { confirmed: [], pending: [] },
             operations: [{
               op: "set",
@@ -1569,6 +1615,22 @@ Deno.test("event attention retention: unresolved terminal covers survive every s
     assertThrows(
       () =>
         applyCommit(engine, {
+          sessionId: "server-attention-delete",
+          space: SPACE,
+          principal: ALICE,
+          commitClass: "system",
+          commit: {
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            operations: [{ op: "delete", id: SIDECAR }],
+          },
+        }),
+      ProtocolError,
+      "cannot remove unresolved needs-attention entries",
+    );
+    assertThrows(
+      () =>
+        applyCommit(engine, {
           sessionId: "server-attention-operation",
           space: SPACE,
           principal: ALICE,
@@ -1612,6 +1674,94 @@ Deno.test("event attention retention: unresolved terminal covers survive every s
     });
     waveSetSidecar(engine, holder, 5, { entries: [] });
     assertEquals(sidecarValue(engine).entries, []);
+  } finally {
+    resetServerExecutionConfig();
+    await Deno.remove(path).catch(() => {});
+  }
+});
+
+Deno.test("system Retry actor carriage rejects incomplete and forged metadata", async () => {
+  const { engine, path } = await createEngine();
+  setServerExecutionConfig(true);
+  try {
+    const systemActor = { principal: ALICE, sessionId: SESSION };
+    const expectProtocolError = (
+      sessionId: string,
+      options: Parameters<typeof applyCommit>[1],
+      message: string,
+    ) =>
+      assertThrows(
+        () => applyCommit(engine, { ...options, sessionId }),
+        ProtocolError,
+        message,
+      );
+
+    expectProtocolError("bad-actor-class", {
+      sessionId: "unused",
+      space: SPACE,
+      principal: ALICE,
+      commitClass: "authored",
+      systemEventActor: systemActor,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [],
+      },
+    }, "system-commit admission only");
+    expectProtocolError("bad-actor-identity", {
+      sessionId: "unused",
+      space: SPACE,
+      principal: ALICE,
+      commitClass: "system",
+      systemEventActor: { principal: "", sessionId: "" },
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [],
+      },
+    }, "requires the authenticated principal");
+    expectProtocolError("bad-actor-no-append", {
+      sessionId: "unused",
+      space: SPACE,
+      principal: ALICE,
+      commitClass: "system",
+      systemEventActor: systemActor,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [],
+      },
+    }, "requires a declared Retry append");
+    expectProtocolError("bad-retry-provenance", {
+      sessionId: "unused",
+      space: SPACE,
+      principal: ALICE,
+      commitClass: "system",
+      systemEventActor: systemActor,
+      commit: appendCommit(1, [entryOf("evt-no-retry-of")]),
+    }, "carries no retryOf provenance");
+    expectProtocolError("bad-retry-client-seq", {
+      sessionId: "unused",
+      space: SPACE,
+      principal: ALICE,
+      commitClass: "system",
+      systemEventActor: systemActor,
+      commit: appendCommit(1, [entryOf("evt-client-seq", {
+        retryOf: "evt-original",
+        firedAt: { user: ALICE, session: SESSION, clientSeq: 1 },
+      })]),
+    }, "client-minted only");
+    expectProtocolError("bad-retry-actor", {
+      sessionId: "unused",
+      space: SPACE,
+      principal: ALICE,
+      commitClass: "system",
+      systemEventActor: systemActor,
+      commit: appendCommit(1, [entryOf("evt-wrong-actor", {
+        retryOf: "evt-original",
+        firedAt: { user: "user:mallory", session: SESSION },
+      })]),
+    }, "disagrees with the authenticated Retry actor");
   } finally {
     resetServerExecutionConfig();
     await Deno.remove(path).catch(() => {});

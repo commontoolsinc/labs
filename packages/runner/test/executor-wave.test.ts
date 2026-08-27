@@ -80,7 +80,10 @@ import {
   createDuplicateWorkTransaction,
   createNonReactiveTransaction,
 } from "../src/storage/extended-storage-transaction.ts";
-import { EngineWaveCommitSink } from "../src/executor/engine-wave-sink.ts";
+import {
+  EngineWaveCommitSink,
+  waveCommitFailureResult,
+} from "../src/executor/engine-wave-sink.ts";
 import {
   effectCompletionKeyOf,
   markEffectCompletion,
@@ -315,6 +318,26 @@ describe("stage D seal-into-wave", () => {
       recoveryEpoch: "row-label-verdict",
       permanentEvidence: true,
     }]);
+  });
+
+  it("preserves a row-label refusal's failed operation at the engine sink boundary", () => {
+    const error = new Engine.RowLabelCommitError(
+      "sqlite commit refused: synthetic operation pin",
+    );
+    error.operationIndex = 4;
+    expect(waveCommitFailureResult(error)).toEqual({
+      error: {
+        name: "RowLabelCommitError",
+        message: "sqlite commit refused: synthetic operation pin",
+        failedOperation: 4,
+      },
+    });
+    expect(waveCommitFailureResult("plain refusal")).toEqual({
+      error: {
+        name: "WaveCommitRejected",
+        message: "plain refusal",
+      },
+    });
   });
 
   it("seals into the wave instead of committing; later txs read the layered view; the wave commits once", async () => {

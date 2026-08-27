@@ -172,9 +172,10 @@ describe("XRootView", () => {
     const originalCreate = RuntimeInternals.create;
     let capturedOnError: ((event: ErrorNotification) => void) | undefined;
     let capturedWorkerUrl: URL | undefined;
+    const offCalls: unknown[] = [];
     const fakeRuntime = {
       on: () => {},
-      off: () => {},
+      off: (...args: unknown[]) => offCalls.push(args),
       listEventAttention: () => Promise.resolve([]),
     };
     RuntimeInternals.create = ((options) => {
@@ -213,6 +214,15 @@ describe("XRootView", () => {
       };
       capturedOnError!(event);
       expect(errors).toContainEqual(["[RuntimeClient Error]", event]);
+
+      // Replacing a live runtime removes the old attention listener before
+      // disposing the worker internals.
+      task.run([view.app]);
+      await task.taskComplete;
+      expect(offCalls).toContainEqual([
+        "eventneedsattention",
+        view._handleEventNeedsAttention,
+      ]);
     } finally {
       RuntimeInternals.create = originalCreate;
       console.error = originalError;
@@ -522,6 +532,9 @@ describe("XRootView", () => {
 
   it("shows attention only for the active space and ignores stale refreshes", async () => {
     const restore = installBrowserGlobals();
+    const originalError = console.error;
+    const errors: unknown[][] = [];
+    console.error = (...args: unknown[]) => errors.push(args);
     try {
       const { XRootView } = await import("../src/views/RootView.ts");
       const view = new XRootView();
@@ -535,7 +548,9 @@ describe("XRootView", () => {
       >();
       (view as unknown as { runtime: unknown }).runtime = {
         listEventAttention: (space: string) =>
-          space === firstSpace ? firstRefresh.promise : Promise.resolve([]),
+          space === firstSpace
+            ? firstRefresh.promise
+            : Promise.reject(new Error("second-space refresh failed")),
       };
       const lifecycle = view as unknown as {
         willUpdate(changed: Map<string, unknown>): void;
@@ -596,6 +611,127 @@ describe("XRootView", () => {
       const markup = templateMarkup(view.render());
       expect(markup).toContain("second-space");
       expect(markup).not.toContain("first-space");
+      expect(errors[0]?.[0]).toBe(
+        "[RootView] Failed to load event attention:",
+      );
+    } finally {
+      console.error = originalError;
+      restore();
+    }
+  });
+
+  it("coalesces duplicate attention actions and keeps a failed action visible", async () => {
+    const restore = installBrowserGlobals();
+    const originalError = console.error;
+    const errors: unknown[][] = [];
+    console.error = (...args: unknown[]) => errors.push(args);
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const view = new XRootView();
+      const notice: EventAttentionNotice = {
+        space: "did:key:z6Mk-shell-attention-failure" as never,
+        eventId: "evt-action-failure",
+        sidecarId: "of:stream-events:action-failure",
+        reason: "still needs attention",
+        attention: {
+          phase: "dispatch-load",
+          failureClass: "connection",
+          code: "delivery-failure-budget-exhausted",
+          firstFailureAt: 10,
+          lastFailureAt: 70_000,
+          accumulatedFailureMs: 60_000,
+          failureCount: 2,
+          recovery: "explicit-retry",
+        },
+      };
+
+      // No runtime is a harmless no-op.
+      await view._resolveEventAttention(notice, "retry");
+
+      const deferred = Promise.withResolvers<never>();
+      let calls = 0;
+      (view as unknown as { runtime: unknown; space: unknown }).runtime = {
+        resolveEventAttention: () => {
+          calls++;
+          return deferred.promise;
+        },
+      };
+      (view as unknown as { space: unknown }).space = notice.space;
+      view._handleEventNeedsAttention(notice);
+
+      const first = view._resolveEventAttention(notice, "retry");
+      await view._resolveEventAttention(notice, "retry");
+      expect(calls).toBe(1);
+      deferred.reject(new Error("retry failed"));
+      await first;
+
+      expect(templateMarkup(view.render())).toContain("still needs attention");
+      expect(errors[0]?.[0]).toBe("[RootView] Failed to retry event:");
+    } finally {
+      console.error = originalError;
+      restore();
+    }
+  });
+
+  it("keeps an in-flight attention action owned across A to B to A navigation", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const view = new XRootView();
+      const identity = await Identity.fromPassphrase(
+        "root-view-attention-navigation-test",
+      );
+      const firstSpace = "did:key:z6Mk-shell-attention-nav-first" as never;
+      const secondSpace = "did:key:z6Mk-shell-attention-nav-second" as never;
+      const resolution = Promise.withResolvers<{ kind: "dismissed" }>();
+      let calls = 0;
+      (view as unknown as { runtime: unknown }).runtime = {
+        listEventAttention: () => Promise.resolve([]),
+        resolveEventAttention: () => {
+          calls++;
+          return resolution.promise;
+        },
+      };
+      const lifecycle = view as unknown as {
+        willUpdate(changed: Map<string, unknown>): void;
+      };
+      const setSpace = (space: string) => {
+        const previous = view.app;
+        view.app = {
+          ...view.app,
+          identity,
+          view: { spaceDid: space } as typeof view.app.view,
+        };
+        lifecycle.willUpdate(new Map([["app", previous]]));
+      };
+      const notice: EventAttentionNotice = {
+        space: firstSpace,
+        eventId: "evt-navigation",
+        sidecarId: "of:stream-events:navigation",
+        reason: "navigation guard",
+        attention: {
+          phase: "dispatch-load",
+          failureClass: "connection",
+          code: "delivery-failure-budget-exhausted",
+          firstFailureAt: 10,
+          lastFailureAt: 70_000,
+          accumulatedFailureMs: 60_000,
+          failureCount: 2,
+          recovery: "explicit-retry",
+        },
+      };
+
+      setSpace(firstSpace);
+      const first = view._resolveEventAttention(notice, "dismiss");
+      setSpace(secondSpace);
+      setSpace(firstSpace);
+      await view._resolveEventAttention(notice, "dismiss");
+      expect(calls).toBe(1);
+
+      resolution.resolve({ kind: "dismissed" });
+      await first;
+      await view._resolveEventAttention(notice, "dismiss");
+      expect(calls).toBe(2);
     } finally {
       restore();
     }

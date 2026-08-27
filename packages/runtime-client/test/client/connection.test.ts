@@ -93,6 +93,35 @@ class ThrowingTransport extends EventEmitter<RuntimeTransportEvents>
 }
 
 describe("connection", () => {
+  it("routes terminal event-attention notifications", async () => {
+    const transport = new FakeTransport();
+    const connection = await initializedConnection(transport);
+    const messages: unknown[] = [];
+    connection.on("eventneedsattention", (message) => messages.push(message));
+    const notification = {
+      type: NotificationType.EventNeedsAttention,
+      space: "did:key:z6Mk-connection-attention",
+      eventId: "evt-attention",
+      sidecarId: "of:stream-events:connection-attention",
+      reason: "delivery needs attention",
+      attention: {
+        phase: "dispatch-load",
+        failureClass: "session-revoked",
+        code: "permanent-delivery-failure",
+        firstFailureAt: 10,
+        lastFailureAt: 10,
+        accumulatedFailureMs: 0,
+        failureCount: 1,
+        recovery: "explicit-retry",
+      },
+    } as const;
+
+    transport.emit("message", notification);
+
+    expect(messages).toEqual([notification]);
+    await connection.dispose();
+  });
+
   it("routes collaborative operation notifications", async () => {
     const transport = new FakeTransport();
     const connection = await initializedConnection(transport);

@@ -124,6 +124,25 @@ export function reportDroppedCfcRejectedWrite(
   );
 }
 
+/** Report a served event's durable outcome without letting an observer failure
+ * escape into scheduler control flow. The callback is notification-only: a
+ * broken observer must neither change the event disposition nor skip later
+ * settlement work. */
+export function reportServedEventFailure(
+  served: Pick<NonNullable<QueuedEvent["served"]>, "onFailure"> | undefined,
+  outcome: ServedEventFailureOutcome,
+): void {
+  try {
+    served?.onFailure?.(outcome);
+  } catch (callbackError) {
+    logger.error(
+      "schedule-error",
+      "Error in served event failure callback:",
+      callbackError,
+    );
+  }
+}
+
 export function isHeadEventParked(
   state: { readonly eventQueue: readonly QueuedEvent[] },
   now: number = performance.now(),
@@ -206,19 +225,11 @@ function notifyEventDropped(
   // park), no consequence is written and a later wave re-drains the
   // entry. `cause` tells the two deferrals apart for the drain's retry
   // budget (see ServedEventDispatch.onFailure).
-  try {
-    const outcome: ServedEventFailureOutcome = options.servedOutcome ??
-      (servedKind === "dropped"
-        ? { kind: "dropped", message: reason }
-        : { kind: "deferred", message: reason });
-    args.served?.onFailure?.(outcome);
-  } catch (callbackError) {
-    logger.error(
-      "schedule-error",
-      "Error in served event drop callback:",
-      callbackError,
-    );
-  }
+  const outcome: ServedEventFailureOutcome = options.servedOutcome ??
+    (servedKind === "dropped"
+      ? { kind: "dropped", message: reason }
+      : { kind: "deferred", message: reason });
+  reportServedEventFailure(args.served, outcome);
   if (!args.onCommit) return;
   const tx = state.runtime.edit();
   tx.abort(new Error(reason));
@@ -1486,18 +1497,10 @@ export async function dispatchQueuedEvent(state: {
         // threw server-side — the error IS the consequence. The
         // handler tx (with its consequenced mark) aborted above; the
         // drain seals the error consequence in its own transaction.
-        try {
-          served?.onFailure?.({
-            kind: "error",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        } catch (callbackError) {
-          logger.error(
-            "schedule-error",
-            "Error in served event failure callback:",
-            callbackError,
-          );
-        }
+        reportServedEventFailure(served, {
+          kind: "error",
+          message: error instanceof Error ? error.message : String(error),
+        });
         // A throwing handler is a final outcome for this event — settle the
         // commit callback (with the aborted tx) instead of leaving callers
         // that await it hanging.
@@ -1611,39 +1614,26 @@ export async function dispatchQueuedEvent(state: {
       // copy.
       const sealCfcRefusalConsequence = (): void => {
         if (served === undefined || !isCfcRejectedCommitError(error)) return;
-        try {
-          served.onFailure?.({ kind: "error", message: error.message });
-        } catch (callbackError) {
-          logger.error(
-            "schedule-error",
-            "Error in served event failure callback:",
-            callbackError,
-          );
-        }
+        reportServedEventFailure(served, {
+          kind: "error",
+          message: error.message,
+        });
       };
       const deferCommitPreparationFailure = (): void => {
         if (served === undefined || error?.name !== "CommitPreparationError") {
           return;
         }
-        try {
-          served.onFailure?.({
-            kind: "deferred",
-            cause: "delivery-failure",
-            role: "failed-head",
-            phase: "commit-preparation",
-            failure: {
-              failureClass: "unknown",
-              recoveryEpoch: "commit-preparation",
-              permanentEvidence: false,
-            },
-          });
-        } catch (callbackError) {
-          logger.error(
-            "schedule-error",
-            "Error in served event failure callback:",
-            callbackError,
-          );
-        }
+        reportServedEventFailure(served, {
+          kind: "deferred",
+          cause: "delivery-failure",
+          role: "failed-head",
+          phase: "commit-preparation",
+          failure: {
+            failureClass: "unknown",
+            recoveryEpoch: "commit-preparation",
+            permanentEvidence: false,
+          },
+        });
       };
       const routeProvenNoCommitFailure = (): void => {
         if (served === undefined || error === undefined) return;
@@ -1654,45 +1644,29 @@ export async function dispatchQueuedEvent(state: {
             true &&
           typeof aclRevision === "number";
         if (!rowLabelRefusal && !authorizationRefusal) return;
-        try {
-          served.onFailure?.({
-            kind: "deferred",
-            cause: "delivery-failure",
-            role: "failed-head",
-            phase: "commit-finalization",
-            failure: {
-              failureClass: rowLabelRefusal ? "protocol" : "authorization",
-              recoveryEpoch: rowLabelRefusal
-                ? "row-label-verdict"
-                : `acl:${aclRevision}`,
-              permanentEvidence: true,
-            },
-          });
-        } catch (callbackError) {
-          logger.error(
-            "schedule-error",
-            "Error in served event failure callback:",
-            callbackError,
-          );
-        }
+        reportServedEventFailure(served, {
+          kind: "deferred",
+          cause: "delivery-failure",
+          role: "failed-head",
+          phase: "commit-finalization",
+          failure: {
+            failureClass: rowLabelRefusal ? "protocol" : "authorization",
+            recoveryEpoch: rowLabelRefusal
+              ? "row-label-verdict"
+              : `acl:${aclRevision}`,
+            permanentEvidence: true,
+          },
+        });
       };
       const sealExplicitHandlerAbort = (): void => {
         if (
           served === undefined || error?.name !== "StorageTransactionAborted" ||
           error.message !== "Transaction was aborted"
         ) return;
-        try {
-          served.onFailure?.({
-            kind: "error",
-            message: "Event handler aborted its transaction",
-          });
-        } catch (callbackError) {
-          logger.error(
-            "schedule-error",
-            "Error in served event failure callback:",
-            callbackError,
-          );
-        }
+        reportServedEventFailure(served, {
+          kind: "error",
+          message: "Event handler aborted its transaction",
+        });
       };
 
       switch (disposition.kind) {

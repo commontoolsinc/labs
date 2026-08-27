@@ -2,6 +2,7 @@ import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import type { NormalizedLink } from "../src/link-types.ts";
 import { ReplicaLoadFailureError } from "../src/storage/interface.ts";
+import { StorageManager } from "../src/storage/v2.ts";
 import {
   createSchedulerTestRuntime,
   disposeSchedulerTestRuntime,
@@ -18,6 +19,21 @@ describe("storage pending-load generations", () => {
 
   afterEach(async () => {
     await disposeSchedulerTestRuntime(env);
+  });
+
+  it("rejects event attention resolution when the replica lacks the capability", async () => {
+    const storage = {
+      open: () => ({ replica: {} }),
+    };
+    await expect(
+      StorageManager.prototype.resolveEventAttention.call(
+        storage,
+        space,
+        "of:event",
+        "of:sidecar",
+        "retry",
+      ),
+    ).rejects.toThrow("storage replica does not support event attention");
   });
 
   it("keeps the document pending until its CFC schema load settles", async () => {

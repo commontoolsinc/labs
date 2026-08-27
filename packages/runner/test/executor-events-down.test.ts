@@ -56,6 +56,7 @@ import type {
   WaveCommitSink,
   WaveSpaceCommit,
 } from "../src/executor/wave.ts";
+import { waveRunContextOf } from "../src/executor/wave.ts";
 import {
   isRendererTrustedEvent,
   markRendererTrustedEvent,
@@ -398,6 +399,12 @@ describe("Phase 3 events-down (serving side)", () => {
     | ((batch: WaveSpaceCommit) => WaveCommitRejection | undefined)
     | undefined;
   let rejectedWaveCommits = 0;
+  let failNextServingCommit:
+    | "result-error"
+    | "rejection"
+    | "synchronous-throw"
+    | undefined;
+  let failServingCommitActionPrefix: string | undefined;
 
   const decorateWaveCommitSink = (sink: WaveCommitSink): WaveCommitSink => ({
     currentHeads: (space, docs) => sink.currentHeads(space, docs),
@@ -444,6 +451,37 @@ describe("Phase 3 events-down (serving side)", () => {
             systemPatternAutoUpdate: false,
           },
         });
+        const edit = runtime.edit.bind(runtime);
+        runtime.edit = (options) => {
+          const tx = edit(options);
+          const commit = tx.commit.bind(tx);
+          tx.commit = () => {
+            const failure = failNextServingCommit;
+            const actionId = waveRunContextOf(tx)?.actionId;
+            if (
+              failure === undefined ||
+              failServingCommitActionPrefix === undefined ||
+              !actionId?.startsWith(failServingCommitActionPrefix)
+            ) {
+              return commit();
+            }
+            failNextServingCommit = undefined;
+            failServingCommitActionPrefix = undefined;
+            const error = new Error(`forced serving commit ${failure}`);
+            if (failure === "result-error") {
+              return Promise.resolve({
+                error: {
+                  name: "StorageTransactionAborted" as const,
+                  message: error.message,
+                  reason: error,
+                },
+              });
+            }
+            if (failure === "rejection") return Promise.reject(error);
+            throw error;
+          };
+          return tx;
+        };
         servingRuntime = runtime;
         servingManager = manager;
         return {
@@ -468,6 +506,8 @@ describe("Phase 3 events-down (serving side)", () => {
     rejectWaveCommitWhen = undefined;
     rejectWaveCommitWith = undefined;
     rejectedWaveCommits = 0;
+    failNextServingCommit = undefined;
+    failServingCommitActionPrefix = undefined;
   });
 
   afterEach(async () => {
@@ -3429,8 +3469,9 @@ describe("Phase 3 events-down (serving side)", () => {
         scope: "space",
         id: argumentId,
       };
-      rejectWaveCommitWhen = (batch) =>
-        JSON.stringify(batch.operations).includes('"deliveryDeferral"');
+      failNextServingCommit = "result-error";
+      failServingCommitActionPrefix =
+        "server-execution/event-delivery-checkpoint:";
 
       // A2 arrives first. Hold B1 until after the failed write is observed so
       // no newer input can legitimately wake a second attempt first.
@@ -3445,7 +3486,7 @@ describe("Phase 3 events-down (serving side)", () => {
         () => host!.stats().events.deliveryCheckpointWriteFailures === 1,
         "the first checkpoint write rejection to be counted",
       );
-      expect(rejectedWaveCommits).toBe(1);
+      expect(rejectedWaveCommits).toBe(0);
       expect(
         allEntries().every((entry) => entry.deliveryDeferral === undefined),
         "uncommitted failure age must not become durable authority",
@@ -3459,6 +3500,8 @@ describe("Phase 3 events-down (serving side)", () => {
       await host!.spaceServer(space)!.park("idle");
       servingRuntime = undefined;
       servingManager = undefined;
+      rejectWaveCommitWhen = (batch) =>
+        JSON.stringify(batch.operations).includes('"deliveryDeferral"');
       send("b");
       await clientRuntime.idle();
       await clientRuntime.storageManager.synced();
@@ -3466,6 +3509,41 @@ describe("Phase 3 events-down (serving side)", () => {
         () => sidecarIdsIn(engine).length === 2,
         "B1's append to land on its own sidecar",
       );
+
+      await waitUntil(
+        () => host!.stats().events.deliveryCheckpointWriteFailures === 2,
+        "the whole-wave checkpoint rejection to be counted",
+      );
+      expect(rejectedWaveCommits).toBe(1);
+      rejectWaveCommitWhen = undefined;
+      const wakeCheckpointRetry = async (suffix: string, value: number) => {
+        const wake = clientRuntime.getCell<{ value: number }>(
+          space,
+          `checkpoint-write-wake-${suffix}`,
+          undefined,
+        );
+        await wake.sync();
+        const tx = clientRuntime.edit();
+        wake.withTx(tx).set({ value });
+        expect((await tx.commit()).error).toBeUndefined();
+      };
+      failNextServingCommit = "rejection";
+      failServingCommitActionPrefix =
+        "server-execution/event-delivery-checkpoint:";
+      await wakeCheckpointRetry("rejection", 1);
+      await waitUntil(
+        () => host!.stats().events.deliveryCheckpointWriteFailures === 3,
+        "the rejected checkpoint promise to be counted",
+      );
+      failNextServingCommit = "synchronous-throw";
+      failServingCommitActionPrefix =
+        "server-execution/event-delivery-checkpoint:";
+      await wakeCheckpointRetry("throw", 2);
+      await waitUntil(
+        () => host!.stats().events.deliveryCheckpointWriteFailures === 4,
+        "the synchronously failed checkpoint staging to be counted",
+      );
+      await wakeCheckpointRetry("success", 3);
 
       await waitUntil(
         () =>
@@ -3506,7 +3584,8 @@ describe("Phase 3 events-down (serving side)", () => {
       // no terminal drop was counted.
       const duringFailure = host!.stats().events;
       expect(duringFailure.loadParkDeferrals).toBeGreaterThan(0);
-      expect(duringFailure.loadParkFailures).toBe(2);
+      // Initial observation plus the four explicitly woken write attempts.
+      expect(duringFailure.loadParkFailures).toBe(5);
       expect(duringFailure.deliveryDeferralsActive).toBe(1);
       expect(duringFailure.deliveryFailuresActive).toBe(1);
       expect(duringFailure.dropped).toBe(0);
@@ -4004,8 +4083,8 @@ describe("Phase 3 events-down (serving side)", () => {
       expect(host!.stats().events.maxAccumulatedDeliveryFailureMs).toBe(
         60_000,
       );
-      rejectWaveCommitWhen = (batch) =>
-        JSON.stringify(batch.operations).includes('"attention"');
+      failNextServingCommit = "result-error";
+      failServingCommitActionPrefix = "server-execution/event-consequence:";
       // A new load generation is a positive recovery wake. The load still
       // fails, so the retry re-enters failed state with the accumulated budget
       // and attempts to terminalize immediately. Reject that notice wave: the
@@ -4015,7 +4094,7 @@ describe("Phase 3 events-down (serving side)", () => {
         () => host!.stats().events.needsAttentionSealFailures === 1,
         "the rejected attention notice to be counted",
       );
-      expect(rejectedWaveCommits).toBe(1);
+      expect(rejectedWaveCommits).toBe(0);
       expect(
         allEntries().some((entry) => entry.status === "needs-attention"),
       ).toBe(false);
@@ -4030,6 +4109,8 @@ describe("Phase 3 events-down (serving side)", () => {
       // only then may the later healthy handler consequence land.
       GatedStorageManager.loadParkFailDocId = undefined;
       GatedStorageManager.loadParkFailAddress = undefined;
+      rejectWaveCommitWhen = (batch) =>
+        JSON.stringify(batch.operations).includes('"attention"');
       bump();
       await clientRuntime.idle();
       await clientRuntime.storageManager.synced();
@@ -4037,6 +4118,12 @@ describe("Phase 3 events-down (serving side)", () => {
         () => allEntries().length === 3,
         "the later event append to become durable",
       );
+      await waitUntil(
+        () => host!.stats().events.needsAttentionSealFailures === 2,
+        "the whole-wave attention rejection to be counted",
+      );
+      expect(rejectedWaveCommits).toBe(1);
+      rejectWaveCommitWhen = undefined;
       const noticeWake = clientRuntime.getCell<{ value: number }>(
         space,
         "needs-attention-notice-write-wake",

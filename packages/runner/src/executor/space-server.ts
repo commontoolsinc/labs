@@ -2512,46 +2512,45 @@ export class SpaceServer implements TransactionSealDestination {
       }
       const sealed = commit.then((result) => {
         if (result.error === undefined) return;
-        const pending = this.#pendingDeliveryCheckpointWrites.get(
-          entry.eventId,
-        );
-        if (pending?.checkpoint !== checkpoint) return;
-        this.#pendingDeliveryCheckpointWrites.delete(entry.eventId);
-        this.#deliveryCheckpointWriteBlocked.add(entry.eventId);
-        this.#deliveryWriteBlockedAt.set(entry.eventId, this.#inputHead);
-        this.#options.stats.events.deliveryCheckpointWriteFailures += 1;
-        this.#drainInFlight.delete(entry.eventId);
-        logger.warn("event-delivery-checkpoint-write-failed", () => [
-          `delivery checkpoint for ${entry.eventId} failed to seal; the ` +
-          "durable entry and arrival barrier remain pending",
+        this.#recordDeliveryCheckpointWriteFailure(
+          entry,
           result.error,
-        ]);
+          false,
+          checkpoint,
+        );
       }, (error) => {
-        this.#pendingDeliveryCheckpointWrites.delete(entry.eventId);
-        this.#deliveryCheckpointWriteBlocked.add(entry.eventId);
-        this.#deliveryWriteBlockedAt.set(entry.eventId, this.#inputHead);
-        this.#options.stats.events.deliveryCheckpointWriteFailures += 1;
-        this.#drainInFlight.delete(entry.eventId);
-        logger.warn("event-delivery-checkpoint-write-failed", () => [
-          `delivery checkpoint for ${entry.eventId} failed to seal; the ` +
-          "durable entry and arrival barrier remain pending",
-          error,
-        ]);
+        this.#recordDeliveryCheckpointWriteFailure(entry, error, false);
       });
       this.#eventNoticeWork.add(sealed);
       sealed.finally(() => this.#eventNoticeWork.delete(sealed));
     } catch (error) {
-      this.#pendingDeliveryCheckpointWrites.delete(entry.eventId);
-      this.#deliveryCheckpointWriteBlocked.add(entry.eventId);
-      this.#deliveryWriteBlockedAt.set(entry.eventId, this.#inputHead);
-      this.#options.stats.events.deliveryCheckpointWriteFailures += 1;
-      this.#drainInFlight.delete(entry.eventId);
-      logger.warn("event-delivery-checkpoint-write-failed", () => [
-        `delivery checkpoint for ${entry.eventId} could not be staged; the ` +
-        "durable entry and arrival barrier remain pending",
-        error,
-      ]);
+      this.#recordDeliveryCheckpointWriteFailure(entry, error, true);
     }
+  }
+
+  #recordDeliveryCheckpointWriteFailure(
+    entry: StreamEventEntry,
+    error: unknown,
+    staging: boolean,
+    expected?: DeliveryDeferral,
+  ): void {
+    const pending = this.#pendingDeliveryCheckpointWrites.get(entry.eventId);
+    if (expected !== undefined && pending?.checkpoint !== expected) return;
+    this.#pendingDeliveryCheckpointWrites.delete(entry.eventId);
+    this.#blockDeliveryCheckpointWrite(entry.eventId);
+    this.#drainInFlight.delete(entry.eventId);
+    logger.warn("event-delivery-checkpoint-write-failed", () => [
+      `delivery checkpoint for ${entry.eventId} ${
+        staging ? "could not be staged" : "failed to seal"
+      }; the durable entry and arrival barrier remain pending`,
+      error,
+    ]);
+  }
+
+  #blockDeliveryCheckpointWrite(eventId: string): void {
+    this.#deliveryCheckpointWriteBlocked.add(eventId);
+    this.#deliveryWriteBlockedAt.set(eventId, this.#inputHead);
+    this.#options.stats.events.deliveryCheckpointWriteFailures += 1;
   }
 
   #recordDeliveryFailure(
@@ -2661,9 +2660,7 @@ export class SpaceServer implements TransactionSealDestination {
           this.#eventScanOwed = true;
         }
       } else {
-        this.#deliveryCheckpointWriteBlocked.add(eventId);
-        this.#deliveryWriteBlockedAt.set(eventId, this.#inputHead);
-        this.#options.stats.events.deliveryCheckpointWriteFailures += 1;
+        this.#blockDeliveryCheckpointWrite(eventId);
         logger.warn("event-delivery-checkpoint-write-failed", () => [
           `delivery checkpoint for ${eventId} did not survive the wave; ` +
           "the durable entry and arrival barrier remain pending",
@@ -2698,9 +2695,7 @@ export class SpaceServer implements TransactionSealDestination {
           `${pending.attention.failureClass} failure`,
         ]);
       } else {
-        this.#attentionSealWriteBlocked.add(eventId);
-        this.#deliveryWriteBlockedAt.set(eventId, this.#inputHead);
-        this.#options.stats.events.needsAttentionSealFailures += 1;
+        this.#blockAttentionNoticeWrite(eventId);
         logger.warn("event-needs-attention-seal-failed", () => [
           `attention notice for ${eventId} did not survive the wave; the ` +
           "entry and arrival barrier remain pending",
@@ -3504,39 +3499,52 @@ export class SpaceServer implements TransactionSealDestination {
       const sealed = commit.then((result) => {
         if (result.error !== undefined) throw result.error;
       }).catch((error) => {
-        if (outcome?.kind === "needs-attention") {
-          this.#pendingAttentionNotices.delete(entry.eventId);
-          this.#attentionSealWriteBlocked.add(entry.eventId);
-          this.#deliveryWriteBlockedAt.set(entry.eventId, this.#inputHead);
-          this.#options.stats.events.needsAttentionSealFailures += 1;
-        }
-        // The mark never reached a wave: the drain's guard releases so
-        // the re-drain can queue the entry again.
-        this.#drainInFlight.delete(entry.eventId);
-        logger.warn("event-notice-seal-failed", () => [
-          `consequence notice for ${entry.eventId} failed to seal; the ` +
-          "entry stays pending and the next wave re-drains it",
-          error,
-        ]);
+        this.#recordEventNoticeFailure(entry, outcome, error, false);
       });
       this.#eventNoticeWork.add(sealed as Promise<unknown>);
       (sealed as Promise<unknown>).finally(() => {
         this.#eventNoticeWork.delete(sealed as Promise<unknown>);
       });
     } catch (error) {
-      if (outcome?.kind === "needs-attention") {
-        this.#pendingAttentionNotices.delete(entry.eventId);
-        this.#attentionSealWriteBlocked.add(entry.eventId);
-        this.#deliveryWriteBlockedAt.set(entry.eventId, this.#inputHead);
-        this.#options.stats.events.needsAttentionSealFailures += 1;
-      }
-      this.#drainInFlight.delete(entry.eventId);
-      logger.warn("event-notice-failed", () => [
-        `consequence notice for ${entry.eventId} could not be staged; ` +
-        "the entry stays pending and the next wave re-drains it",
-        error,
-      ]);
+      this.#recordEventNoticeFailure(entry, outcome, error, true);
     }
+  }
+
+  #recordEventNoticeFailure(
+    entry: StreamEventEntry,
+    outcome:
+      | { kind: "error" | "dropped"; message: string }
+      | {
+        kind: "needs-attention";
+        message: string;
+        attention: DeliveryAttention;
+      }
+      | undefined,
+    error: unknown,
+    staging: boolean,
+  ): void {
+    if (outcome?.kind === "needs-attention") {
+      this.#pendingAttentionNotices.delete(entry.eventId);
+      this.#blockAttentionNoticeWrite(entry.eventId);
+    }
+    // The mark never reached a wave: the drain's guard releases so the
+    // re-drain can queue the entry again.
+    this.#drainInFlight.delete(entry.eventId);
+    logger.warn(
+      staging ? "event-notice-failed" : "event-notice-seal-failed",
+      () => [
+        `consequence notice for ${entry.eventId} ${
+          staging ? "could not be staged" : "failed to seal"
+        }; the entry stays pending and the next wave re-drains it`,
+        error,
+      ],
+    );
+  }
+
+  #blockAttentionNoticeWrite(eventId: string): void {
+    this.#attentionSealWriteBlocked.add(eventId);
+    this.#deliveryWriteBlockedAt.set(eventId, this.#inputHead);
+    this.#options.stats.events.needsAttentionSealFailures += 1;
   }
 
   /**

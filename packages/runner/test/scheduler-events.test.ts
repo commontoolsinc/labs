@@ -23,6 +23,7 @@ import type {
 } from "./scheduler-test-utils.ts";
 import type { RuntimeTelemetryMarker } from "../src/telemetry.ts";
 import { RetryImmediately } from "../src/scheduler/retry-immediately.ts";
+import { reportServedEventFailure } from "../src/scheduler/events.ts";
 
 async function waitForSchedulerCondition(
   runtime: Runtime,
@@ -74,6 +75,22 @@ describe("event handling", () => {
     ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
       import.meta.url,
     ));
+  });
+
+  it("isolates served failure observers from scheduler control flow", () => {
+    const outcomes: unknown[] = [];
+    reportServedEventFailure({
+      onFailure: (outcome) => outcomes.push(outcome),
+    }, { kind: "dropped", message: "terminal" });
+    expect(outcomes).toEqual([{ kind: "dropped", message: "terminal" }]);
+
+    expect(() =>
+      reportServedEventFailure({
+        onFailure: () => {
+          throw new Error("observer failed");
+        },
+      }, { kind: "error", message: "handler failed" })
+    ).not.toThrow();
   });
 
   afterEach(async () => {

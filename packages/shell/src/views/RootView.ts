@@ -141,7 +141,7 @@ export class XRootView extends BaseView implements ShellApp {
   private accessor _eventAttention: readonly EventAttentionNotice[] = [];
 
   @state()
-  private accessor _resolvingAttention = new Set<string>();
+  private accessor _resolvingAttention = new Map<string, symbol>();
 
   // Invalidates callbacks from replaced workers. A coded compiler-load error
   // can arrive through either a request reply or an asynchronous runtime error;
@@ -461,7 +461,6 @@ export class XRootView extends BaseView implements ShellApp {
     if (token !== this.#resolveSpaceToken || space === this.space) return;
     this.space = space;
     this._eventAttention = [];
-    this._resolvingAttention = new Set();
     // Keep browser OTel span attribution in sync with the resolved space —
     // the telemetry sink lives across navigations.
     this.#telemetry?.setSpace(space);
@@ -514,7 +513,11 @@ export class XRootView extends BaseView implements ShellApp {
     if (runtime === undefined) return;
     const key = `${notice.space}\0${notice.eventId}`;
     if (this._resolvingAttention.has(key)) return;
-    this._resolvingAttention = new Set(this._resolvingAttention).add(key);
+    const request = Symbol(key);
+    this._resolvingAttention = new Map(this._resolvingAttention).set(
+      key,
+      request,
+    );
     try {
       await runtime.resolveEventAttention(notice, action);
       this._eventAttention = this._eventAttention.filter((candidate) =>
@@ -523,9 +526,11 @@ export class XRootView extends BaseView implements ShellApp {
     } catch (error) {
       console.error(`[RootView] Failed to ${action} event:`, error);
     } finally {
-      const resolving = new Set(this._resolvingAttention);
-      resolving.delete(key);
-      this._resolvingAttention = resolving;
+      if (this._resolvingAttention.get(key) === request) {
+        const resolving = new Map(this._resolvingAttention);
+        resolving.delete(key);
+        this._resolvingAttention = resolving;
+      }
     }
   };
 

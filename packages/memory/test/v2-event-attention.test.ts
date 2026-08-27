@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import * as Engine from "../v2/engine.ts";
 import { Server } from "../v2/server.ts";
+import { SessionRegistry } from "../v2/session-registry.ts";
 import {
   encodeMemoryBoundary,
   eventAttentionIndexKey,
@@ -29,13 +30,28 @@ const SECOND_SIDECAR = streamEntriesDocId(SECOND_STREAM);
 
 type Connection = ReturnType<Server["connect"]>;
 
+class InvalidatingSessionRegistry extends SessionRegistry {
+  invalidateAfterNextGet = false;
+
+  override get(space: string, sessionId: string) {
+    const session = super.get(space, sessionId);
+    if (this.invalidateAfterNextGet) {
+      this.invalidateAfterNextGet = false;
+      this.remove(space, sessionId);
+    }
+    return session;
+  }
+}
+
 describe("event attention resolution", () => {
   let server: Server;
+  let sessions: InvalidatingSessionRegistry;
   const connections: Connection[] = [];
   let nextSeedLocalSeq = 100;
 
   beforeEach(() => {
     setServerExecutionConfig(true);
+    sessions = new InvalidatingSessionRegistry();
     server = new Server({
       store: new URL(`memory://event-attention-${crypto.randomUUID()}`),
       subscriptionRefreshDelayMs: 0,
@@ -44,6 +60,7 @@ describe("event attention resolution", () => {
         return typeof issuer === "string" ? issuer : undefined;
       },
       sessionOpenAuth: { audience: AUDIENCE },
+      sessions,
     });
   });
 
@@ -284,6 +301,60 @@ describe("event attention resolution", () => {
     expect(entries[0].resolution).toEqual({ kind: "dismissed" });
   });
 
+  it("routes attention resolution through the session protocol", async () => {
+    const messages: unknown[] = [];
+    const connection = server.connect((message) => messages.push(message));
+    connections.push(connection);
+    await connection.receive(encodeMemoryBoundary({
+      type: "hello",
+      protocol: MEMORY_PROTOCOL,
+      flags: getMemoryProtocolFlags(),
+    }));
+    const hello = messages.shift() as HelloOkMessage;
+    await connection.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "protocol-session",
+      space: SPACE,
+      session: {},
+      invocation: {
+        iss: ALICE,
+        aud: hello.sessionOpen!.audience,
+        challenge: hello.sessionOpen!.challenge.value,
+      },
+    }));
+    const opened = messages.shift() as ResponseMessage<{ sessionId: string }>;
+    const sessionId = opened.ok!.sessionId;
+    await seedAttention(sessionId, ALICE, "evt-protocol-dismiss");
+
+    await connection.receive(encodeMemoryBoundary({
+      type: "event.attention.resolve",
+      requestId: "protocol-dismiss",
+      space: SPACE,
+      sessionId,
+      eventId: "evt-protocol-dismiss",
+      sidecarId: SIDECAR,
+      action: "dismiss",
+    }));
+
+    const response = messages.shift() as ResponseMessage<{
+      resolution: { kind: "dismissed" };
+    }>;
+    expect(response.ok?.resolution).toEqual({ kind: "dismissed" });
+
+    sessions.remove(SPACE, sessionId);
+    await connection.receive(encodeMemoryBoundary({
+      type: "event.attention.resolve",
+      requestId: "protocol-missing-session",
+      space: SPACE,
+      sessionId,
+      eventId: "evt-protocol-dismiss",
+      sidecarId: SIDECAR,
+      action: "dismiss",
+    }));
+    const missing = messages.shift() as ResponseMessage<never>;
+    expect(missing.error?.name).toBe("SessionError");
+  });
+
   it("overlapping Retry and Dismiss requests return one recorded resolution", async () => {
     const sessionId = await openSession(ALICE);
     await seedAttention(sessionId, ALICE, "evt-retry-race");
@@ -412,6 +483,43 @@ describe("event attention resolution", () => {
     ).toEqual({ entries: {} });
   });
 
+  it("removes one event summary without hiding another event in its stream", async () => {
+    const sessionId = await openSession(ALICE);
+    await seedAttention(sessionId, ALICE, "evt-first");
+    await seedAttention(sessionId, ALICE, "evt-second");
+
+    const first = await server.resolveEventAttention({
+      type: "event.attention.resolve",
+      requestId: "same-stream-first",
+      space: SPACE,
+      sessionId,
+      eventId: "evt-first",
+      sidecarId: SIDECAR,
+      action: "dismiss",
+    });
+    expect(first.error).toBeUndefined();
+    const engine = await server.engineForSpace(SPACE);
+    const afterFirst = Engine.read(engine, {
+      id: SERVER_EXECUTION_ATTENTION_DOC_ID,
+    })?.value as EventAttentionIndexValue;
+    const summaries = afterFirst.entries?.[eventAttentionIndexKey(SIDECAR)];
+    expect(summaries?.[eventAttentionIndexKey("evt-first")]).toBeUndefined();
+    expect(summaries?.[eventAttentionIndexKey("evt-second")]?.eventId).toBe(
+      "evt-second",
+    );
+
+    const second = await server.resolveEventAttention({
+      type: "event.attention.resolve",
+      requestId: "same-stream-second",
+      space: SPACE,
+      sessionId,
+      eventId: "evt-second",
+      sidecarId: SIDECAR,
+      action: "dismiss",
+    });
+    expect(second.error).toBeUndefined();
+  });
+
   it("resolves an event whose identifier names an object prototype key", async () => {
     const sessionId = await openSession(ALICE);
     await seedAttention(sessionId, ALICE, "__proto__");
@@ -449,6 +557,37 @@ describe("event attention resolution", () => {
     });
     expect(crossUser.error?.name).toBe("AuthorizationError");
 
+    const engine = await server.engineForSpace(SPACE);
+    Engine.applyCommit(engine, {
+      space: SPACE,
+      sessionId: "server-test-acl",
+      principal: ALICE,
+      commitClass: "system",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: `of:${SPACE}`,
+          value: { value: { [ALICE]: "OWNER", [BOB]: "READ" } },
+        }],
+      },
+    });
+    server.options.acl = { mode: "enforce" };
+    const aclDenied = await server.resolveEventAttention({
+      type: "event.attention.resolve",
+      requestId: "acl-denied",
+      space: SPACE,
+      sessionId: bobSession,
+      eventId: "evt-owned",
+      sidecarId: SIDECAR,
+      action: "dismiss",
+    });
+    expect(aclDenied.error).toMatchObject({
+      name: "AuthorizationError",
+      permanentEvidence: true,
+    });
+
     const sessionless = await server.resolveEventAttention({
       type: "event.attention.resolve",
       requestId: "sessionless",
@@ -459,10 +598,76 @@ describe("event attention resolution", () => {
       action: "retry",
     });
     expect(sessionless.error?.name).toBe("SessionError");
-    const engine = await server.engineForSpace(SPACE);
     const entries = (Engine.read(engine, { id: SIDECAR })!
       .value as StreamEventsDocValue).entries!;
     expect(entries).toHaveLength(1);
     expect(entries[0].resolution).toBeUndefined();
+  });
+
+  it("fails closed when the session is replaced while the engine opens", async () => {
+    const sessionId = await openSession(ALICE);
+    await seedAttention(sessionId, ALICE, "evt-replaced-session");
+    sessions.invalidateAfterNextGet = true;
+
+    const response = await server.resolveEventAttention({
+      type: "event.attention.resolve",
+      requestId: "replaced-session",
+      space: SPACE,
+      sessionId,
+      eventId: "evt-replaced-session",
+      sidecarId: SIDECAR,
+      action: "dismiss",
+    });
+
+    expect(response.error?.name).toBe("SessionError");
+    expect(response.error?.message).toContain("replaced");
+  });
+
+  it("returns protocol errors for missing authoritative and discovery state", async () => {
+    const sessionId = await openSession(ALICE);
+    const missingCover = await server.resolveEventAttention({
+      type: "event.attention.resolve",
+      requestId: "missing-cover",
+      space: SPACE,
+      sessionId,
+      eventId: "evt-missing",
+      sidecarId: SIDECAR,
+      action: "dismiss",
+    });
+    expect(missingCover.error?.name).toBe("ProtocolError");
+    expect(missingCover.error?.message).toContain(
+      "no authoritative attention cover",
+    );
+
+    await seedAttention(sessionId, ALICE, "evt-missing-index");
+    const engine = await server.engineForSpace(SPACE);
+    Engine.applyCommit(engine, {
+      space: SPACE,
+      sessionId: "server-test-remove-index",
+      principal: ALICE,
+      commitClass: "system",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: SERVER_EXECUTION_ATTENTION_DOC_ID,
+          value: { value: { entries: {} } },
+        }],
+      },
+    });
+    const missingIndex = await server.resolveEventAttention({
+      type: "event.attention.resolve",
+      requestId: "missing-index",
+      space: SPACE,
+      sessionId,
+      eventId: "evt-missing-index",
+      sidecarId: SIDECAR,
+      action: "dismiss",
+    });
+    expect(missingIndex.error?.name).toBe("ProtocolError");
+    expect(missingIndex.error?.message).toContain(
+      "no unresolved attention notice",
+    );
   });
 });

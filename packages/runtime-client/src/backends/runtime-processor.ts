@@ -53,6 +53,7 @@ import {
   type Cell,
   convertCellsToLinks,
   entityIdFrom,
+  type EventIntentOutcome,
   getCellOrThrow,
   getPatternIdentityRef,
   hasOperationStorageCapability,
@@ -124,6 +125,7 @@ import {
   type EnsureHomePatternRunningRequest,
   type EventAttentionListResponse,
   type EventAttentionResolveResponse,
+  type EventNeedsAttentionNotification,
   type GetActionRunTraceRequest,
   type GetCellRequest,
   GetGraphSnapshotRequest,
@@ -241,6 +243,30 @@ import {
   getCell,
   mapCellRefsToSigilLinks,
 } from "./utils.ts";
+
+/** Subscribe the worker bridge to complete terminal-attention outcomes. Keeping
+ * the filter and wire projection here makes the host boundary independently
+ * testable without booting a worker runtime. */
+export function subscribeEventAttentionNotifications(
+  runtime: Pick<Runtime, "subscribeEventIntentOutcomes">,
+  post: (notification: EventNeedsAttentionNotification) => void = postToClient,
+): Cancel {
+  return runtime.subscribeEventIntentOutcomes((outcome: EventIntentOutcome) => {
+    if (
+      outcome.kind !== "needs-attention" ||
+      outcome.sidecarId === undefined ||
+      outcome.attention === undefined
+    ) return;
+    post({
+      type: NotificationType.EventNeedsAttention,
+      space: outcome.space,
+      eventId: outcome.eventId,
+      sidecarId: outcome.sidecarId,
+      reason: outcome.reason,
+      attention: outcome.attention,
+    });
+  });
+}
 
 /**
  * Maximum nesting depth of a console argument's debug rendering. The bound is
@@ -768,22 +794,8 @@ export class RuntimeProcessor {
       space,
       processor.renderMembershipProvider,
     );
-    processor.#intentOutcomeCancel = runtime.subscribeEventIntentOutcomes(
-      (outcome) => {
-        if (
-          outcome.kind !== "needs-attention" ||
-          outcome.sidecarId === undefined ||
-          outcome.attention === undefined
-        ) return;
-        postToClient({
-          type: NotificationType.EventNeedsAttention,
-          space: outcome.space,
-          eventId: outcome.eventId,
-          sidecarId: outcome.sidecarId,
-          reason: outcome.reason,
-          attention: outcome.attention,
-        });
-      },
+    processor.#intentOutcomeCancel = subscribeEventAttentionNotifications(
+      runtime,
     );
     // Site-table v0: the home space carries space-to-host hints; the
     // runtime reads them as its live host lookup (2026-06-09 federation
