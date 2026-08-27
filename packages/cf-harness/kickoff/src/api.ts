@@ -61,15 +61,22 @@ export const startTask = async (
     }),
   );
 
+/**
+ * Asks the server to stop a turn. A refusal rejects like every other route's
+ * does: a cancel the server would not take leaves the turn running, and a page
+ * that read it as success would say the opposite.
+ */
 export const cancelTurn = async (
   sessionId: string,
   turnId?: string,
 ): Promise<void> => {
-  await fetch("/api/cancel", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ sessionId, turnId }),
-  });
+  await json<unknown>(
+    await fetch("/api/cancel", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId, turnId }),
+    }),
+  );
 };
 
 export const listSessions = async (): Promise<

@@ -51,9 +51,19 @@ const result = (
 /** A run that searched, failed to compile, fixed, and named the piece. */
 const buildTranscript = (): HarnessTranscriptMessage[] => [
   { role: "user", content: "track the books I am reading" },
-  call("c1", "search_patterns", { query: "reading list" }),
+  call("c1", "search_patterns", { text: "reading list", tags: ["#books"] }),
   result("c1", "search_patterns", {
-    results: [{ patternId: "p-books", title: "Reading list", score: 0.82 }],
+    outputId: "r1:search_patterns:1",
+    status: "ok",
+    results: [
+      {
+        patternId: "p-books",
+        description: "Reading list",
+        hashtags: ["#books"],
+        importHint: "#books/p-books",
+        signals: { uses: 4, score: 0.82 },
+      },
+    ],
   }),
   call("c2", "run_pattern", { sourceText: "export default () => {}" }),
   result("c2", "run_pattern", {
@@ -70,7 +80,7 @@ const buildTranscript = (): HarnessTranscriptMessage[] => [
     slug: "books",
     url: "http://localhost:8000/my-space/books",
   }),
-  call("c5", "record_feedback", { patternId: "p-books", event: "success" }),
+  call("c5", "record_feedback", { patternId: "p-books", verdict: "up" }),
   result("c5", "record_feedback", { status: "ok" }),
 ];
 
@@ -92,14 +102,36 @@ describe("kickoff/runs", () => {
 
     it("reads the index calls and the address a person can open", () => {
       const lens = kickoffRunLens(buildTranscript());
-      expect(lens.searches[0].query).toBe("reading list");
+      expect(lens.searches[0].query).toBe("reading list #books");
       expect(lens.searches[0].hits[0]).toEqual({
         patternId: "p-books",
-        title: "Reading list",
+        description: "Reading list",
         score: 0.82,
       });
-      expect(lens.feedback[0].event).toBe("success");
+      expect(lens.feedback[0].verdict).toBe("up");
       expect(lens.pieces[0].url).toBe("http://localhost:8000/my-space/books");
+    });
+
+    it("names a search made on tags alone by its tags", () => {
+      const lens = kickoffRunLens([
+        call("c1", "search_patterns", { tags: ["#books", "#reading"] }),
+        result("c1", "search_patterns", { status: "ok", results: [] }),
+      ]);
+      expect(lens.searches[0].query).toBe("#books #reading");
+    });
+
+    it("leaves a hit the index ranked no signal for without a score", () => {
+      const lens = kickoffRunLens([
+        call("c1", "search_patterns", { text: "books" }),
+        result("c1", "search_patterns", {
+          status: "ok",
+          results: [{ patternId: "p-books", description: "Reading list" }],
+        }),
+      ]);
+      expect(lens.searches[0].hits[0]).toEqual({
+        patternId: "p-books",
+        description: "Reading list",
+      });
     });
 
     it("reports a call whose result did not parse rather than dropping it", () => {
@@ -148,6 +180,13 @@ describe("kickoff/runs", () => {
       }
     };
 
+    /** A tool-output file named the way the artifact store names one. */
+    const toolOutputName = (
+      runId: string,
+      toolId: string,
+      sequence: number,
+    ): string => `${runId}_${toolId}_${sequence}-${toolId}.json`;
+
     const writeRun = async (
       root: string,
       runId: string,
@@ -163,14 +202,24 @@ describe("kickoff/runs", () => {
         join(runRoot, "transcript.json"),
         JSON.stringify(buildTranscript()),
       );
-      await Deno.writeTextFile(
-        join(runRoot, "tool-outputs", `${runId}_run_pattern-2.json`),
-        JSON.stringify({ status: "ok" }),
-      );
-      await Deno.writeTextFile(
-        join(runRoot, "tool-outputs", `${runId}_run_pattern-10.json`),
-        JSON.stringify({ status: "ok" }),
-      );
+      // Two tools, and a run long enough that the tenth call would sort before
+      // the second on the digits alone.
+      for (
+        const [toolId, sequence] of [
+          ["search_patterns", 1],
+          ["run_pattern", 2],
+          ["run_pattern", 10],
+        ] as const
+      ) {
+        await Deno.writeTextFile(
+          join(
+            runRoot,
+            "tool-outputs",
+            toolOutputName(runId, toolId, sequence),
+          ),
+          JSON.stringify({ status: "ok" }),
+        );
+      }
     };
 
     it("lists runs most recently touched first", async () => {
@@ -197,10 +246,24 @@ describe("kickoff/runs", () => {
           "run-state.json",
           "transcript.json",
         ]);
+        // The order the calls were made in, not the order their tools sort in.
         expect(detail?.toolOutputNames).toEqual([
-          "r1_run_pattern-2.json",
-          "r1_run_pattern-10.json",
+          "r1_search_patterns_1-search_patterns.json",
+          "r1_run_pattern_2-run_pattern.json",
+          "r1_run_pattern_10-run_pattern.json",
         ]);
+      });
+    });
+
+    it("lists a tool-output name of another shape after every call", async () => {
+      await withArtifactRoot(async (root) => {
+        await writeRun(root, "r1", "2026-01-01T00:00:01.000Z");
+        await Deno.writeTextFile(
+          join(root, "r1", "tool-outputs", "unnumbered.json"),
+          "{}",
+        );
+        const detail = await readKickoffRun(root, "r1");
+        expect(detail?.toolOutputNames.at(-1)).toBe("unnumbered.json");
       });
     });
 
@@ -208,7 +271,11 @@ describe("kickoff/runs", () => {
       await withArtifactRoot(async (root) => {
         await writeRun(root, "r1", "2026-01-01T00:00:01.000Z");
         expect(
-          await readKickoffToolOutput(root, "r1", "r1_run_pattern-2.json"),
+          await readKickoffToolOutput(
+            root,
+            "r1",
+            "r1_run_pattern_2-run_pattern.json",
+          ),
         ).toBe(JSON.stringify({ status: "ok" }));
       });
     });

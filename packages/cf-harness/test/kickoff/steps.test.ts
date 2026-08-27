@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { kickoffRunHandles, kickoffRunSteps } from "../../kickoff/steps.ts";
 import type { HarnessTranscriptMessage } from "../../src/contracts/transcript.ts";
 import type { HarnessHandleTable } from "../../src/contracts/handle-table.ts";
+import type { HarnessCfcInvocationContext } from "../../src/contracts/cfc-invocation-context.ts";
 import { createToolOutputId } from "../../src/contracts/tool-result.ts";
 
 const call = (
@@ -80,6 +81,41 @@ describe("kickoff/steps", () => {
         }),
       ]);
       expect(steps[0].childRunId).toBe("run.subagent.1");
+    });
+
+    it("reads a skill resource the tool says it read as an ok step", () => {
+      const steps = kickoffRunSteps([
+        call("c1", "read_skill_resource", { path: "SKILL.md" }),
+        result("c1", "read_skill_resource", { status: "read", content: "#" }),
+        call("c2", "read_skill_resource", { path: "logo.png" }),
+        result("c2", "read_skill_resource", { status: "binary", bytes: 12 }),
+        call("c3", "read_skill_resource", { path: "absent.md" }),
+        result("c3", "read_skill_resource", { status: "error" }),
+      ]);
+      expect(steps.map((step) => step.status)).toEqual([
+        "ok",
+        "ok",
+        "error",
+      ]);
+    });
+
+    it("reads a skill script the tool says it executed as an ok step", () => {
+      const steps = kickoffRunSteps([
+        call("c1", "run_skill_script", { script: "build.sh" }),
+        result("c1", "run_skill_script", { status: "executed", exitCode: 0 }),
+      ]);
+      expect(steps[0].status).toBe("ok");
+    });
+
+    it("reads a status no tool succeeds under as an error step", () => {
+      const steps = kickoffRunSteps([
+        call("c1", "run_pattern", {}),
+        result("c1", "run_pattern", { status: "compile-error" }),
+        call("c2", "bash", { command: "ls" }),
+        // `read` is a success only for the tool that reports it.
+        result("c2", "bash", { status: "read" }),
+      ]);
+      expect(steps.map((step) => step.status)).toEqual(["error", "error"]);
     });
 
     it("brings a handle into scope at the step its token first appears", () => {
@@ -302,6 +338,82 @@ describe("kickoff/steps CFC and disclosure", () => {
     expect(steps[0].invocation?.cfcInputLabels?.entries[0].path).toEqual([
       "command",
     ]);
+  });
+
+  it("hands a context that named no output to its own tool's steps in turn", () => {
+    const context = (
+      sequence: number,
+      toolId: string,
+      cwd: string,
+    ): HarnessCfcInvocationContext => ({
+      type: "cf-harness.cfc-invocation-context",
+      version: 1,
+      sequence,
+      runId: "r",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      toolId,
+      operation: "shell",
+      cfcEnforcementMode: "enforce-explicit",
+      cwd,
+      runManifest: { present: false },
+      inputs: {},
+    });
+    const steps = kickoffRunSteps(
+      [
+        call("c1", "read_file", { path: "a.txt" }),
+        result("c1", "read_file", { path: "a.txt", content: "a" }),
+        call("c2", "read_file", { path: "b.txt" }),
+        result("c2", "read_file", { path: "b.txt", content: "b" }),
+      ],
+      [],
+      [],
+      [
+        context(1, "read_file", "/workspace/a"),
+        context(
+          2,
+          "read_file",
+          "/workspace/b",
+        ),
+      ],
+    );
+    expect(steps[0].invocation?.cwd).toBe("/workspace/a");
+    expect(steps[1].invocation?.cwd).toBe("/workspace/b");
+  });
+
+  it("leaves a step with no invocation context recorded for another tool", () => {
+    const steps = kickoffRunSteps(
+      [
+        call("c1", "read_file", { path: "a.txt" }),
+        result("c1", "read_file", { path: "a.txt", content: "a" }),
+      ],
+      [],
+      [],
+      [
+        {
+          type: "cf-harness.cfc-invocation-context",
+          version: 1,
+          sequence: 1,
+          runId: "r",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          toolId: "write_file",
+          operation: "shell",
+          cfcEnforcementMode: "enforce-explicit",
+          cwd: "/workspace",
+          runManifest: { present: false },
+          inputs: {},
+        },
+      ],
+    );
+    expect(steps[0].invocation).toBeUndefined();
+  });
+
+  it("measures a value in bytes rather than in code units", () => {
+    const steps = kickoffRunSteps([
+      call("c1", "run_pattern", {}),
+      result("c1", "run_pattern", { status: "ok", value: { note: "🙂" } }),
+    ]);
+    // `{"note":"🙂"}` is thirteen code units and fifteen bytes.
+    expect(steps[0].disclosure?.valueBytes).toBe(15);
   });
 
   it("leaves a step with no invocation context when none names its output", () => {

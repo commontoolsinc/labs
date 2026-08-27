@@ -200,6 +200,17 @@ export class KickoffApp extends LitElement {
       case "turn_canceled":
         this.state = "canceling";
         break;
+      case "status_changed":
+        // A canceled turn is still winding down when it says so, and the
+        // session reporting no active turn is where it has actually stopped.
+        // That is the only end a cancellation has, so the page reads it as one.
+        if (event.session.activeTurnId === undefined && this.running) {
+          this.state = this.state === "canceling" ? "canceled" : "idle";
+          this.running = false;
+          this.activity = undefined;
+          void this.#refresh();
+        }
+        break;
       case "turn_failed":
         this.state = "failed";
         this.running = false;
@@ -233,6 +244,12 @@ export class KickoffApp extends LitElement {
   }
 
   async #start(): Promise<void> {
+    // The button is disabled while a turn runs, but the attribute is written on
+    // the next render rather than on the click, so a second click that lands
+    // first is refused here rather than starting a second turn.
+    if (this.running) {
+      return;
+    }
     const input = this.querySelector("#task") as HTMLTextAreaElement;
     const text = input.value.trim();
     if (text === "") {
@@ -267,12 +284,24 @@ export class KickoffApp extends LitElement {
     }
   }
 
+  /**
+   * Asks for the running turn to stop. A refused cancel leaves the turn
+   * running, so the page goes back to reporting what the turn is doing and says
+   * why it is still doing it.
+   */
   async #cancel(): Promise<void> {
     if (this.sessionId === undefined) {
       return;
     }
+    const before = this.state;
     this.state = "canceling";
-    await cancelTurn(this.sessionId, this.turnId);
+    try {
+      await cancelTurn(this.sessionId, this.turnId);
+      this.error = undefined;
+    } catch (error) {
+      this.state = before;
+      this.error = error instanceof Error ? error.message : String(error);
+    }
   }
 
   #runRow(node: RunNode, depth: number): TemplateResult {

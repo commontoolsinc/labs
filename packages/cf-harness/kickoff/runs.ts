@@ -69,15 +69,23 @@ export interface KickoffPatternAttempt {
 /** One `search_patterns` call and the patterns it matched. */
 export interface KickoffPatternSearch {
   toolCallId: string;
+  /** What was searched for: the call's free text, its tags, or both. */
   query?: string;
-  hits: readonly { patternId?: string; title?: string; score?: number }[];
+  hits: readonly {
+    patternId?: string;
+    /** The hit's own description, which is all the index titles it by. */
+    description?: string;
+    /** The index's ranking signal for the hit, when it keeps one. */
+    score?: number;
+  }[];
 }
 
 /** One `record_feedback` call, as the run reported it to the index. */
 export interface KickoffPatternFeedback {
   toolCallId: string;
   patternId?: string;
-  event?: string;
+  /** The verdict the call cast: `up` or `down`. */
+  verdict?: string;
   note?: string;
 }
 
@@ -118,6 +126,20 @@ const asString = (value: unknown): string | undefined =>
 
 const asNumber = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isFinite(value) ? value : undefined;
+
+/**
+ * What a `search_patterns` call asked for. The call carries free text, tags,
+ * or both, and what a person wants to read back is the whole of the question
+ * rather than whichever half the call led with.
+ */
+const searchQuery = (args: Record<string, unknown>): string | undefined => {
+  const tags = Array.isArray(args.tags)
+    ? args.tags.flatMap((tag) => asString(tag) ?? [])
+    : [];
+  const text = asString(args.text);
+  const parts = [...(text === undefined ? [] : [text]), ...tags];
+  return parts.length === 0 ? undefined : parts.join(" ");
+};
 
 /**
  * The tool calls an assistant made, by call id. A tool message names only the
@@ -203,23 +225,20 @@ export const kickoffRunLens = (
           : Array.isArray(result.hits)
           ? result.hits
           : [];
+        const query = searchQuery(args);
         searches.push({
           toolCallId: message.toolCallId,
-          ...(asString(args.query) !== undefined
-            ? { query: args.query as string }
-            : {}),
+          ...(query !== undefined ? { query } : {}),
           hits: hits.map((hit) => {
             const record = asRecord(hit);
+            const description = asString(record.description);
+            const score = asNumber(asRecord(record.signals).score);
             return {
               ...(asString(record.patternId) !== undefined
                 ? { patternId: record.patternId as string }
                 : {}),
-              ...(asString(record.title) !== undefined
-                ? { title: record.title as string }
-                : {}),
-              ...(asNumber(record.score) !== undefined
-                ? { score: record.score as number }
-                : {}),
+              ...(description !== undefined ? { description } : {}),
+              ...(score !== undefined ? { score } : {}),
             };
           }),
         });
@@ -231,8 +250,8 @@ export const kickoffRunLens = (
           ...(asString(args.patternId) !== undefined
             ? { patternId: args.patternId as string }
             : {}),
-          ...(asString(args.event) !== undefined
-            ? { event: args.event as string }
+          ...(asString(args.verdict) !== undefined
+            ? { verdict: args.verdict as string }
             : {}),
           ...(asString(args.note) !== undefined
             ? { note: args.note as string }

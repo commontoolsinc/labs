@@ -234,6 +234,41 @@ describe("kickoff/server", () => {
     });
   });
 
+  describe("the served page", () => {
+    it("confines the page to this origin with a content security policy", async () => {
+      const response = await server.handle(getRequest("/"));
+      await response.body?.cancel();
+
+      const policy = response.headers.get("content-security-policy") ?? "";
+      expect(policy).toContain("default-src 'self'");
+      expect(policy).toContain("object-src 'none'");
+      expect(policy).toContain("frame-ancestors 'none'");
+      // The run tree indents a row with a `style` attribute, which a policy
+      // without this would refuse; a script has no such exception.
+      expect(policy).toContain("style-src 'self' 'unsafe-inline'");
+      expect(policy).not.toContain("script-src");
+      expect(policy).not.toContain("default-src 'self' 'unsafe-inline'");
+    });
+
+    it("carries that policy on every path served from the built page", async () => {
+      const response = await server.handle(getRequest("/scripts/index.js"));
+      await response.body?.cancel();
+
+      expect(response.headers.get("content-security-policy")).toContain(
+        "default-src 'self'",
+      );
+    });
+
+    it("does not answer an API route with a page policy", async () => {
+      const response = await server.handle(
+        getRequest("/api/sessions", { cookie }),
+      );
+      await response.json();
+
+      expect(response.headers.get("content-security-policy")).toBeNull();
+    });
+  });
+
   describe("request authorization", () => {
     it("hands the page a strictly same-site token cookie", async () => {
       const response = await server.handle(getRequest("/"));

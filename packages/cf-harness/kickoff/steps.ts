@@ -119,6 +119,8 @@ export interface KickoffStep {
   invocation?: HarnessCfcInvocationContext;
 }
 
+const textEncoder = new TextEncoder();
+
 const parseJson = (text: string): { value?: unknown; ok: boolean } => {
   try {
     return { value: JSON.parse(text), ok: true };
@@ -213,14 +215,34 @@ const disclosureOf = (output: unknown): KickoffDisclosure | undefined => {
   }
   const value = record.value;
   return {
-    valueBytes: JSON.stringify(value ?? null)?.length ?? 0,
+    // The pane reports bytes, so the JSON is measured encoded: a code unit is
+    // not a byte, and the characters a channel would be widest in are exactly
+    // the ones that take more than one.
+    valueBytes:
+      textEncoder.encode(JSON.stringify(value ?? null) ?? "null").byteLength,
     sealedPositions: sealedPositions(output),
     longestNumericRun: longestNumericRun(value),
   };
 };
 
+/**
+ * What a tool answers with when it did the thing it was asked to do. Most
+ * answer `ok`; the two skill tools answer with the act itself, and reading
+ * either of those as a failure would paint a whole run red. A status this does
+ * not name is a failure, so a tool that grows a new success status belongs
+ * here.
+ */
+const TOOL_SUCCESS_STATUSES = new Map<string, readonly string[]>([
+  ["read_skill_resource", ["read", "binary"]],
+  ["run_skill_script", ["executed"]],
+]);
+
+/** What a tool this does not name is taken to report success with. */
+const DEFAULT_SUCCESS_STATUSES: readonly string[] = ["ok", "completed"];
+
 /** How a tool step turned out, read from its own result and CFC's verdict. */
 const statusOf = (
+  toolName: string,
   output: unknown,
   outputText: string | undefined,
   decision: HarnessPolicyDecisionRecord | undefined,
@@ -237,7 +259,9 @@ const statusOf = (
     : undefined;
   const status = record?.status;
   if (typeof status === "string") {
-    return status === "ok" || status === "completed" ? "ok" : "error";
+    const successes = TOOL_SUCCESS_STATUSES.get(toolName) ??
+      DEFAULT_SUCCESS_STATUSES;
+    return successes.includes(status) ? "ok" : "error";
   }
   if (record?.error !== undefined) {
     return "error";
@@ -268,12 +292,39 @@ export const kickoffRunSteps = (
 ): readonly KickoffStep[] => {
   // An invocation context names the output it was recorded for, which is the
   // same id the transcript's tool message carries as its result reference.
-  const invocationsByOutput = new Map(
-    invocationContexts.map((context) => [
-      String(context.toolOutputId),
-      context,
-    ]),
-  );
+  // A tool that mints its output id only once the call has run — `read_file`
+  // among them — records none, so those are held by the tool they name and
+  // handed to that tool's steps in turn: both sequences are the run's own
+  // order, so the nth context a tool recorded belongs to its nth step.
+  const invocationsByOutput = new Map<string, HarnessCfcInvocationContext>();
+  const unnamedInvocationsByTool = new Map<
+    string,
+    HarnessCfcInvocationContext[]
+  >();
+  for (const context of invocationContexts) {
+    if (context.toolOutputId !== undefined) {
+      invocationsByOutput.set(String(context.toolOutputId), context);
+      continue;
+    }
+    const held = unnamedInvocationsByTool.get(context.toolId);
+    if (held === undefined) {
+      unnamedInvocationsByTool.set(context.toolId, [context]);
+    } else {
+      held.push(context);
+    }
+  }
+
+  /** The context recorded for a step, by the id it named or by its turn. */
+  const invocationFor = (
+    toolName: string,
+    resultRef: ToolResultRef | undefined,
+  ): HarnessCfcInvocationContext | undefined => {
+    const named = resultRef === undefined
+      ? undefined
+      : invocationsByOutput.get(String(resultRef.outputId));
+    return named ?? unnamedInvocationsByTool.get(toolName)?.shift();
+  };
+
   const calls = toolCallsById(transcript);
   const decisionsByCall = new Map(
     policyDecisions.map((decision) => [decision.toolCallId, decision]),
@@ -350,6 +401,7 @@ export const kickoffRunSteps = (
         handlesIntroduced,
         handlesInScope: [...inScope],
         status: statusOf(
+          message.toolName,
           parsedOutput.value,
           parsedOutput.ok ? undefined : message.content,
           decision,
@@ -369,9 +421,10 @@ export const kickoffRunSteps = (
         policyEvents: events,
         ...(disclosure !== undefined ? { disclosure } : {}),
         ...(() => {
-          const invocation = message.resultRef === undefined
-            ? undefined
-            : invocationsByOutput.get(String(message.resultRef.outputId));
+          const invocation = invocationFor(
+            message.toolName,
+            message.resultRef,
+          );
           return invocation === undefined ? {} : { invocation };
         })(),
       });

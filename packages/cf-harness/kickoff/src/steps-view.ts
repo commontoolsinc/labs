@@ -43,6 +43,16 @@ const atomNames = (clauses: readonly unknown[] = []): string[] =>
       : JSON.stringify(clause) ?? "clause";
   });
 
+/**
+ * Where the scrubber sits when `count` steps are what it is scrubbing. A run
+ * shorter than the one that was open cannot hold the step it was scrubbed to,
+ * so the selection follows the steps down rather than pointing past their end,
+ * where the rail highlights nothing and an arrow key moves from a step that is
+ * not there.
+ */
+export const clampSelection = (selected: number, count: number): number =>
+  Math.min(Math.max(selected, 0), Math.max(count - 1, 0));
+
 /** A step's one-line label in the rail. */
 const stepLabel = (step: KickoffStep): string =>
   step.kind === "tool" ? step.toolName ?? "tool" : step.kind;
@@ -67,6 +77,12 @@ export class KickoffSteps extends LitElement {
 
   protected override createRenderRoot(): HTMLElement {
     return this;
+  }
+
+  protected override willUpdate(changed: Map<string, unknown>): void {
+    if (changed.has("steps")) {
+      this.selected = clampSelection(this.selected, this.steps.length);
+    }
   }
 
   override connectedCallback(): void {
@@ -103,7 +119,7 @@ export class KickoffSteps extends LitElement {
     if (this.steps.length === 0) {
       return;
     }
-    this.selected = Math.min(Math.max(index, 0), this.steps.length - 1);
+    this.selected = clampSelection(index, this.steps.length);
   }
 
   /** The handles in scope at a step, the ones it introduced first. */
@@ -362,7 +378,7 @@ export class KickoffSteps extends LitElement {
         <p class="empty">This run recorded no transcript.</p>
       `;
     }
-    const step = this.steps[Math.min(this.selected, this.steps.length - 1)];
+    const step = this.steps[clampSelection(this.selected, this.steps.length)];
     return html`
       <div class="scrubber">
         <button

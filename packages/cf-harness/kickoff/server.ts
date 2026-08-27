@@ -144,6 +144,24 @@ const cookieValue = (
  */
 const ASSET_PATH = /^\/(scripts\/|styles\/|build-manifest\.json$|$)/;
 
+/**
+ * What the page is allowed to load and where it may send what it holds.
+ * Everything it needs comes from this origin, so `'self'` covers its script,
+ * its stylesheet, its fetches and its event stream; `style-src` allows inline
+ * as well because the run tree indents a row with a `style` attribute. The
+ * page renders text a run produced — a model's words, a tool's output, a
+ * pattern's source — and this is what keeps markup that reached it that way
+ * from loading a script or sending a run's artifacts anywhere else.
+ */
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+].join("; ");
+
 const CONTENT_TYPES: Readonly<Record<string, string>> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -605,6 +623,10 @@ export class KickoffServer {
     }
     if (request.method === "GET" && ASSET_PATH.test(url.pathname)) {
       const response = await this.#asset(url.pathname);
+      response.headers.set(
+        "content-security-policy",
+        CONTENT_SECURITY_POLICY,
+      );
       response.headers.append(
         "set-cookie",
         // No `Secure`: this is plain http on loopback, and a `Secure` cookie

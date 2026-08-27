@@ -102,6 +102,22 @@ const namesPresent = async (
   return present;
 };
 
+/**
+ * The call this output belongs to. The artifact store names a file for its
+ * output id and the tool that wrote it, `<run-id>_<tool>_<sequence>-<tool>`,
+ * with the id's separators rewritten — so the sequence is the digits before
+ * the trailing tool name, and the leading run id may carry digits and hyphens
+ * of its own. The last such group is therefore the one that counts. A name of
+ * some other shape sorts after every call rather than in among them.
+ */
+const toolOutputSequence = (name: string): number => {
+  let sequence: number | undefined;
+  for (const match of name.matchAll(/_(\d+)-/g)) {
+    sequence = Number(match[1]);
+  }
+  return sequence ?? Number.MAX_SAFE_INTEGER;
+};
+
 const toolOutputNames = async (root: string): Promise<string[]> => {
   const names: string[] = [];
   try {
@@ -113,13 +129,16 @@ const toolOutputNames = async (root: string): Promise<string[]> => {
   } catch {
     // A run that called no tool wrote no directory.
   }
-  // The output id leads each name and carries the call's sequence, so sorting
-  // by name is sorting by the order the run made the calls — except that the
-  // sequence is not zero-padded, so a run with ten calls would otherwise put
-  // the tenth before the second.
-  return names.sort((left, right) =>
-    left.localeCompare(right, undefined, { numeric: true })
-  );
+  // The sequence a name carries counts every call the run made, whichever tool
+  // made it, so it is the run's own order and the only thing worth sorting on:
+  // the name leads with the tool, and sorting on that groups a mixed run by
+  // tool instead of laying it out as it happened.
+  return names.sort((left, right) => {
+    const bySequence = toolOutputSequence(left) - toolOutputSequence(right);
+    return bySequence !== 0
+      ? bySequence
+      : left.localeCompare(right, undefined, { numeric: true });
+  });
 };
 
 /** Every run under the artifact root, most recently touched first. */

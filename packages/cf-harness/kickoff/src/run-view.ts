@@ -37,6 +37,14 @@ export class KickoffRunView extends LitElement {
   declare rawText: string | undefined;
   declare error: string | undefined;
 
+  /**
+   * Which read of a run is the current one. A running turn re-reads on every
+   * tool completion and a click can switch runs mid-read, so two reads are
+   * routinely in flight and the network is free to answer them in either order;
+   * only the newest one is allowed to say what the pane shows.
+   */
+  #reads = 0;
+
   constructor() {
     super();
     this.pane = "timeline";
@@ -57,33 +65,57 @@ export class KickoffRunView extends LitElement {
 
   /** Re-reads the open run, which a running turn's new steps arrive through. */
   async refresh(): Promise<void> {
-    if (this.runId === undefined) {
+    const read = ++this.#reads;
+    const runId = this.runId;
+    if (runId === undefined) {
       this.detail = undefined;
       return;
     }
     try {
-      this.detail = await readRun(this.runId);
+      const detail = await readRun(runId);
+      if (read !== this.#reads) {
+        return;
+      }
+      this.detail = detail;
       this.error = undefined;
     } catch (error) {
+      if (read !== this.#reads) {
+        return;
+      }
       this.error = error instanceof Error ? error.message : String(error);
     }
   }
 
+  /**
+   * Reads one file into the raw pane. What was asked for is remembered whole —
+   * the run, the pane, and the name — because a second click while the first
+   * file is still being read is what the pane is for, and a file that arrives
+   * after the selection moved on is no longer what is showing.
+   */
   async #showRaw(
     kind: "artifacts" | "tool-outputs",
     name: string,
   ): Promise<void> {
-    if (this.detail === undefined) {
+    const detail = this.detail;
+    if (detail === undefined) {
       return;
     }
+    const runId = detail.summary.runId;
+    const pane = this.pane;
     this.rawName = name;
     this.rawText = undefined;
+    const stillShowing = (): boolean =>
+      this.rawName === name && this.pane === pane &&
+      this.detail?.summary.runId === runId;
     try {
-      this.rawText = prettyJson(
-        await readRunFile(this.detail.summary.runId, kind, name),
-      );
+      const text = prettyJson(await readRunFile(runId, kind, name));
+      if (stillShowing()) {
+        this.rawText = text;
+      }
     } catch (error) {
-      this.rawText = error instanceof Error ? error.message : String(error);
+      if (stillShowing()) {
+        this.rawText = error instanceof Error ? error.message : String(error);
+      }
     }
   }
 
@@ -109,7 +141,7 @@ export class KickoffRunView extends LitElement {
                   ${search.hits.map((hit) =>
                     html`
                       <li>
-                        ${hit.title ?? hit.patternId ?? "unnamed"}
+                        ${hit.description ?? hit.patternId ?? "unnamed"}
                         ${hit.score === undefined
                           ? nothing
                           : html`<span class="score">
@@ -167,7 +199,7 @@ export class KickoffRunView extends LitElement {
         html`
           <div class="lens-item">
             <div class="label">
-              feedback <span class="tool">${record.event ?? ""}</span>
+              feedback <span class="tool">${record.verdict ?? ""}</span>
               ${record.patternId ?? ""}
             </div>
             ${record.note === undefined
