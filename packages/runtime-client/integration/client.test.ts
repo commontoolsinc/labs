@@ -191,9 +191,10 @@ describe("RuntimeClient", () => {
       await using rt = await createRuntimeClient(session);
 
       const schema = { type: "object" } as const satisfies JSONSchema;
+      const cause = "test-fabric-value-" + Date.now();
       const cell = await rt.getCell<Record<string, unknown>>(
         session.space,
-        "test-fabric-value-" + Date.now(),
+        cause,
         schema,
       );
 
@@ -222,26 +223,43 @@ describe("RuntimeClient", () => {
       assertEquals(synced.tag, Symbol.for("cf.test.interned"));
 
       // The notification path is a separate crossing from the response path,
-      // and only one of them is exercised above.
+      // and it is watched from a SECOND handle on the same cell. The writing
+      // handle is no good for it: `set()` updates its own cache and calls its
+      // own subscribers synchronously with the object it was handed, so a
+      // subscriber there would be shown the value it just built and would say
+      // `instanceof FabricBytes` about a `FabricBytes` that never left the
+      // process. `getCell()` returns a fresh handle, and this one never
+      // writes, so every value it is given arrived over the connection.
       const nextContent = new Uint8Array([1, 2, 3]);
+      const reader = await rt.getCell<Record<string, unknown>>(
+        session.space,
+        cause,
+        schema,
+      );
       const gotNext = defer<Record<string, unknown>>();
-      const cancel = cell.subscribe((value) => {
+      const cancel = reader.subscribe((value) => {
         const record = value as Record<string, unknown> | undefined;
-        if (
-          record?.bytes instanceof FabricBytes && record.marker === "second"
-        ) {
-          gotNext.resolve(record);
-        }
+        if (record?.marker === "second") gotNext.resolve(record);
       });
 
-      await cell.set({
+      const sent = {
         bytes: new FabricBytes(nextContent),
         marker: "second",
-      });
+      };
+      await cell.set(sent);
 
       const delivered = await gotNext.promise;
       cancel();
-      assert(delivered.bytes instanceof FabricBytes);
+      // Not the object that was written, which is what says this came back
+      // rather than across.
+      assert(delivered !== sent);
+      assert(
+        delivered.bytes instanceof FabricBytes,
+        `delivered ${
+          (delivered.bytes as { constructor?: { name?: string } })?.constructor
+            ?.name ?? String(delivered.bytes)
+        }, not a FabricBytes`,
+      );
       assertEquals(delivered.bytes.slice(), nextContent);
     });
 
