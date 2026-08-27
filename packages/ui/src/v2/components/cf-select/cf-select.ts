@@ -65,10 +65,7 @@ export interface SelectItem {
 }
 
 export class CFSelect extends BaseElement {
-  //
-  // Styles
-  //
-
+  /** Styles */
   static override styles = [
     BaseElement.baseStyles,
     css`
