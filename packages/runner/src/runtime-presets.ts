@@ -94,12 +94,14 @@
  * | patternCoverage            | delta (patternTest, remoteClient, browserWorker) |
  * |                            | — test/CI statement-coverage collection, unset   |
  * |                            | elsewhere                                        |
- * | onPatternInstantiated      | delta (patternTest only) — the vintage capture   |
- * |                            | passes it to learn which patterns a run          |
- * |                            | materialized and where. Observation only, and    |
- * |                            | deliberately NOT available to the deployed       |
- * |                            | presets: nothing in production should depend on  |
- * |                            | being told about instantiation                   |
+ * | onPatternInstantiated      | delta (patternTest, remoteClient) — the vintage  |
+ * |                            | capture learns which patterns a run materialized |
+ * |                            | and where; cf-harness's client session learns    |
+ * |                            | whether the piece `run_pattern` created carries  |
+ * |                            | a session-only pattern pointer. Observation      |
+ * |                            | only: a runtime behaves identically whether or   |
+ * |                            | not one is installed, and no serving runtime     |
+ * |                            | (productionServer, browserWorker) is offered one |
  * | trustSnapshotProvider      | delta (remoteClient, browserWorker)              |
  * | spaceHostMap               | delta (browserWorker only — federation routing   |
  * |                            | is decided by the shell host)                    |
@@ -375,6 +377,13 @@ export interface RemoteClientPresetParams extends CoreParams {
   errorHandlers?: ErrorHandler[];
   navigateCallback?: NavigateCallback;
 
+  /**
+   * Records what this client materializes; cf-harness's fabric session passes
+   * one so `run_pattern` can tell whether the piece it created carries a
+   * session-only pattern pointer.
+   */
+  onPatternInstantiated?: PatternInstantiationObserver;
+
   /** Shared compiled-module-byte cache (integration suites). */
   moduleByteCache?: ModuleByteCache;
 
@@ -498,6 +507,9 @@ export const runtimePresets = {
         : {}),
       ...(params.patternCoverage !== undefined
         ? { patternCoverage: params.patternCoverage }
+        : {}),
+      ...(params.onPatternInstantiated !== undefined
+        ? { onPatternInstantiated: params.onPatternInstantiated }
         : {}),
     };
   },

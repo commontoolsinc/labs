@@ -11,8 +11,10 @@ import {
   type PatternRef,
   type PieceDiffStatus,
   type PiecePatternRef,
+  type PiecePlan,
   type PieceSelector,
   type PlanDiff,
+  type RepairReport,
   type RestorableRevision,
 } from "@commonfabric/piece/ops";
 import ports from "@commonfabric/ports" with { type: "json" };
@@ -103,6 +105,13 @@ import type {
 import { render, safeStringify } from "../lib/render.ts";
 import { newSessionId } from "../lib/session.ts";
 import { parseSqliteSource } from "../lib/sqlite-source.ts";
+import {
+  type ApplyRunProgress,
+  describeUnreportedApplyRun,
+  guardRunReport,
+  type RunReportGuard,
+  type UnreportedRunDeps,
+} from "../lib/unreported-run.ts";
 import { absPath } from "../lib/utils.ts";
 
 // Hint system: print helpful next-step suggestions after operations
@@ -3701,6 +3710,9 @@ export interface RepairCommandDependencies {
   printError?: (message: string) => void;
   printHint?: (message: string) => void;
   exit?: (code: number) => never;
+
+  /** The process-end guard's effects; see {@link ApplyCommandDependencies}. */
+  guard?: UnreportedRunDeps;
 }
 
 export async function repairFromCommand(
@@ -3716,7 +3728,29 @@ export async function repairFromCommand(
     ...(options.plan === undefined ? {} : { planPath: absPath(options.plan) }),
     ...(options.apply === true ? { apply: true } : {}),
   };
-  const report = await (deps.runRepair ?? runRepair)(spaceConfig, request);
+  // The repair runs one session rather than the retarget's grouped ones, but
+  // it ends the same way: an await that stops settling drains the process at
+  // code 0 with the fixer's writes half-made and nothing said about them.
+  //
+  // Unwatched, because `repairPieces` reports its rows only in the report it
+  // returns — there is no row callback to hand it. So the guard says the
+  // count is unknown rather than zero: this run's rows really do settle, and
+  // a process that never saw them must not report their absence.
+  const progress = newApplyRunProgress(false);
+  const guard = guardRunReport(
+    () => describeUnreportedApplyRun("Repair", progress),
+    deps.guard ?? {},
+  );
+  let report: RepairReport;
+  try {
+    report = await (deps.runRepair ?? runRepair)(spaceConfig, request);
+  } catch (error) {
+    guard.reported();
+    throw error;
+  }
+  // As the retarget does: the guard stays armed over the writing of what the
+  // engine returned, and says that is where the process ended.
+  progress.phase = "reporting";
   const print = deps.render ?? render;
   const printHint = deps.printHint ?? hint;
   if (options.json) {
@@ -3741,6 +3775,9 @@ export async function repairFromCommand(
     [...tally.entries()].map(([verdict, count]) => `${verdict}: ${count}`)
       .join(" · "),
   );
+  // Reported; the guard stands down before the exit below, which never
+  // returns. See {@link reportApplyRun} for the same placement.
+  guard.reported();
   if (options.apply !== true) {
     // The dry run's product is the exact per-piece diff, so every changed
     // position renders — through the data-model's own debug stringifier,
@@ -3812,6 +3849,14 @@ export interface ApplyCommandDependencies {
   printError?: (message: string) => void;
   printHint?: (message: string) => void;
   exit?: (code: number) => never;
+
+  /**
+   * The process-end guard's effects. A run that writes arms one for its
+   * whole life, so a process that ends before the run reports says so and
+   * exits nonzero instead of draining silently at code 0
+   * ([../lib/unreported-run.ts](../lib/unreported-run.ts)).
+   */
+  guard?: UnreportedRunDeps;
 }
 
 export interface RetargetCommandDependencies extends ApplyCommandDependencies {
@@ -3890,19 +3935,47 @@ export async function retargetFromCommand(
   const spaceConfig = { ...parseSpaceOptions(options), jsonOutput: true };
   const print = deps.render ?? render;
   const streaming = options.json !== true && options.out === undefined;
-  const report = await (deps.runRetarget ?? runRetarget)(spaceConfig, {
-    planPath: absPath(options.plan),
-    ...(options.acceptUnretained === undefined
-      ? {}
-      : { accept: options.acceptUnretained }),
-    ...(options.apply === true ? { apply: true } : {}),
-    ...(options.groupSize === undefined
-      ? {}
-      : { groupSize: options.groupSize }),
-    ...(streaming
-      ? { onRow: (row: ApplyRow) => print(formatApplyRow(row)) }
-      : {}),
-  });
+  // Armed before the first session opens and stood down by the report: a run
+  // that stops settling anywhere in between ends the process, and without
+  // this that ending is indistinguishable from a clean finish.
+  const progress = newApplyRunProgress(true);
+  const guard = guardRunReport(
+    () => describeUnreportedApplyRun("Retarget", progress),
+    deps.guard ?? {},
+  );
+  let report: ApplyReport;
+  try {
+    report = await (deps.runRetarget ?? runRetarget)(spaceConfig, {
+      planPath: absPath(options.plan),
+      ...(options.acceptUnretained === undefined
+        ? {}
+        : { accept: options.acceptUnretained }),
+      ...(options.apply === true ? { apply: true } : {}),
+      ...(options.groupSize === undefined
+        ? {}
+        : { groupSize: options.groupSize }),
+      // Every mode watches the rows; only a streaming one prints them. What
+      // the document modes cannot do is stream to stdout, and observing is
+      // not streaming — they are the modes with the most to lose from a run
+      // that never returns, since the document they emit is written from
+      // the report and a run that never reports writes nothing at all.
+      onRow: (row: ApplyRow) => {
+        countApplyRow(progress, row);
+        if (streaming) print(formatApplyRow(row));
+      },
+    });
+  } catch (error) {
+    // A run that ended by throwing reports through the error it threw, which
+    // the CLI prints on its way to a nonzero exit.
+    guard.reported();
+    throw error;
+  }
+  // The engine returned; everything below is the writing of what it returned,
+  // and that can end the process too — a throw here reaches the operator as
+  // an error, but the tally it was about to print does not. The guard stays
+  // armed over it and changes what it claims, rather than standing down and
+  // leaving this stretch unguarded.
+  progress.phase = "reporting";
   // Every accepted piece by name, through the note so `--quiet` cannot
   // silence it: a piece this move could not be reversed for is the fact the
   // operator most needs in front of them, and it is being recorded at the
@@ -3915,12 +3988,35 @@ export async function retargetFromCommand(
       `accepted as unrollbackable: ${piece} (moving it leaves no reversal)`,
     );
   }
-  await reportApplyRun(report, {
-    verb: "Retarget",
-    ...(options.apply === true ? { apply: true } : {}),
-    ...(options.out === undefined ? {} : { out: options.out }),
-    ...(options.json === true ? { json: true } : {}),
-  }, deps);
+  await reportApplyRun(
+    report,
+    {
+      verb: "Retarget",
+      ...(options.apply === true ? { apply: true } : {}),
+      ...(options.out === undefined ? {} : { out: options.out }),
+      ...(options.json === true ? { json: true } : {}),
+    },
+    deps,
+    guard,
+  );
+}
+
+/**
+ * A guarded apply run's row counts, empty before its first row settles.
+ * `observed` is whether this run's engine is being handed a row reporter at
+ * all: without one its rows settle unseen, and the process-end report must
+ * say the count is unknown rather than say zero.
+ */
+function newApplyRunProgress(observed: boolean): ApplyRunProgress {
+  return { observed, verdicts: new Map<string, number>(), phase: "running" };
+}
+
+/** Count one settled row toward what a process-end report would say. */
+function countApplyRow(progress: ApplyRunProgress, row: ApplyRow): void {
+  progress.verdicts.set(
+    row.verdict,
+    (progress.verdicts.get(row.verdict) ?? 0) + 1,
+  );
 }
 
 /**
@@ -3934,6 +4030,7 @@ async function reportApplyRun(
   report: ApplyReport,
   run: { verb: string; apply?: boolean; out?: string; json?: boolean },
   deps: ApplyCommandDependencies,
+  guard?: RunReportGuard,
 ): Promise<void> {
   const print = deps.render ?? render;
   const printHint = deps.printHint ?? hint;
@@ -3959,6 +4056,10 @@ async function reportApplyRun(
       `written: ${report.applied}`,
     ].join(" · "),
   );
+  // The run has reported, so the process-end guard stands down here rather
+  // than at the end of this function: the exit below never returns, and a
+  // guard released after it would still be armed when the process ends.
+  guard?.reported();
   // A row that landed and was warned about is a success the operator still
   // has to read. It rides the report itself, so `--json` and `--out` carry
   // it whatever the hint does; this is the human copy.
@@ -4085,22 +4186,41 @@ export async function rollbackFromCommand(
   const print = deps.render ?? render;
   const printHint = deps.printHint ?? hint;
   const streaming = options.json !== true && options.out === undefined;
-  const { report, plan } = await (deps.runRollback ?? runRollback)(
-    spaceConfig,
-    {
-      planPath: absPath(options.plan),
-      ...(options.acceptUnretained === undefined
-        ? {}
-        : { accept: options.acceptUnretained }),
-      ...(options.apply === true ? { apply: true } : {}),
-      ...(options.groupSize === undefined
-        ? {}
-        : { groupSize: options.groupSize }),
-      ...(streaming
-        ? { onRow: (row: ApplyRow) => print(formatApplyRow(row)) }
-        : {}),
-    },
+  // The same process-end guard the retarget arms, for the same reason: this
+  // runs on the same engine, over the same grouped sessions — and watches
+  // its rows in every mode, as the retarget does and for the same reason.
+  const progress = newApplyRunProgress(true);
+  const guard = guardRunReport(
+    () => describeUnreportedApplyRun("Rollback", progress),
+    deps.guard ?? {},
   );
+  let report: ApplyReport;
+  let plan: PiecePlan;
+  try {
+    ({ report, plan } = await (deps.runRollback ?? runRollback)(
+      spaceConfig,
+      {
+        planPath: absPath(options.plan),
+        ...(options.acceptUnretained === undefined
+          ? {}
+          : { accept: options.acceptUnretained }),
+        ...(options.apply === true ? { apply: true } : {}),
+        ...(options.groupSize === undefined
+          ? {}
+          : { groupSize: options.groupSize }),
+        onRow: (row: ApplyRow) => {
+          countApplyRow(progress, row);
+          if (streaming) print(formatApplyRow(row));
+        },
+      },
+    ));
+  } catch (error) {
+    guard.reported();
+    throw error;
+  }
+  // As the retarget does, and for the same reason: the writing of what the
+  // engine returned is guarded too, under a claim that fits it.
+  progress.phase = "reporting";
   printHint(`Derived ${plan.rows.length} rollback rows from ${options.plan}`);
   // Every accepted piece by name, on every run that carried one — through
   // the note rather than a hint, so `--quiet` does not silence it. A piece
@@ -4112,12 +4232,17 @@ export async function rollbackFromCommand(
       `accepted as unrollbackable: ${piece} (left out of this reversal)`,
     );
   }
-  await reportApplyRun(report, {
-    verb: "Rollback",
-    ...(options.apply === true ? { apply: true } : {}),
-    ...(options.out === undefined ? {} : { out: options.out }),
-    ...(options.json === true ? { json: true } : {}),
-  }, deps);
+  await reportApplyRun(
+    report,
+    {
+      verb: "Rollback",
+      ...(options.apply === true ? { apply: true } : {}),
+      ...(options.out === undefined ? {} : { out: options.out }),
+      ...(options.json === true ? { json: true } : {}),
+    },
+    deps,
+    guard,
+  );
 }
 
 export interface RestoreCLIOptions extends PieceCLIOptions {
