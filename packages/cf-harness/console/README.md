@@ -159,65 +159,94 @@ dial and reaches every run's `policy-snapshot.json` either way.
 
 ## Reading a run
 
-There is one reading of a run rather than two. A turn produces a run, and the
-run's artifacts are the record of it — so the same view serves a run that
-finished an hour ago and one still going. The left rail lists every run the
-server has made, each named by the task it was given, with a `delegate_task`
-child nested under the run that delegated to it. The live event stream drives
-the status line and the re-reads; it is not a second feed.
+Three columns, each scrolling on its own: the runs there are, the run being
+read, and the map of how it went. A turn produces a run, and the run's artifacts
+are the record of it, so the same view serves a run that finished an hour ago
+and one still going. The live event stream drives the status line and the
+re-reads; it is not a second feed. A run writes its artifacts as it goes, so
+every completed tool call re-reads the list, the open run and its map. The step
+the scrubber sits on survives the re-read.
 
-A run writes its artifacts as it goes, so every completed tool call re-reads the
-list and the open run. The step the scrubber sits on survives the re-read.
+### The runs
 
-Opening a run gives four panes:
+The left column lists every run the server has made, each named by the task it
+was given, with a `delegate_task` child nested under the run that delegated to
+it.
+
+### The map
+
+The right column is the conversation, read top to bottom. A turn opens where a
+person spoke; under it are the calls the agent made, each carrying how it turned
+out and what CFC decided, with a delegated child's own calls nested beneath the
+call that delegated. Clicking a node moves the middle column to that step —
+which is how you move around a run — and clicking a node of a child opens that
+child's own run.
+
+Cells appear wherever a run touches one:
+
+- **makes** — the call minted it, and its result addressed it.
+- **reads** — the call was wired to it, labelled with the argument name that
+  carried it.
+- **in scope** — it arrived without this call making it: a handle handed to the
+  session, or one a child's result carried back.
+
+The map heads with the CFC regime the run ran under and with the blunt counts:
+how many calls failed, how many CFC refused, and how many patterns read no cell.
+That last one matters — a run whose patterns read nothing built its work from
+literals rather than composing it over references, which is the opposite of what
+the handle model is for.
+
+A map spans the run **and the `delegate_task` children beneath it**, because
+that is where the routing lives: a parent commonly names a cell its child
+produced. Cells are keyed by the address they stand for, so a parent's token and
+a child's token for one cell are one cell.
+
+### A cell
+
+A cell is drawn one way wherever it appears — in an argument, in a map node, in
+the handles a step holds — because two sightings of one cell have to be
+recognisable as one cell. The chip carries the name it goes by: the slug a
+person gave it, else the handle the model held, else its address. Hovering it
+gives the rest — handle, address, the shape the pattern that made it declared,
+the confidentiality atoms riding on it, and the step whose result minted it.
+
+A cell showing no atoms under a run whose flow labels are `off` is saying what
+that run recorded, not hiding something. The regime at the top of the map is
+what makes the difference readable.
+
+### The run's own panes
 
 - **Timeline** — the run step by step, scrubbed with arrow keys or the slider. A
-  tool call and the result answering it are one step. Each step shows the whole
-  of what went in and came back as formatted JSON, untruncated, and long lines
-  scroll inside their block rather than widening the page. A coloured dot on
-  each step in the rail says how it turned out: green for a result the tool
-  called `ok`, red for one it called an error, amber for a call CFC denied.
+  tool call and the result answering it are one step. A coloured dot on each
+  step in the rail says how it turned out: green for a result the tool called
+  `ok`, red for one it called an error, amber for a call CFC denied.
 
-  Each step also carries:
+  A step leads with what it was given and what it holds, and the payloads come
+  after:
 
+  - **handles in scope** — every cell live by that point, the ones the step
+    introduced marked.
+  - **arguments** — each one read as what it is. A reference is a cell chip and
+    leads back to the step that produced it; both spellings resolve alike, since
+    `run_pattern` takes a `cfh:a:` token or a whole link and they name one cell.
+    A plain value says it is a value.
   - **cfc** — the decision recorded for that call: allowed or denied, its effect
     class, and the reason codes behind it. A policy event appears beside it,
     which is how a call CFC _allowed_ but whose _observation_ it refused reads
-    as the two separate facts it is.
+    as the two separate facts it is. The flow labels the runtime computed for
+    each input position appear here too.
   - **disclosure** — how many bytes the result let across as a plain value, how
     many positions it sealed behind a reference, and the longest run of numbers
     it carried. A long numeric run is called out, in the rail as well: the
     harness seals a string the schema does not pin to an enum or a const, but it
     never seals a number, so an array of them carries whatever its author chose
     to encode.
-  - **handles in scope** — every handle live by that point, resolved to the
-    address it stands for, with the ones the step introduced marked.
+
+  Then the call's input and output as formatted JSON, untruncated, with long
+  lines scrolling inside their block rather than widening the page.
 
   A `delegate_task` step names the child it started; opening that child in the
   rail reads its own timeline.
-- **Data flow** — the run as a graph: the patterns it ran, the cells they
-  produced and read, and the routing between them. A rectangle is a pattern and
-  a rounded one is a cell; a solid edge is a pattern producing a cell, a dashed
-  one is a pattern reading a cell it was wired to, labelled with the input name.
-  Rank runs left to right, so a pattern sits beside what it produced and a cell
-  read by a later pattern pushes that pattern further right — the horizontal
-  axis is the data's path rather than the clock. Clicking a node opens what is
-  known about it: the handle and address behind a cell, the slug it was given,
-  the CFC decision and disclosure of a pattern, and the confidentiality atoms
-  either carries.
-
-  The graph is of the run **and the `delegate_task` children beneath it**,
-  because that is where the routing lives: a parent commonly names a cell its
-  child produced, and a per-run picture shows that cell arriving from nowhere.
-  Cells are keyed by the address they stand for, so the parent's token and the
-  child's token for one cell are one node. A descendant's nodes are dated to the
-  step that delegated into it — a child's own step order is not comparable with
-  its parent's, so open the child to scrub inside it.
-
-  The summary line counts **read edges**. A run whose patterns read no cell
-  built everything from literals rather than composing work over references,
-  which is the opposite of what the handle model is for; the count says so
-  rather than leaving it to be inferred from the picture.
 - **Patterns** — the pattern-shaped work. Every `run_pattern` attempt in order
   with the source it submitted and, for one the compiler refused, the diagnostic
   — so the compile-error and fix rounds are legible rather than lost. Alongside
