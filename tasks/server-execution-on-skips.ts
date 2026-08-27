@@ -128,6 +128,10 @@ const SUITE_PACKAGE_DIR: Record<ServerExecutionSuite, string> = {
  * stage-C W3 (2026-08-19) after OW35's close for the W2 cascade-echo
  * residual; its sibling `cfc-group-chat-demo-two-browsers` was
  * un-skipped by fan-out stage B (2026-08-17, 3/3 green).
+ * That 2026-08-19 lift did NOT hold: #5744's profile-first join re-skipped
+ * the file the same week on a different member. It is lifted AGAIN, and on
+ * that member's own evidence, as of 2026-08-27 — see the lift comment in
+ * the `patterns` list below.
  */
 
 /**

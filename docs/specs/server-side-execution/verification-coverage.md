@@ -6362,8 +6362,9 @@ supply; OW29/OW32/OW34 closed):
     lines 8 (1/run), `piece-start-commit-failed` 8 (1/run — this row already
     records it as NOT this file's discriminator), `sidecar-run-raced` 8
     (1/run, #6312's designed loud yield), and the recorded background of
-    `foreign-write-refused` / `seal-space-commit-failed` refusals naming
-    OTHER spaces (80 and 40 per run). Evidence on the measuring box at
+    `foreign-write-refused` / `seal-space-commit-failed` refusals (80 and
+    40 per run; this row already records that background as firing just as
+    often in greens). Evidence on the measuring box at
     `/Users/berni/labs-worktrees/b1-lifts-evidence/runs/lunch/` (per-run
     ledger, test and toolshed logs, meta+stats JSON, own `memory/` store,
     plus `store-census.txt`), report at
