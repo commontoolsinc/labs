@@ -1792,6 +1792,52 @@ describe("cell-handle", () => {
       expect(second.get()).toEqual([1, 2]);
     });
 
+    it("preserves an equivalent handle update across a strict response", async () => {
+      const strictResponse = Promise.withResolvers<void>();
+      let stored = [0];
+      const runtime = {
+        [$conn]: () => ({
+          request: (
+            request: {
+              type: RequestType;
+              value?: unknown;
+              values?: unknown[];
+            },
+          ) => {
+            if (request.type === RequestType.CellSet) {
+              stored = request.value as number[];
+              return strictResponse.promise.then(() => ({}));
+            }
+            if (request.type === RequestType.CellPush) {
+              stored = [...stored, ...request.values as number[]];
+            }
+            return Promise.resolve({});
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const first = new CellHandle<number[]>(runtime, ref, [0]);
+      const second = new CellHandle<number[]>(runtime, {
+        ...ref,
+        schema: { type: "array" },
+      }, [0]);
+
+      const replacing = first.setStrict([9]);
+      stored = [7];
+      second[$onCellUpdate]([7]);
+      second.push(2);
+
+      strictResponse.resolve();
+      await replacing;
+      await second.sendStrict([]);
+
+      expect(stored).toEqual([7, 2]);
+      expect(first.get()).toEqual([0]);
+      expect(second.get()).toEqual([7, 2]);
+    });
+
     it("does not append to a later optimistic replacement", async () => {
       const firstWrite = Promise.withResolvers<void>();
       const requests: Array<{

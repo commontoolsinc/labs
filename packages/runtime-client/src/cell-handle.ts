@@ -53,6 +53,8 @@ interface CellOperationQueue {
   tail: Promise<void> | undefined;
   hasValue: boolean;
   value: unknown;
+  // Changes when any equivalent handle receives an authoritative update.
+  authoritativeGeneration: number;
 }
 
 const operationQueues = new WeakMap<
@@ -184,8 +186,12 @@ export class CellHandle<T = unknown> {
     this.#publishValue(snapshot);
     await this.#enqueueOperation(async (queue) => {
       const updateGeneration = this.#updateGeneration;
+      const authoritativeGeneration = queue.authoritativeGeneration;
       await this.#sendWrite(serialized);
-      if (updateGeneration === this.#updateGeneration) {
+      if (
+        updateGeneration === this.#updateGeneration &&
+        authoritativeGeneration === queue.authoritativeGeneration
+      ) {
         queue.value = snapshot;
         queue.hasValue = true;
       }
@@ -204,16 +210,22 @@ export class CellHandle<T = unknown> {
     const writeGeneration = this.#writeGeneration;
     await this.#enqueueOperation(async (queue) => {
       const updateGeneration = this.#updateGeneration;
+      const authoritativeGeneration = queue.authoritativeGeneration;
       await this.#sendStrictWrite(
         snapshot,
         serialized,
         writeGeneration,
+        queue,
+        authoritativeGeneration,
       );
-      // Publication follows handle-local generations, but this shared queue
-      // follows committed operation order. A later queued append must start
-      // from this replacement even when a still-later mutation suppresses the
-      // replacement's direct publication on this handle.
-      if (updateGeneration === this.#updateGeneration) {
+      // Publication follows handle-local and identity-wide generations, but
+      // this shared queue follows committed operation order. A later queued
+      // append must start from this replacement even when a still-later
+      // mutation suppresses its direct publication on this handle.
+      if (
+        updateGeneration === this.#updateGeneration &&
+        authoritativeGeneration === queue.authoritativeGeneration
+      ) {
         queue.value = snapshot;
         queue.hasValue = true;
       }
@@ -231,7 +243,12 @@ export class CellHandle<T = unknown> {
     const key = cellRefToIdentityKey(this.#ref);
     let queue = queues.get(key);
     if (!queue) {
-      queue = { tail: undefined, hasValue: false, value: undefined };
+      queue = {
+        tail: undefined,
+        hasValue: false,
+        value: undefined,
+        authoritativeGeneration: 0,
+      };
       queues.set(key, queue);
     }
     const previous = queue.tail;
@@ -285,6 +302,8 @@ export class CellHandle<T = unknown> {
     value: T,
     serialized: WireCellValue,
     writeGeneration: number,
+    queue: CellOperationQueue,
+    authoritativeGeneration: number,
   ): Promise<boolean> {
     const before = this.#value;
     const updateGeneration = this.#updateGeneration;
@@ -296,6 +315,7 @@ export class CellHandle<T = unknown> {
     }).then(() => {
       const publish = writeGeneration === this.#writeGeneration &&
         updateGeneration === this.#updateGeneration &&
+        authoritativeGeneration === queue.authoritativeGeneration &&
         this.#value === before;
       if (publish) this.#publishValue(value);
       return publish;
@@ -386,6 +406,7 @@ export class CellHandle<T = unknown> {
     );
     const writeGeneration = ++this.#writeGeneration;
     const append = (queue: CellOperationQueue): Promise<void> => {
+      const authoritativeGeneration = queue.authoritativeGeneration;
       const current = (queue.hasValue ? queue.value : fallback) as unknown[];
       if (!Array.isArray(current)) {
         throw new Error("push() can only be used on array cells");
@@ -398,7 +419,10 @@ export class CellHandle<T = unknown> {
         this.#publishValue(value);
       }
       const rollback = (error: unknown) => {
-        if (updateGeneration === this.#updateGeneration) {
+        if (
+          updateGeneration === this.#updateGeneration &&
+          authoritativeGeneration === queue.authoritativeGeneration
+        ) {
           // Keep the restored base explicit in the shared queue. A later
           // append may have captured this append's optimistic publication as
           // its private fallback before the refusal arrived.
@@ -526,22 +550,28 @@ export class CellHandle<T = unknown> {
   async sync(): Promise<Readonly<T> | undefined> {
     const writeGeneration = this.#writeGeneration;
     const updateGeneration = this.#updateGeneration;
-    const value = await this.#enqueueOperation(async (queue) => {
-      const response = await this.#conn.request<RequestType.CellGet>({
-        type: RequestType.CellGet,
-        cell: this.ref(),
-      });
-      const value = CellHandle.deserialize<T>(this, response.value) as T;
-      if (updateGeneration === this.#updateGeneration) {
-        queue.value = value;
-        queue.hasValue = true;
-      }
-      return value;
-    });
+    const { value, authoritative } = await this.#enqueueOperation(
+      async (queue) => {
+        const authoritativeGeneration = queue.authoritativeGeneration;
+        const response = await this.#conn.request<RequestType.CellGet>({
+          type: RequestType.CellGet,
+          cell: this.ref(),
+        });
+        const value = CellHandle.deserialize<T>(this, response.value) as T;
+        const authoritative = updateGeneration === this.#updateGeneration &&
+          authoritativeGeneration === queue.authoritativeGeneration;
+        if (authoritative) {
+          queue.value = value;
+          queue.hasValue = true;
+        }
+        return { value, authoritative };
+      },
+    );
 
     if (
       writeGeneration === this.#writeGeneration &&
-      updateGeneration === this.#updateGeneration
+      updateGeneration === this.#updateGeneration &&
+      authoritative
     ) {
       this.#value = value;
     }
@@ -552,22 +582,28 @@ export class CellHandle<T = unknown> {
   async pull(): Promise<Readonly<T> | undefined> {
     const writeGeneration = this.#writeGeneration;
     const updateGeneration = this.#updateGeneration;
-    const value = await this.#enqueueOperation(async (queue) => {
-      const response = await this.#conn.request<RequestType.CellPull>({
-        type: RequestType.CellPull,
-        cell: this.ref(),
-      });
-      const value = CellHandle.deserialize<T>(this, response.value) as T;
-      if (updateGeneration === this.#updateGeneration) {
-        queue.value = value;
-        queue.hasValue = true;
-      }
-      return value;
-    });
+    const { value, authoritative } = await this.#enqueueOperation(
+      async (queue) => {
+        const authoritativeGeneration = queue.authoritativeGeneration;
+        const response = await this.#conn.request<RequestType.CellPull>({
+          type: RequestType.CellPull,
+          cell: this.ref(),
+        });
+        const value = CellHandle.deserialize<T>(this, response.value) as T;
+        const authoritative = updateGeneration === this.#updateGeneration &&
+          authoritativeGeneration === queue.authoritativeGeneration;
+        if (authoritative) {
+          queue.value = value;
+          queue.hasValue = true;
+        }
+        return { value, authoritative };
+      },
+    );
 
     if (
       writeGeneration === this.#writeGeneration &&
-      updateGeneration === this.#updateGeneration
+      updateGeneration === this.#updateGeneration &&
+      authoritative
     ) {
       this.#value = value;
     }
@@ -735,6 +771,7 @@ export class CellHandle<T = unknown> {
       cellRefToIdentityKey(this.#ref),
     );
     if (queue) {
+      queue.authoritativeGeneration++;
       queue.value = applied;
       queue.hasValue = true;
     }
