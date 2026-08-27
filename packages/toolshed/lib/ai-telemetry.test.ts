@@ -206,8 +206,11 @@ Deno.test("metadataAttributeValue drops values that have no attribute form", () 
   assertEquals(metadataAttributeValue(() => {}), undefined);
 });
 
+//
 // A request may carry non-string metadata, and every value it can carry has to
 // reach the spans, not just the string ones.
+//
+
 Deno.test("runtimeContextFromMetadata carries every value that has an attribute form", () => {
   const { runtimeContext, includeRuntimeContext } = runtimeContextFromMetadata({
     requestId: "req-abc",

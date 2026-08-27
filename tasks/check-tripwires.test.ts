@@ -4,9 +4,12 @@ import { checkTripwire, main, TRIPWIRES } from "./check-tripwires.ts";
 
 const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 
+//
 // The check is only as good as its manifest: a typo'd path would make it pass
 // vacuously while reporting "intact", which is the failure mode that matters
 // most for a guard nobody looks at until the day it fires.
+//
+
 Deno.test("every tripwire's test file exists and carries its sentinel", async () => {
   assert(
     TRIPWIRES.length > 0,
@@ -32,9 +35,12 @@ Deno.test("every tripwire's weakness is currently present", async () => {
   }
 });
 
+//
 // The obligation text IS the deliverable — it is the only thing the person who
 // trips this will read. A tripwire whose instructions have gone stale is a
 // reminder that fires and then wastes the moment it bought.
+//
+
 Deno.test("every obligation names concrete, runnable next steps", () => {
   for (const tripwire of TRIPWIRES) {
     const text = tripwire.obligation.join("\n");

@@ -1,11 +1,13 @@
 import { assertEquals, assertFalse } from "@std/assert";
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 
+//
 // Epic B1: mint helpers for the exchange-rule atom families (spec §15).
 // Every helper is exercised with optionals absent AND present: minted atoms
 // compare by structural equality over canonical JSON, so an absent optional
 // must be truly absent (never an explicit-undefined key), and a supplied one
 // must land verbatim.
+//
 
 Deno.test("cfcAtom mints confidentiality principals and Expires", () => {
   assertEquals(cfcAtom.user("did:key:alice"), {

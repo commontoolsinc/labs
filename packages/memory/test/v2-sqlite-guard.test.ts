@@ -17,6 +17,7 @@ import {
 } from "../v2/sqlite/guard.ts";
 import { open } from "../v2/engine.ts";
 
+//
 // S4: the guard's core-table denylist is hand-maintained, but unqualified
 // pattern-SQL names resolve to the attached cell-db ONLY because `main` (the
 // core store) has no table of that name. If the engine ever adds a `main` table
@@ -24,6 +25,8 @@ import { open } from "../v2/engine.ts";
 // pattern write could silently hit core storage. This asserts the denylist
 // covers every real `main` table, so adding an engine table without updating the
 // guard fails CI.
+//
+
 describe("CORE_TABLE_NAMES vs the engine schema", () => {
   it("covers every table the engine creates in `main`", async () => {
     const path = await Deno.makeTempFile({ suffix: ".sqlite" });

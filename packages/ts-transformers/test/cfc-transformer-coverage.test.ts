@@ -59,6 +59,7 @@ Deno.test("transformer coverage: projection paths lower as canonical pointers", 
   });
 });
 
+//
 // The canonical OpaqueInput helper was removed (the runner rejects ifc.opaque
 // fail-closed), but a non-canonical local alias with EXPLICIT type arguments
 // still resolves through the Cfc carrier — the generic payload passthrough.
@@ -66,6 +67,8 @@ Deno.test("transformer coverage: projection paths lower as canonical pointers", 
 // lowering mechanism, not an advertised capability. Defaulted type arguments
 // are NOT recovered on non-canonical aliases (only the canonical name
 // registry hardcoded defaults), so `OpaqueInput<string>` would emit no ifc.
+//
+
 Deno.test("transformer coverage: non-canonical Cfc payloads lower structurally", async () => {
   const source = `/// <cts-enable />
     import { toSchema } from "commonfabric";

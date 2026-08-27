@@ -116,11 +116,13 @@ Deno.test("memory v2 selector normalization ignores inherited definition names",
   assertEquals(normalized.schema, { $ref: "#/$defs/toString" });
 });
 
+//
 // The registry of reads a provider replays onto a replacement replica keys its
 // entries by the normalized selector's identity. These two tests pin what that
 // key relies on: normalization hands back one shared instance per distinct
 // registration, so identity separates registrations exactly and the registry
 // needs no content hash per `sync()` call to tell them apart.
+//
 
 Deno.test("memory v2 selector normalization collapses schemaless reads", () => {
   const first = normalizeSyncSelector({

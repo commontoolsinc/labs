@@ -421,9 +421,11 @@ Deno.test("assert records a body that returns early", async () => {
   assertEquals(assertCaptureLabels(root), ["a.get()", "b.get()"]);
 });
 
+//
 // The stage sees the AST before type-checking has rejected anything, so it has
 // to survive a callback it cannot read and leave the call alone rather than
 // emit a broken body. These sources are deliberately not well-typed.
+//
 
 Deno.test("assert leaves a callback it was not given inline alone", async () => {
   const root = await transformed(patternSource(`

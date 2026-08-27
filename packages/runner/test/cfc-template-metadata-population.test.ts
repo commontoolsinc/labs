@@ -86,6 +86,7 @@ const templateEntry = (
   observes: "labelMetadata",
 });
 
+//
 // Stage B of docs/specs/cfc-template-population.md (§5/§6; spec §4.6.4.1-.2):
 // the §4.6.4.2 field-precise label-metadata population profile, carried as
 // multi-`*` templates under /cfc/labels/<target-envelope-path>/... — minted at
@@ -94,6 +95,7 @@ const templateEntry = (
 // them at concrete clause/alternative paths through the wildcard machinery,
 // falling back to the computed-in-hand interim rule for pre-Stage-B
 // envelopes).
+//
 
 describe("CFC template metadata population (Stage B): persist-seam mints", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;

@@ -21,8 +21,11 @@ Deno.test("OTEL_ENABLED parses strictly: only 'true'/'1' enable telemetry", () =
   assertEquals(otel(undefined), false);
 });
 
+//
 // The sibling boolean flags shared the same z.coerce.boolean() trap and now use
 // the strict boolFlag() parse. Guard them so they can't silently regress.
+//
+
 Deno.test("DISABLE_LOG_REQ_RES / PLAID_SYNC_ALL_TRANSACTIONS parse strictly", () => {
   const flag = (key: string, v: string | undefined) =>
     (EnvSchema.parse(v === undefined ? {} : { [key]: v }) as Record<

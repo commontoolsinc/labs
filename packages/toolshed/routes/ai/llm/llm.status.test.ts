@@ -183,9 +183,12 @@ Deno.test("a tool the model cannot serve is the caller's mistake", async () => {
   assertStringIncludes(error, "is not supported by model");
 });
 
+//
 // A body sent as JSON is parsed by the route's own validator, which answers
 // its own 400 before the handler runs. A body sent as anything else reaches
 // the handler unparsed.
+//
+
 Deno.test("a body that is not JSON is the caller's mistake", async () => {
   const response = await app.request("/api/ai/llm", {
     method: "POST",

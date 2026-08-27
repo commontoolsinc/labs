@@ -47,10 +47,13 @@ Deno.test("smoke test", async function () {
   );
 });
 
+//
 // A harness run can fail for a reason no assertion in this suite anticipates:
 // the browser refuses to boot, a bundle fails, the process is killed. Each of
 // those says what happened on one of the run's two streams, and an assertion
 // that reported only its own words left the reason nowhere.
+//
+
 Deno.test("a failed assertion carries the whole run", function () {
   const run = runWith();
   const error = assertThrows(
@@ -69,8 +72,11 @@ Deno.test("an assertion that holds says nothing", function () {
   runWith().assert(true, "test successful");
 });
 
+//
 // No real run in this suite is killed by a signal, so this states one. The
 // transcript names the signal rather than only the exit code it comes with.
+//
+
 Deno.test("a run the kernel killed names the signal", function () {
   const transcript = runWith({ code: 137, signal: "SIGKILL" }).transcript();
 

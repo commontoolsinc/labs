@@ -229,10 +229,13 @@ Deno.test("writeDetailValueForTarget: composition preserves large off-spine subt
   }
 });
 
+//
 // A `FabricInstance` holds its state privately, so an overlay path addresses
 // nothing in one. Both arms are covered: the base itself, and an instance
 // nested deeper -- reached only through a descendant's parent path, which the
 // base check does not see.
+//
+
 Deno.test("writeDetailValueForTarget: refuses an overlay onto a `FabricInstance` base", () => {
   const err = FabricError.fromNativeError(new Error("boom"));
   const tx = txWith([

@@ -351,8 +351,10 @@ Deno.test("filepickercov2: paging the picker up to the top keeps the scroll non-
 // Behavioral anchors for the reachable structure-tree edges near 288/377/380.
 //
 
+//
 // These do not force the unreachable defensive returns, but assert the
 // surrounding navigation/card behavior stays correct from a real session.
+//
 
 Deno.test("session: card down then up across a multi-target card stays consistent", () => {
   const doc = parseDocument(SAMPLE);

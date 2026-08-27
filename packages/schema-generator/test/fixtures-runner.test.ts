@@ -244,10 +244,13 @@ function normalizeArrayOrdering(obj: unknown): unknown {
   return obj;
 }
 
+//
 // The golden format exists to hold values plain JSON cannot. Guard that
 // directly: a fixture cannot reach these values on its own yet, and a golden
 // that silently flattens them would agree with buggy output instead of
 // catching it.
+//
+
 Deno.test("golden encoding preserves values JSON cannot represent", () => {
   const schema = {
     type: "object",

@@ -3,10 +3,12 @@ import { expect } from "@std/expect";
 import { createRateLimiter } from "@/lib/rate-limit.ts";
 import { clientKey } from "@/middlewares/rate-limit.ts";
 
+//
 // Toolshed had no rate limiting before self-serve minting, so this is the whole
 // of it. The properties worth pinning are the ones an abuse bound depends on:
 // that a burst is actually capped, that keys do not share a bucket, and that
 // eviction cannot be used as a reset primitive.
+//
 
 describe("token bucket", () => {
   it("allows a burst up to capacity, then refuses", () => {

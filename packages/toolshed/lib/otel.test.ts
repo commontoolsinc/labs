@@ -37,12 +37,15 @@ Deno.test("spans carry both the service attributes and the SDK defaults", () => 
   );
 });
 
+//
 // `OpenInferenceBatchSpanProcessor` subclasses `BatchSpanProcessor`, but
 // @arizeai/openinference-vercel imports @opentelemetry/sdk-trace-base without
 // declaring it as a dependency, and the range it names in its development
 // dependencies stops below the major this workspace resolves. Which copy it
 // subclasses is therefore decided by the workspace import map rather than by
 // anything the package states, and the span export above depends on the answer.
+//
+
 Deno.test("the OpenInference processor extends the tracer SDK in use", () => {
   assert(
     OpenInferenceBatchSpanProcessor.prototype instanceof BatchSpanProcessor,
@@ -72,9 +75,12 @@ Deno.test("spans pass through the OpenInference processor to the exporter", asyn
   }
 });
 
+//
 // The `ai` package collects no spans until a telemetry integration is
 // registered, and it reports nothing when none is: the LLM spans simply stop
 // being produced. Importing this module is what registers ours.
+//
+
 Deno.test("importing the module registers an AI SDK telemetry integration", () => {
   assert(
     (globalThis.AI_SDK_TELEMETRY_INTEGRATIONS?.length ?? 0) > 0,

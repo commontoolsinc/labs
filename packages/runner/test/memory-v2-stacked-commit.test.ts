@@ -4936,6 +4936,7 @@ Deno.test("memory v2 stacked commits: a dependant stranded by a dropped optimist
     await harness.close();
   }
 });
+//
 // CT-1872 Class 1a pins (ported from #4608, expectations rewritten for the
 // ops-replay contract): a pending patch layer renders by REPLAYING ITS OPS
 // over the current base — never by copying values out of its optimistic
@@ -4945,6 +4946,7 @@ Deno.test("memory v2 stacked commits: a dependant stranded by a dropped optimist
 // SKIPPED: transiently honest, converging when a frame delivers server
 // truth. Under strict semantics (CT-1875) such commits become terminal
 // rejections at admission instead.
+//
 
 Deno.test("memory v2 stacked commits: a surviving child whose ops cannot apply to the repaired base renders skipped, not crashed", async () => {
   const harness = await createHarness();

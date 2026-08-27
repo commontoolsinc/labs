@@ -1298,11 +1298,13 @@ Deno.test("watch.add with a changed entityScopeKey on an existing watch id is a 
   }
 });
 
+//
 // Delivery-failure rollback for explicit foreign instances (thread
 // r3731191415): the wire frame carries scope NAMES, so rollback cannot
 // recover the instance from the frame alone — the server must retain the
 // frame's true instance keys. A lost foreign-instance frame must be
 // REDELIVERED once sends succeed again.
+//
 
 Deno.test("a failed delivery of an explicit foreign-instance frame is redelivered (rollback keys the exact instance)", async () => {
   const server = newServer("memory://explicit-read-rollback");
