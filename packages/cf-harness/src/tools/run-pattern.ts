@@ -34,9 +34,15 @@ import {
 import type {
   HarnessPatternIndexClientFactory,
   PatternIndexEventType,
-  PatternIndexProgram,
   PatternIndexPublishRequest,
 } from "../pattern-index/client.ts";
+import {
+  composedPatternIds,
+  materializeComposedPatterns,
+  PatternCompositionError,
+  patternIndexDependencies,
+  runtimeProgramFromIndex,
+} from "../pattern-index/composition.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 
 export interface RunPatternToolInput {
@@ -264,31 +270,6 @@ const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 /**
- * The `RuntimeProgram` a published program compiles as. Every field the index
- * carries is copied across: an entry point that names the wrong export, a
- * missing source root, or a dropped data file each compiles or runs into a
- * failure whose cause is nowhere near the omission.
- */
-export const runtimeProgramFromIndex = (
-  program: PatternIndexProgram,
-): RuntimeProgram => ({
-  main: program.main,
-  files: program.files.map((file) => ({
-    name: file.name,
-    contents: file.contents,
-  })),
-  ...(program.mainExport !== undefined
-    ? { mainExport: program.mainExport }
-    : {}),
-  ...(program.sourceRoots !== undefined
-    ? { sourceRoots: [...program.sourceRoots] }
-    : {}),
-  ...(program.dataFiles !== undefined
-    ? { dataFiles: [...program.dataFiles] }
-    : {}),
-});
-
-/**
  * Reports what a run did with an indexed pattern, without letting the report
  * bear on the run. The index ranks on these events, so a failure to record
  * one costs ranking accuracy and nothing else — it is logged and dropped
@@ -341,23 +322,6 @@ const publishPatternToIndex = (
     }
   })();
 };
-
-/**
- * The published patterns a program composes, read off the `cf:pattern:<id>`
- * specifiers its files import. The index derives the same set from the
- * program it is given, so this is what the publisher knows rather than the
- * authority on it.
- */
-export const patternIndexDependencies = (
-  files: readonly { contents: string }[],
-): readonly string[] => [
-  ...new Set(
-    files.flatMap((file) =>
-      [...file.contents.matchAll(/\bcf:pattern:([A-Za-z0-9_-]+)/g)]
-        .map((match) => match[1])
-    ),
-  ),
-];
 
 /**
  * The entry path `compileAndSavePattern` wraps bare source under. Written out
@@ -651,6 +615,10 @@ export const runPatternTool: HarnessToolDefinition<
     // straight into the compiler. Nothing read from the index is carried into
     // any output this tool returns.
     let program: RuntimeProgram;
+    // What the index recorded the fetched pattern composes, when the run named
+    // one. A published pattern's own imports are materialized on the same
+    // terms as an authored source's.
+    let recordedDependencies: readonly string[] = [];
     if (sourceText !== undefined) {
       program = {
         main: RUN_PATTERN_SOURCE_MAIN,
@@ -679,12 +647,43 @@ export const runPatternTool: HarnessToolDefinition<
         );
       }
       program = runtimeProgramFromIndex(indexed.program);
+      recordedDependencies = indexed.dependencies;
     } else {
       // Unreachable: a call naming neither was refused above, and one naming
       // a `patternId` without an index with it. The pair's exclusivity is a
       // fact about those checks rather than about the input type, so the
       // branch is written out instead of asserted away.
       return errorOutput("error", RUN_PATTERN_NO_PROGRAM_MESSAGE);
+    }
+    // A `cf:pattern:` import resolves from the space's own source cache, and
+    // for a pattern this space has never run there is nothing there to
+    // resolve. Each one is fetched from the index and compiled into the space
+    // first, host-side, so the compile below finds it — and so no part of what
+    // was fetched reaches this tool's output, on the success path or on any of
+    // the failure paths.
+    try {
+      await materializeComposedPatterns({
+        runtime: pieces.runtime,
+        space,
+        patternIds: composedPatternIds(program, recordedDependencies),
+        getClient: getPatternIndexClient,
+      });
+    } catch (error) {
+      if (error instanceof PatternCompositionError) {
+        return {
+          ...errorOutput("error", error.message),
+          ...(error.rawCauseMessage !== undefined
+            ? { rawCauseMessage: error.rawCauseMessage }
+            : {}),
+        };
+      }
+      return {
+        ...errorOutput(
+          "error",
+          "the published patterns this source composes could not be made available; the failure text is retained in the run artifact and withheld here, since it can quote source you did not author",
+        ),
+        rawCauseMessage: errorMessage(error),
+      };
     }
     let pattern;
     try {

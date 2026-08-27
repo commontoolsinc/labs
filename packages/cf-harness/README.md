@@ -126,6 +126,11 @@ What works today:
     reports each one's declared shapes and import specifier, never its source)
   - `record_feedback` (under the same pattern-index gate; votes a pattern up or
     down so the index learns which ones were worth offering)
+- composing published patterns: source the model authors may
+  `import Sub from "cf:pattern:<patternId>"`, and `run_pattern` fetches and
+  compiles each named pattern into the space before compiling the source that
+  imports it, so composition costs the import line and nothing else — and no
+  part of an imported pattern's source reaches the conversation
 - publishing back to that index: a pattern the model authored and ran
   successfully is published under the identity its compile recorded, with the
   `description` and `hashtags` the `run_pattern` call named, unless the run was

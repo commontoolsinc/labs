@@ -1136,6 +1136,7 @@ const buildSubagentSystemPrompt = (
           ? [
             "Search the pattern index with search_patterns before you author anything. A published pattern that already does the job is the better answer: run it by passing its patternId to run_pattern instead of sourceText.",
             'When you do author, prefer composing what the index already holds over rewriting it. Each search result carries the import specifier that composes it — `import X from "cf:pattern:<patternId>"` — along with the argument and result shapes to wire against. You never see an indexed pattern\'s source, and you do not need it.',
+            "An indexed pattern imported that way is a component of the source you are writing: run_pattern fetches and compiles each one you name before it compiles your source, so composing one costs you the import line and nothing else. Reach for that before reimplementing what a search already found.",
             "A pattern you author and run successfully is published back to the index, so pass run_pattern a `description` saying in one line what it does and `hashtags` naming the words someone looking for that capability would search. Write them for the next person, not for this task: a pattern published without a description is not published at all.",
           ]
           : []),

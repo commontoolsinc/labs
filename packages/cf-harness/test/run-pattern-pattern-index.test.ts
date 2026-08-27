@@ -4,6 +4,7 @@ import { normalize } from "@std/path/posix";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
 import {
+  compileAndSavePattern,
   computeEntryIdentity,
   ensureCompilerStack,
   Runtime,
@@ -13,10 +14,13 @@ import { CfHarnessEngine } from "../src/engine.ts";
 import type { HarnessFetch } from "../src/contracts/http-fetch.ts";
 import { PatternIndexClient } from "../src/pattern-index/client.ts";
 import {
+  MAX_COMPOSED_PATTERNS,
   patternIndexDependencies,
-  type RunPatternToolErrorOutput,
-  type RunPatternToolSuccessOutput,
   runtimeProgramFromIndex,
+} from "../src/pattern-index/composition.ts";
+import type {
+  RunPatternToolErrorOutput,
+  RunPatternToolSuccessOutput,
 } from "../src/tools/run-pattern.ts";
 import type {
   SandboxCommandRequest,
@@ -44,6 +48,58 @@ const DOUBLING_PATTERN_SOURCE = [
  * author.
  */
 const SOURCE_MARKER = "unreadableSourceMarker";
+
+/**
+ * Text carried only by the source of a published pattern a composed run
+ * imports. Finding it anywhere in a tool output is source having escaped the
+ * host side.
+ */
+const DEPENDENCY_SOURCE_MARKER = "unreadableDependencySourceMarker";
+
+/**
+ * The innermost published pattern the composition tests draw in. It exports a
+ * value alongside its pattern, so an importer can be shown to have bound both.
+ */
+const DOUBLER_SOURCE = [
+  "import { computed, pattern } from 'commonfabric';",
+  `// ${DEPENDENCY_SOURCE_MARKER}`,
+  "export const factor = 2;",
+  "interface Input { n: number; }",
+  "interface Output { doubled: number; }",
+  "export default pattern<Input, Output>(({ n }) => ({",
+  "  doubled: computed(() => n * factor),",
+  "}));",
+  "",
+].join("\n");
+
+/** Composes the doubler, by pattern and by exported value. */
+const quadruplerSource = (doublerId: string): string =>
+  [
+    "import { computed, pattern } from 'commonfabric';",
+    `import doubler, { factor } from "cf:pattern:${doublerId}";`,
+    "interface Input { n: number; }",
+    "interface Output { half: { doubled: number }; quadrupled: number; }",
+    "export default pattern<Input, Output>(({ n }) => ({",
+    "  half: doubler({ n }),",
+    "  quadrupled: computed(() => n * factor * factor),",
+    "}));",
+    "",
+  ].join("\n");
+
+/** Composes the quadrupler, which composes the doubler in turn. */
+const octuplerSource = (quadruplerId: string): string =>
+  [
+    "import { computed, pattern } from 'commonfabric';",
+    `import quadrupler from "cf:pattern:${quadruplerId}";`,
+    "interface Input { n: number; }",
+    "interface Inner { half: { doubled: number }; quadrupled: number; }",
+    "interface Output { inner: Inner; octupled: number; }",
+    "export default pattern<Input, Output>(({ n }) => ({",
+    "  inner: quadrupler({ n }),",
+    "  octupled: computed(() => n * 8),",
+    "}));",
+    "",
+  ].join("\n");
 
 const DOUBLED_RESULT_SCHEMA = {
   type: "object",
@@ -205,8 +261,12 @@ describe("run-pattern over the pattern index", () => {
   let runtime: Runtime;
   let pieces: PiecesController;
 
+  /** Runtimes a single test built for itself, disposed alongside the shared one. */
+  let extraRuntimes: Runtime[];
+
   beforeEach(async () => {
     storageManager = StorageManager.emulate({ as: signer });
+    extraRuntimes = [];
     runtime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
@@ -222,9 +282,76 @@ describe("run-pattern over the pattern index", () => {
   });
 
   afterEach(async () => {
+    for (const extra of extraRuntimes ?? []) {
+      await extra.dispose();
+    }
     await runtime?.dispose();
     await storageManager?.close();
   });
+
+  /**
+   * A session in a space of its own whose runtime enforces CFC as `mode`. The
+   * content-addressed source cache a composed import resolves from is only
+   * written under an enforcing mode, so the mode is what decides whether a
+   * `cf:pattern:` import can resolve at all.
+   */
+  const sessionWithCfcMode = async (
+    mode: "disabled" | "enforce-explicit",
+  ): Promise<PiecesController> => {
+    const own = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+      cfcEnforcementMode: mode,
+    });
+    extraRuntimes.push(own);
+    const controller = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `run-pattern-index-${mode}-${crypto.randomUUID()}`,
+      }),
+      own,
+    );
+    await controller.synced();
+    return controller;
+  };
+
+  /**
+   * The identity a composed source compiles to. The light identity path
+   * refuses a source carrying a fabric import — folding each imported
+   * pattern's identity into the entry's is what compiling does — so the id is
+   * taken from a real compile, in a space of its own so the space under test
+   * is left holding nothing.
+   */
+  const composedIdentityOf = async (
+    source: string,
+    imported: readonly string[],
+  ): Promise<string> => {
+    const scratch = await sessionWithCfcMode("enforce-explicit");
+    const space = scratch.getSpace();
+    const programOf = (contents: string) => ({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents }],
+    });
+    for (const dependency of imported) {
+      await compileAndSavePattern(
+        scratch.runtime,
+        programOf(dependency),
+        { space },
+      );
+    }
+    await scratch.runtime.patternManager.flushCompileCacheWrites();
+    const compiled = await compileAndSavePattern(
+      scratch.runtime,
+      programOf(source),
+      { space },
+    );
+    const identity = scratch.runtime.patternManager
+      .getArtifactEntryRef(compiled)?.identity;
+    if (identity === undefined) {
+      throw new Error("composed source compiled without a durable identity");
+    }
+    return identity;
+  };
 
   /**
    * The session's pieces controller with `runPersistent` replaced by a throw
@@ -249,6 +376,7 @@ describe("run-pattern over the pattern index", () => {
       publish?: false;
       taskText?: string;
       startFailure?: string;
+      pieces?: PiecesController;
     } = {},
   ): CfHarnessEngine =>
     new CfHarnessEngine({
@@ -258,7 +386,7 @@ describe("run-pattern over the pattern index", () => {
       fabricSessionFactory: () =>
         Promise.resolve({
           pieces: options.startFailure === undefined
-            ? pieces
+            ? options.pieces ?? pieces
             : piecesFailingToStart(options.startFailure),
         }),
       ...(options.taskText === undefined ? {} : { taskText: options.taskText }),
@@ -678,6 +806,275 @@ describe("run-pattern over the pattern index", () => {
       await index.settled("recordEvent", 2);
       expect(index.calls.filter((call) => call.fn === "publishPattern"))
         .toEqual([]);
+    });
+  });
+
+  describe("composing published patterns", () => {
+    /**
+     * An index record for `source`, stored under the identity that source
+     * compiles to — which is what a `cf:pattern:` import addresses, so a
+     * record filed under anything else is one no importer can resolve.
+     */
+    const indexRecord = (
+      patternId: string,
+      source: string,
+      dependencies: readonly string[] = [],
+    ) => ({
+      patternId,
+      ownerDid: "did:key:zOwner",
+      createdAt: "2026-08-01T00:00:00.000Z",
+      description: "A published pattern",
+      hashtags: ["math"],
+      dependencies,
+      program: {
+        main: "/main.tsx",
+        files: [{ name: "/main.tsx", contents: source }],
+      },
+    });
+
+    const HALF_SCHEMA = {
+      type: "object",
+      properties: { doubled: { type: "number" } },
+      required: ["doubled"],
+    } as const;
+
+    const QUADRUPLED_RESULT_SCHEMA = {
+      type: "object",
+      properties: { half: HALF_SCHEMA, quadrupled: { type: "number" } },
+      required: ["half", "quadrupled"],
+    } as const;
+
+    it("materializes an imported pattern and runs the source that composes it", async () => {
+      const doublerId = await entryIdentityOf(DOUBLER_SOURCE);
+      const index = stubIndex({
+        [doublerId]: indexRecord(doublerId, DOUBLER_SOURCE),
+      });
+      const result = await createEngine(index).invokeBuiltinTool(
+        "run_pattern",
+        {
+          sourceText: quadruplerSource(doublerId),
+          inputs: { n: 3 },
+          resultSchema: QUADRUPLED_RESULT_SCHEMA,
+        },
+      );
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(output.value).toEqual({ half: { doubled: 6 }, quadrupled: 12 });
+    });
+
+    it("keeps an imported pattern's source out of everything the run answers with", async () => {
+      const doublerId = await entryIdentityOf(DOUBLER_SOURCE);
+      const index = stubIndex({
+        [doublerId]: indexRecord(doublerId, DOUBLER_SOURCE),
+      });
+      const result = await createEngine(index).invokeBuiltinTool(
+        "run_pattern",
+        {
+          sourceText: quadruplerSource(doublerId),
+          inputs: { n: 3 },
+          resultSchema: QUADRUPLED_RESULT_SCHEMA,
+        },
+      );
+      expect(JSON.stringify(result.output)).not.toContain(
+        DEPENDENCY_SOURCE_MARKER,
+      );
+    });
+
+    it("materializes an imported pattern's own imports before it", async () => {
+      const doublerId = await entryIdentityOf(DOUBLER_SOURCE);
+      const quadrupler = quadruplerSource(doublerId);
+      const quadruplerId = await composedIdentityOf(quadrupler, [
+        DOUBLER_SOURCE,
+      ]);
+      const index = stubIndex({
+        [doublerId]: indexRecord(doublerId, DOUBLER_SOURCE),
+        [quadruplerId]: indexRecord(quadruplerId, quadrupler, [doublerId]),
+      });
+      const result = await createEngine(index).invokeBuiltinTool(
+        "run_pattern",
+        {
+          sourceText: octuplerSource(quadruplerId),
+          inputs: { n: 3 },
+          resultSchema: {
+            type: "object",
+            properties: {
+              inner: QUADRUPLED_RESULT_SCHEMA,
+              octupled: { type: "number" },
+            },
+            required: ["inner", "octupled"],
+          },
+        },
+      );
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(output.value).toEqual({
+        inner: { half: { doubled: 6 }, quadrupled: 12 },
+        octupled: 24,
+      });
+      // Depth first, and each fetched once: the importer is read before the
+      // pattern it imports, which is the only order that can discover it.
+      expect(
+        index.calls.filter((call) => call.fn === "getPattern")
+          .map((call) => call.body.patternId),
+      ).toEqual([quadruplerId, doublerId]);
+    });
+
+    it("materializes the dependencies recorded for a pattern it runs by id", async () => {
+      const doublerId = await entryIdentityOf(DOUBLER_SOURCE);
+      const quadrupler = quadruplerSource(doublerId);
+      const quadruplerId = await composedIdentityOf(quadrupler, [
+        DOUBLER_SOURCE,
+      ]);
+      const index = stubIndex({
+        [doublerId]: indexRecord(doublerId, DOUBLER_SOURCE),
+        [quadruplerId]: indexRecord(quadruplerId, quadrupler, [doublerId]),
+      });
+      const result = await createEngine(index).invokeBuiltinTool(
+        "run_pattern",
+        {
+          patternId: quadruplerId,
+          inputs: { n: 3 },
+          resultSchema: QUADRUPLED_RESULT_SCHEMA,
+        },
+      );
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(output.value).toEqual({ half: { doubled: 6 }, quadrupled: 12 });
+      expect(JSON.stringify(result.output)).not.toContain(
+        DEPENDENCY_SOURCE_MARKER,
+      );
+    });
+
+    it("names the imported pattern the index does not hold", async () => {
+      const index = stubIndex({});
+      const result = await createEngine(index).invokeBuiltinTool(
+        "run_pattern",
+        { sourceText: quadruplerSource("absentPatternIdentity"), inputs: {} },
+      );
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("absentPatternIdentity");
+      expect(output.message).toContain("404");
+      expect(JSON.stringify(result.output)).not.toContain(
+        "export default pattern",
+      );
+    });
+
+    it("refuses a composed source when the run has no pattern index", async () => {
+      const result = await createEngine().invokeBuiltinTool("run_pattern", {
+        sourceText: quadruplerSource("absentPatternIdentity"),
+        inputs: {},
+      });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("absentPatternIdentity");
+      expect(output.message).toContain("--pattern-index-url");
+    });
+
+    it("refuses a composed source when the runtime has CFC enforcement disabled", async () => {
+      const doublerId = await entryIdentityOf(DOUBLER_SOURCE);
+      const index = stubIndex({
+        [doublerId]: indexRecord(doublerId, DOUBLER_SOURCE),
+      });
+      const result = await createEngine(index, {
+        pieces: await sessionWithCfcMode("disabled"),
+      }).invokeBuiltinTool("run_pattern", {
+        sourceText: quadruplerSource(doublerId),
+        inputs: { n: 3 },
+      });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("CFC-enabled runtime");
+      // Nothing was fetched: the run cannot resolve a composed import however
+      // the fetch turns out, so it does not make one.
+      expect(index.calls).toEqual([]);
+    });
+
+    it("refuses published patterns whose recorded dependencies form a cycle", async () => {
+      const doublerId = await entryIdentityOf(DOUBLER_SOURCE);
+      const triplerSource = DOUBLER_SOURCE.replace("factor = 2", "factor = 3");
+      const triplerId = await entryIdentityOf(triplerSource);
+      const index = stubIndex({
+        [doublerId]: indexRecord(doublerId, DOUBLER_SOURCE, [triplerId]),
+        [triplerId]: indexRecord(triplerId, triplerSource, [doublerId]),
+      });
+      const result = await createEngine(index).invokeBuiltinTool(
+        "run_pattern",
+        { sourceText: quadruplerSource(doublerId), inputs: { n: 3 } },
+      );
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("cycle");
+      expect(output.message).toContain(doublerId);
+      expect(output.message).toContain(triplerId);
+    });
+
+    it("refuses a composition drawing in more published patterns than the cap", async () => {
+      const chain = Array.from(
+        { length: MAX_COMPOSED_PATTERNS + 4 },
+        (_, position) => `chainedPatternIdentity${position}`,
+      );
+      const index = stubIndex(Object.fromEntries(
+        chain.map((patternId, position) => [
+          patternId,
+          indexRecord(
+            patternId,
+            DOUBLER_SOURCE,
+            chain.slice(position + 1, position + 2),
+          ),
+        ]),
+      ));
+      const result = await createEngine(index).invokeBuiltinTool(
+        "run_pattern",
+        { sourceText: quadruplerSource(chain[0]), inputs: {} },
+      );
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain(String(MAX_COMPOSED_PATTERNS));
+      // The cap counts what the composition began drawing in, not what it
+      // finished: a chain would otherwise descend to any depth before the
+      // first of them compiled and the count moved off zero.
+      expect(
+        index.calls.filter((call) => call.fn === "getPattern"),
+      ).toHaveLength(MAX_COMPOSED_PATTERNS);
+    });
+
+    it("publishes a composed pattern under the identity its compile recorded", async () => {
+      const doublerId = await entryIdentityOf(DOUBLER_SOURCE);
+      const index = stubIndex({
+        [doublerId]: indexRecord(doublerId, DOUBLER_SOURCE),
+      }, { publish: { created: true } });
+      const result = await createEngine(index).invokeBuiltinTool(
+        "run_pattern",
+        {
+          sourceText: quadruplerSource(doublerId),
+          inputs: { n: 3 },
+          description: "Quadruples a number",
+          hashtags: ["math"],
+        },
+      );
+      expect((result.output as RunPatternToolSuccessOutput).status).toBe("ok");
+
+      await index.settled("publishPattern", 1);
+      const publish = index.calls.find((call) => call.fn === "publishPattern");
+      expect(publish?.body.dependencies).toEqual([doublerId]);
+      // The identity the compile recorded, which folds each imported
+      // pattern's identity into the entry's — so it is neither the imported
+      // pattern's id nor anything the source alone determines.
+      expect(publish?.body.patternId).not.toBe(doublerId);
+      expect(publish?.body.patternId).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    });
+
+    it("has no light identity to publish a composed source under", async () => {
+      const doublerId = await entryIdentityOf(DOUBLER_SOURCE);
+      await ensureCompilerStack();
+      // Why the publication reads the compiled artifact's entry ref rather
+      // than recomputing an identity over the source it sent.
+      expect(() =>
+        computeEntryIdentity("/main.tsx", [
+          { name: "/main.tsx", contents: quadruplerSource(doublerId) },
+        ])
+      ).toThrow();
     });
   });
 });

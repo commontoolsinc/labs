@@ -96,6 +96,46 @@ const DOUBLED_RESULT_SCHEMA = {
   required: ["doubled"],
 } as const;
 
+/**
+ * A source composing the published doubler by its id, the way a model does it:
+ * the specifier `search_patterns` reports, and nothing else. `marker` makes the
+ * bytes unique to one run, so the identity it publishes under is new.
+ */
+const quadruplingPatternSource = (marker: string): string =>
+  [
+    "import { computed, pattern } from 'commonfabric';",
+    `import doubler from "cf:pattern:${LIVE_PATTERN_ID}";`,
+    `// ${marker}`,
+    "",
+    "interface Input {",
+    "  n: number;",
+    "}",
+    "",
+    "interface Output {",
+    "  half: { doubled: number };",
+    "  quadrupled: number;",
+    "}",
+    "",
+    "export default pattern<Input, Output>(({ n }) => ({",
+    "  half: doubler({ n }),",
+    "  quadrupled: computed(() => n * 4),",
+    "}));",
+    "",
+  ].join("\n");
+
+const QUADRUPLED_RESULT_SCHEMA = {
+  type: "object",
+  properties: {
+    half: {
+      type: "object",
+      properties: { doubled: { type: "number" } },
+      required: ["doubled"],
+    },
+    quadrupled: { type: "number" },
+  },
+  required: ["half", "quadrupled"],
+} as const;
+
 class FakeSandboxRuntime implements SandboxRuntime {
   describe(): SandboxRuntimeDescription {
     return {
@@ -352,6 +392,41 @@ describe("pattern index, live", () => {
       expect(published.description).toBe(`Doubles a number (${marker})`);
       expect(published.hashtags).toContain(LIVE_TAG);
       expect(published.program?.files[0].contents).toBe(source);
+    },
+  });
+
+  it({
+    name: "composes the published pattern into a source it compiles and runs",
+    ignore: !LIVE,
+    async fn() {
+      const marker = crypto.randomUUID().replaceAll("-", "");
+      const result = await createEngine().invokeBuiltinTool("run_pattern", {
+        sourceText: quadruplingPatternSource(marker),
+        inputs: { n: 3 },
+        resultSchema: QUADRUPLED_RESULT_SCHEMA,
+        description: `Quadruples a number (${marker})`,
+        hashtags: [LIVE_TAG],
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(output.value).toEqual({ half: { doubled: 6 }, quadrupled: 12 });
+
+      // The imported pattern was fetched, compiled into the space, and run,
+      // and none of it came back out.
+      const rendered = JSON.stringify(result.output);
+      expect(rendered).not.toContain("computed(() => n * 2)");
+      expect(rendered).not.toContain("interface Input");
+
+      await watcher.settled("publishPattern", 1);
+      const search = await client.searchPatterns({
+        tags: [LIVE_TAG],
+        text: marker,
+      });
+      const hit = search.results.find((entry) =>
+        entry.description.includes(marker)
+      );
+      expect(hit?.patternId).not.toBe(LIVE_PATTERN_ID);
+      expect(hit?.dependencies).toContain(LIVE_PATTERN_ID);
     },
   });
 });

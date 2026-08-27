@@ -201,6 +201,26 @@ The current package provides:
   are absent from the tool surface, for a `pattern-author`-profile subagent as
   much as for the parent — a child searches through the one client the parent
   built — and `run_pattern` refuses a `patternId`;
+- composition over that index: source the model authors may import a published
+  pattern by the specifier a search reported,
+  `import Sub from "cf:pattern:<patternId>"`, and `run_pattern` makes it
+  compile. Before it compiles the source it was given, it reads the imported ids
+  off it, fetches each one's program from the index host-side, and compiles it
+  into the session's space, so the closure a `cf:pattern:` import resolves from
+  is durable by the time the importer asks for it. Materialization recurses
+  through what each fetched pattern imports and through the dependencies the
+  index recorded for it, deepest first, and a pattern the space already holds is
+  left alone. The same happens for a `patternId` the run names directly, so an
+  indexed pattern that composes others runs. A composition is refused, with
+  nothing of any fetched source in the message, if the run has no index, if the
+  runtime has CFC enforcement disabled (an imported pattern resolves from the
+  content-addressed source cache, which only an enforcing runtime writes and
+  trusts), if the index holds no program for an imported id, if the recorded
+  dependencies form a cycle, or if the graph draws in more than sixteen
+  patterns. A composed pattern publishes like any other, carrying the ids it
+  imports as its dependencies and stored under the identity its compile recorded
+  — which is the identity the imported patterns are folded into, and not one the
+  source alone determines;
 - a `pattern-author` child profile that authors and runs Common Fabric pattern
   source: `run_pattern` under the same fabric-session gate, plus `read_file`,
   `bash`, and `read_skill_resource`, and no workspace writes, so its deliverable
