@@ -534,6 +534,9 @@ describe("cf-iframe cell bridge", () => {
     expect(materialized).toBe(true);
     expect(demandedSource).toBeUndefined();
     expect(subscriptions.map(({ path }) => path)).toContainEqual(["database"]);
+    expect(
+      subscriptions.find(({ path }) => path[0] === "database")?.schema,
+    ).toEqual({ asCell: ["sqlite"] });
     retargeted = true;
     await expect(
       bridge.resources.database.methods!.query({ sql: "SELECT 2" }),

@@ -104,7 +104,8 @@ async function demandSqliteSource<T>(
   authority: CellHandle<unknown>,
   operation: () => Promise<T>,
 ): Promise<T> {
-  const cancel = source.subscribe(() => {});
+  const demand = source.asSchema({ asCell: ["sqlite"] });
+  const cancel = demand.subscribe(() => {});
   try {
     await source.pull();
     const latest = await source.resolveAsCell();
