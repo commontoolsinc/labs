@@ -39,22 +39,20 @@ type StoredEntry = {
   observes?: string;
 };
 
-// Stage A of docs/specs/cfc-template-population.md: runtime-minted `*`-path
-// per-class `structure` entries (the membership/slot templates) close the two
-// SC-4/SC-8 residual under-taints:
-//   §1.1 a per-child existence probe ("is /items/3 present?" — a nonRecursive
-//        shape read AT the child) never consumed the membership J, because
-//        the runner's membership stamp is container-anchored and structure
-//        entries applied only at exactly their own path;
-//   §1.2 a slot-pointer observation (followRef probe at a computed slot)
-//        consumed only the per-slot link entry (the target's transport
-//        label), never the assignment J that decided WHICH element sits
-//        there.
-// The fix mints three `*`-child entries beside the container-anchored
-// enumerate stamp — {path:[...container,"*"], origin:"structure", observes}
-// for observes ∈ {shape, value, followRef} — all carrying the same per-tx J,
-// under the same replace-from-criteria discipline.
 describe("CFC template population (Stage A): the two under-taints", () => {
+  // Stage A of docs/specs/cfc-template-population.md: runtime-minted `*`-path
+  // per-class `structure` entries (the membership/slot templates) close the two
+  // SC-4/SC-8 residual under-taints: §1.1 a per-child existence probe ("is
+  // /items/3 present?" — a nonRecursive shape read AT the child) never consumed
+  // the membership J, because the runner's membership stamp is
+  // container-anchored and structure entries applied only at exactly their own
+  // path; §1.2 a slot-pointer observation (followRef probe at a computed slot)
+  // consumed only the per-slot link entry (the target's transport label), never
+  // the assignment J that decided WHICH element sits there. The fix mints three
+  // `*`-child entries beside the container-anchored enumerate stamp —
+  // {path:[...container,"*"], origin:"structure", observes} for observes ∈
+  // {shape, value, followRef} — all carrying the same per-tx J, under the same
+  // replace-from-criteria discipline.
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
 
@@ -530,19 +528,19 @@ describe("CFC template population (Stage A): the two under-taints", () => {
   });
 });
 
-// The SC-8 remainder (template-population §6, closed here): the generic
-// pure-link value-write route mints the same `*`-child class templates the
-// declared coordinator route does, so HAND-BUILT pure-link containers — no
-// coordinator, no `recordCfcStructureContainer` — carry consumable
-// membership/assignment taint. What makes the route safe to enable is the
-// machinery-read boundary: the op-instantiation/wiring machinery's reads of
-// plumbing containers (slot scalars, `length`, alias shells) carry the
-// `machineryRead` marker and skip template consumption in the flow join, so
-// the runtime's own scaffolding traffic no longer smears one reconcile's J
-// into the next op's action chain (the measured phase-B pointwise re-smear
-// that kept the route off in Stage A). The end-to-end smear pin is the
-// cfc-flow-pointwise map test, which runs with the generic route on.
 describe("CFC template population (SC-8 remainder): generic pure-link containers", () => {
+  // The SC-8 remainder (template-population §6, closed here): the generic
+  // pure-link value-write route mints the same `*`-child class templates the
+  // declared coordinator route does, so HAND-BUILT pure-link containers — no
+  // coordinator, no `recordCfcStructureContainer` — carry consumable
+  // membership/assignment taint. What makes the route safe to enable is the
+  // machinery-read boundary: the op-instantiation/wiring machinery's reads of
+  // plumbing containers (slot scalars, `length`, alias shells) carry the
+  // `machineryRead` marker and skip template consumption in the flow join, so
+  // the runtime's own scaffolding traffic no longer smears one reconcile's J
+  // into the next op's action chain (the measured phase-B pointwise re-smear
+  // that kept the route off in Stage A). The end-to-end smear pin is the
+  // cfc-flow-pointwise map test, which runs with the generic route on.
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
 
@@ -757,10 +755,10 @@ describe("CFC template population (SC-8 remainder): generic pure-link containers
   });
 });
 
-// Resolution semantics over hand-seeded template entries with DISTINCT
-// per-class atoms — the runtime mints identical labels per class, so the
-// class split is only observable with seeded metadata.
 describe("CFC template population (Stage A): class-split resolution", () => {
+  // Resolution semantics over hand-seeded template entries with DISTINCT
+  // per-class atoms — the runtime mints identical labels per class, so the
+  // class split is only observable with seeded metadata.
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
 
@@ -1028,11 +1026,11 @@ describe("CFC template population (Stage A): class-split resolution", () => {
   });
 });
 
-// The §4 schema-walk extension: record-only `additionalProperties` descends
-// as a `*` segment; mixed properties+additionalProperties schemas mint NO
-// `*` entry (pinned — the restriction is load-bearing, `*` matches any
-// segment and would over-taint the named fields).
 describe("CFC template population (Stage A): record-only additionalProperties walk", () => {
+  // The §4 schema-walk extension: record-only `additionalProperties` descends
+  // as a `*` segment; mixed properties+additionalProperties schemas mint NO `*`
+  // entry (pinned — the restriction is load-bearing, `*` matches any segment
+  // and would over-taint the named fields).
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
 
@@ -1157,11 +1155,11 @@ describe("CFC template population (Stage A): record-only additionalProperties wa
   });
 });
 
-// Inv-12 Stage 1 rides along (design §3.3): template entries opt into the
-// cross-space representation transform at mint exactly like the container
-// stamps they accompany — a membership J fed by a foreign labeled read
-// persists in commitment form under `enforce`.
 describe("CFC template population (Stage A): cross-space label protection", () => {
+  // Inv-12 Stage 1 rides along (design §3.3): template entries opt into the
+  // cross-space representation transform at mint exactly like the container
+  // stamps they accompany — a membership J fed by a foreign labeled read
+  // persists in commitment form under `enforce`.
   const userAtom = { type: CFC_ATOM_TYPE.User, subject: "did:key:alice" };
 
   it("templates with cross-space J persist commitment forms under enforce", async () => {
@@ -1252,9 +1250,9 @@ describe("CFC template population (Stage A): cross-space label protection", () =
   });
 });
 
-// Canonicalization and coalescing over multi-`*` paths (design §3.3 "no
-// changes required" — verified, not assumed).
 describe("CFC template population (Stage A): canonical form with `*` paths", () => {
+  // Canonicalization and coalescing over multi-`*` paths (design §3.3 "no
+  // changes required" — verified, not assumed).
   const entry = (
     path: string[],
     atom: string,

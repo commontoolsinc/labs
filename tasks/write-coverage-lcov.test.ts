@@ -27,8 +27,11 @@ Deno.test("normalizeLcovInstancePaths leaves a plain path and non-SF lines uncha
   assertEquals(normalizeLcovInstancePaths(input), input);
 });
 
+//
 // Two cache-busting imports of one file arrive as two records; collapsing the
 // suffix is what lets a downstream consumer accumulate them as one file.
+//
+
 Deno.test("normalizeLcovInstancePaths maps two instances of one file to the same path", () => {
   const out = normalizeLcovInstancePaths(
     [
@@ -99,9 +102,9 @@ Deno.test("write-coverage-lcov writes an empty report when the profile dir is ab
   }
 });
 
-// An empty profile file is dropped, and with nothing left the script writes an
-// empty report rather than invoking `deno coverage` on it.
 Deno.test("write-coverage-lcov drops empty profiles and reports none remain", async () => {
+  // An empty profile file is dropped, and with nothing left the script writes
+  // an empty report rather than invoking `deno coverage` on it.
   const root = await Deno.makeTempDir({ prefix: "write-lcov-" });
   try {
     const profileDir = join(root, "raw");
@@ -177,9 +180,10 @@ async function writeProfileForSource(
   );
 }
 
-// The happy path: a real V8 coverage profile is generated from a standalone
-// test, then converted to an LCOV report with the instance-path suffix stripped.
 Deno.test("write-coverage-lcov converts real profiles to a normalized LCOV report", async () => {
+  // The happy path: a real V8 coverage profile is generated from a standalone
+  // test, then converted to an LCOV report with the instance-path suffix
+  // stripped.
   const root = await Deno.makeTempDir({ prefix: "write-lcov-" });
   try {
     const rawDir = await generateSampleProfiles(root);
@@ -219,10 +223,10 @@ async function writeUncompiledTrackedFile(): Promise<string> {
   return filePath;
 }
 
-// The dangerous case, because `deno coverage` exits zero and writes a report
-// that simply lacks the file: the report looks healthy, and every line of the
-// dropped file reads as uncovered downstream.
 Deno.test("write-coverage-lcov fails when a tracked file is left out", async () => {
+  // The dangerous case, because `deno coverage` exits zero and writes a report
+  // that simply lacks the file: the report looks healthy, and every line of the
+  // dropped file reads as uncovered downstream.
   const root = await Deno.makeTempDir({ prefix: "write-lcov-" });
   const dropped = await writeUncompiledTrackedFile();
   try {
@@ -255,10 +259,10 @@ Deno.test("write-coverage-lcov fails when a tracked file is left out", async () 
   }
 });
 
-// Same loss, but with nothing left to report, so `deno coverage` calls it an
-// error too. The exit status must still say the conversion broke rather than
-// let the empty report stand as a measurement.
 Deno.test("write-coverage-lcov fails when every file left out is a tracked file", async () => {
+  // Same loss, but with nothing left to report, so `deno coverage` calls it an
+  // error too. The exit status must still say the conversion broke rather than
+  // let the empty report stand as a measurement.
   const root = await Deno.makeTempDir({ prefix: "write-lcov-" });
   const dropped = await writeUncompiledTrackedFile();
   try {
@@ -281,11 +285,11 @@ Deno.test("write-coverage-lcov fails when every file left out is a tracked file"
   }
 });
 
-// `deno coverage` leaves test files out of a report by design, so a profile set
-// covering nothing else converts to nothing and it calls that an error. No file
-// was lost and nothing downstream tracks a test file, so the empty report is
-// honest and the conversion succeeds.
 Deno.test("write-coverage-lcov succeeds when the profiles cover only test files", async () => {
+  // `deno coverage` leaves test files out of a report by design, so a profile
+  // set covering nothing else converts to nothing and it calls that an error.
+  // No file was lost and nothing downstream tracks a test file, so the empty
+  // report is honest and the conversion succeeds.
   const root = await Deno.makeTempDir({ prefix: "write-lcov-" });
   try {
     await Deno.writeTextFile(
@@ -320,10 +324,10 @@ Deno.test("write-coverage-lcov succeeds when the profiles cover only test files"
   }
 });
 
-// A source that is genuinely gone is a different message from a source that is
-// present with no transpiled form, and it is not a failure: no report could name
-// the file and nothing downstream tracks it.
 Deno.test("write-coverage-lcov warns without failing when a dropped source is gone", async () => {
+  // A source that is genuinely gone is a different message from a source that
+  // is present with no transpiled form, and it is not a failure: no report
+  // could name the file and nothing downstream tracks it.
   const root = await Deno.makeTempDir({ prefix: "write-lcov-" });
   try {
     const rawDir = await generateSampleProfiles(root);
@@ -342,12 +346,12 @@ Deno.test("write-coverage-lcov warns without failing when a dropped source is go
   }
 });
 
-// A test that copies a fixture project into a temporary directory and runs Deno
-// there gets its modules compiled under a different Deno configuration than the
-// conversion runs under, so `deno coverage` cannot find their transpiled form.
-// Nothing downstream tracks a file outside the repository, so that is a warning
-// and the conversion succeeds.
 Deno.test("write-coverage-lcov succeeds when the file left out is outside the repository", async () => {
+  // A test that copies a fixture project into a temporary directory and runs
+  // Deno there gets its modules compiled under a different Deno configuration
+  // than the conversion runs under, so `deno coverage` cannot find their
+  // transpiled form. Nothing downstream tracks a file outside the repository,
+  // so that is a warning and the conversion succeeds.
   const root = await Deno.makeTempDir({ prefix: "write-lcov-" });
   try {
     const project = join(root, "project");
@@ -386,10 +390,13 @@ Deno.test("write-coverage-lcov succeeds when the file left out is outside the re
   }
 });
 
+//
 // The conversion answers "does the metric charge for this file?" itself, so its
 // own module graph stays small enough for the permissions the CI step grants.
 // That leaves two answers to the same question, and this is what stops them
 // drifting: every path below goes to both, and they must agree.
+//
+
 Deno.test("isTrackedFile gives the same answer as the coverage metric", () => {
   const paths = [
     "packages/a/mod.ts",
@@ -474,12 +481,15 @@ function dirEntry(name: string, isDirectory: boolean): Deno.DirEntry {
   return { name, isDirectory, isFile: !isDirectory, isSymlink: false };
 }
 
+//
 // A full coverage run can leave far more profile files in one directory than
 // the number of arguments V8 lets a single call take (a ceiling near 130,000).
 // Present the collector a directory that large through an injected reader — no
 // real files — and confirm it gathers every profile. A collector that merged a
 // subdirectory's list into its parent with a spread would overflow here; a
 // walk that appends into one shared array does not, whatever the stack size.
+//
+
 Deno.test("collectCoverageProfileFiles gathers a directory larger than the argument limit", async () => {
   const COUNT = 200_000;
   const root = "/coverage-root";
