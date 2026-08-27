@@ -155,9 +155,10 @@ function _schemaHasIfcUncached(
  * local store. Returns whether they all did: `false` names a corrupt or
  * deliberately malformed declaration — a ref to a document that never
  * arrived, a document that is not a schema document, or one whose content
- * does not hash to its id — which is logged and otherwise ignored; a
- * caller about to walk the schema uses it to skip the broken declaration
- * instead of throwing on the dangling ref.
+ * does not hash to its id — which is logged, after which the declaration
+ * SELECTS NOTHING: the traversal narrows it to `false` and a caller about
+ * to walk the schema (narrowing among them) skips it instead of throwing
+ * on the dangling ref.
  */
 export function ensureExternalSchemaClosure(
   tx: IExtendedStorageTransaction,

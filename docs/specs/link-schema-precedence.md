@@ -142,11 +142,13 @@ loading is registry warming, never a wait for delivery.
 
 A ref the closure cannot resolve therefore names a corrupt runtime or a
 deliberately malformed written schema. Such a declaration is logged and
-ignored — it neither shapes, voids, nor throws out of a read: the seams
-mark whatever the schema legibly declares (`schemaHasIfc` walks what
-resolves), the traversal narrows a broken declaration to `false` (which a
-reader with a shape of its own ignores under precedence), and link
-resolution skips narrowing it rather than throwing on the dangling ref.
+SELECTS NOTHING — it never shapes a read and never throws out of one:
+the traversal narrows a broken declaration to `false`, which a reader
+with a shape of its own ignores under precedence while an agnostic
+reader adopts it and reads nothing through the crossing; link resolution
+skips narrowing it rather than throwing on the dangling ref; and the
+seams still mark whatever the schema legibly declares (`schemaHasIfc`
+walks what resolves).
 
 Link resolution narrows a stored schema across an ancestor hop (a read
 that descends past the link's position), and that walk resolves `$ref`s
