@@ -7,6 +7,7 @@
 import type { JSONSchema } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import {
+  type PatternUpdateReceipt,
   type PieceController,
   type PiecePatternRef,
   PiecesController,
@@ -356,6 +357,27 @@ interface PropRebuildJob {
   propName: "input" | "result";
   resolveLink: ResolveLink;
   spaceName: string;
+}
+
+/**
+ * What `error.log` says after a source write whose transaction committed and
+ * whose refresh of the running piece then failed, and `undefined` when the
+ * refresh completed or the write made no source update.
+ *
+ * A write in that state saved the source and left the piece not running it,
+ * which the file has to keep saying: `error.log` is cleared on a clean write,
+ * so silence there is the mount reporting an unqualified success. Held apart
+ * from the reporting so the text a reader finds in the file is assertable on
+ * its own.
+ */
+export function sourceRefreshWarning(
+  receipt: PatternUpdateReceipt | undefined,
+): string | undefined {
+  return receipt?.refresh.status === "failed"
+    ? `Source revision ${receipt.revisionId} committed as ` +
+      `cf:module/${receipt.ref.identity}#${receipt.ref.symbol}, but ` +
+      `refreshing the running piece failed: ${receipt.refresh.warning}`
+    : undefined;
 }
 
 export class CellBridge {
@@ -2284,25 +2306,45 @@ export class CellBridge {
     });
   }
 
-  async finalizeSourceWritePath(writePath: SourceWritePath): Promise<void> {
+  /**
+   * Rebuild a piece's source tree and pattern metadata after a write.
+   *
+   * `receipt` is the source update the write committed, when it made one. Its
+   * refresh outcome is reported here rather than by the caller because the
+   * rebuild below replaces `.src` and the synthetic `error.log` inside it:
+   * a report written before this call is discarded along with the inode it
+   * went to, so the only place a report survives is after the rebuild, which
+   * is inside this method.
+   */
+  async finalizeSourceWritePath(
+    writePath: SourceWritePath,
+    receipt?: PatternUpdateReceipt,
+  ): Promise<void> {
     const state = this.spaces.get(writePath.spaceName);
     const pieceIno = state?.pieceInos.get(writePath.pieceName);
-    if (!state || pieceIno === undefined) return;
-    await this.buildSourceTree(
-      pieceIno,
-      writePath.piece,
-      state,
-      writePath.pieceName,
-    );
-    await this.refreshPiecePatternMetadata(
-      state,
-      writePath.piece,
-      pieceIno,
+    if (state && pieceIno !== undefined) {
+      await this.buildSourceTree(
+        pieceIno,
+        writePath.piece,
+        state,
+        writePath.pieceName,
+      );
+      await this.refreshPiecePatternMetadata(
+        state,
+        writePath.piece,
+        pieceIno,
+      );
+    }
+    this.reportSourceRefreshWarning(
+      writePath,
+      sourceRefreshWarning(receipt),
     );
   }
 
   /**
-   * Write `.src/error.log` for a piece's source directory as it stands now.
+   * Report that a source write committed and then failed to refresh the
+   * running piece, into `.src/error.log` as that directory stands now.
+   * `undefined` is the refresh having succeeded, and reports nothing.
    *
    * The directory a caller was handed is not the one to write into after a
    * finalize: `buildSourceTree` replaces `.src` wholesale and mints a fresh
@@ -2310,14 +2352,23 @@ export class CellBridge {
    * inode it was written to are gone. Resolving the directory here, from the
    * state the rebuild updated, is what lets a report outlive the rebuild that
    * a successful write performs.
+   *
+   * A piece whose source tree was never built — a system piece, or one the
+   * rebuild skipped — has nowhere to keep the report, and the console line
+   * stands in for it rather than the write failing over a missing file.
    */
-  writeSourceErrorLog(writePath: SourceWritePath, text: string): void {
+  reportSourceRefreshWarning(
+    writePath: SourceWritePath,
+    warning: string | undefined,
+  ): void {
+    if (warning === undefined) return;
+    console.error(`[source] ${warning}`);
     const state = this.spaces.get(writePath.spaceName);
     const srcIno = state?.srcInos.get(writePath.pieceName);
     if (srcIno === undefined) return;
     const errorLogIno = this.tree.lookup(srcIno, "error.log");
     if (errorLogIno === undefined) return;
-    this.tree.updateFile(errorLogIno, text);
+    this.tree.updateFile(errorLogIno, warning);
   }
 
   invalidateHandlerTarget(target: HandlerTarget): void {

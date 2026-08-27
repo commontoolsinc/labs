@@ -9,7 +9,6 @@
 
 import { parseArgs } from "@std/cli/parse-args";
 
-import type { PatternUpdateReceipt } from "@commonfabric/piece/ops";
 import { linkRefFrom } from "@commonfabric/runner/shared";
 
 import {
@@ -210,27 +209,6 @@ export function decodeSourceWriteText(
   } catch {
     return undefined;
   }
-}
-
-/**
- * What `error.log` says after a source write whose transaction committed and
- * whose refresh of the running piece then failed, and `undefined` when the
- * refresh completed.
- *
- * A write in that state saved the source and left the piece not running it,
- * which the file has to keep saying: `error.log` is cleared on a clean write,
- * so silence here is the mount reporting an unqualified success. Held apart
- * from the flush path so the text a reader finds in the file is assertable
- * without a mounted filesystem.
- */
-export function sourceRefreshWarning(
-  receipt: PatternUpdateReceipt,
-): string | undefined {
-  return receipt.refresh.status === "failed"
-    ? `Source revision ${receipt.revisionId} committed as ` +
-      `cf:module/${receipt.ref.identity}#${receipt.ref.symbol}, but ` +
-      `refreshing the running piece failed: ${receipt.refresh.warning}`
-    : undefined;
 }
 
 export function bufferForNoHandleTruncate(
@@ -1853,27 +1831,12 @@ export async function main(argv: string[] = Deno.args) {
             sourceRoots: program.sourceRoots,
             dataFiles: program.dataFiles,
           }, { dangerouslyAllowIncompatibleSchema });
-          // The source transaction committed, so the write itself succeeded
-          // and its bookkeeping proceeds either way. Refreshing the running
-          // piece is the part that can fail on its own, and it leaves a piece
-          // that is on the new source and not running it — a state error.log
-          // has to keep, because an empty file here is the mount saying the
-          // write was clean.
-          const refreshWarning = sourceRefreshWarning(receipt);
           const errorLogIno = tree.lookup(srcIno, "error.log");
           if (errorLogIno !== undefined) {
             tree.updateFile(errorLogIno, "");
           }
           markExistingReady();
-          await bridge.finalizeSourceWritePath(writeTarget.target);
-          // After the finalize, never before it: rebuilding the source tree
-          // replaces `.src` and the synthetic `error.log` inside it, so a
-          // report written above would be discarded along with the inode it
-          // went to. The bridge resolves the directory the rebuild just made.
-          if (refreshWarning !== undefined) {
-            bridge.writeSourceErrorLog(writeTarget.target, refreshWarning);
-            console.error(`[source] ${refreshWarning}`);
-          }
+          await bridge.finalizeSourceWritePath(writeTarget.target, receipt);
           reconcileCfcWritebacks("source flush post-finalize");
           markExistingFinalized();
           if (handle.version === flushVersion) {
@@ -1881,11 +1844,7 @@ export async function main(argv: string[] = Deno.args) {
             handle.truncatePending = false;
           }
           writeStats.flushed++;
-          console.log(
-            `[write-trace] flush-ok ino=${handle.ino} kind=source${
-              refreshWarning === undefined ? "" : " refresh=failed"
-            }`,
-          );
+          console.log(`[write-trace] flush-ok ino=${handle.ino} kind=source`);
           return 0;
         } catch (e) {
           // Write compile error to error.log

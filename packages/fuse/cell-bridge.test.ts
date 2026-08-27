@@ -24,6 +24,8 @@ import { FsTree } from "./tree.ts";
 import {
   CellBridge,
   type HandlerTarget,
+  sourceRefreshWarning,
+  type SourceWritePath,
   type SpaceState,
   type WritePath,
 } from "./cell-bridge.ts";
@@ -186,6 +188,36 @@ function getFileContent(tree: FsTree, parentIno: bigint, name: string): string {
   const node = tree.getNode(ino);
   if (!node || node.kind !== "file") throw new Error(`"${name}" is not a file`);
   return decoder.decode(node.content);
+}
+
+/** A source write path for a piece, as the flush path would hand one over. */
+function sourceWritePath(
+  spaceName: string,
+  pieceName: string,
+  srcIno: bigint,
+): SourceWritePath {
+  return {
+    spaceName,
+    pieceName,
+    relPath: "main.tsx",
+    piece: {} as never,
+    srcIno,
+  };
+}
+
+/** Collect `console.error` lines for the length of one call. */
+function captureConsoleErrors(): { lines: string[]; restore: () => void } {
+  const lines: string[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => {
+    lines.push(args.join(" "));
+  };
+  return {
+    lines,
+    restore: () => {
+      console.error = original;
+    },
+  };
 }
 
 /**
@@ -5310,7 +5342,7 @@ Deno.test("CellBridge.invalidateWritePath does not spawn concurrent hydrations f
   assertEquals(getFileContent(tree, resultIno!, "content"), "fresh");
 });
 
-Deno.test("CellBridge.writeSourceErrorLog reports into the current .src directory", () => {
+Deno.test("CellBridge.reportSourceRefreshWarning reports into the current .src directory", () => {
   // A source write that committed but did not refresh has to leave a report a
   // reader can find, and the flush path can only write it AFTER finalizing —
   // rebuilding `.src` replaces the directory and mints a fresh empty
@@ -5329,20 +5361,112 @@ Deno.test("CellBridge.writeSourceErrorLog reports into the current .src director
   tree.addFile(rebuiltSrcIno, "error.log", "", "string");
   state.srcInos.set("notes", rebuiltSrcIno);
 
-  bridge.writeSourceErrorLog(
-    {
-      spaceName: "space",
-      pieceName: "notes",
-      relPath: "main.tsx",
-      piece: {} as never,
-      srcIno: staleSrcIno,
-    },
-    "committed, but the refresh failed",
-  );
+  const errors = captureConsoleErrors();
+  try {
+    bridge.reportSourceRefreshWarning(
+      sourceWritePath("space", "notes", staleSrcIno),
+      "committed, but the refresh failed",
+    );
+  } finally {
+    errors.restore();
+  }
 
   assertEquals(
     getFileContent(tree, rebuiltSrcIno, "error.log"),
     "committed, but the refresh failed",
   );
   assertEquals(getFileContent(tree, staleSrcIno, "error.log"), "");
+  assertEquals(errors.lines.length, 1);
+});
+
+Deno.test("CellBridge.reportSourceRefreshWarning reports nothing for a refreshed write", () => {
+  // `undefined` is the refresh having succeeded. The rebuild already left
+  // `error.log` empty, and saying anything here would describe a clean write
+  // as a broken one.
+  const bridge = new CellBridge(new FsTree(), "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "space", []);
+  const tree = bridge.tree;
+  const pieceIno = tree.addDir(state.piecesIno, "notes");
+  const srcIno = tree.addDir(pieceIno, ".src");
+  tree.addFile(srcIno, "error.log", "", "string");
+  state.srcInos.set("notes", srcIno);
+
+  const errors = captureConsoleErrors();
+  try {
+    bridge.reportSourceRefreshWarning(
+      sourceWritePath("space", "notes", srcIno),
+      undefined,
+    );
+  } finally {
+    errors.restore();
+  }
+
+  assertEquals(getFileContent(tree, srcIno, "error.log"), "");
+  assertEquals(errors.lines, []);
+});
+
+Deno.test("CellBridge.reportSourceRefreshWarning still says so with no source tree to write into", () => {
+  // A system piece, or one whose rebuild was skipped, has no `.src` and so no
+  // `error.log` to keep the report in. The write still committed, so the
+  // console line stands in for the file rather than the report being lost or
+  // the call failing over a directory that was never built.
+  const bridge = new CellBridge(new FsTree(), "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "space", []);
+  const tree = bridge.tree;
+  const pieceIno = tree.addDir(state.piecesIno, "notes");
+  // Registered, but its `.src` holds no synthetic error.log.
+  const srcIno = tree.addDir(pieceIno, ".src");
+  state.srcInos.set("empty-src", srcIno);
+
+  const errors = captureConsoleErrors();
+  try {
+    // A piece the bridge has no source directory for at all.
+    bridge.reportSourceRefreshWarning(
+      sourceWritePath("space", "notes", srcIno),
+      "committed, but the refresh failed",
+    );
+    // And one whose directory exists without the synthetic file.
+    bridge.reportSourceRefreshWarning(
+      sourceWritePath("space", "empty-src", srcIno),
+      "committed, but the refresh failed",
+    );
+  } finally {
+    errors.restore();
+  }
+
+  assertEquals(errors.lines.length, 2);
+  assertEquals(tree.lookup(srcIno, "error.log"), undefined);
+});
+
+Deno.test("sourceRefreshWarning describes a committed write whose refresh failed", () => {
+  // The write committed, so the flush succeeds and the file is saved — but
+  // the piece is on the new source and not running it, and error.log is the
+  // only place the mount can say so.
+  assertEquals(
+    sourceRefreshWarning({
+      status: "committed",
+      ref: { identity: "A".repeat(43), symbol: "default" },
+      revisionId: "revision-2",
+      detachedOrigin: null,
+      refresh: { status: "failed", warning: "dependency unavailable" },
+    }),
+    `Source revision revision-2 committed as cf:module/${
+      "A".repeat(43)
+    }#default, but refreshing the running piece failed: dependency unavailable`,
+  );
+});
+
+Deno.test("sourceRefreshWarning says nothing for a refreshed or absent write", () => {
+  assertEquals(
+    sourceRefreshWarning({
+      status: "committed",
+      ref: { identity: "A".repeat(43), symbol: "default" },
+      revisionId: "revision-2",
+      detachedOrigin: null,
+      refresh: { status: "completed" },
+    }),
+    undefined,
+  );
+  // A finalize with no receipt — a metadata write, which updated no source.
+  assertEquals(sourceRefreshWarning(undefined), undefined);
 });

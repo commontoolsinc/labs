@@ -13,7 +13,6 @@ import {
   isConnectionWriteFailure,
   parseCfcXattrNamespace,
   rootSpaceLookupNames,
-  sourceRefreshWarning,
   sourceRelPathToTreeSegments,
   writeUnavailableErrno,
 } from "./mod.ts";
@@ -187,67 +186,24 @@ Deno.test("source writeback retains attached data files", async () => {
   );
 });
 
-Deno.test("source writeback reports a committed write whose refresh failed", () => {
-  // The write committed, so the flush succeeds and the file is saved — but
-  // the piece is on the new source and not running it, and error.log is the
-  // only place the mount can say so. A clean write clears that file, so a
-  // silent warning here is the mount reporting an unqualified success.
-  assertEquals(
-    sourceRefreshWarning({
-      status: "committed",
-      ref: { identity: "A".repeat(43), symbol: "default" },
-      revisionId: "revision-2",
-      detachedOrigin: null,
-      refresh: { status: "failed", warning: "dependency unavailable" },
-    }),
-    `Source revision revision-2 committed as cf:module/${
-      "A".repeat(43)
-    }#default, but refreshing the running piece failed: dependency unavailable`,
-  );
-});
-
-Deno.test("source writeback says nothing when the refresh completed", () => {
-  assertEquals(
-    sourceRefreshWarning({
-      status: "committed",
-      ref: { identity: "A".repeat(43), symbol: "default" },
-      revisionId: "revision-2",
-      detachedOrigin: null,
-      refresh: { status: "completed" },
-    }),
-    undefined,
-  );
-});
-
-Deno.test("source writeback keeps a refresh warning in error.log", async () => {
-  // The composed text is asserted above; what this adds is that the flush
-  // path reports it, and reports it late enough to survive. Finalizing a
-  // source write rebuilds `.src` and mints a fresh empty `error.log`, so a
-  // warning written before that call is discarded along with the inode it
-  // went to — the report has to land after the rebuild, through the bridge,
-  // which resolves the directory the rebuild just made. Read from the source
-  // because driving the flush needs a mounted filesystem, in the same way as
-  // the two writeback cases above.
+Deno.test("source writeback hands its receipt to the finalize that rebuilds .src", async () => {
+  // Where the report is composed and written is CellBridge's business, and
+  // deliberately so: finalizing rebuilds `.src` and mints a fresh empty
+  // `error.log`, so a report written out here would be discarded along with
+  // the inode it went to. What the flush path owes is the receipt, handed to
+  // the call that performs that rebuild. Read from the source because driving
+  // the flush needs a mounted filesystem, in the same way as the two cases
+  // above.
   const source = await Deno.readTextFile(new URL("./mod.ts", import.meta.url));
   const sourceWriteback = source.slice(
     source.indexOf('if (writeTarget?.kind === "source")'),
   );
 
   assert(
-    sourceWriteback.includes("const refreshWarning = sourceRefreshWarning("),
-    "source writeback must read the refresh outcome off the receipt",
-  );
-  assert(
     sourceWriteback.includes(
-      "bridge.writeSourceErrorLog(writeTarget.target, refreshWarning)",
+      "bridge.finalizeSourceWritePath(writeTarget.target, receipt)",
     ),
-    "source writeback must report the refresh warning through the bridge",
-  );
-  assertAppearsBefore(
-    sourceWriteback,
-    "await bridge.finalizeSourceWritePath(writeTarget.target)",
-    "bridge.writeSourceErrorLog(writeTarget.target, refreshWarning)",
-    "the refresh warning must be written after the source tree is rebuilt",
+    "source writeback must hand the update receipt to the finalize",
   );
 });
 
