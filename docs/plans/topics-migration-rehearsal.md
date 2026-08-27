@@ -92,9 +92,14 @@ pieces=$(deno task cf inspect entities $DB --kind piece --require-complete --jso
         | jq -r '[.id, (.pattern.identity // "unresolved"), (.pattern.filename // "-")] | @tsv'
     done | sort -k2 > topics-manifest.tsv
 
-# everything in scope: the board plus everything on either topic generation
-grep -E 'PB0GumS5vkDPyKAWciwh-4UtypoJwKFUXcDj3SsspHY|-85Wmyd9iwUjbpwnTYR2YolxkMUHup9WHY6YsRUDA1E|WpIRvAWL_WW45Q89ekZAlHWLObhQ16NDmQzvv_q2aI8' \
-  topics-manifest.tsv | cut -f2 | sort | uniq -c   # two generations + 1 board
+# everything in scope: the board plus every generation its children are on.
+# The filter comes from the survey above, never from identities written down
+# here — a grep for a retired identity matches nothing and prints nothing,
+# which is indistinguishable from a clean manifest.
+grep -o '"patternIdentity":"[^"]*"' survey-before.jsonl \
+  | sed 's/.*:"//;s/"//' | sort -u > in-scope-identities.txt
+grep -F -f in-scope-identities.txt topics-manifest.tsv \
+  | cut -f2 | sort | uniq -c
 ```
 
 `--require-complete` is load-bearing, not decoration: the piece listing is
