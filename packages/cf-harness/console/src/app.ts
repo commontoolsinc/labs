@@ -1,5 +1,5 @@
 /**
- * The kickoff page. Type a task, watch the harness work, open what it built,
+ * The console page. Type a task, watch the harness work, open what it built,
  * and read what any run did step by step.
  *
  * There is one reading of a run rather than two. A turn produces a run, and a
@@ -12,8 +12,8 @@
 import { html, LitElement, nothing, type TemplateResult } from "lit";
 import {
   cancelTurn,
+  type ConsoleRunSummary,
   type HarnessChatEventEnvelope,
-  type KickoffRunSummary,
   listRuns,
   startTask,
 } from "./api.ts";
@@ -21,7 +21,7 @@ import "./index-view.ts";
 import "./run-view.ts";
 
 /** Which surface the shell is showing: the runs, or the pattern index. */
-type View = "kickoff" | "index";
+type View = "console" | "index";
 
 /** The address a run named, raised above the timeline once it exists. */
 interface Piece {
@@ -31,7 +31,7 @@ interface Piece {
 
 /** A run and the `delegate_task` children it started. */
 interface RunNode {
-  run: KickoffRunSummary;
+  run: ConsoleRunSummary;
   children: RunNode[];
 }
 
@@ -41,7 +41,7 @@ interface RunNode {
  * where it would read as work someone asked for directly.
  */
 export const runTree = (
-  runs: readonly KickoffRunSummary[],
+  runs: readonly ConsoleRunSummary[],
 ): readonly RunNode[] => {
   const nodes = new Map<string, RunNode>(
     runs.map((run) => [run.runId, { run, children: [] }]),
@@ -66,7 +66,7 @@ export const runTree = (
   return roots;
 };
 
-export class KickoffApp extends LitElement {
+export class ConsoleApp extends LitElement {
   static override properties = {
     sessionId: { attribute: false },
     turnId: { attribute: false },
@@ -83,7 +83,7 @@ export class KickoffApp extends LitElement {
   declare view: View;
   declare sessionId: string | undefined;
   declare turnId: string | undefined;
-  declare runs: readonly KickoffRunSummary[];
+  declare runs: readonly ConsoleRunSummary[];
   declare openRunId: string | undefined;
   declare state: string;
   declare running: boolean;
@@ -103,7 +103,7 @@ export class KickoffApp extends LitElement {
     this.runs = [];
     this.state = "idle";
     this.running = false;
-    this.view = "kickoff";
+    this.view = "console";
   }
 
   protected override createRenderRoot(): HTMLElement {
@@ -154,7 +154,7 @@ export class KickoffApp extends LitElement {
         this.openRunId = fresh.runId;
       }
     }
-    const view = this.querySelector("kickoff-run-view") as
+    const view = this.querySelector("console-run-view") as
       | { refresh: () => Promise<void> }
       | null;
     await view?.refresh();
@@ -377,9 +377,9 @@ export class KickoffApp extends LitElement {
     return html`
       <main>
         <header>
-          <h1>cf-harness kickoff</h1>
+          <h1>cf-harness console</h1>
           <div class="views">
-            ${viewTab("kickoff", "Runs")}
+            ${viewTab("console", "Runs")}
             ${viewTab("index", "Index")}
           </div>
           <span id="state">
@@ -390,14 +390,14 @@ export class KickoffApp extends LitElement {
         </header>
 
         ${this.view === "index"
-          ? html`<kickoff-index-view></kickoff-index-view>`
-          : this.#kickoffView()}
+          ? html`<console-index-view></console-index-view>`
+          : this.#consoleView()}
       </main>
     `;
   }
 
   /** Type a task, watch it run, read what any run did. */
-  #kickoffView(): TemplateResult {
+  #consoleView(): TemplateResult {
     return html`
       <div>
         <textarea
@@ -464,15 +464,15 @@ export class KickoffApp extends LitElement {
               ? html`<p class="empty">No run has been made yet.</p>`
               : runTree(this.runs).map((node) => this.#runRow(node, 0))}
           </div>
-          <kickoff-run-view
+          <console-run-view
             .runId=${this.openRunId}
             @open-run=${(event: CustomEvent<string>) =>
               this.openRunId = event.detail}
-          ></kickoff-run-view>
+          ></console-run-view>
         </div>
       </div>
     `;
   }
 }
 
-customElements.define("kickoff-app", KickoffApp);
+customElements.define("console-app", ConsoleApp);

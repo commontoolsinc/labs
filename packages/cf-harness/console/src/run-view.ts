@@ -5,7 +5,7 @@
  */
 
 import { html, LitElement, nothing, type TemplateResult } from "lit";
-import { type KickoffRunDetail, readRun, readRunFile } from "./api.ts";
+import { type ConsoleRunDetail, readRun, readRunFile } from "./api.ts";
 import "./steps-view.ts";
 
 /** Which pane of the open run is showing. */
@@ -20,7 +20,7 @@ const prettyJson = (text: string): string => {
   }
 };
 
-export class KickoffRunView extends LitElement {
+export class ConsoleRunView extends LitElement {
   static override properties = {
     runId: { attribute: false },
     detail: { attribute: false },
@@ -31,7 +31,7 @@ export class KickoffRunView extends LitElement {
   };
 
   declare runId: string | undefined;
-  declare detail: KickoffRunDetail | undefined;
+  declare detail: ConsoleRunDetail | undefined;
   declare pane: Pane;
   declare rawName: string | undefined;
   declare rawText: string | undefined;
@@ -119,7 +119,7 @@ export class KickoffRunView extends LitElement {
     }
   }
 
-  #patterns(detail: KickoffRunDetail): TemplateResult {
+  #patterns(detail: ConsoleRunDetail): TemplateResult {
     const { patternAttempts, searches, feedback, pieces } = detail.lens;
     if (
       patternAttempts.length === 0 && searches.length === 0 &&
@@ -297,10 +297,10 @@ export class KickoffRunView extends LitElement {
         </div>
         ${this.pane === "timeline"
           ? html`
-            <kickoff-steps
+            <console-steps
               .steps=${detail.steps}
               .handles=${detail.handles}
-            ></kickoff-steps>
+            ></console-steps>
           `
           : this.pane === "patterns"
           ? this.#patterns(detail)
@@ -312,4 +312,4 @@ export class KickoffRunView extends LitElement {
   }
 }
 
-customElements.define("kickoff-run-view", KickoffRunView);
+customElements.define("console-run-view", ConsoleRunView);

@@ -7,7 +7,7 @@ import {
   parseAfterSequence,
   pingFrame,
   sseFrame,
-} from "../../kickoff/sse.ts";
+} from "../../console/sse.ts";
 import {
   createHarnessChatEventEnvelope,
   type HarnessChatEventEnvelope,
@@ -21,7 +21,7 @@ const envelope = (sequence: number): HarnessChatEventEnvelope =>
     event: { kind: "assistant_completed", text: `message ${sequence}` },
   });
 
-describe("kickoff/sse", () => {
+describe("console/sse", () => {
   describe("sseFrame()", () => {
     it("terminates a frame with a blank line and omits an absent id", () => {
       expect(sseFrame("ping", "1")).toBe("event: ping\ndata: 1\n\n");

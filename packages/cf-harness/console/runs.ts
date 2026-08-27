@@ -16,13 +16,13 @@ import type {
 } from "../src/contracts/transcript.ts";
 
 /** How much of a title a listing entry carries before it is elided. */
-export const KICKOFF_RUN_TITLE_LIMIT = 200;
+export const CONSOLE_RUN_TITLE_LIMIT = 200;
 
 const elide = (text: string, limit: number): string =>
   text.length > limit ? `${text.slice(0, limit)}…` : text;
 
 /** One row of the run list. */
-export interface KickoffRunSummary {
+export interface ConsoleRunSummary {
   runId: string;
   status: HarnessRunStatus;
   createdAt: string;
@@ -51,7 +51,7 @@ export interface KickoffRunSummary {
  * fix rounds between the first call and the one that works are the part a
  * feed of elided summaries loses.
  */
-export interface KickoffPatternAttempt {
+export interface ConsolePatternAttempt {
   toolCallId: string;
   /** Present when the call submitted source; absent when it named an index pattern. */
   source?: string;
@@ -67,7 +67,7 @@ export interface KickoffPatternAttempt {
 }
 
 /** One `search_patterns` call and the patterns it matched. */
-export interface KickoffPatternSearch {
+export interface ConsolePatternSearch {
   toolCallId: string;
   /** What was searched for: the call's free text, its tags, or both. */
   query?: string;
@@ -81,7 +81,7 @@ export interface KickoffPatternSearch {
 }
 
 /** One `record_feedback` call, as the run reported it to the index. */
-export interface KickoffPatternFeedback {
+export interface ConsolePatternFeedback {
   toolCallId: string;
   patternId?: string;
   /** The verdict the call cast: `up` or `down`. */
@@ -90,7 +90,7 @@ export interface KickoffPatternFeedback {
 }
 
 /** One `assign_slug` call, and the address a person can open. */
-export interface KickoffPiece {
+export interface ConsolePiece {
   toolCallId: string;
   slug?: string;
   url?: string;
@@ -101,11 +101,11 @@ export interface KickoffPiece {
  * reading of a run that is not a reading of its pattern calls is missing what
  * the run was doing.
  */
-export interface KickoffRunLens {
-  patternAttempts: readonly KickoffPatternAttempt[];
-  searches: readonly KickoffPatternSearch[];
-  feedback: readonly KickoffPatternFeedback[];
-  pieces: readonly KickoffPiece[];
+export interface ConsoleRunLens {
+  patternAttempts: readonly ConsolePatternAttempt[];
+  searches: readonly ConsolePatternSearch[];
+  feedback: readonly ConsolePatternFeedback[];
+  pieces: readonly ConsolePiece[];
 }
 
 const parseJson = (text: string): unknown => {
@@ -162,13 +162,13 @@ const toolCallsById = (
 };
 
 /** The last thing a person said, which is what the run was asked to do. */
-export const kickoffRunTitle = (
+export const consoleRunTitle = (
   transcript: readonly HarnessTranscriptMessage[],
 ): string | undefined => {
   for (let index = transcript.length - 1; index >= 0; index -= 1) {
     const message = transcript[index];
     if (message.role === "user" && message.content.trim() !== "") {
-      return elide(message.content.trim(), KICKOFF_RUN_TITLE_LIMIT);
+      return elide(message.content.trim(), CONSOLE_RUN_TITLE_LIMIT);
     }
   }
   return undefined;
@@ -180,14 +180,14 @@ export const kickoffRunTitle = (
  * something back is the fact worth showing, and a result this cannot read is
  * exactly the case the raw artifact is there for.
  */
-export const kickoffRunLens = (
+export const consoleRunLens = (
   transcript: readonly HarnessTranscriptMessage[],
-): KickoffRunLens => {
+): ConsoleRunLens => {
   const calls = toolCallsById(transcript);
-  const patternAttempts: KickoffPatternAttempt[] = [];
-  const searches: KickoffPatternSearch[] = [];
-  const feedback: KickoffPatternFeedback[] = [];
-  const pieces: KickoffPiece[] = [];
+  const patternAttempts: ConsolePatternAttempt[] = [];
+  const searches: ConsolePatternSearch[] = [];
+  const feedback: ConsolePatternFeedback[] = [];
+  const pieces: ConsolePiece[] = [];
 
   for (const message of transcript) {
     if (message.role !== "tool") {
@@ -279,12 +279,12 @@ export const kickoffRunLens = (
 };
 
 /** How a run reads in the list: what it was asked, and how it ended. */
-export const summarizeKickoffRun = (
+export const summarizeConsoleRun = (
   runState: HarnessRunState,
   transcript: readonly HarnessTranscriptMessage[] = [],
-): KickoffRunSummary => {
-  const title = kickoffRunTitle(transcript);
-  const pieceUrls = kickoffRunLens(transcript).pieces
+): ConsoleRunSummary => {
+  const title = consoleRunTitle(transcript);
+  const pieceUrls = consoleRunLens(transcript).pieces
     .flatMap((piece) => piece.url === undefined ? [] : [piece.url]);
   return {
     runId: runState.runId,
@@ -322,9 +322,9 @@ export const summarizeKickoffRun = (
  * looking for is the one at the top. Runs updated in the same millisecond are
  * ordered by run id, so two requests reading the same state list them alike.
  */
-export const sortKickoffRuns = (
-  runs: readonly KickoffRunSummary[],
-): readonly KickoffRunSummary[] =>
+export const sortConsoleRuns = (
+  runs: readonly ConsoleRunSummary[],
+): readonly ConsoleRunSummary[] =>
   [...runs].sort((left, right) =>
     left.updatedAt === right.updatedAt
       ? left.runId.localeCompare(right.runId)

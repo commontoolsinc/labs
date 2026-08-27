@@ -1,4 +1,4 @@
-# cf-harness kickoff
+# cf-harness console
 
 Type a task, watch the harness work, open what it built — and read what the run
 left behind when the feed's elided summaries are not enough. One Deno HTTP
@@ -50,42 +50,42 @@ export CF_HARNESS_FABRIC_IDENTITY="$HOME/.cf/my-key.pkcs8"
 export CF_HARNESS_FABRIC_SPACE=my-space
 export CF_HARNESS_PATTERN_INDEX_URL=https://index.example/   # optional
 
-deno task --cwd packages/cf-harness kickoff
+deno task --cwd packages/cf-harness console
 open http://127.0.0.1:8100
 ```
 
-`kickoff` builds the page and then serves it. The page is a [felt](../../felt/)
+`console` builds the page and then serves it. The page is a [felt](../../felt/)
 build: its source is `src/`, its static files are `public/`, and both are
 emitted to `dist/`, which the server serves and git ignores. A server started
 without that build answers `/` by naming the command that produces it. While
 changing the page, `deno task --cwd packages/cf-harness
-kickoff:watch` rebuilds
+console:watch` rebuilds
 `src/` on save — it serves on felt's own port, which holds no API, so keep the
-kickoff server running and reload against it after a rebuild. `kickoff:build` is
+console server running and reload against it after a rebuild. `console:build` is
 the one-shot build on its own.
 
 Every environment variable has a flag, and the flag wins:
 
 | Flag                  | Environment                          | Default                               |
 | --------------------- | ------------------------------------ | ------------------------------------- |
-| `--port`              | `CF_HARNESS_KICKOFF_PORT`            | `8100`                                |
+| `--port`              | `CF_HARNESS_CONSOLE_PORT`            | `8100`                                |
 | `--fabric-api-url`    | `CF_HARNESS_FABRIC_API_URL`          | `http://localhost:8000`               |
 | `--fabric-identity`   | `CF_HARNESS_FABRIC_IDENTITY`         | required                              |
 | `--fabric-space`      | `CF_HARNESS_FABRIC_SPACE`            | required, a name                      |
 | `--pattern-index-url` | `CF_HARNESS_PATTERN_INDEX_URL`       | unset                                 |
 | `--model`             | `CF_HARNESS_MODEL`                   | the CLI's default model               |
-| `--workspace`         | `CF_HARNESS_KICKOFF_WORKSPACE`       | `.cf-harness-kickoff/workspace`       |
-| `--artifact-root`     | `CF_HARNESS_ARTIFACT_ROOT`           | `.cf-harness-kickoff/runs`            |
-| `--session-db`        | `CF_HARNESS_KICKOFF_SESSION_DB`      | `.cf-harness-kickoff/sessions.sqlite` |
-| `--max-model-turns`   | `CF_HARNESS_KICKOFF_MAX_MODEL_TURNS` | the prompt loop's default             |
+| `--workspace`         | `CF_HARNESS_CONSOLE_WORKSPACE`       | `.cf-harness-console/workspace`       |
+| `--artifact-root`     | `CF_HARNESS_ARTIFACT_ROOT`           | `.cf-harness-console/runs`            |
+| `--session-db`        | `CF_HARNESS_CONSOLE_SESSION_DB`      | `.cf-harness-console/sessions.sqlite` |
+| `--max-model-turns`   | `CF_HARNESS_CONSOLE_MAX_MODEL_TURNS` | the prompt loop's default             |
 
-Everything the server writes lives under `.cf-harness-kickoff/` in the working
+Everything the server writes lives under `.cf-harness-console/` in the working
 directory — the sandbox workspace, run artifacts, the session database, and the
 sandbox's two CFC sidecar transport directories. The harness refuses to start an
 enforcing run without those transports wired, so this surface sites them itself;
 `CF_HARNESS_RUNSC_CFC_RESULT_DIR` and
 `CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR` move them somewhere else.
-`CF_HARNESS_KICKOFF_DIR` moves the whole tree.
+`CF_HARNESS_CONSOLE_DIR` moves the whole tree.
 
 `--session-db none` keeps sessions in memory for the life of the process, which
 is what a throwaway run wants. Otherwise sessions, turns, and events are

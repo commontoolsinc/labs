@@ -1,7 +1,7 @@
 import { type Config } from "@commonfabric/felt";
 
 /**
- * The kickoff page's build. The page is served by the kickoff server itself
+ * The console page's build. The page is served by the console server itself
  * rather than by felt, so only `build` is used here: `port` and `hostname`
  * belong to felt's own dev server, which this surface does not run.
  */

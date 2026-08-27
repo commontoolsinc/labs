@@ -1,6 +1,6 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { cancelTurn } from "../../../kickoff/src/api.ts";
+import { cancelTurn } from "../../../console/src/api.ts";
 
 const realFetch = globalThis.fetch;
 
@@ -14,7 +14,7 @@ const answerWith = (response: Response): { calls: number } => {
   return record;
 };
 
-describe("kickoff/src/api", () => {
+describe("console/src/api", () => {
   afterEach(() => {
     globalThis.fetch = realFetch;
   });

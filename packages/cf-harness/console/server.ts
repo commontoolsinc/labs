@@ -1,12 +1,12 @@
 #!/usr/bin/env -S deno run -A
 
 /**
- * The kickoff surface: type a task, watch the harness work, open what it
+ * The console surface: type a task, watch the harness work, open what it
  * built. One HTTP server holding one in-process
  * `HarnessInteractiveChatService`, one static page reading its events over
  * Server-Sent Events, and nothing else.
  *
- *   deno task --cwd packages/cf-harness kickoff
+ *   deno task --cwd packages/cf-harness console
  *   open http://127.0.0.1:8100
  *
  * The server binds 127.0.0.1, and loopback is where its trust ends rather than
@@ -92,14 +92,14 @@ import {
 import type { CreateHarnessPromptLoopOptions } from "../src/prompt-loop.ts";
 import type { HarnessChatSessionStore } from "../src/session-store.ts";
 import {
-  listKickoffRuns,
-  readKickoffRun,
-  readKickoffRunArtifact,
-  readKickoffToolOutput,
+  listConsoleRuns,
+  readConsoleRun,
+  readConsoleRunArtifact,
+  readConsoleToolOutput,
 } from "./run-store.ts";
 import {
-  type KickoffSessionListing,
-  summarizeKickoffSessions,
+  type ConsoleSessionListing,
+  summarizeConsoleSessions,
 } from "./sessions.ts";
 import {
   chatEventFrame,
@@ -113,7 +113,7 @@ import {
 const HOSTNAME = "127.0.0.1";
 
 /** The cookie the page carries this process's token back in. */
-const TOKEN_COOKIE = "cf_harness_kickoff_token";
+const TOKEN_COOKIE = "cf_harness_console_token";
 
 /**
  * The host names a request may address this server by: its own loopback
@@ -184,7 +184,7 @@ const DEFAULT_PORT = 8100;
 const DEFAULT_FABRIC_API_URL = "http://localhost:8000";
 
 /**
- * The CFC posture a kickoff session runs its fabric session under. This
+ * The CFC posture a console session runs its fabric session under. This
  * surface exists to show CFC working, so the named bundle is on by default
  * rather than opted into: `max-enforcement` spreads
  * `MAX_ENFORCEMENT_CFC_OPTIONS` over the runtime `run_pattern` deploys into —
@@ -211,14 +211,14 @@ const PING_INTERVAL_MS = 15_000;
  * key the single-user local host writes, so a harness connected once through
  * `cf-harness config`/Loom Settings is connected here too.
  */
-const KICKOFF_CREDENTIAL_OWNER = {
+const CONSOLE_CREDENTIAL_OWNER = {
   type: HARNESS_CREDENTIAL_OWNER_REF_TYPE,
   version: 1,
   ownerKey: "local",
 } as const;
 
 /**
- * The tools a kickoff session is allowed, over the default parent surface: the
+ * The tools a console session is allowed, over the default parent surface: the
  * two that need a fabric session, and the two that need an index. Each is
  * withheld again by the prompt loop when its backing is absent, so naming them
  * here asks for them rather than asserting they exist.
@@ -294,7 +294,7 @@ const callPatternIndex = (
 };
 
 /** Everything the server needs before it can serve a single request. */
-interface KickoffConfig {
+interface ConsoleConfig {
   port: number;
   workspacePath: string;
   artifactRoot: string;
@@ -335,11 +335,11 @@ const positiveInteger = (value: string, flag: string): number => {
  * and never hand back an address for it, which is the one outcome this surface
  * exists to avoid.
  */
-export const resolveKickoffConfig = (
+export const resolveConsoleConfig = (
   args: readonly string[],
   env: Record<string, string | undefined>,
   cwd: string,
-): KickoffConfig => {
+): ConsoleConfig => {
   const parsed = parseArgs(args, {
     string: [
       "port",
@@ -362,17 +362,17 @@ export const resolveKickoffConfig = (
 
   const port = flag("port") !== undefined
     ? positiveInteger(flag("port")!, "--port")
-    : nonEmpty(env.CF_HARNESS_KICKOFF_PORT) !== undefined
-    ? positiveInteger(env.CF_HARNESS_KICKOFF_PORT!, "CF_HARNESS_KICKOFF_PORT")
+    : nonEmpty(env.CF_HARNESS_CONSOLE_PORT) !== undefined
+    ? positiveInteger(env.CF_HARNESS_CONSOLE_PORT!, "CF_HARNESS_CONSOLE_PORT")
     : DEFAULT_PORT;
 
   const dataDir = resolve(
     cwd,
-    nonEmpty(env.CF_HARNESS_KICKOFF_DIR) ?? ".cf-harness-kickoff",
+    nonEmpty(env.CF_HARNESS_CONSOLE_DIR) ?? ".cf-harness-console",
   );
   const workspacePath = resolve(
     cwd,
-    flag("workspace") ?? nonEmpty(env.CF_HARNESS_KICKOFF_WORKSPACE) ??
+    flag("workspace") ?? nonEmpty(env.CF_HARNESS_CONSOLE_WORKSPACE) ??
       join(dataDir, "workspace"),
   );
   const artifactRoot = resolve(
@@ -463,18 +463,18 @@ export const resolveKickoffConfig = (
   // pattern-dev + pattern-schema skills; without a skills root the parent
   // model authors patterns blind and burns turns on idiom errors.
   const skillsRootFlag = flag("skills-root") ??
-    nonEmpty(env.CF_HARNESS_KICKOFF_SKILLS_ROOT) ??
+    nonEmpty(env.CF_HARNESS_CONSOLE_SKILLS_ROOT) ??
     resolve(cwd, join(moduleDir, "../../../skills"));
 
   const patternIndexUrl = flag("pattern-index-url") ??
     nonEmpty(env.CF_HARNESS_PATTERN_INDEX_URL);
   const sessionDb = flag("session-db") ??
-    nonEmpty(env.CF_HARNESS_KICKOFF_SESSION_DB) ??
+    nonEmpty(env.CF_HARNESS_CONSOLE_SESSION_DB) ??
     join(dataDir, "sessions.sqlite");
   // Pattern-building sessions routinely spend a turn per author/run/fix
   // round; the interactive default of 8 strands a session mid-build.
   const maxModelTurns = flag("max-model-turns") ??
-    nonEmpty(env.CF_HARNESS_KICKOFF_MAX_MODEL_TURNS) ?? "32";
+    nonEmpty(env.CF_HARNESS_CONSOLE_MAX_MODEL_TURNS) ?? "32";
 
   return {
     port,
@@ -509,12 +509,12 @@ export const resolveKickoffConfig = (
 };
 
 /**
- * The policy a kickoff session runs under: see `FABRIC_TOOL_IDS`. The prompt
+ * The policy a console session runs under: see `FABRIC_TOOL_IDS`. The prompt
  * slot is bound as a direct command because the page's textarea is the user
  * typing the command themselves — the same standing the batch CLI's prompt
  * argument has, and what authorizes effectful tools under CFC enforce modes.
  */
-export const kickoffChatPolicy = (
+export const consoleChatPolicy = (
   patternIndexConfigured: boolean,
 ): HarnessChatPolicy => ({
   ...DEFAULT_HARNESS_CHAT_POLICY,
@@ -529,7 +529,7 @@ export const kickoffChatPolicy = (
   ],
   promptSlot: createCliPromptSlotBinding({
     kernelName: "cf-harness",
-    surface: "kickoff-web",
+    surface: "console-web",
     role: "direct-command",
   }),
 });
@@ -541,7 +541,7 @@ export const kickoffChatPolicy = (
  * turn that fails after the page said it had started.
  */
 const resolveModelOptions = async (
-  config: KickoffConfig,
+  config: ConsoleConfig,
   env: Record<string, string | undefined>,
 ): Promise<CreateHarnessPromptLoopOptions> => {
   const providerSettingsStore = new FileHarnessProviderSettingsStore({
@@ -573,25 +573,25 @@ const resolveModelOptions = async (
   });
   const status = await new OpenAICodexAuthService(
     credentialStore,
-    KICKOFF_CREDENTIAL_OWNER.ownerKey,
+    CONSOLE_CREDENTIAL_OWNER.ownerKey,
   ).status();
   if (status.status !== "connected") {
     throw new Error(
-      `cf-harness Codex is ${status.status}; connect it with \`cf-harness auth\` before starting the kickoff server`,
+      `cf-harness Codex is ${status.status}; connect it with \`cf-harness auth\` before starting the console server`,
     );
   }
   return {
     modelProvider: provider,
     modelAuthSource: "cf-harness-local-store",
-    credentialOwner: KICKOFF_CREDENTIAL_OWNER,
-    credentialOwnerKey: KICKOFF_CREDENTIAL_OWNER.ownerKey,
+    credentialOwner: CONSOLE_CREDENTIAL_OWNER,
+    credentialOwnerKey: CONSOLE_CREDENTIAL_OWNER.ownerKey,
     modelClient: new OpenAICodexResponsesClient({
       credentialResolver: new OpenAICodexCredentialResolver({
         store: credentialStore,
-        ownerKey: KICKOFF_CREDENTIAL_OWNER.ownerKey,
-        credentialOwner: KICKOFF_CREDENTIAL_OWNER,
+        ownerKey: CONSOLE_CREDENTIAL_OWNER.ownerKey,
+        credentialOwner: CONSOLE_CREDENTIAL_OWNER,
       }),
-      credentialOwner: KICKOFF_CREDENTIAL_OWNER,
+      credentialOwner: CONSOLE_CREDENTIAL_OWNER,
     }),
   };
 };
@@ -628,9 +628,9 @@ interface StreamClient {
 const encoder = new TextEncoder();
 
 /** The live event fan-out, and the routes that read and write through it. */
-export class KickoffServer {
+export class ConsoleServer {
   readonly #clients = new Set<StreamClient>();
-  readonly #config: KickoffConfig;
+  readonly #config: ConsoleConfig;
   readonly #service: HarnessInteractiveChatService;
   readonly #token = crypto.randomUUID();
   readonly #patternIndexClientFactory:
@@ -650,7 +650,7 @@ export class KickoffServer {
    * in by a test that has no keyfile to read.
    */
   constructor(
-    config: KickoffConfig,
+    config: ConsoleConfig,
     createService: (
       onEvent: HarnessInteractiveChatEventListener,
     ) => HarnessInteractiveChatService,
@@ -744,7 +744,7 @@ export class KickoffServer {
     }
     if (request.method === "GET" && url.pathname === "/api/runs") {
       return Response.json({
-        runs: await listKickoffRuns(this.#config.artifactRoot),
+        runs: await listConsoleRuns(this.#config.artifactRoot),
       });
     }
     if (request.method === "GET" && url.pathname.startsWith("/api/runs/")) {
@@ -810,7 +810,7 @@ export class KickoffServer {
     }
     const root = this.#config.artifactRoot;
     if (kind === undefined || kind === "") {
-      const detail = await readKickoffRun(root, runId);
+      const detail = await readConsoleRun(root, runId);
       return detail === undefined
         ? new Response("not found", { status: 404 })
         : Response.json(detail);
@@ -819,9 +819,9 @@ export class KickoffServer {
       return new Response("not found", { status: 404 });
     }
     const text = kind === "artifacts"
-      ? await readKickoffRunArtifact(root, runId, name)
+      ? await readConsoleRunArtifact(root, runId, name)
       : kind === "tool-outputs"
-      ? await readKickoffToolOutput(root, runId, name)
+      ? await readConsoleToolOutput(root, runId, name)
       : undefined;
     return text === undefined
       ? new Response("not found", { status: 404 })
@@ -832,7 +832,7 @@ export class KickoffServer {
 
   /**
    * One file of the built page. The page is a felt build under `dist/`, so a
-   * server started before `deno task kickoff:build` has nothing to serve and
+   * server started before `deno task console:build` has nothing to serve and
    * says which command produces it rather than answering an empty 404.
    */
   async #asset(pathname: string): Promise<Response> {
@@ -849,7 +849,7 @@ export class KickoffServer {
     } catch {
       return new Response(
         pathname === "/"
-          ? "the kickoff page is not built; run `deno task --cwd packages/cf-harness kickoff:build`"
+          ? "the console page is not built; run `deno task --cwd packages/cf-harness console:build`"
           : "not found",
         {
           status: 404,
@@ -864,9 +864,9 @@ export class KickoffServer {
    * The turns are read for replay so a session recovered from the store on
    * startup is named by the task it was given rather than by its identifier.
    */
-  async #sessions(): Promise<KickoffSessionListing> {
+  async #sessions(): Promise<ConsoleSessionListing> {
     const turns = await this.#service.listTurnsForReplay({});
-    return summarizeKickoffSessions(this.#service.status(), turns.turns);
+    return summarizeConsoleSessions(this.#service.status(), turns.turns);
   }
 
   /**
@@ -903,7 +903,7 @@ export class KickoffServer {
         workspace: { hostPath: this.#config.workspacePath },
         model: this.#config.model,
         artifactRoot: this.#config.artifactRoot,
-        policy: kickoffChatPolicy(this.#config.patternIndex !== undefined),
+        policy: consoleChatPolicy(this.#config.patternIndex !== undefined),
       });
       if (!session.ok) {
         return chatErrorResponse(session);
@@ -936,7 +936,7 @@ export class KickoffServer {
       crypto.randomUUID(),
       body.sessionId,
       typeof body.turnId === "string" ? body.turnId : undefined,
-      "canceled from the kickoff page",
+      "canceled from the console page",
     );
     return response.ok
       ? Response.json(response.result)
@@ -1135,12 +1135,12 @@ const chatErrorResponse = (response: HarnessChatResponse): Response =>
  * object into every turn — so what is set here holds for the whole session,
  * and the engine builds both lazily-cached client factories from it.
  */
-export const startKickoffServer = async (
+export const startConsoleServer = async (
   args: readonly string[] = Deno.args,
   env: Record<string, string | undefined> = Deno.env.toObject(),
   cwd: string = Deno.cwd(),
 ): Promise<void> => {
-  const config = resolveKickoffConfig(args, env, cwd);
+  const config = resolveConsoleConfig(args, env, cwd);
   for (
     const directory of [
       config.workspacePath,
@@ -1156,7 +1156,7 @@ export const startKickoffServer = async (
     ? undefined
     : await openSessionStore(config.sessionDbPath);
 
-  const server = new KickoffServer(
+  const server = new ConsoleServer(
     config,
     (onEvent) =>
       createHarnessInteractiveChatService({
@@ -1192,7 +1192,7 @@ export const startKickoffServer = async (
     hostname: HOSTNAME,
     port: config.port,
     onListen: () => {
-      console.log(`\n  cf-harness kickoff: http://${HOSTNAME}:${config.port}`);
+      console.log(`\n  cf-harness console: http://${HOSTNAME}:${config.port}`);
       console.log(`  space:      ${config.fabricSession.space}`);
       console.log(`  fabric:     ${config.fabricSession.apiUrl}`);
       console.log(
@@ -1223,7 +1223,7 @@ export const startKickoffServer = async (
 // Running the file serves; importing it (the tests do) serves nothing.
 if (import.meta.main) {
   try {
-    await startKickoffServer();
+    await startConsoleServer();
   } catch (error) {
     // A misconfigured server is an operator's problem to fix, and the message
     // is the whole of what they need; the stack behind it is noise.

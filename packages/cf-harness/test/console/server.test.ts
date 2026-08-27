@@ -1,8 +1,8 @@
 import { beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { KickoffServer, resolveKickoffConfig } from "../../kickoff/server.ts";
-import type { KickoffSessionListing } from "../../kickoff/sessions.ts";
+import { ConsoleServer, resolveConsoleConfig } from "../../console/server.ts";
+import type { ConsoleSessionListing } from "../../console/sessions.ts";
 import type { HarnessFetch } from "../../src/contracts/http-fetch.ts";
 import { PatternIndexClient } from "../../src/pattern-index/client.ts";
 import {
@@ -15,7 +15,7 @@ import type {
 } from "../../src/prompt-loop.ts";
 
 /**
- * A loop that answers the task it was given and nothing else. The kickoff
+ * A loop that answers the task it was given and nothing else. The console
  * server's routes are what these tests are about, so the turn behind them only
  * has to reach a terminal state.
  */
@@ -51,37 +51,37 @@ const advancingClock = () => {
 };
 
 /** The identity the proxied index client signs with in these tests. */
-const signer = await Identity.fromPassphrase("cf-harness kickoff index proxy");
+const signer = await Identity.fromPassphrase("cf-harness console index proxy");
 
 const config = () =>
-  resolveKickoffConfig(
+  resolveConsoleConfig(
     [
       "--fabric-identity",
       "key.pkcs8",
       "--fabric-space",
-      "kickoff-test",
+      "console-test",
       "--session-db",
       "none",
     ],
     {},
-    "/kickoff",
+    "/console",
   );
 
 /** The same configuration, with an index for the proxy route to reach. */
 const configWithIndex = () =>
-  resolveKickoffConfig(
+  resolveConsoleConfig(
     [
       "--fabric-identity",
       "key.pkcs8",
       "--fabric-space",
-      "kickoff-test",
+      "console-test",
       "--session-db",
       "none",
       "--pattern-index-url",
       "https://index.test/api",
     ],
     {},
-    "/kickoff",
+    "/console",
   );
 
 const jsonRequest = (
@@ -100,13 +100,13 @@ const getRequest = (
   headers: Record<string, string> = {},
 ): Request => new Request(`http://127.0.0.1:8100${path}`, { headers });
 
-describe("kickoff/server", () => {
-  let server: KickoffServer;
+describe("console/server", () => {
+  let server: ConsoleServer;
   /** The `Cookie` header the page carries, as loading the page hands it out. */
   let cookie: string;
 
   beforeEach(async () => {
-    server = new KickoffServer(
+    server = new ConsoleServer(
       config(),
       (onEvent) =>
         new HarnessInteractiveChatService({
@@ -133,7 +133,7 @@ describe("kickoff/server", () => {
     return started;
   };
 
-  const listSessions = async (): Promise<KickoffSessionListing> => {
+  const listSessions = async (): Promise<ConsoleSessionListing> => {
     const response = await server.handle(
       getRequest("/api/sessions", { cookie }),
     );
@@ -156,7 +156,7 @@ describe("kickoff/server", () => {
   const indexServer = async (
     responses: readonly Response[],
   ): Promise<
-    { server: KickoffServer; cookie: string; requests: IndexRequest[] }
+    { server: ConsoleServer; cookie: string; requests: IndexRequest[] }
   > => {
     const requests: IndexRequest[] = [];
     let answered = 0;
@@ -169,7 +169,7 @@ describe("kickoff/server", () => {
       answered += 1;
       return Promise.resolve(response);
     };
-    const indexed = new KickoffServer(
+    const indexed = new ConsoleServer(
       configWithIndex(),
       (onEvent) =>
         new HarnessInteractiveChatService({
@@ -314,7 +314,7 @@ describe("kickoff/server", () => {
   describe("POST /api/index/call", () => {
     /** Posts one proxied read at a server that has an index. */
     const call = async (
-      indexed: { server: KickoffServer; cookie: string },
+      indexed: { server: ConsoleServer; cookie: string },
       body: unknown,
     ): Promise<Response> =>
       await indexed.server.handle(
@@ -325,7 +325,7 @@ describe("kickoff/server", () => {
       // A factory that cannot build its client throws host-side — an
       // unreadable keyfile names the path the operator configured, which the
       // page must not read.
-      const server = new KickoffServer(
+      const server = new ConsoleServer(
         config(),
         (onEvent) =>
           new HarnessInteractiveChatService({
@@ -539,7 +539,7 @@ describe("kickoff/server", () => {
       await response.body?.cancel();
 
       const setCookie = response.headers.get("set-cookie") ?? "";
-      expect(setCookie).toMatch(/^cf_harness_kickoff_token=.+/);
+      expect(setCookie).toMatch(/^cf_harness_console_token=.+/);
       expect(setCookie).toContain("SameSite=Strict");
       expect(setCookie).toContain("HttpOnly");
       expect(setCookie).toContain("Path=/");
@@ -620,7 +620,7 @@ describe("kickoff/server", () => {
       const response = await server.handle(
         getRequest("/api/sessions", {
           cookie:
-            "cf_harness_kickoff_token=00000000-0000-4000-8000-000000000000",
+            "cf_harness_console_token=00000000-0000-4000-8000-000000000000",
         }),
       );
 
