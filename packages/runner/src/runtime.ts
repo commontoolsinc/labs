@@ -68,6 +68,7 @@ import {
 } from "./cell.ts";
 import { createRef, EntityId } from "./create-ref.ts";
 import {
+  type EventIntentOutcome,
   SpeculationOverlayDestination,
   stampSpeculationRunContext,
 } from "./speculation/overlay-destination.ts";
@@ -126,7 +127,7 @@ import type { ConsoleMessage } from "./interface.ts";
 import { ModuleRegistry } from "./module.ts";
 import type { PatternCoverageCollector } from "./pattern-coverage.ts";
 import { PatternManager } from "./pattern-manager.ts";
-import { PatternUpdater } from "./pattern-updater.ts";
+import { SourceReconciler } from "./source-reconciler.ts";
 import { snapshotQueryResult } from "./query-result-proxy.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
 import { type PieceSourceTransition, Runner } from "./runner.ts";
@@ -281,15 +282,6 @@ export interface ExperimentalOptions {
    * dispose resets).
    */
   readerSchemaPrecedence?: boolean | undefined;
-
-  /**
-   * Roll toolshed-backed patterns forward in place when their source serves a
-   * newer content identity. Persisted default roots reconcile before start;
-   * other patterns check in the background after instantiation. Default off;
-   * enabled per deployment once CI golden-replay coverage exists. See
-   * docs/specs/pattern-imports/pattern-updates.md.
-   */
-  systemPatternAutoUpdate?: boolean | undefined;
 
   /**
    * Server-execution v2 (docs/specs/server-side-execution/): one flag, two
@@ -858,7 +850,7 @@ export class Runtime {
   readonly id: string;
   readonly scheduler: Scheduler;
   readonly patternManager: PatternManager;
-  readonly patternUpdater: PatternUpdater;
+  readonly sourceReconciler: SourceReconciler;
   readonly moduleRegistry: ModuleRegistry;
   readonly harness: Engine;
   readonly runner: Runner;
@@ -1448,7 +1440,7 @@ export class Runtime {
       this.userIdentityDID = options.storageManager.as.did() as DID;
       this.moduleRegistry = new ModuleRegistry(this);
       this.patternManager = new PatternManager(this);
-      this.patternUpdater = new PatternUpdater(this);
+      this.sourceReconciler = new SourceReconciler(this);
       this.runner = new Runner(this);
       this.onPatternInstantiated = options.onPatternInstantiated;
       this.cfcEnforcementMode = options.cfcEnforcementMode ??
@@ -1804,7 +1796,7 @@ export class Runtime {
    * makes a subsequent read of the store a statement about a state this runtime
    * actually reached. `idle()` and `synced()` cannot substitute, because they
    * say nothing about the background work that only teardown stops —
-   * `patternUpdater`'s source checks and the runner's pointer-commit
+   * `sourceReconciler`'s source checks and the runner's pointer-commit
    * roll-forwards both live outside the scheduler and can still commit. That
    * path also drains in-flight async builtin work first; see below.
    *
@@ -1901,7 +1893,7 @@ export class Runtime {
 
       // Background source checks are deliberately outside the scheduler. Abort
       // and settle them before the storage sessions they may write through close.
-      await this.patternUpdater.dispose();
+      await this.sourceReconciler.dispose();
 
       // Same contract for the runner's unloadable-pointer roll-forward commits
       // (CT-1923): settle before their storage sessions close. Commits only —
@@ -2094,6 +2086,18 @@ export class Runtime {
    * runtime has one. */
   get speculationOverlay(): SpeculationOverlayDestination | undefined {
     return this.#speculationOverlay;
+  }
+
+  /** Observe terminal client event-intent outcomes. Subscribing eagerly
+   * installs the flag-ON client overlay so the production IPC bridge cannot
+   * miss the first outcome while waiting for the first speculative edit. */
+  subscribeEventIntentOutcomes(
+    subscriber: (outcome: EventIntentOutcome) => void,
+  ): () => void {
+    return this.#speculationDestination()?.subscribeIntentOutcomes(
+      subscriber,
+    ) ??
+      (() => undefined);
   }
 
   /** The client-effect channel of a flag-ON non-serving runtime
@@ -2374,7 +2378,9 @@ export class Runtime {
     return this.writeDebugContext.run(label, fn);
   }
 
-  setWriteStackTraceMatchers(matchers: WriteStackTraceMatcher[]): void {
+  setWriteStackTraceMatchers(
+    matchers: readonly WriteStackTraceMatcher[],
+  ): void {
     setWriteStackTraceMatchers(matchers, { scopeId: this.id });
   }
 
@@ -2404,9 +2410,21 @@ export class Runtime {
    * the FIRST attempt, because re-running cannot change the outcome and each
    * doomed attempt costs a round-trip plus a subscriber revert notification.
    *
+   * A caller that decides inside the transaction whether to write at all — one
+   * re-reading a precondition against the fresh state each retry sees — says so
+   * through the value `fn` returns, which comes back as `ok`. An `ok` of
+   * `false` carrying no `error` is the convention for a write that was declined
+   * rather than one that failed. The bound on that convention is that we commit
+   * whatever `fn` staged, whatever `fn` returned: declining does not abort the
+   * transaction, so it stands for "nothing was written" only where the callback
+   * stages nothing before it declines.
+   *
    * @param fn - Function to execute with the transaction.
    * @param maxRetries - Maximum number of retries.
-   * @returns Promise<boolean> that resolves to true on success, or false after exhausting retries.
+   * @returns `{ ok }` once the transaction commits, carrying whatever `fn`
+   *   returned, or `{ error }` when it does not commit: a rejection that is not
+   *   retryable, a retryable one whose retries are spent, or `fn` itself
+   *   throwing, which aborts the transaction.
    */
   editWithRetry<T = void>(
     fn: (tx: IExtendedStorageTransaction) => T,
@@ -3015,29 +3033,20 @@ export class Runtime {
     patternFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
-    options?: { schedulePatternUpdate?: boolean },
   ): Cell<R>;
   run<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     pattern: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-    options?: { schedulePatternUpdate?: boolean },
   ): Cell<R>;
   run<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     patternOrModule: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-    options: { schedulePatternUpdate?: boolean } = {},
   ): Cell<R> {
-    return this.runner.run<T, R>(
-      tx,
-      patternOrModule,
-      argument,
-      resultCell,
-      options,
-    );
+    return this.runner.run<T, R>(tx, patternOrModule, argument, resultCell);
   }
 
   runSynced(
@@ -3060,11 +3069,8 @@ export class Runtime {
     return this.runner.runSynced(resultCell, pattern, inputs, options);
   }
 
-  start<T = any>(
-    resultCell: Cell<T>,
-    options: { schedulePatternUpdate?: boolean } = {},
-  ): Promise<boolean> {
-    return this.runner.start(resultCell, options);
+  start<T = any>(resultCell: Cell<T>): Promise<boolean> {
+    return this.runner.start(resultCell);
   }
 
   /**

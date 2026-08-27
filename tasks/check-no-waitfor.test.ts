@@ -69,8 +69,10 @@ Deno.test("importsPollingWaitFor detects an aliased import", () => {
   );
 });
 
+//
 // A type-only import binds the type of `waitFor` and is erased before the test
 // runs, so it cannot poll. The value forms below it still have to be caught.
+//
 
 Deno.test("importsPollingWaitFor ignores a type-only import statement", () => {
   assertEquals(
@@ -164,8 +166,10 @@ Deno.test("importsPollingWaitFor ignores a commented-out member", () => {
   assertEquals(importsPollingWaitFor(source), false);
 });
 
+//
 // Commenting the import out is the first step of migrating a test off the
 // polling waitFor, so none of these shapes may be flagged.
+//
 
 Deno.test("importsPollingWaitFor ignores an import in a line comment", () => {
   assertEquals(
@@ -210,7 +214,9 @@ Deno.test("importsPollingWaitFor ignores an import inside a template literal", (
   assertEquals(importsPollingWaitFor(source), false);
 });
 
+//
 // The blanking of comments and strings must not swallow the code around them.
+//
 
 Deno.test("importsPollingWaitFor detects an import after a comment holding an apostrophe and a brace", () => {
   const source = [
@@ -228,9 +234,9 @@ Deno.test("importsPollingWaitFor detects an import after a template literal", ()
   assert(importsPollingWaitFor(source));
 });
 
-// A template literal ends at its own closing backtick even when it holds a
-// nested one, so what follows is read as code again.
 Deno.test("importsPollingWaitFor detects an import after a nested template literal", () => {
+  // A template literal ends at its own closing backtick even when it holds a
+  // nested one, so what follows is read as code again.
   const source = [
     "const label = `a ${`b ${c}`} d`;",
     'import { waitFor } from "@commonfabric/integration";',
@@ -238,16 +244,18 @@ Deno.test("importsPollingWaitFor detects an import after a nested template liter
   assert(importsPollingWaitFor(source));
 });
 
-// A string may carry a newline through a trailing backslash, so the scan cannot
-// simply stop looking at the end of the line.
 Deno.test("importsPollingWaitFor ignores an import in a line-continued string", () => {
+  // A string may carry a newline through a trailing backslash, so the scan
+  // cannot simply stop looking at the end of the line.
   const source = 'const sample = "\\\n' +
     "import { waitFor } from '@commonfabric/integration';\\\n" +
     '";';
   assertEquals(importsPollingWaitFor(source), false);
 });
 
+//
 // A relative path reaches the same waitFor without naming the package.
+//
 
 Deno.test("importsPollingWaitFor detects a relative import of the package's utils.ts", () => {
   assert(
@@ -324,9 +332,11 @@ Deno.test("isIntegrationTestFile excludes non-integration and non-ts files", () 
   );
 });
 
+//
 // The following two tests run against the real repository tree. Together they
 // assert that the set of in-scope files importing the polling `waitFor` equals
 // the ALLOWLIST exactly.
+//
 
 Deno.test("no un-allowlisted polling waitFor in integration tests", async () => {
   const { violations } = await scan();

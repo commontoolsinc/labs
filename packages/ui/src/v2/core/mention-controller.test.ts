@@ -29,9 +29,9 @@ function createMentionableCell(names: string[]) {
   });
 }
 
-// ---------------------------------------------------------------------------
+//
 // Trigger detection and query extraction
-// ---------------------------------------------------------------------------
+//
 
 describe("MentionController — trigger detection", () => {
   it("shows mentions when @ is typed", () => {
@@ -99,9 +99,9 @@ describe("MentionController — trigger detection", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Filtering
-// ---------------------------------------------------------------------------
+//
 
 describe("MentionController — filtering", () => {
   it("returns all items when query is empty", () => {
@@ -136,9 +136,9 @@ describe("MentionController — filtering", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Keyboard navigation
-// ---------------------------------------------------------------------------
+//
 
 describe("MentionController — keyboard navigation", () => {
   function createShowingController() {
@@ -242,9 +242,9 @@ describe("MentionController — keyboard navigation", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Mention insertion and encoding
-// ---------------------------------------------------------------------------
+//
 
 describe("MentionController — mention insertion", () => {
   it("encodes mention as markdown link [name](encodedId)", async () => {
@@ -269,9 +269,9 @@ describe("MentionController — mention insertion", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // extractMentionsFromText
-// ---------------------------------------------------------------------------
+//
 
 describe("MentionController — extractMentionsFromText", () => {
   it("extracts mentions from markdown links", async () => {
@@ -316,9 +316,9 @@ describe("MentionController — extractMentionsFromText", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Lifecycle
-// ---------------------------------------------------------------------------
+//
 
 describe("MentionController — lifecycle", () => {
   it("hide() resets state", () => {

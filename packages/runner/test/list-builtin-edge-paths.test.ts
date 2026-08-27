@@ -321,14 +321,14 @@ describe("list builtin edge paths", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Resume harness for the owned-cell walk's nested-node branches.
 //
 // The walk (Runner.collectResumeOwnedCells) recurses through nested sub-pattern
 // nodes. A sub-pattern whose result cell carries a non-"space" cell scope makes
 // the walk re-scope the child result cell before recursing, the branch the
 // single-space resume tests do not reach. A cold resume drives the walk.
-// ---------------------------------------------------------------------------
+//
 
 function plainLoopback(
   server: MemoryV2Server.Server,
@@ -468,7 +468,7 @@ describe("resume owned-cell walk: scoped sub-pattern", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Cross-space link load kick (Runtime.ensureLinkedDocLoaded).
 //
 // A value read that follows a link to a target in ANOTHER space, whose doc is
@@ -477,7 +477,7 @@ describe("resume owned-cell walk: scoped sub-pattern", () => {
 // queries cannot follow links across space boundaries, so the client fetches
 // the target itself. A reader session that never created the target drives the
 // kick.
-// ---------------------------------------------------------------------------
+//
 
 const spaceH = signer.did(); // "home" — holds the link
 const spaceP = (await Identity.fromPassphrase("edge paths target P")).did();

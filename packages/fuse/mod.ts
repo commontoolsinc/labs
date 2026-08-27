@@ -745,8 +745,7 @@ export async function main(argv: string[] = Deno.args) {
     Deno.exit(1);
   }
 
-  // --- Callbacks ---
-  // Keep references so GC doesn't collect them.
+  // Callbacks: Keep references so GC doesn't collect them.
   // deno-lint-ignore no-explicit-any
   const callbacks: Deno.UnsafeCallback<any>[] = [];
 
@@ -3432,7 +3431,7 @@ export async function main(argv: string[] = Deno.args) {
   );
   callbacks.push(symlinkCb);
 
-  // --- Build ops struct ---
+  // Build ops struct
   const opsBuf = new ArrayBuffer(OPS_SIZE);
   const opsView = new DataView(opsBuf);
 
@@ -3473,7 +3472,7 @@ export async function main(argv: string[] = Deno.args) {
   }
   setOp(OPS_OFFSETS.create, createCb);
 
-  // --- Mount ---
+  // Mount
   const fuseArgs = buildMountFuseArgs({
     os: Deno.build.os,
     provider: platform.provider(),

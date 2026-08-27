@@ -19,9 +19,9 @@ import {
   symbolDeclaresCommonFabricDefault,
 } from "../../src/core/common-fabric-symbols.ts";
 
-// ---------------------------------------------------------------------------
+//
 // Test infrastructure
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Build a minimal TypeScript program from an in-memory file map.
@@ -117,9 +117,9 @@ function findFirstNode<T extends ts.Node>(
   return found;
 }
 
-// ---------------------------------------------------------------------------
+//
 // Tests
-// ---------------------------------------------------------------------------
+//
 
 describe("isCommonFabricModuleName", () => {
   it("matches Common Fabric module names", () => {

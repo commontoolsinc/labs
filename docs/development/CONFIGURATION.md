@@ -148,6 +148,7 @@ The toolshed-embedded memory service has two modes:
 | `MEMORY_DIR` | `./cache/memory/` (as a `file://` URL) | **Directory mode** — one SQLite file per space. Default; backwards-compatible. |
 | `DB_PATH` | _(unset)_ | **Single-file mode** — absolute path to one SQLite database holding every space, instead of a file per space. Takes precedence over `MEMORY_DIR`. Validated as an absolute path. |
 | `MEMORY_URL` | `http://localhost:8000` | Where other components reach the memory service. |
+| `MEMORY_WS_IDLE_TIMEOUT_SECONDS` | `300` | Pong deadline for memory WebSockets, in seconds. Set to `0` to disable it. Size it above the longest legitimate synchronous memory-server stretch, not as a network round-trip timeout. |
 | `MEMORY_ACL_MODE` | `enforce` | Space ACL policy: `off`, `observe`, or `enforce`. `observe` logs ordinary access shortfalls, while malformed ACLs and fresh-space genesis violations still fail closed. |
 | `RATE_LIMIT_TRUST_FORWARDED_FOR` | `false` | Set to `true` ONLY when a trusted reverse proxy that overwrites `X-Forwarded-For` sits in front of toolshed. Control-plane rate limiting keys on the real TCP peer by default. Enabling it without such a proxy makes the header client-controlled and the limiter a no-op; leaving it off behind a proxy collapses every caller onto one bucket. |
 | `MEMORY_SERVICE_DIDS` | _(empty)_ | Comma-separated DIDs with implicit OWNER on every space. These identities may initialize ACLs but still cannot make an ordinary first write before genesis. |
@@ -273,7 +274,6 @@ that is:
 | `modernCellRep` | `EXPERIMENTAL_MODERN_CELL_REP` |
 | `contentAddressedSchemas` | `EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS` |
 | `plainResultReceipts` | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` |
-| `systemPatternAutoUpdate` | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` |
 | `computedCellIds` | `EXPERIMENTAL_COMPUTED_CELL_IDS` |
 | `lazyMaterialization` | `EXPERIMENTAL_LAZY_MATERIALIZATION` |
 | `readerSchemaPrecedence` | `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` |
@@ -295,9 +295,9 @@ Most shell config is **build-time**: esbuild injects defines in
 |---|---|---|---|
 | `PRODUCTION` | `$ENVIRONMENT` (`"production"` if set, else `"development"`) | _(unset = dev)_ | Triggers minified bundle and disables sourcemaps. |
 | `API_URL` | `$API_URL` | falls back to `location.origin` | Backend the shell calls. |
-| `PRESENCE_URL` | `$PRESENCE_URL` | _(unset)_ | WebSocket endpoint provided to collaborative editors for ephemeral co-presence. When unset, editor co-presence stays disabled unless a component supplies its own endpoint. |
+| `PRESENCE_URL` | `$PRESENCE_URL` | _(unset)_ | WebSocket endpoint provided to collaborative editors for ephemeral co-presence. Must be a credential-free `ws:`/`wss:` URL; `packages/shell/src/lib/presence-url.ts` rejects anything else and fails the build. When unset, editor co-presence stays disabled unless a component supplies its own endpoint. Both deployed shells take it from a repository variable — see [Deploying a commit](./deploying.md). |
 | `COMMIT_SHA` | `$COMMIT_SHA` | _(unset)_ | Surfaced for diagnostics and used by deployed shells to select the immutable `/builds/<sha>` worker asset graph. In development the explicit worker URL remains `/scripts/worker-runtime.js`. It does not authorize system-pattern updates. |
-| `EXPERIMENTAL_*` (`MODERN_CELL_REP`, `COMPUTED_CELL_IDS`, `SYSTEM_PATTERN_AUTOUPDATE`, `SERVER_EXECUTION`, `CONTENT_ADDRESSED_SCHEMAS`, `READER_SCHEMA_PRECEDENCE`) | `EXPERIMENTAL.<flag>` | _(unset)_ | Per-flag build-time values; changing one requires a rebuild. See experimental flags. |
+| `EXPERIMENTAL_*` (`MODERN_CELL_REP`, `COMPUTED_CELL_IDS`, `SERVER_EXECUTION`, `CONTENT_ADDRESSED_SCHEMAS`, `READER_SCHEMA_PRECEDENCE`) | `EXPERIMENTAL.<flag>` | _(unset)_ | Per-flag build-time values; changing one requires a rebuild. See experimental flags. |
 | `SHELL_PORT` | _(server-only)_ | `5173` (from `ports.json`) | Dev server port. |
 
 ---

@@ -50,7 +50,8 @@ Deno.test("the real manifest passes end to end", async () => {
   assertEquals(await main(), 0);
 });
 
-// --- the evasion paths -----------------------------------------------------
+//
+// the evasion paths
 //
 // Each of these is a way someone silences the reminder without meaning to.
 // They were originally verified by hand, once; a guard whose failure modes are
@@ -59,6 +60,7 @@ Deno.test("the real manifest passes end to end", async () => {
 // Each case writes its own fixture file rather than pointing at a real one.
 // Self-reference bites here: a literal ".ignore(" anywhere in this file would
 // make the healthy case trip the DISABLED branch.
+//
 
 const SENTINEL = "@tripwire:probe-sentinel";
 

@@ -578,14 +578,11 @@ describe("committed-write backpressure", () => {
   );
 
   it(
-    "reports a CFC-refused write dropped on the terminal disposition",
+    "does not mistake a RowLabel verdict with CFC-like text for a boundary refusal",
     async () => {
-      // A CFC-refused write is silent data loss of user intent: the UI's
-      // write never lands. `reportDroppedCfcRejectedWrite` exists to say so
-      // unconditionally, because the `logger.warn` beside it is the opt-in
-      // scheduler logger and is disabled in deployed workers (labs#4772).
-      // The refusal is classified terminal rather than give-up, so the report
-      // has to hang off both dispositions — this pins the terminal one.
+      // OW54 routes a RowLabel verdict through the proven-no-commit terminal
+      // cover. Keep the older client-side CFC reporting arm keyed to its exact
+      // error name: overlapping prose is not a type discriminator.
       const piece = buildCounterPiece(
         runtime,
         tx,
@@ -596,14 +593,6 @@ describe("committed-write backpressure", () => {
       await runtime.idle();
 
       const commitTelemetry = collectEventCommitMarkers(runtime);
-      // The injection names `RowLabelCommitError` because the rejection has
-      // to arrive over the wire to reach this path, and `toRejectedError`
-      // preserves only the names on its allow-list — a client-minted
-      // `CfcCommitRefusalError` never round-trips, so it cannot be injected
-      // here. What is under test is the ROUTING, not the provenance: a
-      // rejection classified terminal whose message is a CFC refusal must
-      // still be reported, and both halves of that pairing are what the
-      // real client-side refusal presents to this switch.
       const injector = rejectServerTransacts(storageManager, Infinity, {
         name: "RowLabelCommitError",
         message: "CFC enforcement rejected commit: relevant transaction was " +
@@ -623,14 +612,14 @@ describe("committed-write backpressure", () => {
         await commitTelemetry.firstMarker;
         await runtime.idle();
 
-        // The refused write did not land, and the drop was reported rather
-        // than left to the opt-in logger.
+        // The refused write did not land, but this is not the client-side CFC
+        // refusal that owns the legacy report.
         expect(piece.total()).toBe(0);
         expect(
           reported.some((args) =>
             String(args[0]).includes("Owner-protected write dropped")
           ),
-        ).toBe(true);
+        ).toBe(false);
       } finally {
         console.error = originalConsoleError;
         injector.restore();

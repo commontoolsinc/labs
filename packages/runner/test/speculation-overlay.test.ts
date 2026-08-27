@@ -99,7 +99,6 @@ describe("Phase 2 speculation overlay", () => {
           servingPosture: true,
           experimental: {
             serverExecution: true,
-            systemPatternAutoUpdate: false,
           },
         });
         _servingRuntime = runtime;

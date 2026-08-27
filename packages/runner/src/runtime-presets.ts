@@ -146,9 +146,9 @@ import type {
   RuntimeOptions,
 } from "./runtime.ts";
 
-// ---------------------------------------------------------------------------
+//
 // Gate 1: the exhaustive option registry.
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Every key of `RuntimeOptions`, by hand. The `satisfies` clause rejects
@@ -237,7 +237,6 @@ export const EXPERIMENTAL_ENV_VARS = {
   // proof (#5244); env-reachable so a process can opt out with an explicit
   // "false" while the flag exists.
   plainResultReceipts: "EXPERIMENTAL_PLAIN_RESULT_RECEIPTS",
-  systemPatternAutoUpdate: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE",
   computedCellIds: "EXPERIMENTAL_COMPUTED_CELL_IDS",
   lazyMaterialization: "EXPERIMENTAL_LAZY_MATERIALIZATION",
   // Reader precedence at link crossings is default-on; env-reachable so a
@@ -276,9 +275,9 @@ export function experimentalOptionsFromEnv(
   return opts;
 }
 
-// ---------------------------------------------------------------------------
+//
 // Gate 3: which flags a deployed client takes from the server it talks to.
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Where a client resolves one flag when it is not built alongside the server
@@ -327,10 +326,6 @@ export const EXPERIMENTAL_FLAG_AUTHORITY = {
   // runs the handler, so a client on the other value reads back a receipt
   // shaped by a rule it does not share.
   plainResultReceipts: "server",
-  // Whether this deployment rolls patterns forward in place. Both runtimes
-  // race the update under the flag, OCC-guarded; a client on the other value
-  // either never participates or drags a deployment that opted out.
-  systemPatternAutoUpdate: "server",
   // Entity-id minting: a peer predating the `computed:` scheme throws on such
   // ids arriving via sync, so the scheme has to be fleet-wide.
   computedCellIds: "server",
@@ -550,9 +545,9 @@ export async function experimentalOptionsForDeployedClient(
   );
 }
 
-// ---------------------------------------------------------------------------
+//
 // The max-enforcement CFC posture (CT-2075's named bundle).
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Names of the CFC posture bundles a preset caller can opt into. One posture
@@ -621,9 +616,9 @@ export const MAX_ENFORCEMENT_CFC_OPTIONS = Object.freeze(
   } as const,
 ) satisfies Partial<RuntimeOptions>;
 
-// ---------------------------------------------------------------------------
+//
 // Gate 4: the shared core all presets compose.
-// ---------------------------------------------------------------------------
+//
 
 interface CoreParams {
   /** Base URL of the memory/API service this runtime talks to. */
@@ -704,9 +699,9 @@ function coreOptions(params: CoreParams): RuntimeOptions {
   };
 }
 
-// ---------------------------------------------------------------------------
+//
 // The presets.
-// ---------------------------------------------------------------------------
+//
 
 export interface ProductionServerPresetParams extends CoreParams {
   /**

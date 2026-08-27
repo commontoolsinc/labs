@@ -437,9 +437,9 @@ export interface TestRunnerOptions {
   };
 }
 
-// ---------------------------------------------------------------------------
+//
 // Verbose-mode logger stats helpers
-// ---------------------------------------------------------------------------
+//
 
 type GlobalWithLoggers = {
   commonfabric?: {

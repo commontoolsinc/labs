@@ -6,10 +6,11 @@
 import { css } from "lit";
 
 export const styles = css`
-  /* ================================================
-  * Leaflet Core CSS (v1.9.4)
-  * Required for proper map rendering in Shadow DOM
-  * ================================================ */
+  /*
+  ** Leaflet Core CSS (v1.9.4)
+  **
+  ** Required for proper map rendering in Shadow DOM
+  */
 
   /* required styles */
 
@@ -690,10 +691,11 @@ export const styles = css`
     }
   }
 
-  /* ================================================
-  * cf-map Component Styles
-  * Theme-integrated styles for the map container
-  * ================================================ */
+  /*
+  ** cf-map Component Styles
+  **
+  ** Theme-integrated styles for the map container
+  */
 
   :host {
     display: block;
@@ -728,10 +730,11 @@ export const styles = css`
     font-family: var(--cf-font-family, inherit);
   }
 
-  /* ================================================
-  * Popup Theme Integration
-  * Override Leaflet popup styles with cf-* theme
-  * ================================================ */
+  /*
+  ** Popup Theme Integration
+  **
+  ** Override Leaflet popup styles with cf-* theme
+  */
 
   .leaflet-popup-content-wrapper,
   .leaflet-popup-tip {
@@ -851,10 +854,11 @@ export const styles = css`
     outline-offset: 2px;
   }
 
-  /* ================================================
-  * Custom Marker Icon Styles
-  * Styles for divIcon-based markers (emoji and default)
-  * ================================================ */
+  /*
+  ** Custom Marker Icon Styles
+  **
+  ** Styles for divIcon-based markers (emoji and default)
+  */
 
   /* Default marker icon (SVG pin) */
   .cf-map-default-marker {

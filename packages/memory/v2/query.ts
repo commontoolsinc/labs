@@ -283,10 +283,299 @@ export type QueryGraphReuseContext = {
   managers?: Map<string, EngineObjectManager>;
 };
 
+/**
+ * Canonical selector identity for evaluation-cache keys. Interning gives
+ * structurally equal selectors one canonical instance
+ * (`internPathSelector`), so reference identity is structural equality and
+ * the id is exact. Canonical instances are weakly held, so an id can lapse
+ * with its selector and a re-interned equal reappears under a fresh id —
+ * that costs a cache miss, never a wrong hit.
+ */
+let nextCanonicalSelectorId = 0;
+const canonicalSelectorIds = new WeakMap<SchemaPathSelector, number>();
+const canonicalSelectorId = (selector: SchemaPathSelector): number => {
+  const interned = internPathSelector(selector);
+  let id = canonicalSelectorIds.get(interned);
+  if (id === undefined) {
+    id = nextCanonicalSelectorId++;
+    canonicalSelectorIds.set(interned, id);
+  }
+  return id;
+};
+
+const evaluationQueryKey = (query: GraphQuery): string =>
+  JSON.stringify([
+    query.branch ?? "",
+    query.roots
+      .map((root) => [
+        root.id,
+        root.scope ?? DEFAULT_SCOPE,
+        root.entityScopeKey ?? "",
+        canonicalSelectorId(toDocumentSelector(root.selector)),
+      ])
+      .map((parts) => JSON.stringify(parts))
+      .toSorted(),
+  ]);
+
+const evaluationIdentityKey = (options: TrackGraphOptions): string =>
+  JSON.stringify([options.principal ?? null, options.sessionId ?? null]);
+
+/**
+ * Bounds an evaluation cache's entry COUNT — the cardinality backstop for
+ * adversarial query-shape churn, not the memory bound. Memory is bounded
+ * by the server's cross-space retained-entity budget, which evicts by
+ * weight (see Server's evaluation-cache budget).
+ */
+const EVALUATION_CACHE_MAX_ENTRIES = 16;
+
+export type QueryEvaluationCacheDiagnostics = {
+  seq: number;
+  entries: number;
+  weight: number;
+  hits: number;
+  misses: number;
+  rotations: number;
+};
+
+/**
+ * Caches whole tracked-graph evaluations per (query shape, engine seq).
+ *
+ * The WHOLE evaluation is the smallest soundly shareable unit: within one
+ * walk, an already-covered (doc, selector) skips its subtree — including
+ * the tracker registrations that subtree would record — so any per-document
+ * slice of a walk's effects depends on what its siblings covered first, and
+ * replaying one standalone under-registers coverage. A complete evaluation
+ * carries no such context.
+ *
+ * Entries are valid only at the engine seq they were evaluated at; a seq
+ * advance rotates the whole cache. Staleness is therefore structural — no
+ * write hooks, no dependency tracking — and the sharing this buys is
+ * exactly where the cost multiplies: many sessions establishing the same
+ * watch corpus between two commits (a reconnect stampede after a process
+ * death is this, at its worst).
+ *
+ * Scope purity decides who may share an entry. An evaluation whose whole
+ * reach — tracked, missed, and loaded — resolved under the `space` scope is
+ * identical for every identity and is shared across them; one that touched
+ * a session- or user-scoped instance is keyed to the evaluating identity
+ * (key-vocabulary.md §5's identity-bound invariant — the same value-bleed
+ * rule `assertSchemaMemoIdentity` enforces for the inner schema memos).
+ * ACL changes are themselves commits, so a grant or revocation rotates the
+ * cache before any post-change evaluation could be served from it.
+ */
+export type QueryEvaluationCache = {
+  /** The engine the entries were evaluated against. A sequence number
+   * identifies state only within its engine, so a different engine object
+   * for the same space rotates the cache exactly as a seq advance does —
+   * both entry points accept a caller-supplied engine. */
+  engine: Engine.Engine | null;
+  seq: number;
+  entries: Map<
+    string,
+    { state: TrackedGraphState; share: StateScopeClass; weight: number }
+  >;
+  /** Sum of entry weights (retained entity count — the proxy for the
+   * parsed documents an entry keeps alive). The server enforces its
+   * cross-space budget against this. */
+  weight: number;
+  hits: number;
+  misses: number;
+  rotations: number;
+};
+
+export const createQueryEvaluationCache = (): QueryEvaluationCache => ({
+  engine: null,
+  seq: -1,
+  entries: new Map(),
+  weight: 0,
+  hits: 0,
+  misses: 0,
+  rotations: 0,
+});
+
+export const queryEvaluationCacheDiagnostics = (
+  cache: QueryEvaluationCache,
+): QueryEvaluationCacheDiagnostics => ({
+  seq: cache.seq,
+  entries: cache.entries.size,
+  weight: cache.weight,
+  hits: cache.hits,
+  misses: cache.misses,
+  rotations: cache.rotations,
+});
+
+/**
+ * How an evaluation's reach constrains who may share its cache entry.
+ *
+ * `pure`: every key resolved under the space scope — the result is
+ * identical for every identity. `absent-residue`: identity-dependent ONLY
+ * through scoped value-link dead-ends (`missed` keys — docs that were
+ * ABSENT), which is the shape a live corpus actually produces: per-session
+ * draft cells linked from shared documents that no fresh session has ever
+ * written. Such an entry serves another identity by REWRITING those keys
+ * to the requester's own instances — sound because the keys are the only
+ * identity-dependent part of the state (nothing was delivered from them,
+ * nothing was traversed under them) — after verifying each is absent for
+ * the requester too. `tainted`: scoped PRESENT data reached the tracker,
+ * or a key did not classify; the entry stays keyed to its identity.
+ */
+type StateScopeClass =
+  | { kind: "pure" }
+  | {
+    kind: "absent-residue";
+    residue: { key: QueryDocKey; id: string; scope: CellScope }[];
+  }
+  | { kind: "tainted" };
+
+/** Exported for testing (the malformed-key guard is unreachable through
+ * a real walk while the scope-key vocabulary holds). */
+export const classifyStateScope = (
+  state: TrackedGraphState,
+): StateScopeClass => {
+  for (const [key] of state.tracker) {
+    if (fromDocKey(key as QueryDocKey).scopeKey !== "space") {
+      return { kind: "tainted" };
+    }
+  }
+  for (const address of state.manager.loadedAddresses()) {
+    // Both halves checked deliberately: an explicit entity_scope_key can
+    // pair a non-space scope NAME with an aliased key, and such a load
+    // must never classify as shared. (Explicit foreign keys are
+    // lease-holder-only, and that whole session class bypasses the cache
+    // — this guards the invariant locally as well.)
+    if (address.scopeKey !== "space" || address.scope !== "space") {
+      return { kind: "tainted" };
+    }
+  }
+  const residue: { key: QueryDocKey; id: string; scope: CellScope }[] = [];
+  for (const [key] of state.missed) {
+    // The scope-key vocabulary is closed (isScopeKey), so a key that is
+    // not the space instance necessarily recovers a session or user
+    // scope; fromDocKey throws on anything outside the vocabulary.
+    const { id, scope, scopeKey } = fromDocKey(key as QueryDocKey);
+    if (scopeKey === "space") continue;
+    residue.push({ key: key as QueryDocKey, id, scope });
+  }
+  return residue.length === 0
+    ? { kind: "pure" }
+    : { kind: "absent-residue", residue };
+};
+
+/**
+ * Serve an `absent-residue` entry to `options`' identity: verify each
+ * residue doc is ABSENT for the requester too, then clone with the
+ * residue's miss keys rewritten to the requester's instances — so the
+ * clone's wake and dirty-refresh reactivity points at the docs the OWNING
+ * session would create, not the recording session's.
+ *
+ * The absence probes are load-bearing and cannot be skipped for a
+ * different identity: the requester's instance may have existed since
+ * before the entry was recorded (the recording walk never looked at it).
+ * They are also sufficient — entries live only within one engine seq, and
+ * absence cannot change without a commit. A present instance returns
+ * null: the caller evaluates normally, and that evaluation's tracker then
+ * carries the scoped doc, keying its own entry to the identity.
+ */
+const cloneWithRewrittenResidue = (
+  engine: Engine.Engine,
+  space: string,
+  state: TrackedGraphState,
+  residue: { key: QueryDocKey; id: string; scope: CellScope }[],
+  options: TrackGraphOptions,
+): { state: TrackedGraphState | null; probeReads: number } => {
+  const identity: ScopeKeyIdentity = {
+    principal: options.principal,
+    sessionId: options.sessionId,
+  };
+  const mapping = new Map<string, string>();
+  let probeReads = 0;
+  for (const { key, id, scope } of residue) {
+    const requesterScopeKey = resolveScopeKey(scope, identity);
+    const requesterKey = `${space}/${requesterScopeKey}/${id}`;
+    if (requesterKey !== key) {
+      probeReads++;
+      const probe = Engine.readState(engine, {
+        id,
+        scope,
+        scopeKey: requesterScopeKey,
+        principal: options.principal,
+        sessionId: options.sessionId,
+        branch: state.branch,
+      });
+      if (probe !== null && probe.document !== null) {
+        // Refused — but the probes already performed are reads this call
+        // made, and the caller's statistics must carry them.
+        return { state: null, probeReads };
+      }
+      mapping.set(key, requesterKey);
+    }
+  }
+  const clone = cloneTrackedGraphStateForIdentity(engine, state, options);
+  if (mapping.size === 0) {
+    return { state: clone, probeReads };
+  }
+  const missed = new MapSetStringToPathSelectors(true);
+  for (const [key, selectors] of clone.missed) {
+    const mapped = mapping.get(key) ?? key;
+    for (const selector of selectors) {
+      missed.add(mapped, selector);
+    }
+  }
+  const missedBy = new Map<string, Set<string>>();
+  for (const [key, referrers] of clone.missedBy) {
+    missedBy.set(mapping.get(key) ?? key, referrers);
+  }
+  const missesOf = new Map<string, Set<string>>();
+  for (const [referrer, misses] of clone.missesOf) {
+    missesOf.set(
+      referrer,
+      new Set([...misses].map((miss) => mapping.get(miss) ?? miss)),
+    );
+  }
+  return { state: { ...clone, missed, missedBy, missesOf }, probeReads };
+};
+
+/**
+ * Clone for a cache hit: `cloneTrackedGraphState` rebound to the
+ * requesting identity. Only scope-pure entries are ever cloned across
+ * identities, so every key, entity, memo entry, and manager cache line in
+ * the source resolved identically to what this identity's own evaluation
+ * would have produced; the rebind exists so the clone's LATER operations —
+ * refreshes, extensions — resolve scoped reach against the session that
+ * owns it. The cloned memo is a fresh Map, so the identity binding the
+ * schema-memo tripwire tracks starts unbound and binds to the new owner.
+ */
+const cloneTrackedGraphStateForIdentity = (
+  engine: Engine.Engine,
+  state: TrackedGraphState,
+  options: TrackGraphOptions,
+): TrackedGraphState => {
+  const clone = cloneTrackedGraphState(engine, state);
+  if (
+    clone.manager.principal === options.principal &&
+    clone.manager.sessionId === options.sessionId
+  ) {
+    return clone;
+  }
+  const manager = new EngineObjectManager(
+    engine,
+    state.branch,
+    options.principal,
+    options.sessionId,
+  );
+  manager.mergeFrom(state.manager);
+  return { ...clone, manager };
+};
+
 export type TrackGraphOptions = {
   readSeq?: number;
   principal?: string;
   sessionId?: string;
+
+  /** Serve/record whole evaluations through this cache (current-seq reads
+   * only; a `readSeq` read bypasses it). See {@link QueryEvaluationCache}
+   * for the sharing and rotation rules. */
+  evaluationCache?: QueryEvaluationCache;
 
   /**
    * `queryGraph` only (server-execution v2 stage A, OW17's wire leg):
@@ -765,6 +1054,82 @@ export const trackGraph = (
   stats: QueryTraversalStats;
 } => {
   const branch = query.branch ?? "";
+  // Historical reads bypass the cache (entries are current-seq only), and
+  // so does the lease-holder exemption class: an exempt evaluation judges
+  // the CURRENT live lease, which is host state that can move without a
+  // commit — seq rotation cannot fence it, so those evaluations are never
+  // cached or served.
+  const cache = options.readSeq === undefined && options.keyedSnapshots !== true
+    ? options.evaluationCache
+    : undefined;
+  let cacheKeys: { pure: string; identity: string } | undefined;
+  let refusalProbeReads = 0;
+  if (cache !== undefined) {
+    const currentSeq = Engine.serverSeq(engine);
+    if (cache.engine !== engine || cache.seq !== currentSeq) {
+      cache.engine = engine;
+      cache.seq = currentSeq;
+      cache.entries.clear();
+      cache.weight = 0;
+      cache.rotations++;
+    }
+    const queryKey = evaluationQueryKey(query);
+    cacheKeys = {
+      pure: `P${queryKey}`,
+      identity: `I${evaluationIdentityKey(options)}${queryKey}`,
+    };
+    const pureEntry = cache.entries.get(cacheKeys.pure);
+    let served: TrackedGraphState | null = null;
+    let probeReads = 0;
+    if (pureEntry !== undefined) {
+      if (pureEntry.share.kind === "absent-residue") {
+        const rewritten = cloneWithRewrittenResidue(
+          engine,
+          space,
+          pureEntry.state,
+          pureEntry.share.residue,
+          options,
+        );
+        served = rewritten.state;
+        probeReads = rewritten.probeReads;
+      } else {
+        served = cloneTrackedGraphStateForIdentity(
+          engine,
+          pureEntry.state,
+          options,
+        );
+      }
+    }
+    if (served === null) {
+      // Either no shared entry, or its residue is PRESENT for this
+      // identity and the share was refused. The identity's own earlier
+      // evaluation — tainted, keyed to exactly this (principal,
+      // sessionId) — still answers; without this lookup a shared entry
+      // would shadow it and the identity would re-evaluate every time.
+      const identityEntry = cache.entries.get(cacheKeys.identity);
+      if (identityEntry !== undefined) {
+        served = cloneTrackedGraphStateForIdentity(
+          engine,
+          identityEntry.state,
+          options,
+        );
+      }
+    }
+    if (served !== null) {
+      cache.hits++;
+      // A hit ran no traversal, and its stats say so — but the residue
+      // absence probes ARE engine reads, and they report as such.
+      return {
+        serverSeq: currentSeq,
+        state: served,
+        stats: { ...createQueryTraversalStats(), managerReads: probeReads },
+      };
+    }
+    // A refused share's probes were still reads this call performed; the
+    // full evaluation below reports them alongside its own.
+    refusalProbeReads = probeReads;
+    cache.misses++;
+  }
   const managerKey = options.readSeq === undefined
     ? `${branch}\0${options.principal ?? ""}\0${options.sessionId ?? ""}`
     : `${branch}\0${options.readSeq}\0${options.principal ?? ""}\0${
@@ -848,18 +1213,37 @@ export const trackGraph = (
     entities.set(key, snapshot);
   }
 
-  stats.managerReads = manager.readCount - readCountBefore;
+  stats.managerReads = manager.readCount - readCountBefore +
+    refusalProbeReads;
 
+  const state: TrackedGraphState = {
+    branch,
+    tracker: schemaTracker,
+    ...missState,
+    entities,
+    memo: sharedMemo,
+    manager,
+  };
+  if (
+    cache !== undefined && cacheKeys !== undefined &&
+    cache.entries.size < EVALUATION_CACHE_MAX_ENTRIES
+  ) {
+    // The cache keeps its own clone: the state returned below belongs to
+    // the caller's session, whose refreshes and extensions mutate it.
+    const share = classifyStateScope(state);
+    const weight = state.entities.size;
+    const key = share.kind === "tainted" ? cacheKeys.identity : cacheKeys.pure;
+    const previous = cache.entries.get(key);
+    cache.entries.set(key, {
+      state: cloneTrackedGraphState(engine, state),
+      share,
+      weight,
+    });
+    cache.weight += weight - (previous?.weight ?? 0);
+  }
   return {
     serverSeq: Engine.serverSeq(engine),
-    state: {
-      branch,
-      tracker: schemaTracker,
-      ...missState,
-      entities,
-      memo: sharedMemo,
-      manager,
-    },
+    state,
     stats,
   };
 };

@@ -65,12 +65,7 @@ a record: archive it to `docs/history/plans/` following the procedure in
   walk deleted — the structural walk demoted to fallback — the client
   intent listener, the ruled double-dispatch implementation, the
   acceptance and the owner ruling set); it archives beside the stage-C
-  closeout when that build lands. The arc's
-  [OW54 give-up design](server-execution-v2/ow54-give-up-design.md) proposes,
-  for owner ratification, the durable terminal cover and explicit retry for a
-  served event whose dispatch or proven-no-commit finalization failure cannot
-  recover; it is a design artifact only and changes no live contract before
-  those rulings.
+  closeout when that build lands.
 - [Retention and CFC execution provenance](retention-and-provenance.md)
   sequences how long an invocation record is kept and what the runtime knows
   about who caused it — the `AgentActor` mint, trusted ingress, and metadata
@@ -81,6 +76,10 @@ a record: archive it to `docs/history/plans/` following the procedure in
   repairing, and rolling back many pieces as one reviewable, resumable
   operation over a shared plan — with batching as an execution strategy
   underneath rather than the subject.
+- [The Topics verb surface](topics-verb-surface.md) sequences how the Topics
+  board and topic grow their verbs without breaking the pieces already holding
+  data: the shape the board demands of a stored topic, the one rehearsed break
+  that narrowing it needs, and the items waiting on platform work.
 - [Topics migration rehearsal](topics-migration-rehearsal.md) is the concrete,
   unexecuted script for `setsrc`-ing the Estuary Topics board against a clone
   and then live.

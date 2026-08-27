@@ -1,12 +1,10 @@
-import {
-  fabricFromRealmValue,
-  newDefaultJsonCodecEngine,
-  realmFromFabricValue,
-} from "@commonfabric/data-model/codecs";
-import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
+import { newDefaultJsonCodecEngine } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { toStructuredDebugValue } from "@commonfabric/data-model/value-debug";
+import {
+  toCompactDebugString,
+  toStructuredDebugValue,
+} from "@commonfabric/data-model/value-debug";
 import {
   type SiteTable,
   siteTableCause,
@@ -19,21 +17,19 @@ import {
   type RenderDeclassificationPolicy,
   WorkerReconciler,
 } from "@commonfabric/html/worker";
-import {
-  DID,
-  Identity,
-  keyPairFromRealmValue,
-  type Session,
-} from "@commonfabric/identity";
+import { DID, Identity, type Session } from "@commonfabric/identity";
 import type { Program } from "@commonfabric/js-compiler";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { setLLMUrl } from "@commonfabric/llm";
 import { type ACL, isACLUser, isCapability } from "@commonfabric/memory/acl";
 import {
-  type ApplyOpResolution,
+  eventAttentionEntryKey,
+  type EventAttentionIndexValue,
   type OperationFieldAddress,
-  type OperationFieldSnapshot,
+  SERVER_EXECUTION_ATTENTION_DOC_ID,
+  type StreamEventsDocValue,
   toValuePath,
+  type UnresolvedEventAttention,
 } from "@commonfabric/memory/v2";
 import {
   PieceController,
@@ -50,6 +46,7 @@ import {
   type Cell,
   convertCellsToLinks,
   entityIdFrom,
+  type EventIntentOutcome,
   getCellOrThrow,
   getPatternIdentityRef,
   hasOperationStorageCapability,
@@ -94,6 +91,8 @@ import {
   resetAllCountBaselines,
   resetAllTimingBaselines,
 } from "@commonfabric/utils/logger";
+import { isPlainObject } from "@commonfabric/utils/types";
+
 import {
   getMetaLink,
   KeepAsCell,
@@ -119,6 +118,9 @@ import {
   type DetectNonIdempotentRequest,
   type DetectNonIdempotentResponse,
   type EnsureHomePatternRunningRequest,
+  type EventAttentionListResponse,
+  type EventAttentionResolveResponse,
+  type EventNeedsAttentionNotification,
   type GetActionRunTraceRequest,
   type GetCellRequest,
   GetGraphSnapshotRequest,
@@ -134,6 +136,7 @@ import {
   type InitializationData,
   type IPCClientNotification,
   IPCClientRequest,
+  type ListEventAttentionRequest,
   type LoggerCountsResponse,
   type LoggerMetadata,
   type LogLevel,
@@ -159,6 +162,7 @@ import {
   type PageStopRequest,
   type PageSyncedRequest,
   type PatternCoverageResponse,
+  type PatternSourceInfo,
   type PatternSourcesResponse,
   type PieceCloneRequest,
   type PieceGetSourceRequest,
@@ -170,6 +174,7 @@ import {
   type RecreateSpaceRootPatternRequest,
   type RegisterSpaceHostRequest,
   RequestType,
+  type ResolveEventAttentionRequest,
   type ResolveSpaceNameRequest,
   type SetActionRunTraceEnabledRequest,
   type SetBreakpointsRequest,
@@ -195,31 +200,9 @@ import {
   type VDomMountRequest,
   type VDomMountResponse,
   type VDomUnmountRequest,
-  type WireApplyOpResolution,
-  type WireOperationFieldSnapshot,
   type WriteStackTraceResponse,
 } from "@/protocol/mod.ts";
 
-const operationFieldToWire = (
-  field: OperationFieldSnapshot,
-): WireOperationFieldSnapshot => ({
-  ...field,
-  materialized: realmFromFabricValue(field.materialized),
-  operations: field.operations.map((operation) => ({
-    ...operation,
-    payload: realmFromFabricValue(operation.payload),
-  })),
-});
-
-const applyOpResolutionToWire = (
-  resolution: ApplyOpResolution,
-): WireApplyOpResolution => ({
-  ...resolution,
-  operations: resolution.operations.map((operation) => ({
-    ...operation,
-    payload: realmFromFabricValue(operation.payload),
-  })),
-});
 import type { VDomOp } from "@/protocol/types.ts";
 import { cellRefToKey, describeFailure } from "@/shared/utils.ts";
 import { postToClient } from "./post-to-client.ts";
@@ -234,6 +217,33 @@ import {
   getCell,
   mapCellRefsToSigilLinks,
 } from "./utils.ts";
+
+/** Subscribe the worker bridge to complete terminal-attention outcomes. Keeping
+ * the filter and wire projection here makes the host boundary independently
+ * testable without booting a worker runtime. */
+export function subscribeEventAttentionNotifications(
+  runtime: Pick<Runtime, "subscribeEventIntentOutcomes">,
+  post: (notification: EventNeedsAttentionNotification) => void = postToClient,
+): Cancel {
+  return runtime.subscribeEventIntentOutcomes((outcome: EventIntentOutcome) => {
+    if (
+      outcome.kind !== "needs-attention" ||
+      outcome.sidecarId === undefined ||
+      typeof outcome.seq !== "number" ||
+      outcome.attention === undefined
+    ) return;
+    post({
+      type: NotificationType.EventNeedsAttention,
+      space: outcome.space,
+      eventId: outcome.eventId,
+      seq: outcome.seq,
+      sidecarId: outcome.sidecarId,
+      retryable: outcome.retryable,
+      reason: outcome.reason,
+      attention: outcome.attention,
+    });
+  });
+}
 
 /**
  * Maximum nesting depth of a console argument's debug rendering. The bound is
@@ -522,26 +532,6 @@ export function toConsoleDebugValue(value: unknown): FabricValue {
   );
 }
 
-/**
- * Converts one of a pattern's `console.*` arguments into the form the
- * notification carries it in. The other half is the `fabricFromRealmValue()`
- * in `client/connection.ts`, which decodes before the client emits.
- *
- * Exported for testing.
- */
-export function toConsoleWireValue(value: unknown): RealmEncodedValue {
-  try {
-    return realmFromFabricValue(toConsoleDebugValue(value));
-  } catch {
-    // An object forged onto a `FabricPrimitive`'s prototype is a `FabricValue`
-    // by every check and still has no encoding, so the encode is the one step
-    // here a hostile argument can stop. It says so and says nothing further:
-    // the value was built to defeat this, and what a reader needs is the
-    // argument's position in the call, which arrives either way.
-    return realmFromFabricValue({ "/unconvertible": "no encoding for value" });
-  }
-}
-
 export const hasExplicitSubscriptionSchema = (schema: unknown): boolean =>
   schema === true ||
   (schema !== undefined && schema !== false &&
@@ -578,6 +568,7 @@ export class RuntimeProcessor {
   >();
   private telemetry: RuntimeTelemetry;
   #telemetryEnabled = false;
+  #intentOutcomeCancel: Cancel | undefined;
 
   // VDOM mounts: mountId -> { reconciler, cancel }
   private vdomMounts = new Map<
@@ -620,14 +611,11 @@ export class RuntimeProcessor {
   static async initialize(data: InitializationData): Promise<RuntimeProcessor> {
     const apiUrlObj = new URL(data.apiUrl);
     const identity = await Identity.fromKeyPair(
-      keyPairFromRealmValue(data.identity, "Initialization `identity`"),
+      data.identity,
     );
     const spaceIdentity = data.spaceIdentity
       ? await Identity.fromKeyPair(
-        keyPairFromRealmValue(
-          data.spaceIdentity,
-          "Initialization `spaceIdentity`",
-        ),
+        data.spaceIdentity,
       )
       : undefined;
     const space = data.spaceDid;
@@ -684,7 +672,7 @@ export class RuntimeProcessor {
           type: NotificationType.ConsoleMessage,
           metadata,
           method,
-          args: args.map((arg) => toConsoleWireValue(arg)),
+          args: args.map((arg) => toConsoleDebugValue(arg)),
         });
         return args;
       },
@@ -759,6 +747,9 @@ export class RuntimeProcessor {
       processor.renderConfidentialityCeiling,
       space,
       processor.renderMembershipProvider,
+    );
+    processor.#intentOutcomeCancel = subscribeEventAttentionNotifications(
+      runtime,
     );
     // Site-table v0: the home space carries space-to-host hints; the
     // runtime reads them as its live host lookup (2026-06-09 federation
@@ -890,6 +881,8 @@ export class RuntimeProcessor {
     this.disposingPromise = (async () => {
       this.telemetry.removeEventListener("telemetry", this.#onTelemetry);
       try {
+        this.#intentOutcomeCancel?.();
+        this.#intentOutcomeCancel = undefined;
         this.#siteTableCancel?.();
         this.#siteTableCancel = undefined;
         for (const cancel of this.subscriptions.values()) {
@@ -1011,14 +1004,9 @@ export class RuntimeProcessor {
     // persists nor re-imports inbound views, so the redacted copies cannot
     // round-trip into under-labeled state.
     //
-    // TODO(danfuzz): `convertCellsToLinks` preserves a `FabricPrimitive` by
-    // identity, so the response can hold live `FabricSpecialObject`s, and
-    // `postMessage`'s structured clone silently strips their prototype and
-    // private state to `{}` on the way to the main thread. The inbound
-    // direction throws instead (`CellHandle.serialize`; see the
-    // `WireCellValue` marker in `protocol/types.ts`) — this outbound direction
-    // loses silently. The subscription-update path below posts the same
-    // conversion. `codec-realm` is the mechanism for both directions.
+    // `convertCellsToLinks()` preserves a `FabricPrimitive` by identity, and
+    // the envelope's encoding carries one to the main thread with its class,
+    // so what the response holds is what the cell held.
     const converted = redactSigilCfcLabelViewsForDisplay(
       convertCellsToLinks(value, {
         includeSchema: true,
@@ -1145,7 +1133,7 @@ export class RuntimeProcessor {
       ...address,
       ...(request.after === undefined ? {} : { after: request.after }),
     });
-    return { field: operationFieldToWire(field) };
+    return { field: field };
   }
 
   async handleOperationApply(
@@ -1164,9 +1152,9 @@ export class RuntimeProcessor {
       ...(request.baselineHash === undefined
         ? {}
         : { baselineHash: request.baselineHash }),
-      payload: fabricFromRealmValue(request.payload),
+      payload: request.payload,
     });
-    return { resolution: applyOpResolutionToWire(resolution) };
+    return { resolution: resolution };
   }
 
   async handleOperationSubscribe(
@@ -1200,10 +1188,10 @@ export class RuntimeProcessor {
             subscription
         ) return;
         queueMicrotask(() =>
-          self.postMessage({
+          postToClient({
             type: NotificationType.OperationUpdate,
             subscriptionId: request.subscriptionId,
-            field: operationFieldToWire(field),
+            field: field,
           })
         );
       });
@@ -1467,11 +1455,11 @@ export class RuntimeProcessor {
     const homeSpaceCell = this.runtime.getHomeSpaceCell();
     await homeSpaceCell.sync();
 
-    // Always the PiecesController path: ensureDefaultPattern() reconciles the
-    // persisted identity and carries the cold-start setup repair that heals an
-    // aged home root. Starting the pattern directly here would skip that
-    // repair, and with `systemPatternAutoUpdate` unset nothing else heals the
-    // root — so no fast path belongs in front of the controller.
+    // Always the PiecesController path: ensureDefaultPattern() follows the
+    // root's origin and carries the cold-start setup repair that heals an aged
+    // home root. Starting the pattern directly here would skip both, and
+    // nothing else heals the root — so no fast path belongs in front of the
+    // controller.
     const homeSession: Session = {
       as: this.identity,
       space: this.runtime.userIdentityDID,
@@ -1495,6 +1483,91 @@ export class RuntimeProcessor {
     // and reactive write-backs alike). Internal callers that only need
     // reactive quiescence use runtime.idle() and are unaffected.
     await this.runtime.scheduler.idleWithPendingCommits();
+  }
+
+  async handleListEventAttention(
+    request: ListEventAttentionRequest,
+  ): Promise<EventAttentionListResponse> {
+    const provider = this.runtime.storageManager.open(request.space);
+    const indexSync = await provider.sync(
+      SERVER_EXECUTION_ATTENTION_DOC_ID as never,
+      undefined,
+      "space",
+    );
+    if (indexSync.error !== undefined) throw indexSync.error;
+    if (provider.replica === undefined) {
+      throw new Error("storage provider does not expose an attention replica");
+    }
+    const index = provider.replica.getDocument(
+      SERVER_EXECUTION_ATTENTION_DOC_ID as never,
+      "space",
+    )?.value as EventAttentionIndexValue | undefined;
+    const notices: EventAttentionListResponse["notices"] = [];
+    const summariesBySidecar = new Map<string, UnresolvedEventAttention[]>();
+    for (const sidecarSummaries of Object.values(index?.entries ?? {})) {
+      for (const summary of Object.values(sidecarSummaries)) {
+        const summaries = summariesBySidecar.get(summary.sidecarId) ?? [];
+        summaries.push(summary);
+        summariesBySidecar.set(summary.sidecarId, summaries);
+      }
+    }
+    for (const [sidecarId, summaries] of summariesBySidecar) {
+      const sidecarSync = await provider.sync(
+        sidecarId as never,
+        undefined,
+        "space",
+      );
+      if (sidecarSync.error !== undefined) throw sidecarSync.error;
+      const sidecar = provider.replica.getDocument(
+        sidecarId as never,
+        "space",
+      )?.value as StreamEventsDocValue | undefined;
+      const entries = new Map(
+        sidecar?.entries?.map((entry) =>
+          [eventAttentionEntryKey(entry.eventId, entry.seq), entry] as const
+        ),
+      );
+      for (const summary of summaries) {
+        const entry = entries.get(
+          eventAttentionEntryKey(summary.eventId, summary.seq),
+        );
+        const actingUser = entry?.firedAt?.user;
+        if (
+          entry?.status !== "needs-attention" ||
+          entry.attention === undefined ||
+          entry.resolution !== undefined ||
+          (actingUser !== undefined && actingUser !== this.identity.did())
+        ) continue;
+        notices.push({
+          space: request.space,
+          eventId: entry.eventId,
+          seq: summary.seq,
+          sidecarId,
+          retryable: actingUser !== undefined,
+          reason: entry.reason ?? "Event delivery needs attention",
+          attention: entry.attention,
+        });
+      }
+    }
+    return { notices };
+  }
+
+  async handleResolveEventAttention(
+    request: ResolveEventAttentionRequest,
+  ): Promise<EventAttentionResolveResponse> {
+    const resolve = this.runtime.storageManager.resolveEventAttention;
+    if (resolve === undefined) {
+      throw new Error("storage manager does not support event attention");
+    }
+    const result = await resolve.call(
+      this.runtime.storageManager,
+      request.space,
+      request.eventId,
+      request.seq,
+      request.sidecarId,
+      request.action,
+    );
+    return { resolution: result.resolution };
   }
 
   // Persistence durability, distinct from handleIdle's reactive quiescence:
@@ -1525,8 +1598,23 @@ export class RuntimeProcessor {
       throw new Error("Invalid source.");
     }
 
+    // Checked rather than cast. The wire carries a `FabricValue`; a piece's
+    // input is narrower, being a record of named inputs, which is the question
+    // `isPlainObject()` asks.
+    const argument = request.argument;
+    if ((argument !== undefined) && !isPlainObject(argument)) {
+      // The rejected value is named rather than its `typeof`, which calls both
+      // an array and `null` an `object` and so says nothing about either. It
+      // is bounded because the argument is a caller's data.
+      throw new Error(
+        `A piece's argument must be a record, not: ${
+          toCompactDebugString(argument, 120)
+        }`,
+      );
+    }
+
     const piece = await cc.create<NameSchema>(program, {
-      input: request.argument as object | undefined,
+      input: argument,
       origin,
       start: request.run ?? true,
     }, request.cause);
@@ -1919,7 +2007,7 @@ export class RuntimeProcessor {
   ): PatternSourcesResponse {
     const snapshot = this.runtime.scheduler.getGraphSnapshot();
     const seen = new Set<string>();
-    const patterns: PatternSourcesResponse["patterns"] = [];
+    const patterns: PatternSourceInfo[] = [];
 
     for (const node of snapshot.nodes) {
       const ref = node.patternIdentity;
@@ -1971,11 +2059,12 @@ export class RuntimeProcessor {
       `/${request.space}/blobs/upload.${encodeURIComponent(suffix)}`,
       host,
     );
-    // `request.body` is ceded to the decode rather than copied for it. That is
-    // legitimate because a handler owns the values its request carries, per
-    // `BaseRequest`, so nothing else can be reading this tree. What comes back
-    // is a `FabricValue`, of which only the one arm is a blob's bytes.
-    const bytes = fabricFromRealmValue(request.body);
+    // The envelope's decode already produced this; `request.body` is a
+    // `FabricBytes` by the time it arrives, and a handler owns the values its
+    // request carries per `BaseRequest`, so nothing else is reading it. The
+    // check is on the arm rather than the decode: the declared type is what
+    // the client is meant to send, not what a malformed message can hold.
+    const bytes = request.body;
     if (!(bytes instanceof FabricBytes)) {
       throw new Error("uploadBlob requires bytes as its body");
     }
@@ -2126,6 +2215,10 @@ export class RuntimeProcessor {
         return await this.handleEnsureHomePatternRunning(request);
       case RequestType.Idle:
         return await this.handleIdle();
+      case RequestType.ListEventAttention:
+        return await this.handleListEventAttention(request);
+      case RequestType.ResolveEventAttention:
+        return await this.handleResolveEventAttention(request);
       case RequestType.FlushCompileCacheWrites:
         return await this.handleFlushCompileCacheWrites();
       case RequestType.PageCreate:

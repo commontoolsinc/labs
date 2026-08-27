@@ -56,7 +56,9 @@ function node(
   };
 }
 
-// --- cursorScreenPos / layout ------------------------------------------------
+//
+// cursorScreenPos / layout
+//
 
 Deno.test("cursorScreenPos: null when there is no cursor", () => {
   const doc = parseDocument(SAMPLE);
@@ -156,7 +158,9 @@ Deno.test("cursorScreenPos: null when a dialog covers the content", () => {
   assertEquals(cursorScreenPos(doc, view), null);
 });
 
-// --- notice rows -------------------------------------------------------------
+//
+// notice rows
+//
 
 Deno.test("renderFrame: notice overwrites the bottom content rows", () => {
   const doc = parseDocument(SAMPLE);
@@ -196,7 +200,9 @@ Deno.test("renderFrame: an empty notice array leaves content untouched", () => {
   assertEquals(withNotice, without);
 });
 
-// --- selectionSpan: schema / closure / selection backgrounds -----------------
+//
+// selectionSpan: schema / closure / selection backgrounds
+//
 
 Deno.test("renderFrame: a schema node tints its line", () => {
   const doc = parseDocument("const x = 1;\n");
@@ -235,7 +241,9 @@ Deno.test("renderFrame: a plain node uses the selection background", () => {
   assert(/48;2;/.test(rows[0]), "selection region tinted");
 });
 
-// --- search-match column clamping --------------------------------------------
+//
+// search-match column clamping
+//
 
 Deno.test("renderFrame: search matches off the left edge are clipped", () => {
   const doc = parseDocument("hello world\n");
@@ -255,7 +263,9 @@ Deno.test("renderFrame: search matches off the right edge are clipped", () => {
   assert(/48;2;/.test(rows[0]), "in-bounds match columns highlighted");
 });
 
-// --- renderStatus branches ---------------------------------------------------
+//
+// renderStatus branches
+//
 
 Deno.test("renderStatus: the input line replaces the status bar", () => {
   const doc = parseDocument(SAMPLE);
@@ -397,7 +407,9 @@ Deno.test("renderStatus: a narrow bar drops the lowest-priority hints first", ()
   assert(!tight.includes("WASD Tree"), "WASD drops before Q");
 });
 
-// --- kindGlyph: every branch -------------------------------------------------
+//
+// kindGlyph: every branch
+//
 
 Deno.test("renderStatus: kindGlyph maps every node kind to a glyph", () => {
   const doc = parseDocument("x\n");
@@ -430,7 +442,9 @@ Deno.test("renderStatus: kindGlyph maps every node kind to a glyph", () => {
   }
 });
 
-// --- display modes: tabs and control characters ------------------------------
+//
+// display modes: tabs and control characters
+//
 
 Deno.test("renderFrame: a tab renders as its Control Pictures glyph", () => {
   const doc = parseDocument("a\tb\n");
@@ -450,7 +464,9 @@ Deno.test("renderFrame: a control character renders as its Control Pictures glyp
   assert(!text.includes("\x01"), "control char scrubbed");
 });
 
-// --- overlay: span past the inner width / truncCenter truncation -------------
+//
+// overlay: span past the inner width / truncCenter truncation
+//
 
 Deno.test("overlay: a span wider than the box is clipped at the inner edge", () => {
   const doc = parseDocument(SAMPLE);
@@ -799,7 +815,9 @@ Deno.test("renderFrame: the guide rail is blank on lines outside the selected no
   assertEquals(stripAnsi(rows[1])[0], "▶", "single-line node carries a glyph");
 });
 
-// --- SGR encoding helpers (rich modifiers and background merge) ---------------
+//
+// SGR encoding helpers (rich modifiers and background merge)
+//
 
 Deno.test("cellsToAnsi: encodes rich text attributes", () => {
   const cells = [
@@ -840,7 +858,9 @@ Deno.test("darkenSpan: repaints a shadow span and clips out-of-bounds cells", ()
   assertEquals(stripAnsi(rows[0]), "hello world", "the characters are kept");
 });
 
-// --- status-bar fitting (file, and left truncation) --------------------------
+//
+// status-bar fitting (file, and left truncation)
+//
 
 Deno.test("renderStatus: a long current file is tail-truncated with a leading ellipsis", () => {
   const doc = parseDocument(SAMPLE);

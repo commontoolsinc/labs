@@ -78,25 +78,63 @@ export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
   {
     pattern: "topics/main.tsx",
     paths: [
+      // The unsigned caller retires. The per-topic display names it fed go
+      // with it, and are listed once below among the narrowed demand rather
+      // than twice — the two removals take the same paths.
+      "myName",
+      "setMyName",
+      // --- the demand narrowing (docs/history/topics-demand-narrowing-break.md)
+      // The board demanded the topic's whole published surface of every stored
+      // topic, three verb streams among them. A holder's required demands are
+      // write-once and a stream cannot carry a default, so a verb named there
+      // priced every future verb as a break of the board. The demand is now the
+      // eight members the board reads.
+      //
+      // These sit in this entry rather than their own because `acceptedDropsFor`
+      // takes the FIRST entry matching a pattern and window: a second entry for
+      // `topics/main.tsx` covering the same vintages would shadow this one
+      // instead of adding to it, and the paths above would silently stop
+      // applying. Two breaks on one pattern inside one window share an entry.
+      //
+      // A stored topic loses none of this. What it loses is the board's claim
+      // on it: the fields and verbs stay on the topic, reachable at its own
+      // address, and only the board's view of them narrows.
+      "topics[].addComment",
+      "topics[].addLink",
+      "topics[].bodyUpdatedAt",
+      "topics[].bodyUpdatedBy",
+      "topics[].comments",
+      "topics[].createdByName",
+      "topics[].links",
+      "topics[].setBody",
+      "mentionable[].addComment",
+      "mentionable[].addLink",
+      "mentionable[].bodyUpdatedAt",
+      "mentionable[].bodyUpdatedBy",
+      "mentionable[].comments",
+      "mentionable[].createdByName",
+      "mentionable[].links",
+      "mentionable[].setBody",
+      // --- the reference-graph rebuild follows
+      "crossrefs",
+      "index[].refsOut",
+      "index[].referencedBy",
+      "index[].topic",
+      "topics[].crossrefs",
+      "mentionable[].crossrefs",
       // `crossrefs` is listed WHOLE, and that is the honest shape of what
       // happened: the old graph row carried an fid, a title, summary counts and
       // two edge sets, and the pivot row that replaced it carries a topic and
       // who mentions it. Nothing of the old row survives to be compared field
       // by field.
-      "crossrefs",
       // The old index rows carried the same two edge sets beside their
       // summaries. The summaries themselves are untouched.
-      "index[].refsOut",
-      "index[].referencedBy",
       // An index row IS its topic now, so the title-only reference that used to
       // sit beside it goes; the row's own address is the topic's. The copied
       // `fid` field goes with it, and needs no entry here: no replayed vintage
       // holds a resolved one.
-      "index[].topic",
       // The retired per-topic edge row, seen through each of the board's two
       // lists of children.
-      "topics[].crossrefs",
-      "mentionable[].crossrefs",
     ],
     // The newest topics vintage predating the rebuild. Both replayed fixtures
     // sit at or under it, and any captured from here on hold the pivot rows,
@@ -115,13 +153,35 @@ export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
     // The topic's own edge row, whole. A topic no longer derives one: inbound
     // references are read out of the board's pivot and published as
     // `referencedBy`, so nothing reads this path.
-    paths: ["crossrefs"],
+    paths: [
+      "crossrefs",
+      // The unsigned caller retires, and the display names it fed go with it:
+      // a comment always carries a structured author now, so the mirror beside
+      // it describes nothing. A stored topic keeps what it holds; what goes is
+      // the pattern's claim to publish these.
+      "createdByName",
+      "comments[].authorName",
+      // And the structured author a legacy topic used to get FROM that name.
+      // `createdByOf` projected `createdByName` into `createdBy` when a topic
+      // had no structured author; with the name retired, such a topic reads as
+      // the inert sentinel instead.
+      //
+      // Accepted on evidence, not on principle: every one of the 113 topics on
+      // the deployed board carries a structured `createdBy.name`, so no live
+      // topic reaches the projection being removed. The replayed vintages
+      // predate structured authorship and do, which is what surfaces here. A
+      // census belongs in the migration's pre-flight rather than being taken
+      // on trust from this comment.
+      "createdBy",
+    ],
     capturedThrough: "2026-08-06T23-04-13.189Z",
     reason:
       "Topics' reference graph was rebuilt on cell identity — see the matching " +
       "entry in tasks/pattern-compat-accepted-breaks.ts. The board's own " +
       "`crossrefs` came back as a pivot and strands nothing, so only a topic's " +
-      "retired per-topic row is listed here.",
+      "retired per-topic row is listed here. Carried with it: the unsigned " +
+      "caller's retirement, whose display-name mirrors go too — one entry per " +
+      "pattern, because a second would shadow this one rather than add to it.",
     record: "docs/history/topics-crossref-identity-break.md",
   },
   {

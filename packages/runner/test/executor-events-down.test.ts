@@ -35,6 +35,9 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import {
   decodeMemoryBoundary,
+  eventAttentionEntryKey,
+  eventAttentionIndexKey,
+  SERVER_EXECUTION_ATTENTION_DOC_ID,
   streamEntriesDocId,
   type StreamEventsDocValue,
 } from "@commonfabric/memory/v2";
@@ -45,9 +48,17 @@ import type {
   IExtendedStorageTransaction,
   MemorySpace,
 } from "../src/storage/interface.ts";
+import { ReplicaLoadFailureError } from "../src/storage/interface.ts";
+import { RetryImmediately } from "../src/scheduler/retry-immediately.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { readWatermarkSeq } from "../src/executor/watermark.ts";
+import type {
+  WaveCommitRejection,
+  WaveCommitSink,
+  WaveSpaceCommit,
+} from "../src/executor/wave.ts";
+import { waveRunContextOf } from "../src/executor/wave.ts";
 import {
   isRendererTrustedEvent,
   markRendererTrustedEvent,
@@ -73,6 +84,17 @@ import { newSharedServer } from "./memory-v2-test-utils.ts";
  * continuation is held) reaches the guard check exactly when the test
  * lets it. `syncGateWhen` receives the synced doc's id. */
 class GatedStorageManager extends EmulatedStorageManager {
+  static loadParkRecoveryGeneration = 0;
+
+  static signalLoadRecovery(manager: GatedStorageManager): void {
+    const failedEpoch = `test:load-park:${this.loadParkRecoveryGeneration}`;
+    this.loadParkRecoveryGeneration += 1;
+    manager.loadRecoveryObserver?.({
+      failedEpoch,
+      recoveryEpoch: `test:load-park:${this.loadParkRecoveryGeneration}`,
+    });
+  }
+
   static override connectTo(
     server: MemoryV2Server.Server,
     options: Parameters<typeof EmulatedStorageManager.connectTo>[1],
@@ -167,10 +189,19 @@ class GatedStorageManager extends EmulatedStorageManager {
     if (keys.some((key) => GatedStorageManager.#matchesArmedDoc(key))) {
       GatedStorageManager.loadParkFailHits += 1;
       const held = GatedStorageManager.loadParkSettle;
-      if (held !== undefined) return held;
-      return Promise.reject(
+      const failure = (cause: unknown) =>
+        new ReplicaLoadFailureError({
+          failureClass: "session-revoked",
+          recoveryEpoch:
+            `test:load-park:${GatedStorageManager.loadParkRecoveryGeneration}`,
+          permanentEvidence: false,
+        }, cause);
+      if (held !== undefined) {
+        return held.catch((cause) => Promise.reject(failure(cause)));
+      }
+      return Promise.reject(failure(
         new Error("memory session revoked: unauthorized (pin seam)"),
-      );
+      ));
     }
     return super.loadsSettled(keys);
   }
@@ -365,6 +396,59 @@ describe("Phase 3 events-down (serving side)", () => {
    * closes the settle gate. */
   let servingRuntime: Runtime | undefined;
   let servingManager: GatedStorageManager | undefined;
+  let rejectWaveCommitWhen: ((batch: WaveSpaceCommit) => boolean) | undefined;
+  let rejectWaveCommitWith:
+    | ((batch: WaveSpaceCommit) => WaveCommitRejection | undefined)
+    | undefined;
+  let rejectedWaveCommits = 0;
+  let gateWaveCommitWhen: ((batch: WaveSpaceCommit) => boolean) | undefined;
+  let waveCommitGate: Promise<void> | undefined;
+  let waveCommitGateHits = 0;
+  let observedWaveCommits: WaveSpaceCommit[];
+  type ServingCommitFailure =
+    | "result-error"
+    | "rejection"
+    | "synchronous-throw";
+  let failNextServingCommit: ServingCommitFailure | undefined;
+  let failServingCommitSequence: ServingCommitFailure[];
+  let failServingCommitActionPrefix: string | undefined;
+
+  const decorateWaveCommitSink = (sink: WaveCommitSink): WaveCommitSink => ({
+    currentHeads: (space, docs) => sink.currentHeads(space, docs),
+    concurrentWritePaths: (space, doc, sinceSeq) =>
+      sink.concurrentWritePaths(space, doc, sinceSeq),
+    commitWave: (batch) => {
+      const typedRejection = rejectWaveCommitWith?.(batch);
+      if (typedRejection !== undefined) {
+        rejectWaveCommitWith = undefined;
+        rejectedWaveCommits += 1;
+        return Promise.resolve({ error: typedRejection });
+      }
+      if (rejectWaveCommitWhen?.(batch) === true) {
+        rejectWaveCommitWhen = undefined;
+        rejectedWaveCommits += 1;
+        return Promise.resolve({
+          error: {
+            name: "WaveCommitRejected",
+            message: "forced OW54 processing-state write rejection",
+          },
+        });
+      }
+      if (
+        waveCommitGate !== undefined && gateWaveCommitWhen?.(batch) === true
+      ) {
+        const gate = waveCommitGate;
+        gateWaveCommitWhen = undefined;
+        waveCommitGateHits += 1;
+        return gate.then(() => {
+          observedWaveCommits.push(batch);
+          return sink.commitWave(batch);
+        });
+      }
+      observedWaveCommits.push(batch);
+      return sink.commitWave(batch);
+    },
+  });
 
   const newHost = (
     policy?: ConstructorParameters<typeof ExecutorHost>[0]["policy"],
@@ -383,9 +467,47 @@ describe("Phase 3 events-down (serving side)", () => {
           servingPosture: true,
           experimental: {
             serverExecution: true,
-            systemPatternAutoUpdate: false,
           },
         });
+        const edit = runtime.edit.bind(runtime);
+        runtime.edit = (options) => {
+          const tx = edit(options);
+          const commit = tx.commit.bind(tx);
+          tx.commit = () => {
+            const sequenceFailure = failServingCommitSequence[0];
+            const failure = sequenceFailure ?? failNextServingCommit;
+            const actionId = waveRunContextOf(tx)?.actionId;
+            if (
+              failure === undefined ||
+              failServingCommitActionPrefix === undefined ||
+              !actionId?.startsWith(failServingCommitActionPrefix)
+            ) {
+              return commit();
+            }
+            if (sequenceFailure === undefined) {
+              failNextServingCommit = undefined;
+              failServingCommitActionPrefix = undefined;
+            } else {
+              failServingCommitSequence.shift();
+              if (failServingCommitSequence.length === 0) {
+                failServingCommitActionPrefix = undefined;
+              }
+            }
+            const error = new Error(`forced serving commit ${failure}`);
+            if (failure === "result-error") {
+              return Promise.resolve({
+                error: {
+                  name: "StorageTransactionAborted" as const,
+                  message: error.message,
+                  reason: error,
+                },
+              });
+            }
+            if (failure === "rejection") return Promise.reject(error);
+            throw error;
+          };
+          return tx;
+        };
         servingRuntime = runtime;
         servingManager = manager;
         return {
@@ -397,14 +519,26 @@ describe("Phase 3 events-down (serving side)", () => {
         };
       },
       policy: policy ?? { flushDeadlineMs: 5_000, idleParkMs: 600_000 },
+      decorateWaveCommitSink,
     });
 
   beforeEach(() => {
     server = newSharedServer({ subscriptionRefreshDelayMs: 0 });
+    GatedStorageManager.loadParkRecoveryGeneration = 0;
     extraManagers = [];
     extraRuntimes = [];
     servingRuntime = undefined;
     servingManager = undefined;
+    rejectWaveCommitWhen = undefined;
+    rejectWaveCommitWith = undefined;
+    rejectedWaveCommits = 0;
+    gateWaveCommitWhen = undefined;
+    waveCommitGate = undefined;
+    waveCommitGateHits = 0;
+    observedWaveCommits = [];
+    failNextServingCommit = undefined;
+    failServingCommitSequence = [];
+    failServingCommitActionPrefix = undefined;
   });
 
   afterEach(async () => {
@@ -535,6 +669,13 @@ describe("Phase 3 events-down (serving side)", () => {
       row.consequence_of.includes(entry.eventId)
     );
     expect(carrying.length).toBe(1);
+    const carryingBatch = observedWaveCommits.find((batch) =>
+      batch.consequenceOf.includes(entry.eventId)
+    );
+    expect(carryingBatch).toBeDefined();
+    expect(JSON.stringify(carryingBatch!.operations)).not.toContain(
+      "deliveryDeferral",
+    );
     await waitUntil(
       () => {
         const doc = Engine.read(engine, {
@@ -1117,7 +1258,7 @@ describe("Phase 3 events-down (serving side)", () => {
     cancelDemand();
   });
 
-  it("the give-up arm's CFC discriminator (OW54): a served event whose commit is refused PRE-STORAGE by CFC enforcement — a genuinely-ambiguous stored envelope, the class RULING 5 still refuses — seals an ERROR consequence and the stream advances: ONE completed run, ONE consequence commit naming the event, ONE dropped-write report, the entry carries the refusal as its error, and a second poisoned fire seals its own consequence behind it (events.md §5; mutation: the discriminated `served.onFailure` call removed → the entry never consequences and the drain re-runs the handler every wave)", async () => {
+  it("a typed CFC commit-preparation crash accumulates durable failed-state time, then seals one retained needs-attention cover without conflating it with a deterministic CFC refusal", async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
     const { result } = await standUp(clientRuntime, BUMP_PATTERN, {
@@ -1147,7 +1288,13 @@ describe("Phase 3 events-down (serving side)", () => {
     await clientRuntime.idle();
     await clientRuntime.storageManager.synced();
 
-    host = newHost();
+    let deliveryNow = 10_000;
+    host = newHost({
+      flushDeadlineMs: 5_000,
+      idleParkMs: 600_000,
+      deliveryFailureBudgetMs: 60_000,
+      deliveryFailureNow: () => deliveryNow,
+    });
     // Warm-up fire through the pattern's own handler: activates the
     // space, lands the sidecar, and hands the probe its stream link.
     result.key("bump").send({ kind: "warmup" });
@@ -1200,10 +1347,20 @@ describe("Phase 3 events-down (serving side)", () => {
     // a served handler whose write meets the stored ambiguous envelope,
     // so its commit-prep records the refusal and the commit is rejected
     // before storage.
-    let probeRuns = 0;
+    const probeRuns = new Map<string, number>();
+    const gatedRetryStarted = Promise.withResolvers<void>();
+    const releaseGatedRetry = Promise.withResolvers<void>();
     const cancelProbe = servingRuntime!.scheduler.addEventHandler(
-      (tx, _event) => {
-        probeRuns += 1;
+      async (tx, event) => {
+        const kind = (event as { kind?: string }).kind ?? "unknown";
+        const runs = (probeRuns.get(kind) ?? 0) + 1;
+        probeRuns.set(kind, runs);
+        if (kind === "gated-retry" && runs > 1) {
+          gatedRetryStarted.resolve();
+          await releaseGatedRetry.promise;
+          return;
+        }
+        if (kind === "follower" || kind === "gated-follower") return;
         const resolved = servingRuntime!.getCell<{ name: string }>(
           space,
           `${poisonedDocName}-resolved`,
@@ -1230,9 +1387,8 @@ describe("Phase 3 events-down (serving side)", () => {
       ).all({ from_seq: beforePoison }) as Array<
         { seq: number; consequence_of: string }
       >).filter((row) => row.consequence_of.includes(eventId));
-    // The unconditional dropped-write report (the give-up arm's loss
-    // report) is the direct witness that the copy took the give-up
-    // disposition — count it per event.
+    // Commit-preparation crashes are not deterministic CFC verdicts, so the
+    // old dropped-write report must not claim one occurred.
     const droppedWriteReports: string[] = [];
     const realConsoleError = console.error;
     console.error = (...args: unknown[]) => {
@@ -1244,61 +1400,142 @@ describe("Phase 3 events-down (serving side)", () => {
       realConsoleError(...args);
     };
     try {
-      result.key("bump").send({ kind: "poison-1" });
+      let poisonAckStatus: string | undefined;
+      (result.key("bump") as unknown as {
+        send(
+          value: unknown,
+          onCommit: (tx: { status(): { status: string } }) => void,
+        ): unknown;
+      }).send({ kind: "poison-1" }, (tx) => {
+        poisonAckStatus = tx.status().status;
+      });
       await clientRuntime.idle();
       await clientRuntime.storageManager.synced();
-      await waitUntil(() => probeRuns >= 1, "the served probe to run");
+      await waitUntil(
+        () =>
+          entryByKind("poison-1")?.deliveryDeferral?.failureCount !==
+            undefined,
+        "the first durable commit-preparation checkpoint",
+      );
+      const deferred = entryByKind("poison-1")!;
+      expect(deferred.consequenced).not.toBe(true);
+      expect(deferred.error).toBeUndefined();
+      expect(deferred.status).toBeUndefined();
+      expect(deferred.deliveryDeferral).toMatchObject({
+        phase: "commit-preparation",
+        failureClass: "unknown",
+        state: "failed",
+      });
 
-      // THE PIN (red pre-fix: the refused copy settles with no
-      // consequence, the entry re-drains every wave, and this wait
-      // times out): the deterministic refusal seals an error
-      // consequence and the frontier advances past it.
+      // Spend the ratified cumulative failed-state budget, then use a real
+      // authored append as the causal wake. The follower remains behind the
+      // failed head while the head terminalizes.
+      deliveryNow += 60_000;
+      result.key("bump").send({ kind: "follower" });
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
       await waitUntil(
         () => {
           const entry = entryByKind("poison-1");
           return entry?.consequenced === true &&
-            typeof entry?.error === "string" &&
-            watermarkNow() === entry?.seq;
+            entry.status === "needs-attention" &&
+            entry.seq !== undefined &&
+            (watermarkNow() ?? 0) >= entry.seq;
         },
-        "the CFC refusal to seal an error consequence",
+        "the commit-preparation failure to seal a terminal cover",
       );
       const poison1 = entryByKind("poison-1")!;
-      expect(poison1.error).toContain("CFC enforcement rejected commit");
-      expect(poison1.error).toMatch(/divergent anyOf|commit-prep crashed/);
-      // Exactly-once (the (α) invariant): one completed run, one
-      // consequence commit naming the event, one give-up report.
-      expect(probeRuns).toBe(1);
+      expect(poison1.error).toBeUndefined();
+      expect(poison1.deliveryDeferral).toBeUndefined();
+      expect(poison1.attention).toMatchObject({
+        phase: "commit-preparation",
+        failureClass: "unknown",
+        code: "delivery-failure-budget-exhausted",
+        accumulatedFailureMs: 60_000,
+        recovery: "explicit-retry",
+      });
       expect(consequenceCommitsNaming(poison1.eventId).length).toBe(1);
-      expect(droppedWriteReports.length).toBe(1);
+      expect(droppedWriteReports).toEqual([]);
+      await waitUntil(
+        () => poisonAckStatus !== undefined,
+        "the terminal durable acknowledgment",
+      );
+      expect(poisonAckStatus).toBe("error");
+      const attentionIndex = Engine.read(engine, {
+        id: SERVER_EXECUTION_ATTENTION_DOC_ID,
+      })?.value as {
+        entries?: Record<string, Record<string, { sidecarId?: string }>>;
+      } | undefined;
+      expect(
+        attentionIndex?.entries?.[eventAttentionIndexKey(sidecarId)]?.[
+          eventAttentionEntryKey(poison1.eventId, poison1.seq!)
+        ]?.sidecarId,
+      ).toBe(sidecarId);
+      const poisonRunsAtTerminal = probeRuns.get("poison-1");
+      await waitUntil(
+        () => (probeRuns.get("follower") ?? 0) >= 1,
+        "the follower to release after the terminal cover",
+      );
+      expect(probeRuns.get("poison-1")).toBe(poisonRunsAtTerminal);
+      expect(consequenceCommitsNaming(poison1.eventId).length).toBe(1);
+      expect(host!.stats().events.needsAttention.total).toBe(1);
+      expect(
+        host!.stats().events.needsAttention.byPhase["commit-preparation"],
+      ).toBe(1);
 
-      // The stream advances: a second poisoned fire drains BEHIND the
-      // sealed consequence and seals its own — no wedge, and no second
-      // consequence for the first event.
-      result.key("bump").send({ kind: "poison-2" });
+      await waitUntil(
+        () => entryByKind("follower")?.consequenced === true,
+        "the first terminal cover's follower to consequence",
+      );
+      result.key("bump").send({ kind: "gated-retry" });
       await clientRuntime.idle();
       await clientRuntime.storageManager.synced();
       await waitUntil(
-        () => {
-          const entry = entryByKind("poison-2");
-          return entry?.consequenced === true &&
-            typeof entry?.error === "string" &&
-            watermarkNow() === entry?.seq;
-        },
-        "the second refusal to seal its own error consequence",
+        () =>
+          entryByKind("gated-retry")?.deliveryDeferral?.failureCount !==
+            undefined,
+        "the gated event's first commit-preparation checkpoint",
       );
-      const poison2 = entryByKind("poison-2")!;
-      expect(probeRuns).toBe(2);
-      expect(consequenceCommitsNaming(poison1.eventId).length).toBe(1);
-      expect(consequenceCommitsNaming(poison2.eventId).length).toBe(1);
-      expect(droppedWriteReports.length).toBe(2);
+      await gatedRetryStarted.promise;
+
+      const skipsBefore = host!.stats().events.drainInFlightSkips;
+      deliveryNow += 60_000;
+      const wake = clientRuntime.edit();
+      clientRuntime.getCell<number>(space, "gated-retry-wake", undefined)
+        .withTx(wake).set(1);
+      expect((await wake.commit()).error).toBeUndefined();
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(
+        () => host!.stats().events.drainInFlightSkips > skipsBefore,
+        "the expired checkpoint scan to observe its in-flight owner",
+      );
+      const stillRunning = entryByKind("gated-retry")!;
+      expect(stillRunning.consequenced).not.toBe(true);
+      expect(stillRunning.status).toBeUndefined();
+      expect(stillRunning.attention).toBeUndefined();
+
+      releaseGatedRetry.resolve();
+      await waitUntil(
+        () => entryByKind("gated-retry")?.consequenced === true,
+        "the in-flight clean retry to consequence normally",
+      );
+      const succeeded = entryByKind("gated-retry")!;
+      expect(succeeded.status).toBeUndefined();
+      expect(succeeded.attention).toBeUndefined();
+      expect(succeeded.deliveryDeferral).toBeUndefined();
+      expect(probeRuns.get("gated-retry")).toBe(2);
+      expect(consequenceCommitsNaming(succeeded.eventId)).toHaveLength(1);
+      expect(host!.stats().events.needsAttention.total).toBe(1);
     } finally {
+      releaseGatedRetry.resolve();
       console.error = realConsoleError;
       cancelProbe();
       cancelDemand();
     }
   });
 
-  it("a NON-CFC give-up on a served event keeps the re-drain cadence (OW54's scope boundary): a handler that aborts its own transaction leaves the entry UNCONSEQUENCED — no error, no notice, no frontier advance — and a later wave re-drains it (mutation: the give-up arm's discriminator widened to every give-up → this entry seals a consequence and the re-drain stops)", async () => {
+  it("an explicit handler abort is proven pre-seal and becomes one safe error consequence instead of re-draining forever", async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
     const { result } = await standUp(clientRuntime, BUMP_PATTERN, {
@@ -1341,10 +1578,8 @@ describe("Phase 3 events-down (serving side)", () => {
       path: [...warmup.stream.path],
       scope: (warmup.stream.scope ?? "space") as never,
     };
-    // A give-up that is NOT the CFC pre-storage refusal: the handler
-    // discards its own transaction, so the commit settles with a
-    // non-CFC rejection and the give-up arm must NOT seal a
-    // consequence for it.
+    // This is the exact explicit-abort sentinel. It proves that no storage
+    // commit was attempted, so OQ-23 admits a terminal error consequence.
     let probeRuns = 0;
     const cancelProbe = servingRuntime!.scheduler.addEventHandler(
       (tx, _event) => {
@@ -1357,18 +1592,87 @@ describe("Phase 3 events-down (serving side)", () => {
       result.key("bump").send({ kind: "aborted" });
       await clientRuntime.idle();
       await clientRuntime.storageManager.synced();
-      // The wave IS the retry cadence: the unconsequenced entry is
-      // dispatched again on a later wave.
-      await waitUntil(() => probeRuns >= 2, "the entry to re-drain");
+      await waitUntil(
+        () => {
+          const entry = entryByKind("aborted");
+          return entry?.consequenced === true &&
+            typeof entry.error === "string";
+        },
+        "the explicit abort to seal an error consequence",
+      );
       const aborted = entryByKind("aborted")!;
-      expect(aborted.consequenced).not.toBe(true);
-      expect(aborted.error).toBeUndefined();
-      expect((aborted as { status?: unknown }).status).toBeUndefined();
-      // The frontier stayed at the warm-up entry.
+      expect(probeRuns).toBe(1);
+      expect(aborted.error).toBe("Event handler aborted its transaction");
+      expect(aborted.status).toBeUndefined();
       expect(
         (Engine.read(engine, { id: sidecarId })?.value as StreamEventsDocValue)
           .eventWatermark,
-      ).toBe(entryByKind("warmup")!.seq);
+      ).toBe(aborted.seq);
+    } finally {
+      cancelProbe();
+      cancelDemand();
+    }
+  });
+
+  it("a served RetryImmediately retry remains settlement and never creates a delivery checkpoint", async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const { result } = await standUp(clientRuntime, BUMP_PATTERN, {
+      arg: "retry-immediately-arg",
+      result: "retry-immediately-result",
+    });
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    result.key("bump").send({ kind: "warmup" });
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+    await waitUntil(
+      () => sidecarIdsIn(engine).length === 1,
+      "the RetryImmediately stream to become durable",
+    );
+    const sidecarId = sidecarIdsIn(engine)[0];
+    const entries = () => ((Engine.read(engine, { id: sidecarId })?.value as
+      | StreamEventsDocValue
+      | undefined)?.entries ?? []);
+    await waitUntil(
+      () => entries()[0]?.consequenced === true,
+      "the warm-up event to consequence",
+    );
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "the RetryImmediately serving runtime to activate",
+    );
+
+    const streamLink = {
+      space,
+      id: entries()[0].stream.id as never,
+      path: [...entries()[0].stream.path],
+      scope: (entries()[0].stream.scope ?? "space") as never,
+    };
+    let runs = 0;
+    const cancelProbe = servingRuntime!.scheduler.addEventHandler(
+      () => {
+        runs += 1;
+        if (runs === 1) throw new RetryImmediately("test name resolution");
+      },
+      streamLink,
+    );
+    try {
+      result.key("bump").send({ kind: "retry-immediately" });
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(
+        () => entries().at(-1)?.consequenced === true && runs === 2,
+        "the served name-resolution retry to consequence",
+      );
+      const retried = entries().at(-1)!;
+      expect(retried.deliveryDeferral).toBeUndefined();
+      expect(retried.attention).toBeUndefined();
+      expect(host!.stats().events.deliveryDeferralsActive).toBe(0);
+      expect(host!.stats().events.deliveryFailuresActive).toBe(0);
     } finally {
       cancelProbe();
       cancelDemand();
@@ -2172,7 +2476,6 @@ describe("Phase 3 events-down (serving side)", () => {
     cancelParentDemand();
   });
 
-  // ---------------------------------------------------------------------
   // Stage C build W3 — (α): ONE durable entry, ONE completed run
   // (events.md §4, RULED 2026-08-18; register OW35). The pins below drive
   // RAW handlers on the serving runtime (the production chain from the
@@ -2184,7 +2487,6 @@ describe("Phase 3 events-down (serving side)", () => {
   // async child that is still RUNNING when the deadline closes its wave
   // (the in-flight residue the purge cannot reach), and a DERIVATION
   // emitter whose sidecar append the wave supersedes (the orphan).
-  // ---------------------------------------------------------------------
 
   /** Bare stream + value docs for the (α) pins, created by the CLIENT
    * (client commits land natively; the serving runtime's writes must
@@ -2193,8 +2495,11 @@ describe("Phase 3 events-down (serving side)", () => {
   const w3Setup = async (
     prefix: string,
     policy: { flushDeadlineMs: number },
+    clientSigner: Identity = aliceSigner,
   ) => {
-    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    ({ manager: clientManager, runtime: clientRuntime } = openClient(
+      clientSigner,
+    ));
     const engine = await server.engineForSpace(space);
     const mkStream = async (name: string) => {
       const cell = clientRuntime.getCell<unknown>(space, name, undefined);
@@ -2694,7 +2999,6 @@ describe("Phase 3 events-down (serving side)", () => {
     }
   });
 
-  // ---------------------------------------------------------------------
   // The same-eventId SIBLING shape (independent review of W3, B1 / M1):
   // an event can contribute SEVERAL transactions to one wave — the
   // handler run plus a separate event-handler-stamped tx carrying the
@@ -2706,7 +3010,6 @@ describe("Phase 3 events-down (serving side)", () => {
   // the sibling's survival as the handler's: a seq-less entry is marked
   // consequenced only by the LT1 copy's OWN run (`lt1 === true`), and an
   // orphan-refused copy takes its siblings down with it.
-  // ---------------------------------------------------------------------
 
   /** A sibling contribution of the running handler's event: a separate
    * event-handler-stamped tx carrying `tx.dispatchedEventId`, committed
@@ -2862,19 +3165,11 @@ describe("Phase 3 events-down (serving side)", () => {
     }
   });
 
-  /** Tags the ONE retryable failure of the sibling-orphan step: the
-   * held-wave probe finding the emitter's flushed "ping" durable — the
-   * structural ungated-tail window (OW57). Nothing else throws this. */
-  class A3StructuralWindow extends Error {}
-
-  /** The sibling-orphan construction, extracted whole so the bounded
-   * accept-and-retry below can re-run it FRESH (the window lottery is
-   * per-construction — a bare re-assert would just re-fail): every
-   * attempt gets its own doc/stream prefix, host tenure, and client. */
-  const runSiblingOrphanConstruction = async (prefix: string) => {
+  it("(α3) + a same-eventId SIBLING tx (independent review M1): the LT1 copy of a DERIVATION emitter's superseded append commits a sibling event-handler-stamped tx (the served navigateTo intent shape) inside the same wave; the orphan refusal must take the SIBLING down with the handler's contribution — neither half of an orphan lands (a navigation intent enacted for an event with zero durable entries is events.md §4's FORBIDDEN half-delivery); the refusal is counted once per EVENT (mutation: the sibling fold removed → the handler half is refused, the intent half LANDS — `side` 1) — the commit-sink gate makes the race deterministic", async () => {
+    const prefix = "w3-sibling-orphan";
     const w = await w3Setup(prefix, { flushDeadlineMs: 30_000 });
     const cancels: Array<() => void> = [];
-    const gate = Promise.withResolvers<void>();
+    const commitGate = Promise.withResolvers<void>();
     const sideClient = clientRuntime.getCell<{ n?: number }>(
       space,
       `${prefix}-side`,
@@ -2895,21 +3190,12 @@ describe("Phase 3 events-down (serving side)", () => {
     await sideServing.sync();
     try {
       const servingSeen = w.servingC;
-      // The s2 handler records every tag; for the derivation's "ping" it
-      // ALSO commits the sibling tx inline (the intent half) — and ARMS
-      // the settle gate as its first act (#6184's belt; the primary
-      // arming is the QUEUE seam installed below). `armingGap` is the
-      // construction's discriminator: the queue seam must have armed
-      // BEFORE the copy's run reaches this handler — a gap is exactly
-      // the window the CI flake rode.
-      let holdArmed = false;
-      let armingGap = false;
+      let pingEventId: string | undefined;
       cancels.push(w.serving.scheduler.addEventHandler(
         (tx: IExtendedStorageTransaction, event: unknown) => {
           const tag = (event as { tag?: string })?.tag ?? "?";
           if (tag === "ping") {
-            if (!holdArmed) armingGap = true;
-            holdArmed = true;
+            pingEventId = tx.dispatchedEventId;
             stampSibling(w.serving, tx, sideServing);
           }
           const current = servingSeen.withTx(tx).get() as
@@ -2938,38 +3224,21 @@ describe("Phase 3 events-down (serving side)", () => {
       expect(seenView()).toEqual([]);
       expect(sideView()).toBe(0);
 
-      // Hold the wave open for the cycle that RUNS the copy (CT-2060;
-      // the OW57 row's owed construction). The primary arming is the
-      // QUEUE seam: the LT1 copy is queued for dispatch synchronously
-      // with the emitter's sealed append (cell.ts's LT1 arm — the raw
-      // entries write and `scheduler.queueEvent` sit in one synchronous
-      // block, no interleaving point between them), and a drain's later
-      // re-delivery of the durable entry dispatches through the SAME
-      // `queueEvent` (space-server.ts's served dispatch) — so every
-      // path to the copy's run arms the hold strictly before the run,
-      // and no settle can sample an unarmed predicate after any of the
-      // copy's contributions sealed. This closes the post-#6184
-      // residual (the ping durable AND consequenced at the probe below
-      // — 4/4 CI attempts on #6223's board, 0/12+ under local timing):
-      // the handler's own arming can run after the copy's append
-      // sealed. A drain-side sidecar-SYNC seam cannot close it either —
-      // the same-wave copy's entry is a sealed-wave write the drain's
-      // durable query never sees, so nothing syncs the sidecar before
-      // the copy runs in that cycle (the Codex P1 finding on this PR,
-      // confirmed in code). Idle settles pass: nothing arms until THIS
-      // step's stream event is queued.
-      const s2StreamId = w.servingS2.getAsNormalizedFullLink().id;
-      const originalQueueEvent = w.serving.scheduler.queueEvent.bind(
-        w.serving.scheduler,
-      );
-      (w.serving.scheduler as {
-        queueEvent: typeof originalQueueEvent;
-      }).queueEvent = (eventLink, ...rest) => {
-        if (eventLink.id === s2StreamId) holdArmed = true;
-        return originalQueueEvent(eventLink, ...rest);
-      };
-      servingManager!.settleGate = gate.promise;
-      servingManager!.settleGateWhen = () => holdArmed;
+      // Pause the exact home-space wave after the emitter append and its
+      // handler/sibling consequences have accumulated, but immediately before
+      // the WaveCommitSink performs its head-checked store commit. This is the
+      // persistence boundary whose race OW57 needs: a rival can now advance
+      // the sidecar head deterministically, and releasing this wave exercises
+      // the production sink's conflict reconciliation without relying on
+      // scheduler timing or the storage manager's earlier settle hook.
+      const s2Sidecar = w.sidecarOf(w.s2);
+      gateWaveCommitWhen = (batch) =>
+        pingEventId !== undefined &&
+        batch.eventAppends?.some((append) =>
+            append.id === s2Sidecar && append.eventId === pingEventId
+          ) === true &&
+        batch.consequenceOf.includes(pingEventId);
+      waveCommitGate = commitGate.promise;
       let released = false;
       try {
         await w.serving.scheduler.run(emitter as never);
@@ -2978,54 +3247,17 @@ describe("Phase 3 events-down (serving side)", () => {
           "the derivation's cascade copy AND its sibling to SEAL into the open wave",
           20_000,
         );
-        // The wave is HELD: nothing of it has reached the store yet (the
-        // sidecar holds no "ping" entry) — the rival below races it.
-        // The one shape this probe can see that is NOT a regression is
-        // the structural ungated-tail window: the serving cycle's
-        // committing tail (watermark commit → notice settle → seal-chain
-        // drain → commitWave) runs AFTER the settle's only inputSynced
-        // consultation, so an emitter interleaving into those awaits
-        // flushes past an ARMED gate (space-server.ts #waveCycle; the
-        // OW57 audit). That shape — the flushed ping durable here, and
-        // nothing else — throws the TAGGED error the bounded retry
-        // below absorbs once; anything else fails loud, first time.
-        {
-          const durableAtProbe = w.entriesOf(w.sidecarOf(w.s2));
-          // The tag requires the window's WHOLE fingerprint, not the
-          // symptom alone (Cubic P1 on the retry PR): (a) the durable
-          // content is exactly the emitter's ping — nothing else ever
-          // qualifies; (b) the queue-seam arming provably ENGAGED
-          // (`holdArmed` — set synchronously with the sealed append,
-          // so a durable ping with holdArmed still false means the
-          // arming machinery itself broke: NOT the window, fails
-          // loud, first attempt). The residual — an intermittent
-          // gate-machinery regression producing exactly an
-          // armed-flush — is indistinguishable from the window at
-          // this seam BY THE AUDIT'S CONCLUSION (no admitting-path
-          // seam exists test-side), which is what the owner ruled
-          // on: it is absorbed AT MOST ONCE, logged and countable,
-          // and a deterministic regression with this signature still
-          // reds the step on the second attempt.
-          if (
-            durableAtProbe.length > 0 &&
-            holdArmed &&
-            durableAtProbe.every((entry) =>
-              (entry.payload as { tag?: string } | undefined)?.tag === "ping"
-            )
-          ) {
-            throw new A3StructuralWindow(
-              `the held-wave probe found the emitter's ping durable ` +
-                `(${durableAtProbe.length} entry/entries) with the hold ` +
-                `armed — the committing-tail window admitted the wave ` +
-                `past the armed settle gate`,
-            );
-          }
-          expect(durableAtProbe).toEqual([]);
-        }
+        await waitUntil(
+          () => waveCommitGateHits === 1,
+          "the target wave to reach the commit sink",
+          20_000,
+        );
+        expect(pingEventId).toBeDefined();
+        expect(w.entriesOf(s2Sidecar)).toEqual([]);
+
         w.s2.send({ tag: "rival" } as never);
         await clientRuntime.idle();
         await clientRuntime.storageManager.synced();
-        const s2Sidecar = w.sidecarOf(w.s2);
         await waitUntil(
           () =>
             w.entriesOf(s2Sidecar).some((entry) =>
@@ -3033,23 +3265,16 @@ describe("Phase 3 events-down (serving side)", () => {
             ),
           "the rival append to land",
         );
-        gate.resolve();
+        commitGate.resolve();
         released = true;
       } finally {
-        if (!released) gate.resolve();
-        (w.serving.scheduler as {
-          queueEvent: typeof originalQueueEvent;
-        }).queueEvent = originalQueueEvent;
-        servingManager!.settleGate = undefined;
-        servingManager!.settleGateWhen = undefined;
+        if (!released) commitGate.resolve();
+        gateWaveCommitWhen = undefined;
+        waveCommitGate = undefined;
       }
 
-      // The construction's discriminator: the hold was armed BEFORE the
-      // copy's run reached the handler — red under handler-only arming
-      // (#6184) and under a drain-sync seam alike.
-      expect(armingGap).toBe(false);
+      expect(waveCommitGateHits).toBe(1);
 
-      const s2Sidecar = w.sidecarOf(w.s2);
       await waitUntil(
         () =>
           w.entriesOf(s2Sidecar).length === 1 &&
@@ -3071,11 +3296,8 @@ describe("Phase 3 events-down (serving side)", () => {
       expect(seen).toEqual(["rival"]);
       expect(w.engineN(sideServing)).toBe(0);
       expect(stats.events.orphanDeliveriesRefused).toBe(1);
-      // Scoped to THIS attempt's stream (Cubic P3 on the retry PR): the
-      // retry reuses the per-step server/space, so a global scan would
-      // read an absorbed attempt-1 tenure's leftovers beside this
-      // construction's — an eventId embeds its stream doc id, and each
-      // attempt's stream is prefix-fresh, so the filter is exact.
+      // Scoped to this construction's stream: the eventId embeds its stream
+      // doc id, so the filter remains exact if the harness retains artifacts.
       const s2Id = w.s2.getAsNormalizedFullLink().id;
       const consequenced = (w.engine.database.prepare(
         `SELECT consequence_of FROM "commit"
@@ -3089,52 +3311,10 @@ describe("Phase 3 events-down (serving side)", () => {
       expect(consequenced.length).toBeGreaterThanOrEqual(1);
       for (const id of consequenced) expect(durableIds.has(id)).toBe(true);
     } finally {
-      gate.resolve();
+      commitGate.resolve();
+      gateWaveCommitWhen = undefined;
+      waveCommitGate = undefined;
       for (const cancel of cancels) cancel();
-    }
-  };
-
-  it("(α3) + a same-eventId SIBLING tx (independent review M1): the LT1 copy of a DERIVATION emitter's superseded append commits a sibling event-handler-stamped tx (the served navigateTo intent shape) inside the same wave; the orphan refusal must take the SIBLING down with the handler's contribution — neither half of an orphan lands (a navigation intent enacted for an event with zero durable entries is events.md §4's FORBIDDEN half-delivery); the refusal is counted once per EVENT (mutation: the sibling fold removed → the handler half is refused, the intent half LANDS — `side` 1) — bounded accept-and-retry on the structural window (OW57, RULED 2026-08-24)", async () => {
-    // OW57, RULED 2026-08-24 (owner, verbatim: "agreed with your
-    // recommendation: bounded accept-and-retry for now"). The audit
-    // behind the ruling (#6223's settle-gate seam audit): the serving
-    // cycle's committing tail admits seals AFTER the settle's only
-    // inputSynced consultation, so no test-side held-wave construction
-    // can be sound against an emitter that interleaves there — three
-    // arming constructions (the #6184 handler arm, a drain-sync seam,
-    // the queue seam this step keeps) failed on the identical CI
-    // signature, 5 identical observations. Bounded: TWO attempts total;
-    // ONLY the tagged structural signature retries (the held-wave probe
-    // finding the flushed ping durable — A3StructuralWindow); every
-    // other failure, the title's mutation pins included, propagates on
-    // the FIRST attempt. Each attempt re-runs the FULL construction
-    // (fresh prefix, fresh host tenure, fresh client) — the window
-    // lottery is per-construction. An absorbed hit logs the greppable
-    // marker "a3-structural-window-retry (OW57)": CI occurrences stay
-    // countable, the evidence base for the eventual tail-seam decision.
-    for (let attempt = 1;; attempt++) {
-      try {
-        await runSiblingOrphanConstruction(`w3-sibling-orphan-a${attempt}`);
-        return;
-      } catch (error) {
-        if (attempt < 2 && error instanceof A3StructuralWindow) {
-          console.warn(
-            `a3-structural-window-retry (OW57): attempt ${attempt} hit ` +
-              `the structural ungated-tail window — ${error.message}; ` +
-              `re-running the full construction (bounded: 2 attempts)`,
-          );
-          // The re-run needs the first construction torn down: the host
-          // holds the space lease and serving tenure, the client its
-          // session. (The suite's afterEach tears down only the CURRENT
-          // pair.)
-          await host?.close();
-          host = undefined;
-          await clientRuntime?.dispose();
-          await clientManager?.close();
-          continue;
-        }
-        throw error;
-      }
     }
   });
 
@@ -3251,7 +3431,7 @@ describe("Phase 3 events-down (serving side)", () => {
     }
   });
 
-  it("a served event whose HEAD-EVENT LOAD PARK fails DEFERS instead of terminally dropping: the entry stays unconsequenced through the failure, later arrivals hold behind it, and a drain after the failure clears delivers it EXACTLY ONCE in arrival order (events.md §5's T3 predicate — 'no runnable handler', never 'the run raced'; the OW45 residue member: a genesis ACL revoking the serving plane's pre-genesis session made a cross-space replica load fail and `failHeadEventLoadPark` sealed {status:'dropped', consequenced:true}, discharging at-least-once on a healthy trusted click; mutation: route the failure arm back to `dropEvent` → BOTH entries seal dropped and the log never grows past the warm-up)", async () => {
+  it("a transient failed head load fails closed when its first checkpoint write rejects, carries no uncommitted age across restart, and retries once after recovery", async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
 
@@ -3324,9 +3504,12 @@ describe("Phase 3 events-down (serving side)", () => {
         scope: "space",
         id: argumentId,
       };
+      failNextServingCommit = "result-error";
+      failServingCommitActionPrefix =
+        "server-execution/event-delivery-checkpoint:";
 
-      // A2 arrives first, B1 second — the same ordered appends the
-      // sidecar-sync barrier pin uses.
+      // A2 arrives first. Hold B1 until after the failed write is observed so
+      // no newer input can legitimately wake a second attempt first.
       send("a");
       await clientRuntime.idle();
       await clientRuntime.storageManager.synced();
@@ -3334,6 +3517,38 @@ describe("Phase 3 events-down (serving side)", () => {
         () => entriesOf(aSidecarId).length === 2,
         "A2's append to land",
       );
+      await waitUntil(
+        () => host!.stats().events.deliveryCheckpointWriteFailures === 1,
+        "the first checkpoint write rejection to be counted",
+      );
+      expect(rejectedWaveCommits).toBe(0);
+      expect(
+        allEntries().every((entry) => entry.deliveryDeferral === undefined),
+        "uncommitted failure age must not become durable authority",
+      ).toBe(true);
+      expect(storedLog(), "the failed head stays pending").toEqual(["A"]);
+
+      // Rotate the tenure while no checkpoint exists durably. B1 is both the
+      // later arrival whose barrier behavior is under test and the new input
+      // that activates the successor tenure. The still-failing A2 is therefore
+      // re-observed from durable state and begins at count one.
+      await host!.spaceServer(space)!.park("idle");
+      servingRuntime = undefined;
+      servingManager = undefined;
+      rejectWaveCommitWhen = (batch) => {
+        const rejects = JSON.stringify(batch.operations).includes(
+          '"deliveryDeferral"',
+        );
+        if (rejects) {
+          // Arm both following commit attempts before this rejection returns.
+          // The host may start its next drain immediately, so arming either
+          // failure after observing the counter races that automatic retry.
+          failServingCommitSequence = ["rejection", "synchronous-throw"];
+          failServingCommitActionPrefix =
+            "server-execution/event-delivery-checkpoint:";
+        }
+        return rejects;
+      };
       send("b");
       await clientRuntime.idle();
       await clientRuntime.storageManager.synced();
@@ -3342,19 +3557,48 @@ describe("Phase 3 events-down (serving side)", () => {
         "B1's append to land on its own sidecar",
       );
 
-      // Wait for the park failure to have RESOLVED one way or the other.
-      // The predicate is satisfiable in BOTH worlds on purpose, so the
-      // pin reds on its assertion rather than on a timeout: the terminal
-      // arm seals a `status` onto the entry and then goes quiet (nothing
-      // is left to park), while the deferral arm never seals and keeps
-      // re-draining, so its failure count goes on climbing.
-      const failuresBefore = GatedStorageManager.loadParkFailHits;
+      await waitUntil(
+        () => host!.stats().events.deliveryCheckpointWriteFailures >= 2,
+        "the whole-wave checkpoint rejection to be counted",
+      );
+      expect(rejectedWaveCommits).toBe(1);
+      rejectWaveCommitWhen = undefined;
+      const wakeCheckpointRetry = async (suffix: string, value: number) => {
+        const wake = clientRuntime.getCell<{ value: number }>(
+          space,
+          `checkpoint-write-wake-${suffix}`,
+          undefined,
+        );
+        await wake.sync();
+        const tx = clientRuntime.edit();
+        wake.withTx(tx).set({ value });
+        expect((await tx.commit()).error).toBeUndefined();
+      };
+      await wakeCheckpointRetry("rejection", 1);
+      await waitUntil(
+        () => host!.stats().events.deliveryCheckpointWriteFailures >= 3,
+        "the rejected checkpoint promise to be counted",
+      );
+      await wakeCheckpointRetry("throw", 2);
+      await waitUntil(
+        () => host!.stats().events.deliveryCheckpointWriteFailures >= 4,
+        "the synchronously failed checkpoint staging to be counted",
+      );
+      await wakeCheckpointRetry("success", 3);
+
       await waitUntil(
         () =>
           allEntries().some((entry) =>
-            (entry as { status?: string }).status !== undefined
-          ) || GatedStorageManager.loadParkFailHits > failuresBefore + 1,
-        "the head-event load park to fail (deferring or terminally dropping)",
+            entry.deliveryDeferral?.phase === "dispatch-load"
+          ),
+        "the head-event load failure checkpoint to commit",
+      );
+      const checkpoint = allEntries().find((entry) =>
+        entry.deliveryDeferral?.phase === "dispatch-load"
+      )!.deliveryDeferral!;
+      expect(checkpoint.failureCount).toBe(1);
+      expect(checkpoint.recoveryEpoch).toBe(
+        `test:load-park:${GatedStorageManager.loadParkRecoveryGeneration}`,
       );
 
       // PIN 1 — the failure is a DEFERRAL, not a drop: nothing was
@@ -3381,11 +3625,17 @@ describe("Phase 3 events-down (serving side)", () => {
       // no terminal drop was counted.
       const duringFailure = host!.stats().events;
       expect(duringFailure.loadParkDeferrals).toBeGreaterThan(0);
+      // Initial observation plus the four explicitly woken write attempts. An
+      // automatic retry may observe the same durable failure between them.
+      expect(duringFailure.loadParkFailures).toBeGreaterThanOrEqual(5);
+      expect(duringFailure.deliveryDeferralsActive).toBe(1);
+      expect(duringFailure.deliveryFailuresActive).toBe(1);
       expect(duringFailure.dropped).toBe(0);
 
       // Heal: the replica load succeeds and the deferred entries drain.
       GatedStorageManager.loadParkFailDocId = undefined;
       GatedStorageManager.loadParkFailAddress = undefined;
+      GatedStorageManager.signalLoadRecovery(servingManager!);
 
       await waitUntil(
         () => storedLog().length === 3,
@@ -3416,8 +3666,15 @@ describe("Phase 3 events-down (serving side)", () => {
         allEntries().filter((entry) => entry.consequenced === true).length,
         "every entry consequenced exactly once",
       ).toBe(3);
+      expect(
+        allEntries().every((entry) => entry.deliveryDeferral === undefined),
+      ).toBe(true);
+      expect(host!.stats().events.deliveryDeferralsActive).toBe(0);
+      expect(host!.stats().events.deliveryFailuresActive).toBe(0);
       expect(host!.stats().events.dropped).toBe(0);
     } finally {
+      rejectWaveCommitWhen = undefined;
+      failServingCommitSequence = [];
       GatedStorageManager.loadParkFailDocId = undefined;
       GatedStorageManager.loadParkFailAddress = undefined;
       cancelDemand();
@@ -3532,6 +3789,7 @@ describe("Phase 3 events-down (serving side)", () => {
       servingManager!.syncGateWhen = undefined;
       servingManager!.syncGate = undefined;
       gate.resolve();
+      GatedStorageManager.signalLoadRecovery(servingManager!);
 
       await waitUntil(
         () => storedLog().length === 3,
@@ -3671,6 +3929,7 @@ describe("Phase 3 events-down (serving side)", () => {
       GatedStorageManager.loadParkFailDocId = undefined;
       GatedStorageManager.loadParkFailAddress = undefined;
       GatedStorageManager.loadParkSettle = undefined;
+      GatedStorageManager.signalLoadRecovery(servingManager!);
 
       await waitUntil(
         () => storedLog().length === 3,
@@ -3690,7 +3949,123 @@ describe("Phase 3 events-down (serving side)", () => {
     }
   });
 
-  it("the typed-cause budget bypass, discriminated: a PERSISTENTLY failing load defers past the cold-view give-up threshold without ever hardening into §5's drop (the fix's central posture — `cause: \"load-park\"` keeps these deferrals off `EVENT_DEFERRAL_DROP_THRESHOLD`, because that budget exists for a piece that never materializes, not for an input that exists and only failed to READ. Independent review F4. Mutation: delete the arm's trailing delete/delete/rescan/return so it falls through into the threshold accounting → the entry hardens into a sealed dropped notice after ~8 backstop ticks, restoring the at-least-once discharge this PR removes)", async () => {
+  it("a store-time RowLabelCommitError attributes the refused operation to its served event and reaches retained commit-finalization attention", async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const { argument, result } = await standUp(clientRuntime, BUMP_PATTERN, {
+      arg: "row-label-cover-arg",
+      result: "row-label-cover-result",
+    });
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    const argumentId = argument.getAsNormalizedFullLink().id;
+    const storedValue = () =>
+      (Engine.read(engine, { id: argumentId })?.value as
+        | { value?: number }
+        | undefined)?.value ?? 0;
+    const entriesOf = (sidecarId: string) =>
+      ((Engine.read(engine, { id: sidecarId })?.value ??
+        {}) as StreamEventsDocValue).entries ?? [];
+    const allEntries = () =>
+      sidecarIdsIn(engine).flatMap((id) => entriesOf(id));
+    const bump = () =>
+      (result.key("bump") as unknown as { send(value: unknown): unknown })
+        .send({});
+
+    try {
+      // Warm the piece and identify the ordinary handler-write operation that
+      // stands in for the sqlite operation rejected by the real engine sink.
+      // This decorator sits after the sink's typed producer boundary: the
+      // regression below exercises the wave-owner and SpaceServer handoff,
+      // while memory's sqlite tests exercise the real evaluator rollback.
+      bump();
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(() => storedValue() === 1, "the warm-up bump to land");
+
+      rejectWaveCommitWith = (batch) => {
+        if (batch.consequenceOf.length === 0) return undefined;
+        const failedOperation = batch.operations.findIndex((operation) =>
+          operation.op !== "sqlite" && operation.id === argumentId
+        );
+        if (failedOperation < 0) return undefined;
+        return {
+          name: "RowLabelCommitError",
+          message: "sqlite commit refused: synthetic row-label verdict",
+          failedOperation,
+        };
+      };
+      bump();
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+
+      await waitUntil(
+        () =>
+          allEntries().some((entry) =>
+            entry.status === "needs-attention" &&
+            entry.attention?.phase === "commit-finalization"
+          ),
+        "the refused wave to reach commit-finalization attention",
+      );
+      const terminal = allEntries().find((entry) =>
+        entry.status === "needs-attention" &&
+        entry.attention?.phase === "commit-finalization"
+      )!;
+      expect(rejectedWaveCommits).toBe(1);
+      expect(storedValue(), "the refused handler write never committed").toBe(
+        1,
+      );
+      expect(terminal.consequenced).toBe(true);
+      expect(terminal.deliveryDeferral).toBeUndefined();
+      expect(terminal.attention).toMatchObject({
+        failureClass: "protocol",
+        code: "permanent-delivery-failure",
+        recovery: "explicit-retry",
+      });
+      expect(host!.stats().events.needsAttention.total).toBe(1);
+      expect(
+        host!.stats().events.needsAttention.byPhase["commit-finalization"],
+      ).toBe(1);
+
+      // The refusal proves no consequence committed, so the explicit retry is
+      // eligible and runs under a fresh event ID after the synthetic refusal
+      // has been consumed.
+      const sidecarId = sidecarIdsIn(engine).find((id) =>
+        entriesOf(id).some((entry) => entry.eventId === terminal.eventId)
+      )!;
+      const retried = await clientManager.resolveEventAttention(
+        space,
+        terminal.eventId,
+        terminal.seq!,
+        sidecarId,
+        "retry",
+      );
+      expect(retried.resolution.kind).toBe("retried");
+      const retryId = (retried.resolution as {
+        kind: "retried";
+        eventId: string;
+      }).eventId;
+      await waitUntil(
+        () =>
+          storedValue() === 2 &&
+          allEntries().some((entry) =>
+            entry.eventId === retryId && entry.consequenced === true
+          ),
+        "the explicit retry to consequence exactly once",
+      );
+      expect(
+        allEntries().filter((entry) => entry.retryOf === terminal.eventId),
+      ).toHaveLength(1);
+    } finally {
+      rejectWaveCommitWith = undefined;
+      cancelDemand();
+    }
+  });
+
+  it("a rejected terminal notice keeps the persistent failed head and later arrival blocked until a newer input lets the cover commit in order", async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
     const { argument, result } = await standUp(clientRuntime, BUMP_PATTERN, {
@@ -3701,7 +4076,13 @@ describe("Phase 3 events-down (serving side)", () => {
     await clientRuntime.idle();
     await clientRuntime.storageManager.synced();
 
-    host = newHost();
+    let deliveryNow = 10_000;
+    host = newHost({
+      flushDeadlineMs: 5_000,
+      idleParkMs: 600_000,
+      deliveryFailureBudgetMs: 60_000,
+      deliveryFailureNow: () => deliveryNow,
+    });
     const argumentId = argument.getAsNormalizedFullLink().id;
     const storedValue = () =>
       (Engine.read(engine, { id: argumentId })?.value as
@@ -3735,52 +4116,136 @@ describe("Phase 3 events-down (serving side)", () => {
       await clientRuntime.idle();
       await clientRuntime.storageManager.synced();
 
-      // Causally closed on the COUNTER, not a sleep: one pending event means
-      // one deferral per backstop tick, so crossing the cold-view budget is
-      // what we wait for. EVENT_DEFERRAL_DROP_THRESHOLD is 8; going past it
-      // is the whole point. The seal arm is in the predicate too, so that a
-      // regression reds on the ASSERTION below rather than on a timeout:
-      // under the fall-through mutation the counter stops at the threshold
-      // (the entry is consequenced and stops deferring) and would otherwise
-      // just hang here.
       await waitUntil(
         () =>
-          host!.stats().events.loadParkDeferrals > 8 ||
           allEntries().some((entry) =>
-            (entry as { status?: string }).status !== undefined
+            entry.deliveryDeferral?.phase === "dispatch-load"
           ),
-        "the deferral count to pass the cold-view give-up threshold " +
-          "(or an entry to harden, which is the regression)",
-        30_000,
+        "the failed-head checkpoint to commit",
       );
-
-      // THE PIN: past the threshold, still no consequence. Under the
-      // fall-through mutation the entry is sealed
-      // {status: "dropped", consequenced: true} by now.
+      deliveryNow += 60_000;
+      expect(host!.stats().events.maxAccumulatedDeliveryFailureMs).toBe(
+        60_000,
+      );
+      failNextServingCommit = "result-error";
+      failServingCommitActionPrefix = "server-execution/event-consequence:";
+      // A successful replacement load is a positive recovery wake. The
+      // handler's required load still fails, so the retry re-enters failed
+      // state with the accumulated budget and attempts to terminalize
+      // immediately. Reject that notice wave: the entry and its arrival
+      // barrier must remain pending.
+      GatedStorageManager.signalLoadRecovery(servingManager!);
+      await waitUntil(
+        () => host!.stats().events.needsAttentionSealFailures === 1,
+        "the rejected attention notice to be counted",
+      );
+      expect(rejectedWaveCommits).toBe(0);
       expect(
-        allEntries().filter((entry) =>
-          (entry as { status?: string }).status !== undefined
-        ),
-        "a persistent load failure must never harden into §5's drop",
-      ).toEqual([]);
-      expect(host!.stats().events.dropped, "nothing terminal was sealed")
-        .toBe(0);
+        allEntries().some((entry) => entry.status === "needs-attention"),
+      ).toBe(false);
       expect(
-        allEntries().filter((entry) => entry.consequenced === true).length,
-        "only the warm-up entry is consequenced",
-      ).toBe(1);
-      expect(storedValue(), "the handler never ran").toBe(1);
+        allEntries().some((entry) => entry.deliveryDeferral !== undefined),
+      ).toBe(true);
+      expect(storedValue(), "the failed handler remains unrun").toBe(1);
+      expect(host!.stats().events.needsAttention.total).toBe(0);
 
-      // And it is a DEFERRAL, not a wedge: healing still delivers it once.
+      // Heal, then append one later event. Its newer input is the valid wake
+      // for the failed notice write. The original cover must commit first;
+      // only then may the later healthy handler consequence land.
       GatedStorageManager.loadParkFailDocId = undefined;
       GatedStorageManager.loadParkFailAddress = undefined;
+      rejectWaveCommitWhen = (batch) =>
+        JSON.stringify(batch.operations).includes('"attention"');
+      bump();
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
       await waitUntil(
-        () => storedValue() === 2,
-        "the long-deferred event to deliver after the failure clears",
-        30_000,
+        () => allEntries().length === 3,
+        "the later event append to become durable",
       );
+      await waitUntil(
+        () => host!.stats().events.needsAttentionSealFailures === 2,
+        "the whole-wave attention rejection to be counted",
+      );
+      expect(rejectedWaveCommits).toBe(1);
+      rejectWaveCommitWhen = undefined;
+      const noticeWake = clientRuntime.getCell<{ value: number }>(
+        space,
+        "needs-attention-notice-write-wake",
+        undefined,
+      );
+      await noticeWake.sync();
+      const wakeTx = clientRuntime.edit();
+      noticeWake.withTx(wakeTx).set({ value: 1 });
+      expect((await wakeTx.commit()).error).toBeUndefined();
+      await waitUntil(
+        () =>
+          allEntries().some((entry) =>
+            entry.status === "needs-attention" &&
+            entry.attention?.phase === "dispatch-load"
+          ) && storedValue() === 2,
+        "the cover to commit before the later healthy consequence",
+      );
+      const terminal = allEntries().find((entry) =>
+        entry.status === "needs-attention"
+      )!;
+      expect(terminal.consequenced).toBe(true);
+      expect(terminal.deliveryDeferral).toBeUndefined();
+      expect(terminal.attention).toMatchObject({
+        failureClass: "session-revoked",
+        code: "delivery-failure-budget-exhausted",
+        accumulatedFailureMs: 60_000,
+        recovery: "explicit-retry",
+      });
+      expect(storedValue()).toBe(2);
+      const entries = allEntries();
+      expect(entries[1].status).toBe("needs-attention");
+      expect(entries[2].consequenced).toBe(true);
       expect(host!.stats().events.dropped).toBe(0);
+      expect(host!.stats().events.needsAttention.total).toBe(1);
+      expect(
+        host!.stats().events.needsAttention.byPhase["dispatch-load"],
+      ).toBe(1);
+      expect(host!.stats().events.deliveryDeferralsActive).toBe(0);
+      expect(host!.stats().events.deliveryFailuresActive).toBe(0);
+
+      // Explicit Retry is one fresh durable event with exact provenance. A
+      // lost-response replay returns the recorded ID and never appends or runs
+      // a second successor.
+      const retryResult = await clientManager.resolveEventAttention(
+        space,
+        terminal.eventId,
+        terminal.seq!,
+        sidecarIdsIn(engine)[0],
+        "retry",
+      );
+      expect(retryResult.resolution.kind).toBe("retried");
+      const retryId = (retryResult.resolution as {
+        kind: "retried";
+        eventId: string;
+      }).eventId;
+      await waitUntil(
+        () =>
+          storedValue() === 3 &&
+          allEntries().some((entry) =>
+            entry.eventId === retryId && entry.consequenced === true
+          ),
+        "the one explicit retry to consequence",
+      );
+      const replay = await clientManager.resolveEventAttention(
+        space,
+        terminal.eventId,
+        terminal.seq!,
+        sidecarIdsIn(engine)[0],
+        "retry",
+      );
+      expect(replay.resolution).toEqual(retryResult.resolution);
+      expect(
+        allEntries().filter((entry) => entry.retryOf === terminal.eventId),
+      ).toHaveLength(1);
+      expect(host!.stats().events.explicitRetries).toBe(1);
     } finally {
+      rejectWaveCommitWhen = undefined;
       GatedStorageManager.loadParkFailDocId = undefined;
       GatedStorageManager.loadParkFailAddress = undefined;
       cancelDemand();

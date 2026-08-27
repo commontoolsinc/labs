@@ -41,9 +41,9 @@ import {
 } from "./annotations.ts";
 import { encodeFuseComponent } from "./path-codec.ts";
 
-// ---------------------------------------------------------------------------
+//
 // Shared helpers
-// ---------------------------------------------------------------------------
+//
 
 const decoder = new TextDecoder();
 
@@ -1995,9 +1995,9 @@ Deno.test("CellBridge fails closed without paginated identifier listing", async 
   assertEquals(pieceListRequests, 0);
 });
 
-// ---------------------------------------------------------------------------
+//
 // Group 1: loadPieceTree — initial tree structure
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("CellBridge.loadPieceTree creates meta.json with a pattern reference", async () => {
   const tree = new FsTree();
@@ -3556,9 +3556,9 @@ Deno.test("CellBridge.hydratePieceProp labels void handlers as no-arg callables 
   );
 });
 
-// ---------------------------------------------------------------------------
+//
 // Group 2: addPieceToSpace — name collision
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("CellBridge.addPieceToSpace assigns -2 suffix on name collision", async () => {
   const tree = new FsTree();
@@ -3680,9 +3680,9 @@ Deno.test("CellBridge.addPieceToSpace assigns -2 and -3 suffixes for three colli
   assertEquals(tree.lookup(state.piecesIno, "Standup-3") !== undefined, true);
 });
 
-// ---------------------------------------------------------------------------
+//
 // Group 3: updateIndexJson
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("CellBridge.updateIndexJson writes .index.json mapping names to entity IDs", async () => {
   const tree = new FsTree();
@@ -4338,9 +4338,9 @@ Deno.test("CellBridge decodes encoded space directory names for source write pat
   assertEquals(patternRefReads, 1);
 });
 
-// ---------------------------------------------------------------------------
+//
 // Group 4: syncPieceListOnce — add/remove
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("CellBridge.syncPieceListOnce adds a new piece to the tree", async () => {
   const tree = new FsTree();
@@ -4444,9 +4444,9 @@ Deno.test("CellBridge.syncPieceListOnce removes a deleted piece from the tree", 
   assertEquals(state.pieceMap.size, 0);
 });
 
-// ---------------------------------------------------------------------------
+//
 // Group 5: subscribePiece — rename on cell change
-// ---------------------------------------------------------------------------
+//
 
 Deno.test({
   name: "CellBridge.subscribePiece renames directory when piece name changes",

@@ -108,7 +108,7 @@ async function runTest(base: URL) {
       }[];
 
     try {
-      // --- Seed: one valid guarded row; staging = 1 valid + 1 violating. ---
+      // Seed: one valid guarded row; staging = 1 valid + 1 violating.
       await send("seed");
       await waitFor(
         "seed",
@@ -119,10 +119,10 @@ async function runTest(base: URL) {
               ?.length === 2,
       );
 
-      // --- THE POINT (rollback): copy EVERY staging row into the guarded
+      // THE POINT (rollback): copy EVERY staging row into the guarded
       // table. The runner gate admits the INSERT…SELECT (the server
       // advertised 3.c); the server evaluates the two committed rows, the
-      // violating one refuses, and the WHOLE statement rolls back. ---
+      // violating one refuses, and the WHOLE statement rolls back.
       await send("copyBad");
       // The failed commit rolls back the db-handle rev bump too, so `q` does
       // not re-run for it; the next SUCCESSFUL write re-queries server truth.
@@ -144,12 +144,12 @@ async function runTest(base: URL) {
         );
       }
 
-      // --- Upsert, violating post-image: row 2's sender flips to junk ->
-      // the server re-derives the post-image, refuses, rolls back. ---
+      // Upsert, violating post-image: row 2's sender flips to junk ->
+      // the server re-derives the post-image, refuses, rolls back.
       await send("upsertBad");
-      // --- Upsert, valid post-image: row 1's sender flips to carol2. Its
+      // Upsert, valid post-image: row 1's sender flips to carol2. Its
       // successful commit bumps the handle rev, forcing a FRESH query cycle
-      // against server truth (no dependency on rolled-back speculation). ---
+      // against server truth (no dependency on rolled-back speculation).
       await send("upsertGood");
       await waitFor(
         "upserts settled",
@@ -167,7 +167,7 @@ async function runTest(base: URL) {
         );
       }
 
-      // --- The read side re-derives row 1's label from the POST-IMAGE. ---
+      // The read side re-derives row 1's label from the POST-IMAGE.
       const rowLabel = async (i: number) => {
         const dtx = runtime.edit();
         const leaf = result.key("q").key("result").key(i).key("body")

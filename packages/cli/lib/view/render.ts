@@ -1218,7 +1218,9 @@ function lineInfo(
   return `${first}-${last}/${total}  ${where}`;
 }
 
-// --- Overlay (info card / definition peek) ----------------------------------
+//
+// Overlay (info card / definition peek)
+//
 
 export interface OverlayBox {
   x: number;
@@ -1351,7 +1353,9 @@ function darkenSpan(
   rows[r] = overlayRow(rows[r], from, paint(chars, ui.overlayShadow));
 }
 
-// --- Modal dialog (save / revert / amend prompt) ----------------------------
+//
+// Modal dialog (save / revert / amend prompt)
+//
 
 /** Blank columns between adjacent buttons in a dialog's button row. */
 const BUTTON_GAP = 3;
@@ -1579,7 +1583,9 @@ function overlayRow(base: string, x: number, insert: string): string {
   return left + RESET + insert + RESET + right;
 }
 
-// --- Cell / style helpers ----------------------------------------------------
+//
+// Cell / style helpers
+//
 
 function cellsToAnsi(cells: Cell[], color: boolean): string {
   if (!color) return cells.map((c) => c.ch).join("");
@@ -1653,7 +1659,9 @@ function kindGlyph(kind: string): string {
   }
 }
 
-// --- Visible-width string ops (ANSI-aware) -----------------------------------
+//
+// Visible-width string ops (ANSI-aware)
+//
 
 // deno-lint-ignore no-control-regex
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;

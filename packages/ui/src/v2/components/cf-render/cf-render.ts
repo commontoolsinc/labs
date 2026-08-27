@@ -306,7 +306,10 @@ export class CFRender extends BaseElement {
   private accessor _hasRendered = false;
   private _startPromise?: Promise<boolean>;
 
+  //
   // Debug helpers
+  //
+
   private _instanceId = DEBUG_LOGGING
     ? Math.random().toString(36).substring(7)
     : "";

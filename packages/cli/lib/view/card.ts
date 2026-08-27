@@ -195,7 +195,9 @@ function cardTitle(node: StructureNode): string {
   return `${node.kind}  ${node.label}`;
 }
 
-// --- sections ----------------------------------------------------------------
+//
+// sections
+//
 
 function metaLine(node: StructureNode): Line {
   const span = node.endLine - node.startLine + 1;
@@ -808,13 +810,17 @@ function enclosingNode(
   return best;
 }
 
-// --- schema rendering --------------------------------------------------------
+//
+// schema rendering
+//
 
-// --- schema → TypeScript-like type rendering --------------------------------
+//
+// schema → TypeScript-like type rendering
 //
 // Schemas are shown as a type signature (`{ token: string }`, `string[]`,
 // nested objects) rather than the underlying JSON-schema shape. Optional fields
 // (not in `required`) get a `?`. Rendered inline when it fits, else multi-line.
+//
 
 const INLINE_MAX = 56;
 
@@ -907,7 +913,9 @@ function pad(indent: number): string {
   return "  ".repeat(indent);
 }
 
-// --- line/span helpers -------------------------------------------------------
+//
+// line/span helpers
+//
 
 type Part = readonly [string, TokenClass];
 

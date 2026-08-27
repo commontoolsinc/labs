@@ -1696,7 +1696,8 @@ export class CellImpl<T extends FabricValue>
                 if (
                   consequence.kind === "errored" ||
                   consequence.kind === "dropped" ||
-                  consequence.kind === "refused"
+                  consequence.kind === "refused" ||
+                  consequence.kind === "needs-attention"
                 ) {
                   callerOnCommit(errorStatusTxView(
                     echoTx,

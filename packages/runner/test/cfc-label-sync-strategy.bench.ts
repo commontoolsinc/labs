@@ -51,7 +51,9 @@ const warmReplica = (): Replica =>
   new Set(Array.from({ length: NODE_COUNT }, (_, index) => index));
 const coldReplica = (): Replica => new Set();
 
-// --- "ensure the whole meta-graph is available" strategies ------------------
+//
+// "ensure the whole meta-graph is available" strategies
+//
 
 const ensureSerial = async (replica: Replica) => {
   for (let node = 0; node < NODE_COUNT; node++) {

@@ -15,7 +15,9 @@ import {
   type StatOpts,
 } from "./platform.ts";
 
-// --- Library paths ---
+//
+// Library paths
+//
 
 const LIBFUSE_PATHS = [
   "/usr/lib/x86_64-linux-gnu/libfuse3.so", // Debian/Ubuntu x86_64
@@ -26,7 +28,7 @@ const LIBFUSE_PATHS = [
   "/usr/lib64/libfuse3.so.4", // Fedora
 ];
 
-// --- Linux-specific FFI symbols (FUSE v3) ---
+// Linux-specific FFI symbols (FUSE v3)
 //
 // Key differences from v2:
 //   - fuse_session_new replaces fuse_lowlevel_new (same signature)
@@ -52,7 +54,7 @@ const LINUX_SYMBOLS = {
 
 type LinuxLib = Deno.DynamicLibrary<typeof LINUX_SYMBOLS>;
 
-// --- struct stat (Linux x86_64, 144 bytes) ---
+// struct stat (Linux x86_64, 144 bytes):
 //   dev_t st_dev       @ 0   (u64)
 //   ino_t st_ino       @ 8   (u64)
 //   nlink_t st_nlink   @ 16  (u64)  — note: u64 on Linux, u16 on macOS
@@ -90,9 +92,12 @@ function writeStat(buf: ArrayBuffer, opts: StatOpts): void {
   }
 }
 
-// --- fuse_entry_param ---
+//
+// fuse_entry_param
+//
 // Layout: ino(u64) + generation(u64) + stat(144) + attr_timeout(f64) + entry_timeout(f64)
 // = 8 + 8 + 144 + 8 + 8 = 176 bytes (same total as macOS)
+//
 
 const ENTRY_PARAM_SIZE = 176;
 const writeEntryParam = makeWriteEntryParam(
@@ -101,7 +106,7 @@ const writeEntryParam = makeWriteEntryParam(
   ENTRY_PARAM_SIZE,
 );
 
-// --- fuse_file_info (FUSE v3) ---
+// fuse_file_info (FUSE v3)
 // v3 removed the deprecated fh_old field.
 //   int flags             @  0  (i32)
 //   bitfield (32 bits)    @  4  (u32)
@@ -134,20 +139,24 @@ function writeFileInfo(ptr: Deno.PointerValue, fh: bigint): void {
   fiArr[FH_OFFSET / 8] = fh; // offset 16 = index 2
 }
 
-// --- O_* flags (Linux) ---
+//
+// O_* flags (Linux)
+//
 
 const O_CREAT = 0x40;
 const O_TRUNC = 0x200;
 const O_APPEND = 0x400;
 
-// --- Errno constants (Linux) ---
+//
+// Errno constants (Linux)
+//
 
 const ENOTEMPTY = 39;
 const ENOSYS = 38;
 const ENODATA = 61; // Linux equivalent of macOS ENOATTR
 const ENOTSUP = 95;
 
-// --- fuse_lowlevel_ops offsets ---
+// fuse_lowlevel_ops offsets
 // v3 keeps the same order for existing ops and adds new ones at the end.
 // The offsets below should match v2 for all ops we use.
 // Verify with verify-structs.c.
@@ -189,11 +198,15 @@ const OPS_OFFSETS = {
 
 const FUSE_ARGS_STRUCT_SIZE = 24;
 
-// --- Module state ---
+//
+// Module state
+//
 
 let fullLib: LinuxLib | null = null;
 
-// --- Platform implementation ---
+//
+// Platform implementation
+//
 
 const linuxPlatform: FusePlatform = {
   provider() {

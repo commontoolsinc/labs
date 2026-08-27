@@ -38,9 +38,9 @@ function link(id: string, path: string[] = []): NormalizedFullLink {
   return { space, id, path } as unknown as NormalizedFullLink;
 }
 
-// ---------------------------------------------------------------------------
+//
 // stripClockFields
-// ---------------------------------------------------------------------------
+//
 
 describe("stripClockFields", () => {
   it("removes a top-level timestamp without mutating the input", () => {
@@ -87,9 +87,9 @@ describe("stripClockFields", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // shouldShapeDelivery
-// ---------------------------------------------------------------------------
+//
 
 describe("shouldShapeDelivery", () => {
   it("is true only for renderer-trusted events", () => {
@@ -101,9 +101,9 @@ describe("shouldShapeDelivery", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Wake shaper, event path (unit, deterministic zero-length window)
-// ---------------------------------------------------------------------------
+//
 
 // The old DeliveryShaper surface, expressed over the unified WakeShaper +
 // holdShapedEvent adapter, so the event-path contract assertions below stay
@@ -356,9 +356,9 @@ describe("wake shaper (event path)", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Unified engine (plan C): properties specific to one shaper serving both paths
-// ---------------------------------------------------------------------------
+//
 
 describe("WakeShaper (unified engine)", () => {
   it("keeps event-path and cell-path budgets separate for the same pattern", async () => {
@@ -435,9 +435,9 @@ describe("WakeShaper (unified engine)", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Scheduler integration (real Runtime, default shaper)
-// ---------------------------------------------------------------------------
+//
 
 const STREAM_SCHEMA = {
   type: "object",
@@ -651,6 +651,7 @@ describe("delivery shaping (scheduler integration)", () => {
       }
       let settledOriginal = 0;
       let settledRetry = 0;
+      let settledSecondRetry = 0;
       runtime.scheduler.queueEvent(
         linkRef,
         { marker: "original" },
@@ -667,13 +668,25 @@ describe("delivery shaping (scheduler integration)", () => {
         false,
         { eventId: "inv-coalesced" },
       );
+      runtime.scheduler.queueEvent(
+        linkRef,
+        { marker: "second-retry" },
+        true,
+        () => settledSecondRetry++,
+        false,
+        { eventId: "inv-coalesced" },
+      );
       await runtime.idle();
-      // One delivery, carrying the FIRST payload; both callbacks settled on it.
+      // One delivery carries the FIRST payload. Every retry callback settles
+      // on that outcome, including a callback appended to the existing flat
+      // callback chain.
       expect(received).toContainEqual({ marker: "original" });
       expect(received).not.toContainEqual({ marker: "retry" });
+      expect(received).not.toContainEqual({ marker: "second-retry" });
       expect(received.length).toBe(MAX_EVENT_BACKLOG_PER_STREAM);
       expect(settledOriginal).toBe(1);
       expect(settledRetry).toBe(1);
+      expect(settledSecondRetry).toBe(1);
     } finally {
       await runtime.dispose();
     }

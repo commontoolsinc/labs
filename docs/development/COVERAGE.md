@@ -566,6 +566,13 @@ that starts with `ACCEPT_COVERAGE_DEBT:` and that the check cannot read fails th
 job and says what form to write instead, rather than being passed over as though
 it were not there.
 
+An accepted group keeps its attribution. The gate keeps one comment on the pull
+request and rewrites it in place as the answer changes, and the comment an
+acceptance leaves behind names the files holding the lines it accepted, under
+"Files with new uncovered lines" — the same heading and the same counts the
+failing run wrote. So the pull request goes on saying which file the debt is in
+after the acceptance stops anything from failing over it.
+
 The left margin is what tells an acceptance from a mention of one. A description
 can name the marker in a sentence, and can indent an example of it into a code
 block, without either being read as accepting anything — or as a malformed

@@ -1,10 +1,12 @@
 /**
- * These pin the walkthrough↔demo sync check to the three drift classes it
+ * These pin the walkthrough↔demo sync check to the four drift classes it
  * exists to catch, each of which shipped at least once: a composed command
  * the demo never runs (one was wrong from the day it was written and
  * survived four editing passes), an act reference gone stale under
- * renumbering (twice), and a shape-table row pairing a verb with an act that
- * no longer shows it.
+ * renumbering (twice), a shape-table row pairing a verb with an act that
+ * no longer shows it, and a write quoted with a value other than the one the
+ * demo pipes — invisible for as long as the payload was dropped, and the
+ * substance of every act a tour about writing narrates.
  *
  * The real files are checked too, so the gate's green on this repository is
  * itself a pinned fact — and so is the check's grip: each class is asserted
@@ -27,6 +29,8 @@ import {
   findViolations,
   joinContinuations,
   main,
+  READ_WRITE_DEMO_PATH,
+  READ_WRITE_TOUR_PATH,
   tokenize,
   TOUR_PATH,
   WALKTHROUGH_PATH,
@@ -39,10 +43,18 @@ describe("check-verb-session-sync", () => {
   let sh = "";
   let md = "";
   let tour = "";
+  let readWriteDemo = "";
+  let readWriteTour = "";
   beforeAll(async () => {
     sh = await Deno.readTextFile(join(REPO_ROOT, DEMO_PATH));
     md = await Deno.readTextFile(join(REPO_ROOT, WALKTHROUGH_PATH));
     tour = await Deno.readTextFile(join(REPO_ROOT, TOUR_PATH));
+    readWriteDemo = await Deno.readTextFile(
+      join(REPO_ROOT, READ_WRITE_DEMO_PATH),
+    );
+    readWriteTour = await Deno.readTextFile(
+      join(REPO_ROOT, READ_WRITE_TOUR_PATH),
+    );
   });
 
   describe("tokenize", () => {
@@ -77,6 +89,62 @@ describe("check-verb-session-sync", () => {
     it("extracts a command out of an assignment's substitution", () => {
       expect(demoCommands(`X=$(cf piece get --piece a title | jq -r .)`))
         .toEqual([["cf", "piece", "get", "--piece", "a", "title"]]);
+    });
+
+    it("reads past a helper's own leading arguments", () => {
+      // `run_stdin` carries the piped value ahead of the argv, so a rule that
+      // read the second token would take the payload for the command and
+      // report every write in a tour as invented. The payload comes back in
+      // the document's own spelling for it, which is what holds the two to
+      // each other.
+      expect(demoCommands(`run_stdin '25' cf set --piece a target`))
+        .toEqual([["echo", "25", "|", "cf", "set", "--piece", "a", "target"]]);
+    });
+
+    it("does not mistake a payload spelled `cf` for the command", () => {
+      // Searching for the `cf` token found the payload first and read the
+      // rest as the argv, recording `cf cf set …` — a command no demo runs,
+      // against which the honest quote of the write reads as invented. The
+      // helper's shape says where the command starts; nothing is searched.
+      expect(demoCommands(`run_stdin 'cf' cf set --piece a target`))
+        .toEqual([["echo", "cf", "|", "cf", "set", "--piece", "a", "target"]]);
+    });
+
+    it("reads a refusal's own claim and signature past, not through", () => {
+      // The same hazard on the helper carrying two arguments: either can be
+      // spelled `cf`, and only the table knows the command is the third.
+      expect(demoCommands(`refused 'why' 'cf' cf get --piece a x`))
+        .toEqual([["cf", "get", "--piece", "a", "x"]]);
+    });
+
+    it("ignores a helper it does not know", () => {
+      // The head list is the whole of what makes a line a command the demo
+      // ran; a new helper that executes one has to be added to it.
+      expect(demoCommands(`frobnicate cf set --piece a target`)).toEqual([]);
+    });
+  });
+
+  describe("walkthroughCommands", () => {
+    const block = (line: string) => ["```bash", line, "```"].join("\n");
+
+    it("reads a piped value as part of the command it feeds", () => {
+      // The document's spelling of a demo's `run_stdin`, asserted here as
+      // tokens rather than only through the violations it produces.
+      expect(
+        walkthroughCommands(block("echo '25' | cf set --piece a target"))
+          .map((command) => command.tokens),
+      ).toEqual([["echo", "25", "|", "cf", "set", "--piece", "a", "target"]]);
+    });
+
+    it("finds no command in a line piping into anything but cf", () => {
+      // The payload rule's boundary: `echo`, a value, the bar, and then `cf`
+      // — all four, or the line is not a command at all. Dropping the last
+      // of those requirements would make every `echo … | jq` in a document
+      // a command the demo is then asked to have run.
+      expect(walkthroughCommands(block("echo '25' | jq -r .")))
+        .toEqual([]);
+      expect(walkthroughCommands(block("echo '25' | cfx set --piece a x")))
+        .toEqual([]);
     });
   });
 
@@ -267,12 +335,87 @@ describe("check-verb-session-sync", () => {
       expect(demoFor(TOUR_PATH)).toBe(DEMO_PATH);
     });
 
+    it("holds the read/write tour to the demo that runs it", async () => {
+      // Every command in the tour is one read-write-demo.sh runs, and none of
+      // them is one the verb demo runs — so the pairing is what makes the
+      // document check at all, and the wrong demo says so loudly.
+      const lines: string[] = [];
+      expect(
+        await main({ mdPath: READ_WRITE_TOUR_PATH, log: (l) => lines.push(l) }),
+      ).toBe(0);
+      expect(demoFor(READ_WRITE_TOUR_PATH)).toBe(READ_WRITE_DEMO_PATH);
+      expect(
+        await main({
+          mdPath: READ_WRITE_TOUR_PATH,
+          shPath: DEMO_PATH,
+          error: () => {},
+        }),
+      ).toBe(1);
+    });
+
     it("refuses a document no demo is paired with", async () => {
       // The other half of the same rule: half a pairing that names nothing
       // is refused rather than sent to whichever demo happens to be first.
       await expect(main({ mdPath: "docs/nowhere.md" })).rejects.toThrow(
         /No demo is paired with/,
       );
+    });
+
+    it("catches a write the document shows a different value for", () => {
+      // The drift class this pairing exists to catch, and the one a rule
+      // that dropped the payload missed: a tour ABOUT writing can narrate
+      // setting 250 beside the answer the session got for 25, and every
+      // claim around it still reads as verified.
+      const demo = `run_stdin '25' cf set --piece a target\n`;
+      const quoted = "```bash\necho '25' | cf set --piece a target\n```";
+      const drifted = "```bash\necho '250' | cf set --piece a target\n```";
+      expect(findViolations(demo, quoted)).toEqual([]);
+      expect(findViolations(demo, drifted).length).toBe(1);
+    });
+
+    it("catches a write the document quotes without its value", () => {
+      // The other half: a document that quotes only the command half leaves
+      // a reader with a `cf set` that hangs waiting on stdin.
+      const demo = `run_stdin '25' cf set --piece a target\n`;
+      const halved = "```bash\ncf set --piece a target\n```";
+      expect(findViolations(demo, halved).length).toBe(1);
+    });
+
+    it("keeps a value holding a bar as one value on both sides", () => {
+      // Splitting the raw line at its first bar split INSIDE the quotes, so
+      // a document showing `a|b` matched a demo piping `a`: the separator is
+      // the bar that stands alone as a token, never the first bar character.
+      const pipesA = `run_stdin 'a' cf set --piece a target\n`;
+      const showsAB = "```bash\necho 'a|b' | cf set --piece a target\n```";
+      expect(findViolations(pipesA, showsAB).length).toBe(1);
+      const pipesAB = `run_stdin 'a|b' cf set --piece a target\n`;
+      expect(findViolations(pipesAB, showsAB)).toEqual([]);
+    });
+
+    it("keeps a value holding the word cf out of the command", () => {
+      // The document side reads its command positionally for the same
+      // reason the demo side does: found in the raw text, the first `cf `
+      // a value spells is taken for the start of the command.
+      const demo = `run_stdin 'x cf y' cf set --piece a target\n`;
+      const quoted = "```bash\necho 'x cf y' | cf set --piece a target\n```";
+      expect(findViolations(demo, quoted)).toEqual([]);
+      const drifted = "```bash\necho 'x cf y' | cf set --piece a label\n```";
+      expect(findViolations(demo, drifted).length).toBe(1);
+    });
+
+    it("keeps every write in the read/write tour matched to its demo", () => {
+      // Against the real files: each of the four writes must be quoted with
+      // the value the demo pipes, and changing any one of them is caught.
+      const values = ["25", "100", "15", "30"];
+      for (const value of values) {
+        const drifted = readWriteTour.replace(
+          `echo '${value}' |`,
+          `echo '${value}0' |`,
+        );
+        expect(drifted).not.toBe(readWriteTour);
+        expect(findViolations(readWriteDemo, drifted, READ_WRITE_TOUR_PATH))
+          .toHaveLength(1);
+      }
     });
 
     it("does not let a reasonless marker exempt anything", () => {

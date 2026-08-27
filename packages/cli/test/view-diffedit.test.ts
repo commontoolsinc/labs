@@ -1727,7 +1727,9 @@ Deno.test("diffedit: an edit after expanding context saves without duplicating l
   }
 });
 
-// --- regression: review findings (expand overlap, repeated-path revert, etc.) -
+//
+// regression: review findings (expand overlap, repeated-path revert, etc.) -
+//
 
 const MULTI_DIFF = `diff --git a/m.ts b/m.ts
 index 0000000..1111111 100644
@@ -2187,7 +2189,9 @@ Deno.test("diffedit: insert + expand + edit then save writes the file correctly"
   }
 });
 
-// --- regression: git log -p multi-commit diffs must not corrupt files --------
+//
+// regression: git log -p multi-commit diffs must not corrupt files
+//
 
 function stubWs(root: string): DiffWorkspace {
   return {
@@ -2898,7 +2902,9 @@ Deno.test("diffedit: editing a hunk with a blank context line saves without trun
   }
 });
 
-// --- refusing edits that cannot be saved (a commit-message preamble) ---------
+//
+// refusing edits that cannot be saved (a commit-message preamble)
+//
 
 Deno.test("diffedit: refuses editing text before the diff (a commit-message subject)", () => {
   const { ws, done } = tempWorkspace();
@@ -2958,7 +2964,9 @@ Deno.test("diffedit: an edit-mode search skips the preamble to a savable line", 
   }
 });
 
-// --- editing the HEAD commit's message (git show) ----------------------------
+//
+// editing the HEAD commit's message (git show)
+//
 
 Deno.test("diffedit: the HEAD commit's message is editable; save prompts then amends", () => {
   const { root, ws, done } = tempWorkspace();
@@ -4425,7 +4433,9 @@ Deno.test("diffedit: with no git runner the message is not editable", () => {
   }
 });
 
-// --- amend safety (review follow-ups) ----------------------------------------
+//
+// amend safety (review follow-ups)
+//
 
 Deno.test("diffedit: refuses to amend an all-blank commit message", () => {
   const { ws, done } = tempWorkspace();
@@ -4550,7 +4560,9 @@ Deno.test("diffedit: quitting after a message-only edit names the message, not f
   }
 });
 
-// --- context-aware revert prompt ---------------------------------------------
+//
+// context-aware revert prompt
+//
 
 /** Move the text cursor to `line` (up or down), in edit mode. */
 function moveCursorTo(s: Session, line: number): void {

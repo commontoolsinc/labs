@@ -7,10 +7,137 @@ import {
   buildRestoreDocument,
   deepEqual,
   findLink,
+  isAbsentPathError,
   normalizeFid,
+  retiredKeys,
+  WHOLE_VALUE,
+  withoutKeys,
 } from "./topics-rehearsal-lib.ts";
 
 describe("topics-rehearsal-lib", () => {
+  describe("retiredKeys", () => {
+    // The case this exists for: an export taken before a migration carries a
+    // field the migrated schema no longer declares.
+    it("names a key the live read does not surface", () => {
+      const exported = [{ author: { name: "a" }, authorName: "a", body: "x" }];
+      const live = [{ author: { name: "a" }, body: "x" }];
+      expect(retiredKeys(exported, live)).toEqual(["[].authorName"]);
+    });
+
+    it("names nothing when both sides carry the same keys", () => {
+      expect(retiredKeys({ a: 1, b: { c: 2 } }, { a: 9, b: { c: 8 } })).toEqual(
+        [],
+      );
+    });
+
+    // A migration that retires a whole top-level field leaves no surviving
+    // record for a key to be missing from, so absence is reported about the
+    // compared value itself.
+    it("names the whole value when a retired scalar reads back absent", () => {
+      expect(retiredKeys("a legacy display name", undefined)).toEqual([
+        WHOLE_VALUE,
+      ]);
+    });
+
+    it("names the whole value when a retired object reads back absent", () => {
+      expect(retiredKeys({ kind: "agent", name: "Fable" }, undefined)).toEqual([
+        WHOLE_VALUE,
+      ]);
+    });
+
+    it("names nothing when neither side carries the value", () => {
+      expect(retiredKeys(undefined, undefined)).toEqual([]);
+    });
+
+    // The distinction the whole approach rests on: a field the schema still
+    // declares reads back present even when its value was lost, so genuine
+    // loss is a difference rather than a gap and must not be forgiven.
+    it("does not name a key that is present but changed", () => {
+      expect(retiredKeys({ body: "kept" }, { body: "" })).toEqual([]);
+    });
+
+    it("does not name a whole value that is present but changed", () => {
+      expect(retiredKeys("a legacy display name", "changed")).toEqual([]);
+    });
+
+    // `null` is how a declared-but-empty field reads back, so it is a present
+    // value that lost its content — a difference, never a retirement.
+    it("does not name a whole value that reads back null", () => {
+      expect(retiredKeys("a legacy display name", null)).toEqual([]);
+    });
+  });
+
+  describe("withoutKeys", () => {
+    it("drops only the named path, leaving the rest comparable", () => {
+      const exported = [{ author: { name: "a" }, authorName: "a", body: "x" }];
+      expect(withoutKeys(exported, new Set(["[].authorName"]))).toEqual([
+        { author: { name: "a" }, body: "x" },
+      ]);
+    });
+
+    it("drops the value itself when the whole of it was retired", () => {
+      expect(withoutKeys("a legacy display name", new Set([WHOLE_VALUE])))
+        .toBeUndefined();
+    });
+
+    // Together these are what let a restore across a migration report success
+    // for a retired field while still failing on a body that came back wrong.
+    it("leaves a changed value in place for the comparison to catch", () => {
+      const retired = retiredKeys({ authorName: "a", body: "x" }, {
+        body: "wrong",
+      });
+      expect(withoutKeys({ authorName: "a", body: "x" }, new Set(retired)))
+        .toEqual({ body: "x" });
+    });
+
+    // The verdict the restore actually reaches, asked the way it asks it:
+    // read the field back, forgive what the schema retired, compare the rest.
+    // A retired top-level field passes; a damaged one still fails.
+    it("forgives a wholly retired field and nothing else", () => {
+      const survives = (exported: unknown, live: unknown) =>
+        deepEqual(
+          live,
+          withoutKeys(exported, new Set(retiredKeys(exported, live))),
+        );
+      expect(survives("a legacy display name", undefined)).toBe(true);
+      expect(survives({ kind: "agent", name: "Fable" }, undefined)).toBe(true);
+      expect(survives("a legacy display name", "changed")).toBe(false);
+      expect(survives("a legacy display name", null)).toBe(false);
+      expect(
+        survives({ kind: "agent", name: "Fable" }, {
+          kind: "agent",
+          name: "",
+        }),
+      ).toBe(false);
+    });
+  });
+
+  describe("isAbsentPathError", () => {
+    // The restore forgives an absent field as retired, so only a read that
+    // landed and reported the path missing may present as absent.
+    it("recognizes the runtime's missing-property failure through cf", () => {
+      const error = new Error(
+        "cf get -q --input authorName exited 1\nCannot access path " +
+          '"authorName" - property "authorName" not found. ' +
+          "Available keys: body, title",
+      );
+      expect(isAbsentPathError(error)).toBe(true);
+    });
+
+    it("returns false for a read that never reached the document", () => {
+      expect(
+        isAbsentPathError(
+          new Error(
+            "cf get -q --input body exited 1\nerror sending request for url " +
+              "(http://localhost:8020/): connection refused",
+          ),
+        ),
+      ).toBe(false);
+      expect(isAbsentPathError(new Error("did not return JSON"))).toBe(false);
+      expect(isAbsentPathError("not an error")).toBe(false);
+    });
+  });
+
   describe("findLink", () => {
     it("returns null for plain scalars and objects", () => {
       expect(findLink("body text")).toBe(null);
@@ -91,6 +218,39 @@ describe("topics-rehearsal-lib", () => {
     it("throws on a link-valued field it does not understand", () => {
       expect(() => buildRestoreDocument({ attachments: [link] }, resolved))
         .toThrow("attachments");
+    });
+  });
+
+  // `topics-restore.ts` declares `--allow-run --allow-read --allow-env` in its
+  // shebang and talks to a running server over `cf`. `@db/sqlite` opens its
+  // dynamic library with a top-level `await dlopen`, and the only entry point
+  // `@commonfabric/state-inspector` publishes re-exports the module that
+  // imports it — so one import of that barrel anywhere in the restore's graph
+  // makes the script die at module load with a permission error, whatever
+  // permissions the pure function it wanted actually needs. Twice now that
+  // failure was hidden by testing the script under `deno run -A`, which is why
+  // this asks the graph rather than trusting the run.
+  describe("import graph", () => {
+    it("names no store-reader dependency in the restore's graph", async () => {
+      // Static `from "…"` specifiers followed through relative hops, which is
+      // the whole of these scripts' own graph: they use no dynamic import and
+      // no re-export. A bare specifier ends the walk — what a package pulls in
+      // behind its own entry point is the reason this check exists.
+      const seen = new Set<string>();
+      const bare = new Set<string>();
+      const queue = [new URL("./topics-restore.ts", import.meta.url)];
+      while (queue.length > 0) {
+        const module = queue.pop()!;
+        if (seen.has(module.href)) continue;
+        seen.add(module.href);
+        const source = await Deno.readTextFile(module);
+        for (const [, specifier] of source.matchAll(/from\s+"([^"]+)"/g)) {
+          if (specifier.startsWith(".")) queue.push(new URL(specifier, module));
+          else bare.add(specifier);
+        }
+      }
+      expect(seen.size).toBeGreaterThan(1);
+      expect([...bare]).not.toContain("@commonfabric/state-inspector");
     });
   });
 

@@ -1,9 +1,15 @@
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 import { defer } from "@commonfabric/utils/defer";
 import { isDeno } from "@commonfabric/utils/env";
 import {
   ErrorNotification,
   IPCClientMessage,
   IPCClientNotification,
+  IPCRemoteMessage,
+  IPCRemotePost,
   isWorkerConsoleNotification,
   isWorkerReadyNotification,
   NotificationType,
@@ -13,6 +19,7 @@ import {
   RuntimeTransportEvents,
 } from "@/client/transport.ts";
 import { EventEmitter } from "@/client/emitter.ts";
+import { describeFailure } from "@/shared/utils.ts";
 
 export interface WebWorkerRuntimeTransportOptions {
   // URL to hosted `backends/web-worker/index.ts`
@@ -49,13 +56,19 @@ export class WebWorkerRuntimeTransport
 
   /** @inheritDoc */
   send(data: IPCClientMessage | IPCClientNotification): void {
-    // TODO(danfuzz): this send should encode `data` with `codec-realm`, which
-    // is what would let the payload carry the whole `FabricValue` domain
-    // instead of whatever structured cloning happens to preserve of it. The
-    // payload type carries the matching marker -- `IPCClientRequest` in
-    // `../../../protocol/types.ts` -- as does the receiving end, the `message`
-    // listener in `../../../backends/web-worker/index.ts`.
-    this._worker.postMessage(data);
+    // The encoding is a tree walk and what it produces is a tree, which is
+    // narrower than the value model in two ways worth knowing. A cycle is
+    // refused outright. A subtree that needs encoding and is reachable by two
+    // paths arrives as two values rather than as one reached twice; a subtree
+    // that needs no encoding keeps its sharing.
+    //
+    // The walks that feed the common paths already rewrite both, so neither
+    // reaches here from them: `convertCellsToLinks()` turns a cycle into a
+    // back-link before a prop arrives, and `CellHandle.serialize()` rebuilds a
+    // record rather than aliasing it. What is exposed is a value handed to the
+    // connection without passing through one of those, of which
+    // `PageCreateRequest.argument` is the field to know about.
+    this._worker.postMessage(realmFromFabricValue(data));
   }
 
   /** @inheritDoc */
@@ -73,15 +86,70 @@ export class WebWorkerRuntimeTransport
     return this._readyPromise.promise;
   }
 
-  static connect(
+  /**
+   * Constructs a transport, and resolves it once its worker reports ready.
+   *
+   * @throws If readiness fails. The transport is disposed of before the throw,
+   *   so no worker is left running.
+   */
+  static async connect(
     options: WebWorkerRuntimeTransportOptions = {},
   ): Promise<WebWorkerRuntimeTransport> {
     const transport = new WebWorkerRuntimeTransport(options);
-    return transport.ready().then(() => transport);
+
+    try {
+      await transport.ready();
+    } catch (error) {
+      // The caller never receives a transport on this path, so the disposal is
+      // this method's to do -- `terminate()` lives only in `dispose()`, and
+      // nothing else is left holding the worker. Both ways readiness can fail
+      // land here: a worker error before ready, and a message the decode
+      // refuses before ready.
+      await transport.dispose();
+      throw error;
+    }
+
+    return transport;
   }
 
+  // What a decode returns is deep-frozen, so a consumer of a response or a
+  // notification reads it rather than reshaping it in place.
   private _handleMessage = (event: MessageEvent): void => {
-    const data = event.data;
+    let data: IPCRemotePost;
+
+    try {
+      data = fabricFromRealmValue(event.data) as IPCRemotePost;
+    } catch (error) {
+      // Defense in depth. Everything the worker posts is the result of a
+      // successful encode -- `postToClient()` substitutes a strings-only
+      // stand-in for a message the encoding refused, rather than posting the
+      // refusal -- so nothing undecodable should arrive. That is the ideal,
+      // and it may not always hold. When it does not, losing one message
+      // loudly beats an exception leaving this listener, which would take the
+      // connection's whole dispatch with it.
+      //
+      // Before the worker has reported ready, though, there is no dispatch to
+      // protect and no one listening for the report: what a failure costs
+      // there is `ready()` never settling, and a caller waiting on a promise
+      // that will not resolve has no way back. So the failure lands where
+      // `_handleError()` puts a pre-ready one, on the promise itself.
+      if (!this._ready) {
+        this._readyPromise.reject(
+          new Error(
+            `Undecodable message from the worker: ${describeFailure(error)}`,
+          ),
+        );
+        return;
+      }
+
+      this.emit("message", {
+        type: NotificationType.ErrorReport,
+        message: `Undecodable message from the worker: ${
+          describeFailure(error)
+        }`,
+      } as ErrorNotification);
+      return;
+    }
 
     // Worker-side console output forwarded by the bridge in
     // `backends/web-worker/index.ts` (opt-in). Re-emit it on the page
@@ -98,7 +166,9 @@ export class WebWorkerRuntimeTransport
       return;
     }
 
-    this.emit("message", data);
+    // The two above are this transport's own traffic and have returned, so
+    // what is left is the connection's.
+    this.emit("message", data as IPCRemoteMessage);
   };
 
   private _handleError = (event: ErrorEvent): void => {

@@ -7,10 +7,9 @@ import {
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { toValuePath } from "@commonfabric/memory/v2";
 import { getLogger } from "@commonfabric/utils/logger";
-import { consoleMessageFrom, RuntimeConnection } from "@/client/connection.ts";
+import { RuntimeConnection } from "@/client/connection.ts";
 import { EventEmitter } from "@/client/emitter.ts";
 import {
-  type ConsoleNotification,
   type InitializationData,
   type IPCClientMessage,
   type IPCClientNotification,
@@ -39,9 +38,15 @@ class FakeTransport extends EventEmitter<RuntimeTransportEvents>
   }
 
   send(original: IPCClientMessage | IPCClientNotification): void {
-    // Cloned, as a real transport delivers it, so what is captured cannot
+    // Encoded, cloned and decoded, which is what the real transport does and
+    // what a bare `structuredClone` would misreport: the clone alone strips a
+    // `FabricBytes` to a plain object, so a double using it would model a
+    // transport that loses exactly what this connection carries. The round
+    // trip also gives the capture its own copy, so what is captured cannot
     // change under later mutation by the sender.
-    const message = structuredClone(original);
+    const message = fabricFromRealmValue(
+      structuredClone(realmFromFabricValue(original)),
+    ) as IPCClientMessage | IPCClientNotification;
     this.sent.push(message);
     // Notifications carry no msgId and get no reply.
     if (!("msgId" in message)) return;
@@ -67,8 +72,9 @@ async function initializedConnection(
 }
 
 /**
- * Transport whose `send()` throws, as `postMessage()` does when handed a value
- * structured cloning refuses.
+ * Transport whose `send()` throws, as the real one does two ways: the
+ * envelope's encode refuses a value that has no encoding, and `postMessage()`
+ * refuses one structured cloning cannot carry.
  */
 class ThrowingTransport extends EventEmitter<RuntimeTransportEvents>
   implements RuntimeTransport {
@@ -79,7 +85,7 @@ class ThrowingTransport extends EventEmitter<RuntimeTransportEvents>
   send(message: IPCClientMessage | IPCClientNotification): void {
     if (!("msgId" in message)) return;
     if (message.data.type === this.failOn) {
-      throw new Error("could not be cloned");
+      throw new Error("no encoding for value");
     }
     // Everything else is acknowledged, so the connection can initialize.
     queueMicrotask(() => {
@@ -93,6 +99,36 @@ class ThrowingTransport extends EventEmitter<RuntimeTransportEvents>
 }
 
 describe("connection", () => {
+  it("routes terminal event-attention notifications", async () => {
+    const transport = new FakeTransport();
+    const connection = await initializedConnection(transport);
+    const messages: unknown[] = [];
+    connection.on("eventneedsattention", (message) => messages.push(message));
+    const notification = {
+      type: NotificationType.EventNeedsAttention,
+      space: "did:key:z6Mk-connection-attention",
+      eventId: "evt-attention",
+      seq: 17,
+      sidecarId: "of:stream-events:connection-attention",
+      reason: "delivery needs attention",
+      attention: {
+        phase: "dispatch-load",
+        failureClass: "session-revoked",
+        code: "permanent-delivery-failure",
+        firstFailureAt: 10,
+        lastFailureAt: 10,
+        accumulatedFailureMs: 0,
+        failureCount: 1,
+        recovery: "explicit-retry",
+      },
+    } as const;
+
+    transport.emit("message", notification);
+
+    expect(messages).toEqual([notification]);
+    await connection.dispose();
+  });
+
   it("routes collaborative operation notifications", async () => {
     const transport = new FakeTransport();
     const connection = await initializedConnection(transport);
@@ -111,7 +147,7 @@ describe("connection", () => {
         codec: null,
         cursor: null,
         baselineHash: "baseline",
-        materialized: realmFromFabricValue("value"),
+        materialized: "value",
         operations: [],
       },
     };
@@ -267,7 +303,7 @@ describe("connection", () => {
           cell: { id: "of:c", space: "did:key:t", scope: "space", path: [] },
           value: 1,
         } as never)
-      ).toThrow("could not be cloned");
+      ).toThrow("no encoding for value");
 
       expect(connection.getPendingRequestDiagnostics()).toHaveLength(0);
 
@@ -583,9 +619,13 @@ describe("connection", () => {
       // it. A double that passed the sender's object through would model
       // something no real transport does.
       const transport = new FakeTransport();
-      const body = realmFromFabricValue(
-        new FabricBytes(new Uint8Array([1, 2, 3])),
-      );
+      const body = new FabricBytes(new Uint8Array([1, 2, 3]));
+      // A plain nested container alongside it: the codec rebuilds a
+      // `FabricBytes` either way, so that arm alone cannot tell whether the
+      // clone is there. An encode passes a subtree needing no encoding through
+      // by identity, and a decode hands that same object back -- so without the
+      // clone this is the sender's own object, frozen under it.
+      const nested = { note: "unshared" };
       const message: IPCClientMessage = {
         msgId: 1,
         data: {
@@ -593,12 +633,17 @@ describe("connection", () => {
           space: "did:key:test-space",
           contentType: "image/png",
           body,
-        },
+          nested,
+        } as never,
       };
 
       transport.send(message);
 
       const captured = transport.sent[0];
+      expect(
+        (captured as unknown as { data: { nested: unknown } }).data.nested,
+      ).not.toBe(nested);
+      expect(Object.isFrozen(nested)).toBe(false);
       expect(captured).not.toBe(message);
       if (
         !("msgId" in captured) || captured.data.type !== RequestType.UploadBlob
@@ -606,74 +651,15 @@ describe("connection", () => {
         throw new Error("Expected the upload request to have been captured.");
       }
       expect(captured.data.body).not.toBe(body);
-      // Decode both trees rather than compare identity alone: a shallow copy
-      // differs by identity while still sharing the buffer beneath. A decode
-      // takes its buffer over, so the sender's tree still decoding after the
-      // captured one did is what says the two do not share one.
-      expect((fabricFromRealmValue(captured.data.body) as FabricBytes).slice())
-        .toEqual(new Uint8Array([1, 2, 3]));
-      expect((fabricFromRealmValue(body) as FabricBytes).slice())
-        .toEqual(new Uint8Array([1, 2, 3]));
-    });
-  });
-
-  describe("consoleMessageFrom", () => {
-    /** A console notification carrying the given already-encoded arguments. */
-    function notification(
-      args: ConsoleNotification["args"],
-    ): ConsoleNotification {
-      return { type: NotificationType.ConsoleMessage, method: "log", args };
-    }
-
-    it("returns the arguments decoded, and the rest of the notification intact", () => {
-      const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
-      const message = consoleMessageFrom({
-        ...notification([bytes, "plain"].map((a) => realmFromFabricValue(a))),
-        metadata: { pieceId: "a-piece" },
-      });
-
-      expect(message.method).toBe("log");
-      expect(message.metadata).toEqual({ pieceId: "a-piece" });
-      expect(message.args[0]).toBeInstanceOf(FabricBytes);
-      expect(message.args[0]).toEqual(bytes);
-      expect(message.args[1]).toBe("plain");
-    });
-
-    it("returns a fixed token when the decoder's own failure resists stringifying", () => {
-      // A null-prototype object has no `toString` to reach, so `String()`
-      // throws on it; deriving the failure's message must not fail in turn.
-      const hostile = new Proxy({}, {
-        get() {
-          throw Object.create(null);
-        },
-        ownKeys() {
-          return ["x"];
-        },
-        getOwnPropertyDescriptor() {
-          return { enumerable: true, configurable: true };
-        },
-      });
-      const message = consoleMessageFrom(notification([
-        [["fvr1"], hostile] as unknown as ConsoleNotification["args"][0],
-        realmFromFabricValue("after"),
-      ]));
-
-      expect(message.args[0]).toEqual({ "/undecodable": "/undecodableError" });
-      expect(message.args[1]).toBe("after");
-    });
-
-    it("returns `/undecodable` in place of an argument that does not decode", () => {
-      // These are a pattern's `console.*` arguments: a log line that arrives
-      // damaged beats one that takes the message dispatch down with it.
-      const message = consoleMessageFrom(notification([
-        realmFromFabricValue("before"),
-        ["not-a-marker", 1] as unknown as ConsoleNotification["args"][0],
-        realmFromFabricValue("after"),
-      ]));
-
-      expect(message.args[0]).toBe("before");
-      expect(Object.keys(message.args[1] as object)).toEqual(["/undecodable"]);
-      expect(message.args[2]).toBe("after");
+      // The bytes arrive as a `FabricBytes` and not as the plain object a bare
+      // structured clone would leave, which is the whole point of encoding the
+      // envelope. Read both rather than compare identity alone: a shallow copy
+      // differs by identity while still sharing the buffer beneath, and the
+      // sender's still reading after the captured one did is what says the two
+      // do not share one.
+      expect(captured.data.body).toBeInstanceOf(FabricBytes);
+      expect(captured.data.body.slice()).toEqual(new Uint8Array([1, 2, 3]));
+      expect(body.slice()).toEqual(new Uint8Array([1, 2, 3]));
     });
   });
 });

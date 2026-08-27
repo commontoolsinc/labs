@@ -40,11 +40,11 @@ describe("mergeable op registry consistency", () => {
   });
 });
 
-// A create-from-absent mergeable op adds a key to its parent container; the
-// build stamps `createsKey` so the conflict matcher invalidates a shape reader
-// of the parent (see docs/specs/memory-v2/08-conflict-granularity.md and the
-// engine-side conflict test in packages/memory).
 describe("mergeable op createsKey stamping", () => {
+  // A create-from-absent mergeable op adds a key to its parent container; the
+  // build stamps `createsKey` so the conflict matcher invalidates a shape
+  // reader of the parent (see docs/specs/memory-v2/08-conflict-granularity.md
+  // and the engine-side conflict test in packages/memory).
   it("stamps createsKey when a tail op materializes an absent array", () => {
     expect(
       buildMergeableIntent(
@@ -91,11 +91,11 @@ describe("mergeable op createsKey stamping", () => {
   });
 });
 
-// The tail op builder (append / add-unique) bails in several guarded cases,
-// abandoning the intent so the commit carries the plain diff instead. Some are
-// reachable only through sequences the poison fallback short-circuits before
-// build, so they are covered directly here.
 describe("mergeable tail-op build guards", () => {
+  // The tail op builder (append / add-unique) bails in several guarded cases,
+  // abandoning the intent so the commit carries the plain diff instead. Some
+  // are reachable only through sequences the poison fallback short-circuits
+  // before build, so they are covered directly here.
   // The op path holds no array at commit — the value is absent, or was
   // overwritten with a non-array — so there is nothing to slice a tail from.
   it("a tail op with no working array abandons the intent", () => {
@@ -212,12 +212,13 @@ describe("mergeable tail-op build guards", () => {
   });
 });
 
-// A remove-by-value suppresses the array path AND its whole subtree, so unlike a
-// tail op it leaves the commit no other carrier for that array. It may therefore
-// be emitted only when it fully explains the local value: the working array must
-// be exactly the base with the removed values taken out. Anything else the
-// transaction changed on that array would otherwise be silently discarded.
 describe("mergeable remove-by-value build guards", () => {
+  // A remove-by-value suppresses the array path AND its whole subtree, so
+  // unlike a tail op it leaves the commit no other carrier for that array. It
+  // may therefore be emitted only when it fully explains the local value: the
+  // working array must be exactly the base with the removed values taken out.
+  // Anything else the transaction changed on that array would otherwise be
+  // silently discarded.
   const removeIntent = (...values: string[]) =>
     ({ op: "remove-by-value", path: ["value"], values }) as const;
 
@@ -299,12 +300,12 @@ describe("mergeable remove-by-value build guards", () => {
   });
 });
 
-// Which paths an op's PAYLOAD already carries. Two intents on one document are
-// mutually exclusive when one contains the other: the contained one has already
-// had its change applied by the containing op, whose payload is read from the
-// working array at commit. `buildMergeableOps` abandons the contained intent;
-// this pins the per-op answers it asks for.
 describe("mergeable op payload containment", () => {
+  // Which paths an op's PAYLOAD already carries. Two intents on one document
+  // are mutually exclusive when one contains the other: the contained one has
+  // already had its change applied by the containing op, whose payload is read
+  // from the working array at commit. `buildMergeableOps` abandons the
+  // contained intent; this pins the per-op answers it asks for.
   // A tail op sends `array.slice(tailStart)` — live values out of the working
   // document — so it carries every path at or past that index, at any depth.
   it("a tail op contains the paths at or past its tail start", () => {

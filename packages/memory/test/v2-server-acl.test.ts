@@ -1738,7 +1738,6 @@ Deno.test("acl default: absent acl option behaves like off", async () => {
   }
 });
 
-// ---------------------------------------------------------------------------
 // OW31 (WRITE ruled 2026-08-18, READ ruled 2026-08-19): the delegated READ
 // binding. A session opened `actingAs: "space-owner"` by a DELEGATING-class
 // principal has its READ-class decisions resolved as the space's ACL OWNER

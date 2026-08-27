@@ -1,7 +1,8 @@
 #!/usr/bin/env -S deno run -A
 
-import { assertEquals, assertExists, assertRejects } from "@std/assert";
+import { assert, assertEquals, assertExists, assertRejects } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { render } from "@commonfabric/html/client";
 import { MockDoc } from "@commonfabric/html/mock-doc";
 import {
@@ -177,6 +178,89 @@ describe("RuntimeClient", () => {
         });
       });
       assertEquals(value, input);
+    });
+
+    it("carries a fabric value through a real worker, set to sync to subscribe", async () => {
+      // The envelope's whole purpose, at the seam it exists for: a real
+      // `RuntimeClient` over a real Worker, with no encoding double standing
+      // in for the crossing. Structured cloning would have stripped the
+      // `FabricBytes` to `{}` on the way, and a `bigint` it refuses outright,
+      // so each arm below fails differently without the envelope rather than
+      // all of them failing the same way.
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const schema = { type: "object" } as const satisfies JSONSchema;
+      const cause = "test-fabric-value-" + Date.now();
+      const cell = await rt.getCell<Record<string, unknown>>(
+        session.space,
+        cause,
+        schema,
+      );
+
+      const content = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
+      await cell.set({
+        bytes: new FabricBytes(content),
+        big: 9007199254740993n,
+        tag: Symbol.for("cf.test.interned"),
+      });
+      await rt.idle();
+
+      const synced = await cell.sync() as Record<string, unknown>;
+      assert(
+        synced.bytes instanceof FabricBytes,
+        `synced back ${
+          (synced.bytes as { constructor?: { name?: string } })?.constructor
+            ?.name ?? String(synced.bytes)
+        }, not a FabricBytes`,
+      );
+      assertEquals(synced.bytes.slice(), content);
+      // A `bigint` past `Number.MAX_SAFE_INTEGER`, so a number round trip
+      // would not return it even if one carried the arm at all.
+      assertEquals(synced.big, 9007199254740993n);
+      // Interned, which is the only symbol the fabric boundary admits: a
+      // unique one has no identity to rebuild on the far side.
+      assertEquals(synced.tag, Symbol.for("cf.test.interned"));
+
+      // The notification path is a separate crossing from the response path,
+      // and it is watched from a SECOND handle on the same cell. The writing
+      // handle is no good for it: `set()` updates its own cache and calls its
+      // own subscribers synchronously with the object it was handed, so a
+      // subscriber there would be shown the value it just built and would say
+      // `instanceof FabricBytes` about a `FabricBytes` that never left the
+      // process. `getCell()` returns a fresh handle, and this one never
+      // writes, so every value it is given arrived over the connection.
+      const nextContent = new Uint8Array([1, 2, 3]);
+      const reader = await rt.getCell<Record<string, unknown>>(
+        session.space,
+        cause,
+        schema,
+      );
+      const gotNext = defer<Record<string, unknown>>();
+      const cancel = reader.subscribe((value) => {
+        const record = value as Record<string, unknown> | undefined;
+        if (record?.marker === "second") gotNext.resolve(record);
+      });
+
+      const sent = {
+        bytes: new FabricBytes(nextContent),
+        marker: "second",
+      };
+      await cell.set(sent);
+
+      const delivered = await gotNext.promise;
+      cancel();
+      // Not the object that was written, which is what says this came back
+      // rather than across.
+      assert(delivered !== sent);
+      assert(
+        delivered.bytes instanceof FabricBytes,
+        `delivered ${
+          (delivered.bytes as { constructor?: { name?: string } })?.constructor
+            ?.name ?? String(delivered.bytes)
+        }, not a FabricBytes`,
+      );
+      assertEquals(delivered.bytes.slice(), nextContent);
     });
 
     it("recursively returns VNodes inline with schema-driven serialization", async () => {
@@ -742,7 +826,7 @@ export default pattern((_) => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const consoleEvents: { method: string; args: unknown[] }[] = [];
+      const consoleEvents: { method: string; args: readonly unknown[] }[] = [];
       const gotHello = defer<void>();
       rt.on(
         "console",

@@ -190,7 +190,7 @@ export class PatternCallbackLoweringTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
     const scopeStack: PatternScopeInfo[] = [];
 
-    // ── Main transform pass ────────────────────────────────────────────
+    // Main transform pass
     const visit: ts.Visitor = (node: ts.Node): ts.Node => {
       const callback = ts.isCallExpression(node)
         ? getPatternBuilderCallbackArgument(node, context.checker)

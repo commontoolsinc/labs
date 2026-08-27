@@ -232,7 +232,6 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
           servingPosture: true,
           experimental: {
             serverExecution: true,
-            systemPatternAutoUpdate: false,
           },
         });
         runtime.scheduler.setActionRunTraceEnabled(true);

@@ -70,6 +70,17 @@ stores state, not things a model infers from the data:
   owned-cell / free-cell) by _which paths exist_, and resolves lineage from them
   — so "what is this entity" is answerable structurally, and `entities` /
   `piece` / `graph` speak that vocabulary.
+- **An entity holding no document says which kind of nothing it is.** A
+  tombstone is its own kind, `deleted`. `unknown` is everything else the tool
+  cannot make sense of, and its label says which: `(undecodable)` for a payload
+  that does not decode, `(no data)` for a `set` that stored none, `(absent)` for
+  an id with no visible row, and `{paths}` for the one case that DID decode — a
+  document whose shape no other kind recognizes. Ask `--kind deleted` for
+  deletions and `--kind unknown` for trouble; do not read a tombstone as damage,
+  and do not read the revision count as evidence either way (it includes the
+  delete op). What the entity WAS is not in the listing — it is gone at HEAD,
+  and `history <id>` plus `value-at --seq` before the delete is what recovers
+  it.
 - **`scope_key` partitions an entity by identity.** The _same_ cell id can hold
   a shared `space` value AND a per-`user:<DID>` override AND a
   per-`session:<DID>:<sid>` override, stored side by side and genuinely

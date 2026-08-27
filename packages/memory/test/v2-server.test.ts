@@ -820,6 +820,8 @@ Deno.test("memory v2 server consumes challenge before denied session open", asyn
       error: {
         name: "AuthorizationError",
         message: `Principal <anonymous> lacks READ on space ${space}`,
+        permanentEvidence: true,
+        aclRevision: 0,
       },
     });
 

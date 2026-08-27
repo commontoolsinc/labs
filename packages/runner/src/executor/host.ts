@@ -32,9 +32,14 @@ import { selectPendingStreamEventDocs } from "@commonfabric/memory/v2/engine";
 import { getLogger } from "@commonfabric/utils/logger";
 import type { Runtime } from "../runtime.ts";
 import type { MemorySpace } from "../storage/interface.ts";
-import { SpaceServer, type SpaceServerPolicy } from "./space-server.ts";
+import {
+  SpaceServer,
+  type SpaceServerOptions,
+  type SpaceServerPolicy,
+} from "./space-server.ts";
 import {
   emptyServingLoopStats,
+  refreshDeliveryCheckpointStats,
   registerServingLoopStatsProvider,
   type ServingLoopStats,
 } from "./stats.ts";
@@ -72,9 +77,7 @@ export type ExecutorHostOptions = {
 
   /** Build a serving runtime for one space over the loopback plane. The
    * factory owns auth and runtime options; it MUST pass
-   * `experimental: { serverExecution: true, systemPatternAutoUpdate:
-   * true }` — the flag posture and §3e's server-side pattern-update
-   * flip. */
+   * `experimental: { serverExecution: true }`. */
   createRuntime: (space: MemorySpace) => Promise<{
     runtime: Runtime;
     dispose: () => Promise<void>;
@@ -88,6 +91,9 @@ export type ExecutorHostOptions = {
    * whole-instance switch — per-space discrimination is deferred by
    * the same ruling. */
   ensureSpaceRoots?: boolean;
+
+  /** Forwarded internal deterministic-verification seam. */
+  decorateWaveCommitSink?: SpaceServerOptions["decorateWaveCommitSink"];
 };
 
 export class ExecutorHost {
@@ -167,6 +173,7 @@ export class ExecutorHost {
   /** The §7 counters, live: static counts merged with per-space state
    * (activeSpaces and watermarkLag read the current SpaceServers). */
   stats(): ServingLoopStats {
+    refreshDeliveryCheckpointStats(this.#stats);
     let watermarkLag = 0;
     let activeSpaces = 0;
     for (const server of this.#spaces.values()) {
@@ -180,7 +187,13 @@ export class ExecutorHost {
       // the top-level spread shares its reference (the same reason as
       // NIT-1's settle-series copy below).
       derivedCommitsBySpace: { ...this.#stats.derivedCommitsBySpace },
-      events: { ...this.#stats.events },
+      events: {
+        ...this.#stats.events,
+        needsAttention: {
+          ...this.#stats.events.needsAttention,
+          byPhase: { ...this.#stats.events.needsAttention.byPhase },
+        },
+      },
       demand: { ...this.#stats.demand },
       settle: {
         // NIT-1: deep-copy the entries — a series row stays live after it
@@ -457,6 +470,11 @@ export class ExecutorHost {
         policy: this.#options.policy,
         ...(this.#options.ensureSpaceRoots !== undefined
           ? { ensureSpaceRoots: this.#options.ensureSpaceRoots }
+          : {}),
+        ...(this.#options.decorateWaveCommitSink !== undefined
+          ? {
+            decorateWaveCommitSink: this.#options.decorateWaveCommitSink,
+          }
           : {}),
         onParked: (reason) => {
           // The backoff streak: a `loop-failed` park extends it; an

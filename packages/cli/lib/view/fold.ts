@@ -129,7 +129,9 @@ function cpCount(s: string): number {
   return n;
 }
 
-// --- the collapsed line list ------------------------------------------------
+//
+// the collapsed line list
+//
 
 /**
  * Maps between the full document's lines and the collapsed display: a collapsed
@@ -211,7 +213,9 @@ function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
 }
 
-// --- file-category detection ------------------------------------------------
+//
+// file-category detection
+//
 
 /** Whether a path selects the pager's Markdown language. */
 export function isMarkdownPath(path: string): boolean {

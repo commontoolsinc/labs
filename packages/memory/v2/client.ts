@@ -11,6 +11,7 @@ import {
   type EntityIdListResult,
   type EntityIdLookupResult,
   type EntitySnapshot,
+  type EventAttentionResolveResult,
   getMemoryProtocolFlags,
   type GraphQuery,
   type GraphQueryResult,
@@ -313,6 +314,14 @@ export class Client {
       if (result.error.retriable !== undefined) {
         (error as Error & { retriable?: boolean }).retriable =
           result.error.retriable;
+      }
+      if (result.error.permanentEvidence === true) {
+        (error as Error & { permanentEvidence?: true }).permanentEvidence =
+          true;
+      }
+      if (result.error.aclRevision !== undefined) {
+        (error as Error & { aclRevision?: number }).aclRevision =
+          result.error.aclRevision;
       }
       throw error;
     }
@@ -761,6 +770,27 @@ export class SpaceSession {
       space: this.space,
       sessionId: this.#sessionId,
       query,
+    });
+    this.noteResult(result.serverSeq);
+    return result;
+  }
+
+  async resolveEventAttention(
+    eventId: string,
+    seq: number,
+    sidecarId: string,
+    action: "retry" | "dismiss",
+  ): Promise<EventAttentionResolveResult> {
+    this.#assertOpen();
+    const result = await this.client.request<EventAttentionResolveResult>({
+      type: "event.attention.resolve",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      eventId,
+      seq,
+      sidecarId,
+      action,
     });
     this.noteResult(result.serverSeq);
     return result;

@@ -28,8 +28,11 @@ vocabulary, and they map cleanly onto ideas you already have.
 | **Space** | The shared durable place pieces live in, named by a cryptographic identifier. | A database, or a tenant. |
 
 The fourth term is the one this work is named for. A **verb** is an operation a
-pattern declares — the only way its state ever changes. In the source it is a
-typed stream: an event type in, a result type out.
+pattern declares — the only way a pattern changes its own state, an operator
+writing a cell directly with `cf set` being a write that runs nothing and that
+the next recomputation may overwrite
+([the read and write session](../workflows/reading-and-writing.md)). In the
+source it is a typed stream: an event type in, a result type out.
 
 Every example from here on comes from one program: a work-item tracker,
 written to be driven and nothing else. Items sit in a tree on a **board**, and

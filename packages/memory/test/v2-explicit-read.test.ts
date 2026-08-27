@@ -314,14 +314,12 @@ Deno.test("explicit entity_scope_key reads: lease holder admitted, non-holder an
   }
 });
 
-// ---------------------------------------------------------------------------
 // The exemption LIFECYCLE (stage-F fix round, thread r3731191378 — P0):
 // `leaseHolderReads` is an authorization exemption tied to holding a LIVE
 // execution lease. The push path's applicable-set filter (protocol.md §3)
 // must key its bypass on CURRENT holdership, lease loss must clear the
 // exemption, and a session resume must revalidate rather than trust the
 // persisted bit. A former holder receives NOTHING foreign.
-// ---------------------------------------------------------------------------
 
 /** Doc-ids upserted by session/effect frames at or past `from`. */
 const effectUpsertIds = (
@@ -584,16 +582,13 @@ Deno.test("the persisted lease-holder exemption does not survive session resume 
   }
 });
 
-// ---------------------------------------------------------------------------
 // Instance identity across the wire seam (threads r3731191411 and
 // r3731191526): the wire strips scope KEYS (frames carry scope names), so
 // the server must refuse what the wire cannot express — one watch set (or
 // query) resolving TWO instances of one (branch, id, scope) — and must
 // treat a changed `entityScopeKey` on an existing watch id as a changed
 // spec, never silently the same watch.
-// ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
 // OW17's wire leg (server-execution v2 stage A, 2026-08-16): a LIVE lease
 // holder may name two instances of one (branch, id, scope) — its frames and
 // query results carry the instance key (`scopeKey`) per entry, so the two
@@ -601,7 +596,6 @@ Deno.test("the persisted lease-holder exemption does not survive session resume 
 // BOTH the service instance and a demander's instance of one doc). The
 // wire collapse guard stays for everyone else: a NON-holder's wire carries
 // scope names only, so its ambiguous read set is still refused loudly.
-// ---------------------------------------------------------------------------
 
 Deno.test("stage A: a lease holder names two instances of one (branch, id, scope) and receives BOTH, keyed — watch.set, watch.add, graph.query, and the push frame; the collapse guard still refuses a non-holder (OW17's wire leg)", async () => {
   const server = newServer("memory://explicit-read-two-instances");
@@ -846,7 +840,6 @@ Deno.test("stage A: a lease holder names two instances of one (branch, id, scope
   }
 });
 
-// ---------------------------------------------------------------------------
 // The exemption LIFECYCLE under the keyed wire (fan-out stage A's
 // independent review, finding 1 — 2026-08-17). Two halves of one
 // invariant: (i) a session's wire vocabulary is STICKY once it was
@@ -858,7 +851,6 @@ Deno.test("stage A: a lease holder names two instances of one (branch, id, scope
 // RE-ARMS on the first live pass with a full evaluation that re-delivers
 // what the lapse withheld — a renewal blip the SpaceServer survives
 // in-process must not leave its serving replica silently stale.
-// ---------------------------------------------------------------------------
 
 /** Every session/effect frame's upserts at or past `from`, with keys. */
 const effectUpserts = (
@@ -1307,13 +1299,11 @@ Deno.test("watch.add with a changed entityScopeKey on an existing watch id is a 
   }
 });
 
-// ---------------------------------------------------------------------------
 // Delivery-failure rollback for explicit foreign instances (thread
 // r3731191415): the wire frame carries scope NAMES, so rollback cannot
 // recover the instance from the frame alone — the server must retain the
 // frame's true instance keys. A lost foreign-instance frame must be
 // REDELIVERED once sends succeed again.
-// ---------------------------------------------------------------------------
 
 Deno.test("a failed delivery of an explicit foreign-instance frame is redelivered (rollback keys the exact instance)", async () => {
   const server = newServer("memory://explicit-read-rollback");
@@ -1460,7 +1450,6 @@ Deno.test("a non-canonical entity_scope_key (raw '/') is refused at admission �
   }
 });
 
-// ---------------------------------------------------------------------------
 // Phase 5 — the read row's cross-space widening and its fail-closed twin
 // (protocol.md §2; verification-coverage.md's stage-F read-row entry):
 //
@@ -1475,7 +1464,6 @@ Deno.test("a non-canonical entity_scope_key (raw '/') is refused at admission �
 //   Phase-5 precondition): a co-hosted serving session's UNNAMED scoped
 //   read of a space it does not hold refuses loudly instead of silently
 //   resolving the delegating envelope's (empty) instance.
-// ---------------------------------------------------------------------------
 
 const HOME_SPACE = "did:key:z6Mk-explicit-read-home";
 

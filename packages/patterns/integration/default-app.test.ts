@@ -2845,7 +2845,7 @@ async function collectNoteCreateProfile(page: Page): Promise<unknown> {
     };
 
     const settleHistory = await api
-      .getSettleStatsHistory() as SettleHistoryEntry[];
+      .getSettleStatsHistory() as readonly SettleHistoryEntry[];
     const recentHistory = settleHistory.slice(-8);
     const settle = {
       executeCalls: settleHistory.length,

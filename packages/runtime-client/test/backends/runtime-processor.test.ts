@@ -17,7 +17,12 @@ import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import { getLogger } from "@commonfabric/utils/logger";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
-import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
+import {
+  decodeMemoryBoundary,
+  eventAttentionEntryKey,
+  eventAttentionIndexKey,
+  SERVER_EXECUTION_ATTENTION_DOC_ID,
+} from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { siteTableCause, siteTableSchema } from "@commonfabric/home-schemas";
@@ -32,6 +37,7 @@ import {
 } from "@commonfabric/runner";
 import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { StorageManager as WorkerStorageManager } from "@commonfabric/runner/storage/cache";
 
 import { parseLink } from "@commonfabric/runner";
 import * as V2Storage from "@commonfabric/runner/storage/v2";
@@ -40,6 +46,7 @@ import {
   type CfcLabelView,
   ClientNotificationType,
   type GetPatternSourcesRequest,
+  NotificationType,
   RequestType,
 } from "@/protocol/mod.ts";
 import {
@@ -48,8 +55,8 @@ import {
   renderConfidentialityResolverFor,
   renderMembershipProviderFor,
   RuntimeProcessor,
+  subscribeEventAttentionNotifications,
   toConsoleDebugValue,
-  toConsoleWireValue,
 } from "@/backends/runtime-processor.ts";
 import {
   assertFabricLoggerFlags,
@@ -603,6 +610,105 @@ describe("runtime-processor", () => {
         await runtime.dispose();
         await storageManager.close();
       }
+    });
+  });
+
+  describe("piece creation", () => {
+    it("names the rejected argument rather than its type", async () => {
+      // A piece's input is a record, and the guard turns away everything else.
+      // `typeof` is not what says which: it renders an array and `null` alike,
+      // as `object`, and those are two of the three kinds that get here. The
+      // message exists to explain the refusal, so it names the value.
+      const space = "did:key:z6Mk-runtime-processor-create" as const;
+      const processor = { getSpaceCtx: () => ({}) };
+      const refusalFor = async (argument: unknown) => {
+        try {
+          // deno-lint-ignore no-explicit-any
+          await (RuntimeProcessor.prototype as any).handlePieceCreate.call(
+            processor,
+            {
+              type: RequestType.PageCreate,
+              space,
+              source: { program: { main: "/main.tsx", files: [] } },
+              argument,
+            },
+          );
+        } catch (error) {
+          return (error as Error).message;
+        }
+        throw new Error("handlePieceCreate returned instead of refusing");
+      };
+
+      expect(await refusalFor([1, 2]))
+        .toBe("A piece's argument must be a record, not: [1,2]");
+      expect(await refusalFor(null))
+        .toBe("A piece's argument must be a record, not: null");
+      expect(await refusalFor("a bare string"))
+        .toBe('A piece\'s argument must be a record, not: "a bare string"');
+    });
+
+    it("refuses a fabric class instance as the whole argument", async () => {
+      // The arm that separates `isPlainObject()` from the looser
+      // `isObjectNotArray()`, which admits any class instance. The connection
+      // carries a `FabricBytes` whole, so one reaches this guard as itself
+      // rather than as the `{}` a shape-blind copy would leave -- and a piece's
+      // entire input is not one value, whatever that value is.
+      const space = "did:key:z6Mk-runtime-processor-create" as const;
+      const processor = { getSpaceCtx: () => ({}) };
+
+      await expect(
+        // deno-lint-ignore no-explicit-any
+        (RuntimeProcessor.prototype as any).handlePieceCreate.call(processor, {
+          type: RequestType.PageCreate,
+          space,
+          source: { program: { main: "/main.tsx", files: [] } },
+          argument: new FabricBytes(new Uint8Array([1, 2, 3])),
+        }),
+      ).rejects.toThrow("A piece's argument must be a record, not:");
+
+      // The other branch of the fabric class hierarchy, which reaches the
+      // guard by the same route.
+      await expect(
+        // deno-lint-ignore no-explicit-any
+        (RuntimeProcessor.prototype as any).handlePieceCreate.call(processor, {
+          type: RequestType.PageCreate,
+          space,
+          source: { program: { main: "/main.tsx", files: [] } },
+          argument: new FabricError({
+            type: "Error",
+            message: "not a set of inputs",
+            stack: undefined,
+            cause: undefined,
+          }),
+        }),
+      ).rejects.toThrow("A piece's argument must be a record, not:");
+    });
+
+    it("admits a record that holds a fabric class instance", async () => {
+      // The other side of the same line, and the case that has to keep
+      // working: the guard asks what the argument *is*, not what it holds.
+      const space = "did:key:z6Mk-runtime-processor-create" as const;
+      const created: unknown[] = [];
+      const processor = {
+        getSpaceCtx: () => ({
+          create: (_program: unknown, options: { input?: unknown }) => {
+            created.push(options.input);
+            throw new Error("stop after the guard");
+          },
+        }),
+      };
+      const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+
+      await expect(
+        // deno-lint-ignore no-explicit-any
+        (RuntimeProcessor.prototype as any).handlePieceCreate.call(processor, {
+          type: RequestType.PageCreate,
+          space,
+          source: { program: { main: "/main.tsx", files: [] } },
+          argument: { image: bytes },
+        }),
+      ).rejects.toThrow("stop after the guard");
+      expect(created).toEqual([{ image: bytes }]);
     });
   });
 
@@ -1213,12 +1319,15 @@ describe("runtime-processor", () => {
 
     describe("what the transport accepts", () => {
       /**
-       * Puts `value` through the two ends the notification actually uses: the
-       * producer's `toConsoleWireValue()`, `postMessage`'s structured clone, and
-       * the `fabricFromRealmValue()` that `client/connection.ts` decodes with.
+       * Puts `value` through the ends the notification actually uses: the
+       * producer's `toConsoleDebugValue()`, the envelope's encode,
+       * `postMessage`'s structured clone, and the decode the transport does on
+       * arrival. There is one encode, the envelope's.
        */
       function acrossTheWire(value: unknown): unknown {
-        return fabricFromRealmValue(structuredClone(toConsoleWireValue(value)));
+        return fabricFromRealmValue(
+          structuredClone(realmFromFabricValue(toConsoleDebugValue(value))),
+        );
       }
 
       it("returns a value the realm encoding carries, for each shape it renders", () => {
@@ -1443,27 +1552,16 @@ describe("runtime-processor", () => {
           .toEqual({ a: Symbol.for("tag") });
       });
 
-      it("returns a forged `FabricPrimitive` as `/unconvertible`, not a throw", () => {
+      it("leaves a forged `FabricPrimitive` for the encode to refuse", () => {
         // An object on a `FabricPrimitive`'s prototype passes every membership
         // check and has no encoding: `isValidFabricValue()` says true and the
-        // encode refuses. The handler must not throw over it, since the throw
-        // would abort the pattern's own `console.log()`. Nothing is said about
-        // what the value was -- it was built to defeat exactly this.
+        // encode refuses. Producing one takes deliberate effort, so it is not
+        // worth a second walk of every console argument to find early; it is
+        // left to fail where the encoding is actually done.
         const forged = Object.create(FabricBytes.prototype);
         expect(isValidFabricValue(toConsoleDebugValue(forged))).toBe(true);
         expect(() => realmFromFabricValue(toConsoleDebugValue(forged)))
           .toThrow();
-        expect(fabricFromRealmValue(toConsoleWireValue(forged)))
-          .toEqual({ "/unconvertible": "no encoding for value" });
-      });
-
-      it("returns `/unconvertible` for the whole argument a forgery is buried in", () => {
-        // The failure is the argument's, not the position's: nothing of the
-        // surrounding value survives, which is the price of not sifting a
-        // hostile graph for the piece that broke.
-        const forged = Object.create(FabricBytes.prototype);
-        expect(fabricFromRealmValue(toConsoleWireValue({ a: 1, forged })))
-          .toEqual({ "/unconvertible": "no encoding for value" });
       });
 
       it("returns a unique symbol as its marker", () => {
@@ -1881,11 +1979,9 @@ describe("runtime-processor", () => {
         },
       } as unknown as RuntimeProcessor;
 
-      // Freshly encoded, as the transport's clone delivers it: the handler owns
+      // The bytes as the transport's decode delivers them: the handler owns
       // its request's payload. Kept here so the test can check what became of it.
-      const payload = realmFromFabricValue(
-        new FabricBytes(new Uint8Array([1, 2, 3])),
-      );
+      const payload = new FabricBytes(new Uint8Array([1, 2, 3]));
 
       try {
         await expect(
@@ -1904,11 +2000,9 @@ describe("runtime-processor", () => {
         globalThis.fetch = originalFetch;
       }
 
-      // The handler CONSUMES its payload -- `BaseRequest` entitles it to, and it
-      // does, which is what makes the transport's ownership guarantee load-
-      // bearing rather than decorative. A spent tree is what a second decode
-      // reports.
-      expect(() => fabricFromRealmValue(payload)).toThrow("detached buffer");
+      // The handler no longer decodes, so the ceding that `BaseRequest`'s
+      // ownership rule turns on happens at the envelope rather than here: the
+      // bytes arrive already decoded and are handed on as they are.
 
       expect(requestedUrl).toBe(
         "http://toolshed.test/did:key:test-space/blobs/upload.png",
@@ -2380,7 +2474,10 @@ describe("runtime-processor", () => {
       const orig = self.postMessage;
       (self as { postMessage: unknown }).postMessage = (
         m: { value?: unknown },
-      ) => posted.push(m);
+      ) =>
+        posted.push(
+          fabricFromRealmValue(m as never) as { value?: unknown },
+        );
       try {
         RuntimeProcessor.prototype.handleCellSubscribe.call(processor, {
           type: RequestType.CellSubscribe,
@@ -3390,6 +3487,337 @@ describe("runtime-processor", () => {
           type: RequestType.GetPatternCoverage,
         }),
       ).toEqual({ data: report });
+    });
+  });
+
+  describe("RuntimeProcessor event attention IPC", () => {
+    const space = "did:key:z6Mk-runtime-processor-attention" as never;
+    const sidecarId = "of:stream-events:runtime-processor-attention";
+    const attention = {
+      phase: "dispatch-load" as const,
+      failureClass: "session-revoked" as const,
+      code: "permanent-delivery-failure" as const,
+      firstFailureAt: 10,
+      lastFailureAt: 10,
+      accumulatedFailureMs: 0,
+      failureCount: 1,
+      recovery: "explicit-retry" as const,
+    };
+
+    it("forwards only complete terminal-attention outcomes", () => {
+      let subscriber: ((outcome: never) => void) | undefined;
+      const cancel = () => {};
+      const posted: unknown[] = [];
+      const returned = subscribeEventAttentionNotifications({
+        subscribeEventIntentOutcomes(callback: (outcome: never) => void) {
+          subscriber = callback as (outcome: never) => void;
+          return cancel;
+        },
+      } as never, (notification) => posted.push(notification));
+
+      expect(returned).toBe(cancel);
+      subscriber!({
+        kind: "dropped",
+        space,
+        eventId: "evt-dropped",
+        reason: "dropped",
+      } as never);
+      subscriber!({
+        kind: "needs-attention",
+        space,
+        eventId: "evt-incomplete",
+        reason: "incomplete",
+      } as never);
+      subscriber!({
+        kind: "needs-attention",
+        space,
+        eventId: "evt-complete",
+        seq: 40,
+        sidecarId,
+        retryable: false,
+        reason: "complete",
+        attention,
+      } as never);
+
+      expect(posted).toEqual([{
+        type: NotificationType.EventNeedsAttention,
+        space,
+        eventId: "evt-complete",
+        seq: 40,
+        sidecarId,
+        retryable: false,
+        reason: "complete",
+        attention,
+      }]);
+    });
+
+    it("installs and cancels the runtime notification subscription", async () => {
+      const server = new MemoryV2Server.Server({
+        authorizeSessionOpen: () => cfcSigner.did(),
+        sessionOpenAuth: { audience: testSessionOpenAudience },
+      });
+      const storageManager = new SharedV2StorageManager({
+        as: cfcSigner,
+        memoryHost: new URL("memory://"),
+      }, server);
+      const originalOpen = WorkerStorageManager.open;
+      const originalHealthCheck = Runtime.prototype.healthCheck;
+      const originalWatchSiteTable = RuntimeProcessor.prototype.watchSiteTable;
+      const originalSubscribe = Runtime.prototype.subscribeEventIntentOutcomes;
+      let subscribed = false;
+      let cancelled = 0;
+      WorkerStorageManager.open = () => storageManager;
+      Runtime.prototype.healthCheck = () => Promise.resolve(true);
+      RuntimeProcessor.prototype.watchSiteTable = () => {};
+      Runtime.prototype.subscribeEventIntentOutcomes = () => {
+        subscribed = true;
+        return () => cancelled++;
+      };
+      try {
+        const processor = await RuntimeProcessor.initialize({
+          apiUrl: "http://worker.test/",
+          identity: cfcSigner.keyPair,
+          spaceDid: space,
+        });
+        expect(subscribed).toBe(true);
+        await processor.dispose();
+        expect(cancelled).toBe(1);
+      } finally {
+        WorkerStorageManager.open = originalOpen;
+        Runtime.prototype.healthCheck = originalHealthCheck;
+        RuntimeProcessor.prototype.watchSiteTable = originalWatchSiteTable;
+        Runtime.prototype.subscribeEventIntentOutcomes = originalSubscribe;
+        await storageManager.close();
+        await server.close();
+      }
+    });
+
+    it("lists only authoritative unresolved notices and dispatches resolution", async () => {
+      const summaries = {
+        [eventAttentionEntryKey("evt-valid", 41)]: {
+          eventId: "evt-valid",
+          seq: 41,
+          sidecarId,
+          phase: attention.phase,
+          failureClass: attention.failureClass,
+          code: attention.code,
+          firstFailureAt: attention.firstFailureAt,
+        },
+        [eventAttentionEntryKey("evt-resolved", 42)]: {
+          eventId: "evt-resolved",
+          seq: 42,
+          sidecarId,
+          phase: attention.phase,
+          failureClass: attention.failureClass,
+          code: attention.code,
+          firstFailureAt: attention.firstFailureAt,
+        },
+        [eventAttentionEntryKey("evt-legacy", 0)]: {
+          eventId: "evt-legacy",
+          seq: 0,
+          sidecarId,
+          phase: attention.phase,
+          failureClass: attention.failureClass,
+          code: attention.code,
+          firstFailureAt: attention.firstFailureAt,
+        },
+        [eventAttentionEntryKey("evt-userless", 43)]: {
+          eventId: "evt-userless",
+          seq: 43,
+          sidecarId,
+          phase: attention.phase,
+          failureClass: attention.failureClass,
+          code: attention.code,
+          firstFailureAt: attention.firstFailureAt,
+        },
+      };
+      const provider = {
+        sync: () => Promise.resolve({}),
+        replica: {
+          getDocument(id: string) {
+            if (id === SERVER_EXECUTION_ATTENTION_DOC_ID) {
+              return {
+                value: {
+                  entries: {
+                    [eventAttentionIndexKey(sidecarId)]: summaries,
+                  },
+                },
+              };
+            }
+            return {
+              value: {
+                entries: [{
+                  eventId: "evt-valid",
+                  seq: 41,
+                  status: "needs-attention",
+                  reason: "safe reason",
+                  attention,
+                  firedAt: { user: cfcSigner.did() },
+                }, {
+                  eventId: "evt-resolved",
+                  seq: 42,
+                  status: "needs-attention",
+                  attention,
+                  resolution: { kind: "dismissed" },
+                  firedAt: { user: cfcSigner.did() },
+                }, {
+                  eventId: "evt-legacy",
+                  status: "needs-attention",
+                  reason: "legacy reason",
+                  attention,
+                  firedAt: { user: cfcSigner.did() },
+                }, {
+                  eventId: "evt-userless",
+                  seq: 43,
+                  status: "needs-attention",
+                  reason: "system event reason",
+                  attention,
+                  firedAt: { session: "server" },
+                }],
+              },
+            };
+          },
+        },
+      };
+      const resolveCalls: unknown[] = [];
+      const processor = {
+        runtime: {
+          storageManager: {
+            open: () => provider,
+            resolveEventAttention(
+              requestSpace: unknown,
+              eventId: unknown,
+              seq: unknown,
+              requestSidecarId: unknown,
+              action: unknown,
+            ) {
+              resolveCalls.push([
+                requestSpace,
+                eventId,
+                seq,
+                requestSidecarId,
+                action,
+              ]);
+              return Promise.resolve({ resolution: { kind: "dismissed" } });
+            },
+          },
+        },
+        identity: cfcSigner,
+        handleListEventAttention:
+          RuntimeProcessor.prototype.handleListEventAttention,
+        handleResolveEventAttention:
+          RuntimeProcessor.prototype.handleResolveEventAttention,
+      } as unknown as RuntimeProcessor;
+
+      expect(
+        await RuntimeProcessor.prototype.handleRequest.call(processor, {
+          type: RequestType.ListEventAttention,
+          space,
+        }),
+      ).toEqual({
+        notices: [{
+          space,
+          eventId: "evt-valid",
+          seq: 41,
+          sidecarId,
+          retryable: true,
+          reason: "safe reason",
+          attention,
+        }, {
+          space,
+          eventId: "evt-legacy",
+          seq: 0,
+          sidecarId,
+          retryable: true,
+          reason: "legacy reason",
+          attention,
+        }, {
+          space,
+          eventId: "evt-userless",
+          seq: 43,
+          sidecarId,
+          retryable: false,
+          reason: "system event reason",
+          attention,
+        }],
+      });
+      expect(
+        await RuntimeProcessor.prototype.handleRequest.call(processor, {
+          type: RequestType.ResolveEventAttention,
+          space,
+          eventId: "evt-valid",
+          seq: 41,
+          sidecarId,
+          action: "dismiss",
+        }),
+      ).toEqual({ resolution: { kind: "dismissed" } });
+      expect(resolveCalls).toEqual([[
+        space,
+        "evt-valid",
+        41,
+        sidecarId,
+        "dismiss",
+      ]]);
+    });
+
+    it("surfaces attention index and sidecar synchronization failures", async () => {
+      const indexError = new Error("index failed");
+      const sidecarError = new Error("sidecar failed");
+      const summary = {
+        eventId: "evt-failed",
+        seq: 43,
+        sidecarId,
+        phase: attention.phase,
+        failureClass: attention.failureClass,
+        code: attention.code,
+        firstFailureAt: attention.firstFailureAt,
+      };
+      const invoke = (provider: unknown) =>
+        RuntimeProcessor.prototype.handleListEventAttention.call({
+          runtime: { storageManager: { open: () => provider } },
+          identity: cfcSigner,
+        } as never, { type: RequestType.ListEventAttention, space });
+
+      await expect(invoke({
+        sync: () => Promise.resolve({ error: indexError }),
+      })).rejects.toBe(indexError);
+      await expect(invoke({
+        sync: () => Promise.resolve({}),
+      })).rejects.toThrow("does not expose an attention replica");
+      let syncCount = 0;
+      await expect(invoke({
+        sync: () =>
+          Promise.resolve(
+            ++syncCount === 1 ? {} : { error: sidecarError },
+          ),
+        replica: {
+          getDocument: () => ({
+            value: {
+              entries: {
+                [eventAttentionIndexKey(sidecarId)]: {
+                  [eventAttentionEntryKey(summary.eventId, summary.seq)]:
+                    summary,
+                },
+              },
+            },
+          }),
+        },
+      })).rejects.toBe(sidecarError);
+    });
+
+    it("rejects resolution when the storage capability is absent", async () => {
+      await expect(
+        RuntimeProcessor.prototype.handleResolveEventAttention.call({
+          runtime: { storageManager: {} },
+        } as never, {
+          type: RequestType.ResolveEventAttention,
+          space,
+          eventId: "evt-unsupported",
+          seq: 44,
+          sidecarId,
+          action: "retry",
+        }),
+      ).rejects.toThrow("does not support event attention");
     });
   });
 

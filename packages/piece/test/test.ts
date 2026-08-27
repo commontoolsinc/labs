@@ -29,6 +29,9 @@ describe("PiecesController.getPieceCell", () => {
         sync: () => Promise.resolve(),
       }),
       getCellFromEntityId: () => piece,
+      // Opening a piece follows its origin before starting it; this one
+      // records none.
+      sourceReconciler: { reconcile: () => Promise.resolve("detached") },
       start: () => {
         startSawSyncedPiece = pieceSynced;
         return Promise.resolve(true);
