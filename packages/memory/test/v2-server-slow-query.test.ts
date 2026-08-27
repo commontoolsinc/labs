@@ -123,6 +123,58 @@ describe("v2 server slow queries", () => {
     }
   });
 
+  it("records a commit whose wire shape lacks reads without masking the response", async () => {
+    const space = "did:key:z6Mk-slow-query-malformed";
+    const server = createServer("memory://slow-query-malformed");
+    const messages: ServerMessage[] = [];
+    const connection = server.connect((message) => messages.push(message));
+    try {
+      const sessionId = await openSession(connection, messages, space);
+
+      // The wire parser validates only the commit's envelope, so a commit
+      // without `reads` reaches transact. Whatever the evaluation decides,
+      // the recording must not replace that outcome with its own throw.
+      let settled: { error?: { name: string } } | undefined;
+      let threw: unknown;
+      try {
+        settled = await server.transact(
+          transactMessage(
+            space,
+            sessionId,
+            {
+              localSeq: 1,
+              operations: [
+                { op: "set", id: "of:doc:bare", value: { value: { n: 1 } } },
+              ],
+            } as unknown as TransactRequest["commit"],
+          ),
+          () => {
+            nowOffsetMs += 250;
+          },
+        );
+      } catch (error) {
+        threw = error;
+      }
+      expect(threw instanceof TypeError).toBe(false);
+
+      const entry = getSlowQueries().find((slow) =>
+        slow.space === space && slow.operation === "transact"
+      );
+      expect(entry).toBeDefined();
+      expect(entry!.operations).toBe(1);
+      expect(entry!.readsConfirmed).toBeUndefined();
+      expect(entry!.readsPending).toBeUndefined();
+      expect(typeof entry!.outcome).toBe("string");
+      if (settled !== undefined) {
+        expect(entry!.outcome).toBe(settled.error?.name ?? "ok");
+      } else {
+        expect(entry!.outcome).toBe("threw");
+      }
+    } finally {
+      connection.close();
+    }
+  });
+
   it("records a slow rejected commit under the error's name", async () => {
     const space = "did:key:z6Mk-slow-query-conflict";
     const server = createServer("memory://slow-query-conflict");

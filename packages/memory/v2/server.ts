@@ -2807,11 +2807,18 @@ export class Server {
         // The elapsed span deliberately starts at the REQUEST, not at lock
         // acquisition: what a client waits for is both halves, and the
         // lockWaitMs field is what splits them apart on the dashboard.
+        // The wire parser validates only the commit's envelope, so the
+        // arrays may be absent here; a malformed commit records with its
+        // counts missing rather than masking the transaction's own
+        // response with a throw from this finally.
+        const commit = message.commit as Partial<ClientCommit>;
+        const count = (value: unknown): number | undefined =>
+          Array.isArray(value) ? value.length : undefined;
         recordSlowQueryDuration("transact", message.space, requestedAt, {
           lockWaitMs: Math.round(lockWaitMs),
-          operations: message.commit.operations.length,
-          readsConfirmed: message.commit.reads.confirmed.length,
-          readsPending: message.commit.reads.pending.length,
+          operations: count(commit.operations),
+          readsConfirmed: count(commit.reads?.confirmed),
+          readsPending: count(commit.reads?.pending),
           outcome,
         });
       }
