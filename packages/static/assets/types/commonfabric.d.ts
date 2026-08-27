@@ -3172,12 +3172,14 @@ export type SqliteEntryRow<Row> = Array<
 
 /**
  * Runtime row shape for a typed SQLite query. Rows with an explicitly declared
- * Fabric-reserved alias use entries; all other typed rows remain objects.
+ * Fabric-reserved alias use entries. Indexed row types admit either shape
+ * because their possible column names are not statically closed; all other
+ * typed rows remain objects.
  */
-export type SqliteQueryRow<Row> = Extract<
-  keyof Row,
-  SqliteReservedColumnName
-> extends never ? Row : SqliteEntryRow<Row>;
+export type SqliteQueryRow<Row> = string extends keyof Row
+  ? Row | SqliteEntryRow<Row>
+  : Extract<keyof Row, SqliteReservedColumnName> extends never ? Row
+  : SqliteEntryRow<Row>;
 
 /** Reactive read on a SqliteDb handle: builds a `sqliteQuery` node. `<Row>` is
  *  lowered by the transformer to an injected result schema. */
