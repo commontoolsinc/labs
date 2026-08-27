@@ -6214,7 +6214,85 @@ supply; OW29/OW32/OW34 closed):
     a pointer only one session can load is the unstated
     identity-assignment semantic. Fixing L3 alone would NOT green the
     step (the verdict is L1+L2); fixing L1/L2 alone leaves durable
-    poison pointers. **a04 RECLASSIFIED — a DIFFERENT member, the
+    poison pointers.
+    **RULED 2026-08-27 (owner, coordination chat) — L3 and L2; L1 remains
+    an OPEN owner question (no ruling received; flagged, not filled).**
+    L3 ruled (a), verbatim: keyless identities must NEVER land durably
+    (honor the existing contract; the transformer hoists all
+    source-authored lift()/handler() code to cf:module — CT-1644/CT-1655
+    — so the keyless population is runtime-built pattern VALUES whose
+    PRODUCING CODE is module-addressed; "nothing keyless should ever
+    need loading"). Recovery semantics: reactive producers re-derive on
+    demand (run the producing lift); handler-created-outliving-session
+    is out of contract (must instantiate from content-addressed
+    artifacts) — handler-replay is NOT built, deferred to the
+    codeless-rebuild arc (seed: `docs/plans/codeless-graph-rebuild-seed.md`).
+    L2 ruled PUNT, verbatim: optimistic navigateTo stands even when the
+    authoritative branch computes no intent — the client navigates, so
+    be it; the default-app step must be robust to it (the step's
+    navigation-robustness fix is the companion PR on
+    `claude/server-exec-v2-default-app-test`).
+    **LANDED (keyless close-out PR-1, branch
+    `claude/server-exec-v2-keyless-guard`): the L3(a) guard, all
+    writers.** A THIRD writer beyond the diagnosis's two fell out of
+    the build: the storage-boundary serializer itself
+    (`patternToEncodableForm`) — the mint sets the value's forward
+    entry ref, so the designed "no entry ref → full graph" fallback
+    stopped firing and every boundary write of a minted pattern VALUE
+    emitted the keyless ref. Landed: (1) boundary serializer treats a
+    keyless ref as no-ref (full graph); (2) `Runner.setup` skips the
+    durable `patternIdentity`/`patternSetupIdentity` stamps and the
+    `onPatternInstantiated` report for keyless refs — keyless pieces
+    genuinely carry no pointer, the verdict `getPatternIdentityRef`'s
+    own doc always claimed; (3) `substituteOpPatternRefs` no longer
+    substitutes the keyless `$patternRef` sentinel — the durable inputs
+    doc carries the full embedded graph and the instantiating session
+    registers a session-side resolution hint keyed by the inputs doc,
+    so CT-1812 stays sealed in-session; (4) `setArtifactEntryRef` lets
+    a REAL ref replace a keyless one (the mint used to permanently
+    shadow a later-indexed real identity — first-write-wins); (5) the
+    CT-1923 roll-forward's refuses-when-running-ref-also-keyless arm
+    now converges the unloadable durable pointer to the running VALUE's
+    module-addressed PRODUCER (`resolveProducerEntryRef`: first real
+    entry ref up the derivation chain, as many steps as recorded); a
+    from-scratch runtime-built value has NO in-memory producer link
+    (frames carry the building code's `implementationIdentity` but
+    nothing records it per-artifact, and a lift-module identity would
+    not be a loadable PATTERN identity anyway) — that shape stays a
+    tolerated orphan, `keyless-running-no-producer` at debug, nothing
+    written; (6) legacy tolerance for pre-guard durable keyless
+    pointers: watcher and start walk record
+    `legacy-keyless-pattern-pointer` at debug (not
+    `pattern-load-error`), `loadPatternByIdentity` short-circuits
+    (storage cannot hold a session identity), the start walk reports
+    not-started instead of rejecting; (7) mint-site tripwire
+    (`keyless-mint-missing-association` + `keylessMintAnomalies`
+    counter): a module-indexed pattern (source path present) reaching
+    the mint is the missing-association bug surfacing — full runner
+    battery ran silent. The build also surfaced — and replaced — THREE
+    in-session roles the durable keyless stamps had been quietly
+    playing, each now served session-side (dies with the session, the
+    contract's own shape): (i) the pattern POINTER for
+    separate-start/resume/stop-restart flows and (ii) the
+    setup-completion MARKER for `storedSetupMarker`'s reuse decision —
+    both via `Runner.sessionPatternPointers`, written exactly where the
+    stamps are skipped; and (iii) the intra-session CHANGE SIGNAL for
+    RUNNING sub-pieces: a lift re-deriving its returned pattern used to
+    reach the running piece's swap machinery THROUGH the stamp (setup
+    wrote the pointer, the meta watcher fired, swapToPattern replaced
+    the graph) — now a session swap channel
+    (`Runner.sessionPatternSwaps`) carries the live value to the
+    watcher's own swap closure with the same guards; real patterns
+    keep the durable-stamp path byte-for-byte. Test pins that read the
+    durable stamp for hand-built pieces were adjusted to the contract
+    (cfc-boundary, patterns-lift/handlers diagnostics-identity source,
+    scheduler-event-receipts' Decision-13 discriminator → setup's
+    result-schema meta). Pinned red-first in
+    `packages/runner/test/keyless-never-durable.test.ts` (raw-sqlite
+    byte scan across all three writer paths; producer convergence;
+    start-walk tolerance; tripwire — 4 of 5 red at base, the
+    legacy-heal pin being a regression guard for the pre-existing
+    roll-forward arm). **a04 RECLASSIFIED — a DIFFERENT member, the
     WRITE-side loss family (lunch third-member kin), not r06/r09:**
     all 7 create events durably appended and marked
     `consequenced: true`, but clientSeq 10 and 11's consequences are
