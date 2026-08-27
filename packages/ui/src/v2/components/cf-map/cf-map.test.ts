@@ -26,6 +26,7 @@ import type {
 
 //
 // Type Structure Tests
+//
 // These tests verify that the type definitions are correctly structured
 //
 

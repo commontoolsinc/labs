@@ -69,8 +69,7 @@ const DARWIN_SYMBOLS = {
 
 type DarwinLib = Deno.DynamicLibrary<typeof DARWIN_SYMBOLS>;
 
-//
-// struct stat (macOS arm64, 144 bytes)
+// struct stat (macOS arm64, 144 bytes):
 //   dev_t st_dev      @ 0   (i32)
 //   mode_t st_mode    @ 4   (u16)
 //   nlink_t st_nlink  @ 6   (u16)
@@ -79,7 +78,6 @@ type DarwinLib = Deno.DynamicLibrary<typeof DARWIN_SYMBOLS>;
 //   gid_t st_gid      @ 20  (u32)
 //   ...
 //   off_t st_size     @ 96  (i64)
-//
 
 const STAT_SIZE = 144;
 const STAT_ST_SIZE_OFFSET = 96;
@@ -120,15 +118,13 @@ const writeEntryParam = makeWriteEntryParam(
   ENTRY_PARAM_SIZE,
 );
 
-//
-// fuse_file_info (macOS 64-bit, 40 bytes)
+// fuse_file_info (macOS 64-bit, 40 bytes):
 //   int flags            @  0  (i32)
 //   unsigned long fh_old @  8  (u64, deprecated)
 //   int writepage        @ 16  (i32)
 //   bitfield             @ 20  (u32)
 //   uint64_t fh          @ 24  (u64)
 //   uint64_t lock_owner  @ 32  (u64)
-//
 
 const FUSE_FILE_INFO_SIZE = 40;
 const FH_OFFSET = 24;

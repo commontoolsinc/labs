@@ -2925,6 +2925,7 @@ Deno.test("session: escaping a search with no query typed clears the match set",
 
 //
 // diff edit guards on a non-editable (removed) line
+//
 // Land the cursor on the removed line (index 8 in the DIFF fixture) and run
 // each delete-/kill-style edit. The policy's editStart returns null there, so
 // every gate reports NOT_EDITABLE and refuses the edit.

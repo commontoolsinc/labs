@@ -157,10 +157,10 @@ export function createDataFlowAnalyzer(
       isArrayMethodElementBindingReference(current);
   };
 
-  // Synthetic node helpers
-  // These enable unified handling of both synthetic (transformer-created) and
-  // non-synthetic (original source) nodes by gracefully handling cases where
-  // the TypeChecker can't resolve symbols or types.
+  // Synthetic node helpers: These enable unified handling of both synthetic
+  // (transformer-created) and non-synthetic (original source) nodes by
+  // gracefully handling cases where the TypeChecker can't resolve symbols or
+  // types.
 
   const isSynthetic = (node: ts.Node): boolean => !node.getSourceFile();
 
@@ -1248,11 +1248,10 @@ export function createDataFlowAnalyzer(
       return mergeAnalyses(...analyses);
     }
 
-    // JSX Expression Handling
-    // The analyzer provides complete data flow analysis for JSX elements,
-    // including both attributes (like `value={expr}`) and children.
-    // This makes the analyzer self-contained - callers get correct results
-    // regardless of how they traverse the AST.
+    // JSX Expression Handling: The analyzer provides complete data flow
+    // analysis for JSX elements, including both attributes (like
+    // `value={expr}`) and children. This makes the analyzer self-contained -
+    // callers get correct results regardless of how they traverse the AST.
 
     // Helper: analyze JSX attributes (JsxAttribute and JsxSpreadAttribute)
     const analyzeJsxAttributes = (

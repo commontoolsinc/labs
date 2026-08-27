@@ -240,6 +240,7 @@ Deno.test("parse: null, true and false are colored as boolean literals", () => {
 
 //
 // classifyIdentifier: declaration-name and access branches
+//
 // Covers lines 844-846 (function/method/method-signature names), 848-852
 // (interface/class/class-expression names), 854 (enum name), 869-870
 // (property declaration / enum member), 877 (synthetic helper member access).
@@ -389,12 +390,10 @@ Deno.test("parse: an element-access expression gets a […] generic label", () =
   );
 });
 
-//
-// registerDefinition no-name guard (line 1260)
-// Covered indirectly: registerDefinition is only called when desc.name is set,
-// but the early `if (!desc.name) return` is reached when called for a name.
-// A named binding exercises the body; the guard line itself runs every call.
-//
+// registerDefinition no-name guard (line 1260): Covered indirectly:
+// registerDefinition is only called when desc.name is set, but the early `if
+// (!desc.name) return` is reached when called for a name. A named binding
+// exercises the body; the guard line itself runs every call.
 
 Deno.test("parse: a named binding registers a definition", () => {
   const doc = parseDocument("const namedThing = 1;\n", "m.ts");
@@ -735,6 +734,7 @@ Deno.test("parse: interface metadata describes property, method and index member
 
 //
 // parseSchemaObject + fieldType: array / object / anyOf branches
+//
 // Covers 1819-1820 (non-property-assignment skip), 1847-1857 (fieldType array,
 // object, anyOf/oneOf fallthrough), 1871, 1894-1899 (readSchemaProps/hasProp).
 //

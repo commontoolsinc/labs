@@ -28,7 +28,6 @@ const LIBFUSE_PATHS = [
   "/usr/lib64/libfuse3.so.4", // Fedora
 ];
 
-//
 // Linux-specific FFI symbols (FUSE v3)
 //
 // Key differences from v2:
@@ -36,7 +35,6 @@ const LIBFUSE_PATHS = [
 //   - fuse_session_mount(session, mountpoint) replaces fuse_mount(mountpoint, args)
 //   - fuse_session_unmount(session) replaces fuse_unmount(mountpoint, chan)
 //   - No channel concept — session manages mount directly
-//
 
 const LINUX_SYMBOLS = {
   ...COMMON_SYMBOLS,
@@ -56,8 +54,7 @@ const LINUX_SYMBOLS = {
 
 type LinuxLib = Deno.DynamicLibrary<typeof LINUX_SYMBOLS>;
 
-//
-// struct stat (Linux x86_64, 144 bytes)
+// struct stat (Linux x86_64, 144 bytes):
 //   dev_t st_dev       @ 0   (u64)
 //   ino_t st_ino       @ 8   (u64)
 //   nlink_t st_nlink   @ 16  (u64)  — note: u64 on Linux, u16 on macOS
@@ -70,7 +67,6 @@ type LinuxLib = Deno.DynamicLibrary<typeof LINUX_SYMBOLS>;
 //
 // NOTE: These offsets are initial best-guesses for x86_64.
 // Run verify-structs.c to confirm exact values.
-//
 
 const STAT_SIZE = 144;
 const STAT_ST_SIZE_OFFSET = 48;
@@ -96,11 +92,9 @@ function writeStat(buf: ArrayBuffer, opts: StatOpts): void {
   }
 }
 
-//
 // fuse_entry_param
 // Layout: ino(u64) + generation(u64) + stat(144) + attr_timeout(f64) + entry_timeout(f64)
 // = 8 + 8 + 144 + 8 + 8 = 176 bytes (same total as macOS)
-//
 
 const ENTRY_PARAM_SIZE = 176;
 const writeEntryParam = makeWriteEntryParam(
@@ -109,7 +103,6 @@ const writeEntryParam = makeWriteEntryParam(
   ENTRY_PARAM_SIZE,
 );
 
-//
 // fuse_file_info (FUSE v3)
 // v3 removed the deprecated fh_old field.
 //   int flags             @  0  (i32)
@@ -122,7 +115,6 @@ const writeEntryParam = makeWriteEntryParam(
 //   Total: 40 bytes (with trailing padding)
 //
 // NOTE: fh offset is a best-guess. Verify with verify-structs.c.
-//
 
 const FUSE_FILE_INFO_SIZE = 40;
 const FH_OFFSET = 16;
@@ -161,12 +153,10 @@ const ENOSYS = 38;
 const ENODATA = 61; // Linux equivalent of macOS ENOATTR
 const ENOTSUP = 95;
 
-//
 // fuse_lowlevel_ops offsets
 // v3 keeps the same order for existing ops and adds new ones at the end.
 // The offsets below should match v2 for all ops we use.
 // Verify with verify-structs.c.
-//
 
 const OPS_SIZE = 352; // v3 has more ops than v2 (verified by verify-structs.c)
 const OPS_OFFSETS = {

@@ -1620,11 +1620,11 @@ function classify(node: ts.Node, ctx: BuildCtx): Desc | null {
     };
   }
 
-  // variable statements & declarations
-  // A single binding is represented by the whole statement (so the `variable`
-  // node covers `export const … ;`); a multi-declarator statement stays generic
-  // and each declaration becomes its own binding node. The single declaration
-  // itself stays generic to avoid labeling one binding at two nesting levels.
+  // variable statements & declarations: A single binding is represented by the
+  // whole statement (so the `variable` node covers `export const … ;`); a
+  // multi-declarator statement stays generic and each declaration becomes its
+  // own binding node. The single declaration itself stays generic to avoid
+  // labeling one binding at two nesting levels.
   if (ts.isVariableStatement(node)) {
     const decls = node.declarationList.declarations;
     if (decls.length === 1) return bindingDesc(decls[0], ctx);

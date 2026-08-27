@@ -118,6 +118,7 @@ class WishError extends Error {
 
 //
 // Interval #now constants and helpers
+//
 // Bounds for #now/N intervals, specified in whole seconds. Values outside this
 // range are rejected, not clamped. The 1-second minimum caps the sampling rate
 // at 1Hz; the 24-hour maximum keeps the scheduled delay within the setTimeout

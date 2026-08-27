@@ -745,8 +745,7 @@ export async function main(argv: string[] = Deno.args) {
     Deno.exit(1);
   }
 
-  // Callbacks
-  // Keep references so GC doesn't collect them.
+  // Callbacks: Keep references so GC doesn't collect them.
   // deno-lint-ignore no-explicit-any
   const callbacks: Deno.UnsafeCallback<any>[] = [];
 
