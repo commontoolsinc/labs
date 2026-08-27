@@ -2723,7 +2723,9 @@ export type CompileAndRunFunction = <T = any, S = any>(
  */
 export type DataFileFunction = (path: string) => string;
 
-// --- SQLite builtins (docs/specs/sqlite-builtin) ---
+//
+// SQLite builtins (docs/specs/sqlite-builtin)
+//
 
 declare const __sqliteDb: unique symbol;
 

@@ -1133,7 +1133,9 @@ Deno.test(
   },
 );
 
-// --- Batch 4: aliased identity-writer args, nested patterns, dynamic calls --
+//
+// Batch 4: aliased identity-writer args, nested patterns, dynamic calls
+//
 
 Deno.test(
   "aliased local pushed into a cell writer is read at its aliased path",
@@ -1321,7 +1323,9 @@ Deno.test(
   },
 );
 
-// --- Batch 6: whole-root identity, array-item identity, param array binding --
+//
+// Batch 6: whole-root identity, array-item identity, param array binding
+//
 
 Deno.test(
   "equals() over the whole tracked root records a root comparable passthrough",

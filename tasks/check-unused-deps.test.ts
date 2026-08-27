@@ -11,7 +11,9 @@ import {
   scan,
 } from "./check-unused-deps.ts";
 
-// --- importsAlias: the specifier shapes that count as an import ---
+//
+// importsAlias: the specifier shapes that count as an import
+//
 
 Deno.test("importsAlias matches a static import", () => {
   assert(importsAlias('import { x } from "zod";', "zod"));
@@ -150,7 +152,9 @@ Deno.test("importsAlias counts a commented-out import as used", () => {
   assert(importsAlias('// import { x } from "zod";', "zod"));
 });
 
-// --- owningMember: longest-prefix attribution, including nesting ---
+//
+// owningMember: longest-prefix attribution, including nesting
+//
 
 Deno.test("owningMember attributes a file to its member", () => {
   const members = ["packages/memory", "packages/runner"];
@@ -184,7 +188,9 @@ Deno.test("owningMember does not match a member that is only a path-segment pref
   );
 });
 
-// --- parsing ---
+//
+// parsing
+//
 
 Deno.test("parseImportMap returns the imports block", () => {
   const text = `{
@@ -237,7 +243,9 @@ Deno.test("gitTrackedFiles returns null when git is not available", async () => 
   );
 });
 
-// --- scan over the real repository tree ---
+//
+// scan over the real repository tree
+//
 
 Deno.test("no unused import map entries in the repository", async () => {
   const { unused } = await scan();
@@ -265,7 +273,9 @@ Deno.test("the unused-import-map ALLOWLIST has no stale entries", async () => {
   );
 });
 
-// --- main over a temp fixture tree ---
+//
+// main over a temp fixture tree
+//
 
 // Builds a minimal workspace under a fresh temp dir: a root deno.jsonc naming
 // one member, that member's deno.jsonc with the given imports, and one source

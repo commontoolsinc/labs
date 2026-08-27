@@ -589,7 +589,9 @@ Deno.test("FsTree - addSymlink", () => {
   }
 });
 
-// --- Sigil link tests ---
+//
+// Sigil link tests
+//
 
 Deno.test("isSigilLink - detects valid sigil links", () => {
   assertEquals(
@@ -763,7 +765,9 @@ Deno.test("buildJsonTree - unresolvable sigil link falls through to object", () 
   assertEquals(refNode?.kind, "dir");
 });
 
-// --- Stream / handler tests ---
+//
+// Stream / handler tests
+//
 
 Deno.test("isStreamValue - detects stream markers", () => {
   assertEquals(isStreamValue({ $stream: true }), true);
@@ -1527,7 +1531,9 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
   assertEquals(resultJson.search, { "/tool": "search" });
 });
 
-// --- parseSymlinkTarget tests ---
+//
+// parseSymlinkTarget tests
+//
 
 /** Helper: build a minimal tree mimicking a space with pieces. */
 function buildTestTree(): {

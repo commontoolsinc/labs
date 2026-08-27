@@ -120,7 +120,9 @@ Deno.test("gate 913: a qualified name in a type annotation resolves as a type", 
   );
 });
 
-// --- 916: typeof type resolves via ts.isTypeNode before the TypeQuery branch -
+//
+// 916: typeof type resolves via ts.isTypeNode before the TypeQuery branch -
+//
 
 Deno.test("gate 916: a `typeof` type colors its operand as a type name", () => {
   // `typeof base` as a type makes `base`'s parent a TypeQueryNode. Because a
@@ -219,7 +221,9 @@ Deno.test("gate 1270: named declarations are registered; an anonymous one is not
   );
 });
 
-// --- 1668: controlLabel's eight handled kinds (the fall-through never runs) --
+//
+// 1668: controlLabel's eight handled kinds (the fall-through never runs)
+//
 
 Deno.test("gate 1668: every control statement gets its dedicated label", () => {
   // controlLabel runs only for the eight isControlStatement kinds, each with an
@@ -248,7 +252,9 @@ Deno.test("gate 1668: every control statement gets its dedicated label", () => {
   assert(has(/^try$/), "try label");
 });
 
-// --- 1719-1721: safe()'s wrapped extractors never throw on parseable input --
+//
+// 1719-1721: safe()'s wrapped extractors never throw on parseable input
+//
 
 Deno.test("gate 1719-1721: metadata extraction never throws on malformed input", () => {
   // Each input parses (via TypeScript error recovery) into nodes with valid

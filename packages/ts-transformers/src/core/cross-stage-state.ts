@@ -152,7 +152,9 @@ export class CrossStageState {
     return links;
   }
 
-  // --- mapCallbackRegistry ---
+  //
+  // mapCallbackRegistry
+  //
 
   markArrayMethodCallback(node: ts.Node): void {
     this.mapCallbackRegistry.add(node);
@@ -162,7 +164,9 @@ export class CrossStageState {
     return this.#hasWithOriginal(this.mapCallbackRegistry, node);
   }
 
-  // --- syntheticComputeCallbackRegistry ---
+  //
+  // syntheticComputeCallbackRegistry
+  //
 
   markSyntheticComputeCallback(node: ts.Node): void {
     this.syntheticComputeCallbackRegistry.add(node);
@@ -172,7 +176,9 @@ export class CrossStageState {
     return this.#hasWithOriginal(this.syntheticComputeCallbackRegistry, node);
   }
 
-  // --- syntheticComputeOwnedNodeRegistry ---
+  //
+  // syntheticComputeOwnedNodeRegistry
+  //
 
   markSyntheticComputeOwnedSubtree(node: ts.Node): void {
     const registry = this.syntheticComputeOwnedNodeRegistry;
@@ -187,7 +193,9 @@ export class CrossStageState {
     return this.#hasWithOriginal(this.syntheticComputeOwnedNodeRegistry, node);
   }
 
-  // --- syntheticReactiveCollectionRegistry (keyed by ts.Symbol) ---
+  //
+  // syntheticReactiveCollectionRegistry (keyed by ts.Symbol)
+  //
 
   markSyntheticReactiveCollection(symbol: ts.Symbol): void {
     this.syntheticReactiveCollectionRegistry.add(symbol);
@@ -197,7 +205,9 @@ export class CrossStageState {
     return this.syntheticReactiveCollectionRegistry.has(symbol);
   }
 
-  // --- schemaHints ---
+  //
+  // schemaHints
+  //
 
   recordSchemaHint(node: ts.Node, hint: SchemaHint): void {
     this.schemaHints.set(node, hint);
@@ -212,7 +222,9 @@ export class CrossStageState {
       this.schemaHints.get(ts.getOriginalNode(node));
   }
 
-  // --- capabilitySummary (nodeLinks-backed) ---
+  //
+  // capabilitySummary (nodeLinks-backed)
+  //
 
   recordCapabilitySummary(
     fn: ts.Node,
@@ -225,7 +237,9 @@ export class CrossStageState {
     return this.nodeLinks.get(fn)?.capabilitySummary;
   }
 
-  // --- patternResultAnchor (nodeLinks-backed) ---
+  //
+  // patternResultAnchor (nodeLinks-backed)
+  //
 
   recordPatternResultSchemaCall(schemaCall: ts.Node, anchor: ts.Node): void {
     this.#linksFor(schemaCall).patternResultAnchor = anchor;
@@ -238,7 +252,8 @@ export class CrossStageState {
     return this.nodeLinks.get(schemaCall)?.patternResultAnchor;
   }
 
-  // --- schemaInjected (nodeLinks-backed) ---
+  //
+  // schemaInjected (nodeLinks-backed)
   //
   // Marks builder call/new nodes that SchemaInjection has already finalized,
   // so a later re-traversal of the transformer's own output skips re-injection
@@ -250,6 +265,7 @@ export class CrossStageState {
   // user call. Falling back to the original would wrongly report a
   // not-yet-injected user node as injected. (This is why it is a `nodeLinks`
   // field rather than a member of the getOriginalNode-fallback marker family.)
+  //
 
   markSchemaInjected(node: ts.Node): void {
     this.#linksFor(node).schemaInjected = true;
@@ -260,7 +276,9 @@ export class CrossStageState {
     return this.nodeLinks.get(node)?.schemaInjected === true;
   }
 
-  // --- diagnostic dedup ---
+  //
+  // diagnostic dedup
+  //
 
   /**
    * Records that a diagnostic with `key` is being emitted. Returns true the
@@ -275,7 +293,9 @@ export class CrossStageState {
     return true;
   }
 
-  // --- shared helper: membership check with getOriginalNode fallback ---
+  //
+  // shared helper: membership check with getOriginalNode fallback
+  //
 
   #hasWithOriginal(set: WeakSet<ts.Node>, node: ts.Node): boolean {
     if (set.has(node)) return true;

@@ -4,7 +4,9 @@
 // platform-linux.ts (FUSE v3). This module provides the shared interface,
 // constants that are identical across platforms, and a runtime dispatcher.
 
-// --- Shared types ---
+//
+// Shared types
+//
 
 export interface StatOpts {
   ino: bigint;
@@ -51,7 +53,9 @@ export function msToTimespec(ms?: number): { sec: bigint; nsec: bigint } {
   };
 }
 
-// --- Common FFI symbols (identical between FUSE v2 and v3) ---
+//
+// Common FFI symbols (identical between FUSE v2 and v3)
+//
 
 export const COMMON_SYMBOLS = {
   // Session lifecycle
@@ -145,7 +149,9 @@ export const COMMON_SYMBOLS = {
 
 export type FuseLib = Deno.DynamicLibrary<typeof COMMON_SYMBOLS>;
 
-// --- Platform interface ---
+//
+// Platform interface
+//
 
 // deno-lint-ignore no-explicit-any
 type AnyCallback = Deno.UnsafeCallback<any>;
@@ -256,7 +262,9 @@ export interface FusePlatform {
   ): void;
 }
 
-// --- Shared constants (identical on macOS and Linux) ---
+//
+// Shared constants (identical on macOS and Linux)
+//
 
 // Errno constants (POSIX-standard values)
 export const ENOENT = 2;
@@ -346,7 +354,9 @@ export const FILE_MODE_RWX = S_IFREG | 0o777;
 export const FILE_MODE_WO = S_IFREG | 0o222;
 export const SYMLINK_MODE = S_IFLNK | 0o777;
 
-// --- Shared utility ---
+//
+// Shared utility
+//
 
 export function readCString(ptr: Deno.PointerValue): string {
   if (!ptr) return "";
@@ -354,7 +364,9 @@ export function readCString(ptr: Deno.PointerValue): string {
   return view.getCString();
 }
 
-// --- Shared struct helpers ---
+//
+// Shared struct helpers
+//
 
 /**
  * Build a writeEntryParam function using the given platform's writeStat and STAT_SIZE.
@@ -436,7 +448,9 @@ export function createFuseArgs(
   return { argsBuf, argv, argvBuf, encodedArgs };
 }
 
-// --- Platform dispatcher ---
+//
+// Platform dispatcher
+//
 
 let _platform: FusePlatform | null = null;
 

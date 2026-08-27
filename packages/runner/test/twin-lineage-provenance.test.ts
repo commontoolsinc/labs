@@ -38,7 +38,9 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("twin-lineage-provenance");
 const space = signer.did();
 
-// ── The twin topology, inlined (mirrors the investigation's twin3e probe) ──
+//
+// The twin topology, inlined (mirrors the investigation's twin3e probe)
+//
 
 const ENTRY_BODY = `
 import {

@@ -233,7 +233,7 @@ describe("ingest journal sink", () => {
     expect(cell.getAsNormalizedFullLink().id).toBe(GOLDEN_ID);
   });
 
-  // --- processIngest: the full auth + validation contract ---
+  // processIngest: the full auth + validation contract
   const savedReg = async (
     overrides: Partial<IngestRegistration> = {},
   ): Promise<{ r: IngestRegistration; secret: string }> => {

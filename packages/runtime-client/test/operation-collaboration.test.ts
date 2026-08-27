@@ -444,6 +444,35 @@ describe("RuntimeClient operation collaboration", () => {
             materialized: field.materialized,
           },
         }]);
+
+      // The notification goes through `postToClient()`, which is what puts it
+      // under the guard there. It posts from a `queueMicrotask` callback, so
+      // there is no caller's `try` around it: a refused post that threw would
+      // be an uncaught error rather than anything a caller could handle. Made
+      // to throw once, the post is answered with a substitute and nothing
+      // escapes -- where a bare `self.postMessage` here would escape. The
+      // substitute is encoded like anything else this connection sends, so it
+      // is read the same way.
+      notifications.length = 0;
+      let thrown = false;
+      (globalThis as { postMessage: (m: unknown) => void }).postMessage = (
+        m,
+      ) => {
+        if (!thrown) {
+          thrown = true;
+          throw new Error("post refused");
+        }
+        notifications.push(m);
+      };
+      subscribed!(field);
+      await Promise.resolve();
+      expect(notifications).toHaveLength(1);
+      const substitute = fabricFromRealmValue(notifications[0] as never) as {
+        type?: unknown;
+        message?: string;
+      };
+      expect(substitute.type).toBe(NotificationType.ErrorReport);
+      expect(substitute.message).toContain("Undeliverable message");
     } finally {
       (globalThis as { postMessage?: unknown }).postMessage = postMessage;
     }

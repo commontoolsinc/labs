@@ -128,6 +128,20 @@ export const EnvSchema = z.object({
     { message: "DB_PATH must be an absolute path" },
   ).optional(),
   MEMORY_URL: z.string().default("http://localhost:8000"),
+  // Seconds an unresponsive memory websocket may miss its ping before the
+  // runtime closes it (Deno.upgradeWebSocket's idleTimeout; 0 disables).
+  // The memory server evaluates frames and flush passes synchronously on
+  // its event loop, so during a long evaluation stretch every connection's
+  // pong sits unprocessed — a deadline shorter than the longest legitimate
+  // stretch closes ALL of the process's connections at once when the loop
+  // yields, and the reconnecting clients then re-establish their watch
+  // sets against the same busy process. Size this above the worst
+  // single-loop stretch, not above a round-trip time.
+  MEMORY_WS_IDLE_TIMEOUT_SECONDS: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim() === "" ? undefined : value,
+    z.coerce.number().nonnegative().default(300),
+  ),
 
   GOOGLE_CLIENT_ID: z.string().default(""),
   GOOGLE_CLIENT_SECRET: z.string().default(""),

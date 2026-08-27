@@ -219,6 +219,7 @@ describe("scan-extent", () => {
         "owned-cell",
         "free-cell",
         "unknown",
+        "deleted",
       ]);
     });
   });
@@ -913,6 +914,38 @@ describe("scan-extent", () => {
           expect(uncapped.extent.truncated).toBe(false);
           expect(uncapped.extent.unreadable).toBe(1);
           expect(isCompleteScan(uncapped.extent)).toBe(false);
+        },
+      );
+    });
+
+    it("does not count an unreadable row a deleted-only filter dropped", async () => {
+      await withSeeded(
+        [
+          {
+            id: "of:gone",
+            document: { value: "was here" },
+            revisions: 1,
+            deleted: true,
+          },
+          { id: "of:bad", document: UNDECODABLE, revisions: 1 },
+        ],
+        [{ name: "" }],
+        (space) => {
+          // The reverse of the tombstone-vs-piece case below. What makes an
+          // entity `deleted` is the OP of its visible row, read before any
+          // payload is — so a row that would not decode is definitively not a
+          // tombstone, and dropping it leaves nothing out of the answer.
+          const listing = listEntityModels(space, { kind: "deleted" });
+          expect(listing.entities.map((e) => e.id)).toEqual(["of:gone"]);
+          expect(listing.extent.unreadable).toBe(0);
+          expect(isCompleteScan(listing.extent)).toBe(true);
+
+          // The same undecodable row IS a gap for any other kind, which is what
+          // keeps the assertion above from passing for the wrong reason.
+          const pieces = listEntityModels(space, { kind: "piece" });
+          expect(pieces.entities).toEqual([]);
+          expect(pieces.extent.unreadable).toBe(1);
+          expect(isCompleteScan(pieces.extent)).toBe(false);
         },
       );
     });
