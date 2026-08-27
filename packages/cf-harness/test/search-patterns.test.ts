@@ -5,9 +5,10 @@ import { Identity } from "@commonfabric/identity";
 import { CfHarnessEngine } from "../src/engine.ts";
 import type { HarnessFetch } from "../src/contracts/http-fetch.ts";
 import { PatternIndexClient } from "../src/pattern-index/client.ts";
-import type {
-  SearchPatternsToolErrorOutput,
-  SearchPatternsToolSuccessOutput,
+import {
+  searchPatternsTool,
+  type SearchPatternsToolErrorOutput,
+  type SearchPatternsToolSuccessOutput,
 } from "../src/tools/search-patterns.ts";
 import type {
   SandboxCommandRequest,
@@ -209,6 +210,10 @@ describe("search-patterns", () => {
     const output = result.output as SearchPatternsToolErrorOutput;
     expect(output.status).toBe("error");
     expect(output.message).toContain("--pattern-index-url");
+  });
+
+  it("declares itself a read, since a search alters nothing", () => {
+    expect(searchPatternsTool.descriptor.effectClass).toBe("read");
   });
 
   it("reports what the index answered when a search fails", async () => {

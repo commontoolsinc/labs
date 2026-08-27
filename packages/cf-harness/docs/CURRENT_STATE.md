@@ -185,11 +185,22 @@ The current package provides:
   source nor a compile diagnostic quoting it reaches model context — the
   diagnostic is retained in the run artifact instead. The run reports
   `instantiated` and then `run_succeeded` or `run_failed` back to the index,
-  best-effort, so a reporting failure never bears on the tool result. Without
-  the index configuration `search_patterns` is absent from the tool surface, for
-  a `pattern-author`-profile subagent as much as for the parent — a child
-  searches through the one client the parent built — and `run_pattern` refuses a
-  `patternId`;
+  best-effort, so a reporting failure never bears on the tool result. It adds
+  the `record_feedback` tool, which votes a pattern up or down with an optional
+  note, so the index learns which of the patterns it holds were worth offering.
+  And it closes the loop the other way: source the model authored and ran
+  successfully is published back under the identity the compile recorded for it,
+  carrying the `description` and `hashtags` the call named, the run's own task
+  as the request the pattern answers, the compiled argument and result schemas,
+  and the published patterns the source imports. That publication is best-effort
+  in the same way — never awaited, never a failure of a run that worked — and a
+  run that names no `description` publishes nothing, since a pattern nobody can
+  read the purpose of is a pattern nobody finds. `--no-pattern-index-publish`,
+  or `CF_HARNESS_PATTERN_INDEX_PUBLISH=0`, makes the run a reader and voter
+  only. Without the index configuration `search_patterns` and `record_feedback`
+  are absent from the tool surface, for a `pattern-author`-profile subagent as
+  much as for the parent — a child searches through the one client the parent
+  built — and `run_pattern` refuses a `patternId`;
 - a `pattern-author` child profile that authors and runs Common Fabric pattern
   source: `run_pattern` under the same fabric-session gate, plus `read_file`,
   `bash`, and `read_skill_resource`, and no workspace writes, so its deliverable

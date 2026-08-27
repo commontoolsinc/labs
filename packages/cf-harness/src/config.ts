@@ -64,6 +64,14 @@ export interface HarnessFabricSessionConfig {
  */
 export interface HarnessPatternIndexConfig {
   baseUrl: string;
+
+  /**
+   * Whether a pattern the model authored and ran successfully is published
+   * back to the index. Absent means published: a run that can read the index
+   * contributes to it, so what one run worked out is available to the next.
+   * `false` makes the run a reader only.
+   */
+  publish?: boolean;
 }
 export type HarnessModelProviderId =
   | "openai-compatible-gateway"

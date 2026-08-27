@@ -297,3 +297,19 @@ Deno.test("resolveHarnessConfig rejects a pattern index with no fabric session",
     "pattern index configuration requires a fabric session",
   );
 });
+
+Deno.test("resolveHarnessConfig carries a pattern index the run does not publish to", () => {
+  const config = resolveHarnessConfig({
+    fabricSession: {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+    },
+    patternIndex: { baseUrl: "https://index.example/", publish: false },
+    skillScriptExecutionTarget: "sandbox",
+  });
+  assertEquals(config.patternIndex, {
+    baseUrl: "https://index.example/",
+    publish: false,
+  });
+});

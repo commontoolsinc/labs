@@ -124,6 +124,12 @@ What works today:
   - `search_patterns` (present only when the run configures a pattern index with
     `--pattern-index-url`; finds published patterns by hashtag or free text and
     reports each one's declared shapes and import specifier, never its source)
+  - `record_feedback` (under the same pattern-index gate; votes a pattern up or
+    down so the index learns which ones were worth offering)
+- publishing back to that index: a pattern the model authored and ran
+  successfully is published under the identity its compile recorded, with the
+  `description` and `hashtags` the `run_pattern` call named, unless the run was
+  started with `--no-pattern-index-publish`
 - targeted exact-string edits plus whole-file replace/create and append writes
 - initial and in-run image attachments for model vision-capable flows
 - bounded public HTTP(S) fetches through `web_fetch`, with redirect validation,

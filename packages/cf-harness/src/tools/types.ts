@@ -59,10 +59,25 @@ export interface HarnessToolContext {
   /**
    * The run's pattern-index client, lazy and cached by the engine.
    * Undefined when the run has no pattern index configured, which also keeps
-   * `search_patterns` out of the tool surface and `run_pattern`'s
-   * `patternId` argument unusable.
+   * `search_patterns` and `record_feedback` out of the tool surface and
+   * `run_pattern`'s `patternId` argument unusable.
    */
   getPatternIndexClient?: () => Promise<PatternIndexClient>;
+
+  /**
+   * Whether a pattern the model authored and ran successfully is published
+   * back to the index. Absent or `false` makes the run a reader of the index
+   * only; the client is still there, since a run that does not publish still
+   * searches, runs, and votes.
+   */
+  patternIndexPublishEnabled?: boolean;
+
+  /**
+   * What this run was asked to do, in the words it was asked in. A published
+   * pattern carries it as the request it answers, which is what the index
+   * ranks a later search against. Absent when the run has no such text.
+   */
+  taskText?: string;
 
   /**
    * The prompt loop's run-level abort signal, when the invocation came

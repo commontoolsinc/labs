@@ -3,12 +3,17 @@ import { expect } from "@std/expect";
 import { normalize } from "@std/path/posix";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
-import { Runtime } from "@commonfabric/runner";
+import {
+  computeEntryIdentity,
+  ensureCompilerStack,
+  Runtime,
+} from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CfHarnessEngine } from "../src/engine.ts";
 import type { HarnessFetch } from "../src/contracts/http-fetch.ts";
 import { PatternIndexClient } from "../src/pattern-index/client.ts";
 import {
+  patternIndexDependencies,
   type RunPatternToolErrorOutput,
   type RunPatternToolSuccessOutput,
   runtimeProgramFromIndex,
@@ -32,6 +37,13 @@ const DOUBLING_PATTERN_SOURCE = [
   "}));",
   "",
 ].join("\n");
+
+/**
+ * Text a start failure carries out of the pattern's own source and into what
+ * it throws — the thing the model must not be shown for a pattern it did not
+ * author.
+ */
+const SOURCE_MARKER = "unreadableSourceMarker";
 
 const DOUBLED_RESULT_SCHEMA = {
   type: "object",
@@ -89,27 +101,74 @@ class FakeSandboxRuntime implements SandboxRuntime {
 interface IndexStub {
   fetchFn: HarnessFetch;
   calls: { fn: string; body: Record<string, unknown> }[];
+
+  /**
+   * Resolves once the `count`-th call to index function `fn` has answered.
+   * The publication and the events a run reports are deliberately not
+   * awaited by the run, so watching the call itself finish is the only
+   * event a test can hang on for one.
+   */
+  settled(fn: string, count: number): Promise<void>;
+}
+
+interface StubIndexOptions {
+  /** What `publishPattern` answers. Absent means it answers a 500. */
+  publish?: { created: boolean };
 }
 
 /**
  * An index answering `getPattern` with `patterns` and every event with `ok`.
  * A pattern absent from the map answers 404.
  */
-const stubIndex = (patterns: Record<string, unknown>): IndexStub => {
+const stubIndex = (
+  patterns: Record<string, unknown>,
+  options: StubIndexOptions = {},
+): IndexStub => {
   const calls: { fn: string; body: Record<string, unknown> }[] = [];
+  const waiters: { fn: string; count: number; resolve: () => void }[] = [];
+  const answered: Record<string, number> = {};
+  const announce = (fn: string) => {
+    answered[fn] = (answered[fn] ?? 0) + 1;
+    for (let index = waiters.length - 1; index >= 0; index -= 1) {
+      const waiter = waiters[index];
+      if (waiter.fn === fn && answered[fn] >= waiter.count) {
+        waiters.splice(index, 1);
+        waiter.resolve();
+      }
+    }
+  };
   const fetchFn: HarnessFetch = (input, init) => {
     const fn = String(input).split("/").pop() ?? "";
     const body = JSON.parse(
       typeof init?.body === "string" ? init.body : "{}",
     ) as Record<string, unknown>;
     calls.push({ fn, body });
+    const answer = (response: Response): Promise<Response> => {
+      announce(fn);
+      return Promise.resolve(response);
+    };
     if (fn === "recordEvent") {
-      return Promise.resolve(
+      return answer(
         new Response(JSON.stringify({ ok: true }), { status: 200 }),
       );
     }
+    if (fn === "publishPattern") {
+      return answer(
+        options.publish === undefined
+          ? new Response(JSON.stringify({ error: "index is down" }), {
+            status: 500,
+          })
+          : new Response(
+            JSON.stringify({
+              patternId: body.patternId,
+              created: options.publish.created,
+            }),
+            { status: 200 },
+          ),
+      );
+    }
     const pattern = patterns[body.patternId as string];
-    return Promise.resolve(
+    return answer(
       pattern === undefined
         ? new Response(JSON.stringify({ error: "unknown pattern" }), {
           status: 404,
@@ -117,7 +176,28 @@ const stubIndex = (patterns: Record<string, unknown>): IndexStub => {
         : new Response(JSON.stringify(pattern), { status: 200 }),
     );
   };
-  return { fetchFn, calls };
+  return {
+    fetchFn,
+    calls,
+    settled(fn, count) {
+      if ((answered[fn] ?? 0) >= count) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        waiters.push({ fn, count, resolve });
+      });
+    },
+  };
+};
+
+/**
+ * The content identity `/main.tsx` carrying `source` compiles under — the
+ * identity the index stores a published entry beneath, and the one a later
+ * `run_pattern` by patternId resolves.
+ */
+const entryIdentityOf = async (source: string): Promise<string> => {
+  await ensureCompilerStack();
+  return computeEntryIdentity("/main.tsx", [
+    { name: "/main.tsx", contents: source },
+  ]);
 };
 
 describe("run-pattern over the pattern index", () => {
@@ -146,12 +226,56 @@ describe("run-pattern over the pattern index", () => {
     await storageManager?.close();
   });
 
-  const createEngine = (index?: IndexStub): CfHarnessEngine =>
+  /**
+   * The session's pieces controller with `runPersistent` replaced by a throw
+   * carrying `marker`. A pattern's own body runs inside that call, so a start
+   * failure is where source-derived text reaches the tool — staging one is
+   * how the branch that withholds it is measured.
+   */
+  const piecesFailingToStart = (marker: string): PiecesController =>
+    new Proxy(pieces, {
+      get(target, property) {
+        if (property === "runPersistent") {
+          return () => Promise.reject(new Error(marker));
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+  const createEngine = (
+    index?: IndexStub,
+    options: {
+      publish?: false;
+      taskText?: string;
+      startFailure?: string;
+    } = {},
+  ): CfHarnessEngine =>
     new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `run-pattern-index-test-${crypto.randomUUID()}`,
       cfcEnforcementMode: "disabled",
-      fabricSessionFactory: () => Promise.resolve({ pieces }),
+      fabricSessionFactory: () =>
+        Promise.resolve({
+          pieces: options.startFailure === undefined
+            ? pieces
+            : piecesFailingToStart(options.startFailure),
+        }),
+      ...(options.taskText === undefined ? {} : { taskText: options.taskText }),
+      // Opting out is connection configuration rather than an injection
+      // seam, so a run that does not publish is built from a config that
+      // says so — the session config beside it is what a pattern index is
+      // admitted with.
+      ...(options.publish === false
+        ? {
+          fabricSession: {
+            apiUrl: "https://toolshed.test/",
+            identityKeyPath: "/keys/agent.pkcs8",
+            space: "run-pattern-index",
+          },
+          patternIndex: { baseUrl: "https://index.test", publish: false },
+        }
+        : {}),
       ...(index === undefined ? {} : {
         patternIndexClientFactory: () =>
           Promise.resolve(
@@ -195,6 +319,26 @@ describe("run-pattern over the pattern index", () => {
         main: "/main.tsx",
         files: [{ name: "/main.tsx", contents: "source" }],
       });
+    });
+  });
+
+  describe("patternIndexDependencies()", () => {
+    it("names every published pattern the program's files import", () => {
+      expect(patternIndexDependencies([
+        {
+          contents: [
+            'import a from "cf:pattern:pat-one";',
+            'import b from "cf:pattern:pat-two";',
+          ].join("\n"),
+        },
+        { contents: 'import c from "cf:pattern:pat-one";' },
+      ])).toEqual(["pat-one", "pat-two"]);
+    });
+
+    it("returns nothing for a program composing no published pattern", () => {
+      expect(patternIndexDependencies([
+        { contents: DOUBLING_PATTERN_SOURCE },
+      ])).toEqual([]);
     });
   });
 
@@ -243,6 +387,47 @@ describe("run-pattern over the pattern index", () => {
       expect(events[0].body.patternId).toBe("pat-doubler");
     });
 
+    it("reports the outcome of an indexed run that landed a result", async () => {
+      const index = stubIndex({ "pat-doubler": INDEXED_PATTERN });
+      await createEngine(index).invokeBuiltinTool("run_pattern", {
+        patternId: "pat-doubler",
+        inputs: { n: 21 },
+        resultSchema: DOUBLED_RESULT_SCHEMA,
+      });
+      await index.settled("recordEvent", 2);
+      expect(
+        index.calls.filter((call) => call.fn === "recordEvent")
+          .map((call) => call.body.eventType),
+      ).toEqual(["instantiated", "run_succeeded"]);
+    });
+
+    it("reports neither outcome when the caller's own resultSchema refused the result", async () => {
+      const index = stubIndex({ "pat-doubler": INDEXED_PATTERN });
+      const result = await createEngine(index).invokeBuiltinTool(
+        "run_pattern",
+        {
+          patternId: "pat-doubler",
+          inputs: { n: 21 },
+          // The pattern answers a number here, so this is the caller's
+          // contract failing rather than the pattern's.
+          resultSchema: {
+            type: "object",
+            properties: { doubled: { type: "string" } },
+            required: ["doubled"],
+          },
+        },
+      );
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(output.valueError).toBeDefined();
+
+      await index.settled("recordEvent", 1);
+      expect(
+        index.calls.filter((call) => call.fn === "recordEvent")
+          .map((call) => call.body.eventType),
+      ).toEqual(["instantiated"]);
+    });
+
     it("refuses a call naming both sourceText and patternId", async () => {
       const index = stubIndex({ "pat-doubler": INDEXED_PATTERN });
       const result = await createEngine(index).invokeBuiltinTool(
@@ -289,6 +474,36 @@ describe("run-pattern over the pattern index", () => {
       expect(output.message).toContain("404");
     });
 
+    it("withholds the failure text when an indexed pattern fails while starting", async () => {
+      const index = stubIndex({ "pat-doubler": INDEXED_PATTERN });
+      const result = await createEngine(index, {
+        startFailure: SOURCE_MARKER,
+      }).invokeBuiltinTool("run_pattern", { patternId: "pat-doubler" });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("pat-doubler");
+      expect(output.message).not.toContain(SOURCE_MARKER);
+      expect(output.rawCauseMessage).toContain(SOURCE_MARKER);
+
+      await index.settled("recordEvent", 1);
+      expect(
+        index.calls.filter((call) => call.fn === "recordEvent")
+          .map((call) => call.body.eventType),
+      ).toEqual(["run_failed"]);
+    });
+
+    it("reports its own failure text when the source the model wrote fails while starting", async () => {
+      const result = await createEngine(undefined, {
+        startFailure: SOURCE_MARKER,
+      }).invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21 },
+      });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain(SOURCE_MARKER);
+    });
+
     it("withholds the diagnostic when an indexed pattern does not compile", async () => {
       const index = stubIndex({
         "pat-broken": {
@@ -312,6 +527,157 @@ describe("run-pattern over the pattern index", () => {
       expect(output.message).toContain("pat-broken");
       expect(output.message).not.toContain("secretConstantName");
       expect(output.rawCauseMessage).toBeDefined();
+    });
+  });
+
+  describe("publishing what the model authored", () => {
+    const publishInput = {
+      sourceText: DOUBLING_PATTERN_SOURCE,
+      inputs: { n: 21 },
+      description: "Doubles a number",
+      hashtags: ["math"],
+    };
+
+    it("publishes the program, meta and schemas of a pattern that ran", async () => {
+      const index = stubIndex({}, { publish: { created: true } });
+      const result = await createEngine(index, {
+        taskText: "double the tally for me",
+      }).invokeBuiltinTool("run_pattern", publishInput);
+      expect((result.output as RunPatternToolSuccessOutput).status).toBe("ok");
+
+      await index.settled("publishPattern", 1);
+      const publish = index.calls.find((call) => call.fn === "publishPattern");
+      expect(publish?.body.program).toEqual({
+        main: "/main.tsx",
+        files: [{ name: "/main.tsx", contents: DOUBLING_PATTERN_SOURCE }],
+      });
+      expect(publish?.body.meta).toEqual({
+        directQuery: "double the tally for me",
+        description: "Doubles a number",
+        hashtags: ["math"],
+      });
+      expect(publish?.body.schemas).toEqual({
+        argumentSchema: {
+          type: "object",
+          properties: { n: { type: "number" } },
+          required: ["n"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: { doubled: { type: "number" } },
+          required: ["doubled"],
+        },
+      });
+      expect(publish?.body.dependencies).toEqual([]);
+    });
+
+    it("publishes under the compiled pattern's content-addressed identity", async () => {
+      const index = stubIndex({}, { publish: { created: true } });
+      await createEngine(index).invokeBuiltinTool("run_pattern", publishInput);
+
+      await index.settled("publishPattern", 1);
+      const publish = index.calls.find((call) => call.fn === "publishPattern");
+      // The identity the compile itself recorded for the entry, which is what
+      // a later `run_pattern` by patternId resolves against.
+      expect(publish?.body.patternId).toBe(
+        await entryIdentityOf(DOUBLING_PATTERN_SOURCE),
+      );
+    });
+
+    it("describes the pattern to the index in its own words when the run has no task text", async () => {
+      const index = stubIndex({}, { publish: { created: true } });
+      await createEngine(index).invokeBuiltinTool("run_pattern", publishInput);
+
+      await index.settled("publishPattern", 1);
+      const publish = index.calls.find((call) => call.fn === "publishPattern");
+      expect(publish?.body.meta).toEqual({
+        directQuery: "Doubles a number",
+        description: "Doubles a number",
+        hashtags: ["math"],
+      });
+    });
+
+    it("records a created event for an entry the index did not already hold", async () => {
+      const index = stubIndex({}, { publish: { created: true } });
+      await createEngine(index).invokeBuiltinTool("run_pattern", publishInput);
+
+      await index.settled("recordEvent", 1);
+      const events = index.calls.filter((call) => call.fn === "recordEvent");
+      expect(events.map((event) => event.body.eventType)).toEqual(["created"]);
+      expect(events[0].body.patternId).toBe(
+        await entryIdentityOf(DOUBLING_PATTERN_SOURCE),
+      );
+    });
+
+    it("records no created event for an entry the index already held", async () => {
+      const index = stubIndex({}, { publish: { created: false } });
+      await createEngine(index).invokeBuiltinTool("run_pattern", publishInput);
+
+      await index.settled("publishPattern", 1);
+      expect(index.calls.filter((call) => call.fn === "recordEvent")).toEqual(
+        [],
+      );
+    });
+
+    it("returns the run's result when the publication fails", async () => {
+      const index = stubIndex({});
+      const result = await createEngine(index).invokeBuiltinTool(
+        "run_pattern",
+        { ...publishInput, resultSchema: DOUBLED_RESULT_SCHEMA },
+      );
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect((output.value as { doubled: number }).doubled).toBe(42);
+
+      await index.settled("publishPattern", 1);
+      expect(index.calls.filter((call) => call.fn === "recordEvent")).toEqual(
+        [],
+      );
+    });
+
+    it("publishes nothing when the run opted out of publishing", async () => {
+      const index = stubIndex({}, { publish: { created: true } });
+      const result = await createEngine(index, { publish: false })
+        .invokeBuiltinTool("run_pattern", publishInput);
+      expect((result.output as RunPatternToolSuccessOutput).status).toBe("ok");
+      expect(index.calls).toEqual([]);
+    });
+
+    it("publishes nothing when the run named no description", async () => {
+      const index = stubIndex({}, { publish: { created: true } });
+      const result = await createEngine(index).invokeBuiltinTool(
+        "run_pattern",
+        { sourceText: DOUBLING_PATTERN_SOURCE, inputs: { n: 21 } },
+      );
+      expect((result.output as RunPatternToolSuccessOutput).status).toBe("ok");
+      expect(index.calls).toEqual([]);
+    });
+
+    it("publishes nothing when the source did not compile", async () => {
+      const index = stubIndex({}, { publish: { created: true } });
+      const result = await createEngine(index).invokeBuiltinTool(
+        "run_pattern",
+        { ...publishInput, sourceText: "const broken = ;" },
+      );
+      expect((result.output as RunPatternToolErrorOutput).status).toBe(
+        "compile-error",
+      );
+      expect(index.calls).toEqual([]);
+    });
+
+    it("publishes nothing when the run runs an indexed pattern", async () => {
+      const index = stubIndex(
+        { "pat-doubler": INDEXED_PATTERN },
+        { publish: { created: true } },
+      );
+      await createEngine(index).invokeBuiltinTool("run_pattern", {
+        patternId: "pat-doubler",
+        inputs: { n: 21 },
+        description: "Doubles a number",
+      });
+      await index.settled("recordEvent", 2);
+      expect(index.calls.filter((call) => call.fn === "publishPattern"))
+        .toEqual([]);
     });
   });
 });

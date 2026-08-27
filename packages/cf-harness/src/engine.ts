@@ -139,6 +139,10 @@ import {
   type ReadSkillResourceToolInput,
   type ReadSkillResourceToolOutput,
 } from "./tools/read-skill-resource.ts";
+import type {
+  RecordFeedbackToolInput,
+  RecordFeedbackToolOutput,
+} from "./tools/record-feedback.ts";
 import { getBuiltinTool } from "./tools/registry.ts";
 import {
   type RunPatternToolInput,
@@ -184,6 +188,7 @@ export interface BuiltinToolInputMap {
   assign_slug: AssignSlugToolInput;
   describe_handle: DescribeHandleToolInput;
   search_patterns: SearchPatternsToolInput;
+  record_feedback: RecordFeedbackToolInput;
 }
 
 export interface BuiltinToolOutputMap {
@@ -201,6 +206,7 @@ export interface BuiltinToolOutputMap {
   assign_slug: AssignSlugToolOutput;
   describe_handle: DescribeHandleToolOutput;
   search_patterns: SearchPatternsToolOutput;
+  record_feedback: RecordFeedbackToolOutput;
 }
 
 interface ToolOutputWithId {
@@ -240,6 +246,15 @@ export interface CreateHarnessEngineOptions
    * `run_pattern` refuses a `patternId`.
    */
   patternIndexClientFactory?: HarnessPatternIndexClientFactory;
+
+  /**
+   * What this run was asked to do, in the words it was asked in — the CLI
+   * prompt for a parent run, the delegated goal for a subagent. A pattern
+   * published from this run carries it as the request the pattern answers,
+   * which is what the index ranks a search against. Absent when the run has
+   * no single such text, and nothing invents one.
+   */
+  taskText?: string;
 
   /**
    * Operator input cells to mint handles for at run start; see
@@ -369,6 +384,7 @@ export class CfHarnessEngine {
   readonly #now: () => string;
   readonly #fabricSessionFactory?: HarnessFabricSessionFactory;
   readonly #patternIndexClientFactory?: HarnessPatternIndexClientFactory;
+  readonly #taskText?: string;
   readonly #inputCells: readonly HarnessInputCellSpec[];
   readonly #hostMounts: readonly HostSandboxMount[];
   readonly #ownedRunscConfig?: DockerRunscSandboxConfig;
@@ -521,6 +537,7 @@ export class CfHarnessEngine {
     this.#patternIndexClientFactory = patternIndexClientFactory === undefined
       ? undefined
       : cacheHarnessPatternIndexClientFactory(patternIndexClientFactory);
+    this.#taskText = options.taskText;
     this.#inputCells = options.inputCells ?? [];
     const sandboxConfig = options.sandboxRuntime === undefined
       ? resolveSandboxConfig(this.config, {
@@ -705,10 +722,21 @@ export class CfHarnessEngine {
   /**
    * Whether the run can reach the pattern index — either an injected factory
    * or `patternIndex` connection config. The prompt loop offers
-   * `search_patterns` exactly when this holds.
+   * `search_patterns` and `record_feedback` exactly when this holds.
    */
   get patternIndexAvailable(): boolean {
     return this.#patternIndexClientFactory !== undefined;
+  }
+
+  /**
+   * Whether a pattern this run authored and ran is published back to the
+   * index. A run that can reach an index publishes to it unless the operator
+   * said otherwise, so an injected factory with no connection config — a test
+   * harness, a delegating parent — publishes like a configured one.
+   */
+  get patternIndexPublishEnabled(): boolean {
+    return this.patternIndexAvailable &&
+      this.config.patternIndex?.publish !== false;
   }
 
   /**
@@ -1648,8 +1676,12 @@ export class CfHarnessEngine {
         ? { getFabricSession: this.#fabricSessionFactory }
         : {}),
       ...(this.#patternIndexClientFactory !== undefined
-        ? { getPatternIndexClient: this.#patternIndexClientFactory }
+        ? {
+          getPatternIndexClient: this.#patternIndexClientFactory,
+          patternIndexPublishEnabled: this.patternIndexPublishEnabled,
+        }
         : {}),
+      ...(this.#taskText !== undefined ? { taskText: this.#taskText } : {}),
       sandbox: this.sandbox,
       hostProcessRunner: this.hostProcessRunner,
       resolvePath: (path: string) =>

@@ -4,10 +4,11 @@
  * was published to the index rather than written into the conversation.
  *
  * Gated on `CF_PATTERN_INDEX_LIVE_E2E=1` because it talks to a deployed
- * service. `CF_PATTERN_INDEX_LIVE_URL` names the deployment and
- * `CF_PATTERN_INDEX_LIVE_IDENTITY` the PKCS#8 keyfile the index authorizes;
- * both have defaults, and a run with the flag set and neither present fails
- * rather than passing vacuously.
+ * service. `CF_PATTERN_INDEX_LIVE_URL` names the deployment and defaults to
+ * the standing one; `CF_PATTERN_INDEX_LIVE_IDENTITY` names the PKCS#8 keyfile
+ * the index authorizes and has no default, so a run with the flag set and no
+ * keyfile named fails rather than passing vacuously or signing with whatever
+ * key happened to sit at a guessed path.
  *
  * The pattern it runs is content-addressed, so `LIVE_PATTERN_ID` is the
  * identity of `DOUBLING_PATTERN_SOURCE` and nothing else. Publishing that
@@ -20,8 +21,11 @@ import { expect } from "@std/expect";
 import { normalize } from "@std/path/posix";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
-import { computeEntryIdentity, Runtime } from "@commonfabric/runner";
-import { ensureCompilerStack } from "../../runner/src/harness/deferred-compiler-stack.ts";
+import {
+  computeEntryIdentity,
+  ensureCompilerStack,
+  Runtime,
+} from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CfHarnessEngine } from "../src/engine.ts";
 import type { HarnessFetch } from "../src/contracts/http-fetch.ts";
@@ -30,10 +34,9 @@ import {
   type PatternIndexClient,
 } from "../src/pattern-index/client.ts";
 import type { RunPatternToolSuccessOutput } from "../src/tools/run-pattern.ts";
-import {
-  searchPatternsTool,
-  type SearchPatternsToolOutput,
-  type SearchPatternsToolSuccessOutput,
+import type {
+  SearchPatternsToolOutput,
+  SearchPatternsToolSuccessOutput,
 } from "../src/tools/search-patterns.ts";
 import type {
   SandboxCommandRequest,
@@ -48,8 +51,20 @@ const LIVE = Deno.env.get("CF_PATTERN_INDEX_LIVE_E2E") === "1";
 const BASE_URL = Deno.env.get("CF_PATTERN_INDEX_LIVE_URL") ??
   "https://us-central1-pattern-index.cloudfunctions.net";
 
-const IDENTITY_PATH = Deno.env.get("CF_PATTERN_INDEX_LIVE_IDENTITY") ??
-  `${Deno.env.get("HOME")}/code/labs/.cf/shared-dev.key`;
+/**
+ * The keyfile the index authorizes. No default: which identity a deployment
+ * admits is a fact about that deployment, and a guessed path either does not
+ * exist or is somebody's key that this test had no business signing with.
+ */
+const identityPath = (): string => {
+  const path = Deno.env.get("CF_PATTERN_INDEX_LIVE_IDENTITY");
+  if (path === undefined || path.trim() === "") {
+    throw new Error(
+      "CF_PATTERN_INDEX_LIVE_IDENTITY must name the PKCS#8 keyfile the pattern index authorizes",
+    );
+  }
+  return path;
+};
 
 /** The tag the published pattern carries, and the one the search asks for. */
 const LIVE_TAG = "e2e";
@@ -192,7 +207,7 @@ describe("pattern index, live", () => {
     watcher = watchFetch();
     client = await createHarnessPatternIndexClientFactory(
       { baseUrl: BASE_URL },
-      IDENTITY_PATH,
+      identityPath(),
       watcher.fetchFn,
     )();
   });
@@ -257,7 +272,6 @@ describe("pattern index, live", () => {
       expect(JSON.stringify(output.output)).not.toContain(
         "export default pattern",
       );
-      expect(searchPatternsTool.descriptor.effectClass).toBe("read");
     },
   });
 
@@ -293,6 +307,51 @@ describe("pattern index, live", () => {
         .find((hit) => hit.patternId === LIVE_PATTERN_ID)
         ?.signals?.uses ?? 0;
       expect(usesAfter).toBeGreaterThan(usesBefore);
+    },
+  });
+
+  it({
+    name: "publishes the source it ran and reads it back under that identity",
+    ignore: !LIVE,
+    async fn() {
+      // Source unique to this run, so the publication creates an entry rather
+      // than meeting one the index already holds. It is still content
+      // addressed, so the identity the run publishes under is a fact about
+      // these bytes and is asserted as one.
+      const marker = crypto.randomUUID().replaceAll("-", "");
+      const source = DOUBLING_PATTERN_SOURCE.replace(
+        "n * 2",
+        `n * 2 /* ${marker} */`,
+      );
+      await ensureCompilerStack();
+      const expectedId = computeEntryIdentity(LIVE_PATTERN_MAIN, [{
+        name: LIVE_PATTERN_MAIN,
+        contents: source,
+      }]);
+
+      const result = await createEngine().invokeBuiltinTool("run_pattern", {
+        sourceText: source,
+        inputs: { n: 21 },
+        resultSchema: DOUBLED_RESULT_SCHEMA,
+        description: `Doubles a number (${marker})`,
+        hashtags: [LIVE_TAG],
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect((output.value as { doubled: number }).doubled).toBe(42);
+
+      // The publication and the created event that follows it are both
+      // fire-and-forget, so the test waits on the calls answering.
+      await watcher.settled("publishPattern", 1);
+      await watcher.settled("recordEvent", 1);
+
+      const published = await client.getPattern({
+        patternId: expectedId,
+        includeSource: true,
+      });
+      expect(published.description).toBe(`Doubles a number (${marker})`);
+      expect(published.hashtags).toContain(LIVE_TAG);
+      expect(published.program?.files[0].contents).toBe(source);
     },
   });
 });

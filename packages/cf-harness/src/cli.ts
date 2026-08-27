@@ -210,6 +210,7 @@ const CLI_BOOLEAN_FLAGS = [
   "print-transcript",
   "stream-events",
   "no-skill-catalog",
+  "no-pattern-index-publish",
 ] as const;
 const CLI_COLLECT_FLAGS = [
   "allow-tool",
@@ -489,9 +490,9 @@ Options:
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
-  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | run_pattern | assign_slug | search_patterns);
+  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | run_pattern | assign_slug | search_patterns | record_feedback);
                                 run_pattern and assign_slug additionally require the three --fabric-* session flags,
-                                and search_patterns requires --pattern-index-url
+                                and search_patterns and record_feedback require --pattern-index-url
   --allow-skill-script <spec>   Allow exact skill script execution (repeatable: skill:scripts/path)
   --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser | web_fetch | web_search)
   --output-mode <mode>          operator | batch (default: operator)
@@ -550,9 +551,12 @@ Options:
                                 into the named CFC posture bundle (every staged
                                 enforcement dial on); the two dials above still
                                 apply over the bundle
-  --pattern-index-url <url>     Base URL of the pattern index for search_patterns and
-                                run_pattern's patternId argument; signs with the fabric
-                                session identity, so it needs the three --fabric-* flags
+  --pattern-index-url <url>     Base URL of the pattern index for search_patterns,
+                                record_feedback, and run_pattern's patternId argument;
+                                signs with the fabric session identity, so it needs the
+                                three --fabric-* flags
+  --no-pattern-index-publish    Read the pattern index without contributing to it: a
+                                pattern the model authors and runs is not published back
   --host-mount <spec>           Extra host bind mount (repeatable: name=<id>,source=<host>,target=<sandbox>,mode=readonly|writable)
   --max-model-turns <n>         Maximum model turns before aborting
   --print-transcript            Print the final transcript JSON after the response
@@ -578,6 +582,7 @@ Environment:
   CF_HARNESS_FABRIC_CFC_FLOW_LABELS Default value for --fabric-cfc-flow-labels
   CF_HARNESS_FABRIC_CFC_POSTURE Default value for --fabric-cfc-posture
   CF_HARNESS_PATTERN_INDEX_URL  Default value for --pattern-index-url
+  CF_HARNESS_PATTERN_INDEX_PUBLISH 0 applies --no-pattern-index-publish
   CF_HARNESS_SANDBOX_IMAGE      Default value for --sandbox-image
   CF_HARNESS_SANDBOX_DOCKER_RUNTIME Default value for --sandbox-docker-runtime
   ${CFC_RESULT_DIR_ENV} Fallback for --cfc-result-dir
@@ -635,6 +640,7 @@ const CLI_PARENT_TOOL_IDS = [
   "run_pattern",
   "assign_slug",
   "search_patterns",
+  "record_feedback",
 ] as const satisfies readonly BuiltinToolId[];
 
 const uniqueStrings = <T extends string>(
@@ -1386,6 +1392,9 @@ export const parseCfHarnessCliArgs = async (
       CF_HARNESS_PATTERN_INDEX_URL: Deno.env.get(
         "CF_HARNESS_PATTERN_INDEX_URL",
       ),
+      CF_HARNESS_PATTERN_INDEX_PUBLISH: Deno.env.get(
+        "CF_HARNESS_PATTERN_INDEX_PUBLISH",
+      ),
       CF_HARNESS_SANDBOX_IMAGE: Deno.env.get("CF_HARNESS_SANDBOX_IMAGE"),
       CF_HARNESS_SANDBOX_DOCKER_RUNTIME: Deno.env.get(
         "CF_HARNESS_SANDBOX_DOCKER_RUNTIME",
@@ -1705,7 +1714,15 @@ export const parseCfHarnessCliArgs = async (
         "--pattern-index-url needs a fabric session; missing --fabric-api-url, --fabric-identity, and --fabric-space",
       );
     }
-    patternIndex = { baseUrl: rawPatternIndexUrl };
+    // Publishing is on unless the operator turns it off, on the flag or in
+    // the environment; `0` is the only value the environment disables on, so
+    // an unset or unrecognized value leaves a run publishing.
+    const publish = args["no-pattern-index-publish"] !== true &&
+      nonEmptyEnvValue(env.CF_HARNESS_PATTERN_INDEX_PUBLISH) !== "0";
+    patternIndex = {
+      baseUrl: rawPatternIndexUrl,
+      ...(publish ? {} : { publish: false }),
+    };
   }
   // An allowlisted fabric-session tool with no session to run it against is
   // a configuration contradiction, surfaced here rather than as a tool that
@@ -1718,12 +1735,12 @@ export const parseCfHarnessCliArgs = async (
       `--allow-tool ${sessionTool} requires a fabric session; missing --fabric-api-url, --fabric-identity, and --fabric-space`,
     );
   }
-  if (
-    allowedToolIds?.includes("search_patterns") === true &&
-    patternIndex === undefined
-  ) {
+  const indexTool = (["search_patterns", "record_feedback"] as const).find(
+    (toolId) => allowedToolIds?.includes(toolId) === true,
+  );
+  if (indexTool !== undefined && patternIndex === undefined) {
     throw new Error(
-      "--allow-tool search_patterns requires a pattern index; missing --pattern-index-url",
+      `--allow-tool ${indexTool} requires a pattern index; missing --pattern-index-url`,
     );
   }
   const apiKey = env.CF_HARNESS_API_KEY ?? env.OPENAI_API_KEY;
@@ -2384,6 +2401,21 @@ const summarizeToolCallArguments = (
           ? `text=${JSON.stringify(parsed.text)}`
           : undefined;
         const joined = [tags, text].filter((value): value is string =>
+          value !== undefined
+        ).join(" ");
+        return joined === "" ? undefined : joined;
+      }
+      case "record_feedback": {
+        // The note is the model's prose about a run and can quote what the
+        // pattern produced, so the line names the verdict and the pattern
+        // and leaves the note to the transcript.
+        const patternId = typeof parsed.patternId === "string"
+          ? `patternId=${JSON.stringify(parsed.patternId)}`
+          : undefined;
+        const verdict = typeof parsed.verdict === "string"
+          ? `verdict=${JSON.stringify(parsed.verdict)}`
+          : undefined;
+        const joined = [patternId, verdict].filter((value): value is string =>
           value !== undefined
         ).join(" ");
         return joined === "" ? undefined : joined;
@@ -3180,6 +3212,9 @@ export const runCfHarnessCli = async (
         ...(parsed.patternIndex !== undefined
           ? { patternIndex: parsed.patternIndex }
           : {}),
+        // What the run was asked to do, in the operator's words. A pattern
+        // the run publishes carries it as the request it answers.
+        ...(parsed.prompt !== undefined ? { taskText: parsed.prompt } : {}),
         ...(deps.fabricSessionFactory !== undefined
           ? { fabricSessionFactory: deps.fabricSessionFactory }
           : {}),
@@ -3356,6 +3391,9 @@ export const runCfHarnessCli = async (
         ...(parsed.patternIndex !== undefined
           ? { patternIndex: parsed.patternIndex }
           : {}),
+        // What the run was asked to do, in the operator's words. A pattern
+        // the run publishes carries it as the request it answers.
+        ...(parsed.prompt !== undefined ? { taskText: parsed.prompt } : {}),
         ...(deps.fabricSessionFactory !== undefined
           ? { fabricSessionFactory: deps.fabricSessionFactory }
           : {}),

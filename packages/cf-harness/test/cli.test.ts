@@ -6590,3 +6590,83 @@ Deno.test("parseCfHarnessCliArgs rejects --allow-tool search_patterns without a 
     "missing --pattern-index-url",
   );
 });
+
+Deno.test("parseCfHarnessCliArgs records the publish opt-out from --no-pattern-index-publish", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+      "--pattern-index-url",
+      "https://index.example/api",
+      "--no-pattern-index-publish",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.patternIndex, {
+    baseUrl: "https://index.example/api",
+    publish: false,
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs reads the pattern index publish opt-out from the environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+    ],
+    {
+      cwd: "/tmp/project",
+      env: {
+        CF_HARNESS_PATTERN_INDEX_URL: "https://index.example/api",
+        CF_HARNESS_PATTERN_INDEX_PUBLISH: "0",
+      },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.patternIndex, {
+    baseUrl: "https://index.example/api",
+    publish: false,
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs rejects --allow-tool record_feedback without a pattern index", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--fabric-api-url",
+          "https://toolshed.example/",
+          "--fabric-identity",
+          "keys/agent.pkcs8",
+          "--fabric-space",
+          "my-space",
+          "--allow-tool",
+          "record_feedback",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "missing --pattern-index-url",
+  );
+});

@@ -1,3 +1,15 @@
+/**
+ * The `search_patterns` tool: what the model asks to find a pattern someone
+ * already published rather than write one.
+ *
+ * A hit is metadata and shapes — a description, its hashtags, what the index
+ * has seen it used for, the argument and result types to wire against, and
+ * the `cf:pattern:` specifier that composes it. Never source. That is the
+ * whole boundary this tool keeps: a model composes a published pattern by
+ * naming it, and runs it by handing its id to `run_pattern`, so it needs to
+ * know what a pattern is for and what it takes, and never what it says.
+ */
+
 import type { JSONSchema } from "@commonfabric/api";
 import { schemaToTypeString } from "@commonfabric/runner";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";

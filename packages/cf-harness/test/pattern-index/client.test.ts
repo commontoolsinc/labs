@@ -1,7 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { FIRST_PARTY_HTTP_AUTH_HEADERS } from "@commonfabric/runner/toolshed-http-auth";
+import {
+  FIRST_PARTY_HTTP_AUTH_HEADERS,
+  verifyFirstPartyHttpRequest,
+} from "@commonfabric/runner/toolshed-http-auth";
 import {
   PatternIndexClient,
   PatternIndexError,
@@ -79,6 +82,24 @@ describe("PatternIndexClient", () => {
     expect(request.headers.get("Content-Type")).toBe("application/json");
   });
 
+  it("signs what it sends, as the index's own verifier reads it", async () => {
+    const { client, requests } = createClient([jsonResponse({ results: [] })]);
+    await client.searchPatterns({ tags: ["todo"], text: "expenses" });
+    // Reconstructed from exactly what the fetch was handed, and verified with
+    // the function the index runs on the receiving side: the proof commits to
+    // the body hash, so a client that signed one set of bytes and sent
+    // another fails here rather than at the deployment.
+    const request = requests[0];
+    const verified = await verifyFirstPartyHttpRequest({
+      request: new Request(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: request.body,
+      }),
+    });
+    expect(verified.userDid).toBe(signer.did());
+  });
+
   it("keeps every segment of a base URL served under a path prefix", async () => {
     const { client, requests } = createClient([jsonResponse({ results: [] })]);
     await client.searchPatterns({ text: "expenses" });
@@ -139,6 +160,22 @@ describe("PatternIndexClient", () => {
       includeSource: true,
     });
     expect(pattern.program?.files[0].contents).toBe("export default 1;");
+  });
+
+  it("asks getPattern for no source when the caller omits the flag", async () => {
+    const { client, requests } = createClient([
+      jsonResponse({
+        patternId: "pat-1",
+        ownerDid: "did:key:zOwner",
+        createdAt: "2026-08-01T00:00:00.000Z",
+        description: "Totals an expense list",
+        hashtags: ["expenses"],
+        dependencies: [],
+      }),
+    ]);
+    const pattern = await client.getPattern({ patternId: "pat-1" });
+    expect(JSON.parse(requests[0].body)).toEqual({ patternId: "pat-1" });
+    expect(pattern.program).toBeUndefined();
   });
 
   it("posts an event with its type and optional note", async () => {

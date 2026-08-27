@@ -869,7 +869,7 @@ const FABRIC_SESSION_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
  * as the fabric-session ones.
  */
 const PATTERN_INDEX_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
-  ["search_patterns"] as const,
+  ["search_patterns", "record_feedback"] as const,
 );
 
 /** What a run can back the gated tools with. */
@@ -1136,6 +1136,12 @@ const buildSubagentSystemPrompt = (
           ? [
             "Search the pattern index with search_patterns before you author anything. A published pattern that already does the job is the better answer: run it by passing its patternId to run_pattern instead of sourceText.",
             'When you do author, prefer composing what the index already holds over rewriting it. Each search result carries the import specifier that composes it — `import X from "cf:pattern:<patternId>"` — along with the argument and result shapes to wire against. You never see an indexed pattern\'s source, and you do not need it.',
+            "A pattern you author and run successfully is published back to the index, so pass run_pattern a `description` saying in one line what it does and `hashtags` naming the words someone looking for that capability would search. Write them for the next person, not for this task: a pattern published without a description is not published at all.",
+          ]
+          : []),
+        ...(profileConfig.allowedToolIds.includes("record_feedback")
+          ? [
+            "When your task tells you a pattern you ran did or did not do what was wanted, say so with record_feedback: the patternId and an up or down verdict, plus a sentence on why. That is how the index learns which patterns are worth offering first.",
           ]
           : []),
         "Pass pattern source inline as the run_pattern `sourceText` argument. You have no write_file or edit_file; do not try to author patterns as workspace files.",
@@ -3717,6 +3723,9 @@ export class CfHarnessPromptLoop {
       ...(this.engine.patternIndexClientFactory !== undefined
         ? { patternIndexClientFactory: this.engine.patternIndexClientFactory }
         : {}),
+      // The child's task is the goal it was delegated, which is the request a
+      // pattern it authors and publishes was written to answer.
+      taskText: delegateInput.goal,
       ...(parentRunState.runManifest !== undefined
         ? { runManifest: parentRunState.runManifest }
         : {}),
