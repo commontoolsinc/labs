@@ -40,6 +40,7 @@ import {
   resolveScopeKey,
   type ScopeKey,
   type ScopeKeyIdentity,
+  type SessionHolding,
   type SessionSync,
   type SqliteDbRef,
   type SqliteOperation,
@@ -2694,6 +2695,14 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     () => this.#scopeKeyIdentity(),
   );
   #watchedIds = new Set<string>();
+  // The address behind each watched key, kept so the replica can DECLARE
+  // its holdings on a reconnect (`holdings()`): the frame that added the
+  // key is the only place its scope name and any explicit instance key
+  // are known, and a docKey alone cannot be turned back into either.
+  readonly #watchedAddresses = new Map<
+    string,
+    { id: URI; scope: CellScope | undefined; scopeKey: ScopeKey | undefined }
+  >();
   #nextLocalSeq = 1;
 
   /** The Phase-3 event-intent queue (events.md §5, LT9), created on the
@@ -4329,6 +4338,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     }
     this.#docs.clear();
     this.#watchedIds.clear();
+    this.#watchedAddresses.clear();
     this.resetConflictAdmissionState();
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica reset"));
     this.cancelQueuedWatchRefresh();
@@ -5662,9 +5672,11 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
    * absorb/ordering defect (a dropped, reordered, or un-retained
    * earlier delivery — the defect class OW61's investigation owns).
    * Quarantine contains that defect loudly; the heal arrives with the
-   * next FULL evaluation (a watch.set, a reconnect — those frames carry
-   * the whole assembled closure), since under elision an unchanged
-   * quarantined doc is rightly never re-delivered mid-session.
+   * next reconnect — the replica declares its holdings then (`holdings`),
+   * a quarantined doc is not among them, and the server re-delivers it
+   * with its closure — or with the next `watch.set`, whose frame carries
+   * the whole assembled closure. Under elision an unchanged quarantined
+   * doc is rightly never re-delivered mid-session on its own.
    *
    * Direct refs suffice: a stored verified dependency was itself validated
    * when it arrived, and a locally written one carried its closure in its
@@ -5797,8 +5809,9 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
               `within the delivered set ` +
               `(docs/specs/content-addressed-schemas.md). The document ` +
               `is quarantined — this replica keeps its previous state ` +
-              `for it until the next full evaluation (a watch.set or ` +
-              `reconnect) re-delivers it with its closure. This ` +
+              `for it until the next reconnect (which declares this ` +
+              `replica's holdings, so the server re-delivers it) or ` +
+              `watch.set re-delivers it with its closure. This ` +
               `indicates a client-side absorb/ordering defect ` +
               `(verification-coverage.md OW61).`,
             ]);
@@ -5974,6 +5987,11 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
         this.instanceKey(upsert.scope, undefined, upsert.scopeKey),
       );
       this.#watchedIds.add(key);
+      this.#watchedAddresses.set(key, {
+        id: upsert.id as URI,
+        scope: upsert.scope,
+        scopeKey: upsert.scopeKey,
+      });
       // The settle input barrier's shadow case (Phase 2 revisit (a)):
       // a FOREIGN value integrating UNDER an own pending write is
       // invisible through the materialized view — and the change
@@ -6027,6 +6045,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
         this.instanceKey(remove.scope, undefined, remove.scopeKey),
       );
       this.#watchedIds.delete(key);
+      this.#watchedAddresses.delete(key);
       if (record.pending.length > 0) {
         // A shadowed remove carries no seq on the wire: the sentinel 1
         // holds W entirely until the shadow clears (see the field doc).
@@ -6449,6 +6468,36 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
         clearTimeout(timer);
       }
     }
+  }
+
+  /**
+   * What this replica holds, stated for a reconnect (the wire
+   * `SessionHolding`; 04-protocol.md §4.1.2): every watched document the
+   * server has confirmed to it, at the seq it holds it at, a tombstone
+   * marked as such. The server takes the list as the delivery diff base
+   * in place of its own memory of the session, so a document absent here
+   * — never absorbed, quarantined, or wiped with a replaced replica — is
+   * delivered again, and one present stays elided. Confirmed state only:
+   * a pending local write is not something the server delivered, and a
+   * never-seen key (seq 0) is not held. A document delivered under an
+   * explicit foreign instance key (lease-holder frames) is left unstated
+   * — the wire declares instances by scope name — so it is re-delivered
+   * rather than wrongly claimed for the session's own instance.
+   */
+  holdings(): SessionHolding[] {
+    const holdings: SessionHolding[] = [];
+    for (const [key, address] of this.#watchedAddresses) {
+      if (address.scopeKey !== undefined) continue;
+      const record = this.#docs.get(key);
+      if (record === undefined || record.confirmed.seq <= 0) continue;
+      holdings.push({
+        id: address.id,
+        ...(address.scope !== undefined ? { scope: address.scope } : {}),
+        seq: record.confirmed.seq,
+        ...(record.confirmed.value === undefined ? { deleted: true } : {}),
+      });
+    }
+    return holdings;
   }
 
   private record(
@@ -6969,6 +7018,9 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
             // eventId dedupe keeps a landed original sound — events.md §5).
             this.#eventAppendQueue?.kick();
           };
+          // A reconnect declares what this replica holds, so the server
+          // re-delivers exactly what it lacks (see `holdings`).
+          resolved.session.holdingsProvider = () => this.holdings();
           return resolved;
         },
       ).catch((error) => {

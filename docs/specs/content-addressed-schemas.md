@@ -45,9 +45,9 @@ duplicated on three surfaces:
 2. **Client→server, per watch.** `refreshWatchSet`
    (`packages/runner/src/storage/v2.ts`) sends one watch spec per (doc,
    selector), each with the full inline selector schema. No compression
-   exists in this direction, and reconnect re-sends the entire accumulated
-   watch set — the payload grows monotonically with the session's document
-   count.
+   exists in this direction, and a reconnect the server cannot resume
+   re-sends the entire accumulated watch set — the payload grows
+   monotonically with the session's document count.
 3. **Server→client, per frame.** `syncSchemaTableV2` compresses link schemas
    into a hash-keyed table, but the table is frame-local: every schema body
    re-travels on every frame that references it. The
@@ -418,7 +418,13 @@ exactly two guarantees, both about delivery rather than about values:
   arrival whose ref cannot resolve therefore indicates a CLIENT-side
   absorb/ordering defect (a dropped, reordered, or un-retained earlier
   delivery) — the defect class OW61's investigation owns — never a
-  server obligation to re-ship.
+  server obligation to re-ship unprompted. What the client CAN do is say
+  what it holds: on a reconnect it declares its holdings
+  (memory-v2/04-protocol.md §4.1.2), and the server diffs against that
+  declaration instead of its own memory of the session, so a `cid:`
+  document the client never absorbed is delivered again while every one
+  it holds stays elided — the elision design kept, with the client's
+  statement in the server's memory's place.
 
 Arrival mirrors the assembly pass rather than trusting it: BEFORE a frame
 applies, every schema ref its documents embed — a registered `cid:`
@@ -443,10 +449,12 @@ worker wholesale on one bad document. Quarantine is containment for a
 defect, not a protocol state: the elision design means an unchanged
 quarantined document may never be re-delivered mid-session (the
 server's session cache rightly claims the client holds its ref), so
-the heal waits for the next full evaluation — a watch.set, a
-reconnect — whose full frame carries the whole assembled closure; the
-arrival diagnostic is the loud record meanwhile, and the underlying
-absorb/ordering defect is the thing to find and fix (OW61). The repair
+the heal waits for the next reconnect — whose declared holdings omit
+the quarantined document, so the server re-delivers it with its
+closure — or the next watch.set, whose full frame carries the whole
+assembled closure; the arrival diagnostic is the loud record meanwhile,
+and the underlying absorb/ordering defect is the thing to find and fix
+(OW61). The repair
 paths that do exist serve callers, not arrival: the traversal loader's
 reads are tracked (arrival re-runs the reader), the missing-target kick
 requests the fetch, and any sync of a schema document delivers its

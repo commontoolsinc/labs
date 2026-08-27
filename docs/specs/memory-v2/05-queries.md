@@ -485,6 +485,11 @@ The server deduplicates at the session layer:
 - one entity appears once in the session cache even if multiple watches include
   it
 - `seenSeq` acts as the primary watermark
+- on a reconnect the client's declared `holdings` (04-protocol.md section
+  4.1.2) replace the server's per-session delivery memory as the diff base:
+  the server's memory of what it sent is a claim about the client the client
+  itself can contradict, and a held-at-seq statement from the replica is the
+  exact vocabulary the diff compares
 - optional `sentEntities` bookkeeping MAY still be used for watch-local
   optimizations like `excludeSent`
 

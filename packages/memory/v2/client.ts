@@ -22,6 +22,7 @@ import {
   parseMemoryProtocolFlags,
   type ResponseMessage,
   type SessionEffectMessage,
+  type SessionHolding,
   type SessionOpenAuthMetadata,
   type SessionOpenChallenge,
   type SessionOpenResult,
@@ -323,6 +324,7 @@ export class Client {
     space: string,
     session: MountOptions,
     auth?: SessionOpenAuth,
+    holdings?: SessionHolding[],
   ): Promise<SessionOpenResult> {
     const result = await this.request<SessionOpenResult>({
       type: "session.open",
@@ -330,6 +332,7 @@ export class Client {
       space,
       session,
       ...(auth ? auth : {}),
+      ...(holdings !== undefined ? { holdings } : {}),
     });
     this.updateSessionOpenAuthContext(result.sessionOpen);
     return result;
@@ -637,6 +640,14 @@ export class SpaceSession {
    * marker-keyed client state (parked accepted promotions) must be
    * reconciled immediately (CT-1927). */
   onSessionReplaced: (() => void) | undefined;
+
+  /** Supplies the replica's declared holdings for a reconnect (see the
+   * wire `SessionHolding`): consulted on every reopen, and sent when the
+   * server advertises `sessionHoldings`. The session itself holds no
+   * document state — the replica that consumes its frames does — so the
+   * statement comes from the consumer. Absent, a reconnect declares
+   * nothing and takes the older delivery paths. */
+  holdingsProvider: (() => SessionHolding[] | undefined) | undefined;
   // Highest caughtUpLocalSeq already pushed into the WatchView (via a real sync
   // or a synthetic forward). Subscribers such as runner storage only advance
   // their own caught-up seq from emitted syncs, so a resume that promotes
@@ -865,7 +876,10 @@ export class SpaceSession {
     return result.view;
   }
 
-  async watchSetSync(watches: WatchSpec[]): Promise<WatchMutationResult> {
+  async watchSetSync(
+    watches: WatchSpec[],
+    holdings?: SessionHolding[],
+  ): Promise<WatchMutationResult> {
     this.#assertOpen();
     return await this.runWatchMutation(
       () =>
@@ -875,6 +889,7 @@ export class SpaceSession {
           space: this.space,
           sessionId: this.#sessionId,
           watches,
+          ...(holdings !== undefined ? { holdings } : {}),
         }),
       (result) => {
         this.noteResult(result.serverSeq);
@@ -1078,7 +1093,13 @@ export class SpaceSession {
       // real sync already carried it.
       this.forwardCaughtUpLocalSeqToWatchers(restored.caughtUpLocalSeq);
       if (restored.resumed !== true && this.#watchSpecs.length > 0) {
-        const { view, sync } = await this.watchSetSync(this.#watchSpecs);
+        // The server forgot this session (or never had it): re-establish
+        // the watch set, declaring what the replica still holds so the
+        // response carries the difference rather than the whole union.
+        const { view, sync } = await this.watchSetSync(
+          this.#watchSpecs,
+          this.declaredHoldings(),
+        );
         if (!isEmptySync(sync)) {
           view.emit(sync);
         }
@@ -1395,6 +1416,14 @@ export class SpaceSession {
     }
   }
 
+  /** The holdings to declare on this reconnect: the provider's statement
+   * when the server takes one, else nothing (an older server, or a
+   * consumer that installed no provider). */
+  private declaredHoldings(): SessionHolding[] | undefined {
+    if (this.client.serverFlags?.sessionHoldings !== true) return undefined;
+    return this.holdingsProvider?.();
+  }
+
   private async reopen(): Promise<SessionOpenResult> {
     const oldSessionId = this.#sessionId;
     const session = {
@@ -1415,10 +1444,11 @@ export class SpaceSession {
           this.client.sessionOpenAuthContext(),
         ),
     );
+    const holdings = this.declaredHoldings();
     const restored = await runWithAbortSignal(
       this.routeSignal,
       "memory session route cancelled",
-      () => this.client.openSession(this.space, session, auth),
+      () => this.client.openSession(this.space, session, auth, holdings),
     );
     const sessionChanged = restored.sessionId !== oldSessionId;
     const sessionReplaced = sessionChanged || restored.resumed !== true;

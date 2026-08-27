@@ -1,11 +1,14 @@
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import {
+  type BranchName,
   type CellScope,
+  DEFAULT_BRANCH,
   type EntitySnapshot,
   type GraphQuery,
   resolveScopeKey,
   type ScopeKey,
   type ScopeKeyIdentity,
+  type SessionHolding,
   type SessionSync,
   type SessionSyncRemove,
   type SessionSyncUpsert,
@@ -92,6 +95,39 @@ export const toCacheEntry = (
       ? {}
       : { coverClass: entity.coverClass }),
   };
+};
+
+/**
+ * The delivery diff base a client DECLARES: its holdings, in the cache's
+ * own terms. Each holding names a document instance the client confirms
+ * it holds at `seq` (a tombstone when `deleted`); the instance resolves
+ * from the session identity as every wire frame's does, and the branch is
+ * the runner's single default. A holding the diff then finds unchanged is
+ * elided, a changed or unlisted document is delivered, and a held
+ * document the watch union no longer covers is removed — the same rules
+ * the server's own delivery memory drives, with the client's statement
+ * in that memory's place. `doc` is deliberately absent: a diff never reads
+ * the previous entry's content.
+ */
+export const holdingsToCacheEntries = (
+  holdings: readonly SessionHolding[],
+  identity: ScopeKeyIdentity,
+  branch: BranchName = DEFAULT_BRANCH,
+): Map<string, SessionCacheEntry> => {
+  const entries = new Map<string, SessionCacheEntry>();
+  for (const holding of holdings) {
+    const scope = holding.scope ?? DEFAULT_SCOPE;
+    const scopeKey = resolveScopeKey(scope, identity);
+    entries.set(cacheKeyForEntity(branch, holding.id, scopeKey), {
+      branch,
+      id: holding.id,
+      scope,
+      scopeKey,
+      seq: holding.seq,
+      ...(holding.deleted === true ? { deleted: true } : {}),
+    });
+  }
+  return entries;
 };
 
 export const trackedIdsFromEntries = (
