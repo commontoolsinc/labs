@@ -234,10 +234,9 @@ self.addEventListener("message", async (event: MessageEvent) => {
         request.data,
       );
       worker = await workerInitialization;
-      // Count the reply only once it is actually posted: if postMessage throws
-      // (e.g. a non-cloneable payload) the catch below records a
-      // `responded-error/*` instead, so the ledger never double-counts one
-      // request as both a success and an error.
+      // Count the reply only once it is actually posted: if the post throws,
+      // the catch below records a `responded-error/*` instead, so the ledger
+      // never double-counts one request as both a success and an error.
       postToClient({ msgId: message.msgId });
       ipcLogger.debug(`responded/${request.type}`, () => []);
       return;

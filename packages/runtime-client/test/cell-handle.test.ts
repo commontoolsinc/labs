@@ -617,10 +617,10 @@ describe("cell-handle", () => {
     });
 
     it("refuses a `FabricInstance` rather than apply one", () => {
-      // A tripwire: nothing delivers an instance today, the transport
-      // stripping a fabric class before it arrives. This is `applyValue()`'s
-      // refusal -- it runs first, which is why the comparison after it needs
-      // no arm of its own.
+      // A tripwire: the transport delivers a fabric class whole, so what keeps
+      // an instance out of a cell is this refusal rather than a lossy arrival.
+      // It is `applyValue()`'s, and it runs first, which is why the comparison
+      // after it needs no arm of its own.
       const cell = new CellHandle<unknown>(makeRuntime(), ref);
       cell.subscribe(() => {});
       const link = new FabricLink(
@@ -1027,11 +1027,14 @@ describe("cell-handle", () => {
       // caller has to learn that their write never happened; the alternative
       // is a `set()` that resolves over a value the runtime never saw.
       //
-      // `set()` alone covers the hazard, which is the `.catch()` that turns a
-      // failed write into a resolved promise: `push()` reaches it through the
-      // same `#applyLocalAndSend()`, and `send()` has no such `.catch()` to
-      // swallow anything. What each path *carries* is pinned separately,
-      // below.
+      // `set()` alone covers the hazard. Every write path attaches a
+      // `.catch()` that turns a rejected send into a resolved promise --
+      // `send()` has one of its own, and `push()` reaches this one through the
+      // same `#applyLocalAndSend()` -- so what makes this failure reach the
+      // caller is not the absence of one. It is that the encode throws
+      // synchronously out of `request()`, before there is a promise for any
+      // `.catch()` to attach to. What each path *carries* is pinned
+      // separately, below.
       const sends: number[] = [];
       const cell = new CellHandle<unknown>(encodingRuntime(sends), ref);
 

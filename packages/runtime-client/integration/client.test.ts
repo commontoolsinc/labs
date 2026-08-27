@@ -742,7 +742,7 @@ export default pattern((_) => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const consoleEvents: { method: string; args: unknown[] }[] = [];
+      const consoleEvents: { method: string; args: readonly unknown[] }[] = [];
       const gotHello = defer<void>();
       rt.on(
         "console",

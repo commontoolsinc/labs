@@ -168,7 +168,7 @@ export type VDomBatch = {
   batchId: number;
 
   /** The operations to apply, in order */
-  ops: VDomOp[];
+  ops: readonly VDomOp[];
 
   /**
    * The root node ID for this render tree; `null` while the tree has no root

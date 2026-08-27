@@ -1576,7 +1576,7 @@ export class Scheduler {
   /**
    * Set action IDs that should trigger a debugger breakpoint before execution.
    */
-  setBreakpoints(actionIds: string[]): void {
+  setBreakpoints(actionIds: readonly string[]): void {
     this.breakpoints.clear();
     for (const id of actionIds) {
       this.breakpoints.add(id);

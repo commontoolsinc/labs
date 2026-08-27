@@ -4,6 +4,7 @@ import type {
   FabricKeyPair,
 } from "@commonfabric/data-model/fabric-primitives";
 import type {
+  FabricArray,
   FabricPlainObject,
   FabricValue,
 } from "@commonfabric/data-model/fabric-value";
@@ -946,7 +947,7 @@ export type OperationFieldResponse = {
 
 /** A response naming the operation codecs available for a cell. */
 export type OperationCapabilitiesResponse = {
-  codecs: string[];
+  codecs: readonly string[];
 };
 
 /** A response carrying the authoritative resolution of an operation. */
@@ -1219,7 +1220,7 @@ export type SetWriteStackTraceMatchersRequest = BaseRequest & {
    * The writes whose stack to record. Replaces the current set rather than
    * adding to it.
    */
-  matchers: WriteStackTraceMatcher[];
+  matchers: readonly WriteStackTraceMatcher[];
 };
 
 /**
@@ -1249,7 +1250,7 @@ export type SettleStatsHistoryResponse = {
   /**
    * One entry per recorded pass, oldest first.
    */
-  history: SettleStatsHistoryEntry[];
+  history: readonly SettleStatsHistoryEntry[];
 };
 
 /** The recorded action runs, in the order they ran. */
@@ -1257,7 +1258,7 @@ export type ActionRunTraceResponse = {
   /**
    * The recorded runs, in the order they ran.
    */
-  trace: ActionRunTraceEntry[];
+  trace: readonly ActionRunTraceEntry[];
 };
 
 /** The recorded triggers, in the order they fired. */
@@ -1265,7 +1266,7 @@ export type TriggerTraceResponse = {
   /**
    * The recorded triggers, in the order they fired.
    */
-  trace: TriggerTraceEntry[];
+  trace: readonly TriggerTraceEntry[];
 };
 
 /**
@@ -1276,7 +1277,7 @@ export type WriteStackTraceResponse = {
   /**
    * The recorded writes, in the order they happened.
    */
-  trace: WriteStackTraceEntry[];
+  trace: readonly WriteStackTraceEntry[];
 };
 
 /** What the scheduler's non-idempotency diagnosis found. */
@@ -1318,10 +1319,10 @@ export type PatternSourceInfo = {
   /**
    * Every file of the pattern, code and data alike.
    */
-  files: PatternSourceFile[];
+  files: readonly PatternSourceFile[];
 
   /** Names among `files` that carry data rather than code. */
-  dataFiles?: string[];
+  dataFiles?: readonly string[];
 };
 
 /** One entry per distinct pattern in the graph, not per graph node. */
@@ -1329,7 +1330,7 @@ export type PatternSourcesResponse = {
   /**
    * One entry per distinct pattern.
    */
-  patterns: PatternSourceInfo[];
+  patterns: readonly PatternSourceInfo[];
 };
 
 /**
@@ -1342,7 +1343,7 @@ export type SetBreakpointsRequest = BaseRequest & {
   /**
    * The actions to break on. Replaces the current set.
    */
-  actionIds: string[];
+  actionIds: readonly string[];
 };
 
 /**
@@ -1535,7 +1536,7 @@ export type TimingStats = {
   /**
    * The distribution over every sample since the worker started.
    */
-  cdf: CDFPoint[];
+  cdf: readonly CDFPoint[];
 
   /**
    * The distribution over samples since the last baseline reset, `null`
@@ -1585,12 +1586,17 @@ export type PageCreateRequest = BaseRequest & {
    * The argument the piece is created with. The wire carries a `FabricValue`,
    * which is what the envelope's encoding makes true of it.
    *
-   * A piece's input is a record, which is narrower, and that is what the
-   * client API asks for: `cc.create()` takes an `object`, and
-   * `handlePieceCreate()` refuses anything else rather than casting. So the
-   * arms this admits and that does not -- a `bigint`, a `FabricBytes`, a bare
-   * string -- reach the far end only from a sender that did not go through
-   * that API, and are turned away there with a message saying why.
+   * A piece's input is a record of named inputs, which is narrower, and that
+   * is what the client API asks for. `handlePieceCreate()` holds the same line
+   * at the far end rather than casting, so the arms this admits and
+   * `FabricPlainObject` does not -- a `bigint`, a `FabricBytes`, a bare string
+   * -- reach it only from a sender that went around that API, and are turned
+   * away with a message naming what arrived.
+   *
+   * This value reaches the wire as the caller built it, no conversion walk
+   * standing between, so it is where the encoding's tree shape shows: a cycle
+   * in it is refused, and a subtree needing encoding that the record reaches
+   * twice arrives twice. `RuntimeTransport.send()` states that shape.
    */
   argument?: FabricValue;
 
@@ -1937,15 +1943,15 @@ export type PieceSourceView = {
   /**
    * Every file of the source, code and data alike.
    */
-  files: PatternSourceFile[];
+  files: readonly PatternSourceFile[];
 
   /** Names among `files` that carry data rather than code. */
-  dataFiles?: string[];
+  dataFiles?: readonly string[];
 
   /**
    * Every revision, which is what the current one is chosen from.
    */
-  history: PieceSourceRevisionView[];
+  history: readonly PieceSourceRevisionView[];
 
   /**
    * Which of `history` the piece is on.
@@ -1974,10 +1980,10 @@ export type PieceSourceRevisionSourceView = {
   /**
    * The files as of that revision.
    */
-  files: PatternSourceFile[];
+  files: readonly PatternSourceFile[];
 
   /** Names among `files` that carry data rather than code. */
-  dataFiles?: string[];
+  dataFiles?: readonly string[];
 };
 
 /** One named revision of a piece's source, without the history around it. */
@@ -2171,7 +2177,7 @@ export type SerializedDomEvent = {
     trusted?: boolean;
     ui?: {
       pattern?: string;
-      eventIntegrity?: string[];
+      eventIntegrity?: readonly string[];
       uiContractDataset?: Record<string, string>;
     };
   };
@@ -2605,7 +2611,7 @@ export type ConsoleNotification = {
    * envelope's own encoding, so a `FabricBytes` arrives as bytes and an
    * instance arrives with its class.
    */
-  args: FabricValue[];
+  args: FabricArray;
 };
 
 /**
@@ -2755,7 +2761,7 @@ export type VDomBatchNotification = {
   batchId: number;
 
   /** The operations to apply, in order */
-  ops: VDomOp[];
+  ops: readonly VDomOp[];
 
   /**
    * The root node ID for this render tree; `null` while the tree has no root

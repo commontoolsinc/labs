@@ -2350,7 +2350,9 @@ export class Runtime {
     return this.writeDebugContext.run(label, fn);
   }
 
-  setWriteStackTraceMatchers(matchers: WriteStackTraceMatcher[]): void {
+  setWriteStackTraceMatchers(
+    matchers: readonly WriteStackTraceMatcher[],
+  ): void {
     setWriteStackTraceMatchers(matchers, { scopeId: this.id });
   }
 

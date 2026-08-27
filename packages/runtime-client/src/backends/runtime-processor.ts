@@ -85,7 +85,7 @@ import {
   resetAllCountBaselines,
   resetAllTimingBaselines,
 } from "@commonfabric/utils/logger";
-import { isObjectNotArray } from "@commonfabric/utils/types";
+import { isPlainObject } from "@commonfabric/utils/types";
 
 import {
   getMetaLink,
@@ -152,6 +152,7 @@ import {
   type PageStopRequest,
   type PageSyncedRequest,
   type PatternCoverageResponse,
+  type PatternSourceInfo,
   type PatternSourcesResponse,
   type PieceCloneRequest,
   type PieceGetSourceRequest,
@@ -1468,12 +1469,11 @@ export class RuntimeProcessor {
       throw new Error("Invalid source.");
     }
 
-    // Checked rather than cast. The wire carries a `FabricValue` and so does
-    // the API, but a piece's input is a record: `cc.create()` takes an
-    // `object`, and casting a `bigint` to one would hand the runtime something
-    // it cannot use and say nothing about why.
+    // Checked rather than cast. The wire carries a `FabricValue`; a piece's
+    // input is narrower, being a record of named inputs, which is the question
+    // `isPlainObject()` asks.
     const argument = request.argument;
-    if ((argument !== undefined) && !isObjectNotArray(argument)) {
+    if ((argument !== undefined) && !isPlainObject(argument)) {
       // The rejected value is named rather than its `typeof`, which calls both
       // an array and `null` an `object` and so says nothing about either. It
       // is bounded because the argument is a caller's data.
@@ -1878,7 +1878,7 @@ export class RuntimeProcessor {
   ): PatternSourcesResponse {
     const snapshot = this.runtime.scheduler.getGraphSnapshot();
     const seen = new Set<string>();
-    const patterns: PatternSourcesResponse["patterns"] = [];
+    const patterns: PatternSourceInfo[] = [];
 
     for (const node of snapshot.nodes) {
       const ref = node.patternIdentity;

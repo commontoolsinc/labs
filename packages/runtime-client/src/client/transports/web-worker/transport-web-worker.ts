@@ -56,6 +56,18 @@ export class WebWorkerRuntimeTransport
 
   /** @inheritDoc */
   send(data: IPCClientMessage | IPCClientNotification): void {
+    // The encoding is a tree walk and what it produces is a tree, which is
+    // narrower than the value model in two ways worth knowing. A cycle is
+    // refused outright. A subtree that needs encoding and is reachable by two
+    // paths arrives as two values rather than as one reached twice; a subtree
+    // that needs no encoding keeps its sharing.
+    //
+    // The walks that feed the common paths already rewrite both, so neither
+    // reaches here from them: `convertCellsToLinks()` turns a cycle into a
+    // back-link before a prop arrives, and `CellHandle.serialize()` rebuilds a
+    // record rather than aliasing it. What is exposed is a value handed to the
+    // connection without passing through one of those, of which
+    // `PageCreateRequest.argument` is the field to know about.
     this._worker.postMessage(realmFromFabricValue(data));
   }
 

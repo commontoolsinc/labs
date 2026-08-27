@@ -54,9 +54,13 @@ describe("post-to-client", () => {
       const { posted, restore } = capturing();
 
       try {
-        postToClient(
-          { msgId: 7, data: { value: forged() } } as never,
-        );
+        // The return says a substitute went. The worker's ledger reads it to
+        // tell `responded` from `responded-error`, so a regression that kept
+        // substituting while returning `true` would corrupt the accounting
+        // with every posted message still looking right.
+        expect(
+          postToClient({ msgId: 7, data: { value: forged() } } as never),
+        ).toBe(false);
 
         expect(posted).toHaveLength(1);
         expect(posted[0].msgId).toBe(7);
@@ -73,19 +77,39 @@ describe("post-to-client", () => {
       const { posted, restore } = capturing();
 
       try {
-        postToClient(
-          {
-            type: NotificationType.ConsoleMessage,
-            method: "log",
-            args: [forged()],
-          } as never,
-        );
+        expect(
+          postToClient(
+            {
+              type: NotificationType.ConsoleMessage,
+              method: "log",
+              args: [forged()],
+            } as never,
+          ),
+        ).toBe(false);
 
         expect(posted).toHaveLength(1);
         expect(posted[0].type).toBe(NotificationType.ErrorReport);
         expect(posted[0].message).toContain("Undeliverable message");
         // The rendering names the message, so a reader can tell which one went.
         expect(posted[0].message).toContain("console");
+      } finally {
+        restore();
+      }
+    });
+
+    it("says `true` for a message that goes as asked", () => {
+      // Without this the two assertions above pass for an implementation that
+      // returns `false` unconditionally, which would misclassify every reply.
+      const { posted, restore } = capturing();
+
+      try {
+        expect(
+          postToClient({ msgId: 8, data: { value: 1 } } as never),
+        ).toBe(true);
+
+        expect(posted).toHaveLength(1);
+        expect(posted[0].msgId).toBe(8);
+        expect(posted[0].error).toBeUndefined();
       } finally {
         restore();
       }

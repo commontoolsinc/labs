@@ -144,7 +144,7 @@ function captureStack(): string | undefined {
 }
 
 export function setWriteStackTraceMatchers(
-  matchers: WriteStackTraceMatcher[],
+  matchers: readonly WriteStackTraceMatcher[],
   options: { scopeId?: string } = {},
 ): void {
   const normalizedScopeId = getWriteTraceScopeId(options.scopeId);

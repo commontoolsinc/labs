@@ -638,6 +638,70 @@ describe("runtime-processor", () => {
       expect(await refusalFor("a bare string"))
         .toBe('A piece\'s argument must be a record, not: "a bare string"');
     });
+
+    it("refuses a fabric class instance as the whole argument", async () => {
+      // The arm that separates `isPlainObject()` from the looser
+      // `isObjectNotArray()`, which admits any class instance. The connection
+      // carries a `FabricBytes` whole, so one reaches this guard as itself
+      // rather than as the `{}` a shape-blind copy would leave -- and a piece's
+      // entire input is not one value, whatever that value is.
+      const space = "did:key:z6Mk-runtime-processor-create" as const;
+      const processor = { getSpaceCtx: () => ({}) };
+
+      await expect(
+        // deno-lint-ignore no-explicit-any
+        (RuntimeProcessor.prototype as any).handlePieceCreate.call(processor, {
+          type: RequestType.PageCreate,
+          space,
+          source: { program: { main: "/main.tsx", files: [] } },
+          argument: new FabricBytes(new Uint8Array([1, 2, 3])),
+        }),
+      ).rejects.toThrow("A piece's argument must be a record, not:");
+
+      // The other branch of the fabric class hierarchy, which reaches the
+      // guard by the same route.
+      await expect(
+        // deno-lint-ignore no-explicit-any
+        (RuntimeProcessor.prototype as any).handlePieceCreate.call(processor, {
+          type: RequestType.PageCreate,
+          space,
+          source: { program: { main: "/main.tsx", files: [] } },
+          argument: new FabricError({
+            type: "Error",
+            message: "not a set of inputs",
+            stack: undefined,
+            cause: undefined,
+          }),
+        }),
+      ).rejects.toThrow("A piece's argument must be a record, not:");
+    });
+
+    it("admits a record that holds a fabric class instance", async () => {
+      // The other side of the same line, and the case that has to keep
+      // working: the guard asks what the argument *is*, not what it holds.
+      const space = "did:key:z6Mk-runtime-processor-create" as const;
+      const created: unknown[] = [];
+      const processor = {
+        getSpaceCtx: () => ({
+          create: (_program: unknown, options: { input?: unknown }) => {
+            created.push(options.input);
+            throw new Error("stop after the guard");
+          },
+        }),
+      };
+      const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+
+      await expect(
+        // deno-lint-ignore no-explicit-any
+        (RuntimeProcessor.prototype as any).handlePieceCreate.call(processor, {
+          type: RequestType.PageCreate,
+          space,
+          source: { program: { main: "/main.tsx", files: [] } },
+          argument: { image: bytes },
+        }),
+      ).rejects.toThrow("stop after the guard");
+      expect(created).toEqual([{ image: bytes }]);
+    });
   });
 
   describe("space ACL state", () => {

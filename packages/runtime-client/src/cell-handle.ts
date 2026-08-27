@@ -54,8 +54,11 @@ export const $onCellUpdate = Symbol("$onCellUpdate");
  * The container arms are here too, since theirs hold `FabricValue` where these
  * hold handles as well.
  *
- * The connection carries all of it: `FabricValue` is the same domain with a
- * `CellRef` wherever a handle sat.
+ * The connection's encoding carries this whole domain. The conversion walk
+ * that feeds it is narrower: `CellHandle.serialize()` refuses a
+ * `FabricInstance`, being a container it cannot descend to find a handle
+ * inside. So a value admitted here can still be refused on the way out, and
+ * the refusal names which.
  */
 export type ClientCellValue =
   | FabricValue
