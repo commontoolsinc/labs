@@ -1000,6 +1000,8 @@ export class KickoffServer {
           : 502;
         return Response.json({ error: error.message }, { status });
       }
+      // The generic answer promises the log carries the detail, so it must.
+      console.error("index proxy failed host-side:", error);
       return Response.json(
         { error: "the index request failed on this server; see its log" },
         { status: 502 },
