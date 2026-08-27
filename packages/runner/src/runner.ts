@@ -1437,12 +1437,19 @@ interface SetupStateReuse {
  */
 type StoredSetupMarker = "matches" | "other" | "absent";
 
+// `sessionRef` is a KEYLESS piece's session-side stand-in for the durable
+// completion marker (see `Runner.sessionPatternPointers`): the never-durable
+// contract skips the `patternSetupIdentity` stamp for a keyless piece, and
+// without a marker every re-setup of a re-derived sub-piece (a lift
+// returning a pattern) would read "absent" and restage its own running
+// setup.
 function storedSetupMarker(
   resultCell: Cell<unknown>,
   entryRef: { identity: string; symbol: string } | undefined,
+  sessionRef?: { identity: string; symbol: string },
 ): StoredSetupMarker {
   if (entryRef === undefined) return "absent";
-  const stagedRef = getPatternSetupIdentityRef(resultCell);
+  const stagedRef = getPatternSetupIdentityRef(resultCell) ?? sessionRef;
   if (stagedRef === undefined) return "absent";
   return patternIdentityKey(stagedRef) === patternIdentityKey(entryRef)
     ? "matches"
@@ -1514,6 +1521,22 @@ export class Runner {
   // directly ends it.
   private independentlyStartedResults = new Set<
     `${MemorySpace}/${ScopeKey}/${URI}`
+  >();
+  // SESSION-side pattern pointers for KEYLESS pieces. A hand-built pattern's
+  // setup no longer stamps its session-synthetic `keyless:` ref durably
+  // (never-durable contract; L3(a), RULED 2026-08-27), but the in-session
+  // flows that used to read those stamps are sanctioned and keep working
+  // through this map instead: a separate `start(resultCell)` after setup,
+  // `setup`/`run` without a pattern, restart after `stop()`, and the
+  // setup-reuse marker (`storedSetupMarker`) that lets a re-derived
+  // sub-piece (a lift returning a pattern) reuse its running setup rather
+  // than restage it. Written at the same moment the durable stamps would
+  // have been (end of `applySetupState`), erased when a real pattern's
+  // stamps supersede it or the staging transaction fails, and it dies with
+  // the session — which is the contract's whole point.
+  private sessionPatternPointers = new Map<
+    `${MemorySpace}/${ScopeKey}/${URI}`,
+    { identity: string; symbol: string }
   >();
   // Commit-gated starts that have not installed a registration yet, indexed by
   // result so an explicit stop can tombstone them before installation.
@@ -2362,6 +2385,24 @@ export class Runner {
         identity: durableEntryRef.identity,
         symbol: durableEntryRef.symbol,
       });
+      this.sessionPatternPointers.delete(this.getDocKey(resultCell));
+    } else if (entryRef) {
+      // The KEYLESS piece's stand-in for both skipped stamps, session-side:
+      // the pattern pointer (start/resume flows) and the setup-completion
+      // marker (`storedSetupMarker`'s reuse decision — without it a
+      // re-derived sub-piece would restage its running setup every pass).
+      // Erased if the staging transaction fails, mirroring
+      // `locallyPreparedResults`' cleanup.
+      const key = this.getDocKey(resultCell);
+      this.sessionPatternPointers.set(key, entryRef);
+      tx.addCommitCallback((_tx, result) => {
+        if (
+          result.error &&
+          this.sessionPatternPointers.get(key) === entryRef
+        ) {
+          this.sessionPatternPointers.delete(key);
+        }
+      });
     }
   }
 
@@ -2381,7 +2422,11 @@ export class Runner {
       `resultCell: ${resultCell.getAsNormalizedFullLink().id}`,
     ]);
 
-    const previousIdentityRef = getPatternIdentityRef(resultCell.withTx(tx));
+    // A keyless piece set up by THIS session resolves through the
+    // session-side pointer map (its `keyless:` ref is never stamped
+    // durably); a fresh session correctly finds nothing.
+    const previousIdentityRef = getPatternIdentityRef(resultCell.withTx(tx)) ??
+      this.sessionPatternPointers.get(this.getDocKey(resultCell));
     const resolvedPattern = this.resolveSetupPattern(
       patternOrModule,
       previousIdentityRef,
@@ -2413,7 +2458,11 @@ export class Runner {
     // Read through `tx`, like the identity read above: this decides whether the
     // transaction writes the argument, so it belongs in the same conflict set
     // rather than reading around it off committed state.
-    const marker = storedSetupMarker(resultCell.withTx(tx), entryRef);
+    const marker = storedSetupMarker(
+      resultCell.withTx(tx),
+      entryRef,
+      this.sessionPatternPointers.get(this.getDocKey(resultCell)),
+    );
     const setupState: SetupStateReuse = {
       sameStoredSetup,
       restageStoredArgument: !sameStoredSetup || marker === "other",
@@ -3358,7 +3407,10 @@ export class Runner {
     };
 
     const resultCellForRead = tx ? resultCell.withTx(tx) : resultCell;
-    const initialRef = getPatternIdentityRef(resultCellForRead);
+    // Durable pointer first; a keyless piece set up by this session has only
+    // the session-side entry (the never-durable contract).
+    const initialRef = getPatternIdentityRef(resultCellForRead) ??
+      this.sessionPatternPointers.get(key);
 
     // Determine initial pattern
     if (givenPattern) {
@@ -3488,8 +3540,11 @@ export class Runner {
       });
     }
 
-    // Step 4: Check whether the pattern is available, otherwise load it
-    const identityRef = getPatternIdentityRef(rootCell);
+    // Step 4: Check whether the pattern is available, otherwise load it. A
+    // keyless piece carries no durable pointer (never-durable contract); its
+    // pointer, when this session set it up, is the session-side entry.
+    const identityRef = getPatternIdentityRef(rootCell) ??
+      this.sessionPatternPointers.get(key);
     if (!identityRef) {
       // We may have a slug instead of a resultCell, so try the link.
       const maybeLink = parseLink(rootCell.getRaw(), rootCell);
@@ -5224,7 +5279,10 @@ export class Runner {
         // already-assembled local cells. Stopping an unresolved/storage-only
         // target must not bypass dependency sync and snapshot rehydration on a
         // later explicit start.
-        const stoppedIdentity = getPatternIdentityRef(resultCell);
+        // A keyless piece's pointer is session-side (never stamped durably),
+        // so fall through to it.
+        const stoppedIdentity = getPatternIdentityRef(resultCell) ??
+          this.sessionPatternPointers.get(key);
         if (stoppedIdentity !== undefined) {
           this.locallyStoppedResults.set(
             key,
