@@ -353,6 +353,22 @@ describe("link-ifc-read-relevance closure, narrowing, and raw readers", () => {
     expect(hopReasons().length).toBeGreaterThan(0);
   });
 
+  it("marks an ancestor hop whose schema narrows to nothing", () => {
+    const rootLabeled = {
+      type: "object",
+      properties: { name: { type: "string" } },
+      ifc: { integrity: ["asserted"] },
+    } as const satisfies JSONSchema;
+    const holder = holderOver(rootLabeled);
+
+    // The remaining path names nothing the stored schema describes, so the
+    // traveling schema narrows to undefined — the crossing still marks off
+    // the schema as stored.
+    expect(holder.key("item").key("unlisted").get()).toBeUndefined();
+    expect(tx.getCfcState().relevant).toBe(true);
+    expect(hopReasons().length).toBeGreaterThan(0);
+  });
+
   it("marks a schema-less query-result read crossing a labeled link", () => {
     const holder = holderOver(labeledLinkSchema);
 

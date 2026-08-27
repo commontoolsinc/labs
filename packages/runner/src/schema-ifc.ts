@@ -190,6 +190,20 @@ export function ensureExternalSchemaClosure(
         continue;
       }
       const doc = result.ok.value;
+      // A read can succeed with nothing there — a root document the replica
+      // has never held reads as undefined rather than NotFoundError — and
+      // that absence needs the same delivery request.
+      if (doc === undefined) {
+        options.onMissingDocument?.(
+          {
+            space: address.space,
+            id: address.id,
+            path: [],
+            scope: address.scope,
+          } as NormalizedFullLink,
+        );
+        continue;
+      }
       if (!isObjectNotArray(doc) || !("value" in doc)) continue;
       try {
         registerSchemaDocument(

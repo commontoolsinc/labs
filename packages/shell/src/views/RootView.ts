@@ -207,6 +207,9 @@ export class XRootView extends BaseView implements ShellApp {
           apiUrl: app.apiUrl,
           env: (name) => EXPERIMENTAL_DEFINES[name],
           fetch: (input, init) => globalThis.fetch(input, init),
+          // A superseded startup must not stay pending on a stalled meta
+          // response: the task's abort cancels the request.
+          signal,
         });
 
         const rt = await RuntimeInternals.create({

@@ -1519,6 +1519,13 @@ export class CellImpl<T extends FabricValue>
      */
     sendOptions?: StreamSendOptions,
   ): Cell<T> {
+    // Deliberately NOT opted into the ifc crossing seam: a whole-value
+    // set() re-stores link values verbatim, and a transaction the pre-write
+    // resolution marks relevant then fails prepare's link-source-metadata
+    // audit for exactly those rewritten links (the owner-protected write
+    // flow pins this). Relevance for the write belongs to the write-policy
+    // gate below; the crossings this resolution makes are marked when the
+    // same data is READ (get/getRaw/proxies all opt in).
     const resolvedToValueLink = resolveLink(
       this.runtime,
       this.runtime.readTx(this.tx),
@@ -2381,6 +2388,7 @@ export class CellImpl<T extends FabricValue>
             true,
             this.tx!,
             this.runtime,
+            true,
           )
         );
       }
@@ -2529,6 +2537,7 @@ export class CellImpl<T extends FabricValue>
           true,
           this.tx!,
           this.runtime,
+          true,
         )
         : valueEqual(element, ref as FabricValue);
     const removed = array.filter(matches);
@@ -2939,6 +2948,8 @@ export class CellImpl<T extends FabricValue>
       this.runtime,
       readTx,
       this.link,
+      "value",
+      { markIfcCrossings: true },
     );
     const dereferenceView = cfcLabelViewForDereferenceTraces(
       readTx,

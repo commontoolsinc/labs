@@ -2782,6 +2782,20 @@ function loadSchemaDocClosure(
     }
     context.schemaTracker.add(key, REJECTING_SELECTOR);
     const doc = result.ok.value;
+    // A successful read of nothing — a root document this replica never
+    // held — is the same absence as NotFoundError for delivery purposes.
+    if (doc === undefined) {
+      context.onMissingLinkTarget?.(
+        {
+          space: address.space,
+          id: address.id,
+          path: [],
+          scope: address.scope,
+        } as NormalizedFullLink,
+        referrer.space,
+      );
+      continue;
+    }
     if (!isObjectNotArray(doc) || !("value" in doc)) continue;
     const schemaValue = (doc as { value?: FabricValue }).value;
     try {

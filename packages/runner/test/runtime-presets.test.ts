@@ -417,16 +417,17 @@ describe("runtimePresets conformance (CT-1814)", () => {
         ).toBe(true);
       });
 
-      it("returns only the legacy defaults for a declaration that is not an object", () => {
-        expect(parseServerExperimentalOptions(null)).toEqual({
-          readerSchemaPrecedence: false,
-        });
+      it("adopts nothing for a published null and legacy false for an absent field", () => {
+        // toolshed publishes `experimental: null` until a Runtime exists —
+        // a NEW server saying "nothing yet", which adopts nothing — while a
+        // meta document with no experimental field at all predates the
+        // flag and takes the legacy arm. Malformed declarations adopt
+        // nothing.
+        expect(parseServerExperimentalOptions(null)).toEqual({});
         expect(parseServerExperimentalOptions(undefined)).toEqual({
           readerSchemaPrecedence: false,
         });
-        expect(parseServerExperimentalOptions("modernCellRep")).toEqual({
-          readerSchemaPrecedence: false,
-        });
+        expect(parseServerExperimentalOptions("modernCellRep")).toEqual({});
       });
 
       it("ignores a key this build has no flag for", () => {

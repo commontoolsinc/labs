@@ -463,6 +463,17 @@ export function resolveLinkTracingDereferences(
 } {
   // The walk needs this to detect cycles; the memo needs it to name the entry.
   let addressKey = linkAddressKey(link);
+  // Missing schema-closure documents kick through the same reservation
+  // path as doc pulls, so a memo replay (which re-marks and re-ensures per
+  // call) cannot repeat a sync the reservation already covers.
+  const kickMissingSchemaDoc = (docLink: NormalizedFullLink): void => {
+    const mgr = runtime.storageManager;
+    if (
+      mgr.shouldPullDoc?.(docLink.space, docLink.id, docLink.scope) === true
+    ) {
+      kickDocPull(runtime, docLink, true);
+    }
+  };
   const memo = tx.getSnapshotMemo?.();
   const memoKey = memo === undefined ? "" : resolutionMemoVariant(
     link,
@@ -475,7 +486,7 @@ export function resolveLinkTracingDereferences(
     if (options.markIfcCrossings === true) {
       for (const hop of cached.schemaHops) {
         markIfcBearingLinkCrossing(tx, hop.space, hop.schema, hop.id, {
-          onMissingDocument: (docLink) => kickDocPull(runtime, docLink, false),
+          onMissingDocument: kickMissingSchemaDoc,
         });
       }
     }
@@ -687,14 +698,18 @@ export function resolveLinkTracingDereferences(
       }
       traces.push(recordDereferenceHop(tx, nextHop));
       followedHop = true;
-      // The crossing seam's data: schema-bearing hops are collected as-is
-      // and evaluated at mark time below (and on memo hits), for callers
-      // that opt in.
-      if (nextHop.link.schema !== undefined) {
+      // The crossing seam's data: schema-bearing hops are collected AS
+      // STORED and evaluated at mark time below (and on memo hits), for
+      // callers that opt in. The stored schema decides — an ancestor hop's
+      // narrowing can reduce the traveling schema to nothing while the
+      // declaration stands — and the SOURCE space names where the stored
+      // link (and so its schema's closure documents) lives.
+      const crossingSchema = nextHop.storedSchema ?? nextHop.link.schema;
+      if (crossingSchema !== undefined) {
         schemaHops.push({
           id: nextHop.link.id,
-          space: nextHop.link.space,
-          schema: nextHop.storedSchema ?? nextHop.link.schema,
+          space: nextHop.source.space,
+          schema: crossingSchema,
         });
       }
       const nextLink = nextHop.link;
@@ -812,7 +827,7 @@ export function resolveLinkTracingDereferences(
   if (options.markIfcCrossings === true) {
     for (const hop of schemaHops) {
       markIfcBearingLinkCrossing(tx, hop.space, hop.schema, hop.id, {
-        onMissingDocument: (docLink) => kickDocPull(runtime, docLink, false),
+        onMissingDocument: kickMissingSchemaDoc,
       });
     }
   }

@@ -33,6 +33,10 @@ export type ExperimentalRuntimeFlags = {
   modernCellRep?: boolean;
   systemPatternAutoUpdate?: boolean;
   contentAddressedSchemas?: boolean;
+  // Reader precedence at link crossings; server-authoritative, adopted from
+  // /api/meta by the shell and declared to the worker so both realms run
+  // one combine rule.
+  readerSchemaPrecedence?: boolean;
 };
 
 export type RuntimeCfcEnforcementMode = NonNullable<

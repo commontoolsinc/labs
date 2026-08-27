@@ -1,4 +1,5 @@
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
+import { parseFlagValue } from "@commonfabric/runner/experimental-posture";
 
 declare global {
   var $ENVIRONMENT: string | undefined;
@@ -75,19 +76,15 @@ export const EXPERIMENTAL_DEFINES: Record<string, string | undefined> = {
 };
 
 /**
- * The canonical flag parse (shared with the server side's env mapping):
+ * The one canonical flag parse, shared with the server side's env mapping:
  * exactly `"true"` / `"false"`; anything else — including a garbled define —
- * is ignored rather than coerced, leaving the flag's default in force.
+ * is ignored with a warning rather than coerced, leaving the flag's default
+ * in force.
  */
 function flagValue(flag: string | undefined): boolean | undefined {
-  if (flag === "true" || flag === "false") return flag === "true";
-  if (typeof flag === "string") {
-    console.warn(
-      `[shell/env] Ignoring experimental define "${flag}" — expected ` +
-        `"true" or "false" (unset = default).`,
-    );
-  }
-  return undefined;
+  return typeof flag === "string"
+    ? parseFlagValue(flag, "shell experimental define")
+    : undefined;
 }
 
 /** Build-time experimental flags, injected via felt.config.ts defines. */

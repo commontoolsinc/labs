@@ -59,7 +59,7 @@ export const EXPERIMENTAL_ENV_VARS = {
 } as const satisfies Record<keyof ExperimentalOptions, string | null>;
 
 /** The canonical parse: exactly `"true"` / `"false"`, anything else ignored. */
-function parseFlagValue(raw: string, source: string): boolean | undefined {
+export function parseFlagValue(raw: string, source: string): boolean | undefined {
   if (raw === "true" || raw === "false") return raw === "true";
   console.warn(
     `[runtime-presets] Ignoring ${source}="${raw}" — ` +
@@ -195,14 +195,22 @@ export const ADOPT_SERVER_FLAGS_ENV = "CF_ADOPT_SERVER_FLAGS";
 export function parseServerExperimentalOptions(
   declared: unknown,
 ): ExperimentalOptions {
-  // A server that RESPONDED but declares no readerSchemaPrecedence predates
-  // the flag and necessarily runs the strict combine: absence adopts as the
-  // legacy `false` until the compatibility window closes. This function is
-  // only handed a fetched posture payload — a client that could not reach
-  // the server never calls it and keeps its built-in defaults.
-  const legacy: ExperimentalOptions = { readerSchemaPrecedence: false };
-  if (declared === null || typeof declared !== "object") return legacy;
-  const opts: ExperimentalOptions = { ...legacy };
+  // Field presence decides the legacy arm. A server that published a
+  // posture RECORD but declares no readerSchemaPrecedence in it predates
+  // the flag and necessarily runs the strict combine: that absence adopts
+  // as the legacy `false` until the compatibility window closes. An
+  // explicit `experimental: null` is different — toolshed publishes null
+  // until a Runtime exists — and adopts nothing, as does a malformed
+  // declaration; a client that could not reach the server never calls
+  // this at all and keeps its built-in defaults. The one field-absent
+  // case left adopting nothing is a meta document with NO experimental
+  // field, which the caller hands in as `undefined`: that document shape
+  // also predates the flag, so it takes the legacy arm too.
+  if (declared === null) return {};
+  if (typeof declared !== "object") {
+    return declared === undefined ? { readerSchemaPrecedence: false } : {};
+  }
+  const opts: ExperimentalOptions = { readerSchemaPrecedence: false };
   for (const key of Object.keys(EXPERIMENTAL_FLAG_AUTHORITY)) {
     const value = (declared as Record<string, unknown>)[key];
     if (value === undefined) continue;
