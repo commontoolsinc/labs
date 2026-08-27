@@ -5934,7 +5934,17 @@ supply; OW29/OW32/OW34 closed):
     overlay/session-synthetic pointer reaching the watcher), and the
     load-error is the discriminating event between recovered-green
     and stranded-red (greens have the same catchup and no
-    load-error). CONSEQUENCE for the family map: the fork memo's
+    load-error). **[CORRECTED 2026-08-27, root-cause seat: the
+    session-side claim is WRONG. Durable `keyless:` patternIdentity
+    pointers exist in EVERY run at the lift-campaign head — greens
+    included — written by the serving runtime's derived
+    materialization commits onto orphan sub-piece docs (one per
+    piece root; a03 seq 57 is the store witness). The pointers this
+    record checked were the piece ROOTS', which are real; the
+    keyless ones sit on sub-piece docs nothing else durably
+    references. The member is also not a stranded whole piece: the
+    root cause on the 2026-08-27 campaign row shows the diagnostics
+    were reading a different piece.]** CONSEQUENCE for the family map: the fork memo's
     working hypothesis that h01/h05/rf2 were "the same die-off
     later/earlier in the start walk" is DISPROVED — the walk
     completes in both red shapes; the residue lives in the
@@ -6150,6 +6160,76 @@ supply; OW29/OW32/OW34 closed):
     `/Users/berni/labs-worktrees/b1-lifts-evidence/runs/default-app/`
     (`a03|a04|a07/classification.md` beside the raw dumps) with the running
     report at `/Users/berni/labs-worktrees/b1-lifts-report.md`.
+    **ROOT CAUSE, 2026-08-27 (the r06/r09 member, from a03/a07's own
+    stores + logs; full report
+    `/Users/berni/labs-worktrees/keyless-diagnosis-report.md`, branch
+    `claude/server-exec-v2-keyless-diagnosis`): the member is a
+    WRONG-BRANCH OPTIMISTIC NAVIGATION, not a stranded whole piece.**
+    The client's speculative run of the final-"Create" handler
+    (`notebook.tsx:751`: `shouldNavigate = !usedCreateAnotherNote.get()`
+    → `navigateTo(newNote)`) read the flag false/undefined while the
+    durable value was TRUE (a03: derived seq 24 set true 14:27:55; the
+    authoritative consequence seq 57 patched true→false, proving the
+    server read true and computed NO navigation — and no navigate
+    intent for the note exists in any effects doc). The client enacted
+    optimistically (`optimisticNavigate`, navigate-to.ts — enactment
+    with no withdrawal when the authoritative run's branch computes no
+    effect) and the view moved to the new NOTE: reds carry TWO
+    `set-view` lines where every green carries ONE. Every wait and
+    every diagnostic reads `view.pieceId`, so `isNotebook:false,
+    noteCount:-1, notesLength:0, 84 stored chips` is a healthy NOTE
+    read through notebook accessors (the 84 chips are the note's own
+    `$UI`) — "every read returning nothing" was reads of the wrong
+    piece. The keyless `pattern-load-error` is downstream collateral of
+    mounting that freshly materialized note: `Runner.setup()` durably
+    stamps session-keyless patternIdentity (runner.ts:2315's
+    `if (entryRef)` filters nothing — `entryRefForPattern` always mints;
+    the serving runtime wrote `keyless:fid1:0r4P8HEr…` at a03 seq 57
+    onto an ORPHAN sub-piece doc nothing else durably references, in
+    EVERY run, greens included), the navigated client re-derives the
+    same doc ids live, arms the watcher with its OWN keyless mint, the
+    server's differing mint syncs in, the load fails, and the CT-1923
+    roll-forward CORRECTLY refuses (running ref also keyless) — one
+    error line, one stranded orphan sub-piece, not the step's verdict.
+    The CI charge (33008274232 shard 5: same fingerprint, zero load
+    errors) is the same chain with the sub-piece hash race falling the
+    other way — navigation alone produces the full fingerprint, load
+    error optional; charge and r06/r09 UNIFY. Why 2/10 quiet-biased:
+    the flag is read only inside handlers (no render/derive demand), so
+    under lazy materialization nothing pulls the authoritative patch to
+    the client; once the speculative echoes retire (watermark-gated,
+    speculation.md §4) a later speculative read regresses to the stale
+    base — fastest on a quiet box. That divergent-read link is inferred
+    from the speculation design, not witnessed (the overlay is
+    process-memory): flagged, not filled. NO FIX LANDED — all three
+    layers end in unstated semantics owed an owner ruling: (L1)
+    speculative echo retirement can regress reads for demand-less docs
+    (speculation.md §4's replacement guarantee is demand-gated); (L2)
+    optimistic enactment has no withdrawal on authoritative-branch
+    divergence (protocol.md §5 nonce convergence covers only
+    intent-arrives); (L3) two code paths durably write `keyless:` refs
+    (setup's stamp; `substituteOpPatternRefs`' sentinel, the latter
+    test-pinned as sanctioned) against pattern-manager.ts:543's
+    "never durable" invariant — whether a durable piece tree may carry
+    a pointer only one session can load is the unstated
+    identity-assignment semantic. Fixing L3 alone would NOT green the
+    step (the verdict is L1+L2); fixing L1/L2 alone leaves durable
+    poison pointers. **a04 RECLASSIFIED — a DIFFERENT member, the
+    WRITE-side loss family (lunch third-member kin), not r06/r09:**
+    all 7 create events durably appended and marked
+    `consequenced: true`, but clientSeq 10 and 11's consequences are
+    1-op 802-byte derived commits carrying ONLY the mark (seqs 53/56;
+    healthy siblings run 19+ ops) — two user actions permanently lost:
+    the mark blocks re-dispatch and a dropped first-ever run leaves no
+    basis rows to re-run (the D3 gap record above). The
+    mark-survives-dropped-contributions atomicity break is its own
+    §3d-disposition question for the owner. The final Create being one
+    of the two lost events is also why a04 did NOT navigate (one
+    set-view). The #6224-armed decisive line
+    (`deferred-start-catchup-failed …resolved without the piece
+    running`) did not and could not fire in any of the three reds —
+    `deferred-start-catchup` was 0 campaign-wide — so these reds are
+    decisively NOT the catchup-resolved-without-running variant.
     Sibling entry, landed mid-review: #5744 (lunch-poll profile-first
     join) re-skipped `integration/lunch-poll-vote.test.ts` as a FILE
     entry on this row's b04 signature — its recorded reds PREDATE the
