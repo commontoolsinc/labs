@@ -404,6 +404,32 @@ describe("readerSchemaPrecedence ambient-flag ownership", () => {
     await smBad.close();
   });
 
+  it("a surviving runtime's posture follows the rollback holder's dispose", async () => {
+    const smHolder = StorageManager.emulate({ as: signer });
+    const holder = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: smHolder,
+      experimental: { readerSchemaPrecedence: false },
+    });
+    const smSurvivor = StorageManager.emulate({ as: signer });
+    const survivor = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: smSurvivor,
+    });
+    expect(survivor.experimental.readerSchemaPrecedence).toBe(false);
+
+    // Reverse disposal order: the claim releases while the survivor lives,
+    // and what the survivor ADVERTISES (/api/meta reads this posture) must
+    // follow what traversal actually does now.
+    await holder.dispose();
+    await smHolder.close();
+    expect(getReaderSchemaPrecedenceConfig()).toBe(true);
+    expect(survivor.experimental.readerSchemaPrecedence).toBe(true);
+
+    await survivor.dispose();
+    await smSurvivor.close();
+  });
+
   it("an explicit true beside a live rollback claim reads back the effective false", async () => {
     const smHolder = StorageManager.emulate({ as: signer });
     const holder = new Runtime({

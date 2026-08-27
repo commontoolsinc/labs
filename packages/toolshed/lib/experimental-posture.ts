@@ -26,8 +26,8 @@
 
 import type { ExperimentalOptions } from "@commonfabric/runner";
 
-let posture: Record<string, boolean> | null = null;
-let servingOverrides: Record<string, boolean> | null = null;
+let posture: ExperimentalOptions | null = null;
+let servingOverrides: ExperimentalOptions | null = null;
 
 /**
  * By flag name, so the meta document reads the same across restarts and a
@@ -63,7 +63,7 @@ function booleanFlags(
 export function publishExperimentalPosture(
   experimental: ExperimentalOptions | null,
 ): void {
-  posture = experimental === null ? null : booleanFlags(experimental);
+  posture = experimental;
 }
 
 /**
@@ -80,7 +80,7 @@ export function publishExperimentalPosture(
 export function publishServingExperimentalOverrides(
   overrides: ExperimentalOptions | null,
 ): void {
-  servingOverrides = overrides === null ? null : booleanFlags(overrides);
+  servingOverrides = overrides;
 }
 
 /**
@@ -90,6 +90,13 @@ export function publishServingExperimentalOverrides(
  */
 export function experimentalPosture(): Record<string, boolean> | null {
   if (posture === null) return null;
-  if (servingOverrides === null) return posture;
-  return sortedByFlag(Object.entries({ ...posture, ...servingOverrides }));
+  // Flattened at READ time, not at publish: a Runtime's posture can carry
+  // live read-backs (readerSchemaPrecedence is a getter over the ambient
+  // claim state), and what this document advertises must be what traversal
+  // does NOW — a rollback claim released after construction shows here.
+  const base = booleanFlags(posture);
+  if (servingOverrides === null) return base;
+  return sortedByFlag(
+    Object.entries({ ...base, ...booleanFlags(servingOverrides) }),
+  );
 }

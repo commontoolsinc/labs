@@ -59,7 +59,7 @@ import {
   registerSchemaDocument,
 } from "./schema-registry.ts";
 import { getReaderSchemaPrecedenceConfig } from "./reader-schema-precedence-config.ts";
-import { markIfcBearingLinkCrossing, schemaHasIfc } from "./schema-ifc.ts";
+import { markIfcBearingLinkCrossing } from "./schema-ifc.ts";
 import type {
   CellScope,
   JSONObject,
@@ -2389,7 +2389,10 @@ function followPointer(
   }
   // The crossing's own marking runs after the registration above, so a
   // cold external closure is resolvable when the predicate walks it.
-  markIfcBearingLinkCrossing(tx, link.space, link.schema, link.id);
+  markIfcBearingLinkCrossing(tx, doc.address.space, link.schema, link.id, {
+    onMissingDocument: (docLink) =>
+      context.onMissingLinkTarget?.(docLink, doc.address.space),
+  });
   const schemaScope = schemaScopeForSelector(selector);
   if (!canFollowScopedLink(schemaScope, link.scope)) {
     // A broader-scoped read context cannot follow a link into a narrower scope
@@ -4868,7 +4871,16 @@ export class SchemaObjectTraverser<V extends FabricValue>
         const isLink = isSigilLink(curDoc.value);
         if (isLink) this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
         const cellLink = isLink
-          ? getNextCellLink(this.tx, curDoc, curSelector.schema!)
+          ? getNextCellLink(
+            this.tx,
+            curDoc,
+            curSelector.schema!,
+            (docLink) =>
+              this.context.onMissingLinkTarget?.(
+                docLink,
+                curDoc.address.space,
+              ),
+          )
           : getNormalizedLink(curDoc.address, curSelector.schema);
         const val = this.objectCreator.createObject(cellLink, undefined);
         arrayObj[index] = val;
@@ -5103,7 +5115,13 @@ export class SchemaObjectTraverser<V extends FabricValue>
     // This means we don't follow any redirects
     const asCellValues = ContextualFlowControl.getAsCellValues(schema);
     if (ContextualFlowControl.getAsCellKind(asCellValues.at(0)) === "opaque") {
-      const cellLink = getNextCellLink(this.tx, doc, schema);
+      const cellLink = getNextCellLink(
+        this.tx,
+        doc,
+        schema,
+        (docLink) =>
+          this.context.onMissingLinkTarget?.(docLink, doc.address.space),
+      );
       return { ok: this.objectCreator.createObject(cellLink, undefined) };
     }
 
@@ -5185,7 +5203,13 @@ export class SchemaObjectTraverser<V extends FabricValue>
       if (isSigilLink(redirDoc.value)) {
         this.tx.read(redirDoc.address, READ_FOR_SCHEDULING);
       }
-      const cellLink = getNextCellLink(this.tx, redirDoc, combinedSchema);
+      const cellLink = getNextCellLink(
+        this.tx,
+        redirDoc,
+        combinedSchema,
+        (docLink) =>
+          this.context.onMissingLinkTarget?.(docLink, redirDoc.address.space),
+      );
       logger.debug(
         "traverse",
         () => ["Next cell link:", {
@@ -5611,6 +5635,7 @@ function getNextCellLink(
   tx: IExtendedStorageTransaction,
   doc: IMemorySpaceValueAttestation,
   schema: JSONSchema,
+  onMissingDocument?: (link: NormalizedFullLink) => void,
 ): NormalizedFullLink {
   // For my cell link, itemLink currently points to the last redirect
   // target, but we want cell properties to be based on the link value at
@@ -5621,9 +5646,10 @@ function getNextCellLink(
     // seam itself.
     markIfcBearingLinkCrossing(
       tx,
-      lastLink.space,
+      doc.address.space,
       lastLink.schema,
       lastLink.id,
+      { onMissingDocument },
     );
     // The link may not have the asCell flags, so pull that from itemSchema.
     // Reader precedence, like every other crossing: the handle must not

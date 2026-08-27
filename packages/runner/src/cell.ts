@@ -2130,7 +2130,17 @@ export class CellImpl<T extends FabricValue>
     if (!this.synced) this.sync();
 
     // Get current value, following aliases and references
-    const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
+    // The read half of this read-modify-write is a content read: labeled
+    // crossings mark (the write half's policy input is recorded separately).
+    const resolvedLink = resolveLink(
+      this.runtime,
+      this.tx,
+      this.link,
+      "value",
+      {
+        markIfcCrossings: true,
+      },
+    );
     recordRelevantSchemaWritePolicyInput(
       this.tx,
       resolvedLink,
@@ -2191,7 +2201,17 @@ export class CellImpl<T extends FabricValue>
 
     // Follow aliases and references, since we want to get to an assumed
     // existing array.
-    const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
+    // The read half of this read-modify-write is a content read: labeled
+    // crossings mark (the write half's policy input is recorded separately).
+    const resolvedLink = resolveLink(
+      this.runtime,
+      this.tx,
+      this.link,
+      "value",
+      {
+        markIfcCrossings: true,
+      },
+    );
     recordRelevantSchemaWritePolicyInput(
       this.tx,
       resolvedLink,
@@ -2284,7 +2304,17 @@ export class CellImpl<T extends FabricValue>
     }
     if (!this.synced) this.sync();
 
-    const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
+    // The read half of this read-modify-write is a content read: labeled
+    // crossings mark (the write half's policy input is recorded separately).
+    const resolvedLink = resolveLink(
+      this.runtime,
+      this.tx,
+      this.link,
+      "value",
+      {
+        markIfcCrossings: true,
+      },
+    );
     recordRelevantSchemaWritePolicyInput(
       this.tx,
       resolvedLink,
@@ -2406,7 +2436,17 @@ export class CellImpl<T extends FabricValue>
     }
     if (!this.synced) this.sync();
 
-    const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
+    // The read half of this read-modify-write is a content read: labeled
+    // crossings mark (the write half's policy input is recorded separately).
+    const resolvedLink = resolveLink(
+      this.runtime,
+      this.tx,
+      this.link,
+      "value",
+      {
+        markIfcCrossings: true,
+      },
+    );
     recordRelevantSchemaWritePolicyInput(
       this.tx,
       resolvedLink,
@@ -2447,7 +2487,17 @@ export class CellImpl<T extends FabricValue>
     }
     if (!this.synced) this.sync();
 
-    const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
+    // The read half of this read-modify-write is a content read: labeled
+    // crossings mark (the write half's policy input is recorded separately).
+    const resolvedLink = resolveLink(
+      this.runtime,
+      this.tx,
+      this.link,
+      "value",
+      {
+        markIfcCrossings: true,
+      },
+    );
     recordRelevantSchemaWritePolicyInput(
       this.tx,
       resolvedLink,
@@ -2509,7 +2559,9 @@ export class CellImpl<T extends FabricValue>
   // addUnique / removeByValue, without ever reading the whole array.
   elementById(idKey: string, schema?: JSONSchema): Cell<any> {
     const tx = this.runtime.readTx(this.tx);
-    const resolvedLink = resolveLink(this.runtime, tx, this.link);
+    const resolvedLink = resolveLink(this.runtime, tx, this.link, "value", {
+      markIfcCrossings: true,
+    });
     const entityId = createRef(
       { id: idKey },
       {

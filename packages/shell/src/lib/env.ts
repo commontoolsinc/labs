@@ -57,10 +57,37 @@ export const API_URL: URL = new URL(
 export const COMMIT_SHA: string | undefined = COMMIT_SHA_DEFINE;
 
 /**
- * Results in `true` (on), `false` (off), or `undefined` (default).
+ * Raw build-define strings keyed by the canonical `EXPERIMENTAL_*` names, so
+ * the deployed-posture adoption (`experimentalOptionsForDeployedClient`) can
+ * read them through the one canonical parser the server side uses. A define
+ * that was not set at build time reads as unset.
+ */
+export const EXPERIMENTAL_DEFINES: Record<string, string | undefined> = {
+  EXPERIMENTAL_MODERN_CELL_REP: EXPERIMENTAL_MODERN_CELL_REP_DEFINE,
+  EXPERIMENTAL_COMPUTED_CELL_IDS: EXPERIMENTAL_COMPUTED_CELL_IDS_DEFINE,
+  EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE:
+    EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_DEFINE,
+  EXPERIMENTAL_SERVER_EXECUTION: EXPERIMENTAL_SERVER_EXECUTION_DEFINE,
+  EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS:
+    EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS_DEFINE,
+  EXPERIMENTAL_READER_SCHEMA_PRECEDENCE:
+    EXPERIMENTAL_READER_SCHEMA_PRECEDENCE_DEFINE,
+};
+
+/**
+ * The canonical flag parse (shared with the server side's env mapping):
+ * exactly `"true"` / `"false"`; anything else — including a garbled define —
+ * is ignored rather than coerced, leaving the flag's default in force.
  */
 function flagValue(flag: string | undefined): boolean | undefined {
-  return (typeof flag === "string") ? (flag === "true") : undefined;
+  if (flag === "true" || flag === "false") return flag === "true";
+  if (typeof flag === "string") {
+    console.warn(
+      `[shell/env] Ignoring experimental define "${flag}" — expected ` +
+        `"true" or "false" (unset = default).`,
+    );
+  }
+  return undefined;
 }
 
 /** Build-time experimental flags, injected via felt.config.ts defines. */

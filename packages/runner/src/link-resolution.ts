@@ -474,7 +474,9 @@ export function resolveLinkTracingDereferences(
     for (const trace of cached.traces) tx.recordCfcDereferenceTrace(trace);
     if (options.markIfcCrossings === true) {
       for (const hop of cached.schemaHops) {
-        markIfcBearingLinkCrossing(tx, hop.space, hop.schema, hop.id);
+        markIfcBearingLinkCrossing(tx, hop.space, hop.schema, hop.id, {
+          onMissingDocument: (docLink) => kickDocPull(runtime, docLink, false),
+        });
       }
     }
     for (const target of cached.crossSpaceTargets) {
@@ -809,7 +811,9 @@ export function resolveLinkTracingDereferences(
 
   if (options.markIfcCrossings === true) {
     for (const hop of schemaHops) {
-      markIfcBearingLinkCrossing(tx, hop.space, hop.schema, hop.id);
+      markIfcBearingLinkCrossing(tx, hop.space, hop.schema, hop.id, {
+        onMissingDocument: (docLink) => kickDocPull(runtime, docLink, false),
+      });
     }
   }
 

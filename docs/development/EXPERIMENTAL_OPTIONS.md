@@ -557,12 +557,17 @@ Still unbuilt, and recorded in the plan: handlers materialize eagerly.
 
 - **Toggle via.** `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` environment variable
   (through the canonical env registry) or
-  `RuntimeOptions.experimental.readerSchemaPrecedence`; browser-side via the
-  shell build define of the same name
+  `RuntimeOptions.experimental.readerSchemaPrecedence`; browser-side the
+  shell ADOPTS the deployment's published posture at boot
+  (`experimentalOptionsForDeployedClient` against `/api/meta`, in
+  [`RootView`](../../packages/shell/src/views/RootView.ts)) and declares the
+  result to the worker through the typed initialization posture, with the
+  build define of the same name
   ([`packages/shell/felt.config.ts`](../../packages/shell/felt.config.ts) /
-  [`packages/shell/src/lib/env.ts`](../../packages/shell/src/lib/env.ts)),
-  declared to the worker through the typed initialization posture so the two
-  realms cannot diverge. The ambient control point is
+  [`packages/shell/src/lib/env.ts`](../../packages/shell/src/lib/env.ts),
+  parsed by the one canonical parser) as the explicit override — so a
+  runtime rollback applied server-side reaches already-built shells. The
+  ambient control point is
   [`packages/runner/src/reader-schema-precedence-config.ts`](../../packages/runner/src/reader-schema-precedence-config.ts).
   Server-authoritative in `EXPERIMENTAL_FLAG_AUTHORITY`: a server publishes
   its resolved posture at `/api/meta` and a deployed client adopts it (an
@@ -591,10 +596,17 @@ Still unbuilt, and recorded in the plan: handlers materialize eagerly.
   rollback-holding Runtime acquires a disabler released on dispose (or by a
   throwing construction), a co-hosted default-arm runtime's dispose cannot
   lift a live claim, and an explicit `true` beside a live claim is a
-  conflict the rollback wins, with a warning. The flag gates only the
-  combine rule: the cfc relevance marking off link schemas (`schemaHasIfc`
-  at the read entry point and at traversal hops) is unconditional in both
-  arms.
+  conflict the rollback wins, with a warning. A runtime's
+  `experimental.readerSchemaPrecedence` read-back is LIVE (a getter over the
+  ambient claim state), so the posture `/api/meta` republishes follows a
+  claim released by another runtime's dispose. Compatibility: a server
+  posture that DECLARES no `readerSchemaPrecedence` predates the flag and
+  necessarily runs the strict combine, so adoption treats absence as the
+  legacy `false` until the compatibility window closes
+  (`parseServerExperimentalOptions`); an unreachable server leaves the
+  built-in default. The flag gates only the combine rule: the cfc relevance
+  marking off link schemas (`schemaHasIfc` at the read entry point and at
+  traversal hops) is unconditional in both arms.
 - **Status on 2026-08-26.** Landed on by default in #6338; the rollback arm,
   the claim lifecycle (co-hosted dispose, throwing construction, conflict),
   and the default inheritance are covered by unit tests in

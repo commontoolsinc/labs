@@ -1353,8 +1353,15 @@ export class Runtime {
           "process-wide until that claim releases.",
       );
     }
-    this.experimental.readerSchemaPrecedence =
-      getReaderSchemaPrecedenceConfig();
+    // A LIVE read-back, not a snapshot: the process-global claim can change
+    // after construction (another runtime's rollback claim releasing on its
+    // dispose), and consumers that republish this posture — /api/meta most
+    // of all — must advertise what traversal actually does now.
+    Object.defineProperty(this.experimental, "readerSchemaPrecedence", {
+      get: getReaderSchemaPrecedenceConfig,
+      enumerable: true,
+      configurable: true,
+    });
     // The sync schema table stays negotiated under this flag: the two
     // mechanisms dedupe the same link-schema positions and compose (the
     // table encoder skips reference-only positions), and stored links

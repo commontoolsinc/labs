@@ -17,6 +17,7 @@ import {
 } from "./cfc/schema-refs.ts";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { URI } from "./sigil-types.ts";
+import type { NormalizedFullLink } from "./link-types.ts";
 import {
   collectExternalSchemaRefHashes,
   containsExternalSchemaRef,
@@ -151,6 +152,14 @@ export function ensureExternalSchemaClosure(
   tx: IExtendedStorageTransaction,
   space: MemorySpace,
   schema: JSONSchema | undefined,
+  options: {
+    /**
+     * Invoked for a closure document the local replica does not hold, so
+     * the caller's delivery channel can request it — the tracked read
+     * alone records the dependency but does not initiate delivery.
+     */
+    onMissingDocument?: (link: NormalizedFullLink) => void;
+  } = {},
 ): void {
   if (schema === undefined || !containsExternalSchemaRef(schema)) return;
   const pending = [...collectExternalSchemaRefHashes(schema)];
@@ -160,13 +169,26 @@ export function ensureExternalSchemaClosure(
     if (seen.has(hash)) continue;
     seen.add(hash);
     if (lookupSchemaDocument(hash) === undefined) {
-      const result = tx.read({
+      const address = {
         space,
         id: `cid:${hash}` as URI,
         scope: "space",
         path: [],
-      });
-      if (result.error !== undefined) continue;
+      } as const;
+      const result = tx.read(address);
+      if (result.error !== undefined) {
+        if (result.error.name === "NotFoundError") {
+          options.onMissingDocument?.(
+            {
+              space: address.space,
+              id: address.id,
+              path: [],
+              scope: address.scope,
+            } as NormalizedFullLink,
+          );
+        }
+        continue;
+      }
       const doc = result.ok.value;
       if (!isObjectNotArray(doc) || !("value" in doc)) continue;
       try {
@@ -205,9 +227,13 @@ export function markIfcBearingLinkCrossing(
   space: MemorySpace,
   linkSchema: JSONSchema | undefined,
   linkId: string,
+  options: {
+    /** See {@link ensureExternalSchemaClosure}. */
+    onMissingDocument?: (link: NormalizedFullLink) => void;
+  } = {},
 ): void {
   if (linkSchema === undefined) return;
-  ensureExternalSchemaClosure(tx, space, linkSchema);
+  ensureExternalSchemaClosure(tx, space, linkSchema, options);
   if (schemaHasIfc(linkSchema)) {
     tx.markCfcRelevant(`schema-ifc-hop:${linkId}`);
   }

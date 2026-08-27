@@ -398,13 +398,35 @@ describe("runtimePresets conformance (CT-1814)", () => {
         expect(parseServerExperimentalOptions({
           modernCellRep: true,
           serverExecution: false,
-        })).toEqual({ modernCellRep: true, serverExecution: false });
+        })).toEqual({
+          modernCellRep: true,
+          serverExecution: false,
+          readerSchemaPrecedence: false,
+        });
       });
 
-      it("returns nothing for a declaration that is not an object", () => {
-        expect(parseServerExperimentalOptions(null)).toEqual({});
-        expect(parseServerExperimentalOptions(undefined)).toEqual({});
-        expect(parseServerExperimentalOptions("modernCellRep")).toEqual({});
+      // A responding server that declares no readerSchemaPrecedence predates
+      // the flag and necessarily runs the strict combine: absence adopts as
+      // the legacy false. A declared value wins as usual.
+      it("adopts legacy false for an absent readerSchemaPrecedence declaration", () => {
+        expect(parseServerExperimentalOptions({}).readerSchemaPrecedence)
+          .toBe(false);
+        expect(
+          parseServerExperimentalOptions({ readerSchemaPrecedence: true })
+            .readerSchemaPrecedence,
+        ).toBe(true);
+      });
+
+      it("returns only the legacy defaults for a declaration that is not an object", () => {
+        expect(parseServerExperimentalOptions(null)).toEqual({
+          readerSchemaPrecedence: false,
+        });
+        expect(parseServerExperimentalOptions(undefined)).toEqual({
+          readerSchemaPrecedence: false,
+        });
+        expect(parseServerExperimentalOptions("modernCellRep")).toEqual({
+          readerSchemaPrecedence: false,
+        });
       });
 
       it("ignores a key this build has no flag for", () => {
@@ -416,7 +438,10 @@ describe("runtimePresets conformance (CT-1814)", () => {
             flagFromTheFuture: true,
           })
         );
-        expect(result).toEqual({ modernCellRep: true });
+        expect(result).toEqual({
+          modernCellRep: true,
+          readerSchemaPrecedence: false,
+        });
         expect(warnings.length).toBe(0);
       });
 
@@ -424,7 +449,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
         const { warnings, result } = captureWarnings(() =>
           parseServerExperimentalOptions({ modernCellRep: "true" })
         );
-        expect(result).toEqual({});
+        expect(result).toEqual({ readerSchemaPrecedence: false });
         expect(warnings.length).toBe(1);
         expect(String(warnings[0][0])).toContain("modernCellRep");
       });
@@ -493,10 +518,13 @@ describe("runtimePresets conformance (CT-1814)", () => {
         // toolshed side pins the constant against the route that serves it.
         expect(requested).toEqual(["https://deployment.example/api/meta"]);
         // The env's explicit `false` outranks the server; the flag it says
-        // nothing about is adopted.
+        // nothing about is adopted — and a posture with no
+        // readerSchemaPrecedence declaration is a pre-flag server, adopted
+        // as the legacy strict `false`.
         expect(adopted).toEqual({
           modernCellRep: false,
           serverExecution: true,
+          readerSchemaPrecedence: false,
         });
       });
 
@@ -539,7 +567,9 @@ describe("runtimePresets conformance (CT-1814)", () => {
       });
 
       it("falls back to the environment for a server that publishes no posture", async () => {
-        // An older server, whose meta document predates the field.
+        // An older server, whose meta document predates the field. It also
+        // predates readerSchemaPrecedence, so that one flag adopts as the
+        // legacy strict `false` rather than staying unset.
         expect(
           await experimentalOptionsForDeployedClient({
             apiUrl: new URL("https://deployment.example"),
@@ -547,7 +577,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
             fetch: () =>
               Promise.resolve(metaResponse({ did: "did:key:z", gitSha: null })),
           }),
-        ).toEqual({});
+        ).toEqual({ readerSchemaPrecedence: false });
       });
 
       it("hands the request the caller's cancellation signal", async () => {
@@ -659,7 +689,10 @@ describe("runtimePresets conformance (CT-1814)", () => {
               })),
           })
         );
-        expect(await result).toEqual({ serverExecution: true });
+        expect(await result).toEqual({
+          serverExecution: true,
+          readerSchemaPrecedence: false,
+        });
         expect(warnings.length).toBe(1);
         expect(String(warnings[0][0])).toContain(ADOPT_SERVER_FLAGS_ENV);
       });
