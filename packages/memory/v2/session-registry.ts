@@ -1,4 +1,9 @@
-import type { SessionDescriptor, SessionToken, WatchSpec } from "../v2.ts";
+import type {
+  OpCursor,
+  SessionDescriptor,
+  SessionToken,
+  WatchSpec,
+} from "../v2.ts";
 import type { TrackedGraphState } from "./query.ts";
 import type { SessionCacheEntry } from "./server-sync.ts";
 import { trackedIdsFromEntries } from "./server-sync.ts";
@@ -10,6 +15,7 @@ export type SessionState = {
   seenSeq: number;
   lastSyncedSeq: number;
   watches: WatchSpec[];
+  operationCursors: Map<string, OpCursor>;
   graphs: Map<string, TrackedGraphState>;
   entities: Map<string, SessionCacheEntry>;
   trackedIds: Set<string>;
@@ -139,6 +145,7 @@ export class SessionRegistry {
       seenSeq,
       lastSyncedSeq: existing?.lastSyncedSeq ?? seenSeq,
       watches: existing?.watches ?? [],
+      operationCursors: existing?.operationCursors ?? new Map(),
       graphs: existing?.graphs ?? new Map(),
       entities: existing?.entities ?? new Map(),
       trackedIds: existing?.trackedIds ??
