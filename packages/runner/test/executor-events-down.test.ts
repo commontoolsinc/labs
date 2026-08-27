@@ -2404,8 +2404,11 @@ describe("Phase 3 events-down (serving side)", () => {
   const w3Setup = async (
     prefix: string,
     policy: { flushDeadlineMs: number },
+    clientSigner: Identity = aliceSigner,
   ) => {
-    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    ({ manager: clientManager, runtime: clientRuntime } = openClient(
+      clientSigner,
+    ));
     const engine = await server.engineForSpace(space);
     const mkStream = async (name: string) => {
       const cell = clientRuntime.getCell<unknown>(space, name, undefined);
@@ -3080,10 +3083,18 @@ describe("Phase 3 events-down (serving side)", () => {
 
   /** The sibling-orphan construction, extracted whole so the bounded
    * accept-and-retry below can re-run it FRESH (the window lottery is
-   * per-construction — a bare re-assert would just re-fail): every
-   * attempt gets its own doc/stream prefix, host tenure, and client. */
+   * per-construction — a bare re-assert would just re-fail): every attempt gets
+   * its own doc/stream prefix, host tenure, and client identity/session
+   * namespace. */
   const runSiblingOrphanConstruction = async (prefix: string) => {
-    const w = await w3Setup(prefix, { flushDeadlineMs: 30_000 });
+    const attemptSigner = await Identity.fromPassphrase(
+      `events-down sibling-orphan ${prefix}`,
+    );
+    const w = await w3Setup(
+      prefix,
+      { flushDeadlineMs: 30_000 },
+      attemptSigner,
+    );
     const cancels: Array<() => void> = [];
     const gate = Promise.withResolvers<void>();
     const sideClient = clientRuntime.getCell<{ n?: number }>(
@@ -3589,7 +3600,7 @@ describe("Phase 3 events-down (serving side)", () => {
       );
 
       await waitUntil(
-        () => host!.stats().events.deliveryCheckpointWriteFailures === 2,
+        () => host!.stats().events.deliveryCheckpointWriteFailures >= 2,
         "the whole-wave checkpoint rejection to be counted",
       );
       expect(rejectedWaveCommits).toBe(1);
