@@ -18,6 +18,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
+import { cfcLabelViewForCell } from "../src/cfc/mod.ts";
 import { decomposeSchema } from "../src/schema-decompose.ts";
 import type { Cell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -179,6 +180,27 @@ describe("link-ifc-read-relevance", () => {
     holder.key("item").set({ name: "Grace" });
     expect(tx.getCfcState().relevant).toBe(true);
     expect(schemaIfcHopReasons().length).toBeGreaterThan(0);
+  });
+
+  it("marks a crossing whose only label signal is the stored schema's declaration", () => {
+    // The seam's non-redundant case. The target document carries no
+    // stored cfc metadata and no label view — the ifc exists only as the
+    // stored link schema's declaration — and the flow-label machinery
+    // that marks relevance off persisted metadata is at its default
+    // (off). Without the crossing seam, this read's transaction would
+    // stay non-relevant and enforcement would never engage for it.
+    const holder = holderOverLinkCarrying(labeledLinkSchema);
+
+    expect(holder.key("item").get()).toEqual({ name: "Ada" });
+
+    expect(tx.getCfcState().flowLabelsMode).toBe("off");
+    expect(cfcLabelViewForCell(holder.key("item"))?.entries ?? []).toEqual([]);
+    expect(tx.getCfcState().relevant).toBe(true);
+    const reasons = tx.getCfcState().diagnostics;
+    expect(reasons.length).toBeGreaterThan(0);
+    expect(reasons.every((reason) => reason.startsWith("schema-ifc-"))).toBe(
+      true,
+    );
   });
 
   it("leaves a read through an unlabeled link without the schema-ifc marking", () => {
