@@ -830,3 +830,22 @@ Deno.test("server-execution ON jobs ship records under their variant", async () 
     assertStringIncludes(ship, "variant: server-execution");
   }
 });
+
+Deno.test("server-execution ON pattern failures upload the toolshed log", async () => {
+  const contents = await workflow("deno.yml");
+  const patternJob = jobBlock(
+    contents,
+    "pattern-integration-test-server-execution-on",
+  );
+  const upload = stepBlock(patternJob, "📋 Upload toolshed log on failure");
+
+  assertStringIncludes(upload, "if: failure()");
+  assertStringIncludes(upload, "uses: actions/upload-artifact@v7");
+  assertStringIncludes(
+    upload,
+    "name: toolshed-log-pattern-integration-server-execution-on-${{ matrix.shard }}",
+  );
+  assertStringIncludes(upload, "path: ${{ runner.temp }}/toolshed.log");
+  assertStringIncludes(upload, "retention-days: 14");
+  assertStringIncludes(upload, "if-no-files-found: ignore");
+});
