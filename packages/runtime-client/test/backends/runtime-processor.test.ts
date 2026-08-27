@@ -606,6 +606,74 @@ describe("runtime-processor", () => {
     });
   });
 
+  describe("piece creation", () => {
+    const space = "did:key:z6Mk-runtime-processor-create" as const;
+    const source = { program: { main: "/main.tsx", files: [] } };
+
+    const refusalFor = async (argument: unknown) => {
+      try {
+        // deno-lint-ignore no-explicit-any
+        await (RuntimeProcessor.prototype as any).handlePieceCreate.call(
+          { getSpaceCtx: () => ({}) },
+          { type: RequestType.PageCreate, space, source, argument },
+        );
+      } catch (error) {
+        return (error as Error).message;
+      }
+      throw new Error("handlePieceCreate returned instead of refusing");
+    };
+
+    it("names the rejected argument rather than its type", async () => {
+      // A piece's input is a record of named inputs, and the guard turns away
+      // everything else. `typeof` is not what says which: it renders an array
+      // and `null` alike, as `object`, and those are two of the kinds that get
+      // here. The message exists to explain the refusal, so it names the
+      // value.
+      expect(await refusalFor([1, 2]))
+        .toBe("A piece's argument must be a record, not: [1,2]");
+      expect(await refusalFor(null))
+        .toBe("A piece's argument must be a record, not: null");
+      expect(await refusalFor("a bare string"))
+        .toBe('A piece\'s argument must be a record, not: "a bare string"');
+    });
+
+    it("refuses a fabric class instance as the whole argument", async () => {
+      // The arm that separates `isPlainObject()` from the looser
+      // `isObjectNotArray()`, which admits any class instance. A piece's
+      // entire input is not one value, whatever that value is.
+      expect(await refusalFor(new FabricBytes(new Uint8Array([1, 2, 3]))))
+        .toContain("A piece's argument must be a record, not:");
+      expect(await refusalFor(FabricError.fromNativeError(new Error("x"))))
+        .toContain("A piece's argument must be a record, not:");
+    });
+
+    it("admits a record that holds a fabric class instance", async () => {
+      // The other side of the same line, and the case that has to keep
+      // working: the guard asks what the argument *is*, not what it holds.
+      const created: unknown[] = [];
+      const processor = {
+        getSpaceCtx: () => ({
+          create: (_program: unknown, options: { input?: unknown }) => {
+            created.push(options.input);
+            throw new Error("stop after the guard");
+          },
+        }),
+      };
+      const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+
+      await expect(
+        // deno-lint-ignore no-explicit-any
+        (RuntimeProcessor.prototype as any).handlePieceCreate.call(processor, {
+          type: RequestType.PageCreate,
+          space,
+          source,
+          argument: { image: bytes },
+        }),
+      ).rejects.toThrow("stop after the guard");
+      expect(created).toEqual([{ image: bytes }]);
+    });
+  });
+
   describe("space ACL state", () => {
     it("reports owner controls from the active principal's ACL entry", async () => {
       const space = "did:key:z6Mk-runtime-processor-acl" as const;
