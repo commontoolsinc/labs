@@ -93,6 +93,56 @@ export interface PatternIndexGetRequest {
 }
 
 /**
+ * One row of `listPatterns`: a pattern's public metadata, the events recorded
+ * against it counted by type, and the weighted total those counts produce.
+ * Carries no source and none of the private query fields a publication
+ * supplied.
+ */
+export interface PatternIndexListedPattern {
+  patternId: string;
+  description: string;
+  hashtags: readonly string[];
+  keywords: readonly string[];
+  ownerDid: string;
+
+  /** `null` for a pattern the index holds no creation time for. */
+  createdAt: string | null;
+
+  /** Event type to how many times it was recorded against this pattern. */
+  events: Readonly<Record<string, number>>;
+  score: number;
+}
+
+export interface PatternIndexListPatternsResponse {
+  patterns: readonly PatternIndexListedPattern[];
+
+  /** Event type to the weight `score` counts one of them at. */
+  eventTypes: Readonly<Record<string, number>>;
+}
+
+export interface PatternIndexListEventsRequest {
+  patternId?: string;
+
+  /** The index caps this at 500, whatever a caller asks for. */
+  limit?: number;
+}
+
+/** One recorded event of the calling identity's own stream. */
+export interface PatternIndexEvent {
+  patternId: string;
+  did: string;
+  eventType: string;
+
+  /** `null` for an event the index holds no timestamp for. */
+  ts: string | null;
+  note?: string;
+}
+
+export interface PatternIndexListEventsResponse {
+  events: readonly PatternIndexEvent[];
+}
+
+/**
  * What a run reports back about a pattern it took from the index. The index
  * ranks on these, so a run that instantiates a pattern and then fails says
  * both things rather than only the first.
@@ -284,6 +334,31 @@ export class PatternIndexClient {
       ...(request.includeSource !== undefined
         ? { includeSource: request.includeSource }
         : {}),
+    });
+  }
+
+  /**
+   * Every pattern the index holds, scored, for an operator reading the index
+   * as a whole. The aggregate is public — a count and a weight per pattern —
+   * so this says what is indexed and how it ranks without naming who did what.
+   */
+  listPatterns(): Promise<PatternIndexListPatternsResponse> {
+    return this.#call<PatternIndexListPatternsResponse>("listPatterns", {});
+  }
+
+  /**
+   * The calling identity's OWN events, newest first. The index answers each
+   * signer with their own stream and nobody else's, so this is what a run made
+   * of the index rather than what everyone made of it.
+   */
+  listEvents(
+    request: PatternIndexListEventsRequest = {},
+  ): Promise<PatternIndexListEventsResponse> {
+    return this.#call<PatternIndexListEventsResponse>("listEvents", {
+      ...(request.patternId !== undefined
+        ? { patternId: request.patternId }
+        : {}),
+      ...(request.limit !== undefined ? { limit: request.limit } : {}),
     });
   }
 

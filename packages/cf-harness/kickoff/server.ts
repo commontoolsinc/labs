@@ -79,6 +79,13 @@ import {
 } from "../src/interactive-chat-service.ts";
 import { OpenAICodexResponsesClient } from "../src/model/openai-codex-responses.ts";
 import {
+  cacheHarnessPatternIndexClientFactory,
+  createHarnessPatternIndexClientFactory,
+  type HarnessPatternIndexClientFactory,
+  type PatternIndexClient,
+  PatternIndexError,
+} from "../src/pattern-index/client.ts";
+import {
   CFC_INVOCATION_CONTEXT_DIR_ENV,
   CFC_RESULT_DIR_ENV,
 } from "../src/sandbox/docker-runsc.ts";
@@ -225,6 +232,66 @@ const PATTERN_INDEX_TOOL_IDS = [
   "search_patterns",
   "record_feedback",
 ] as const satisfies readonly BuiltinToolId[];
+
+/**
+ * The index functions the Index view may reach through the proxy. Every one of
+ * them reads: this surface inspects what the index holds and never writes to
+ * it, so a page that asked for `publishPattern` or `recordEvent` is refused by
+ * name rather than by the index. `getPattern` is called without
+ * `includeSource`, which is why a pattern's source cannot arrive at the page
+ * whatever the page sends.
+ */
+const INDEX_FUNCTIONS = [
+  "searchPatterns",
+  "listPatterns",
+  "listEvents",
+  "getPattern",
+] as const;
+
+type IndexFunction = typeof INDEX_FUNCTIONS[number];
+
+const isIndexFunction = (value: unknown): value is IndexFunction =>
+  typeof value === "string" &&
+  (INDEX_FUNCTIONS as readonly string[]).includes(value);
+
+const stringList = (value: unknown): readonly string[] | undefined =>
+  Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : undefined;
+
+/**
+ * Dispatches one allowlisted read at the typed client. The request is rebuilt
+ * field by field rather than forwarded, so what reaches the index is what this
+ * server composed — a page cannot smuggle `includeSource`, or any other field,
+ * past the allowlist by putting it in the body.
+ */
+const callPatternIndex = (
+  client: PatternIndexClient,
+  fn: IndexFunction,
+  body: Readonly<Record<string, unknown>>,
+): Promise<unknown> => {
+  switch (fn) {
+    case "searchPatterns": {
+      const tags = stringList(body.tags);
+      return client.searchPatterns({
+        ...(tags !== undefined ? { tags } : {}),
+        ...(typeof body.text === "string" ? { text: body.text } : {}),
+        ...(typeof body.limit === "number" ? { limit: body.limit } : {}),
+      });
+    }
+    case "listPatterns":
+      return client.listPatterns();
+    case "listEvents":
+      return client.listEvents({
+        ...(typeof body.patternId === "string"
+          ? { patternId: body.patternId }
+          : {}),
+        ...(typeof body.limit === "number" ? { limit: body.limit } : {}),
+      });
+    case "getPattern":
+      return client.getPattern({ patternId: body.patternId as string });
+  }
+};
 
 /** Everything the server needs before it can serve a single request. */
 interface KickoffConfig {
@@ -566,6 +633,9 @@ export class KickoffServer {
   readonly #config: KickoffConfig;
   readonly #service: HarnessInteractiveChatService;
   readonly #token = crypto.randomUUID();
+  readonly #patternIndexClientFactory:
+    | HarnessPatternIndexClientFactory
+    | undefined;
   #beats = 0;
 
   /**
@@ -574,15 +644,30 @@ export class KickoffServer {
    * become the page's feed, and the two have no order to be constructed in
    * otherwise. This is the seam the NDJSON stdio transport keeps for the same
    * reason.
+   *
+   * The index client is the other way round: it reads the fabric identity from
+   * disk to sign with, so it is built lazily, cached once healthy, and handed
+   * in by a test that has no keyfile to read.
    */
   constructor(
     config: KickoffConfig,
     createService: (
       onEvent: HarnessInteractiveChatEventListener,
     ) => HarnessInteractiveChatService,
+    patternIndexClientFactory?: HarnessPatternIndexClientFactory,
   ) {
     this.#config = config;
     this.#service = createService((envelope) => this.broadcast(envelope));
+    const factory = patternIndexClientFactory ??
+      (config.patternIndex !== undefined
+        ? createHarnessPatternIndexClientFactory(
+          config.patternIndex,
+          config.fabricSession.identityKeyPath,
+        )
+        : undefined);
+    this.#patternIndexClientFactory = factory === undefined
+      ? undefined
+      : cacheHarnessPatternIndexClientFactory(factory);
   }
 
   /** The chat service this server fronts, for startup and shutdown. */
@@ -639,6 +724,9 @@ export class KickoffServer {
     }
     if (request.method === "POST" && url.pathname === "/api/task") {
       return await this.#startTask(request);
+    }
+    if (request.method === "POST" && url.pathname === "/api/index/call") {
+      return await this.#indexCall(request);
     }
     if (request.method === "POST" && url.pathname === "/api/cancel") {
       return await this.#cancel(request);
@@ -853,6 +941,72 @@ export class KickoffServer {
     return response.ok
       ? Response.json(response.result)
       : chatErrorResponse(response);
+  }
+
+  /**
+   * One read of the pattern index, signed with this server's fabric identity.
+   * The page holds no key and reaches no other host: it names a function from
+   * `INDEX_FUNCTIONS` and this composes the request, so what the index sees is
+   * the operator's own identity and nothing the page could have addressed
+   * elsewhere. The route sits under `/api/`, so the `Host`, `Origin` and token
+   * gates have already refused everything that is not this server's own page.
+   */
+  async #indexCall(request: Request): Promise<Response> {
+    const factory = this.#patternIndexClientFactory;
+    if (factory === undefined) {
+      return Response.json({
+        error:
+          "this server was started without a pattern index; restart it with --pattern-index-url or CF_HARNESS_PATTERN_INDEX_URL",
+      }, { status: 404 });
+    }
+    let parsed: unknown;
+    try {
+      parsed = await request.json();
+    } catch {
+      return Response.json({ error: "request body is not JSON" }, {
+        status: 400,
+      });
+    }
+    const envelope: { fn?: unknown; body?: unknown } =
+      typeof parsed === "object" && parsed !== null ? parsed : {};
+    if (!isIndexFunction(envelope.fn)) {
+      return Response.json({
+        error: `fn must be one of ${INDEX_FUNCTIONS.join(", ")}`,
+      }, { status: 400 });
+    }
+    const body: Record<string, unknown> =
+      typeof envelope.body === "object" && envelope.body !== null
+        ? envelope.body as Record<string, unknown>
+        : {};
+    if (envelope.fn === "getPattern" && typeof body.patternId !== "string") {
+      return Response.json({ error: "patternId is required" }, { status: 400 });
+    }
+    try {
+      const client = await factory();
+      return Response.json(await callPatternIndex(client, envelope.fn, body));
+    } catch (error) {
+      // The index's own status is passed through when it named a fault in the
+      // request — a pattern that is not there, an identity it will not take —
+      // and anything else reads as this server failing to reach it. The
+      // message alone: a `PatternIndexError`'s detail is the index's body,
+      // which is not what an operator page renders.
+      // Only the typed index error's stable message crosses to the page: a
+      // host-side failure — an unreadable identity keyfile among them — can
+      // name paths this machine's operator configured, which the browser has
+      // no business reading.
+      if (error instanceof PatternIndexError) {
+        const status = error.status >= 400 && error.status < 500
+          ? error.status
+          : 502;
+        return Response.json({ error: error.message }, { status });
+      }
+      // The generic answer promises the log carries the detail, so it must.
+      console.error("index proxy failed host-side:", error);
+      return Response.json(
+        { error: "the index request failed on this server; see its log" },
+        { status: 502 },
+      );
+    }
   }
 
   /**

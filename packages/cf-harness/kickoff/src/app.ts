@@ -17,7 +17,11 @@ import {
   listRuns,
   startTask,
 } from "./api.ts";
+import "./index-view.ts";
 import "./run-view.ts";
+
+/** Which surface the shell is showing: the runs, or the pattern index. */
+type View = "kickoff" | "index";
 
 /** The address a run named, raised above the timeline once it exists. */
 interface Piece {
@@ -73,8 +77,10 @@ export class KickoffApp extends LitElement {
     activity: { attribute: false },
     piece: { attribute: false },
     error: { attribute: false },
+    view: { attribute: false },
   };
 
+  declare view: View;
   declare sessionId: string | undefined;
   declare turnId: string | undefined;
   declare runs: readonly KickoffRunSummary[];
@@ -97,6 +103,7 @@ export class KickoffApp extends LitElement {
     this.runs = [];
     this.state = "idle";
     this.running = false;
+    this.view = "kickoff";
   }
 
   protected override createRenderRoot(): HTMLElement {
@@ -106,7 +113,11 @@ export class KickoffApp extends LitElement {
   override connectedCallback(): void {
     super.connectedCallback();
     void this.#loadRuns();
-    const named = new URLSearchParams(location.search).get("sessionId");
+    const params = new URLSearchParams(location.search);
+    if (params.get("view") === "index") {
+      this.view = "index";
+    }
+    const named = params.get("sessionId");
     if (named !== null && named !== "") {
       this.sessionId = named;
       this.#subscribe();
@@ -304,6 +315,28 @@ export class KickoffApp extends LitElement {
     }
   }
 
+  /**
+   * Switches surface, and says so in the address bar: the Index view is one an
+   * operator reloads into, and the session the runs are being watched under is
+   * kept so switching back returns to it rather than to a fresh page.
+   */
+  #showView(view: View): void {
+    this.view = view;
+    const params = new URLSearchParams();
+    if (this.sessionId !== undefined) {
+      params.set("sessionId", this.sessionId);
+    }
+    if (view === "index") {
+      params.set("view", "index");
+    }
+    const query = params.toString();
+    history.replaceState(
+      null,
+      "",
+      query === "" ? location.pathname : `?${query}`,
+    );
+  }
+
   #runRow(node: RunNode, depth: number): TemplateResult {
     const run = node.run;
     return html`
@@ -331,10 +364,24 @@ export class KickoffApp extends LitElement {
   }
 
   protected override render(): TemplateResult {
+    const viewTab = (view: View, label: string) =>
+      html`
+        <button
+          class="tab ${this.view === view ? "on" : ""}"
+          type="button"
+          @click=${() => this.#showView(view)}
+        >
+          ${label}
+        </button>
+      `;
     return html`
       <main>
         <header>
           <h1>cf-harness kickoff</h1>
+          <div class="views">
+            ${viewTab("kickoff", "Runs")}
+            ${viewTab("index", "Index")}
+          </div>
           <span id="state">
             ${this.running && this.activity !== undefined
               ? this.activity
@@ -342,6 +389,17 @@ export class KickoffApp extends LitElement {
           </span>
         </header>
 
+        ${this.view === "index"
+          ? html`<kickoff-index-view></kickoff-index-view>`
+          : this.#kickoffView()}
+      </main>
+    `;
+  }
+
+  /** Type a task, watch it run, read what any run did. */
+  #kickoffView(): TemplateResult {
+    return html`
+      <div>
         <textarea
           id="task"
           placeholder="Describe what you want built. The harness writes the pattern, runs it in your space, and names the piece."
@@ -412,7 +470,7 @@ export class KickoffApp extends LitElement {
               this.openRunId = event.detail}
           ></kickoff-run-view>
         </div>
-      </main>
+      </div>
     `;
   }
 }

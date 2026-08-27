@@ -206,6 +206,85 @@ describe("PatternIndexClient", () => {
     expect(pattern.program).toBeUndefined();
   });
 
+  it("posts listPatterns with no fields and answers with the scored listing", async () => {
+    const { client, requests } = createClient([
+      jsonResponse({
+        patterns: [{
+          patternId: "pat-1",
+          description: "Totals an expense list",
+          hashtags: ["expenses"],
+          keywords: ["total"],
+          ownerDid: "did:key:zOwner",
+          createdAt: "2026-08-01T00:00:00.000Z",
+          events: { run_succeeded: 3, thumbs_up: 1 },
+          score: 5,
+        }],
+        eventTypes: { run_succeeded: 1, thumbs_up: 2 },
+      }),
+    ]);
+    const listing = await client.listPatterns();
+    expect(requests[0].url).toBe("https://index.test/api/listPatterns");
+    expect(JSON.parse(requests[0].body)).toEqual({});
+    expect(listing.patterns[0].events).toEqual({
+      run_succeeded: 3,
+      thumbs_up: 1,
+    });
+    expect(listing.eventTypes.thumbs_up).toBe(2);
+  });
+
+  it("carries a listing's absent creation time through as null", async () => {
+    const { client } = createClient([
+      jsonResponse({
+        patterns: [{
+          patternId: "pat-1",
+          description: "Totals an expense list",
+          hashtags: [],
+          keywords: [],
+          ownerDid: "did:key:zOwner",
+          createdAt: null,
+          events: {},
+          score: 0,
+        }],
+        eventTypes: {},
+      }),
+    ]);
+    expect((await client.listPatterns()).patterns[0].createdAt).toBeNull();
+  });
+
+  it("sends only the listEvents fields the caller supplied", async () => {
+    const { client, requests } = createClient([
+      jsonResponse({ events: [] }),
+      jsonResponse({ events: [] }),
+    ]);
+    await client.listEvents();
+    expect(requests[0].url).toBe("https://index.test/api/listEvents");
+    expect(JSON.parse(requests[0].body)).toEqual({});
+
+    await client.listEvents({ patternId: "pat-1", limit: 20 });
+    expect(JSON.parse(requests[1].body)).toEqual({
+      patternId: "pat-1",
+      limit: 20,
+    });
+  });
+
+  it("answers listEvents with the caller's own recorded events", async () => {
+    const { client } = createClient([
+      jsonResponse({
+        events: [{
+          patternId: "pat-1",
+          did: "did:key:zOwner",
+          eventType: "run_succeeded",
+          ts: "2026-08-02T09:00:00.000Z",
+          note: "ran in the harness",
+        }],
+      }),
+    ]);
+    const response = await client.listEvents({ limit: 1 });
+    expect(response.events).toHaveLength(1);
+    expect(response.events[0].eventType).toBe("run_succeeded");
+    expect(response.events[0].note).toBe("ran in the harness");
+  });
+
   it("posts an event with its type and optional note", async () => {
     const { client, requests } = createClient([jsonResponse({ ok: true })]);
     const response = await client.recordEvent({

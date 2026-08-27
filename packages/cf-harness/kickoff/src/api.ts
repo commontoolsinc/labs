@@ -5,6 +5,15 @@
  */
 
 import type { HarnessChatEventEnvelope } from "../../src/contracts/interactive-chat.ts";
+import type {
+  PatternIndexEvent,
+  PatternIndexListEventsRequest,
+  PatternIndexListEventsResponse,
+  PatternIndexListPatternsResponse,
+  PatternIndexPattern,
+  PatternIndexSearchRequest,
+  PatternIndexSearchResponse,
+} from "../../src/pattern-index/client.ts";
 import type { KickoffRunDetail } from "../run-store.ts";
 import type { KickoffRunSummary } from "../runs.ts";
 import type { KickoffSessionSummary } from "../sessions.ts";
@@ -14,6 +23,11 @@ export type {
   KickoffRunDetail,
   KickoffRunSummary,
   KickoffSessionSummary,
+  PatternIndexEvent,
+  PatternIndexListPatternsResponse,
+  PatternIndexPattern,
+  PatternIndexSearchRequest,
+  PatternIndexSearchResponse,
 };
 
 /** A started turn, and the session it runs in. */
@@ -95,6 +109,49 @@ export const readRun = async (runId: string): Promise<KickoffRunDetail> =>
   await json<KickoffRunDetail>(
     await fetch(`/api/runs/${encodeURIComponent(runId)}`),
   );
+
+/**
+ * One read of the pattern index, through the server that signs it. The page
+ * names a function and the server composes the request, so the set of things
+ * askable from here is the server's allowlist rather than this module's.
+ */
+const callIndex = async <Value>(
+  fn: string,
+  body?: Record<string, unknown>,
+): Promise<Value> =>
+  await json<Value>(
+    await fetch("/api/index/call", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body === undefined ? { fn } : { fn, body }),
+    }),
+  );
+
+export const listIndexPatterns = (): Promise<
+  PatternIndexListPatternsResponse
+> => callIndex<PatternIndexListPatternsResponse>("listPatterns");
+
+export const listIndexEvents = async (
+  request: PatternIndexListEventsRequest = {},
+): Promise<readonly PatternIndexEvent[]> =>
+  (await callIndex<PatternIndexListEventsResponse>(
+    "listEvents",
+    { ...request },
+  )).events;
+
+/**
+ * One pattern's metadata, schemas and dependencies. The server never asks the
+ * index for source, so what comes back is what this surface shows.
+ */
+export const readIndexPattern = (
+  patternId: string,
+): Promise<PatternIndexPattern> =>
+  callIndex<PatternIndexPattern>("getPattern", { patternId });
+
+export const searchIndexPatterns = (
+  request: PatternIndexSearchRequest,
+): Promise<PatternIndexSearchResponse> =>
+  callIndex<PatternIndexSearchResponse>("searchPatterns", { ...request });
 
 /**
  * One artifact or tool output as its own text. It is returned unparsed: the
