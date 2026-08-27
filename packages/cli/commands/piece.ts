@@ -3943,17 +3943,38 @@ async function reportApplyRun(
       printHint(`${row.verdict}: ${row.piece} warned: ${row.warning}`);
     }
   }
-  // A retarget's write detaches the piece from its origin, and the report
-  // names the origin on each such row. One line rather than one per piece:
-  // an origin-following row is nearly every row on a board that has one, and
-  // a per-row hint would bury the stop lines the operator has to act on.
-  // Nothing re-attaches, so the line says where the work goes.
-  const following = report.rows.filter((row) => row.origin !== undefined);
-  if (following.length > 0) {
+  // A retarget's write detaches the piece from its origin, so the count is
+  // read off the verdict rather than off the recorded origin alone: a row
+  // this run wrote was detached, a row it did not write was not, and a row
+  // already on its target has nothing left for this plan to detach. The two
+  // cannot both fire — a run that writes reports no row as outstanding, and
+  // a run that reports one wrote nothing at all — so each line is the whole
+  // claim the report supports.
+  //
+  // One line rather than one per piece: an origin-following row is nearly
+  // every row on a board that has one, and a per-row hint would bury the
+  // stop lines the operator has to act on. The report itself names each
+  // origin, and nothing re-attaches, so the line says where the work goes.
+  const withOrigin = (verdict: ApplyRow["verdict"]) =>
+    report.rows.filter((row) =>
+      row.origin !== undefined && row.verdict === verdict
+    ).length;
+  const detached = withOrigin("applied");
+  if (detached > 0) {
     printHint(
-      `${following.length} of ${report.rows.length} rows record an origin ` +
-        `the write detaches; the report names each one, and re-attaching ` +
-        `is by hand.`,
+      `detached from a recorded origin: ${detached} of ` +
+        `${report.rows.length} rows; the report names each origin, and ` +
+        `re-attaching is by hand.`,
+    );
+  }
+  // The dry run is where this matters most: it is the moment the detach is
+  // still a decision, and the only one at which nothing has happened yet.
+  const wouldDetach = withOrigin("outstanding");
+  if (wouldDetach > 0) {
+    printHint(
+      `an apply would detach a recorded origin on ${wouldDetach} of ` +
+        `${report.rows.length} rows; the report names each origin, and ` +
+        `re-attaching is by hand.`,
     );
   }
   if (!report.complete) {

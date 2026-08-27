@@ -13,8 +13,9 @@
  *
  * The write detaches the piece from the origin it follows: the source it
  * runs afterwards is the one this plan names, chosen by a human, and a piece
- * that went on taking its origin's next update would leave that plan's
- * reviewer having approved a reference the piece does not keep. What the run
+ * still carrying that origin could be repointed afterwards to whatever the
+ * origin ships, leaving the plan's reviewer having approved a reference the
+ * piece no longer keeps. What the run
  * detaches is recorded — the plan row's `expect.origin`, carried onto every
  * report row — and re-attached by hand or not at all. Nothing here
  * re-attaches: the runtime's `follow` resolves the origin NOW and adopts

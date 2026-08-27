@@ -186,30 +186,71 @@ describe("piece-retarget", () => {
       );
     });
 
-    it("names how many rows record an origin the write detaches", async () => {
+    it("names the rows this run detached, counting no row it did not write", async () => {
       const hints: string[] = [];
+      // A landed row carries the origin its plan recorded and was NOT
+      // written by this run — the piece was already on its target. Counting
+      // it would claim a detach that did not happen here.
       const following: ApplyReport = {
         rows: [
           { ...REPORT.rows[0], origin: "https://origins.test/member.tsx" },
-          REPORT.rows[1],
+          { ...REPORT.rows[1], origin: "https://origins.test/other.tsx" },
         ],
         applied: 1,
         complete: true,
       };
       await captureStdout(() =>
-        retargetFromCommand(OPTIONS, {
+        retargetFromCommand({ ...OPTIONS, apply: true }, {
           runRetarget: () => Promise.resolve(following),
           printHint: (message) => {
             hints.push(message);
           },
         })
       );
-      // One line rather than one per piece: an origin-following row is
-      // nearly every row on a board that has one, and the report itself
-      // names each origin.
       expect(hints).toContain(
-        "1 of 2 rows record an origin the write detaches; the report names " +
-          "each one, and re-attaching is by hand.",
+        "detached from a recorded origin: 1 of 2 rows; the report names " +
+          "each origin, and re-attaching is by hand.",
+      );
+      expect(hints.some((hint) => hint.includes("would detach"))).toBe(false);
+    });
+
+    it("names the rows an apply would detach when nothing was written", async () => {
+      const hints: string[] = [];
+      // The dry run: no row was written, so the only true claim is the
+      // conditional one — and the landed row is excluded there too, an
+      // apply of this plan having nothing left to write for it.
+      const dry: ApplyReport = {
+        rows: [
+          {
+            piece: "fid1:aaa",
+            phase: "items",
+            verdict: "outstanding",
+            origin: "https://origins.test/member.tsx",
+          },
+          {
+            piece: "fid1:bbb",
+            phase: "items",
+            verdict: "landed",
+            origin: "https://origins.test/other.tsx",
+          },
+        ],
+        applied: 0,
+        complete: true,
+      };
+      await captureStdout(() =>
+        retargetFromCommand(OPTIONS, {
+          runRetarget: () => Promise.resolve(dry),
+          printHint: (message) => {
+            hints.push(message);
+          },
+        })
+      );
+      expect(hints).toContain(
+        "an apply would detach a recorded origin on 1 of 2 rows; the report " +
+          "names each origin, and re-attaching is by hand.",
+      );
+      expect(hints.some((hint) => hint.startsWith("detached from"))).toBe(
+        false,
       );
     });
 

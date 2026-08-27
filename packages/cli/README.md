@@ -119,9 +119,10 @@ the default pattern and starts each registered piece to obtain its name and
 pattern metadata. It does not enumerate every stored piece root.
 
 `cf piece inspect --pattern-identity` prints one piece's source pin — pattern
-identity, export symbol, current source revision when the piece keeps a log, and
-whether the identity's source is retained in the space — without running the
-piece and without pulling its input, result, or link graph.
+identity, export symbol, current source revision when the piece keeps a log, the
+origin it follows when it follows one, and whether the identity's source is
+retained in the space — without running the piece and without pulling its input,
+result, or link graph.
 
 `cf piece survey` reads a holder's own collection — the enumeration `piece ls`
 cannot provide — one cheap identity read per member, the holder last, and emits
@@ -157,8 +158,8 @@ verification is `cf piece survey --diff`, a separate invocation by design.
 Each write detaches its piece from the origin it follows: what it runs
 afterwards is the source the plan names. That is recorded rather than gated —
 the survey reads the origin into the row's `expect.origin` and every report row
-for that piece carries it, on the dry run as much as under `--apply`, so what
-the run detaches is in hand while it is still a decision. Re-attaching
+for that piece carries it, on the dry run as much as under `--apply`, so what an
+apply would detach is in hand while it is still a decision. Re-attaching
 afterwards is by hand, from the string the report names.
 
 `--apply` refuses to start over a row whose prior source is not retained

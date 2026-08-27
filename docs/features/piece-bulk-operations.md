@@ -206,8 +206,9 @@ as a completed one; and a group size that is not a positive integer.
 
 A retarget's write detaches the piece from the origin it follows. The source
 it runs afterwards is the one the plan names, chosen by a human and reviewed
-as part of the plan, and a piece that went on taking its origin's next update
-would run something that plan's reviewer never approved.
+as part of the plan; a piece still carrying that origin could be repointed
+afterwards to whatever the origin ships, which is not what the plan's
+reviewer approved.
 
 The detach is recorded rather than gated. The survey reads the origin into the
 row's `expect.origin`, and the apply carries it onto every report row for that
@@ -227,12 +228,22 @@ fired on nearly every row would be a rubber stamp rather than a decision,
 which is the same risk the per-row compatibility override exists to avoid.
 
 Which mechanism moves a piece follows from who chose the source and whether
-there is a set. A piece that records an origin can move on its own, whenever
-its user next opens it, to whatever source that origin then ships: one piece
-at a time, with the choice belonging to whoever ships the origin. Bulk is the
-operator's lane — a set that has to move together in a chosen order, from a
-plan a human reviewed, and the only lane at all for pieces that record no
-origin.
+there is a set. Bulk is the operator's lane: a set that has to move together
+in a chosen order, from a plan a human reviewed. It is also the only lane for
+a piece that records no origin.
+
+The other lane is origin-following — one piece moving to whatever source its
+origin ships, the choice belonging to whoever ships that origin rather than
+to the operator. What a piece does with an origin today is narrower: the
+origin is recorded on the piece, and explicit history actions act on it, one
+clearing it and another repointing the piece to what the recorded origin now
+ships. Following an origin as one mechanism, triggered by a user opening the
+piece, is specified and not built.
+[`piece-source-lifecycle.md`](../specs/piece-source-lifecycle.md) is where
+that status is recorded — its logical-state table gives a repository status
+per state — so a reader checks it there rather than inferring it here. A
+retarget detaches the recorded origin whichever lane would have moved the
+piece next, which is why every row records it.
 
 ## The safety model
 
@@ -511,8 +522,9 @@ Under [`packages/piece/src/ops/`](../../packages/piece/src/ops/):
   measurement
 - [`docs/specs/piece-source-lifecycle.md`](../specs/piece-source-lifecycle.md)
   — the append-only revision log a piece keeps, the restore built on it, and
-  origin-following: the other mechanism a piece's source moves by, one piece
-  at a time and at its user's next open, which a retarget detaches
+  the origin-following lane it specifies: one piece moving at its user's next
+  open, on an origin a retarget detaches. That lane is specified there and
+  not built; the document's logical-state table carries what has landed
 - [`packages/cli/README.md`](../../packages/cli/README.md) — the commands,
   their flags, and the reference forms their selections take
 - [`space-clone-rehearsal.md`](../development/space-clone-rehearsal.md) — the

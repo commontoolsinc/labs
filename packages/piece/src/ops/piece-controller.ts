@@ -4148,8 +4148,8 @@ export class PieceController<T = unknown> {
         }
         // The `null` is the origin: this transition detaches. A caller
         // supplying the source has chosen what the piece runs, and a piece
-        // that went on taking its origin's next update would run something
-        // that caller never named.
+        // still carrying its origin could be repointed afterwards to
+        // whatever that origin ships, which is not what this caller named.
         transition = pieceSourceTransition(
           expected,
           "edit",
