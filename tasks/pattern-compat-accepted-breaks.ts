@@ -91,8 +91,6 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20260818T002831Z-Lk1mtrXcWtEV2FAK",
       "20260818T020120Z-AfZn709Q7YVH7WlZ",
       "20260819T172917Z-ocrU646RD4YKITBc",
-      "20260825T233242Z-lYi7sjXp_--Dkqrb",
-      "20260826T034942Z-i36ehwPr3rl95EA5",
     ],
     paths: [
       "argument.topics[]",
@@ -141,8 +139,6 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20260818T002831Z-ULPZkKYbQEmzLpDl",
       "20260818T020121Z-Y5Q-u4fiTKGUrP5Y",
       "20260819T172917Z-K_8fL8hZtM4xYV7V",
-      "20260825T233242Z-zbW80d8lAFpf3tlJ",
-      "20260826T034942Z--sgcqyrT6j-lQ-JT",
     ],
     paths: [
       "argument.boardCrossrefs",
