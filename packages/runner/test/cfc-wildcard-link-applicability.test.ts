@@ -134,6 +134,7 @@ describe("CFC policy value-conditions on tuple (prefixItems) schemas", () => {
   // a tuple-shaped (prefixItems) value condition vacuously matched ANY array —
   // the policy entry applied where its condition should have excluded it, or
   // vice versa.
+
   const space = "did:key:tuple-policy" as const;
   const target = { space, id: "of:guarded" as const, scope: "space" as const };
   const tx = {

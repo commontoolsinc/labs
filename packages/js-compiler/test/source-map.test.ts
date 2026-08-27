@@ -826,6 +826,7 @@ describe("deferred composition inputs and lazy registration (CT-1819)", () => {
   // instead of bodies — pin that the count-shaped inputs are byte-equivalent to
   // the body-shaped ones, and that the parser's lazy slot has one-shot,
   // lookup-driven semantics.
+
   const raw = (mappings: string, sources: string[] = ["a.ts"]): SourceMap =>
     ({
       version: 3,

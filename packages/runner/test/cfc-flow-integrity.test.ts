@@ -35,6 +35,7 @@ describe("CFC flow labels: integrity propagation (phase C)", () => {
   // class-aware hereditary meet (§8.9.3/§3.1.6.2: an output is certified only
   // when every observed input was) plus runtime-minted TransformedBy derivation
   // provenance.
+
   const makeRuntime = () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({

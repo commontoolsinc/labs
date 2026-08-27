@@ -27,6 +27,7 @@ describe("CFC envelope version guard", () => {
   // fails closed instead: the metadata reader throws, the applies-to-path probe
   // reports that policy applies, and the commit path classifies the envelope as
   // unreadable and rejects the write.
+
   const seedWithVersion = async (
     runtime: Runtime,
     name: string,

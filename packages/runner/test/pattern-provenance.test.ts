@@ -15,6 +15,7 @@ describe("pattern provenance brand", () => {
   // provenance brand stamped only by the trusted `pattern()` builder — so a
   // forged pattern-shaped export cannot launder program / verified-load-id
   // metadata.
+
   const patternShape = {
     argumentSchema: {},
     resultSchema: {},

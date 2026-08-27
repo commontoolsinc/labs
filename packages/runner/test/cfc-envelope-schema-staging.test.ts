@@ -21,6 +21,7 @@ describe("CFC envelope schema documents ride the shared staging path", () => {
   // elides once the space's server has confirmed it — while
   // `loadSchemaDocument`'s read side keeps verifying what the SPACE holds, so a
   // registry hit can never mask a missing document.
+
   const setup = async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({

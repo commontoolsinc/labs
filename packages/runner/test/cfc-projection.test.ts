@@ -15,6 +15,7 @@ describe("CFC projection claims", () => {
   // path (§8.3.2) — the projected value can never claim whole-object integrity,
   // and atoms that cannot express the scoping (string atoms, provenance-class
   // evidence) are dropped, fail-closed.
+
   const createRuntime = () => {
     const storageManager = StorageManager.emulate({
       as: signer,

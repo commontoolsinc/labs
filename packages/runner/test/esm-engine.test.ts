@@ -17,6 +17,7 @@ describe("Engine.compileToRecordGraph", () => {
   // Phase D3.2: the Engine ESM compile path (compileToRecordGraph) runs the
   // real CF transformer pipeline, emits per-module CommonJS, assembles content-
   // addressed records + runtime records, and security-verifies every body.
+
   let runtime: Runtime;
   let engine: Engine;
   let storageManager: ReturnType<typeof StorageManager.emulate>;

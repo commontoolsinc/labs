@@ -68,6 +68,7 @@ describe("cfcLabelViewIsPublic (egress check)", () => {
   // Host-embedding contract seam 4 (docs/features/host-embedding.md §4): the
   // egress check an embedder uses to fail closed on non-public data. Goes red
   // if the "public iff no non-empty confidentiality clause" contract changes.
+
   it("treats an absent label as public", () => {
     expect(cfcLabelViewIsPublic(undefined)).toBe(true);
   });

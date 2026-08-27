@@ -8,6 +8,7 @@ describe("memory v2 path helpers", () => {
   // `@commonfabric/data-model` (`value-clone.ts`); their tests are in
   // `packages/data-model/test/value-clone.test.ts`. This file covers the
   // path-traversal readers that remain in `v2-path.ts`.
+
   it("ignores inherited object properties during traversal", () => {
     const root = Object.create({
       inherited: 7,

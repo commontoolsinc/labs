@@ -229,6 +229,7 @@ describe("ensureSpaceRootsFromEnv", () => {
   // "false" switches the space-root ensure off; garbage FAILS TO PRODUCTION
   // (ON, with a warning) — a typo must never silently strip production spaces
   // of their roots.
+
   const envOf2 =
     (values: Record<string, string | undefined>) => (name: string) =>
       values[name];

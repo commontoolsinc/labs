@@ -11,6 +11,7 @@ describe("Engine verified implementation index", () => {
   // The engine's content-addressed implementation index — the single resolution
   // backing for serialized `$implRef`s (identity E5 deleted the legacy
   // string-keyed `implementationRef` index; this is what remains).
+
   let runtime: Runtime;
   let engine: Engine;
   let storageManager: ReturnType<typeof StorageManager.emulate>;

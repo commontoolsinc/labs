@@ -2170,6 +2170,7 @@ describe("mergeable op guards and single-session branches", () => {
   // `$defs` carry-through, and the in-transaction accumulation of repeated ops
   // on one path. These do not need concurrency, only the op machinery, so they
   // run against a single runtime.
+
   let server: MemoryV2Server.Server;
   let storage1: EmulatedStorageManager;
   let rt: Runtime;

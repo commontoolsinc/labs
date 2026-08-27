@@ -11,6 +11,7 @@ describe("llmDialog reserved tool names", () => {
   // the CFC gates, and the system prompt each free to describe a different one
   // — and the prompt describes the built-ins in prose that no lookup can
   // redirect. The name is refused where it is registered instead.
+
   const toolsCellNamed = (name: string) => ({
     get: () => ({
       [name]: {

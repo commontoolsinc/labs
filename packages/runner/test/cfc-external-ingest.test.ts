@@ -26,6 +26,7 @@ describe("CFC external-ingest provenance mint (split-mint)", () => {
   // the tx, that survives the runtime-minted gate while a copy smuggled into
   // the payload is stripped. The toolshed/operator runtime runs CFC *disabled*,
   // so the headline case proves the mark is still minted there.
+
   const makeRuntime = (
     overrides: {
       cfcEnforcementMode?: string;

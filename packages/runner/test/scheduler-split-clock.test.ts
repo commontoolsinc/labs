@@ -18,6 +18,7 @@ describe("split-clock readiness decisions", () => {
   // reads, an event whose `notBefore` falls between them is classed as neither
   // ready nor parked — so the quiescent continuation resolves idle() with the
   // event still queued and undispatched.
+
   const realNow = performance.now.bind(performance);
 
   afterEach(() => {

@@ -18,6 +18,7 @@ describe("host embedding contract: runtime/space contexts", () => {
   // key string is the wire identity of the seam. A rename, or a merge into a
   // different context, silently breaks every embedder's provide/consume wiring.
   // These assertions go red when that identity changes.
+
   it("runtimeContext is keyed 'runtime'", () => {
     expect(runtimeContext).toBe("runtime");
   });

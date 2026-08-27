@@ -11,6 +11,7 @@ describe("composeLocalContext() flap coverage", () => {
   // runs and not on others. These cases state the facts the composition is
   // given and assert what it makes of them, so each arm runs on every run and
   // under every configuration.
+
   it("carries the branch when git named one", () => {
     const context = composeLocalContext({
       commit: "a".repeat(40),

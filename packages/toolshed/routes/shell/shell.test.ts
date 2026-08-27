@@ -127,6 +127,7 @@ describe("Shell route CORS", () => {
   // The shell routes serve read-only content to any origin. These pin that
   // permissive CORS keeps working alongside the isolation headers, so a future
   // change to one does not silently disturb the other.
+
   it("allows a cross-origin GET with a wildcard origin", async () => {
     const response = await app.request("/", {
       headers: { Origin: "https://example.com" },

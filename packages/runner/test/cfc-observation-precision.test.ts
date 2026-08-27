@@ -17,6 +17,7 @@ describe("CFC observation precision (C4)", () => {
   // child under a secret container `shape` no longer inherits the container's
   // shape label (the flat model took the max), and an opaque link handle is a
   // followRef observation consuming the pointer's label only.
+
   const view = (entries: CfcLabelView["entries"]): CfcLabelView => ({
     version: 1,
     entries,

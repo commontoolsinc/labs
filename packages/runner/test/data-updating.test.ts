@@ -2193,6 +2193,7 @@ describe("scope-isolation write guard", () => {
   // scoped links into scope-silent slots today (.asScope() result links,
   // navigateTo result cells, updateArgument setup wiring); see the enumeration
   // on #4561 for the flip-to-throw checklist.
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -2545,6 +2546,7 @@ describe("schemaIfcOverlapsPath", () => {
   // CT-1895: the overlap predicate deciding whether a schema-policy write input
   // might cover a written path missed ifc labels in tuple slots, so
   // schema-policy inputs for tuple positions were skipped (fail-open).
+
   const tupleSchema = {
     type: "object",
     properties: {

@@ -29,6 +29,7 @@ describe("CFC declared observation classes (C5)", () => {
   // query's result rows (length, membership — the count consumer) no longer
   // inherit the union; class-unaware readers still treat the entry as covering
   // (the exact pre-C5 behavior — over-taint, fail-safe).
+
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
 

@@ -36,6 +36,7 @@ describe("CFC flow labels (default transition)", () => {
   // read. Without this, "read labeled data, write a derived plain value to an
   // unlabeled cell" launders the label away (audit S16) — the acceptance
   // scenario for the cfcFlowLabels dial.
+
   it("persists derived flow labels on laundered value copies and gates downstream egress", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({

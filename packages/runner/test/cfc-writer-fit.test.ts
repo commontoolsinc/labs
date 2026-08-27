@@ -144,6 +144,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
   // delta of docs/specs/cfc-enforcement-matrix.md §4), leaving the §8.12.5
   // outs: upgrade the store label in the same tx, write to a fitting store, or
   // write to a store whose space the clause already names.
+
   it("rejects a confidentiality misfit under enforce-strict with the SC-18c reason", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = newRuntime(storageManager);

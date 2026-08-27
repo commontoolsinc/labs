@@ -18,6 +18,7 @@ describe("interval #now wish", () => {
   // result cell carry state across a suite's cases: run alongside the ~30 other
   // `#now` cases, the beat fires but the observed value stays frozen. In their
   // own file each case starts from a clean grid.
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: ReturnType<Runtime["edit"]>;

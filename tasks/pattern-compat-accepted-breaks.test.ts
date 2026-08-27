@@ -24,6 +24,7 @@ describe("pattern-compat-accepted-breaks", () => {
   // pattern. So the shape of an entry — a pattern that exists, a baseline that
   // exists, a pair named once, a path spelled the way the proof spells it — is
   // worth settling here, in milliseconds, against the files on disk.
+
   describe("ACCEPTED_CONTRACT_BREAKS", () => {
     it("names a pattern file that exists for every entry", async () => {
       for (const accepted of ACCEPTED_CONTRACT_BREAKS) {

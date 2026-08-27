@@ -34,6 +34,7 @@ describe("CFC commitment-form matching (inv-12 Stage 1)", () => {
   // pattern value digest-matches a committed field; a VARIABLE over a committed
   // field does not bind (the rule does not fire — the fail-closed direction: an
   // unevaluable release does not happen).
+
   const reader = "did:key:reader";
   const stranger = "did:key:stranger";
   const committedUser = {

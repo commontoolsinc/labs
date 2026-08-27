@@ -32,6 +32,7 @@ describe("schema-doc-sync", () => {
   // Two managers on one shared loopback server model two real sessions: what
   // the writer commits reaches the reader only through an explicit sync, so the
   // reader's registrations come from frame arrival, not from local writes.
+
   let server: MemoryV2Server.Server;
   let writerStorage: EmulatedStorageManager;
   let readerStorage: EmulatedStorageManager;

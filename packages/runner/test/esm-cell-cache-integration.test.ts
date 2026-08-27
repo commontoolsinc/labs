@@ -35,6 +35,7 @@ describe("ESM compile via content-addressed cell cache", () => {
   // Step 5: PatternManager drives the content-addressed cell cache on the ESM
   // path — cold compiles write the module set back (CFC-stamped), warm compiles
   // reuse it, and the cache is gated on CFC enforcement.
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -656,6 +657,7 @@ describe("ESM compile cache — Pattern.inSpace A → B routing", () => {
   // the per-space routing `PatternFactory.inSpace(B)` relies on: instantiating
   // a child in space B loads it via `loadPattern(id, rootCell.space === B)`,
   // whose core is `compilePattern(source, { space: B })`.
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   const spaceA = signer.did();
 

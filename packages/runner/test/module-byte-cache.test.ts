@@ -74,6 +74,7 @@ describe("ModuleByteCache cross-runtime reuse", () => {
   // A shared module-byte cache lets a fresh runtime compiling into a fresh
   // space reuse another runtime's compiled module bytes (cross-runtime,
   // cross-space).
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
   const PROGRAM: RuntimeProgram = {

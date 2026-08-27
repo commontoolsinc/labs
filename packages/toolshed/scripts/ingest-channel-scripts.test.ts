@@ -35,6 +35,7 @@ describe("ingest channel operator scripts", () => {
   // tooling that makes a trust-condition cutover answerable, so the selection
   // logic — what gets retired, what is skipped, what the audit reports — is
   // worth pinning even though the entrypoints themselves are thin.
+
   let signer: Identity;
   let serviceSpace: string;
   let storageManager: ReturnType<typeof StorageManager.emulate>;

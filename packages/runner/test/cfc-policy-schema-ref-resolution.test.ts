@@ -86,6 +86,7 @@ describe("CFC writeAuthorizedBy policy applies when its value-condition $ref is 
   // `writeAuthorizedBy` entry as not applying and the protected write is
   // accepted unverified — a fail-open direction the nearby comment ("must fail
   // closed on unresolved refs") and the S17 link branch both forbid.
+
   const space = "did:key:policy-schema-refs" as const;
   const target = { space, id: "of:guarded" as const, scope: "space" as const };
   const tx = {

@@ -17,6 +17,7 @@ describe("compile-cache runtime-version resolution", () => {
   // CT-1824 arc), so the resolution ladder is load-bearing: defined global
   // override  >  baked build version  >  live compiler fingerprint (Deno dev
   // runtime)  >  undefined (no fingerprint source).
+
   it("a defined global version overrides everything", async () => {
     const g = globalThis as VersionGlobal;
     const previous = g.__cfCompileCacheRuntimeVersion;

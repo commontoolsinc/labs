@@ -14,6 +14,7 @@ describe("shapableWakeGroupKey", () => {
   // dirt they clear). The bucket key is space-qualified so two instances of one
   // pattern in different spaces (which can share a content-addressed pieceId)
   // do not collide.
+
   const rendererInputTx = { marker: "renderer-input" };
   const state = anyOf<Parameters<typeof shapableWakeGroupKey>[0]>({
     isRendererInputSource: (source: object | undefined) =>

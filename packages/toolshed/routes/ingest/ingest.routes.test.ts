@@ -15,6 +15,7 @@ describe("Ingest route (smoke: wired up + transport paths)", () => {
   // reaches storage yields 502, which is itself the storage-error contract. The
   // full auth + validation contract is unit-tested against a real runtime in
   // ingest.utils.test.ts (processIngest).
+
   it("POST /api/ingest/:id without a bearer token -> 401", async () => {
     const res = await app.request("/api/ingest/ing_nope", {
       method: "POST",

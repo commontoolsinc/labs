@@ -245,6 +245,7 @@ describe("materializer envelope branch selection", () => {
   // write paths if written. Pinned here at the only level where the branch
   // selection is observable (the scheduler's materializer index after a real
   // runner-driven run).
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 

@@ -410,6 +410,7 @@ describe("combineSchema additionalProperties handling", () => {
   // additionalProperties alongside defined properties used to be coerced to
   // `false`, silently blocking the other side's keys exactly as if the author
   // had written an explicitly closed object.
+
   const schemaWithOneSidedProperty = {
     type: "object",
     properties: {

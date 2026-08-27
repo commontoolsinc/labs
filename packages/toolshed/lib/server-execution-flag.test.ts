@@ -71,6 +71,7 @@ describe("memoryAclPrincipalsFor", () => {
   // service reads), NEVER an OWNER-class service DID by default — the
   // operator's configured list is verbatim on BOTH arms, retiring the Phase-7
   // implicit-OWNER blanket.
+
   const me = "did:key:z6MkToolshedProcess";
   const operator = "did:key:z6MkOperator";
 

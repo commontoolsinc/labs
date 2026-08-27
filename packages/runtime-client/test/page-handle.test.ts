@@ -10,6 +10,7 @@ describe("PageHandle start/stop space threading", () => {
   // for a foreign-space page routes to that space's piece context (a home-space
   // handle carries the home space, which resolves to the same context as the
   // no-space form).
+
   const space = "did:key:z6Mk-page-handle-space" as DID;
 
   function makeHandle() {

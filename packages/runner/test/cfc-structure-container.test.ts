@@ -14,6 +14,7 @@ describe("CFC structure-container declaration (tx plumbing)", () => {
   // coordinators (filter/flatMap) declare their result container so prepare
   // re-derives its `structure` label from J every reconcile. The end-to-end
   // behavior is in cfc-flow-pointwise.test.ts; this pins the tx plumbing.
+
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
 

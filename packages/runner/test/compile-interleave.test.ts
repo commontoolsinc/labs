@@ -10,6 +10,7 @@ describe("compile-interleave", () => {
   // predicate default and both arms carry perf contracts the pattern unit
   // suites depend on (Deno batch compiles must add ZERO macrotask turns; the
   // browser worker must get REAL turns), so pin all three here.
+
   it("does not interleave under Deno (batch compiles run straight through)", () => {
     // cf test / toolshed / CLI: the sync compile driver, no yields.
     expect(COMPILE_INTERLEAVES_EVENT_LOOP).toBe(false);

@@ -11,6 +11,7 @@ describe("SESRuntime source-map registration", () => {
   // lookup and stack parsing read what those providers materialize. The
   // provider semantics themselves belong to `SourceMapParser` and are covered
   // by its own tests.
+
   it("lazy providers materialize once, on first lookup", () => {
     const runtime = new SESRuntime();
     let providerCalls = 0;

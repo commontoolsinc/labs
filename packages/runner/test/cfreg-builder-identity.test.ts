@@ -14,6 +14,7 @@ describe("createHoistRegistrar", () => {
   // Unit coverage for the per-module `__cfReg` registrar: run-once,
   // closed-window, and transactional (commit-only-on-success) semantics — the
   // integrity guarantees that let the verifier stay simple.
+
   it("stages entries and commits them to the sink", () => {
     const sink: HoistRegistrationSink = new Map();
     const { register, commit } = createHoistRegistrar("idA", sink);
@@ -64,6 +65,7 @@ describe("hoisted builder artifacts are addressable by {identity, symbol}", () =
   // and no source re-parsing. This source hoists a pattern (the `.map` op) AND
   // a lift (a reactive computation), proving the mechanism generalizes beyond
   // patterns; handlers travel the identical branded node-factory path.
+
   const PROGRAM: RuntimeProgram = {
     main: "/main.tsx",
     files: [{

@@ -40,6 +40,7 @@ describe("load by module identity (warm + version-bump recovery)", () => {
   // cold-recovery path: recreate the pattern from the stored TypeScript alone
   // (content-addressed source set) when the compiled set is unavailable — the
   // runtime-version-bump scenario.
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let engine: Engine;

@@ -34,6 +34,7 @@ describe("ingest journal sink", () => {
   // The journal sink is the security-critical write path (durable, marked, into
   // a caller-provided space). These exercise it directly against an emulated
   // store (no ACL layer — see the cross-space test's caveat).
+
   let signer: Identity;
   let space: ReturnType<Identity["did"]>;
   let storageManager: ReturnType<typeof StorageManager.emulate>;

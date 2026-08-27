@@ -33,6 +33,7 @@ describe("CFC labelMap component origins", () => {
   // `declared` (schema store policy, monotone), `link` (reference-carried,
   // replaced when the link is rewritten), `derived` (default-transition flow
   // labels, replaced on overwrite). Effective label = join of components.
+
   it("tags schema-derived entries as declared", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({

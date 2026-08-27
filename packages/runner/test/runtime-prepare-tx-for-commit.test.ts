@@ -27,6 +27,7 @@ describe("Runtime.prepareTxForCommit()", () => {
   // `prepareCfc` reads and writes the derived label map. A settled transaction
   // refuses both, and cannot commit either, so prepare on one returns without
   // touching it and leaves the terminal state to the commit result.
+
   const started: {
     runtime: Runtime;
     storageManager: ReturnType<typeof StorageManager.emulate>;

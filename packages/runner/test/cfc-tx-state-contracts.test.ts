@@ -14,6 +14,7 @@ describe("CFC tx state contracts", () => {
   // late-activity invalidation of a prepared transaction, and the diagnostics
   // seams. All are part of the audit-S3 posture the read-only state view
   // (#4517) completes.
+
   const withTx = async (
     fn: (runtime: Runtime, tx: ExtendedStorageTransaction) => Promise<void>,
   ) => {

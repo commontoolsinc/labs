@@ -17,6 +17,7 @@ const space = signer.did();
 describe("op-pattern-ref helpers", () => {
   // Unit coverage for the sentinel shape + resolver, independent of the
   // runtime.
+
   it("recognizes a well-formed sentinel and rejects others", () => {
     expect(
       isPatternRefSentinel({
@@ -87,6 +88,7 @@ describe("map op passed by identity", () => {
   // sentinel) and resolved synchronously at runtime via
   // `artifactFromIdentitySync`, instead of being deserialized from an embedded
   // pattern graph.
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;

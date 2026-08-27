@@ -51,6 +51,7 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
   // in-value copy) and flow-derived entries whose join consumed a labeled
   // foreign observation. Same-space-only labels persist verbatim. Behind
   // `cfcLabelMetadataProtection: off | observe | enforce`.
+
   const fullSource = { space: spaceA, id: "of:remote-origin", path: [] };
   const caveatAtom = {
     type: CFC_ATOM_TYPE.Caveat,

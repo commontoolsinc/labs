@@ -7,6 +7,7 @@ describe("shouldRecreateRuntime", () => {
   // runtime — that is the load-bearing lifecycle rule behind "space is just
   // part of the address". (apiUrl/identity compare by reference, matching the
   // AppState lifecycle this guards.)
+
   const identity = { did: () => "did:key:z6Mk-lifecycle" } as never;
   const otherIdentity = { did: () => "did:key:z6Mk-other" } as never;
   const hostA = new URL("http://host-a.test/");

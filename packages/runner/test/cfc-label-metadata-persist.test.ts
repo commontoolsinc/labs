@@ -27,6 +27,7 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
   // stored metadata provides (the round-trip hazard confirmed on the labs#4622
   // review thread: response-side redaction would otherwise persist redacted,
   // under-labeled views on copy-forward writes).
+
   type PersistedEntry = {
     path: string[];
     origin?: string;

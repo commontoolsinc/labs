@@ -134,6 +134,7 @@ describe("Checker", () => {
   // a time (compileToModulesSteps); typeCheck()/declarationCheck() remain the
   // whole-program one-call contract with no other production caller, so they
   // are pinned directly here.
+
   it("checkableSources excludes the virtual type libs", () => {
     const checker = new Checker(
       programFor({ "/ok.ts": "export const x: number = 1;" }),

@@ -1170,6 +1170,7 @@ describe("storedSchemaCoversCandidateEnvelope (merge-skip decision)", () => {
   // CT-1895: the merge-skip decision judged envelopes "covered" via the items
   // branch while their tuple slots differed, dropping the candidate's slot info
   // instead of merging it (fail-open: coverage=true skips the merge).
+
   it("differing tuple slots are not judged covered by matching items", () => {
     const stored = {
       type: "array",
@@ -1344,6 +1345,7 @@ describe("cfcSchemaMergeIssue", () => {
   // rather than attempting the swap and taking a low-level commit rejection.
   // What it must not do is reimplement the rules, so these cases pin that its
   // verdict is the merge's own — including the message, verbatim.
+
   it("reports no issue when the merge succeeds", () => {
     expect(cfcSchemaMergeIssue({
       type: "object",

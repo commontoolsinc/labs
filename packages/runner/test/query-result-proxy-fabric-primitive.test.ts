@@ -61,6 +61,7 @@ describe("internCellLinkSchema preserves FabricValue schema defaults read throug
   // End-to-end: a schema whose `default` carries a non-JSON FabricValue, read
   // through a query-result proxy, must intern without throwing AND without
   // losing the value to a JSON shadow.
+
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let tx: IExtendedStorageTransaction;

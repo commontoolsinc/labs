@@ -84,6 +84,7 @@ describe("CFC flow-join read scope", () => {
   // of a sibling leaf — otherwise a computation that deliberately avoids a
   // confidential field could not prove so by its read set, and strict mode
   // would refuse the untainted aggregate along with the leak.
+
   it("does not taint a sibling-leaf read with a labelled descendant elsewhere", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = newRuntime(storageManager);
