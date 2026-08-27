@@ -2838,7 +2838,16 @@ export class CellImpl<T extends FabricValue>
         );
     } else {
       // Regular cell behavior: subscribe to changes
-      if (!this.synced) this.sync(); // No await, just kicking this off
+      if (!this.synced) {
+        // sink() returns synchronously and immediately publishes the replica's
+        // current value, but the first backing-doc load remains part of the
+        // runtime's convergence work. A pull begun after this call sees the
+        // cell as synced and will not start a second load of its own, so keep
+        // this promise in the shared settled pool until the first load lands.
+        this.runtime.storageManager.trackUntilSettled(
+          this.sync().catch(() => {}),
+        );
+      }
       return subscribeToReferencedDocs(
         callback,
         this.runtime,
@@ -2888,7 +2897,11 @@ export class CellImpl<T extends FabricValue>
     callback: (value: FabricValue) => Cancel | undefined | void,
     options: SinkOptions = {},
   ): Cancel {
-    if (!this.synced) this.sync();
+    if (!this.synced) {
+      this.runtime.storageManager.trackUntilSettled(
+        this.sync().catch(() => {}),
+      );
+    }
 
     const sink: SinkAction = {
       cleanup: undefined,
