@@ -254,7 +254,7 @@ otherwise force arbitrary allocation with a garbage signature.
 
 ### Client
 
-`cf ingest mint|list|rotate|revoke`, alongside `cf acl`. `cf ingest rotate <id>`
+`cf ingest mint|ls|rotate|revoke`, alongside `cf acl`. `cf ingest rotate <id>`
 mints a new token for a channel the caller owns, leaving the channel and its
 grants in place — the spelling for a token that leaked or aged, where revoking
 would take the channel down with it. The CLI is the only client that can sign

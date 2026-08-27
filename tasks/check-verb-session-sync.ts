@@ -39,7 +39,10 @@ export const DEMO_PATH = "packages/cli/integration/verb-session-demo.sh";
 export const WALKTHROUGH_PATH = "docs/common/verbs/session-walkthrough.md";
 export const TOUR_PATH = "docs/common/verbs/the-verb-session.md";
 
+/** The demo that runs the bulk piece operations, act by act. */
 export const BULK_DEMO_PATH = "packages/cli/integration/bulk-ops-demo.sh";
+
+/** The tour written from that demo, and held to it below. */
 export const BULK_TOUR_PATH = "docs/common/workflows/bulk-operations.md";
 
 /**

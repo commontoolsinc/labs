@@ -122,6 +122,40 @@ describe("check-command-docs", () => {
       );
       expect(declaredCommands(tree)).not.toContain("help");
     });
+
+    it("names a hidden command, which a caller reaches like any other", () => {
+      // Hidden decides what `--help` prints, not what the CLI accepts: the
+      // real tree hides `completion complete` and every installed completion
+      // function invokes it on every Tab. A gate that walked past it would
+      // report a count having never asked about the last command.
+      const tree = new Command()
+        .name("cf")
+        .command("brew", new Command().description("make a glaze"))
+        .command(
+          "sift",
+          new Command().description("an entry point nobody types").hidden(),
+        );
+      expect(declaredCommands(tree)).toEqual(["brew", "sift"]);
+    });
+
+    it("walks into a hidden command's own subcommands", () => {
+      // The hidden one is a group in the real tree, and its child is the
+      // command that actually runs.
+      const tree = new Command().name("cf").command(
+        "completion",
+        new Command()
+          .description("shell completion")
+          .command(
+            "complete",
+            new Command().description("what the shell calls").hidden(),
+          )
+          .hidden(),
+      );
+      expect(declaredCommands(tree)).toEqual([
+        "completion",
+        "completion complete",
+      ]);
+    });
   });
 
   describe("isLiveDoc()", () => {

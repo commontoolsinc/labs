@@ -111,7 +111,16 @@ export function isLiveDoc(
   return true;
 }
 
-/** Every command path the tree accepts, deepest last. */
+/**
+ * Every command path the tree accepts, deepest last.
+ *
+ * Hidden commands are walked with the rest. Hidden is a fact about `--help`,
+ * not about whether the CLI accepts the words: `cf completion complete` is
+ * hidden and every installed completion function invokes it on every Tab. A
+ * command a caller can reach is a command this gate has to ask about, and one
+ * that genuinely needs no prose says so in {@link NO_PROSE} rather than by
+ * being invisible here.
+ */
 export function declaredCommands(
   // deno-lint-ignore no-explicit-any
   root: Command<any>,
@@ -120,7 +129,7 @@ export function declaredCommands(
   // deno-lint-ignore no-explicit-any
   const visit = (command: Command<any>, path: readonly string[]): void => {
     if (path.length > 0) paths.push(path.join(" "));
-    for (const child of command.getCommands(false)) {
+    for (const child of command.getCommands(true)) {
       // Cliffy propagates its generated `help` to every descendant, so it is
       // nobody's command and no document owes it prose.
       if (child.getName() === "help") continue;
