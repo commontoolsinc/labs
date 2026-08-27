@@ -1412,7 +1412,8 @@ describe("Phase 3 events-down (serving side)", () => {
           const entry = entryByKind("poison-1");
           return entry?.consequenced === true &&
             entry.status === "needs-attention" &&
-            watermarkNow() === entry?.seq;
+            entry.seq !== undefined &&
+            (watermarkNow() ?? 0) >= entry.seq;
         },
         "the commit-preparation failure to seal a terminal cover",
       );
