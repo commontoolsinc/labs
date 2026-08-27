@@ -73,11 +73,28 @@ export class WebWorkerRuntimeTransport
     return this._readyPromise.promise;
   }
 
-  static connect(
+  /**
+   * Constructs a transport, and resolves it once its worker reports ready.
+   *
+   * @throws If readiness fails. The transport is disposed of before the throw,
+   *   so no worker is left running.
+   */
+  static async connect(
     options: WebWorkerRuntimeTransportOptions = {},
   ): Promise<WebWorkerRuntimeTransport> {
     const transport = new WebWorkerRuntimeTransport(options);
-    return transport.ready().then(() => transport);
+
+    try {
+      await transport.ready();
+    } catch (error) {
+      // The caller never receives a transport on this path, so the disposal is
+      // this method's to do. `terminate()` lives only in `dispose()`, and
+      // nothing else is left holding the worker.
+      await transport.dispose();
+      throw error;
+    }
+
+    return transport;
   }
 
   private _handleMessage = (event: MessageEvent): void => {
