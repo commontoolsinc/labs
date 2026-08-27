@@ -1617,6 +1617,13 @@ function collectedValueEscapes(
   return analyze(expression).containsReactive;
 }
 
+/**
+ * The initializer of a `const` binding, which is the only binding form whose
+ * initializer is also its value. A `let` or `var` can be reassigned between
+ * its declaration and the return, so its initializer says nothing about what
+ * the callback actually hands to `map` — reading one here would exempt a
+ * binding on the strength of an artifact it no longer holds.
+ */
 function getSoleLocalInitializer(
   identifier: ts.Identifier,
   checker: ts.TypeChecker,
@@ -1626,9 +1633,17 @@ function getSoleLocalInitializer(
     return undefined;
   }
   const [declaration] = declarations;
-  return ts.isVariableDeclaration(declaration)
-    ? declaration.initializer
-    : undefined;
+  if (!ts.isVariableDeclaration(declaration)) {
+    return undefined;
+  }
+  const declarationList = declaration.parent;
+  if (
+    !ts.isVariableDeclarationList(declarationList) ||
+    (declarationList.flags & ts.NodeFlags.Const) === 0
+  ) {
+    return undefined;
+  }
+  return declaration.initializer;
 }
 
 /**

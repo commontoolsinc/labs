@@ -759,8 +759,11 @@ What the callback returns then decides how far its result may travel:
   return shape is deliberate and not claimed: a reactive artifact the author
   constructed on purpose — a `computed(...)` cell, an `action(...)` or
   `handler(...)` handle, an applied lift, a `generateObject(...)` result, a
-  `cell(...)`, a fetch or query resource — returned directly, through a local
-  whose initializer is one, or as a field read off one. `ifElse`, `when`, and
+  `cell(...)`, a fetch or query resource — returned directly, through a
+  `const` local whose initializer is one, or as a field read off one. Only
+  `const` is followed: a `let` or `var` can be reassigned between its
+  declaration and the return, so its initializer says nothing about what the
+  callback hands to `map`. `ifElse`, `when`, and
   `unless` are excluded: they stand for a value rather than a handle, so a
   collected one is an object that is truthy whichever branch it represents.
   A collected object or array literal is classified member by member rather

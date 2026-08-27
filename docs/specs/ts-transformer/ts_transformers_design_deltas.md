@@ -133,7 +133,7 @@ computation or a bare read of a reactive or lowered local. One return shape
 is deliberate and not claimed: a reactive artifact the author constructed on
 purpose — a `computed(...)` cell, an `action(...)` or `handler(...)` handle,
 an applied lift, a `generateObject(...)` result, a `cell(...)`, a fetch or
-query resource — returned directly, through a local whose initializer is one,
+query resource — returned directly, through a `const` local whose initializer is one,
 or as a field read off one (weekly-calendar collects per-color action handles
 through a local; gmail-extractor collects per-email records that project
 `analysis.result`, `.pending`, and `.error` out of the `generateObject(...)`
