@@ -9,14 +9,19 @@
  * announced and say the request will not be answered, rather than staying as
  * they were with nothing coming.
  */
+
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
+import type { BuiltInLLMMessage, JSONSchema } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
+import { table } from "@commonfabric/memory/sqlite/schema";
+import type { SqliteDbRef } from "@commonfabric/memory/v2";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { createBuilder } from "../src/builder/factory.ts";
 import type { Cell } from "../src/builder/types.ts";
+import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
 import { Runtime } from "../src/runtime.ts";
 import { MAX_ENFORCEMENT_CFC_OPTIONS } from "../src/runtime-presets.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -266,5 +271,119 @@ describe("a builtin whose staged request is abandoned", () => {
     expect(settled.error).toContain("was refused before it started");
     expect(settled.error).not.toContain(PROMPT_INFLUENCE.source);
     expect(result.withTx().key("pending").get()).toBe(false);
+  });
+
+  it("reports the refusal on sqliteQuery's result cell", async () => {
+    // The database handle is a value rather than a builtin's output, so the
+    // only transaction here is the one staging the query, and the refusal
+    // lands on that.
+
+    const { pattern, sqliteQuery, Cell: BuilderCell } = commonfabric;
+    const db: SqliteDbRef = {
+      id: "of:abandoned-query-db",
+      tables: { notes: table({ id: "integer primary key" }) },
+    };
+    const testPattern = pattern<Record<string, never>>(() => {
+      const sql = BuilderCell.of("SELECT id FROM notes", {
+        type: "string",
+        ifc: { confidentiality: [PROMPT_INFLUENCE] },
+      });
+      // deno-lint-ignore no-explicit-any
+      return sqliteQuery({ db, sql } as any);
+    });
+    const resultCell = runtime.getCell(
+      space,
+      "sqliteQuery-abandoned",
+      testPattern.resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+
+    const settled = await waitForError(result);
+    await runtime.settled();
+
+    expect(settled.error).toContain("was refused before it started");
+    expect(settled.error).not.toContain(PROMPT_INFLUENCE.source);
+    expect(result.withTx().key("pending").get()).toBe(false);
+  });
+
+  it("takes llmDialog's pending flag down when the turn is refused", async () => {
+    // The turn is staged inside the handler that appends the user's message,
+    // so the caveat has to reach that handler's transaction and not the run
+    // that sets the dialog up. A context entry is where the two part company:
+    // the run materializes it as a cell reference without reading its fields,
+    // and the handler reads a field to build the request the turn would send.
+    // So the caveat goes on the field.
+
+    const { pattern, llmDialog, Cell: BuilderCell } = commonfabric;
+    const resultSchema = {
+      type: "object",
+      properties: {
+        addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
+        pending: { type: "boolean" },
+        messages: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        },
+      },
+      required: ["addMessage"],
+    } as const satisfies JSONSchema;
+
+    const testPattern = pattern(
+      () => {
+        const messages = BuilderCell.of<BuiltInLLMMessage[]>([]);
+        const briefing = BuilderCell.of({ note: "a hostile briefing" }, {
+          type: "object",
+          properties: {
+            note: {
+              type: "string",
+              ifc: { confidentiality: [PROMPT_INFLUENCE] },
+            },
+          },
+        });
+        const dialog = llmDialog({ messages, context: { briefing } });
+        return {
+          addMessage: dialog.addMessage,
+          pending: dialog.pending,
+          messages,
+        };
+      },
+      false,
+      resultSchema,
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "llmDialog-abandoned",
+      resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    runtime.prepareTxForCommit(tx);
+    // The run that sets the dialog up has to land: a refusal here would be the
+    // caveat reaching the wrong transaction, and the wait below would then be
+    // waiting on a handler that was never registered.
+    const setUp = await tx.commit();
+    expect(setUp.error).toBeUndefined();
+
+    const addMessage = await result.key("addMessage").pull();
+    addMessage.send({ role: "user", content: "what does the briefing say?" });
+
+    // `pending` is unwritten until the ending writes it, so the wait is for
+    // the ending itself rather than for a value it changed.
+    const settled = await waitForCellValue<{ pending?: boolean }>(
+      runtime,
+      result,
+      (value) => value?.pending === false,
+    );
+    await runtime.settled();
+
+    expect(settled.pending).toBe(false);
+    // The turn is not in the conversation: the message the handler appended
+    // rode the abandoned transaction, so the ending has no turn to answer and
+    // writes no assistant message.
+    expect(result.withTx().key("messages").get()).toEqual([]);
   });
 });
