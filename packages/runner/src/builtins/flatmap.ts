@@ -257,7 +257,12 @@ export function flatMap(
         return runtime.getCellFromLink(resolved, undefined, tx);
       });
 
-    const opPattern = resolveOpPattern(runtime, op.getRaw(), "flatMap", inputsCell);
+    const opPattern = resolveOpPattern(
+      runtime,
+      op.getRaw(),
+      "flatMap",
+      inputsCell,
+    );
     const argumentUsage = inferListOpArgumentUsage(opPattern);
     const outputScope = narrowestCellScope(runtime, tx, [
       inputsCell.key("list"),
