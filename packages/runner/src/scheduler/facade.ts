@@ -2851,11 +2851,24 @@ export class Scheduler {
    * shape (verification-coverage.md's OW45 residue member, store-proven
    * on CI run 32929764230) is a serving session revoked by the genesis
    * ACL landing after activation — `unauthorized` on a cross-space read
-   * of a doc the server itself wrote one second earlier, healing by
-   * design on the next mount. Sealing §5's dropped-event notice for
-   * that DISCHARGED at-least-once on a healthy trusted user action and
-   * advanced the watermark past it, so nothing ever re-ran it: the
-   * click was silently lost.
+   * of a doc the server itself wrote one second earlier. Sealing §5's
+   * dropped-event notice for that DISCHARGED at-least-once on a healthy
+   * trusted user action and advanced the watermark past it, so nothing
+   * ever re-ran it: the click was silently lost.
+   *
+   * CORRECTED 2026-08-26. This docstring used to add "healing by design
+   * on the next mount", and that was FALSE: nothing remounted. Run
+   * 33021643751 (the same board's shards 2 and 6) measured 350 deferrals
+   * over 5m47s off one revoked session, zero successful loads — the
+   * deferral below waiting for a heal that did not exist, exactly as
+   * `storage/rejection.ts`'s SessionError note had said ("the
+   * convergence argument is sound, only the remount is missing"). The
+   * remount now exists: an admitted commit touching the space's ACL doc
+   * re-arms the session (storage/v2.ts `consumeOwedSessionRemount`,
+   * triggered by executor/host.ts), so the deferral's convergence
+   * argument holds. What has NOT changed is the persistent-failure
+   * posture spelled out below: a load whose ACL never changes — or whose
+   * re-open is denied — defers indefinitely, which is OW54's territory.
    *
    * A SERVED event therefore DEFERS — no consequence written, the
    * durable entry left pending and UNCONSEQUENCED, a later drain

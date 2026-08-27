@@ -7010,8 +7010,9 @@ const toRejectedError = (
   //    knows. Classified TERMINAL by the retry allow-list — not because the
   //    commit was evaluated (it was not), but because nothing on the retry path
   //    remounts the session: `sessionHandle()` memoizes the mount and clears it
-  //    only on close. The name still has to survive normalization here, or the
-  //    caller sees a generic TransactionError instead of the real cause.
+  //    on close, and (since 2026-08-26) when the space's ACL CHANGES — which a
+  //    commit retry is not. The name still has to survive normalization here,
+  //    or the caller sees a generic TransactionError instead of the real cause.
   //  - `InvalidMessageError`: a frame off the wire would not decode, and the
   //    client's `rejectPending` sweep (memory/v2/client.ts `onMessage`) rejected
   //    every in-flight request with it — including this commit, which may never
