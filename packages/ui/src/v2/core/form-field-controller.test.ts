@@ -344,9 +344,7 @@ describe("FormFieldController registration behavior", () => {
       isDirty: () => buffer !== undefined && buffer !== "original",
     };
 
-    //
     // Initial state
-    //
 
     expect(registration.getValue()).toBe("original");
     expect(registration.isDirty()).toBe(false);
