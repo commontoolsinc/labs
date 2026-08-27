@@ -1,9 +1,11 @@
 /**
- * What the worker's outbound side does with a message the encoding refuses.
+ * What the worker's outbound side carries, and what it does with a message the
+ * encoding refuses.
  *
- * `postToClient()` is the whole of that side, so it is also the only place a
- * failure to encode can be answered. What it answers with differs by whether
- * anyone is awaiting a reply, and it must not throw either way.
+ * `postToClient()` is the whole of that side. A successful message crosses as
+ * one realm encoding; a failure to encode is answered here. What a failure
+ * becomes differs by whether anyone is awaiting a reply, and it must not throw
+ * either way.
  */
 
 import { describe, it } from "@std/testing/bdd";
@@ -11,9 +13,14 @@ import { expect } from "@std/expect";
 
 import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import type { SetPropOp } from "@commonfabric/html/vdom-ops";
+import { WorkerReconciler } from "@commonfabric/html/worker";
 
 import { postToClient } from "@/backends/post-to-client.ts";
-import { NotificationType } from "@/protocol/mod.ts";
+import {
+  NotificationType,
+  type VDomBatchNotification,
+} from "@/protocol/mod.ts";
 
 /**
  * A value that passes every `FabricValue` check and has no encoding: an object
@@ -25,7 +32,10 @@ function forged(): unknown {
   return Object.create(FabricBytes.prototype);
 }
 
-/** Captures what the worker posts, decoding it as the client's transport does. */
+/**
+ * Captures what the worker posts after the clone-and-decode the client's
+ * transport performs.
+ */
 function capturing(): {
   posted: Record<string, unknown>[];
   restore: () => void;
@@ -34,7 +44,10 @@ function capturing(): {
   const original = (globalThis as { postMessage?: unknown }).postMessage;
   (globalThis as { postMessage: (m: unknown) => void }).postMessage = (m) => {
     posted.push(
-      fabricFromRealmValue(m as never) as Record<string, unknown>,
+      fabricFromRealmValue(structuredClone(m) as never) as Record<
+        string,
+        unknown
+      >,
     );
   };
   return {
@@ -46,6 +59,49 @@ function capturing(): {
 }
 
 describe("post-to-client", () => {
+  describe("a VDOM batch", () => {
+    it("carries a FabricBytes prop emitted by the reconciler", () => {
+      const content = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
+      const { posted, restore } = capturing();
+      let sent = false;
+
+      const reconciler = new WorkerReconciler({
+        onOps: (ops) => {
+          sent = postToClient({
+            type: NotificationType.VDomBatch,
+            batchId: 7,
+            ops,
+          });
+          return 7;
+        },
+      });
+      const cancel = reconciler.mount({
+        type: "vnode",
+        name: "cf-image",
+        props: { bytes: new FabricBytes(content) } as never,
+        children: [],
+      });
+
+      try {
+        // Mount queues operations onto a microtask. Flush them at the explicit
+        // boundary so the assertion observes exactly one complete batch.
+        reconciler.flush();
+
+        expect(sent).toBe(true);
+        expect(posted).toHaveLength(1);
+        const batch = posted[0] as unknown as VDomBatchNotification;
+        const prop = batch.ops.find((op): op is SetPropOp =>
+          op.op === "set-prop" && op.key === "bytes"
+        );
+        expect(prop?.value).toBeInstanceOf(FabricBytes);
+        expect((prop?.value as FabricBytes).slice()).toEqual(content);
+      } finally {
+        cancel();
+        restore();
+      }
+    });
+  });
+
   describe("a message the encoding refuses", () => {
     it("answers a reply as a failure, so the request settles", () => {
       // The client is awaiting this `msgId`. Dropping the message would leave
