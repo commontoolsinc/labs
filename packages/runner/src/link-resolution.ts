@@ -3,7 +3,6 @@ import {
   ensureExternalSchemaClosure,
   markIfcBearingLinkCrossing,
 } from "./schema-ifc.ts";
-import { isObjectOrArray } from "@commonfabric/utils/types";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
