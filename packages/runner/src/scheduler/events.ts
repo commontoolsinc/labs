@@ -1528,6 +1528,39 @@ export async function dispatchQueuedEvent(state: {
       return;
     }
 
+    // Mark/effects atomicity (events.md §4, RULED 2026-08-27 — the a04
+    // write-side member): a SERVED dispatch whose handler body DID NOT
+    // RUN must not seal. The dispatch stamper wrote the entry's
+    // `consequenced` mark into this tx BEFORE the body ran
+    // (space-server.ts), so sealing the skipped run would commit a 1-op
+    // mark-only consequence — the entry permanently consumed with zero
+    // effects and no error (a04's seqs 53/56: two Create clicks lost to
+    // a transient argument-resolution failure). Withdraw the whole tx
+    // instead: the entry stays pending-unconsequenced, the drain
+    // re-delivers it (a drain copy's plain-deferral arm releases the
+    // in-flight guard and arms the rescan; the 8-deferral threshold
+    // hardens a permanently unresolvable argument into the visible §5
+    // DROP notice), and the retried handler's cause-derived idempotent
+    // writes converge. An LT1 in-process copy carries no onFailure —
+    // its abort alone leaves the durable entry unmarked and the next
+    // wave's drain delivers it once, WITH a streamEntry (C8b).
+    // Client/OFF dispatches carry no mark and keep the silent skip.
+    if (served !== undefined && tx.dispatchedHandlerNotRun !== undefined) {
+      const reason = tx.dispatchedHandlerNotRun.reason;
+      if (tx.status().status === "ready") {
+        tx.abort(
+          new Error(`served handler did not run: ${reason}`),
+        );
+      }
+      reportServedEventFailure(served, {
+        kind: "deferred",
+        cause: "handler-not-run",
+        message: reason,
+      });
+      runFinalCommitCallback();
+      return;
+    }
+
     state.runtime.prepareTxForCommit(tx);
     const log = txToReactivityLog(tx);
     const telemetryWrites = log.writes

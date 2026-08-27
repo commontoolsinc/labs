@@ -1570,6 +1570,20 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   dispatchedEventTime?: number;
 
   /**
+   * The dispatched handler's BODY did not run (the runner's stream-path
+   * argument-did-not-resolve skip: `isValidArgument === false`, runner.ts).
+   * Set by the runner on the skip; consumed by the scheduler's event
+   * finalize for mark/effects atomicity (events.md §4, RULED 2026-08-27):
+   * a SERVED dispatch's transaction carries the entry's pre-stamped
+   * `consequenced` mark, so sealing a skipped run would commit the mark
+   * with ZERO effects and permanently consume the event (the a04 1-op
+   * shape). The finalize withdraws the whole transaction instead — the
+   * entry stays pending-unconsequenced and the drain re-delivers it.
+   * Client/OFF dispatches carry no mark and keep the silent skip.
+   */
+  dispatchedHandlerNotRun?: { reason: string };
+
+  /**
    * Commit-time preconditions attached to this transaction's commit in
    * the given space (scheduler-v2 §7.6). Violations surface as
    * IPreconditionFailedError (permanent — never retried).

@@ -302,6 +302,24 @@ const THROW_PATTERN = [
   ">(({ value }) => ({ value, explode: explode({ value }) }));",
 ].join("\n");
 
+/** A handler whose `$ctx` requires a plain-number `gate` the argument doc
+ * does not hold at fire time: the served dispatch's argument read fails the
+ * schema (`isValidArgument === false`, runner.ts's "-- not running" skip)
+ * until a later authored write supplies it — the mark/effects-atomicity
+ * pin's reproduction of the a04 write-side member. */
+const GATED_BUMP_PATTERN = [
+  "import { handler, pattern, Stream, Writable } from 'commonfabric';",
+  "const bump = handler<unknown, { value: Writable<number>; gate: number }>(",
+  "  (_ev, { value, gate }) => {",
+  "    value.set((value.get() ?? 0) + 1 + gate * 0);",
+  "  },",
+  ");",
+  "export default pattern<",
+  "  { value: Writable<number>; gate: Writable<number> },",
+  "  { value: number; bump: Stream<unknown> }",
+  ">(({ value, gate }) => ({ value, bump: bump({ value, gate }) }));",
+].join("\n");
+
 /** Two independent streams whose handlers append their letter to ONE
  * shared log — the arrival-order pin reads the log as the record of
  * consequence order. */
@@ -1211,6 +1229,106 @@ describe("Phase 3 events-down (serving side)", () => {
       });
       expect((doc?.value as { value?: number })?.value).toBe(K);
     }
+    cancelDemand();
+  });
+
+  it("mark/effects atomicity at the DISPATCH layer (events.md §4, RULED 2026-08-27 — the a04 write-side member): a served dispatch whose handler argument cannot resolve is WITHDRAWN, never sealed — the pre-stamped mark must not commit alone; the entry stays pending, re-drains once the argument resolves, and mark + effects land in ONE commit exactly once (mutation: the finalize withdrawal removed → the a04 1-op mark-only consequence, the event permanently consumed with zero effects)", async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const { argument, result } = await standUp(
+      clientRuntime,
+      GATED_BUMP_PATTERN,
+      { arg: "atomicity-arg", result: "atomicity-result" },
+    );
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    const before = Engine.serverSeq(engine);
+    (result.key("bump") as unknown as { send(value: unknown): unknown })
+      .send({});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    await waitUntil(
+      () => sidecarIdsIn(engine).length === 1,
+      "the event append to land",
+    );
+    const sidecarId = sidecarIdsIn(engine)[0];
+    const readEntry = () =>
+      (Engine.read(engine, { id: sidecarId })?.value as
+        | StreamEventsDocValue
+        | undefined)?.entries?.[0];
+    const argumentDocId = argument.getAsNormalizedFullLink().id;
+    const argumentValue = () => {
+      const doc = Engine.read(engine, { id: argumentDocId });
+      return (doc?.value as { value?: number } | undefined)?.value ?? 0;
+    };
+    const deferrals = () =>
+      (host!.stats().events as { handlerNotRunDeferrals?: number })
+        .handlerNotRunDeferrals ?? 0;
+
+    // The unresolvable dispatch resolves: post-fix as a counted
+    // handler-not-run deferral with the entry still pending; PRE-FIX
+    // (watched red) as the a04 shape — the entry consequenced with zero
+    // effects before any deferral exists (seqs 53/56: a 1-op 802-byte
+    // derived commit carrying ONLY the mark).
+    await waitUntil(
+      () => deferrals() >= 1 || readEntry()?.consequenced === true,
+      "the unresolvable dispatch to resolve (deferral post-fix / mark pre-fix)",
+    );
+    expect(readEntry()?.consequenced).not.toBe(true);
+    expect(readEntry()?.status).toBeUndefined();
+    expect(readEntry()?.error).toBeUndefined();
+    expect(argumentValue()).toBe(0);
+    expect(deferrals()).toBeGreaterThanOrEqual(1);
+
+    // Heal within the deferral budget: supply the gate. The standard
+    // re-drain re-delivers and the retried handler's writes land.
+    {
+      const gateCell = clientRuntime.getCell<{ value: number; gate?: number }>(
+        space,
+        "atomicity-arg",
+        undefined,
+      );
+      await gateCell.sync();
+      const tx = clientRuntime.edit();
+      gateCell.key("gate").withTx(tx).set(7);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+
+    await waitUntil(
+      () => readEntry()?.consequenced === true && argumentValue() === 1,
+      "the re-delivered handler's mark + effects to land",
+    );
+    // (α) exactly once: the non-idempotent effect applied exactly once…
+    expect(argumentValue()).toBe(1);
+    const entry = readEntry()!;
+    expect(entry.error).toBeUndefined();
+    expect(entry.status).toBeUndefined();
+    // …and exactly ONE durable derived commit names the event.
+    const consequenceRows = engine.database.prepare(
+      `SELECT seq, consequence_of FROM "commit"
+       WHERE seq > :from_seq AND class = 'derived'
+         AND consequence_of IS NOT NULL`,
+    ).all({ from_seq: before }) as Array<
+      { seq: number; consequence_of: string }
+    >;
+    const carrying = consequenceRows.filter((row) =>
+      row.consequence_of.includes(entry.eventId)
+    );
+    expect(carrying.length).toBe(1);
+    // The committing wave batch carries the mark AND the effect together
+    // (the atomicity, stated positively): the sidecar's mark op and the
+    // argument doc's bump ride ONE home commit.
+    const carryingBatches = observedWaveCommits.filter((batch) =>
+      batch.consequenceOf.includes(entry.eventId)
+    );
+    expect(carryingBatches.length).toBeGreaterThanOrEqual(1);
+    const committedOps = carryingBatches[carryingBatches.length - 1].operations;
+    expect(committedOps.some((op) => op.id === sidecarId)).toBe(true);
+    expect(committedOps.some((op) => op.id === argumentDocId)).toBe(true);
     cancelDemand();
   });
 

@@ -406,6 +406,21 @@ export type ServingLoopStats = {
      * intent tx) fold into the refusal. Counted once per refused EVENT,
      * however many contributions folded. */
     orphanDeliveriesRefused: number;
+
+    /** Mark/effects atomicity at the DISPATCH layer (events.md §4's
+     * exactly-once, the a04 write-side member — RULED 2026-08-27): served
+     * dispatches whose handler body DID NOT RUN (the runner's
+     * argument-did-not-resolve skip) and whose transaction was therefore
+     * WITHDRAWN instead of sealed. The dispatch stamper writes the
+     * entry's `consequenced` mark into the handler tx BEFORE the body
+     * runs, so letting the skip seal committed a 1-op mark-only
+     * consequence — the entry permanently consumed with ZERO effects
+     * and no error (a04's seqs 53/56). Counted per withdrawn dispatch;
+     * the entry stays pending and re-drains (the deferral threshold
+     * hardens a permanently unresolvable argument into the visible §5
+     * DROP notice). A count that grows without `processed` settling
+     * names a handler whose argument never resolves. */
+    handlerNotRunDeferrals: number;
     /** The pre-dispatch LOAD-PARK deferrals (verification-coverage.md's
      * OW45 residue member, fixed 2026-08-26): a served event's dispatch
      * preflight parked on an in-flight replica load its closure reads
@@ -562,6 +577,7 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
     lt1LeftoversPurged: 0,
     lt1LateSealsRefused: 0,
     orphanDeliveriesRefused: 0,
+    handlerNotRunDeferrals: 0,
     loadParkDeferrals: 0,
     loadParkFailures: 0,
     deliveryDeferralsActive: 0,

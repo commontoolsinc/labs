@@ -451,6 +451,33 @@ loop's duty).
   is a distinct `CommitPreparationError`; it is a delivery failure,
   not a CFC verdict. An explicit handler abort is a handler-error
   consequence, not an infrastructure retry.
+- **Handler body DID NOT RUN — not a consequence (RULED 2026-08-27;
+  mark/effects atomicity, the a04 write-side member).** A served
+  dispatch whose handler body never executed — the runner's
+  argument-did-not-resolve skip ("action argument is undefined … not
+  running") — commits NOTHING: the dispatch's transaction, which
+  carries the entry's pre-stamped `consequenced` mark (§4), is
+  WITHDRAWN whole. The entry stays pending-unconsequenced, the
+  standard re-drain re-delivers it, and the retried handler's
+  cause-derived (idempotent) writes converge. Sealing the skip is the
+  defect this rule prevents: the mark committed ALONE — a 1-op derived
+  commit, the user's event permanently consumed with zero effects and
+  no error (the b1-lifts a04 red, seqs 53/56). Consequence atomicity
+  is contribution-level all-or-nothing: if ANY effect of a consequence
+  contribution is withdrawn or requeued by the wave, the mark goes
+  with it — §4's same-transaction carriage plus the wave's
+  whole-contribution requeue and same-eventId fold enforce that at the
+  wave; this rule closes the DISPATCH-side arm, where the effects
+  never entered the transaction at all. The drain treats the
+  withdrawal as a plain deferral (in-flight guard released, rescan
+  armed, counted `handlerNotRunDeferrals`, serving-loop.md §7), so a
+  PERMANENTLY unresolvable argument hardens through the bounded
+  deferral budget into the visible T3 drop notice instead of wedging
+  the stream. (α) preserved: the mark still commits exactly once, only
+  never without its effects. An LT1 in-process copy takes the same
+  withdrawal through its abort alone — the batch marks only a
+  SURVIVING lt1 run (§4), so the durable entry lands unmarked and the
+  next drain delivers it once, with a `streamEntry`.
 - A served event's typed delivery failure records a server-owned
   processing checkpoint on its stream entry. Dispatch-load and
   commit-preparation failures accumulate only intervals in which the

@@ -3356,6 +3356,17 @@ export class SpaceServer implements TransactionSealDestination {
                     return;
                   }
                   if (outcome.kind === "deferred") {
+                    if (
+                      "cause" in outcome && outcome.cause === "handler-not-run"
+                    ) {
+                      // Mark/effects atomicity (events.md §4, RULED
+                      // 2026-08-27): the dispatched handler's body did
+                      // not run and its tx — carrying the pre-stamped
+                      // mark — was withdrawn. Loud counter; the entry
+                      // takes the same plain-deferral pending path
+                      // below (threshold backstop included).
+                      this.#options.stats.events.handlerNotRunDeferrals += 1;
+                    }
                     const deferrals =
                       (this.#eventDeferrals.get(entry.eventId) ?? 0) + 1;
                     this.#eventDeferrals.set(entry.eventId, deferrals);

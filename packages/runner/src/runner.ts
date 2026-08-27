@@ -6775,6 +6775,19 @@ export class Runner {
               },
             ],
           );
+          // Mark/effects atomicity (events.md §4, RULED 2026-08-27 — the
+          // a04 write-side member): record the skip on the transaction so
+          // the scheduler's event finalize can withdraw a SERVED
+          // dispatch's tx instead of sealing it. The dispatch stamper
+          // wrote the entry's `consequenced` mark into this tx BEFORE
+          // the body ran (space-server.ts), so sealing a skipped run
+          // commits a 1-op mark-only consequence — the entry permanently
+          // consumed with zero effects and no error. A fact, recorded
+          // unconditionally; the scheduler gates on `served`.
+          tx.dispatchedHandlerNotRun = {
+            reason:
+              "action argument is undefined (potential schema mismatch)",
+          };
         }
 
         let result: any = undefined;
