@@ -908,7 +908,9 @@ export function buildDiffDocument(
       mappings.set(absPath, mapping);
     }
 
-    // --- file header lines -------------------------------------------------
+    //
+    // file header lines
+    //
     for (let i = file.headerLine; i <= file.endLine; i++) {
       const kind = model.lines[i]?.kind;
       if (kind !== "meta") continue;
@@ -948,7 +950,9 @@ export function buildDiffDocument(
       }));
     }
 
-    // --- the file's section node -------------------------------------------
+    //
+    // the file's section node
+    //
     const label = file.newPath ?? file.oldPath ?? "(unknown file)";
     const start = diffLineStarts[file.headerLine];
     const end = lineEndOffset(diffLineStarts, text, file.endLine);
@@ -1008,7 +1012,9 @@ function buildEdit(
   return { sourceText, lines, fileText, oldFileLines, hunks };
 }
 
-// --- hunk rendering + structure ------------------------------------------------
+//
+// hunk rendering + structure
+//
 
 interface MutableLine {
   text: string;
@@ -1282,13 +1288,15 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
     restoreLossyRenderedChanges(hunk, ctx, sourceFallbacks);
   }
 
-  // --- structure ---------------------------------------------------------
+  //
+  // structure
   // Verified hunks remap the workspace file's own nodes (precise ranges, live
   // semantics). Unverified hunks — drifted workspace, missing file — still get
   // navigable structure from the fragment parse of their new side: the nodes
   // come from the diff text itself, so navigation always works; only the
   // semantic extras (types, definitions) stay silent there. Either way the
   // new-side language projects its own structure into the hunk's coordinates.
+  //
   const children: StructureNode[] = [];
   let source:
     | {
@@ -1550,7 +1558,9 @@ function shiftFragmentSpans(
   ]);
 }
 
-// --- offset maps for semantics ----------------------------------------------
+//
+// offset maps for semantics
+//
 
 function buildMaps(
   diffLineStarts: number[],
@@ -1598,7 +1608,9 @@ function buildMaps(
   };
 }
 
-// --- small helpers -----------------------------------------------------------
+//
+// small helpers
+//
 
 function lineEndOffset(
   lineStarts: number[],

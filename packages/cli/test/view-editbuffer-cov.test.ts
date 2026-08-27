@@ -5,7 +5,9 @@ function at(b: EditBuffer): [number, number] {
   return [b.row, b.col];
 }
 
-// --- construction / setText / spliceLines -----------------------------------
+//
+// construction / setText / spliceLines
+//
 
 Deno.test("editbuffer: constructor splits on newlines, single line otherwise", () => {
   const b = new EditBuffer("a\nb\nc");
@@ -63,7 +65,9 @@ Deno.test("editbuffer: spliceLines clamps cursor into the replacement", () => {
   );
 });
 
-// --- vertical motion (moveUp) -----------------------------------------------
+//
+// vertical motion (moveUp)
+//
 
 Deno.test("editbuffer: moveUp keeps a goal column across short lines", () => {
   const b = new EditBuffer("first line\nx\nlast line");
@@ -83,7 +87,9 @@ Deno.test("editbuffer: moveUp at the top row is a no-op", () => {
   assertEquals(at(b), [0, 2], "cannot move above the first line");
 });
 
-// --- buffer-edge motion -----------------------------------------------------
+//
+// buffer-edge motion
+//
 
 Deno.test("editbuffer: moveBufferStart goes to row 0 col 0", () => {
   const b = new EditBuffer("aaa\nbbb\nccc");
@@ -101,7 +107,9 @@ Deno.test("editbuffer: moveBufferEnd goes to the last line's end", () => {
   assertEquals(at(b), [2, 4], "last row, col at its length");
 });
 
-// --- insertion edge ----------------------------------------------------------
+//
+// insertion edge
+//
 
 Deno.test("editbuffer: insert of an empty string is a no-op", () => {
   const b = new EditBuffer("abc");
@@ -119,7 +127,9 @@ Deno.test("editbuffer: insert of a multi-line string splits and inserts", () => 
   assertEquals(at(b), [1, 1]);
 });
 
-// --- deletion (line joins) ---------------------------------------------------
+//
+// deletion (line joins)
+//
 
 Deno.test("editbuffer: deleteForward deletes a character mid-line", () => {
   const b = new EditBuffer("abc");
@@ -143,7 +153,9 @@ Deno.test("editbuffer: deleteForward at line end joins with the next line", () =
   assertEquals(b.text(), "abcd");
 });
 
-// --- killLine / killWholeLine ------------------------------------------------
+//
+// killLine / killWholeLine
+//
 
 Deno.test("editbuffer: killLine mid-line kills to the end of the line", () => {
   const b = new EditBuffer("hello world");
@@ -206,7 +218,9 @@ Deno.test("editbuffer: killWholeLine on the only line empties it in place", () =
   );
 });
 
-// --- killRegion / yank / yankPop early returns ------------------------------
+//
+// killRegion / yank / yankPop early returns
+//
 
 Deno.test("editbuffer: killRegion with no mark is a no-op", () => {
   const b = new EditBuffer("hello");
@@ -246,7 +260,9 @@ Deno.test("editbuffer: yankPop after a yank replaces with the next ring entry", 
   assertEquals(b.text(), "A", "wraps around the ring");
 });
 
-// --- pushKill empty-text guard ----------------------------------------------
+//
+// pushKill empty-text guard
+//
 
 Deno.test("editbuffer: killLine on an empty last line kills nothing", () => {
   // killLine at end of a non-final empty line joins; on the final empty line
@@ -271,7 +287,9 @@ Deno.test("editbuffer: killWordForward with no word ahead pushes nothing", () =>
   assertEquals(b.killRing.length, 0, "empty kill is not pushed");
 });
 
-// --- case operations ---------------------------------------------------------
+//
+// case operations
+//
 
 Deno.test("editbuffer: capitalizeWord with no letter/number leaves the word as-is", () => {
   const b = new EditBuffer("--- rest");
@@ -306,7 +324,9 @@ Deno.test("editbuffer: a word op whose word ends on the next line just moves to 
   assertEquals(at(b), [0, 3], "cursor moves to the end of the current line");
 });
 
-// --- multi-line cut (via killRegion across lines) ----------------------------
+//
+// multi-line cut (via killRegion across lines)
+//
 
 Deno.test("editbuffer: killRegion across multiple lines cuts and rejoins", () => {
   const b = new EditBuffer("one\ntwo\nthree\nfour");
@@ -356,7 +376,9 @@ Deno.test("editbuffer: killWordForward across a line boundary cuts multiple line
   assertEquals(b.text(), "ab \ncd");
 });
 
-// --- word scanning across lines ---------------------------------------------
+//
+// word scanning across lines
+//
 
 Deno.test("editbuffer: moveWordForward crosses blank/short lines to the next word", () => {
   const b = new EditBuffer("ab\n\ncd");

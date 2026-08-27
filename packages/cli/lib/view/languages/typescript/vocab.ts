@@ -23,9 +23,11 @@ export const BUILDER_NAMES: ReadonlySet<string> =
 /** Reactive call helpers, e.g. `ifElse`, `when`, `cell`, `wish`. */
 export const CALL_NAMES: ReadonlySet<string> = COMMONFABRIC_CALL_EXPORT_NAMES;
 
-// --- Synthetic identifiers emitted by ts-transformers ------------------------
+//
+// Synthetic identifiers emitted by ts-transformers
 // Mirrors of constants in `packages/ts-transformers/src`. Kept as literals so
 // the pager does not import the transformer's analysis graph. See vocab.test.ts.
+//
 
 /** `packages/ts-transformers/src/core/cf-helpers.ts` `CF_HELPERS_IDENTIFIER`. */
 export const CF_HELPERS_IDENTIFIER = "__cfHelpers";

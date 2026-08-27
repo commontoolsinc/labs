@@ -70,7 +70,9 @@ function cwdThatThrows(): string {
   return 12345 as unknown as string;
 }
 
-// --- createSemantics: setup-time guards -------------------------------------
+//
+// createSemantics: setup-time guards
+//
 
 Deno.test("semantics: a text that throws while splitting yields no service", () => {
   // `splitSections` reads `text.length` first; that throw is caught and the
@@ -111,7 +113,9 @@ Deno.test("semantics: a build failure latches and every later query stays silent
   assertEquals(sem.fileLines(join(CWD, "anything.ts")), null);
 });
 
-// --- createSemantics: per-query catch wrappers ------------------------------
+//
+// createSemantics: per-query catch wrappers
+//
 
 Deno.test("semantics: typeAt swallows a throw raised while locating the section", () => {
   // The program builds; then an offset that throws on numeric coercion makes
@@ -141,7 +145,9 @@ Deno.test("semantics: fileLines swallows a throw from the containment check", ()
   assertEquals(sem.fileLines(pathThatThrows()), null);
 });
 
-// --- createDiffSemantics: setup-time fallback -------------------------------
+//
+// createDiffSemantics: setup-time fallback
+//
 
 Deno.test("diff semantics: an un-discoverable config still runs the fallback", () => {
   // With a cwd the path helpers reject, `discoverConfig` throws and the diff

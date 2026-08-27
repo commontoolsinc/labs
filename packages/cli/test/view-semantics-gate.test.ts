@@ -32,7 +32,9 @@ function nameOffsetOf(doc: Document, name: string): number {
   return node.nameOffset;
 }
 
-// --- createSemantics: build success path that the !program guard backstops ----
+//
+// createSemantics: build success path that the !program guard backstops
+//
 
 Deno.test("semantics: a healthy build returns a Program (the !program guard is a backstop)", () => {
   // build() runs createLanguageService + getProgram and returns a real Program,
@@ -62,7 +64,9 @@ const y = x;`;
   assertEquals(sem.definitionOf(nameOffsetOf(doc, "y")), []);
 });
 
-// --- createSemantics: the host file cache (populated once, never re-hit) -------
+//
+// createSemantics: the host file cache (populated once, never re-hit)
+//
 
 Deno.test("semantics: the host reads each real file once (cache populated, not re-hit)", () => {
   // Under Bundler resolution the host loads each resolved file a single time;
@@ -98,7 +102,9 @@ const b = ext();`;
   }
 });
 
-// --- within()/realDir: a child resolves => its ancestor root resolves too ------
+//
+// within()/realDir: a child resolves => its ancestor root resolves too
+//
 
 Deno.test("semantics: within() resolves a real child under a real root (realDir succeeds)", () => {
   // realDir(root) is only reached after the child's realPathSync succeeds; the
@@ -136,7 +142,9 @@ const x = 1;`;
   }
 });
 
-// --- createDiffSemantics: build success path the failure guards backstop ------
+//
+// createDiffSemantics: build success path the failure guards backstop
+//
 
 const FILE_TEXT = `export function double(n: number): number {
     return n * 2;

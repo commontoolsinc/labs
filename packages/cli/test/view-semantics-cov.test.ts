@@ -30,7 +30,9 @@ function nameOffsetOf(doc: Document, name: string): number {
   return node.nameOffset;
 }
 
-// --- createSemantics: lazy build, prewarm, and degrade-to-null paths --------
+//
+// createSemantics: lazy build, prewarm, and degrade-to-null paths
+//
 
 Deno.test("semantics: createSemantics returns a service for a single-section blob", () => {
   // No section headers: the fallback single section runs, the service builds,
@@ -141,7 +143,9 @@ const out = triple(7);`;
   assert(first === second, "the cache hands back the identical array");
 });
 
-// --- JSONC parsing edge cases (stripJsonc) ----------------------------------
+//
+// JSONC parsing edge cases (stripJsonc)
+//
 
 Deno.test("semantics: JSONC import map survives block comments and escapes", () => {
   // A block comment AND a string value containing an escaped quote and a `//`
@@ -212,7 +216,9 @@ const y = x;`;
   }
 });
 
-// --- typeStringAt branches + lineAndPreview clamp ---------------------------
+//
+// typeStringAt branches + lineAndPreview clamp
+//
 
 Deno.test("semantics: typeStringAt returns null when no node holds the offset", () => {
   // A run of trailing blank space after the only statement, all inside the
@@ -273,7 +279,9 @@ const flag = ext();`;
   }
 });
 
-// --- makeHost: extension classification of resolved modules -----------------
+//
+// makeHost: extension classification of resolved modules
+//
 
 Deno.test("semantics: classifies a resolved .tsx import (extensionOf Tsx)", () => {
   // The import-map value points directly at a `.tsx` file; resolveRelative
@@ -492,7 +500,9 @@ const value = asset;`;
   });
 });
 
-// --- createDiffSemantics: full service over a real workspace ----------------
+//
+// createDiffSemantics: full service over a real workspace
+//
 
 const FILE_TEXT = `export function double(n: number): number {
     return n * 2;
@@ -723,7 +733,9 @@ Deno.test("diff semantics: types the workspace binding from a real subdir cwd", 
   }
 });
 
-// --- diff-mode catch-to-empty branches via a throwing DiffMaps stub ----------
+//
+// diff-mode catch-to-empty branches via a throwing DiffMaps stub
+//
 
 /**
  * Wrap a real DiffMaps but force `toFile`/`fromFile` to throw on demand. The
@@ -840,7 +852,9 @@ Deno.test("diff semantics: fileLines rejects a path outside the workspace", () =
   }
 });
 
-// --- end-to-end against the real repo (resolves commonfabric) ---------------
+//
+// end-to-end against the real repo (resolves commonfabric)
+//
 
 Deno.test("semantics: SAMPLE blob types a pattern binding from a real subdir", () => {
   const doc = parseDocument(SAMPLE);
