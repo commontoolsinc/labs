@@ -29,15 +29,30 @@
 // posture re-resolves the `actingAs: "space-owner"` binding against the
 // ACL AS IT NOW STANDS.
 //
-// The pins below are the two halves of that, plus the host wiring:
-//   1. the reproduction — pre-genesis session, genesis revokes it, N
-//      reads fail with zero successes, the ACL-change notice heals it
-//      and the durable doc reads through;
-//   2. fail-closed — an ACL change that REMOVES the user does not widen
-//      authority: the re-open is denied at session.open and the read
-//      keeps failing;
-//   3. the live glue — a real ExecutorHost whose own admission observer
+// The pins:
+//   1. the reproduction — pre-genesis session, genesis revokes it, eight
+//      reads fail with zero successes, the ACL-change notice heals it and
+//      the durable doc reads through;
+//   2. fail-closed — the remount RE-RUNS `session.open`, it does not
+//      decide it: one trigger, two outcomes, and only the ACL chooses
+//      between them;
+//   3. ownership change — the serving plane re-binds the NEW owner
+//      (OW31), which is the outcome the revocation sweep's own comment
+//      asks for, and reads as no one the memory server did not admit;
+//   4. no churn — an ACL commit that terminated nothing mints no new
+//      `session.open`, which is why the teardown is guarded on the
+//      session's own close verdict rather than on the ACL event;
+//   5. the live glue — a real ExecutorHost whose own admission observer
 //      carries the genesis notice, nothing hand-fed.
+//
+// One correction the build made to its own brief, recorded because it
+// changes what "fail closed" means here. Under OW31 a SERVING mount's
+// READ decisions resolve as whoever OWNS the space, so removing the user
+// from an ACL does not de-authorize the serving plane — it re-binds the
+// new owner (pin 3), exactly as `#revokeDeauthorizedSessions`'s own
+// comment says it should. A denial the remount must respect is
+// constructible on a principal the ACL does not grant (pin 2), which is
+// the general statement anyway: the remount never decides.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -89,9 +104,15 @@ describe("the session remount (profile-starvation fifth face)", () => {
   let server: MemoryV2Server.Server;
   let cleanups: Array<() => Promise<void>>;
   let storeSeq = 0;
+  /** `session.open` attempts by the SERVING identity — the observable for
+   * "did this remount actually mint a new session?". Scoped to the service
+   * principal because the ACL-setting client runtimes open sessions of
+   * their own on the same server. */
+  let sessionOpens: number;
 
   beforeEach(() => {
     storeSeq += 1;
+    sessionOpens = 0;
     server = new MemoryV2Server.Server({
       store: new URL(`memory://session-remount-${storeSeq}`),
       subscriptionRefreshDelayMs: 0,
@@ -100,6 +121,7 @@ describe("the session remount (profile-starvation fifth face)", () => {
       // `authorization.principal`.
       authorizeSessionOpen: (message) => {
         const iss = (message.invocation as { iss?: unknown } | undefined)?.iss;
+        if (iss === serviceSigner.did()) sessionOpens += 1;
         if (typeof iss === "string") return iss;
         const principal =
           (message.authorization as { principal?: unknown } | undefined)
@@ -210,7 +232,11 @@ describe("the session remount (profile-starvation fifth face)", () => {
   let probeCounter = 0;
   const mintProbeId = (runtime: Runtime, space: MemorySpace): URI => {
     probeCounter += 1;
-    return runtime.getCell<string>(space, `wire-probe-${probeCounter}`, undefined)
+    return runtime.getCell<string>(
+      space,
+      `wire-probe-${probeCounter}`,
+      undefined,
+    )
       .getAsNormalizedFullLink().id as URI;
   };
 
@@ -378,6 +404,39 @@ describe("the session remount (profile-starvation fifth face)", () => {
     );
   });
 
+  it("a HEALTHY session is never churned: an ACL commit that did not terminate it mints no new session.open", async () => {
+    // The other half of the trigger's discipline, and the reason the
+    // teardown is guarded on the session's own close verdict rather than
+    // on the ACL event alone. ACL documents are written for reasons that
+    // have nothing to do with this replica; re-mounting on each one would
+    // trade a starving session for a churning one — a fresh handshake,
+    // a fresh watch install, and a re-pull of everything the replica had
+    // already tracked, per ACL write.
+    const serving = servingManager();
+    const minter = clientRuntime(homeSigner);
+    await setAcl(homeSigner, homeSpace, { [homeSigner.did()]: "OWNER" });
+    // Opened AFTER the genesis, so it is authorized from the start and
+    // nothing ever revokes it.
+    await serving.ensureSpaceInitialized(homeSpace);
+    expect(
+      (await probeRead(serving, homeSpace, mintProbeId(minter, homeSpace)))
+        .error,
+    ).toBeUndefined();
+
+    const before = sessionOpens;
+    // An ACL commit that changes nothing about this session's standing.
+    await setAcl(homeSigner, homeSpace, { [servingSigner.did()]: "READ" });
+    (serving as AclChangeNotifier).noteSpaceAclChanged?.(homeSpace);
+    expect(
+      (await probeRead(serving, homeSpace, mintProbeId(minter, homeSpace)))
+        .error,
+    ).toBeUndefined();
+    expect(
+      sessionOpens - before,
+      "a live session must survive an ACL commit untouched",
+    ).toBe(0);
+  });
+
   it("HOST GLUE: the genesis ACL rides the host's OWN admission feed and heals a registered space server's foreign session — nothing hand-fed", async () => {
     // The wiring pin. A real ExecutorHost, a real SpaceServer for the
     // SERVING space, and the starved session on a FOREIGN space (the
@@ -439,7 +498,8 @@ describe("the session remount (profile-starvation fifth face)", () => {
     const docId = await seedDoc(homeSigner, homeSpace, "host-glue", "v1");
 
     await waitUntil(
-      async () => (await probeRead(serving, homeSpace, docId)).error === undefined,
+      async () =>
+        (await probeRead(serving, homeSpace, docId)).error === undefined,
       "the host's ACL admission healed the foreign session",
     );
   });
