@@ -117,18 +117,34 @@ describe("check-verb-session-sync", () => {
         .toEqual([["cf", "get", "--piece", "a", "x"]]);
     });
 
-    it("leaves a command piping its own output onward with no payload", () => {
-      // Only a leading `echo <value> |` is a stdin payload. A pipe after the
-      // command belongs to the shell around it, and reading one as a payload
-      // would put a phantom token on every substitution the demos capture.
-      expect(demoCommands(`X=$(cf piece get --piece a title | jq -r .)`))
-        .toEqual([["cf", "piece", "get", "--piece", "a", "title"]]);
-    });
-
     it("ignores a helper it does not know", () => {
       // The head list is the whole of what makes a line a command the demo
       // ran; a new helper that executes one has to be added to it.
       expect(demoCommands(`frobnicate cf set --piece a target`)).toEqual([]);
+    });
+  });
+
+  describe("walkthroughCommands", () => {
+    const block = (line: string) => ["```bash", line, "```"].join("\n");
+
+    it("reads a piped value as part of the command it feeds", () => {
+      // The document's spelling of a demo's `run_stdin`, asserted here as
+      // tokens rather than only through the violations it produces.
+      expect(
+        walkthroughCommands(block("echo '25' | cf set --piece a target"))
+          .map((command) => command.tokens),
+      ).toEqual([["echo", "25", "|", "cf", "set", "--piece", "a", "target"]]);
+    });
+
+    it("finds no command in a line piping into anything but cf", () => {
+      // The payload rule's boundary: `echo`, a value, the bar, and then `cf`
+      // — all four, or the line is not a command at all. Dropping the last
+      // of those requirements would make every `echo … | jq` in a document
+      // a command the demo is then asked to have run.
+      expect(walkthroughCommands(block("echo '25' | jq -r .")))
+        .toEqual([]);
+      expect(walkthroughCommands(block("echo '25' | cfx set --piece a x")))
+        .toEqual([]);
     });
   });
 
