@@ -262,12 +262,14 @@ describe("piece-rollback", () => {
       const out = await captureStdout(() =>
         rollbackFromCommand({ ...ROLLBACK_OPTIONS, json: true }, {
           runRollback: (_config, request) => {
-            // A single document cannot stream, so no row reporter is handed
-            // to the library at all. The key set, not each value: an
-            // `apply: undefined` riding along is a key the library still
-            // has to reason about, and every matcher that asks about one
-            // property reads a present-but-undefined key as an absent one.
-            expect(Object.keys(request).sort()).toEqual(["planPath"]);
+            // A single document cannot stream, so the reporter this mode
+            // hands the library observes and never prints. The key set, not
+            // each value: an `apply: undefined` riding along is a key the
+            // library still has to reason about, and every matcher that asks
+            // about one property reads a present-but-undefined key as an
+            // absent one.
+            expect(Object.keys(request).sort()).toEqual(["onRow", "planPath"]);
+            for (const row of REPORT.rows) request.onRow?.(row);
             return Promise.resolve({ report: REPORT, plan: DERIVED });
           },
           printHint: () => {},
@@ -275,6 +277,9 @@ describe("piece-rollback", () => {
       );
       expect(out.startsWith("fvj1:")).toBe(true);
       expect(out).toContain('"elapsedMs":412');
+      // What "cannot stream" means, asserted directly: two rows went through
+      // the reporter above and stdout still carries one line, the document.
+      expect(out.trimEnd().split("\n")).toHaveLength(1);
     });
 
     it("exits nonzero on a stopped run, naming every unattempted piece", async () => {
@@ -374,6 +379,26 @@ describe("piece-rollback", () => {
       );
       expect(process.errors.join("\n")).toContain("1 row settled");
       expect(abandoned).toBeInstanceOf(Promise);
+    });
+
+    it("counts the rows a document-mode run settled, which wrote no document", async () => {
+      // `--json` builds what it emits from the returned report, so a run
+      // that never returns emits nothing and this line is the whole account.
+      const process = guardHarness();
+      const out = await captureStdout(() => {
+        rollbackFromCommand({ ...ROLLBACK_OPTIONS, json: true, apply: true }, {
+          runRollback: (_config, request) => {
+            request.onRow?.(REPORT.rows[0]);
+            return new Promise<never>(() => {});
+          },
+          printHint: () => {},
+          guard: process.deps,
+        });
+        return Promise.resolve();
+      });
+      expect(process.endProcess()).toBe(1);
+      expect(process.errors.join("\n")).toContain("1 row settled — applied: 1");
+      expect(out).toBe("");
     });
 
     it("says nothing at process end once the run has reported", async () => {

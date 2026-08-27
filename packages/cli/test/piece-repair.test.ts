@@ -263,6 +263,14 @@ describe("piece-repair", () => {
       expect(process.errors.join("\n")).toContain(
         "Repair ended before it reported",
       );
+      // `repairPieces` takes no row callback, so its rows settle where this
+      // process cannot see them. The line must say the count is unknown: a
+      // repair that wrote half its documents and reported "no row settled"
+      // would be telling the operator something false.
+      expect(process.errors.join("\n")).toContain(
+        "How many rows it settled is not known here",
+      );
+      expect(process.errors.join("\n")).not.toContain("No row settled");
       expect(abandoned).toBeInstanceOf(Promise);
     });
 

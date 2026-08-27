@@ -3731,8 +3731,12 @@ export async function repairFromCommand(
   // The repair runs one session rather than the retarget's grouped ones, but
   // it ends the same way: an await that stops settling drains the process at
   // code 0 with the fixer's writes half-made and nothing said about them.
-  // The repair streams no rows, so the guard reports the ending alone.
-  const progress = newApplyRunProgress();
+  //
+  // Unwatched, because `repairPieces` reports its rows only in the report it
+  // returns — there is no row callback to hand it. So the guard says the
+  // count is unknown rather than zero: this run's rows really do settle, and
+  // a process that never saw them must not report their absence.
+  const progress = newApplyRunProgress(false);
   const guard = guardRunReport(
     () => describeUnreportedApplyRun("Repair", progress),
     deps.guard ?? {},
@@ -3931,7 +3935,7 @@ export async function retargetFromCommand(
   // Armed before the first session opens and stood down by the report: a run
   // that stops settling anywhere in between ends the process, and without
   // this that ending is indistinguishable from a clean finish.
-  const progress = newApplyRunProgress();
+  const progress = newApplyRunProgress(true);
   const guard = guardRunReport(
     () => describeUnreportedApplyRun("Retarget", progress),
     deps.guard ?? {},
@@ -3947,14 +3951,15 @@ export async function retargetFromCommand(
       ...(options.groupSize === undefined
         ? {}
         : { groupSize: options.groupSize }),
-      ...(streaming
-        ? {
-          onRow: (row: ApplyRow) => {
-            countApplyRow(progress, row);
-            print(formatApplyRow(row));
-          },
-        }
-        : {}),
+      // Every mode watches the rows; only a streaming one prints them. What
+      // the document modes cannot do is stream to stdout, and observing is
+      // not streaming — they are the modes with the most to lose from a run
+      // that never returns, since the document they emit is written from
+      // the report and a run that never reports writes nothing at all.
+      onRow: (row: ApplyRow) => {
+        countApplyRow(progress, row);
+        if (streaming) print(formatApplyRow(row));
+      },
     });
   } catch (error) {
     // A run that ended by throwing reports through the error it threw, which
@@ -3987,9 +3992,14 @@ export async function retargetFromCommand(
   );
 }
 
-/** A guarded apply run's row counts, empty before its first row settles. */
-function newApplyRunProgress(): ApplyRunProgress {
-  return { verdicts: new Map<string, number>() };
+/**
+ * A guarded apply run's row counts, empty before its first row settles.
+ * `observed` is whether this run's engine is being handed a row reporter at
+ * all: without one its rows settle unseen, and the process-end report must
+ * say the count is unknown rather than say zero.
+ */
+function newApplyRunProgress(observed: boolean): ApplyRunProgress {
+  return { observed, verdicts: new Map<string, number>() };
 }
 
 /** Count one settled row toward what a process-end report would say. */
@@ -4168,8 +4178,9 @@ export async function rollbackFromCommand(
   const printHint = deps.printHint ?? hint;
   const streaming = options.json !== true && options.out === undefined;
   // The same process-end guard the retarget arms, for the same reason: this
-  // runs on the same engine, over the same grouped sessions.
-  const progress = newApplyRunProgress();
+  // runs on the same engine, over the same grouped sessions — and watches
+  // its rows in every mode, as the retarget does and for the same reason.
+  const progress = newApplyRunProgress(true);
   const guard = guardRunReport(
     () => describeUnreportedApplyRun("Rollback", progress),
     deps.guard ?? {},
@@ -4188,14 +4199,10 @@ export async function rollbackFromCommand(
         ...(options.groupSize === undefined
           ? {}
           : { groupSize: options.groupSize }),
-        ...(streaming
-          ? {
-            onRow: (row: ApplyRow) => {
-              countApplyRow(progress, row);
-              print(formatApplyRow(row));
-            },
-          }
-          : {}),
+        onRow: (row: ApplyRow) => {
+          countApplyRow(progress, row);
+          if (streaming) print(formatApplyRow(row));
+        },
       },
     ));
   } catch (error) {

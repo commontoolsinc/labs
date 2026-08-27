@@ -19,8 +19,14 @@ import {
 } from "../lib/unreported-run.ts";
 import { guardHarness as harness } from "./unreported-run-helpers.ts";
 
+/** A watched run that has settled `verdicts` so far. */
 function progressOf(verdicts: [string, number][]): ApplyRunProgress {
-  return { verdicts: new Map(verdicts) };
+  return { observed: true, verdicts: new Map(verdicts) };
+}
+
+/** A run whose engine reports its rows only when it returns. */
+function unwatchedProgress(): ApplyRunProgress {
+  return { observed: false, verdicts: new Map() };
 }
 
 const testDir = dirname(fromFileUrl(import.meta.url));
@@ -115,7 +121,12 @@ describe("unreported-run", () => {
           "run was still in flight.",
       );
       expect(line).toContain("75 rows settled — applied: 75.");
-      expect(line).toContain("Re-running resumes from what landed");
+      expect(line).toContain("Re-running resumes it");
+      // The same command minus `--apply`, not a survey: a survey reads
+      // references, which say nothing about the repair's work in documents,
+      // and one line serves all three verbs.
+      expect(line).toContain("without `--apply` says where every piece now");
+      expect(line).not.toContain("survey");
     });
 
     it("counts one settled row in the singular", () => {
@@ -124,12 +135,24 @@ describe("unreported-run", () => {
       ).toContain("1 row settled — applied: 1.");
     });
 
-    it("says no row settled when the run streamed none", () => {
-      // The repair streams no rows at all, and a stopped retarget can end
-      // before its first row does.
+    it("says no row settled when a watched run ended before its first", () => {
+      // Zero is a fact here: the run's rows were being watched, and none
+      // arrived. A retarget can end this way — inside the preflight, or in
+      // the plan decode before a session ever opens.
       expect(
-        describeUnreportedApplyRun("Repair", progressOf([])),
-      ).toContain("No row settled");
+        describeUnreportedApplyRun("Retarget", progressOf([])),
+      ).toContain("No row settled before it ended");
+    });
+
+    it("says the count is unknown for a run whose rows it never watched", () => {
+      // The repair's engine reports its rows only in the report it returns.
+      // Its rows really do settle, so "no row settled" would be false of it
+      // — and a false line is worse than an unhelpful one, because an
+      // operator can act on it.
+      const line = describeUnreportedApplyRun("Repair", unwatchedProgress());
+      expect(line).toContain("How many rows it settled is not known here");
+      expect(line).not.toContain("No row settled");
+      expect(line).not.toContain("0 rows");
     });
 
     it("keeps every verdict it was given on the tally", () => {

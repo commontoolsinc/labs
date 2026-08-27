@@ -119,6 +119,15 @@ export function guardRunReport(
 
 /** What one guarded apply run has settled by the time it is asked. */
 export interface ApplyRunProgress {
+  /**
+   * Whether this run's rows are being watched as they settle. False for a
+   * run whose engine takes no row callback: its rows settle where this
+   * process cannot see them, so a count of zero would be an absence of
+   * observation rather than an absence of work — and "no row settled" would
+   * be false of it rather than merely unhelpful.
+   */
+  observed: boolean;
+
   /** Rows the run reported, by verdict, in the order first seen. */
   verdicts: Map<string, number>;
 }
@@ -129,11 +138,17 @@ export interface ApplyRunProgress {
  * the missing summary would have carried, minus the claims only a returned
  * report can support.
  *
- * The counts come from the rows the run streamed, so a mode that streams
- * none says only that the run ended, which is the honest whole of what such
- * a run knows about itself. Nothing here asserts that the rows it does not
- * name were left alone: a run that stopped settling stopped somewhere this
- * process cannot see, and a survey is what settles that.
+ * Three readings, and the distinction between the last two is the whole
+ * point of {@link ApplyRunProgress.observed}. A watched run that settled
+ * rows names them and their verdicts. A watched run that settled none says
+ * so, which is a fact about the run. An UNWATCHED run says the number is not
+ * known here — never zero, because zero would be a claim this process is in
+ * no position to make, and a wrong number is worse than no number: an
+ * operator can act on it.
+ *
+ * Nothing here asserts that rows it does not name were left alone either. A
+ * run that stopped settling stopped somewhere this process cannot see, so
+ * the closing line sends the reader to the one thing that can see it.
  */
 export function describeUnreportedApplyRun(
   verb: string,
@@ -149,12 +164,18 @@ export function describeUnreportedApplyRun(
   return [
     `${verb} ended before it reported: the process exited while the run was ` +
     `still in flight.`,
-    settled === 0
-      ? `  No row settled, so this run accounts for nothing it may have ` +
-        `written.`
+    !progress.observed
+      ? `  How many rows it settled is not known here — this run reports ` +
+        `its rows only when it returns, and it did not return.`
+      : settled === 0
+      ? `  No row settled before it ended.`
       : `  ${settled} ${settled === 1 ? "row" : "rows"} settled — ${tally}. ` +
         `Whether anything after them was written is not known here.`,
-    `  Re-running resumes from what landed, and a fresh survey says what ` +
-    `that is.`,
+    // The same command without `--apply`, rather than a named verification:
+    // every verb that arms a guard has a dry mode that classifies each piece
+    // where it now stands, and a survey — which reads references — would say
+    // nothing about a repair, whose work is in the documents.
+    `  Re-running resumes it, and rows that landed are not redone. The same ` +
+    `command without \`--apply\` says where every piece now stands.`,
   ].join("\n");
 }

@@ -363,9 +363,14 @@ describe("piece-retarget", () => {
       const out = await captureStdout(() =>
         retargetFromCommand({ ...OPTIONS, json: true }, {
           runRetarget: (_config, request) => {
-            // A single document cannot stream, so no row reporter is handed
-            // to the library at all.
-            expect(Object.keys(request).sort()).toEqual(["planPath"]);
+            // A single document cannot stream, so the reporter this mode
+            // hands the library observes and never prints. The key set, not
+            // each value: an `apply: undefined` riding along is a key the
+            // library still has to reason about, and every matcher that asks
+            // about one property reads a present-but-undefined key as an
+            // absent one.
+            expect(Object.keys(request).sort()).toEqual(["onRow", "planPath"]);
+            for (const row of REPORT.rows) request.onRow?.(row);
             return Promise.resolve(REPORT);
           },
           printHint: () => {},
@@ -373,6 +378,10 @@ describe("piece-retarget", () => {
       );
       expect(out.startsWith("fvj1:")).toBe(true);
       expect(out).toContain('"elapsedMs":412');
+      // What "cannot stream" means, asserted directly rather than inferred
+      // from the absence of a callback: two rows went through the reporter
+      // above and stdout still carries exactly one line, the document.
+      expect(out.trimEnd().split("\n")).toHaveLength(1);
     });
 
     it("writes the report to --out and leaves stdout empty", async () => {
@@ -381,7 +390,10 @@ describe("piece-retarget", () => {
       const out = await captureStdout(() =>
         retargetFromCommand({ ...OPTIONS, out: "report.json" }, {
           runRetarget: (_config, request) => {
-            expect(Object.keys(request).sort()).toEqual(["planPath"]);
+            expect(Object.keys(request).sort()).toEqual(["onRow", "planPath"]);
+            // The reporter observes; the empty stdout asserted below is what
+            // says it printed nothing.
+            for (const row of REPORT.rows) request.onRow?.(row);
             return Promise.resolve(REPORT);
           },
           writeTextFile: (path, text) => {
@@ -614,6 +626,54 @@ describe("piece-retarget", () => {
       // The abandoned promise is the run that never came back; naming it
       // keeps the lint's floating-promise rule honest about that.
       expect(abandoned).toBeInstanceOf(Promise);
+    });
+
+    it("counts the rows a document-mode run settled, which wrote no document", async () => {
+      // The mode with the most to lose: `--json` and `--out` build what they
+      // emit from the returned report, so a run that never returns writes
+      // nothing at all and this line is the operator's whole account of it.
+      // A count of zero here after real writes would be worse than silence —
+      // wrong, and actionable.
+      for (
+        const mode of [{ json: true }, { out: "report.json" }] as const
+      ) {
+        resetUnreportedRunGuardsForTest();
+        const process = guardHarness();
+        let written = false;
+        const out = await captureStdout(() => {
+          retargetFromCommand({ ...OPTIONS, ...mode, apply: true }, {
+            runRetarget: (_config, request) => {
+              request.onRow?.({
+                piece: "fid1:aaa",
+                phase: "topics",
+                verdict: "applied",
+                elapsedMs: 12,
+              });
+              request.onRow?.({
+                piece: "fid1:bbb",
+                phase: "topics",
+                verdict: "applied",
+                elapsedMs: 9,
+              });
+              return new Promise<ApplyReport>(() => {});
+            },
+            writeTextFile: () => {
+              written = true;
+              return Promise.resolve();
+            },
+            printHint: () => {},
+            guard: process.deps,
+          });
+          return Promise.resolve();
+        });
+        expect(process.endProcess()).toBe(1);
+        expect(process.errors.join("\n")).toContain(
+          "2 rows settled — applied: 2.",
+        );
+        // Observing is not streaming, and the document was never written.
+        expect(out).toBe("");
+        expect(written).toBe(false);
+      }
     });
 
     it("says nothing at process end once the run has reported", async () => {

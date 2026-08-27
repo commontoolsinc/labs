@@ -336,12 +336,27 @@ drains and exits at code 0, having written part of a migration and said
 nothing about it. So the report is not the only thing that decides how `cf`
 ends. Each of `retarget`, `rollback`, and `repair` arms a guard over its whole
 run and stands it down the moment it has reported; a process that ends first
-names the verb, says how many rows had settled and under which verdicts, and
-exits nonzero. The guard runs off the process ending rather than a clock, so
-it costs a run that finishes nothing and can never cut one short. Its summary
-claims only what the run streamed: whether anything past the settled rows was
-written is a question for a survey, which is the answer to every other
-half-finished run too.
+names the verb, says what had settled, and exits nonzero. The guard runs off
+the process ending rather than a clock, so it costs a run that finishes
+nothing and can never cut one short.
+
+That summary is the operator's only account of such a run, so no reading of it
+may be false. The retarget and the rollback watch their rows in every output
+mode — `--json` and `--out` hand the engine a reporter that observes and never
+prints, since what a document mode cannot do is stream to stdout, and those
+are the modes with the most to lose: the document is built from the returned
+report, so a run that never returns writes no file at all. Their line therefore
+counts rows and names their verdicts, and a count of zero is a fact about a run
+that was being watched. The repair's engine reports its rows only in the report
+it returns, so its line says the number is not known rather than saying zero —
+its rows really do settle, and a number an operator can act on must never be
+one this process is in no position to give. Neither line claims that rows it
+does not name were left alone: whether anything past the settled rows was
+written is a question for a fresh read, and the line sends the operator to the
+same command without `--apply` — every verb that arms a guard has a dry mode
+that classifies each piece where it now stands, while a survey reads
+references and would say nothing about a repair, whose work is in the
+documents.
 
 ## The fixer contract
 
