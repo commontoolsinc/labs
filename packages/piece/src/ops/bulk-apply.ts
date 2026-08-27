@@ -97,6 +97,8 @@ export interface ApplyRow {
    * The origin the plan recorded for this piece, absent when the plan
    * recorded none. A survey's reading, carried verbatim: it says what the
    * piece followed when the plan was made and nothing about this run.
+   * {@link ApplyRow.detachedOrigin} carries what a write actually detached,
+   * and that is the one to re-attach from.
    *
    * A field of its own rather than a `warning`, which is a fact about a
    * write that landed and so cannot reach the dry run — the one moment the

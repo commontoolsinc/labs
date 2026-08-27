@@ -278,9 +278,9 @@ export async function surveyPieces(
       patternIdentity: pin.patternIdentity,
       symbol: pin.symbol,
       retained: pin.retained,
-      // The origin rides the row so the artifact records what a retarget
-      // will detach: the write cuts the piece loose, and the operator's way
-      // back is this string, by hand.
+      // The origin rides the row so the artifact records what the plan was
+      // built against. It is this read and nothing later: what a run
+      // detaches is the run's to report, on its own row.
       ...(pin.origin === undefined ? {} : { origin: pin.origin }),
       ...(pin.revisionId === undefined ? {} : { revisionId: pin.revisionId }),
     };
@@ -380,8 +380,8 @@ export interface PiecePin {
    * piece is detached. Read raw rather than classified, as
    * `readRestorableSource` in [piece-restore.ts](./piece-restore.ts) reads it
    * and for the same reason: a classified read reports an origin this runtime
-   * cannot resolve as detached, while a retarget detaches that string all the
-   * same, so reading it classified would leave exactly those pieces
+   * cannot resolve as detached, while a write detaches such an origin like
+   * any other, so reading it classified would leave exactly those pieces
    * unrecorded.
    */
   origin?: string;

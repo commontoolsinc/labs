@@ -55,8 +55,9 @@ retained in the space, the origin the piece follows when it follows one, the
 current source revision when the piece keeps a log, and the stored document's
 hash when a repair recorded one. The origin is the string the piece stores and
 nothing derived from it: the canonical URL and the kind are both computed from
-it, against the host this deployment routes the space to, and what re-attaching
-by hand takes is what the piece stored. An `op` is a
+it, against the host this deployment routes the space to, so either would read
+differently elsewhere. It records what the plan was built against rather than
+what a run detaches, which the report carries instead. An `op` is a
 retarget (a local source, the identity it produces, the symbol, and a per-row
 compatibility override), a restore (the reference to return to, and the
 revision when one was read), or a repair (the fixer's name and the content

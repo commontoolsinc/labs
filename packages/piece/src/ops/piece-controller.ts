@@ -4221,12 +4221,11 @@ export class PieceController<T = unknown> {
       }
       throw pinnedSourceMoved(error, options?.expectedPattern);
     }
-    // Assigned by the mutation above before the write it belongs to; a
-    // mutation that returned without assigning it never reached the write.
-    if (transition === undefined) {
-      throw new Error("the source transition was not prepared");
-    }
-    return { detachedOrigin: transition.expected.origin };
+    // The mutation assigns `transition` before the write it belongs to, and
+    // every earlier exit from it throws — so a mutation that resolved has
+    // one, and a mutation that did not took the catch above. Asserted rather
+    // than guarded because a guard here could never fire.
+    return { detachedOrigin: transition!.expected.origin };
   }
 
   async #runMutation(

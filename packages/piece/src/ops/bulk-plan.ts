@@ -75,19 +75,25 @@ export interface PieceExpect {
   retained: boolean;
 
   /**
-   * The origin the piece follows, exactly as the piece records it; absent
-   * when the piece is detached. A retarget writes a source a human chose
-   * and detaches the piece from its origin, so this is the record of what
-   * the run detaches — and the string an operator writes back to re-attach it
-   * by hand afterwards.
+   * The origin the piece followed when the survey read it, exactly as the
+   * piece records it; absent when it was detached then.
+   *
+   * A record of what the plan was built against, and no claim about what any
+   * later run does. A retarget detaches the origin the piece holds when its
+   * write commits, which is this one only while nothing moved it in between
+   * — and only the reference pair is a precondition, so a piece whose origin
+   * alone moved is still written. What a run detached rides its own report
+   * row as `ApplyRow.detachedOrigin`
+   * ([bulk-apply.ts](./bulk-apply.ts)), and that is the value to re-attach
+   * from; this one disagreeing with it is what tells an operator the plan
+   * had gone stale.
    *
    * The recorded spelling alone. `PieceOrigin` carries two more fields, the
    * canonical URL and the kind, and `classifyOrigin` derives both from this
    * string — the URL against the host this deployment routes the space to —
    * so recording either would put a re-derivable fact in the artifact in a
-   * spelling that reads differently elsewhere. Re-attaching takes the string
-   * the piece stored and nothing else, which is also how
-   * `RestoreOutcome.origin` spells the same fact.
+   * spelling that reads differently elsewhere. `RestoreOutcome.origin`
+   * spells the same fact the same way.
    */
   origin?: string;
 
