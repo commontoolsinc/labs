@@ -146,8 +146,19 @@ export function noteDerivedCopy(copy: unknown, original: unknown): void {
   derivedFrom.set(c, root);
   if (trustedPatterns.has(root)) trustedPatterns.add(c);
   if (trustedBuilderArtifacts().has(root)) trustedBuilderArtifacts().add(c);
+  // Eager ref propagation is an optimization only — the lazy root walk in
+  // `getArtifactEntryRef` serves a copy without an own entry — and it must
+  // never pin a SESSION-synthetic ref onto the copy: `getArtifactEntryRef`
+  // consults the exact object first, so a keyless ref copied here would
+  // shadow the root's later REAL promotion (module indexing after
+  // build-time copies) for this copy forever. Real refs are immutable
+  // facts and safe to pin; keyless ones stay root-resolved.
   const ref = entryRefByValue.get(root);
-  if (ref && !entryRefByValue.has(c)) entryRefByValue.set(c, ref);
+  if (
+    ref && !entryRefByValue.has(c) && !isKeylessPatternIdentity(ref.identity)
+  ) {
+    entryRefByValue.set(c, ref);
+  }
 }
 
 /**

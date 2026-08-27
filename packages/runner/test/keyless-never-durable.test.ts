@@ -8,9 +8,14 @@ import { newLoopbackServer } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import { getPatternIdentityRef, resolveEntryIdentity } from "../src/index.ts";
+import {
+  getPatternIdentityRef,
+  getPatternSetupIdentityRef,
+  resolveEntryIdentity,
+} from "../src/index.ts";
 import {
   brandTrustedPattern,
+  noteDerivedCopy,
   setPatternSourcePath,
 } from "../src/builder/pattern-metadata.ts";
 
@@ -410,6 +415,88 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
 
     const started = await runtime.runner.start(cell);
     expect(started).toBe(false);
+  });
+
+  it("a derived copy sheds its pre-registration keyless shadow once the root promotes", async () => {
+    // The late-indexing window crossed with a build-time copy: a copy made
+    // while the root's only ref was the session mint must not pin that
+    // keyless ref (getArtifactEntryRef consults the exact object first, so
+    // a pinned copy would shadow the root's later REAL promotion forever —
+    // leaving the copy's pieces pointer-less and its boundary form embedded
+    // in a fresh runtime).
+    storageManager = EmulatedStorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const engine = runtime.harness as Engine;
+    const evalResult = await engine.compileAndEvaluateModules(mapProgram);
+    const factory = evalResult.main!.default as object;
+
+    // Mint the session identity on the (still unregistered) root, then make
+    // a derivation copy while the root is keyless.
+    const minted = runtime.patternManager.ensureKeylessPatternIdentity(
+      factory as never,
+    );
+    expect(minted.identity).toMatch(/^keyless:/);
+    const copy = { derivedCopyOf: "map-root" };
+    noteDerivedCopy(copy, factory);
+
+    // The module registers: the root's ref promotes to its real identity.
+    runtime.patternManager.registerEvaluatedModules(evalResult);
+    const rootRef = runtime.patternManager.getArtifactEntryRef(factory);
+    expect(rootRef).toBeDefined();
+    expect(rootRef!.identity).not.toMatch(/^keyless:/);
+
+    // The copy resolves through the root and sees the REAL identity.
+    const copyRef = runtime.patternManager.getArtifactEntryRef(copy);
+    expect(copyRef?.identity).toBe(rootRef!.identity);
+  });
+
+  it("a keyed piece re-setup with a keyless pattern sheds its stale durable pointer", async () => {
+    // The reverse handoff: a piece that once carried a REAL durable pointer
+    // is re-setup with a hand-built (keyless) pattern. The keyless setup
+    // stamps nothing — so it must CLEAR the stale pointer and setup marker,
+    // or later starts (fresh sessions especially) would select the old
+    // pattern over the state setup just staged.
+    storageManager = EmulatedStorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const tx = runtime.edit();
+    const compiled = await runtime.patternManager.compilePattern(mapProgram, {
+      space,
+      tx,
+    });
+    const cell = runtime.getCell<Record<string, unknown>>(
+      space,
+      "keyed-to-keyless-supersede",
+      undefined,
+      tx,
+    );
+    const running = runtime.run(
+      tx,
+      compiled as Parameters<Runtime["run"]>[1],
+      {},
+      cell,
+    );
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    const cancel = running.sink(() => {});
+    await runtime.idle();
+    expect(getPatternIdentityRef(cell)).toBeDefined();
+    cancel();
+    runtime.runner.stop(cell);
+
+    const tx2 = runtime.edit();
+    // deno-lint-ignore no-explicit-any
+    const rerun = runtime.run(tx2, handBuiltPattern() as any, {}, cell);
+    await tx2.commit();
+    await rerun.pull();
+
+    expect(getPatternIdentityRef(cell)).toBeUndefined();
+    expect(getPatternSetupIdentityRef(cell)).toBeUndefined();
   });
 
   it("counts a keyless mint against a module-indexed pattern (missing-association tripwire)", async () => {

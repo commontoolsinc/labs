@@ -2400,6 +2400,23 @@ export class Runner {
       });
       this.sessionPatternPointers.delete(this.getDocKey(resultCell));
     } else if (entryRef) {
+      // A piece previously stamped with a DIFFERENT durable pointer (a real
+      // identity from an earlier keyed setup, or a pre-guard legacy keyless
+      // orphan) must not keep it: setup just staged the KEYLESS pattern's
+      // state, and a standing stale pointer would make later starts —
+      // fresh sessions especially — select the OLD pattern over it. Clear
+      // both durable metas transactionally with this setup; the cleared
+      // state IS the keyless piece's designed durable verdict
+      // (no-pattern-meta), and clearing writes no keyless identity.
+      const staleRef = getPatternIdentityRef(resultCell.withTx(tx));
+      if (staleRef !== undefined) {
+        resultCell.withTx(tx).setMetaRaw("patternIdentity", undefined);
+      }
+      if (
+        getPatternSetupIdentityRef(resultCell.withTx(tx)) !== undefined
+      ) {
+        resultCell.withTx(tx).setMetaRaw("patternSetupIdentity", undefined);
+      }
       // The KEYLESS piece's stand-in for both skipped stamps, session-side:
       // the pattern pointer (start/resume flows) and the setup-completion
       // marker (`storedSetupMarker`'s reuse decision — without it a

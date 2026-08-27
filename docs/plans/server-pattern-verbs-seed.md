@@ -1,10 +1,12 @@
 # Seed: pattern verbs as server calls
 
-A design seed, not a design: it records the owner's serverize direction
-(rulings of 2026-08-24, server-execution v2 coordination) so the arc that
-picks this up starts from the ruled anchors instead of re-deriving them. The
-register (`docs/specs/server-side-execution/verification-coverage.md`) holds
-the surrounding context.
+A pending arc awaiting an implementation owner: move the pattern lifecycle
+verbs onto the serving runtime. This seed carries the ruled anchors the arc
+starts from (owner rulings, 2026-08-24, cited per point below) so it is not
+re-derived; the register
+(`docs/specs/server-side-execution/verification-coverage.md`) holds the
+surrounding context. It is a seed, not a design — the open shape questions
+are listed at the end.
 
 ## The ruled direction (owner, 2026-08-24)
 

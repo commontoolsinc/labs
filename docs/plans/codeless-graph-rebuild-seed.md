@@ -1,14 +1,12 @@
 # Seed: codeless graph rebuild (parked arc)
 
-A design seed for a **parked** arc — recorded 2026-08-27 from the
-server-execution v2 coordination chat so the facts that make the arc possible
-are written down while they are fresh. Nothing here is scheduled; the
-keyless close-out (L3(a)) explicitly deferred handler-replay–class recovery
-to this arc rather than building it.
-
-## The owner's framing (2026-08-27, quoted)
-
-> "the graph is already serialized into scheduler state by definition."
+A **parked** arc, deliberately unscheduled: rebuild a runnable piece graph
+from durable state alone. The keyless close-out (L3(a), owner ruling
+2026-08-27) defers handler-replay–class recovery here rather than building
+it, so this seed exists to keep that deferral honest — it states the facts
+that make the rebuild possible and what the arc builds when unparked. The
+owner's framing of why the arc is possible at all: the graph is already
+serialized into scheduler state by definition (2026-08-27).
 
 ## The facts the arc stands on
 
