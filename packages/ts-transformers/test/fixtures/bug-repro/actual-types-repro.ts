@@ -1,6 +1,5 @@
 /**
  * NULL ELIMINATION REPRODUCTION - Using Actual Common Fabric Types
- * ===============================================================
  *
  * This uses the real Reactive from commonfabric to verify the bug.
  *
