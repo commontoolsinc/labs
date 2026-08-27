@@ -499,6 +499,100 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
     expect(getPatternSetupIdentityRef(cell)).toBeUndefined();
   });
 
+  it("a fresh session replays a keyless piece's setup without restaging its stored argument", async () => {
+    // The cross-session `cf get` transform shape: session A sets up a
+    // keyless piece over a deterministic doc; session B (fresh runtime, no
+    // durable pointer, no setup marker — the keyless piece's designed
+    // durable verdict) re-runs the structurally same pattern on the same
+    // doc. Zero evidence of any update exists, so setup must NOT restage —
+    // restaging validates the stored argument against the candidate schema
+    // and rewrites defaults, and the transform replay failed exactly there
+    // ("additional property"). The pattern's schema rejects extras; the
+    // stored argument carries one (written un-validated by A's plain
+    // new-cell path, as materialized link reads do in production).
+    const directory = await Deno.makeTempDir({ prefix: "keyless-replay-" });
+    const store = toFileUrl(`${directory}/`);
+    const server = newLoopbackServer({
+      subscriptionRefreshDelayMs: 0,
+      store,
+    });
+    const strictPattern = () => ({
+      argumentSchema: {
+        type: "object",
+        properties: { v: { type: "number" } },
+        additionalProperties: false,
+      },
+      resultSchema: {
+        type: "object",
+        properties: { out: { type: "number" } },
+      },
+      result: { out: { $alias: { cell: "argument", path: ["v"] } } },
+      nodes: [],
+    });
+    try {
+      const managerA = EmulatedStorageManager.connectTo(server, {
+        as: signer,
+      });
+      const runtimeA = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: managerA,
+      });
+      try {
+        const tx = runtimeA.edit();
+        const cell = runtimeA.getCell<Record<string, unknown>>(
+          space,
+          "keyless-cross-session-replay",
+          undefined,
+          tx,
+        );
+        const running = runtimeA.run(
+          tx,
+          // deno-lint-ignore no-explicit-any
+          strictPattern() as any,
+          { v: 1, extra: 2 },
+          cell,
+        );
+        await tx.commit();
+        await running.pull();
+        await runtimeA.storageManager.synced();
+      } finally {
+        await runtimeA.runner.idlePointerMaintenance();
+        await runtimeA.dispose();
+        await managerA.close();
+      }
+
+      storageManager = EmulatedStorageManager.connectTo(server, {
+        as: signer,
+      });
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      const tx2 = runtime.edit();
+      const cell2 = runtime.getCell<Record<string, unknown>>(
+        space,
+        "keyless-cross-session-replay",
+        undefined,
+        tx2,
+      );
+      await cell2.sync();
+      const rerun = runtime.run(
+        tx2,
+        // deno-lint-ignore no-explicit-any
+        strictPattern() as any,
+        { v: 1, extra: 2 },
+        cell2,
+      );
+      const committed = await tx2.commit();
+      expect(committed.error).toBeUndefined();
+      const value = await rerun.pull();
+      expect((value as { out?: number })?.out).toBe(1);
+    } finally {
+      await server.close();
+      await Deno.remove(directory, { recursive: true });
+    }
+  });
+
   it("counts a keyless mint against a module-indexed pattern (missing-association tripwire)", async () => {
     // The sanctioned keyless population is runtime-BUILT values. A pattern
     // carrying a module-index source path reaching the mint means its

@@ -2509,7 +2509,19 @@ export class Runner {
     );
     const setupState: SetupStateReuse = {
       sameStoredSetup,
-      restageStoredArgument: !sameStoredSetup || marker === "other",
+      // The zero-evidence exemption: a piece with NO pattern pointer (durable
+      // or session) and NO setup marker carries no evidence any update moved
+      // it — the KEYLESS piece's designed durable verdict (L3(a), RULED
+      // 2026-08-27: a keyless piece stamps nothing, so a FRESH session
+      // re-encountering one reads exactly this), and the pre-marker legacy
+      // root. The absent-marker exemption's own rationale applies in full:
+      // re-staging would validate — and rewrite defaults over — a stored
+      // argument no update touched (the cross-session `cf get` transform
+      // replay failed exactly there). A marker naming ANOTHER identity still
+      // restages, and any surviving pointer keeps the ordinary rule.
+      restageStoredArgument: (!sameStoredSetup || marker === "other") &&
+        !(previousIdentityRef === undefined && marker === "absent" &&
+          !validationOptions.reapplyStoredSetup),
       // "matches" only. An ABSENT marker is not evidence that the running graph
       // is this pattern — it is the absence of evidence either way, and the two
       // must not collapse into one boolean.
