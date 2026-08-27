@@ -486,14 +486,19 @@ Diagnostics emitted in all modes:
     over per-element cells rather than pattern-body code), or a read whose
     receiver is not a `Cell`/`Writable`/`Stream` (`items.get()` on a plain
     pattern input, which also draws `opaque-get:invalid-call`)
-  - a read inside a plain (non-reactive) array `map` callback
-    (`["-", "+"].map((sep) => rows.get().join(sep))`) is accepted. That
-    callback runs eagerly during pattern build and `map` collects what it
-    returns without reading it, so its value sites are pattern-owned wrapper
-    sites like the pattern body's own, and each iteration's site lowers to its
-    own lift-applied computation. The result-interpreting array callbacks
-    (`filter`, `find`, `some`, `every`, `sort`, `flatMap`, `reduce`) keep the
-    diagnostic
+  - a read inside a plain (non-reactive) array `map` callback is carried by
+    that callback's own value sites while the map stays on a supported flow
+    (`["-", "+"].map((sep) => <li>{rows.get().join(sep)}</li>)` as a JSX
+    child). That callback runs eagerly during pattern build and `map` collects
+    what it returns without reading it, so its value sites are pattern-owned
+    wrapper sites like the pattern body's own, and each iteration's site lowers
+    to its own lift-applied computation. When the callback is value-collecting
+    and the collected result leaves the direct JSX-child or synchronous-IIFE
+    flow (`const joined = ["-", "+"].map((sep) => rows.get().join(sep))`), the
+    map call reports `pattern-context:computation` and this diagnostic defers
+    to that single report; §6.7 states the flow rule. The result-interpreting
+    array callbacks (`filter`, `find`, `some`, `every`, `sort`, `flatMap`,
+    `reduce`) keep the diagnostic
   - a cell read that DOES sit at a lowerable site is not rejected: the site is
     auto-wrapped into a lift-applied computation. That covers the read itself
     (`const v = count.get()`, `{ value: count.get() }`,
