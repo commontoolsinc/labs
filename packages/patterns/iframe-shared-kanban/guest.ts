@@ -14,6 +14,7 @@ const state = fabric.cell<IframeStateData>("state");
 const output = fabric.cell<IframeOutputData>("output");
 const root = document.querySelector<HTMLDivElement>("#root")!;
 let problem = "";
+let hydrated = false;
 let cardTitleDraft = "";
 let cardColumnDraft = "";
 let adding = false;
@@ -54,6 +55,11 @@ function run(
   );
 }
 
+async function hydrateBoard(): Promise<void> {
+  await Promise.all([input.pull(), state.pull(), output.pull()]);
+  hydrated = true;
+}
+
 function render(): void {
   const config = input.get() ?? DEFAULT_INPUT;
   const storedBoard = state.get();
@@ -73,6 +79,7 @@ function render(): void {
   title.placeholder = "Add a card";
   title.required = true;
   title.value = cardTitleDraft;
+  title.disabled = !hydrated || adding;
   title.addEventListener("input", () => cardTitleDraft = title.value);
   const column = document.createElement("select");
   for (const item of config.columns) {
@@ -82,18 +89,20 @@ function render(): void {
     cardColumnDraft = config.columns[0]?.id ?? "";
   }
   column.value = cardColumnDraft;
-  column.disabled = config.columns.length === 0 || adding;
+  column.disabled = !hydrated || config.columns.length === 0 || adding;
   column.addEventListener("change", () => cardColumnDraft = column.value);
   const add = document.createElement("button");
   add.type = "button";
   add.textContent = "Add together";
-  add.disabled = storedBoard === undefined || config.columns.length === 0 ||
-    adding;
+  add.disabled = !hydrated || storedBoard === undefined ||
+    config.columns.length === 0 || adding;
   controls.append(title, column, add);
   add.addEventListener("click", () => {
     const value = title.value.trim();
     const destination = column.value;
-    if (!value || !destination || storedBoard === undefined || adding) return;
+    if (
+      !hydrated || !value || !destination || storedBoard === undefined || adding
+    ) return;
     adding = true;
     render();
     run(
@@ -150,17 +159,23 @@ function render(): void {
       select.textContent = preference.selectedCardId === card.id
         ? "Selected"
         : "Select";
+      select.disabled = !hydrated;
       select.addEventListener(
         "click",
-        () => run(output.set({ selectedCardId: card.id })),
+        () => {
+          if (hydrated) run(output.set({ selectedCardId: card.id }));
+        },
       );
       const move = document.createElement("button");
       move.type = "button";
       move.className = "secondary";
       move.textContent = "Move";
-      move.disabled = config.columns.length < 2 || movingCards.has(card.id);
+      move.disabled = !hydrated || config.columns.length < 2 ||
+        movingCards.has(card.id);
       move.addEventListener("click", () => {
-        if (config.columns.length < 2 || movingCards.has(card.id)) return;
+        if (
+          !hydrated || config.columns.length < 2 || movingCards.has(card.id)
+        ) return;
         movingCards.add(card.id);
         render();
         run(
@@ -196,7 +211,7 @@ function render(): void {
 }
 
 const stops = [input.sink(render), state.sink(render), output.sink(render)];
-run(Promise.all([input.pull(), state.pull(), output.pull()]));
+run(hydrateBoard());
 globalThis.addEventListener("pagehide", () => {
   stops.forEach((stop) => stop());
   fabric.disconnect();

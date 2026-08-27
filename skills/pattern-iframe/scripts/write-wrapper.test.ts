@@ -180,6 +180,26 @@ export const IFRAME_PATTERN = {
     expect(guest).toContain("message.disabled = !draftHydrated");
     expect(guest).toContain("submit.disabled = !draftHydrated");
     expect(guest).toContain("run(hydrateDrafts());");
+    expect(guest.match(/draftHydrated = true/g)).toHaveLength(1);
+    expect(guest).not.toContain("if (!draftHydrated && storedDraft)");
+  });
+
+  it("hydrates board configuration before enabling shared actions", async () => {
+    const guest = await Deno.readTextFile(
+      resolve(
+        ROOT,
+        "packages",
+        "patterns",
+        "iframe-shared-kanban",
+        "guest.ts",
+      ),
+    );
+
+    expect(guest).toContain("async function hydrateBoard()");
+    expect(guest).toContain("title.disabled = !hydrated");
+    expect(guest).toContain("add.disabled = !hydrated");
+    expect(guest).toContain("move.disabled = !hydrated");
+    expect(guest).toContain("run(hydrateBoard());");
   });
 
   it("hydrates ledger inputs before adopting user filter updates", async () => {

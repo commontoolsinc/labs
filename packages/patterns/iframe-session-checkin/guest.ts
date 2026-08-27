@@ -88,12 +88,6 @@ async function hydrateDrafts(): Promise<void> {
 
 function render(): void {
   const config = input.get() ?? DEFAULT_INPUT;
-  const storedDraft = state.get();
-  if (!draftHydrated && storedDraft) {
-    moodDraft = storedDraft.mood;
-    messageDraft = storedDraft.message;
-    draftHydrated = true;
-  }
   const room = output.get() ?? DEFAULT_OUTPUT;
   const main = document.createElement("main");
   main.innerHTML =
@@ -133,12 +127,10 @@ function render(): void {
   };
   mood.addEventListener("change", () => {
     moodDraft = mood.value;
-    draftHydrated = true;
     run(persist());
   });
   message.addEventListener("input", () => {
     messageDraft = message.value;
-    draftHydrated = true;
   });
   message.addEventListener("change", () => run(persist()));
   const submit = document.createElement("button");
@@ -162,7 +154,7 @@ function render(): void {
       mood: mood.value,
       message: message.value.trim(),
     };
-    if (!current.message || submitting) return;
+    if (!draftHydrated || !current.message || submitting) return;
     submitting = true;
     moodDraft = current.mood;
     messageDraft = current.message;
