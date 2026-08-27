@@ -26,7 +26,7 @@ import type { Command } from "@cliffy/command";
 import { main as cliRoot } from "../packages/cli/commands/main.ts";
 import { walk } from "@std/fs/walk";
 import { parse as parseJsonc } from "@std/jsonc";
-import { join, relative } from "@std/path";
+import { dirname, fromFileUrl, join, relative } from "@std/path";
 
 /**
  * Commands deliberately left without prose, each with the reason.
@@ -262,7 +262,7 @@ export function describeCommandDocFailures(
 /** Run the check against the real CLI tree. Returns the process exit code. */
 export async function main(
   args: readonly string[] = [],
-  root = new URL("..", import.meta.url).pathname,
+  root = dirname(dirname(fromFileUrl(import.meta.url))),
 ): Promise<number> {
   const declared = declaredCommands(cliRoot);
   const documented = await documentedCommands(root, declared);

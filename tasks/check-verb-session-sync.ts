@@ -3,12 +3,12 @@
 /**
  * Fails when a verb-session document drifts from the demo that runs it.
  *
- * Two documents describe the same session — the tour
- * (`docs/common/verbs/the-verb-session.md`) and the walkthrough
- * (`docs/common/verbs/session-walkthrough.md`) — and each may QUOTE commands
- * but never compose them: every `cf` line in one of their command blocks must
- * be a command `packages/cli/integration/verb-session-demo.sh` actually runs,
- * or sit under a `# not in the demo` comment saying why it cannot be. Nothing
+ * Each document is paired with the demo that runs the session it describes —
+ * the tour and the walkthrough with `verb-session-demo.sh`, the bulk tour with
+ * `bulk-ops-demo.sh` — and a document may QUOTE its demo's commands but never
+ * compose them: every `cf` line in one of its command blocks must be a command
+ * that demo actually runs, or sit under a `# not in the demo` comment saying
+ * why it cannot be. Nothing
  * executes a command block in a document, so a composed example can be wrong
  * from the day it is written and stay wrong through every editing pass — one
  * shipped that way and survived four of them. Both documents also name demo
