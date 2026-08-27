@@ -215,7 +215,7 @@ which to persist derived labels; query that database inside a pattern instead.
 The same `cf-iframe-bridge-multi-user.test.ts` multiplayer browser integration
 runs without a skip in both the default and server-execution ON pattern suites.
 It exercises `PerSpace`, `PerUser`, and `PerSession` cells and SQLite databases
-across two sessions for one identity, a second identity, and a page reload.
+across two sessions for one identity, a second identity, and a guest reload.
 
 ## Protocol
 
