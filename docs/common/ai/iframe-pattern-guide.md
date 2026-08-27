@@ -182,6 +182,13 @@ all resources those actions depend on have completed their initial pulls. A
 pre-hydration sink may render a fallback; it must not persist that fallback or
 run another side effect as though it were authoritative.
 
+Make readiness one aggregate phase owned by the bootstrap pull barrier. An
+individual `sink()` callback must never flip that phase, even when its own value
+is already present: state can arrive before input or output, and enabling an
+action then would let it validate or write against fallback data. While the
+aggregate phase is pending, sinks may update loading UI only. Set the phase once
+after the joint `Promise.all(...)` resolves, then render from the complete set.
+
 A newly resolved `user`- or `session`-scoped input can also be `undefined` while
 its default is materializing. Pull before the first mutation. If a child write
 needs its parent object to exist, initialize only when the authoritative pull

@@ -16,6 +16,9 @@ Keep the authored surface small:
 - `guest.ts` or `guest.tsx` owns the application. It may use plain DOM code or
   React and the guest bridge.
 - `main.tsx` is generated glue. Do not hand-edit it.
+- One joint initial `pull()` barrier owns readiness for every resource an action
+  uses. Keep action controls disabled until it resolves; an individual
+  synchronous `sink()` callback must never declare the guest ready.
 
 Generate the wrapper with:
 
