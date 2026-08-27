@@ -2006,11 +2006,13 @@ export class PiecesController<T = unknown> {
   private async restageRootSetupIfStale(
     root: Cell<NameSchema>,
   ): Promise<Cell<NameSchema>> {
+    // Nothing to re-stage: a root with no pattern to stage from, or one whose
+    // stored setup already names the pattern it is pinned to.
     const ref = getPatternIdentityRef(root);
-    if (ref === undefined) return root;
     const setupRef = getPatternSetupIdentityRef(root);
     if (
-      setupRef?.identity === ref.identity && setupRef.symbol === ref.symbol
+      ref === undefined ||
+      (setupRef?.identity === ref.identity && setupRef.symbol === ref.symbol)
     ) return root;
     try {
       const pattern = await this.runtime.patternManager.loadPatternByIdentity(

@@ -1078,6 +1078,40 @@ describe("piece source reconciliation", () => {
       expect(getPatternIdentityRef(piece)).toEqual(movedRef);
     });
 
+    it("does not apply an update once the piece has moved under the write", async () => {
+      // The candidate was compared against the pattern the piece ran when the
+      // pass read it, and the write is proved against that same pattern. A
+      // move landing after the comparison but before the write drops the
+      // transition rather than applying it over a piece it was never about.
+      const v2Identity = await identityFor(source("v2"));
+      const piece = await preparePiece(
+        servingFetch(() => v2Identity, () => source("v2")),
+      );
+      await stampSource(piece, PARENT_SOURCE);
+      const moved = await compileMarkerPattern("v3");
+      const movedRef = runtime.patternManager.getArtifactEntryRef(moved)!;
+
+      // The last await the pass takes before opening its write transaction.
+      const sync = runtime.syncStoredSetupArgument.bind(runtime);
+      runtime.syncStoredSetupArgument = async (
+        ...args: Parameters<typeof sync>
+      ) => {
+        const unchanged = await sync(...args);
+        const { error } = await runtime.editWithRetry((tx) => {
+          piece.withTx(tx).setMetaRaw("patternIdentity", movedRef);
+        });
+        expect(error).toBeUndefined();
+        return unchanged;
+      };
+      try {
+        expect(await reconcile(piece)).toBe("unavailable");
+      } finally {
+        runtime.syncStoredSetupArgument = sync;
+      }
+      expect(getPatternIdentityRef(piece)).toEqual(movedRef);
+      expect(getPatternSource(piece)).toBe(PARENT_SOURCE);
+    });
+
     it("abandons an in-flight reconciliation on disposal", async () => {
       const identityRequested = defer();
       identityGate = defer();
