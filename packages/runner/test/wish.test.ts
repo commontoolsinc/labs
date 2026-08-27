@@ -5091,6 +5091,38 @@ describe("openSidecarSurface", () => {
     expect(opens).toBe(1);
   });
 
+  it("answers with the replacement when the epoch ends mid-open", async () => {
+    // The pattern an open answers with is minted in the registry epoch that
+    // compiled it. An open still in flight when that epoch ends is answering
+    // about a dead one, so its caller is handed what the open that replaced
+    // it says — not a pattern whose schema references nothing can resolve,
+    // and not a failure over a surface still on its way.
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let opens = 0;
+    const runtime = makeFakeRuntime(() => {
+      opens += 1;
+      return opens === 1
+        ? gate.then(() => ({ marker: "stale" }))
+        : Promise.resolve({ marker: "fresh" });
+    });
+    const slot: SidecarSurfaceState = {};
+
+    const lease = acquireSchemaRegistryLease();
+    const stale = openSidecarSurface(runtime, slot, piece, SURFACE);
+    lease();
+
+    const fresh = openSidecarSurface(runtime, slot, piece, SURFACE);
+    expect(await fresh).toEqual({ marker: "fresh" });
+
+    release();
+    expect(await stale).toEqual({ marker: "fresh" });
+    expect(openedSidecarSurface(slot)).toEqual({ marker: "fresh" });
+    expect(opens).toBe(2);
+  });
+
   it("drops an opened pattern when the schema registry epoch clears", async () => {
     // A compiled pattern's serialized graph embeds `cid:` schema references
     // minted in the registry epoch that compiled it, and both backings die

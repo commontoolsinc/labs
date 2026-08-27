@@ -268,21 +268,36 @@ export class SourceReconciler {
       // the piece exists at all, and a caller's snapshot predates the run that
       // created it.
       let piece = await resultCell.withTx().sync();
+      // The supplied origin is settled once, before either path uses it, so
+      // that resolving one and recording one cannot disagree about what the
+      // runtime is allowed to supply.
+      const origin = classifyPieceOriginString(
+        suppliedOrigin,
+        this.#runtime.hostForSpace(piece.space).href,
+      );
+      if (origin.kind !== "system") {
+        logger.warn("unsupported-supplied-origin", () => [
+          "a piece was instantiated from an origin the runtime cannot supply",
+          piece.space,
+          suppliedOrigin,
+        ]);
+        return undefined;
+      }
       if (getPatternIdentityRef(piece) === undefined) {
-        return await this.#resolveSupplied(piece.space, suppliedOrigin);
+        return await this.#resolveSupplied(piece.space, origin);
       }
       if (getPatternSource(piece) === undefined) {
         // Recording where a piece's code comes from is worth doing and worth
         // saying when it fails, but it is not what the caller asked for: a
         // surface whose provenance could not be written still runs.
         try {
-          await this.#claimSuppliedOrigin(piece, suppliedOrigin);
+          await this.#claimSuppliedOrigin(piece, origin.ref);
           piece = await piece.withTx().sync();
         } catch (error) {
           logger.warn("claim-origin-failed", () => [
             "a piece the runtime supplies could not record its origin",
             piece.space,
-            suppliedOrigin,
+            origin.ref,
             error,
           ]);
         }
@@ -587,6 +602,13 @@ export class SourceReconciler {
    * The identity the source at `target` currently compiles to, per the host
    * serving it, or why that host did not say — which a caller with a piece to
    * report on records as the reason it is not following its origin.
+   *
+   * A host that cannot be reached at all answers here rather than throwing: a
+   * runtime built with no patterns route behind its API address — a pattern
+   * test's, a tool's — reaches this on every open, and the origin being
+   * unavailable is the ordinary state there rather than a fault. An abort still
+   * propagates, because teardown asking the pass to stop is not the origin
+   * failing to answer.
    */
   async #advertisedIdentity(
     target: URL,
@@ -595,7 +617,13 @@ export class SourceReconciler {
   ): Promise<{ identity: string } | { detail: string }> {
     const identityUrl = new URL(target);
     identityUrl.searchParams.set("identity", "");
-    const response = await fetch(identityUrl);
+    let response: Response;
+    try {
+      response = await fetch(identityUrl);
+    } catch {
+      signal.throwIfAborted();
+      return { detail: "the origin could not be reached" };
+    }
     if (!response.ok) {
       return { detail: `the origin answered ${response.status}` };
     }
@@ -635,20 +663,8 @@ export class SourceReconciler {
    */
   async #resolveSupplied(
     space: MemorySpace,
-    suppliedOrigin: string,
+    origin: Extract<PieceOriginKind, { kind: "system" }>,
   ): Promise<Pattern | undefined> {
-    const origin = classifyPieceOriginString(
-      suppliedOrigin,
-      this.#runtime.hostForSpace(space).href,
-    );
-    if (origin.kind !== "system") {
-      logger.warn("unsupported-supplied-origin", () => [
-        "a piece was instantiated from an origin the runtime cannot supply",
-        space,
-        suppliedOrigin,
-      ]);
-      return undefined;
-    }
     return await this.#track(async (signal) => {
       const fetch = this.#revalidatingFetch(signal);
       const target = this.#systemSourceUrl(origin.route, space);

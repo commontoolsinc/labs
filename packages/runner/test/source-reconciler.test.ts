@@ -1258,6 +1258,20 @@ describe("piece source reconciliation", () => {
         .toBeUndefined();
     });
 
+    it("records nothing for a supplied origin it cannot supply", async () => {
+      // The origin the runtime may supply is settled before either path uses
+      // it, so a piece that already exists is not stamped with one that a
+      // piece not yet there would have been refused.
+      const piece = await preparePiece(refuseEveryFetch);
+
+      expect(await open(piece, "https://programs.test/main.tsx"))
+        .toBeUndefined();
+
+      expect(getPatternSource(piece)).toBeUndefined();
+      expect(getPieceSourceRevisions(piece).map((entry) => entry.operation))
+        .toEqual([]);
+    });
+
     it("refuses source that does not compile to the advertised identity", async () => {
       // The host says one thing and serves another, so what it serves is not
       // the source that origin names.

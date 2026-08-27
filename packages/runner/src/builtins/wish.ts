@@ -1621,8 +1621,14 @@ export function openSidecarSurface(
   const opening: Promise<Pattern | undefined> = runtime.sourceReconciler
     .open(piece, surface.origin)
     .then((pattern) => {
-      // A later epoch's open has since replaced this one; its answer stands.
-      if (state.opening !== opening) return pattern;
+      // A later epoch's open replaced this one while it was in flight, so this
+      // pattern was minted in an epoch that has ended and is no answer at all:
+      // running it would stage links nothing can resolve. Wait on the open that
+      // replaced it, so the caller gets a live answer instead of a dead one or
+      // an error account written over a surface still on its way.
+      if (state.opening !== opening) {
+        return openSidecarSurface(runtime, state, piece, surface, options);
+      }
       if (pattern !== undefined) {
         state.pattern = pattern;
         state.patternEpoch = epoch;
