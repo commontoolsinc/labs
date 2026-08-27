@@ -6,13 +6,13 @@
 
 import { html, LitElement, nothing, type TemplateResult } from "lit";
 import {
-  type ConsoleGraph,
+  type ConsoleFlow,
   type ConsoleRunDetail,
   readRun,
   readRunFile,
-  readRunGraph,
+  readRunFlow,
 } from "./api.ts";
-import "./graph-view.ts";
+import "./flow-view.ts";
 import "./steps-view.ts";
 
 /** Which pane of the open run is showing. */
@@ -31,7 +31,7 @@ export class ConsoleRunView extends LitElement {
   static override properties = {
     runId: { attribute: false },
     detail: { attribute: false },
-    graph: { attribute: false },
+    flow: { attribute: false },
     pane: { attribute: false },
     focusStep: { attribute: false },
     rawName: { attribute: false },
@@ -41,7 +41,7 @@ export class ConsoleRunView extends LitElement {
 
   declare runId: string | undefined;
   declare detail: ConsoleRunDetail | undefined;
-  declare graph: ConsoleGraph | undefined;
+  declare flow: ConsoleFlow | undefined;
   declare pane: Pane;
   /** The step the timeline is on, which the flow aside marks. */
   declare focusStep: number | undefined;
@@ -57,8 +57,8 @@ export class ConsoleRunView extends LitElement {
    */
   #reads = 0;
 
-  /** The same guard for the graph, which is read on its own schedule. */
-  #graphReads = 0;
+  /** The same guard for the map, which is read on its own schedule. */
+  #flowReads = 0;
 
   constructor() {
     super();
@@ -84,7 +84,7 @@ export class ConsoleRunView extends LitElement {
     const runId = this.runId;
     if (runId === undefined) {
       this.detail = undefined;
-      this.graph = undefined;
+      this.flow = undefined;
       return;
     }
     try {
@@ -94,11 +94,11 @@ export class ConsoleRunView extends LitElement {
       }
       this.detail = detail;
       this.error = undefined;
-      // The graph reads every descendant's artifacts, so it is fetched only
-      // for a reader who is looking at it — a running turn re-reads the run on
+      // The map reads every descendant's artifacts, so it is fetched only for
+      // a reader who is looking at it — a running turn re-reads the run on
       // every completed tool call, and the family is the expensive part.
       if (this.pane === "timeline") {
-        void this.#loadGraph(runId);
+        void this.#loadFlow(runId);
       }
     } catch (error) {
       if (read !== this.#reads) {
@@ -109,23 +109,43 @@ export class ConsoleRunView extends LitElement {
   }
 
   /**
-   * Reads the open run's data-flow graph. Guarded the same way the run read is:
-   * a click can switch runs while a graph is still arriving, and only the graph
-   * of the run now showing may be drawn.
+   * Reads the open run's conversation map. Guarded the same way the run read
+   * is: a click can switch runs while a map is still arriving, and only the
+   * map of the run now showing may be drawn.
    */
-  async #loadGraph(runId: string): Promise<void> {
-    const read = ++this.#graphReads;
+  async #loadFlow(runId: string): Promise<void> {
+    const read = ++this.#flowReads;
     try {
-      const graph = await readRunGraph(runId);
-      if (read === this.#graphReads && this.runId === runId) {
-        this.graph = graph;
+      const flow = await readRunFlow(runId);
+      if (read === this.#flowReads && this.runId === runId) {
+        this.flow = flow;
       }
     } catch {
-      // A graph that cannot be read leaves the rest of the run readable; the
-      // pane says it is empty rather than the run failing to open.
-      if (read === this.#graphReads && this.runId === runId) {
-        this.graph = undefined;
+      // A map that cannot be read leaves the rest of the run readable; the
+      // aside says it is empty rather than the run failing to open.
+      if (read === this.#flowReads && this.runId === runId) {
+        this.flow = undefined;
       }
+    }
+  }
+
+  /**
+   * Follows a click in the map to the step it names. A node of a child run
+   * opens that run, whose own timeline is where its steps are numbered.
+   */
+  #goToStep(target: { runId?: string; step: number }): void {
+    if (target.runId !== undefined && target.runId !== this.runId) {
+      this.dispatchEvent(
+        new CustomEvent("open-run", { detail: target.runId, bubbles: true }),
+      );
+      return;
+    }
+    const steps = this.querySelector("console-steps") as
+      | { selected: number }
+      | null;
+    if (steps !== null) {
+      steps.selected = target.step;
+      this.focusStep = target.step;
     }
   }
 
@@ -304,7 +324,7 @@ export class ConsoleRunView extends LitElement {
             this.rawName = undefined;
             this.rawText = undefined;
             if (pane === "timeline" && this.runId !== undefined) {
-              void this.#loadGraph(this.runId);
+              void this.#loadFlow(this.runId);
             }
           }}
         >
@@ -353,11 +373,15 @@ export class ConsoleRunView extends LitElement {
                 @step-selected=${(event: CustomEvent<number>) =>
                   this.focusStep = event.detail}
               ></console-steps>
-              <console-graph-view
+              <console-flow-view
                 class="flow-aside"
-                .graph=${this.graph}
+                .flow=${this.flow}
                 .focusStep=${this.focusStep}
-              ></console-graph-view>
+                .focusRunId=${this.runId}
+                @flow-selected=${(
+                  event: CustomEvent<{ runId?: string; step: number }>,
+                ) => this.#goToStep(event.detail)}
+              ></console-flow-view>
             </div>
           `
           : this.pane === "patterns"

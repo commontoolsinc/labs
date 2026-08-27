@@ -21,8 +21,9 @@ body {
 
 main {
   margin: 0 auto;
-  max-width: 64rem;
-  padding: 2.5rem 1.25rem 4rem;
+  /* Three columns of content — runs, the timeline, the map — need the room. */
+  max-width: 112rem;
+  padding: 2.5rem 1.5rem 4rem;
 }
 
 header {
@@ -244,7 +245,7 @@ button[disabled] {
 .workbench {
   display: grid;
   gap: 1.5rem;
-  grid-template-columns: 18rem minmax(0, 1fr);
+  grid-template-columns: 17rem minmax(0, 1fr);
 }
 
 /*
@@ -857,7 +858,7 @@ button[disabled] {
 .timeline-with-flow {
   display: grid;
   gap: 1.25rem;
-  grid-template-columns: minmax(0, 1fr) 21rem;
+  grid-template-columns: minmax(0, 1fr) 25rem;
 }
 
 .timeline-with-flow > * {
@@ -968,4 +969,278 @@ button[disabled] {
 .arg-origin:hover {
   background: var(--accent);
   color: #fff;
+}
+
+/* A cell, drawn one way everywhere it appears. */
+
+.cell {
+  align-items: baseline;
+  background: #f2f7ff;
+  border: 1px solid #cddffb;
+  border-radius: 999px;
+  cursor: default;
+  display: inline-flex;
+  gap: 0.3rem;
+  max-width: 100%;
+  padding: 0.05rem 0.5rem;
+  position: relative;
+}
+
+.cell.labelled {
+  border-color: #1f4fa8;
+}
+
+.cell-dot {
+  background: var(--ok);
+  border-radius: 50%;
+  flex: none;
+  height: 0.45rem;
+  width: 0.45rem;
+}
+
+.cell-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-atoms {
+  background: #1f4fa8;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 0.62rem;
+  line-height: 1.5;
+  padding: 0 0.32rem;
+}
+
+/*
+ * What a cell is, on hover: the handle, the address, the shape and the labels.
+ * Held out of flow so a chip never resizes the row it sits in, and above the
+ * panes below it.
+ */
+.cell-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgb(16 24 40 / 12%);
+  display: none;
+  left: 0;
+  min-width: 20rem;
+  padding: 0.5rem 0.65rem;
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  z-index: 20;
+}
+
+.cell:hover .cell-card,
+.cell:focus-within .cell-card {
+  display: block;
+}
+
+.cell-row {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.12rem 0;
+}
+
+.cell-label {
+  color: var(--muted);
+  flex: none;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  width: 4.2rem;
+}
+
+.cell-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+}
+
+.cell-wrap {
+  overflow-wrap: anywhere;
+}
+
+.cell-none {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+/* The conversation map, read top to bottom. */
+
+.flow-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.6rem;
+}
+
+.flow-turn {
+  border-left: 2px solid var(--line);
+  margin-bottom: 0.9rem;
+  padding-left: 0.7rem;
+}
+
+.flow-turn-head {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: inherit;
+  display: block;
+  margin-bottom: 0.4rem;
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+  width: 100%;
+}
+
+.flow-turn-head:hover {
+  border-color: var(--accent);
+}
+
+.flow-turn-mark {
+  color: var(--muted);
+  display: block;
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.flow-turn-text {
+  display: -webkit-box;
+  font-size: 0.82rem;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.flow-nodes,
+.flow-children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.flow-children {
+  border-left: 2px solid #cddffb;
+  margin: 0.25rem 0 0.25rem 0.5rem;
+  padding-left: 0.6rem;
+}
+
+.flow-node {
+  margin-bottom: 0.25rem;
+}
+
+.flow-row {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: inherit;
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.25rem 0.5rem;
+  text-align: left;
+  width: 100%;
+}
+
+.flow-row:hover {
+  border-color: var(--accent);
+}
+
+.flow-node.here > .flow-row {
+  border-color: var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.flow-mark {
+  border-radius: 50%;
+  flex: none;
+  height: 0.5rem;
+  width: 0.5rem;
+}
+
+.flow-mark.ok {
+  background: var(--ok);
+}
+
+.flow-mark.error {
+  background: var(--bad);
+}
+
+.flow-mark.denied {
+  background: #b54708;
+}
+
+.flow-mark.none {
+  background: var(--line);
+}
+
+.flow-label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+}
+
+.flow-cfc {
+  color: var(--muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.flow-step {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+.flow-cells {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.2rem 0 0.2rem 1rem;
+}
+
+.flow-cell-line {
+  align-items: baseline;
+  display: flex;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.flow-arrow {
+  font-size: 0.66rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.flow-arrow.reads {
+  color: var(--accent);
+}
+
+.flow-arrow.produces {
+  color: var(--ok);
+}
+
+.flow-as {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+}
+
+.flow-text {
+  color: var(--muted);
+  display: -webkit-box;
+  font-size: 0.78rem;
+  overflow: hidden;
+  padding: 0.15rem 0 0.15rem 1rem;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.flow-aside .flow {
+  max-height: 40rem;
+  overflow-y: auto;
 }

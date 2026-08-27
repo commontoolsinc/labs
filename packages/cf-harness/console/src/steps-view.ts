@@ -23,21 +23,8 @@ const json = (value: unknown): string => {
   }
 };
 
-/**
- * A schema in a few words — the keys an object declares, or the type name for
- * anything else. The whole schema rides on the chip's title for a reader who
- * wants it; the chip itself only has to say what shape this is.
- */
-const schemaSummary = (schema: unknown): string => {
-  const record = typeof schema === "object" && schema !== null
-    ? schema as { type?: unknown; properties?: Record<string, unknown> }
-    : undefined;
-  if (record?.properties !== undefined) {
-    const keys = Object.keys(record.properties);
-    return `{ ${keys.slice(0, 4).join(", ")}${keys.length > 4 ? ", …" : ""} }`;
-  }
-  return typeof record?.type === "string" ? record.type : "shape";
-};
+/** The one way a cell is drawn, wherever this view draws one. */
+import "./cell-chip.ts";
 
 /**
  * How long a run of numbers has to be before the page calls it out. Numbers
@@ -222,7 +209,9 @@ export class ConsoleSteps extends LitElement {
                     ? "fresh"
                     : ""}"
                 >
-                  <td class="handle-token">${handle.token}</td>
+                  <td>
+                    <console-cell .cell=${handle}></console-cell>
+                  </td>
                   <td class="handle-ref">${handle.ref ?? "—"}</td>
                   <td class="handle-at">
                     ${step.handlesIntroduced.includes(handle.token)
@@ -282,12 +271,7 @@ export class ConsoleSteps extends LitElement {
     return html`
       <div class="arg reference">
         <span class="arg-key">${argument.key}</span>
-        <span class="arg-ref">
-          ${argument.slug ?? argument.token ?? argument.ref}
-        </span>
-        ${argument.token === undefined || argument.slug === undefined
-          ? nothing
-          : html`<span class="arg-token">${argument.token}</span>`}
+        <console-cell .cell=${argument}></console-cell>
         ${origin === undefined
           ? html`<span class="arg-note">from an earlier turn</span>`
           : html`
@@ -300,17 +284,6 @@ export class ConsoleSteps extends LitElement {
               ← step ${origin}
             </button>
           `}
-        ${argument.confidentiality.map((name) =>
-          html`<span class="atom conf">${name}</span>`
-        )}
-        ${argument.schema === undefined ? nothing : html`
-          <span class="arg-shape" title=${json(argument.schema)}>
-            ${schemaSummary(argument.schema)}
-          </span>
-        `}
-        ${argument.ref === undefined
-          ? nothing
-          : html`<span class="arg-address">${argument.ref}</span>`}
       </div>
     `;
   }

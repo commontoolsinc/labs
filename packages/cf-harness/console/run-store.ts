@@ -28,6 +28,7 @@ import {
   type ConsoleGraphRunInput,
   consoleRunFamilyGraph,
 } from "./graph.ts";
+import { type ConsoleFlow, consoleRunFlow } from "./flow.ts";
 
 /**
  * A single path segment of the characters the artifact store itself writes.
@@ -253,6 +254,35 @@ export const readConsoleRunFamilyGraph = async (
   artifactRoot: string,
   runId: string,
 ): Promise<ConsoleGraph | undefined> => {
+  const family = await readConsoleRunFamily(artifactRoot, runId);
+  return family === undefined
+    ? undefined
+    : consoleRunFamilyGraph(family.root, family.descendants);
+};
+
+/** The conversation map of a run and the children beneath it. */
+export const readConsoleRunFlow = async (
+  artifactRoot: string,
+  runId: string,
+): Promise<ConsoleFlow | undefined> => {
+  const family = await readConsoleRunFamily(artifactRoot, runId);
+  return family === undefined
+    ? undefined
+    : consoleRunFlow(family.root, family.descendants);
+};
+
+/**
+ * A run and its `delegate_task` descendants, each reading its handles against
+ * the neighbours' tables as well as its own. Both the map and the graph are
+ * built from this, and neither wants to know how a family is found on disk.
+ */
+const readConsoleRunFamily = async (
+  artifactRoot: string,
+  runId: string,
+): Promise<
+  | { root: ConsoleGraphRunInput; descendants: ConsoleGraphRunInput[] }
+  | undefined
+> => {
   const root = await readConsoleRun(artifactRoot, runId);
   if (root === undefined) {
     return undefined;
@@ -281,10 +311,10 @@ export const readConsoleRunFamilyGraph = async (
     ...run,
     handles: [...neighbours, ...run.handles],
   });
-  return consoleRunFamilyGraph(
-    withNeighbours({ runId, steps: root.steps, handles: root.handles }),
-    descendants.map(withNeighbours),
-  );
+  return {
+    root: withNeighbours({ runId, steps: root.steps, handles: root.handles }),
+    descendants: descendants.map(withNeighbours),
+  };
 };
 
 /**

@@ -20,10 +20,14 @@ import type {
   ConsoleGraphEdge,
   ConsoleGraphNode,
 } from "../graph.ts";
+import type { ConsoleFlow, ConsoleFlowCell, ConsoleFlowNode } from "../flow.ts";
 import type { ConsoleRunSummary } from "../runs.ts";
 import type { ConsoleSessionSummary } from "../sessions.ts";
 
 export type {
+  ConsoleFlow,
+  ConsoleFlowCell,
+  ConsoleFlowNode,
   ConsoleGraph,
   ConsoleGraphEdge,
   ConsoleGraphNode,
@@ -126,6 +130,12 @@ export const readRun = async (runId: string): Promise<ConsoleRunDetail> =>
 export const readRunGraph = async (runId: string): Promise<ConsoleGraph> =>
   await json<ConsoleGraph>(
     await fetch(`/api/runs/${encodeURIComponent(runId)}/graph`),
+  );
+
+/** The conversation map of a run and the children beneath it. */
+export const readRunFlow = async (runId: string): Promise<ConsoleFlow> =>
+  await json<ConsoleFlow>(
+    await fetch(`/api/runs/${encodeURIComponent(runId)}/flow`),
   );
 
 /**
