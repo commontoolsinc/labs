@@ -173,23 +173,6 @@ const schemaScopeForLinkAtDepth = (
 };
 
 /**
- * The delivery kick for a missing schema-closure document, bound to a
- * runtime: it asks through the doc-pull reservation, so a memo replay
- * (which re-marks and re-ensures per call) cannot repeat a sync the
- * reservation already covers. The crossing seams outside this module —
- * the asCell handle mint in schema.ts among them — share it.
- */
-export const missingSchemaDocKicker =
-  (runtime: Runtime) => (docLink: NormalizedFullLink): void => {
-    const mgr = runtime.storageManager;
-    if (
-      mgr.shouldPullDoc?.(docLink.space, docLink.id, docLink.scope) === true
-    ) {
-      kickDocPull(runtime, docLink, true);
-    }
-  };
-
-/**
  * The link a blocked or dead-ended chain resolves to: undefined-data in place.
  * Exported so every site that decides a link may not be followed produces the
  * same shape — notably the asCell boundaries, which build a handle instead of
@@ -485,7 +468,6 @@ export function resolveLinkTracingDereferences(
 } {
   // The walk needs this to detect cycles; the memo needs it to name the entry.
   let addressKey = linkAddressKey(link);
-  const kickMissingSchemaDoc = missingSchemaDocKicker(runtime);
   const memo = tx.getSnapshotMemo?.();
   const memoKey = memo === undefined ? "" : resolutionMemoVariant(
     link,
@@ -494,38 +476,22 @@ export function resolveLinkTracingDereferences(
   ) + addressKey;
   const cached = memo?.get(memoKey) as LinkResolutionRecord | undefined;
   if (cached !== undefined) {
-    // The marking replay doubles as the policy-knowability check: a hop
-    // whose stored schema closure is not locally complete may carry
-    // flow-control labels this replica cannot see yet, so the cached
-    // result must not be served (an unmarked caller memoized this walk,
-    // or the registry lost the documents since). Fall through to a fresh
-    // walk, which fails the same crossing closed; the entry stays for
-    // when the documents arrive.
-    let policyKnown = true;
+    for (const trace of cached.traces) tx.recordCfcDereferenceTrace(trace);
     if (options.markIfcCrossings === true) {
       for (const hop of cached.schemaHops) {
-        policyKnown = markIfcBearingLinkCrossing(
-          tx,
-          hop.space,
-          hop.schema,
-          hop.id,
-          { onMissingDocument: kickMissingSchemaDoc },
-        ) && policyKnown;
+        markIfcBearingLinkCrossing(tx, hop.space, hop.schema, hop.id);
       }
     }
-    if (policyKnown) {
-      for (const trace of cached.traces) tx.recordCfcDereferenceTrace(trace);
-      for (const target of cached.crossSpaceTargets) {
-        kickDocPull(runtime, target, false);
-      }
-      return {
-        // A copy, so a caller that mutates what it got back cannot reach
-        // into the entry the next resolution will serve.
-        link: { ...cached.result } as unknown as ResolvedFullLink,
-        traces: cached.traces,
-        memoKey,
-      };
+    for (const target of cached.crossSpaceTargets) {
+      kickDocPull(runtime, target, false);
     }
+    return {
+      // A copy, so a caller that mutates what it got back cannot reach into
+      // the entry the next resolution will serve.
+      link: { ...cached.result } as unknown as ResolvedFullLink,
+      traces: cached.traces,
+      memoKey,
+    };
   }
 
   const seen = new Set<string>();
@@ -663,26 +629,19 @@ export function resolveLinkTracingDereferences(
           const storedSchema = schema;
           if (schema !== undefined && remainingPath.length > 0) {
             // The stored schema's external cid: refs must be registered
-            // before the narrowing walks them; the documents live in the
-            // referrer's space. An incomplete closure fails soft: the hop
-            // carries no narrowed schema this pass and the result is not
-            // memoized, so the tracked reads' arrival re-runs the reader
-            // and the next pass narrows for real.
+            // before the narrowing walks them; the documents travel with
+            // the referring document, so they live in the referrer's
+            // space. A ref the closure cannot resolve names a corrupt or
+            // malformed declaration (the loader logs it): the declaration
+            // is ignored — narrowing it would throw on the dangling ref.
             const closureComplete = ensureExternalSchemaClosure(
               tx,
               nextHop.source.space,
               schema,
-              { onMissingDocument: kickMissingSchemaDoc },
             );
-            if (closureComplete) {
-              schema = ContextualFlowControl.getSchemaAtPath(
-                schema,
-                remainingPath,
-              );
-            } else {
-              schema = undefined;
-              memoizable = false;
-            }
+            schema = closureComplete
+              ? ContextualFlowControl.getSchemaAtPath(schema, remainingPath)
+              : undefined;
           }
           nextHop = {
             ...nextHop,
@@ -826,29 +785,13 @@ export function resolveLinkTracingDereferences(
     }
   }
 
-  // The crossing seam, and with it the fail-closed rule: a content-reading
-  // resolution (the callers that opt in) whose crossed stored schema has an
-  // incomplete external closure resolves as undefined data — the schema may
-  // carry flow-control labels this replica cannot see yet, so no content is
-  // served under an unknowable policy. Unmemoized: the closure loader's
-  // tracked reads and the delivery kick re-run the reader when the
-  // documents arrive, and that pass resolves for real.
+  // The crossing seam: every schema-bearing hop a content-reading
+  // resolution (the callers that opt in) crossed marks off its stored
+  // schema. Evaluation happens here at mark time, and the memoized record
+  // replays the same hops per call.
   if (options.markIfcCrossings === true) {
     for (const hop of schemaHops) {
-      const known = markIfcBearingLinkCrossing(
-        tx,
-        hop.space,
-        hop.schema,
-        hop.id,
-        {
-          onMissingDocument: kickMissingSchemaDoc,
-        },
-      );
-      if (!known) {
-        memoizable = false;
-        link = undefinedDataLink(link);
-        break;
-      }
+      markIfcBearingLinkCrossing(tx, hop.space, hop.schema, hop.id);
     }
   }
 

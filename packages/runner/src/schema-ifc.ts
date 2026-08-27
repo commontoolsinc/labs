@@ -6,6 +6,8 @@
  * the walk both gate cfc relevance on this predicate.
  */
 
+import { getLogger } from "@commonfabric/utils/logger";
+
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
@@ -17,7 +19,6 @@ import {
 } from "./cfc/schema-refs.ts";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { URI } from "./sigil-types.ts";
-import type { NormalizedFullLink } from "./link-types.ts";
 import {
   collectExternalSchemaRefHashes,
   containsExternalSchemaRef,
@@ -30,6 +31,8 @@ import {
 } from "./schema-registry.ts";
 import { forEachSubschema } from "./schema-walk.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
+
+const logger = getLogger("schema-ifc");
 
 // Memo for `schemaHasIfc` top-level calls. Safe **only** because entries
 // are populated under an `isDeepFrozen` guard below: the predicate's
@@ -140,32 +143,26 @@ function _schemaHasIfcUncached(
 /**
  * Loads and registers the external schema-document closure behind
  * `schema`'s `cid:` refs, transaction-level: an unregistered document is
- * read through the transaction — a tracked read, so an absent document's
- * arrival re-triggers the reader — verified, and registered; documents the
+ * read through the transaction, verified, and registered; documents the
  * registry already holds cost one lookup and are recursed for their own
  * refs without a read. The fuller traversal-context loader
  * (`loadExternalSchemaDocs` in traverse.ts) also feeds the schema tracker
  * and availability bookkeeping; this one exists for the crossing seams
  * that have no traversal context (link resolution, handle hops).
  *
- * Returns whether the closure is complete: every reachable `cid:` ref
- * resolved to a registered document. A caller about to walk the schema
- * (narrowing among them) uses `false` to fail soft instead of letting the
- * walk throw on the dangling ref — the tracked reads above re-run the
- * reader when the missing documents arrive.
+ * Closure documents travel WITH the documents that refer to them, so
+ * every reachable ref of a well-formed stored schema resolves from the
+ * local store. Returns whether they all did: `false` names a corrupt or
+ * deliberately malformed declaration — a ref to a document that never
+ * arrived, a document that is not a schema document, or one whose content
+ * does not hash to its id — which is logged and otherwise ignored; a
+ * caller about to walk the schema uses it to skip the broken declaration
+ * instead of throwing on the dangling ref.
  */
 export function ensureExternalSchemaClosure(
   tx: IExtendedStorageTransaction,
   space: MemorySpace,
   schema: JSONSchema | undefined,
-  options: {
-    /**
-     * Invoked for a closure document the local replica does not hold, so
-     * the caller's delivery channel can request it — the tracked read
-     * alone records the dependency but does not initiate delivery.
-     */
-    onMissingDocument?: (link: NormalizedFullLink) => void;
-  } = {},
 ): boolean {
   if (schema === undefined || !containsExternalSchemaRef(schema)) return true;
   let complete = true;
@@ -183,37 +180,21 @@ export function ensureExternalSchemaClosure(
         path: [],
       } as const;
       const result = tx.read(address);
-      if (result.error !== undefined) {
-        if (result.error.name === "NotFoundError") {
-          options.onMissingDocument?.(
-            {
-              space: address.space,
-              id: address.id,
-              path: [],
-              scope: address.scope,
-            } as NormalizedFullLink,
-          );
-        }
-        complete = false;
-        continue;
-      }
-      const doc = result.ok.value;
-      // A read can succeed with nothing there — a root document the replica
-      // has never held reads as undefined rather than NotFoundError — and
-      // that absence needs the same delivery request.
+      const doc = result.error === undefined ? result.ok.value : undefined;
       if (doc === undefined) {
-        options.onMissingDocument?.(
-          {
-            space: address.space,
-            id: address.id,
-            path: [],
-            scope: address.scope,
-          } as NormalizedFullLink,
-        );
+        logger.warn("schema-closure", () => [
+          "Stored schema names a cid: document this space does not hold — " +
+          "a corrupt or malformed declaration; ignoring it:",
+          address.id,
+        ]);
         complete = false;
         continue;
       }
       if (!isObjectNotArray(doc) || !("value" in doc)) {
+        logger.warn("schema-closure", () => [
+          "cid: document is not a schema document; ignoring it:",
+          address.id,
+        ]);
         complete = false;
         continue;
       }
@@ -225,6 +206,10 @@ export function ensureExternalSchemaClosure(
       } catch {
         // A document whose content does not hash to its id is forged:
         // neither registered nor recursed into.
+        logger.warn("schema-closure", () => [
+          "cid: document content does not hash to its id; ignoring it:",
+          address.id,
+        ]);
         complete = false;
         continue;
       }
@@ -243,38 +228,24 @@ export function ensureExternalSchemaClosure(
  * Reader precedence keeps a shaped reader's combined schema free of the
  * link's `ifc`, so the marking lives at the crossing rather than on the
  * combination's output. The schema's external closure is loaded first
- * (`ensureExternalSchemaClosure`), so a cold `cid:`-backed declaration is
- * resolvable when the predicate walks it. The registry is realm-global: a
- * hash registered from any space short-circuits the read, soundly, since
- * equal hashes name equal bytes. A document the registry lacks is read in
- * the referrer space — tracked, and requested through the caller's
- * delivery channel when locally absent — so its arrival re-triggers the
- * reader, which marks on that pass (the predicate's resolution-miss guard
- * keeps the cold verdict uncached). The predicate is memoized; unlabeled
- * links (the common case) cost one cached lookup.
- *
- * Returns whether the crossing's policy is KNOWABLE: `true` when the
- * schema's closure is locally complete (or it has none), `false` when a
- * closure document is absent — the schema may carry flow-control labels
- * this replica cannot see yet, so the caller MUST fail the crossing
- * closed (resolve or traverse it as not found) rather than serve content
- * whose policy is not yet known. What is visible of a partial schema
- * still marks, conservatively.
+ * (`ensureExternalSchemaClosure`), so a declaration whose documents the
+ * registry has not yet registered from the local store is resolvable when
+ * the predicate walks it. The registry is realm-global: a hash registered
+ * from any space short-circuits the read, soundly, since equal hashes name
+ * equal bytes. A ref the closure cannot resolve names a corrupt or
+ * malformed declaration; the loader logs it, and the predicate marks off
+ * whatever the schema legibly declares. The predicate is memoized;
+ * unlabeled links (the common case) cost one cached lookup.
  */
 export function markIfcBearingLinkCrossing(
   tx: IExtendedStorageTransaction,
   space: MemorySpace,
   linkSchema: JSONSchema | undefined,
   linkId: string,
-  options: {
-    /** See {@link ensureExternalSchemaClosure}. */
-    onMissingDocument?: (link: NormalizedFullLink) => void;
-  } = {},
-): boolean {
-  if (linkSchema === undefined) return true;
-  const complete = ensureExternalSchemaClosure(tx, space, linkSchema, options);
+): void {
+  if (linkSchema === undefined) return;
+  ensureExternalSchemaClosure(tx, space, linkSchema);
   if (schemaHasIfc(linkSchema)) {
     tx.markCfcRelevant(`schema-ifc-hop:${linkId}`);
   }
-  return complete;
 }

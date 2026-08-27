@@ -393,20 +393,16 @@ the schema's external `cid:` closure first, so a cold declaration is
 resolvable at the check. The schema-document registry is realm-global and
 content-addressed — a hash registered from any space serves every space's
 check without a read, which is sound because equal hashes name equal bytes.
-Only a document the registry does not hold is read in the referrer space:
-that read is tracked, and when the document is also locally absent the
-delivery channel is asked for it, so its arrival re-runs the reader. A
-closure that cannot be completed fails the crossing CLOSED: the absent
-document may carry flow-control labels this replica cannot see yet, so
-the crossing reads as not found — the traversal returns not-found at the
-pointer, an array's element hop voids the whole array read, an asCell
-boundary mints no handle, and a content-reading link resolution resolves
-to undefined data, unmemoized — until the documents arrive and the re-run
-resolves for real. Marking runs before each fail-closed return, so what
-is visible of a partial schema still marks. Link resolution loads the same
-closure before narrowing a stored schema across an ancestor hop, skipping
-the narrowing (rather than throwing on the dangling ref) when it is
-incomplete; the fail-closed rule then decides the result. A resolution that reads marks even on a write path:
+Only a document the registry does not hold is read in the referrer
+space, where it lives: closure documents travel WITH the documents that
+refer to them, so a well-formed declaration always resolves from the
+local store, and the loading is registry warming, never a wait for
+delivery. A ref the closure cannot resolve names a corrupt runtime or a
+deliberately malformed written schema; it is logged and ignored — the
+seams mark whatever the schema legibly declares, the traversal narrows
+the broken declaration to `false` (which a shaped reader ignores under
+precedence), and link resolution skips narrowing it rather than throwing
+on the dangling ref. A resolution that reads marks even on a write path:
 `set()`'s pre-write resolution reads the resolved terminal value (the
 stream check), so it opts in, and a transaction it marks relevant must be
 prepared before commit, as every runtime-owned commit path already does.

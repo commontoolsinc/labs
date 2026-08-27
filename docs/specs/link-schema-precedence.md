@@ -103,10 +103,7 @@ which side won the combination.
   declaration stands — keyed by the hop's **source space**, where the
   stored link and its schema's closure documents live. The memoized
   resolution record replays the marking per call, and evaluation happens
-  at mark time, so no stale verdict is baked into the record; a replay
-  that finds a hop's closure incomplete falls through to a fresh walk,
-  and a walk that does fails closed, unmemoized (the fail-closed rule
-  under "Closure loading at the seam").
+  at mark time, so no stale verdict is baked into the record.
 - The traversal marks each pointer it follows (`followPointer`, after
   external schema-document registration) and the extra handle hop of an
   `asCell` crossing — `getNextCellLink`, its schema.ts twin at the root
@@ -134,37 +131,23 @@ walks them: `ensureExternalSchemaClosure` loads and registers the closure
 transaction-level. The schema-document registry is realm-global and
 content-addressed — a hash registered from any space serves every space's
 check without a read, soundly, since equal hashes name equal bytes. Only a
-document the registry does not hold is read, in the referrer space; that
-read is tracked, and an absence (NotFound or a successful read of nothing)
-asks the caller's delivery channel for the document — through the doc-pull
-reservation, so memoized replays cannot repeat a sync.
+document the registry does not hold is read, in the referrer space, where
+it lives: closure documents travel WITH the documents that refer to them,
+so a well-formed declaration always resolves from the local store, and the
+loading is registry warming, never a wait for delivery.
 
-A closure that cannot be completed fails the crossing CLOSED. The absent
-document may carry flow-control labels this replica cannot see yet, so no
-content is served under an unknowable policy — and no lower-precedence
-stand-in schema can express that, since a shaped reader ignores the link
-schema entirely. Instead the crossing resolves as not found: the traversal
-returns not-found at the pointer (`followPointer`), an array's element
-hop — which the array walk dereferences itself, fast paths included —
-voids the whole array read (a partial array would disclose which
-positions were readable), an asCell boundary that follows the link mints
-no handle (the hop consumed the crossing, so a handle would hand its
-reads out from under the labels), and a content-reading link resolution
-resolves to undefined data, unmemoized. The one asCell mint that is not
-a crossing is the root OPAQUE handle, which addresses the position
-without following the link: the handle may exist, and every read through
-it crosses the link and fails closed like any other. Marking runs before each fail-closed return, so what is
-visible of a partial schema still marks, conservatively — a crossing can
-be relevant and still unreadable. The tracked reads and the delivery kick
-re-run the reader when the documents arrive, and that pass resolves,
-marks, and serves for real.
+A ref the closure cannot resolve therefore names a corrupt runtime or a
+deliberately malformed written schema. Such a declaration is logged and
+ignored — it neither shapes, voids, nor throws out of a read: the seams
+mark whatever the schema legibly declares (`schemaHasIfc` walks what
+resolves), the traversal narrows a broken declaration to `false` (which a
+reader with a shape of its own ignores under precedence), and link
+resolution skips narrowing it rather than throwing on the dangling ref.
 
-Link resolution also narrows a stored schema across an ancestor hop (a
-read that descends past the link's position), and that walk resolves
-`$ref`s too. It loads the same closure first, from the hop's source space;
-on an incomplete closure the narrowing is skipped rather than throwing on
-the dangling ref, and for a content-reading resolution the crossing's
-fail-closed rule above then decides the result.
+Link resolution narrows a stored schema across an ancestor hop (a read
+that descends past the link's position), and that walk resolves `$ref`s
+too — it runs the same registry warming first, from the hop's source
+space.
 
 ## The flag
 
@@ -189,10 +172,12 @@ is the authority on the lifecycle and the removal path.
 the strict-union contrast, the default-inheritance arms, and the rollback
 arm. `packages/runner/test/link-ifc-read-relevance.test.ts` pins the
 crossing seam: entry, nested, resolution-chain, handle-hop, cold-closure,
-cold-closure narrowing, narrowed-away-ancestor, proxy, raw-read, and
-`set()`-resolution marking, plus the fail-closed rule (eager, descendant,
-raw, and handle reads each resolving as not found until a cold closure
-arrives).
+cold-closure narrowing, narrowed-away-ancestor, proxy, raw-read,
+`set()`-resolution, array-element, and root-asCell-mint marking, plus the
+broken-declaration rule (an unresolvable stored schema is ignored — reads
+proceed, and what it legibly declares still marks).
+`packages/runner/test/schema-ifc.test.ts` pins the closure loader's
+broken-declaration arms.
 `packages/runner/test/stored-link-schema-precedence.test.ts` pins the
 cell-level reads, including the asCell handle regression and the inherited
 default. `packages/runner/test/reader-schema-precedence-config.test.ts`

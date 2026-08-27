@@ -6,7 +6,6 @@ import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
 import { decomposeSchema } from "../src/schema-decompose.ts";
 import { ensureExternalSchemaClosure } from "../src/schema-ifc.ts";
-import type { NormalizedFullLink } from "../src/link-utils.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const space = "did:key:zSchemaIfcClosureUnit" as MemorySpace;
@@ -48,31 +47,11 @@ describe("schema-ifc", () => {
       ).toBe(true);
     });
 
-    it("requests a not-found closure document and reports the closure incomplete", () => {
+    it("reports an unreadable closure document as a broken declaration", () => {
       const { ref } = uniqueExternal("closure-unit-not-found");
-      const misses: string[] = [];
       const tx = txReading(() => ({ error: { name: "NotFoundError" } }));
 
-      const complete = ensureExternalSchemaClosure(tx, space, ref, {
-        onMissingDocument: (link: NormalizedFullLink) => misses.push(link.id),
-      });
-
-      expect(complete).toBe(false);
-      expect(misses).toHaveLength(1);
-      expect(misses[0].startsWith("cid:")).toBe(true);
-    });
-
-    it("reports a read error incomplete without requesting delivery", () => {
-      const { ref } = uniqueExternal("closure-unit-read-error");
-      const misses: string[] = [];
-      const tx = txReading(() => ({ error: { name: "ConnectionError" } }));
-
-      const complete = ensureExternalSchemaClosure(tx, space, ref, {
-        onMissingDocument: (link: NormalizedFullLink) => misses.push(link.id),
-      });
-
-      expect(complete).toBe(false);
-      expect(misses).toHaveLength(0);
+      expect(ensureExternalSchemaClosure(tx, space, ref)).toBe(false);
     });
 
     it("reports a document that is not a schema document incomplete", () => {

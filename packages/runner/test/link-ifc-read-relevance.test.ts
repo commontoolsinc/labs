@@ -388,105 +388,49 @@ describe("link-ifc-read-relevance closure, narrowing, and raw readers", () => {
     return decomposeSchema(labeled as JSONSchemaObj);
   };
 
-  const writeClosureDocs = (
-    decomposed: ReturnType<typeof decomposeSchema>,
-  ) => {
-    for (const [hash, doc] of decomposed.documents) {
-      tx.writeValueOrThrow(
-        {
-          space,
-          id: `cid:${hash}`,
-          scope: "space",
-          path: [],
-        } as unknown as Parameters<typeof tx.writeValueOrThrow>[0],
-        doc,
-      );
-    }
-  };
-
-  it("resolves an eager read as not found until a cold schema closure arrives", () => {
+  it("ignores a stored link schema whose cid closure is unresolvable", () => {
+    // Closure documents travel with the documents that refer to them, so
+    // an unresolvable ref names a corrupt or deliberately malformed
+    // declaration. It is logged and ignored: it neither shapes, voids, nor
+    // throws out of a shaped reader's reads.
     const decomposed = labeledCidSchema();
-    // The closure documents are NOT local yet: the stored schema may carry
-    // labels this replica cannot see, so the crossing fails closed — no
-    // content, no relevance, until the documents arrive.
     const holder = holderOver({ $ref: decomposed.rootRef });
 
-    expect(holder.get()?.item?.name).toBeUndefined();
-    expect(tx.getCfcState().relevant).toBe(false);
-
-    writeClosureDocs(decomposed);
     expect(holder.get()).toEqual({ item: { name: "Ada" } });
-    expect(tx.getCfcState().relevant).toBe(true);
-    expect(hopReasons().length).toBeGreaterThan(0);
-  });
-
-  it("resolves a descendant read as not found until a cold schema closure arrives", () => {
-    const decomposed = labeledCidSchema();
-    const holder = holderOver({ $ref: decomposed.rootRef });
-
-    expect(holder.key("item").key("name").get()).toBeUndefined();
-    expect(tx.getCfcState().relevant).toBe(false);
-
-    writeClosureDocs(decomposed);
     expect(holder.key("item").key("name").get()).toEqual("Ada");
-    expect(tx.getCfcState().relevant).toBe(true);
-    expect(hopReasons().length).toBeGreaterThan(0);
-  });
-
-  it("resolves a raw read as not found until a cold schema closure arrives", () => {
-    const decomposed = labeledCidSchema();
-    const holder = holderOver({ $ref: decomposed.rootRef });
-
-    expect(holder.key("item").key("name").getRaw()).toBeUndefined();
-    expect(tx.getCfcState().relevant).toBe(false);
-
-    writeClosureDocs(decomposed);
     expect(holder.key("item").key("name").getRaw()).toEqual("Ada");
-    expect(tx.getCfcState().relevant).toBe(true);
-    expect(hopReasons().length).toBeGreaterThan(0);
   });
 
-  it("marks what a partial schema shows while still failing the crossing closed", () => {
+  it("marks what a schema legibly declares beside an unresolvable ref", () => {
     const decomposed = labeledCidSchema();
-    // The root-level ifc is visible without the missing child document, so
-    // the crossing marks — and the crossing still fails closed, since the
-    // absent document could carry labels of its own.
-    const partiallyVisible = {
+    // The root-level ifc is legible without the broken child ref, so the
+    // crossing marks — the malformed part is ignored, not the whole
+    // declaration's flow-control.
+    const partiallyLegible = {
       type: "object",
       ifc: { integrity: ["asserted"] },
       properties: { name: { $ref: decomposed.rootRef } },
     } as JSONSchema;
-    const holder = holderOver(partiallyVisible);
+    const holder = holderOver(partiallyLegible);
 
-    expect(holder.get()?.item?.name).toBeUndefined();
+    expect(holder.get()).toEqual({ item: { name: "Ada" } });
     expect(tx.getCfcState().relevant).toBe(true);
     expect(hopReasons().length).toBeGreaterThan(0);
-
-    writeClosureDocs(decomposed);
-    expect(holder.get()).toEqual({ item: { name: "Ada" } });
   });
 
-  it("withholds a whole asCell array while one element's schema closure is cold", () => {
-    const decomposed = labeledCidSchema();
-    const warmTarget = runtime.getCell(
-      space,
-      `array-warm-${seq}`,
-      undefined,
-      tx,
-    );
-    warmTarget.setRaw({ name: "Warm" });
-    const coldTarget = runtime.getCell(
-      space,
-      `array-cold-${seq}`,
-      undefined,
-      tx,
-    );
-    coldTarget.setRaw({ name: "Cold" });
+  it("marks a labeled element link an asCell array dereferences directly", () => {
+    // The array walk dereferences its element links itself — the prepared
+    // fast path never reaches followPointer — so the element hop carries
+    // the seam.
+    const first = runtime.getCell(space, `array-first-${seq}`, undefined, tx);
+    first.setRaw({ name: "First" });
+    const second = runtime.getCell(space, `array-second-${seq}`, undefined, tx);
+    second.setRaw({ name: "Second" });
     const holder = runtime.getCell(space, `array-holder-${seq}`, undefined, tx);
     holder.setRaw({
       items: [
-        linkTo(warmTarget, plainLinkSchema),
-        linkTo(coldTarget, { $ref: decomposed.rootRef }),
+        linkTo(first, plainLinkSchema),
+        linkTo(second, labeledLinkSchema),
       ],
     } as never);
     const reader = holder.asSchema<{ items?: Cell<{ name: string }>[] }>({
@@ -503,59 +447,32 @@ describe("link-ifc-read-relevance closure, narrowing, and raw readers", () => {
       },
     });
 
-    // One cold element withholds the WHOLE array: a partial array would
-    // disclose which positions were readable.
-    expect(reader.get()?.items).toBeUndefined();
-
-    writeClosureDocs(decomposed);
     const items = reader.get()?.items;
     expect(items).toHaveLength(2);
-    expect(items?.[0]?.get()).toEqual({ name: "Warm" });
-    expect(items?.[1]?.get()).toEqual({ name: "Cold" });
+    expect(items?.[1]?.get()).toEqual({ name: "Second" });
     expect(tx.getCfcState().relevant).toBe(true);
+    expect(hopReasons().length).toBeGreaterThan(0);
   });
 
-  it("mints no root asCell handle over a crossing whose schema closure is cold", () => {
-    const decomposed = labeledCidSchema();
-    const holder = holderOver({ $ref: decomposed.rootRef });
+  it("marks the one-step hop of a root asCell mint", () => {
+    // The root asCell branch takes the one-more-link hop itself
+    // (readMaybeLink in schema.ts), bypassing resolveLink and the
+    // traversal, so that hop carries the seam.
+    const holder = holderOver(labeledLinkSchema);
     const reader = holder.key("item").asSchema<Cell<{ name: string }>>({
       type: "object",
       properties: { name: { type: "string" } },
       asCell: ["cell"],
     });
 
-    expect(reader.get()).toBeUndefined();
-    expect(tx.getCfcState().relevant).toBe(false);
-
-    writeClosureDocs(decomposed);
-    const handle = reader.get();
-    expect(handle?.get()).toEqual({ name: "Ada" });
+    expect(reader.get()?.get()).toEqual({ name: "Ada" });
     expect(tx.getCfcState().relevant).toBe(true);
     expect(hopReasons().length).toBeGreaterThan(0);
   });
 
-  it("keeps a root opaque handle's reads closed while the schema closure is cold", () => {
-    const decomposed = labeledCidSchema();
-    const holder = holderOver({ $ref: decomposed.rootRef });
-    const reader = holder.key("item").asSchema<Cell<{ name: string }>>({
-      asCell: ["opaque"],
-    });
-
-    // The opaque mint addresses the POSITION without following the link —
-    // no crossing is consumed, so the handle itself discloses nothing. The
-    // reads THROUGH it cross the link, and those fail closed until the
-    // documents arrive.
-    const handle = reader.get();
-    expect(handle).toBeDefined();
-    expect(handle?.get()).toBeUndefined();
-    expect(tx.getCfcState().relevant).toBe(false);
-
-    writeClosureDocs(decomposed);
-    expect(reader.get()?.get()).toBeDefined();
-    expect(tx.getCfcState().relevant).toBe(true);
-  });
-
-  it("mints no asCell handle over a crossing whose schema closure is cold", () => {
+  it("mints an asCell handle across a link whose stored schema is unresolvable", () => {
+    // The broken declaration is ignored: the shaped reader's handle mints
+    // and reads as it would across any link.
     const decomposed = labeledCidSchema();
     const holder = holderOver({ $ref: decomposed.rootRef });
     const asCellReader = holder.asSchema<{ item?: Cell<{ name: string }> }>({
@@ -569,16 +486,7 @@ describe("link-ifc-read-relevance closure, narrowing, and raw readers", () => {
       },
     });
 
-    // The handle hop consumed the crossing, so a handle minted here would
-    // hand its reads out from under the schema's labels: none is minted.
-    expect(asCellReader.get()?.item).toBeUndefined();
-    expect(tx.getCfcState().relevant).toBe(false);
-
-    writeClosureDocs(decomposed);
-    const handle = asCellReader.get()?.item;
-    expect(handle?.get()).toEqual({ name: "Ada" });
-    expect(tx.getCfcState().relevant).toBe(true);
-    expect(hopReasons().length).toBeGreaterThan(0);
+    expect(asCellReader.get()?.item?.get()).toEqual({ name: "Ada" });
   });
 
   it("marks a root-level ifc declaration narrowed away by an ancestor hop", () => {

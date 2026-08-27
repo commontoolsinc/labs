@@ -1861,13 +1861,9 @@ export abstract class BaseObjectTraverser {
         // We can follow all the links, since we don't need to track cells
         const [valueDoc, _] = this.getDocAtPath(redirDoc, [], DEFAULT_SELECTOR);
         this.tx.read(valueDoc.address, READ_FOR_SCHEDULING);
-        // Same entry gate as followPointer: a link schema whose document
-        // closure this space does not hold may carry flow-control labels
-        // this replica cannot see yet, so the crossing fails closed — the
-        // target reads as not found until the documents arrive. The
-        // loader's tracked reads re-run this on arrival. Marking runs
-        // before the fail-closed return, so what is visible of a partial
-        // schema still marks.
+        // Same entry gate as followPointer: an unresolvable ref names a
+        // corrupt or malformed declaration (the loader logs it), and such
+        // a declaration selects nothing.
         const linkSchemaCollected = link?.schema === undefined ||
           loadExternalSchemaDocs(
             this.tx,
@@ -1875,25 +1871,9 @@ export abstract class BaseObjectTraverser {
             link.schema,
             this.context,
           );
-        if (!linkSchemaCollected) {
-          markIfcBearingLinkCrossing(
-            this.tx,
-            doc.address.space,
-            link!.schema,
-            link!.id,
-            {
-              onMissingDocument: (docLink) =>
-                this.context.onMissingLinkTarget?.(
-                  docLink,
-                  doc.address.space,
-                ),
-            },
-          );
-          return null;
-        }
         return this.traverseLinkedDoc(
           valueDoc,
-          link?.schema,
+          linkSchemaCollected ? link?.schema : false,
           defaultValue,
           itemLink,
         );
@@ -2373,7 +2353,7 @@ function followPointer(
 ] {
   // doc.address's path doesn't have the same value nesting semantics as
   // link path, but we don't use the path field from that argument.
-  const link = parseLink(doc.value, doc.address)!;
+  let link = parseLink(doc.value, doc.address)!;
   // We may access portions of the doc outside what we have in our doc
   // attestation, so set the target to the top level doc from the manager.
   const target: IMemorySpaceValueAddress = {
@@ -2384,14 +2364,10 @@ function followPointer(
     // The link.path doesn't include the initial "value", so prepend it
     path: ["value", ...link.path as string[]],
   };
-  // A link schema carrying external refs needs its schema documents loaded
-  // before the narrowing below consults it — and a schema whose closure
-  // this space does not hold may carry flow-control labels this replica
-  // cannot see yet, so the crossing fails CLOSED: the target reads as not
-  // found until the documents arrive. (A lower-precedence stand-in schema
-  // would not do it — under reader precedence a shaped reader ignores the
-  // link schema entirely.) The loader's reads are tracked, so the
-  // documents' arrival re-runs this.
+  // A link schema carrying external refs needs its schema documents
+  // registered before the narrowing below consults them; they travel with
+  // the referring document, so a well-formed declaration resolves from the
+  // local store.
   const collected = link.schema === undefined || loadExternalSchemaDocs(
     tx,
     doc.address,
@@ -2399,20 +2375,21 @@ function followPointer(
     context,
   );
   // The crossing's own marking runs after the registration above, so a
-  // cold external closure is resolvable when the predicate walks it — and
-  // BEFORE the fail-closed return below, so what is visible of a partial
-  // schema still marks.
-  markIfcBearingLinkCrossing(tx, doc.address.space, link.schema, link.id, {
-    onMissingDocument: (docLink) =>
-      context.onMissingLinkTarget?.(docLink, doc.address.space),
-  });
+  // declaration the registry had not yet registered from the local store
+  // is resolvable when the predicate walks it; it marks off whatever the
+  // schema legibly declares.
+  markIfcBearingLinkCrossing(tx, doc.address.space, link.schema, link.id);
   if (!collected) {
+    // Closure documents travel WITH the documents that refer to them, so
+    // an unresolvable ref names a corrupt or deliberately malformed
+    // declaration. Such a declaration selects nothing: narrow with a
+    // false schema, which a reader with a shape of its own ignores.
     logger.warn("traverse", () => [
-      "Link schema references documents this space does not hold; " +
-      "resolving as not found until they arrive:",
+      "Link schema names cid: documents this space does not hold — a " +
+      "corrupt or malformed declaration; it selects nothing:",
       doc.address,
     ]);
-    return [notFound(target), selector];
+    link = { ...link, schema: false };
   }
   const schemaScope = schemaScopeForSelector(selector);
   if (!canFollowScopedLink(schemaScope, link.scope)) {
@@ -2803,20 +2780,6 @@ function loadSchemaDocClosure(
     }
     context.schemaTracker.add(key, REJECTING_SELECTOR);
     const doc = result.ok.value;
-    // A successful read of nothing — a root document this replica never
-    // held — is the same absence as NotFoundError for delivery purposes.
-    if (doc === undefined) {
-      context.onMissingLinkTarget?.(
-        {
-          space: address.space,
-          id: address.id,
-          path: [],
-          scope: address.scope,
-        } as NormalizedFullLink,
-        referrer.space,
-      );
-      continue;
-    }
     if (!isObjectNotArray(doc) || !("value" in doc)) continue;
     const schemaValue = (doc as { value?: FabricValue }).value;
     try {
@@ -4766,37 +4729,15 @@ export class SchemaObjectTraverser<V extends FabricValue>
       if (isSigilLink(item)) {
         // The element hop is a crossing whichever machinery dereferences
         // it — including the prepared fast path below, which bypasses
-        // followPointer. Run the seam here: mark what the stored schema
-        // shows, and while its closure is cold fail the WHOLE array read
-        // closed — a partial array would disclose which positions were
-        // readable.
+        // followPointer — so the seam runs here.
         const elementLink = parseLink(item, curDoc.address);
         if (elementLink !== undefined) {
-          const policyKnown = markIfcBearingLinkCrossing(
+          markIfcBearingLinkCrossing(
             this.tx,
             curDoc.address.space,
             elementLink.schema,
             elementLink.id,
-            {
-              onMissingDocument: (docLink) =>
-                this.context.onMissingLinkTarget?.(
-                  docLink,
-                  curDoc.address.space,
-                ),
-            },
           );
-          if (!policyKnown) {
-            logger.info(
-              "traverse",
-              () => [
-                "Array element's link schema closure is not local — voiding the whole array read until it arrives",
-                `index=${index}`,
-                curDoc.address,
-              ],
-            );
-            valid = false;
-            return;
-          }
         }
         if (this.traverseCells) {
           const alreadyTracked = this.isLinkedDocumentCovered(
@@ -4939,36 +4880,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
         const isLink = isSigilLink(curDoc.value);
         if (isLink) this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
         const cellLink = isLink
-          ? getNextCellLink(
-            this.tx,
-            curDoc,
-            curSelector.schema!,
-            (docLink) =>
-              this.context.onMissingLinkTarget?.(
-                docLink,
-                curDoc.address.space,
-              ),
-          )
+          ? getNextCellLink(this.tx, curDoc, curSelector.schema!)
           : getNormalizedLink(curDoc.address, curSelector.schema);
-        if (cellLink === undefined) {
-          // The element's crossing has an unknowable policy (cold schema
-          // closure): the whole array reads as not found until the
-          // documents arrive, matching the mismatch arm below.
-          logger.info(
-            "traverse",
-            () => [
-              "Array element's link schema closure is not local — voiding the whole array read until it arrives",
-              `index=${index}`,
-              curDoc.address,
-            ],
-          );
-          valid = false;
-        } else {
-          arrayObj[index] = this.objectCreator.createObject(
-            cellLink,
-            undefined,
-          );
-        }
+        arrayObj[index] = this.objectCreator.createObject(cellLink, undefined);
       } else {
         // We want those links to point directly at the linked cells, instead
         // of using our path (e.g. ["items", "0"]), so don't pass in a
@@ -5200,18 +5114,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     // This means we don't follow any redirects
     const asCellValues = ContextualFlowControl.getAsCellValues(schema);
     if (ContextualFlowControl.getAsCellKind(asCellValues.at(0)) === "opaque") {
-      const cellLink = getNextCellLink(
-        this.tx,
-        doc,
-        schema,
-        (docLink) =>
-          this.context.onMissingLinkTarget?.(docLink, doc.address.space),
-      );
-      // Unknowable crossing policy (cold schema closure): not found until
-      // the documents arrive.
-      if (cellLink === undefined) {
-        return fail(TRAVERSE_FAILURES.schemaRefResolution);
-      }
+      const cellLink = getNextCellLink(this.tx, doc, schema);
       return { ok: this.objectCreator.createObject(cellLink, undefined) };
     }
 
@@ -5293,18 +5196,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       if (isSigilLink(redirDoc.value)) {
         this.tx.read(redirDoc.address, READ_FOR_SCHEDULING);
       }
-      const cellLink = getNextCellLink(
-        this.tx,
-        redirDoc,
-        combinedSchema,
-        (docLink) =>
-          this.context.onMissingLinkTarget?.(docLink, redirDoc.address.space),
-      );
-      // Unknowable crossing policy (cold schema closure): not found until
-      // the documents arrive.
-      if (cellLink === undefined) {
-        return fail(TRAVERSE_FAILURES.schemaRefResolution);
-      }
+      const cellLink = getNextCellLink(this.tx, redirDoc, combinedSchema);
       logger.debug(
         "traverse",
         () => ["Next cell link:", {
@@ -5730,27 +5622,20 @@ function getNextCellLink(
   tx: IExtendedStorageTransaction,
   doc: IMemorySpaceValueAttestation,
   schema: JSONSchema,
-  onMissingDocument?: (link: NormalizedFullLink) => void,
-): NormalizedFullLink | undefined {
+): NormalizedFullLink {
   // For my cell link, itemLink currently points to the last redirect
   // target, but we want cell properties to be based on the link value at
   // that location, so we effectively follow one more link if available.
   const lastLink = parseLink(doc.value, doc.address);
   if (lastLink !== undefined) {
     // This extra hop bypasses followPointer, so it carries the crossing
-    // seam itself. An unknowable policy — the stored schema's closure is
-    // not locally complete — fails the crossing closed: no handle is
-    // minted (`undefined`), since this hop consumed the crossing and a
-    // handle would hand its reads out from under the schema's labels. The
-    // seam's tracked reads re-run the caller when the documents arrive.
-    const policyKnown = markIfcBearingLinkCrossing(
+    // seam itself.
+    markIfcBearingLinkCrossing(
       tx,
       doc.address.space,
       lastLink.schema,
       lastLink.id,
-      { onMissingDocument },
     );
-    if (!policyKnown) return undefined;
     // The link may not have the asCell flags, so pull that from itemSchema.
     // Reader precedence, like every other crossing: the handle must not
     // carry the link's wider schema past the reader's.

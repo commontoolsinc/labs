@@ -17,7 +17,6 @@ import {
   schemaWithProperties,
 } from "@commonfabric/data-model-schema";
 import {
-  missingSchemaDocKicker,
   readMaybeLink,
   resolveLink,
   undefinedDataLink,
@@ -1190,18 +1189,8 @@ export function validateAndTransform(
     if (next !== undefined) {
       // This one-step hop bypasses resolveLink and the traversal, so it
       // carries the crossing seam itself (the schema.ts twin of
-      // getNextCellLink): what is visible of the stored schema marks, and
-      // while its closure is cold the crossing fails CLOSED — no handle is
-      // minted and the read is undefined until the documents arrive (the
-      // seam's tracked reads and the delivery kick re-run it).
-      const policyKnown = markIfcBearingLinkCrossing(
-        tx,
-        link.space,
-        next.schema,
-        next.id,
-        { onMissingDocument: missingSchemaDocKicker(runtime) },
-      );
-      if (!policyKnown) return undefined;
+      // getNextCellLink).
+      markIfcBearingLinkCrossing(tx, link.space, next.schema, next.id);
       // An asCell schema turns this link into a handle instead of following
       // it, so resolveLink's cap check never sees this hop. Apply it here too,
       // or reading THROUGH the handle escapes the cap the schema declared
