@@ -709,9 +709,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     },
   );
 
-  // =========================================================================
   // Type-arg form vs inline form: schemas must be identical
-  // =========================================================================
 
   await t.step(
     "handler<E, T> generates same schemas as handler((e: E, t: T) => ...)",

@@ -1142,7 +1142,9 @@ Deno.test("renderFrame: selecting a node draws a guide bar", () => {
   assert(/[╭│╰▶]/.test(joined), "guide glyphs present when a node is selected");
 });
 
-// --- display modes at the frame level ----------------------------------------
+//
+// display modes at the frame level
+//
 
 /** A one-line document whose text is `text` verbatim, in a single plain span. */
 function docOf(text: string) {

@@ -362,7 +362,9 @@ Deno.test("parse: handles empty and whitespace-only input without throwing", () 
   }
 });
 
-// --- full-AST navigation ----------------------------------------------------
+//
+// full-AST navigation
+//
 
 Deno.test("parse: the whole AST is navigable — RHS expression, chained calls, args", () => {
   const doc = parseDocument(

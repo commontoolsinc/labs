@@ -2666,12 +2666,10 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
-    //
     // Default render ceiling (spec §8.10.6, S16 phase D)
     // A host-supplied root ceiling gates labeled cells with NO authored
     // boundary in the tree: atoms render only when listed exactly or when
     // they are Caveat atoms of an allow-listed kind.
-    //
 
     const PROMPT_INFLUENCE_KIND =
       "https://commonfabric.org/cfc/concepts/prompt-influence";

@@ -596,6 +596,15 @@ export class CellHandle<T = unknown> {
       refuseFabricInstance(value, "when sending a value over this connection");
     }
 
+    // An instance is refused for a second reason, which outlives the first: it
+    // is a container whose contents this walk cannot reach, so a `CellHandle`
+    // inside one would cross unconverted even on a connection that carried the
+    // class. Refused through the shared helper, as `deserialize()` above
+    // already does, so the two walks say the same thing about the same value.
+    if (value instanceof FabricInstance) {
+      refuseFabricInstance(value, "when sending a value over this connection");
+    }
+
     if (isObjectOrArray(value)) {
       return Object.fromEntries(
         Object.entries(value).map((

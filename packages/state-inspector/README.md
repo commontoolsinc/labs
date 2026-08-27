@@ -246,6 +246,18 @@ A standalone `cli.ts` entry exists for use outside the `cf` CLI (local only;
   head is a `delete`. `entities` is the exception that keeps tombstones, because
   it describes the space's records; that is why its `extent.total` can exceed
   `graph`'s over the same space.
+- **Everything that describes an ENTITY reads the branch that owns its visible
+  row.** `entityHistory`, `entityTimeline`, `hotEntities`, `contendedEntities`,
+  the detail version log, `analyzeSpaceSignals`' content searches, and the
+  cross-space convergence scans all resolve ownership before they read. That
+  cuts both ways: an entity a child INHERITED is described with the parent's
+  writes, and one the child OVERRODE with the child's alone, because the
+  parent's writes produced nothing a read from here can reach.
+- **What describes a branch's ACTIVITY stays local, on purpose.**
+  `spaceTimeline` and `churn` count commits made ON the branch. An inherited
+  entity was created by a commit that is not in those timelines, so folding it
+  in would attribute creations to commits they never list. `summarizeSpace`
+  counts the whole store and takes no branch at all.
 - **The other caps are silent**: `history` / `hot` / `conflicts` row limits, and
   the HTML stale-read pass, which caps per bundle and marks un-analyzed cells
   rather than showing them clean. There a count at a round cap may be truncated

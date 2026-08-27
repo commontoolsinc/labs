@@ -25,7 +25,7 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import { openSpace, type SpaceDb } from "./db.ts";
 import { collectLinks } from "./decode.ts";
-import { reconstructDocument } from "./reconstruct.ts";
+import { candidatesMatching, reconstructDocument } from "./reconstruct.ts";
 import type { DiscoveredSpace } from "./discover.ts";
 
 export type SpaceRole =
@@ -119,14 +119,12 @@ export function analyzeSpaceSignals(
   // Home detection + profiles[] edges
   let isHome = false;
   const profileDids = new Set<string>();
-  const homeCandidates = space.db
-    .prepare(
-      `SELECT DISTINCT id FROM revision
-       WHERE branch = ? AND scope_key = ?
-         AND data LIKE '%createProfile%' AND data LIKE '%"profiles"%'`,
-    )
-    .all<{ id: string }>(branch, scope);
-  for (const { id } of homeCandidates) {
+  const homeCandidates = candidatesMatching(space, {
+    branch,
+    scope,
+    like: ["%createProfile%", '%"profiles"%'],
+  });
+  for (const id of homeCandidates) {
     let doc;
     try {
       doc = reconstructDocument(space, { id, branch, scope });
@@ -154,12 +152,11 @@ export function analyzeSpaceSignals(
   // All cross-space link targets (cheap candidate query)
   const crossSpaceDids = new Set<string>();
   for (
-    const { id } of space.db
-      .prepare(
-        `SELECT DISTINCT id FROM revision
-         WHERE branch = ? AND scope_key = ? AND data LIKE '%"space":"did:key:%'`,
-      )
-      .all<{ id: string }>(branch, scope)
+    const id of candidatesMatching(space, {
+      branch,
+      scope,
+      like: ['%"space":"did:key:%'],
+    })
   ) {
     let doc;
     try {

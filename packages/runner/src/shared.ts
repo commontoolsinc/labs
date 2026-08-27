@@ -36,6 +36,7 @@ export {
 export {
   CHIP_UI,
   FRAMEWORK_RESULT_KEYS,
+  type JSONObject,
   type JSONSchema,
   type JSONValue,
   NAME,

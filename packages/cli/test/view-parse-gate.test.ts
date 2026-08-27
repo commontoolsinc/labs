@@ -45,7 +45,9 @@ function byName(doc: Document, name: string): StructureNode | undefined {
   return doc.flatStructure.find((n) => n.name === name);
 }
 
-// --- 836: classifyIdentifier with a parent (the only reachable case) --------
+//
+// 836: classifyIdentifier with a parent (the only reachable case)
+//
 
 Deno.test("gate 836: leaf identifiers are classified by their parent context", () => {
   // `if (!p) …` is the parentless fall-through. Every identifier in a parsed
@@ -102,7 +104,9 @@ Deno.test("called element keys carry one exact-position lookup marker", () => {
   );
 });
 
-// --- 913: a qualified name in type position always has a parent -------------
+//
+// 913: a qualified name in type position always has a parent
+//
 
 Deno.test("gate 913: a qualified name in a type annotation resolves as a type", () => {
   // isTypePosition climbs the qualified-name chain (`outer.inner.Leaf`) and then
@@ -129,7 +133,9 @@ Deno.test("gate 916: a `typeof` type colors its operand as a type name", () => {
   );
 });
 
-// --- 917, 919, 920: heritage types resolve via ts.isTypeNode first ----------
+//
+// 917, 919, 920: heritage types resolve via ts.isTypeNode first
+//
 
 Deno.test("gate 917-920: a class heritage type colors as a type name", () => {
   // `extends Parent<number>` produces an ExpressionWithTypeArguments whose
@@ -151,7 +157,9 @@ Deno.test("gate 917-920: an interface heritage type colors as a type name", () =
   );
 });
 
-// --- 1225: mergeByStart only ever runs with a non-empty additions batch -----
+//
+// 1225: mergeByStart only ever runs with a non-empty additions batch
+//
 
 Deno.test("gate 1225: comment batches (always non-empty) merge into their host", () => {
   // insertComments pushes a comment node into a batch before merging it, so
@@ -182,7 +190,9 @@ Deno.test("gate 1225: comment batches (always non-empty) merge into their host",
   );
 });
 
-// --- 1270: registerDefinition is only called for named declarations ---------
+//
+// 1270: registerDefinition is only called for named declarations
+//
 
 Deno.test("gate 1270: named declarations are registered; an anonymous one is not", () => {
   // The caller guards `registerDefinition` with `if (desc.name)`, so the
@@ -282,7 +292,9 @@ Deno.test("gate 1719-1721: safe() returns the value when the extractor succeeds"
   }
 });
 
-// --- 2045-2047: describeInitializer never sees a raw arrow initializer -------
+//
+// 2045-2047: describeInitializer never sees a raw arrow initializer
+//
 
 Deno.test("gate 2045-2047: an arrow initializer becomes a closure node", () => {
   // bindingDesc peels the initializer and routes any arrow / function

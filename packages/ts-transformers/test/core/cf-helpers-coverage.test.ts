@@ -48,9 +48,9 @@ function printExpr(node: ts.Node, sourceFile: ts.SourceFile): string {
   );
 }
 
-// ---------------------------------------------------------------------------
+//
 // Constructor scanning: getCFHelpersIdentifier
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("CFHelpers detects the __cfHelpers named import from commonfabric", () => {
   const helpers = helpersFor(
@@ -122,9 +122,9 @@ Deno.test("CFHelpers ignores a bare import declaration with no import clause", (
   assertFalse(helpers.sourceHasHelpers());
 });
 
-// ---------------------------------------------------------------------------
+//
 // getHelperExpr / getHelperQualified
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("getHelperExpr throws when the source has no helpers import", () => {
   const helpers = helpersFor(`const x = 1;`);
@@ -196,9 +196,9 @@ Deno.test("getHelperQualified builds a qualified name against the helper identif
   assertEquals((qualified.left as ts.Identifier).text, CF_HELPERS_IDENTIFIER);
 });
 
-// ---------------------------------------------------------------------------
+//
 // transformCfDirective / injectCfHelpers (string passes)
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("transformCfDirective returns an all-blank source unchanged", () => {
   // With no content line, `findFirstContentLineIndex` returns null and the

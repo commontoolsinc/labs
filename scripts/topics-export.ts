@@ -58,6 +58,8 @@ import {
   type TopicsExport,
 } from "./topics-rehearsal-lib.ts";
 
+import { argumentIdOf } from "./topics-snapshot-lib.ts";
+
 interface PieceInfo {
   id: string;
   pattern?: { identity?: string };
@@ -127,17 +129,6 @@ if (!isCompleteScan(listing.extent)) {
         : ""),
   );
   Deno.exit(1);
-}
-
-/** The entity a piece's `argument` link points at, or undefined. */
-function argumentIdOf(document: Record<string, unknown>): string | undefined {
-  const link = (document.argument as { "/"?: Record<string, { id?: string }> })
-    ?.["/"];
-  if (!link) return undefined;
-  for (const value of Object.values(link)) {
-    if (typeof value?.id === "string") return value.id;
-  }
-  return undefined;
 }
 
 // Selection reads each piece's DOCUMENT, not its description. `describePiece`

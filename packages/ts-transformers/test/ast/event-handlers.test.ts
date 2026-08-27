@@ -114,9 +114,9 @@ function findJsxAttribute(
   return found;
 }
 
-// =============================================================================
+//
 // Tests for isEventHandlerType
-// =============================================================================
+//
 
 Deno.test("isEventHandlerType - function with 0-1 params is a handler", () => {
   const { checker, sourceFile } = createJsxTestProgram(
@@ -214,9 +214,9 @@ Deno.test("isEventHandlerType - non-function type is NOT a handler", () => {
   }
 });
 
-// =============================================================================
+//
 // Tests for isEventHandlerJsxAttribute - name-based detection
-// =============================================================================
+//
 
 Deno.test("isEventHandlerJsxAttribute - onClick detected by name (without checker)", () => {
   const { sourceFile } = createJsxTestProgram(
@@ -269,9 +269,9 @@ Deno.test("isEventHandlerJsxAttribute - non-on attribute not detected (without c
   );
 });
 
-// =============================================================================
+//
 // Tests for isEventHandlerJsxAttribute - type-based detection
-// =============================================================================
+//
 
 Deno.test("isEventHandlerJsxAttribute - function prop detected by type (with checker)", () => {
   const { sourceFile, checker } = createJsxTestProgram(

@@ -473,6 +473,34 @@ export function isEntityKind(value: string): value is EntityKind {
 export const DEFAULT_SCAN_LIMIT = 5000;
 
 /**
+ * The end index a row listing slices to, for a limit that may be anything a
+ * caller passed.
+ *
+ * These listings were SQL `LIMIT ?` clauses, where SQLite reads a NEGATIVE as
+ * UNLIMITED, and the CLI still accepts one. A JS `slice` reads the same number
+ * as "drop the last N", so moving the bound out of SQL turns an operator asking
+ * for everything into a silent under-report. Distinct from `scanLimit`, which
+ * governs a reconstruction CAP and floors a negative to zero: nothing to
+ * reconstruct is a coherent answer, while nothing to list is not what a
+ * negative meant here. A limit that is not a whole number is refused, which is
+ * also what the SQL did.
+ */
+export function rowLimit(limit: number): number | undefined {
+  // A non-integer is REFUSED rather than rounded, because that is what these
+  // listings did before the bound moved into JS: SQLite answers `LIMIT 1.5`,
+  // `LIMIT NaN` and `LIMIT Infinity` with a datatype mismatch, while `slice`
+  // reads them as one row, no rows, and every row. Silently coercing a limit
+  // the caller could not have meant is how a listing under-reports without
+  // saying so. `Number.isInteger` rejects all four in one test.
+  if (!Number.isInteger(limit)) {
+    throw new Error(
+      `a row limit must be a whole number of rows, not ${limit}.`,
+    );
+  }
+  return limit < 0 ? undefined : limit;
+}
+
+/**
  * The cap a scan will actually apply, for a limit that may be anything a caller
  * passed. Entities are counted one at a time, so a cap has to be a whole
  * number: a fractional one no integer count can ever equal is a cap that never

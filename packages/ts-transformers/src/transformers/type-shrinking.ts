@@ -24,9 +24,9 @@ import {
 } from "../ast/mod.ts";
 import { getCellKind } from "./cell-type.ts";
 
-// ---------------------------------------------------------------------------
+//
 // Types
-// ---------------------------------------------------------------------------
+//
 
 /**
  * How a capability summary is applied to a parameter's schema. `full` shrinks
@@ -69,9 +69,9 @@ const NON_ITEM_PROPS = new Set([
   "update",
 ]);
 
-// ---------------------------------------------------------------------------
+//
 // Utility helpers
-// ---------------------------------------------------------------------------
+//
 
 function groupPathsByHead(
   paths: readonly (readonly string[])[],
@@ -776,9 +776,9 @@ export function printTypeNode(
   return printer.printNode(ts.EmitHint.Unspecified, node, sourceFile);
 }
 
-// ---------------------------------------------------------------------------
+//
 // Core type-shrinking
-// ---------------------------------------------------------------------------
+//
 
 function buildShrunkTypeNodeFromType(
   type: ts.Type,
@@ -1569,9 +1569,9 @@ function shrinkTypeLiteralMembers(
     : factory.createTypeLiteralNode(result);
 }
 
-// ---------------------------------------------------------------------------
+//
 // Validation
-// ---------------------------------------------------------------------------
+//
 
 /** Node-level check: does this TypeNode have a member named `head`? */
 function typeNodeHasHead(
@@ -1993,13 +1993,13 @@ export function validateShrinkCoverage(
   });
 }
 
-// ---------------------------------------------------------------------------
+//
 // Wrapping and defaults
-// ---------------------------------------------------------------------------
+//
 
-// ---------------------------------------------------------------------------
+//
 // Contract-mode capability overlay
-// ---------------------------------------------------------------------------
+//
 
 /** A serialized path key with numeric segments normalized to `*`, so an
  * element access observed at one index matches the element position. */
@@ -3370,9 +3370,9 @@ function buildDefaultsOnlyFallbackPaths(
   return uniquePaths(fallbackPaths);
 }
 
-// ---------------------------------------------------------------------------
+//
 // Main entry point
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Shared implementation for applying capability summary shrinking and wrapping

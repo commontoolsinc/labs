@@ -19,6 +19,7 @@ import type { CfcConfClause } from "@commonfabric/runner/cfc";
 import type { CfcLabelView } from "@commonfabric/runner/cfc/label-view-core";
 import type {
   ActionRunTraceEntry,
+  JSONObject,
   JSONSchema,
   JSONValue,
   NormalizedFullLink,
@@ -32,7 +33,7 @@ import type {
   WriteStackTraceMatcher,
 } from "@commonfabric/runner/shared";
 import { RuntimeTelemetryMarkerResult } from "@commonfabric/runtime-client";
-export type { JSONSchema, JSONValue, Program };
+export type { JSONObject, JSONSchema, JSONValue, Program };
 
 export type { CfcLabelView };
 

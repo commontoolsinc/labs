@@ -122,7 +122,9 @@ Deno.test("diffFiles: a non-diff yields no files", () => {
   assertEquals(diffFiles("just some text\nnot a diff\n"), []);
 });
 
-// --- fold plan ---------------------------------------------------------------
+//
+// fold plan
+//
 
 const ln = (text: string): Line => ({
   text,
@@ -180,7 +182,9 @@ Deno.test("buildFoldPlan: nothing collapsed is the identity", () => {
   assertEquals(plan.displayLines.length, docLines.length);
 });
 
-// --- test-path detection -----------------------------------------------------
+//
+// test-path detection
+//
 
 Deno.test("isMarkdownPath: matches the pager's filename classification", () => {
   for (
@@ -235,7 +239,9 @@ Deno.test("isTestPath: directories and basenames", () => {
   }
 });
 
-// --- folding through the session ---------------------------------------------
+//
+// folding through the session
+//
 
 function press(s: Session, ...names: string[]): void {
   for (const name of names) {

@@ -4,7 +4,9 @@ import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
 
 const NO_WS: DiffWorkspace = { resolve: () => null, read: () => null };
 
-// --- a deleted Markdown file keeps Markdown highlighting --------------------
+//
+// a deleted Markdown file keeps Markdown highlighting
+//
 
 Deno.test("buildDiffDocument: a deleted Markdown file (new path /dev/null) highlights as Markdown", () => {
   // A plain `diff -u doc.md /dev/null` has no `diff --git` line, so the new
@@ -54,7 +56,9 @@ Deno.test("buildDiffDocument: a deleted Markdown file (new path /dev/null) highl
   );
 });
 
-// --- a deleted non-Markdown file is unaffected by the fallback --------------
+//
+// a deleted non-Markdown file is unaffected by the fallback
+//
 
 Deno.test("buildDiffDocument: a deleted .ts file (new path /dev/null) stays TypeScript", () => {
   // The old-path fallback must not turn a deleted TypeScript file into

@@ -8,9 +8,9 @@
 
 import type { Reactive, OpaqueCell } from "commonfabric";
 
-// ============================================================================
+//
 // TEST CASES
-// ============================================================================
+//
 
 // Direct nullable type
 type Direct = Reactive<string | null>;
@@ -33,9 +33,9 @@ type RequiredStateRef = Reactive<Required<State>>;
 type RequiredValueProp = RequiredStateRef["value"];
 type RequiredValueInner = RequiredValueProp extends OpaqueCell<infer T> ? T : never;
 
-// ============================================================================
+//
 // EXPORTS
-// ============================================================================
+//
 export type {
   Direct, DirectInner, DirectGet,
   StateRef, ValueProp, ValueInner, ValueGet,

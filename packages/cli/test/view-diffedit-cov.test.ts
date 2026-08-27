@@ -158,7 +158,9 @@ index 0000000..1111111 100644
  const z = 3;
 `;
 
-// --- revert error branches ---------------------------------------------------
+//
+// revert error branches
+//
 
 Deno.test("diffedit cov: revert returns null when the edited text no longer parses as a diff", () => {
   const { ws, done } = tempWs({ "m.ts": FILE_TEXT });
@@ -308,7 +310,9 @@ Deno.test("diffedit cov: revert chunk returns null when the original has no matc
   }
 });
 
-// --- expandContext error branches -------------------------------------------
+//
+// expandContext error branches
+//
 
 const EXPAND_FILE = "alpha\nbeta\ngamma\ndelta\nepsilon\nzeta\n";
 const EXPAND_DIFF = `diff --git a/m.ts b/m.ts
@@ -513,7 +517,9 @@ Deno.test("diffedit cov: expandContext reveals context below the hunk and grows 
   }
 });
 
-// --- dirtyLabels branches ----------------------------------------------------
+//
+// dirtyLabels branches
+//
 
 Deno.test("diffedit cov: dirtyLabels returns empty when a side fails to parse", () => {
   const { ws, done } = tempWs({ "m.ts": FILE_TEXT });
@@ -598,7 +604,9 @@ diff --git a/x.ts b/x.ts
   }
 });
 
-// --- createDiffHighlighter: getter, no-op update, markdown line scan ----------
+//
+// createDiffHighlighter: getter, no-op update, markdown line scan
+//
 
 Deno.test("diffedit cov: the highlighter's lines getter returns the seeded lines and a no-op update is a no-op", () => {
   const { ws, done } = tempWs({ "m.ts": FILE_TEXT });
@@ -954,7 +962,9 @@ Deno.test("diffedit cov: the highlighter returns plain (non-Markdown) coloring w
   assertEquals(out[2].spans[0].cls, "diffAdd");
 });
 
-// --- read-only source and save's defensive guards ---------------------------
+//
+// read-only source and save's defensive guards
+//
 
 Deno.test("diffedit cov: a diff matching no file on disk yields a read-only source whose save is a no-op", () => {
   // An empty `lines` map means nothing on disk backs the diff: the source is
@@ -3141,7 +3151,9 @@ index 1111111..2222222 100644
   });
 });
 
-// --- editableStart: position/verified-aware line editability -----------------
+//
+// editableStart: position/verified-aware line editability
+//
 
 Deno.test("editableStart: a null model (buffer is not a diff) refuses every line", () => {
   assertEquals(_de.editableStart(null, [], " some text", 0), null);
@@ -3186,7 +3198,9 @@ Deno.test("editableStart: editable only inside a verified hunk", () => {
   );
 });
 
-// --- commit amend helpers ----------------------------------------------------
+//
+// commit amend helpers
+//
 
 Deno.test("pendingAmend: null when there is no editable message", () => {
   assertEquals(
@@ -3297,7 +3311,9 @@ Deno.test("save: rejects a diff with a different hunk count", () => {
   }
 });
 
-// --- message-scope revert ----------------------------------------------------
+//
+// message-scope revert
+//
 
 const SHOW_DIFF = [
   "commit 0123456789abcdef0123456789abcdef01234567",
@@ -3365,7 +3381,9 @@ Deno.test("diffedit cov: message revert is null when the baseline has no such re
   }
 });
 
-// --- expandRoom and the join helpers ----------------------------------------
+//
+// expandRoom and the join helpers
+//
 
 Deno.test("diffedit cov: expandRoom is empty when the text no longer parses", () => {
   const { ws, done } = tempWs({ "m.ts": EXPAND_FILE });

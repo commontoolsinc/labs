@@ -230,6 +230,71 @@ export function visibleRevisionRows(
 }
 
 /**
+ * Ids whose stored rows match every `data LIKE` pattern, across each branch the
+ * read can reach.
+ *
+ * The LIKE set is a CANDIDATE filter — each hit is reconstructed and tested
+ * properly by the caller — so a union across the chain is enough and no
+ * ownership arbitration belongs here: an id matched on a parent but overridden
+ * on the child reconstructs to the child's value and fails the real test on its
+ * own. Searching local rows only is what goes wrong, by never offering an
+ * inherited entity as a candidate at all.
+ */
+export function candidatesMatching(
+  space: SpaceDb,
+  opts: { branch: string; scope: string; like: readonly string[] },
+): string[] {
+  const stmt = space.db.prepare(
+    `SELECT DISTINCT id FROM revision
+     WHERE branch = ? AND scope_key = ? AND seq <= ?
+       AND ${opts.like.map(() => "data LIKE ?").join(" AND ")}`,
+  );
+  const ids = new Set<string>();
+  for (const link of branchReadChain(space, opts.branch)) {
+    for (
+      const r of stmt.all<{ id: string }>(
+        link.branch,
+        opts.scope,
+        link.atSeq,
+        ...opts.like,
+      )
+    ) {
+      ids.add(r.id);
+    }
+  }
+  return [...ids];
+}
+
+/**
+ * The branch that owns one entity's records, or undefined when no branch the
+ * read can reach holds any.
+ *
+ * A pass describing ONE entity's history asks this: nearest-branch ownership
+ * decides which log the reader can reach, and it hides a parent's writes for an
+ * entity the child overrode exactly as it hides the parent's value.
+ *
+ * NOT a readability check. It follows `visibleRevisionRows` in enumerating
+ * RECORDS, so a tombstoned entity has an owning branch while a read of it
+ * returns nothing — which is right for a history (a delete is a write worth
+ * showing) and wrong as a gate. A caller that needs "can this be read" must
+ * reconstruct, or take the entity from `visibleEntityRows`.
+ */
+export function owningLink(
+  space: SpaceDb,
+  opts: { branch?: string; scope?: string; id: string },
+): BranchReadLink | undefined {
+  // `scope` is NOT optional in meaning, only in spelling: ownership is a
+  // property of (scope, entity), and the same id can be owned by different
+  // branches in `space` and in a user scope. Left unfiltered, the first scoped
+  // row to come back would decide, so this defaults the way the rest of the
+  // package does rather than answering about an arbitrary scope.
+  return visibleRevisionRows(space, {
+    ...opts,
+    scope: opts.scope ?? "space",
+  })[0]?.link;
+}
+
+/**
  * Resolve the single revision row visible for `id` at `atSeq` on `branch`,
  * replicating the engine's `readRowForBranch` (`engine.ts`): take the latest
  * local row at/before `atSeq`; if the branch has NONE, inherit the parent's row

@@ -60,7 +60,9 @@ export class EditBuffer {
     this.lineEndings = this.lines.map((_, index) => lineEndings[index]);
   }
 
-  // --- state ----------------------------------------------------------------
+  //
+  // state
+  //
 
   text(): string {
     return this.lines.join("\n");
@@ -196,7 +198,9 @@ export class EditBuffer {
     this.lastYank = null;
   }
 
-  // --- cursor motion --------------------------------------------------------
+  //
+  // cursor motion
+  //
 
   moveLeft(): void {
     this.resetGoal();
@@ -302,7 +306,9 @@ export class EditBuffer {
     this.mark = { row: this.row, col: this.col };
   }
 
-  // --- insertion ------------------------------------------------------------
+  //
+  // insertion
+  //
 
   insert(s: string): void {
     this.resetGoal();
@@ -349,7 +355,9 @@ export class EditBuffer {
     this.col = 0;
   }
 
-  // --- deletion -------------------------------------------------------------
+  //
+  // deletion
+  //
 
   deleteBackward(previousEndColumn?: number): void { // Backspace
     this.resetGoal();
@@ -395,7 +403,9 @@ export class EditBuffer {
     }
   }
 
-  // --- kill / yank ----------------------------------------------------------
+  //
+  // kill / yank
+  //
 
   /** C-k: kill to end of line; at end of line, kill the newline (join next).
    * `endColumn` can keep source-owned transport after the editable text. */
@@ -534,7 +544,9 @@ export class EditBuffer {
     this.lastYank = null;
   }
 
-  // --- case operations (operate over the next word, advancing point) --------
+  //
+  // case operations (operate over the next word, advancing point)
+  //
 
   lowercaseWord(): void { // M-l
     this.transformWord((s) => s.toLowerCase());
@@ -571,7 +583,9 @@ export class EditBuffer {
     this.col = this.col + replaced.length;
   }
 
-  // --- helpers --------------------------------------------------------------
+  //
+  // helpers
+  //
 
   /** Cut text between two ordered points and return it; cursor left at a-side
    * is the caller's responsibility. */
