@@ -12,7 +12,7 @@ import {
 } from "../src/transformers/type-shrinking.ts";
 import { collect, parseModule } from "./transformed-ast.ts";
 
-// ---------------------------------------------------------------------------
+//
 // Structural inspection of printed type nodes.
 //
 // `printTypeNode` renders a `ts.TypeNode` to text. Asserting on that text with
@@ -21,7 +21,7 @@ import { collect, parseModule } from "./transformed-ast.ts";
 // helpers reparse the printed type node and expose its members as real AST
 // nodes so tests can assert on property names, optional flags, exact member
 // types, and the shape of the root node.
-// ---------------------------------------------------------------------------
+//
 
 /** Reparse a printed type node into a `ts.TypeNode`. */
 function parseType(printed: string): ts.TypeNode {
@@ -78,9 +78,9 @@ function hasQualifiedRef(node: ts.Node, left: string, right: string): boolean {
   });
 }
 
-// ---------------------------------------------------------------------------
+//
 // Harness (mirrors test/type-shrinking.test.ts so cases stay comparable).
-// ---------------------------------------------------------------------------
+//
 
 function createProgram(source: string): {
   sourceFile: ts.SourceFile;
@@ -179,11 +179,11 @@ function createContext(sourceFile: ts.SourceFile): {
   return { context, diagnostics };
 }
 
-// ---------------------------------------------------------------------------
+//
 // Array element node building via type-driven shrinking (Array<T> reference).
 // Lines ~1185-1202, 1194-1199: TypeReference to `Array` resolved through the
 // checker, element shrunk, array node rebuilt.
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("applyShrinkAndWrap shrinks Array<T> reference items to accessed fields", () => {
   const { sourceFile, checker } = createProgram(`
@@ -217,10 +217,10 @@ Deno.test("applyShrinkAndWrap shrinks Array<T> reference items to accessed field
   assertEquals(members.has("id"), false);
 });
 
-// ---------------------------------------------------------------------------
+//
 // length-only access on an Array<T> reference emits unknown[] (array-root only
 // path). Exercises the `allNonItem` array branch in the node-driven path.
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("applyShrinkAndWrap collapses length-only Array<T> reads to unknown[]", () => {
   const { sourceFile, checker } = createProgram(`
@@ -245,11 +245,11 @@ Deno.test("applyShrinkAndWrap collapses length-only Array<T> reads to unknown[]"
   assertEquals(printTypeNode(result, sourceFile), "unknown[]");
 });
 
-// ---------------------------------------------------------------------------
+//
 // Union of object shapes: shrink each non-nullish member; nullish member
 // preserved. Exercises the union branch in buildShrunkTypeNodeFromTypeNode
 // (lines ~1278-1301) via a source-authored union node.
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("applyShrinkAndWrap shrinks each member of a source-authored union", () => {
   const { sourceFile, checker } = createProgram(`
@@ -278,11 +278,11 @@ Deno.test("applyShrinkAndWrap shrinks each member of a source-authored union", (
   assertEquals(members.has("onlyB"), false);
 });
 
-// ---------------------------------------------------------------------------
+//
 // Union `T | undefined` where only one member holds the accessed property.
 // After shrinking the non-nullish member, a single member remains and the
 // union collapses to that member (line ~1299-1301 `all.length === 1`).
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("applyShrinkAndWrap collapses a shrunk union to its single non-nullish member", () => {
   const { sourceFile, checker } = createProgram(`
@@ -316,11 +316,11 @@ Deno.test("applyShrinkAndWrap collapses a shrunk union to its single non-nullish
   assert(ts.isTypeLiteralNode(node));
 });
 
-// ---------------------------------------------------------------------------
+//
 // Type-driven union nullish re-wrapping (buildShrunkTypeNodeFromType, ~856-895)
 // and line 888 (`nullishMembers.length === 0` short-circuit not taken).
 // Drive with a synthetic base node to force the type-driven path.
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("applyShrinkAndWrap re-appends undefined when type-driven shrinking a nullable object", () => {
   const { sourceFile, checker } = createProgram(`
@@ -355,11 +355,11 @@ Deno.test("applyShrinkAndWrap re-appends undefined when type-driven shrinking a 
   );
 });
 
-// ---------------------------------------------------------------------------
+//
 // Nested primitive leaf on a type-driven shrink: `text.length` keeps the
 // string leaf intact instead of shrinking `text` to `{ length }`
 // (lines ~934-962 primitive-scalar branch through the type-driven path).
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("applyShrinkAndWrap keeps nested primitive leaves intact under type-driven shrinking", () => {
   const { sourceFile, checker } = createProgram(`
@@ -390,11 +390,11 @@ Deno.test("applyShrinkAndWrap keeps nested primitive leaves intact under type-dr
   assertEquals(members.has("other"), false);
 });
 
-// ---------------------------------------------------------------------------
+//
 // Index-signature access via type-driven shrinking: a numeric/string key that
 // is not a named property resolves through the index signature and the emitted
 // member is optional (lines ~913-936: `isOptional = true`, `984-989`).
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("applyShrinkAndWrap represents index-signature access as an optional member", () => {
   const { sourceFile, checker } = createProgram(`
@@ -424,11 +424,11 @@ Deno.test("applyShrinkAndWrap represents index-signature access as an optional m
   assertEquals(members.has("unused"), false);
 });
 
-// ---------------------------------------------------------------------------
+//
 // isUnchangedShrink: a TypeReference whose members are all accessed with no
 // nested change is kept as the original reference to preserve $ref/$defs
 // (lines ~1453-1474 return `node`).
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("applyShrinkAndWrap resolves an interface reference and drops unaccessed members", () => {
   const { sourceFile, checker } = createProgram(`
@@ -458,12 +458,12 @@ Deno.test("applyShrinkAndWrap resolves an interface reference and drops unaccess
   assertEquals(members.has("z"), false);
 });
 
-// ---------------------------------------------------------------------------
+//
 // Interface heritage merge: an interface extending a base contributes inherited
 // members that are merged and de-duplicated (mergeResolvedMembers, ~1416-1442;
 // resolveMembersFromDeclaration heritage branch ~1388-1414). An overriding
 // property in the derived interface wins.
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("applyShrinkAndWrap merges inherited interface members and honors overrides", () => {
   const { sourceFile, checker } = createProgram(`
@@ -492,11 +492,11 @@ Deno.test("applyShrinkAndWrap merges inherited interface members and honors over
   assertEquals(members.has("shared"), false);
 });
 
-// ---------------------------------------------------------------------------
+//
 // Diagnostics: unknown base type with property access reports
 // schema:unknown-type-access (lines ~1876-1893). Driven through
 // applyShrinkAndWrap with a context + fnNode so validateShrinkCoverage runs.
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("applyShrinkAndWrap reports unknown-type-access for unknown base with reads", () => {
   const { sourceFile, checker } = createProgram(`
@@ -530,10 +530,10 @@ Deno.test("applyShrinkAndWrap reports unknown-type-access for unknown base with 
   assertStringIncludes(diagnostics[0]!.message, "'.missing'");
 });
 
-// ---------------------------------------------------------------------------
+//
 // Diagnostics: concrete type but an accessed path is absent reports
 // schema:path-not-in-type (lines ~1938-1954, and the missing filter 1939-1941).
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("applyShrinkAndWrap reports path-not-in-type for a missing property", () => {
   const { sourceFile, checker } = createProgram(`
@@ -566,10 +566,10 @@ Deno.test("applyShrinkAndWrap reports path-not-in-type for a missing property", 
   assertEquals(diagnostics[0]!.message.includes("'.present'"), false);
 });
 
-// ---------------------------------------------------------------------------
+//
 // Diagnostics: concrete type with a property typed `unknown` reports
 // schema:unknown-type-access (case 2, lines ~1900-1935).
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("applyShrinkAndWrap reports unknown-typed property access", () => {
   const { sourceFile, checker } = createProgram(`
@@ -602,10 +602,10 @@ Deno.test("applyShrinkAndWrap reports unknown-typed property access", () => {
   assertStringIncludes(diagnostics[0]!.message, "typed as 'unknown'");
 });
 
-// ---------------------------------------------------------------------------
+//
 // Diagnostics: `never` base type skips validation entirely (lines ~1857-1862).
 // A `never`-typed parameter with reads must produce no diagnostics.
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("applyShrinkAndWrap skips validation for a never base type", () => {
   const { sourceFile, checker } = createProgram(`
@@ -634,10 +634,10 @@ Deno.test("applyShrinkAndWrap skips validation for a never base type", () => {
   assertEquals(diagnostics.length, 0);
 });
 
-// ---------------------------------------------------------------------------
+//
 // Diagnostics: wildcard param typed `unknown` passed to an opaque function
 // reports the wildcard-specific unknown-type-access branch (lines ~1733-1750).
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("applyShrinkAndWrap reports unknown-type-access for an unknown wildcard param", () => {
   const { sourceFile, checker } = createProgram(`
@@ -669,11 +669,11 @@ Deno.test("applyShrinkAndWrap reports unknown-type-access for an unknown wildcar
   assertStringIncludes(diagnostics[0]!.message, "logged");
 });
 
-// ---------------------------------------------------------------------------
+//
 // Validation over an array base: item-level paths validate against the element
 // type. A missing item property reports through the array-element recursion
 // (lines ~1795-1833, getArrayElementTypeNode paths ~1656-1709).
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("applyShrinkAndWrap validates array item paths against the element type", () => {
   const { sourceFile, checker } = createProgram(`
@@ -706,12 +706,12 @@ Deno.test("applyShrinkAndWrap validates array item paths against the element typ
   assertStringIncludes(diagnostics[0]!.message, "'.missing'");
 });
 
-// ---------------------------------------------------------------------------
+//
 // defaults_only mode: a default nested under a path present in the base type
 // gets applied to the fallback shape when the direct node application misses.
 // Also exercises applyCapabilityDefaultsToTypeNode fallback (~2919-2945) and
 // buildDefaultsOnlyFallbackPaths leaf expansion (~2954-2956, 3001-3026).
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("applyShrinkAndWrap applies defaults-only fallback across the base type shape", () => {
   const { sourceFile, checker } = createProgram(`
@@ -744,10 +744,10 @@ Deno.test("applyShrinkAndWrap applies defaults-only fallback across the base typ
   assertEquals(members.get("count")?.type, "number");
 });
 
-// ---------------------------------------------------------------------------
+//
 // applyCapabilityDefaultsToTypeNode: default applied directly through a tuple
 // index (applySingleDefaultToTypeNode tuple branch ~2825-2850).
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("applyCapabilityDefaultsToTypeNode applies a default through a tuple index", () => {
   const { sourceFile, checker } = createProgram(`
@@ -777,10 +777,10 @@ Deno.test("applyCapabilityDefaultsToTypeNode applies a default through a tuple i
   );
 });
 
-// ---------------------------------------------------------------------------
+//
 // applyCapabilityDefaultsToTypeNode: out-of-range tuple index leaves the node
 // unchanged (tuple guard ~2827-2831). No __cfHelpers.Default wrapper appears.
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("applyCapabilityDefaultsToTypeNode ignores an out-of-range tuple index", () => {
   const { sourceFile, checker } = createProgram(`
@@ -806,11 +806,11 @@ Deno.test("applyCapabilityDefaultsToTypeNode ignores an out-of-range tuple index
   assertEquals(hasQualifiedRef(node, "__cfHelpers", "Default"), false);
 });
 
-// ---------------------------------------------------------------------------
+//
 // Identity-only root on a union base: each union member is replaced with the
 // identity-only shape; nullish members are rebuilt as-is
 // (createIdentityOnlyRootTypeNode union branch ~2367-2400).
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("applyShrinkAndWrap replaces identity-only union roots per member", () => {
   const { sourceFile, checker } = createProgram(`
@@ -846,10 +846,10 @@ Deno.test("applyShrinkAndWrap replaces identity-only union roots per member", ()
   assertEquals(members.has("b"), false);
 });
 
-// ---------------------------------------------------------------------------
+//
 // Identity-only root that is nullish (`undefined`): rebuilt via
 // createIdentityOnlyNullishTypeNode (lines ~2357-2365, 2311-2331).
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("applyShrinkAndWrap rebuilds an identity-only nullish root as undefined", () => {
   const { sourceFile, checker } = createProgram(`
@@ -874,11 +874,11 @@ Deno.test("applyShrinkAndWrap rebuilds an identity-only nullish root as undefine
   assertEquals(printTypeNode(result, sourceFile), "undefined");
 });
 
-// ---------------------------------------------------------------------------
+//
 // Identity paths descending through an array item interface reference resolved
 // via the checker (applyIdentityOnlyPathsToTypeNode Array<T> ref branch
 // ~2557-2583) using an Array<T> reference (not `T[]`).
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("applyShrinkAndWrap descends identity item paths through Array<T> references", () => {
   const { sourceFile, checker } = createProgram(`
@@ -909,11 +909,11 @@ Deno.test("applyShrinkAndWrap descends identity item paths through Array<T> refe
   assertEquals(members.get("drop")?.type, "number");
 });
 
-// ---------------------------------------------------------------------------
+//
 // Identity paths through a union base node (applyIdentityOnlyPathsToTypeNode
 // union branch ~2728-2752): each union member is visited and changed members
 // force a rebuilt union.
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("applyShrinkAndWrap applies identity paths across union members", () => {
   const { sourceFile, checker } = createProgram(`
@@ -948,13 +948,13 @@ Deno.test("applyShrinkAndWrap applies identity paths across union members", () =
   assertEquals(members.get("other")?.type, "boolean");
 });
 
-// ---------------------------------------------------------------------------
+//
 // Identity paths through a named interface reference that resolves to declared
 // members, where a nested member is left unchanged (no matching child path) so
 // the `!changed` early return keeps the reference
 // (applyIdentityOnlyPathsToTypeNode reference branch ~2669-2725, unchanged
 // return ~2721-2723).
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("applyShrinkAndWrap keeps an interface reference when no identity path matches", () => {
   const { sourceFile, checker } = createProgram(`
@@ -982,11 +982,11 @@ Deno.test("applyShrinkAndWrap keeps an interface reference when no identity path
   assertEquals(printTypeNode(result, sourceFile), "Outer");
 });
 
-// ---------------------------------------------------------------------------
+//
 // applyCellCapabilityPathsToTypeNode through a parenthesized type node
 // (~2181-2193) plus per-property cell capability selection where read+write
 // paths on the same leaf select `writable`.
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("applyShrinkAndWrap applies cell capabilities through parenthesized literals", () => {
   const { sourceFile, checker } = createProgram(`
@@ -1017,10 +1017,10 @@ Deno.test("applyShrinkAndWrap applies cell capabilities through parenthesized li
   assertEquals(members.get("value")?.type, "__cfHelpers.ReadonlyCell<number>");
 });
 
-// ---------------------------------------------------------------------------
+//
 // Batch 2: "unchanged / no-match" arms of each identity-path node shape, plus
 // remaining array-element and default clusters.
-// ---------------------------------------------------------------------------
+//
 
 // Identity item path on an Array<T> reference that names no member leaves the
 // whole array reference unchanged (Array<T> ref `updated === inner` ~2574-2576).
@@ -1390,9 +1390,9 @@ Deno.test("applyShrinkAndWrap selects writable capability for read-and-write cel
   assertEquals(members.has("untouched"), false);
 });
 
-// ---------------------------------------------------------------------------
+//
 // Batch 3: array-union validation and remaining union collapse / defensive arms.
-// ---------------------------------------------------------------------------
+//
 
 // Validation over a `Row[] | undefined` base with a valid item field reports no
 // diagnostic, exercising getArrayElementTypeNode's union branch (~1643-1657):

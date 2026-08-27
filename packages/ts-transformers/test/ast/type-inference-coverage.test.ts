@@ -350,13 +350,15 @@ Deno.test("inferArrayElementType: a Box<Default<string[]>> unwraps the Default a
   assertEquals(elementTypeText("boxedDefaultArray"), "string");
 });
 
-// -- Synthetic composite type registration ---------------------------------
+//
+// Synthetic composite type registration
 //
 // A TypeNode built by the factory has no source position, so
 // `checker.getTypeFromTypeNode` widens it to `any`. When each leaf is
 // pre-registered with a real Type, ensureTypeNodeRegistered rebuilds the
 // composite Type from the registered children through the TypeScript-internal
 // createArrayType / getUnionType / createAnonymousType entry points.
+//
 
 function programForSynthetics(): {
   checker: ts.TypeChecker;
