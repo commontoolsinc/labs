@@ -73,6 +73,14 @@ const editorContainsTokens = (
     tokens.every((token) => content.includes(token));
 };
 
+const materializedDisplayEquals = (
+  probe: ProbeApi,
+  expected: string,
+): boolean => {
+  const display = probe.collect("#materialized-content")[0];
+  return display !== undefined && probe.deepText(display).trim() === expected;
+};
+
 const reconciliationReached = (probe: ProbeApi): boolean => {
   const editor = probe.collect("cf-code-editor")[0] as EditorHost | undefined;
   const globals = globalThis as typeof globalThis & {
@@ -675,6 +683,14 @@ describe("cf-code-editor collaboration", () => {
 
     assertEquals(await editorContent(alicePage), "legacy string");
     assertEquals(await editorContent(bobPage), "legacy string");
+    await Promise.all([
+      waitForCondition(alicePage, materializedDisplayEquals, {
+        args: ["legacy string"],
+      }),
+      waitForCondition(bobPage, materializedDisplayEquals, {
+        args: ["legacy string"],
+      }),
+    ]);
 
     await clickCfButton(alicePage, "#replace-content");
     await Promise.all([
@@ -685,6 +701,12 @@ describe("cf-code-editor collaboration", () => {
         args: [["random string"]],
       }),
       awaitMaterialized("legacyReplace", (value) => value === "random string"),
+      waitForCondition(alicePage, materializedDisplayEquals, {
+        args: ["random string"],
+      }),
+      waitForCondition(bobPage, materializedDisplayEquals, {
+        args: ["random string"],
+      }),
     ]);
     assertEquals(await editorContent(alicePage), "random string");
     assertEquals(await editorContent(bobPage), "random string");
@@ -706,6 +728,12 @@ describe("cf-code-editor collaboration", () => {
         "legacyReplace",
         (value) => value === "random string!",
       ),
+      waitForCondition(alicePage, materializedDisplayEquals, {
+        args: ["random string!"],
+      }),
+      waitForCondition(bobPage, materializedDisplayEquals, {
+        args: ["random string!"],
+      }),
     ]);
     assertEquals(await editorContent(alicePage), "random string!");
     assertEquals(await editorContent(bobPage), "random string!");
