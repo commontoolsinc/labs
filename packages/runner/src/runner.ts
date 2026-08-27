@@ -3913,6 +3913,25 @@ export class Runner {
           startTx.abort("Deferred runner start was cancelled");
           return;
         }
+        // ALREADY-RUNNING piece + KEYLESS pattern on the deferred arm: the
+        // same stamp-carried swap the synchronous arm requests through the
+        // session channel (see runWithStartOwnership) — the setup that
+        // staged the new derivation committed with the outer transaction,
+        // so the swap request fires here directly.
+        if (installedRegistration === undefined && givenPattern !== undefined) {
+          const sessionSwap = this.sessionPatternSwaps.get(
+            this.getDocKey(committedResultCell),
+          );
+          const sessionRef = this.runtime.patternManager.getArtifactEntryRef(
+            givenPattern,
+          );
+          if (
+            sessionSwap !== undefined && sessionRef !== undefined &&
+            PatternManager.isKeylessPatternIdentity(sessionRef.identity)
+          ) {
+            sessionSwap(givenPattern, sessionRef);
+          }
+        }
         this.runtime.prepareTxForCommit(startTx);
         startTx.commit().then(({ error }) => {
           if (error) {
