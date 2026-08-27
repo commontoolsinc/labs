@@ -416,7 +416,6 @@ for (const N of SIZES) {
   });
 }
 
-//
 // 4. UPDATE: three writer profiles for "one item changed", distinguished
 //    because they have wildly different write footprints:
 //      a. REGENERATE from scratch (what a derivation/lift recompute does):
@@ -425,7 +424,6 @@ for (const N of SIZES) {
 //         by get() carry their doc identity → only the changed element and
 //         the parent write.
 //      c. TARGETED key(i).set: bypasses the array diff entirely.
-//
 async function updateRegenerate(
   N: number,
   b?: Deno.BenchContext,

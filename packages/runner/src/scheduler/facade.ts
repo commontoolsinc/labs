@@ -1053,14 +1053,12 @@ export class Scheduler {
     return rearmed;
   }
 
-  //
   // The (d′) standing `demandedWriters` root kind and the
   // per-(instance, demander) currency check (stage-C design §2.2 / §2.4;
   // serving-loop.md §1). The SpaceServer's demand pass calls these on
   // registry DELTAS; nothing here is reached off the serving posture (the
   // registration hook installs lazily on the first `enterDemandedEntity`,
   // so a plain client runtime's `demandedWriters` set stays empty — T9′).
-  //
 
   /** Refcount per demanded ENTITY (scope-NAME keyed, `entityNameKey` —
    * the writer index's vocabulary: two instances of one doc, `user:alice`

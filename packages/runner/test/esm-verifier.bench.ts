@@ -36,13 +36,11 @@ import {
   normalizeExact,
 } from "../src/sandbox/tslib-helpers.ts";
 
-//
 // Pre-shadow-detection baseline: the single-pass verifyCompiledModuleBody from
 // Phase D2.1 (commit 4e3f69d05), before the helper-shadow bypass fix landed in
 // 3517a3433 / a0213d532 added a second full statement scan.
 // This is used ONLY in the regression-delta bench group to quantify the cost of
 // the shadow-detection pass. Product code is untouched.
-//
 
 const EMPTY_BINDING_SET: ReadonlySet<string> = new Set<string>();
 
@@ -209,12 +207,10 @@ console.error(
     `total body bytes: ${parkingBodies.reduce((s, [, b]) => s + b.length, 0)}`,
 );
 
-//
 // Bench naming: performance tracking keys each benchmark's timeline by the
 // origin file, group, and verbatim name, so groups and names must stay
 // stable across commits — no content hashes, byte counts, or module counts.
 // Volatile sizes go to stderr.
-//
 
 /** Basenames too vague to identify a module on their own. */
 const GENERIC_BASENAMES = new Set([
@@ -310,11 +306,9 @@ Deno.bench(
   },
 );
 
-//
 // Per-module body verify: one bench per authored module (parking only, to
 // show per-module cost distribution — body size varies widely in a real
 // pattern, the per-module numbers help pinpoint which module dominates).
-//
 
 console.error(
   "parking-coordinator modules: " +

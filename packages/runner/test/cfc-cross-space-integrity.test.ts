@@ -22,7 +22,6 @@ import { parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 
-//
 // Cross-space integrity & declassification — expressing the four scenarios and
 // pinning where the gaps are.
 //
@@ -47,7 +46,6 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 //     and FAILS CLOSED (3a). `projection` (§8.3) IS implemented — verified at
 //     commit with scoped-integrity carry (3a′ shows the subset-declaration
 //     sliver; full behavior in cfc-projection.test.ts).
-//
 
 const signer = await Identity.fromPassphrase("cfc-cross-space-integrity");
 const spaceA = signer.did();
@@ -695,7 +693,6 @@ describe("CFC cross-space integrity", () => {
   });
 });
 
-//
 // Scenario 2 — declassify while releasing/copying the value. Declassification
 // is a boundary-time rewrite expressed by EXCHANGE RULES: a rule adds an
 // alternative to (or drops) a CONFIDENTIALITY clause, gated by evidence. The
@@ -705,7 +702,6 @@ describe("CFC cross-space integrity", () => {
 //
 // These use the exchange evaluator directly, which is the label transform the
 // sink/egress boundary applies under `cfcPolicyEvaluation: "enforce"`.
-//
 
 const BOB = "did:key:bob";
 const userBob = cfcAtom.user(BOB);

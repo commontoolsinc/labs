@@ -696,11 +696,9 @@ describe("stage P2-F per-(action × instance) run supply", () => {
   });
 });
 
-//
 // F1 (RULED 2026-08-13, option c): the piece-start setup commit's
 // failure must SURFACE — loudly, counted — never be swallowed by the
 // fire-and-forget start path.
-//
 
 const V1_NO_HANDLER = [
   "import { Writable, pattern } from 'commonfabric';",
