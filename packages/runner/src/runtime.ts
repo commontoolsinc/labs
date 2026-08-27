@@ -2386,9 +2386,21 @@ export class Runtime {
    * the FIRST attempt, because re-running cannot change the outcome and each
    * doomed attempt costs a round-trip plus a subscriber revert notification.
    *
+   * A caller that decides inside the transaction whether to write at all — one
+   * re-reading a precondition against the fresh state each retry sees — says so
+   * through the value `fn` returns, which comes back as `ok`. An `ok` of
+   * `false` carrying no `error` is the convention for a write that was declined
+   * rather than one that failed. The bound on that convention is that we commit
+   * whatever `fn` staged, whatever `fn` returned: declining does not abort the
+   * transaction, so it stands for "nothing was written" only where the callback
+   * stages nothing before it declines.
+   *
    * @param fn - Function to execute with the transaction.
    * @param maxRetries - Maximum number of retries.
-   * @returns Promise<boolean> that resolves to true on success, or false after exhausting retries.
+   * @returns `{ ok }` once the transaction commits, carrying whatever `fn`
+   *   returned, or `{ error }` when it does not commit: a rejection that is not
+   *   retryable, a retryable one whose retries are spent, or `fn` itself
+   *   throwing, which aborts the transaction.
    */
   editWithRetry<T = void>(
     fn: (tx: IExtendedStorageTransaction) => T,
